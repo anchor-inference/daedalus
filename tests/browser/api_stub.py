@@ -1098,10 +1098,14 @@ class FakeGuests:
     answer to the write that made it and nowhere else, as on the host. ``calls`` records every write.
     """
 
-    def __init__(self, *, chat: str = "a1b2c3d4e5f6", available: bool = True, public_base: str = "https://door.example") -> None:
+    def __init__(self, *, chat: str = "a1b2c3d4e5f6", available: bool = True, public_base: str = "https://door.example", full_tools_why: str = "") -> None:
         self.chat = chat
         self.available = available
         self.public_base = public_base
+        # Why this chat cannot be given the sandboxed tools ("no_sandbox", "host_folder"); empty when it can.
+        self.full_tools_why = full_tools_why
+        # The chat each read of the door was asked about (``?session_id=``), for a check to say the sheet asked.
+        self.door_asked: list[str] = []
         self.usd_per_day = 2.0
         self.calls: list[tuple[str, str, object]] = []
         self.owner: dict[str, str] = {}
@@ -1160,6 +1164,7 @@ class FakeGuests:
                 {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "price_in": 2.0, "price_out": 8.0, "free": False},
             ],
             "usd_per_day": self.usd_per_day, "spent_today": 0.5,
+            "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why,
         }
 
     def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:
@@ -1169,6 +1174,7 @@ class FakeGuests:
         if not self.available and path != "/api/guest/door":
             return 503, {"detail": "the guest door is not available in this installation"}
         if path == "/api/guest/door" and method == "GET":
+            self.door_asked.append(session_id)
             return 200, self.door()
         if path == "/api/guest/settings" and method == "PUT":
             self.calls.append((method, path, dict(data)))
@@ -1208,6 +1214,8 @@ class FakeGuests:
             return 200, {"briefing": self.draft}
         if len(parts) == 6 and parts[:3] == ["", "api", "sessions"] and parts[4:] == ["guest", "links"] and method == "POST":
             self.calls.append((method, path, dict(data)))
+            if data.get("mode") == "direct" and data.get("tools") == "all" and self.full_tools_why:
+                return 409, {"detail": "this chat cannot be given all tools"}
             self.chat = parts[3]
             row = self.link(f"n{len(self.links)}", label=str(data.get("label") or ""), topic=str(data.get("topic") or ""), mode=str(data.get("mode") or "stand_in"),
                             tools=str(data.get("tools") or "none") if data.get("mode") == "direct" else "none")

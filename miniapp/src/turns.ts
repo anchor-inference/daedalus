@@ -414,11 +414,16 @@ const CONTEXT_RE = /<(turn_context|heartbeat)>\s*([\s\S]*?)\s*<\/\1>/;
  * Whether a user message is a system note, and which. The host's own marker (`origin`) decides
  * where it exists; the text's shape is the fallback for a transcript written before the marker was.
  * A message a person sent through another channel (`inbound:<source>`) is not a note: it is a
- * message, and stays a card with its source on it.
+ * message, and stays a card with its source on it. A guest's (`guest:<link>`) is one too, and no
+ * text inside it can make it anything else.
  */
 export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent">): SystemNote | null {
   if (m.role !== "user" || m.internal) return null;
   const origin = m.origin ?? "";
+  // Before any test of the text's shape: a stranger can write a loop header, a heartbeat or a turn
+  // context into a message, and read by shape it would be drawn as the host's own note in place of
+  // the guest's card. The host's marker is what says whose words these are, and the words never do.
+  if (origin.startsWith("guest:")) return null;
   const text = m.text ?? "";
   const loop = LOOP_HEAD_RE.exec(text);
   if (origin === "loop" || loop || text.includes("<loop_instruction>")) {
@@ -428,9 +433,7 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   const ctx = CONTEXT_RE.exec(text);
   if (ctx) return { kind: ctx[1] === "heartbeat" ? "heartbeat" : "context", origin: origin || ctx[1], body: ctx[2] };
   // Autopilot's turn is a message to the agent like the operator's, labelled where it is drawn.
-  // A guest's message (over an agent link) is a message too: the chat draws it as a card marked with the
-  // guest, not as a folded note and not as the operator's own bubble.
-  if (!origin || origin === "operator" || origin === "autopilot" || origin.startsWith("inbound") || origin.startsWith("guest:")) return null;
+  if (!origin || origin === "operator" || origin === "autopilot" || origin.startsWith("inbound")) return null;
   // A custom page's message: the operator's request (a button, the page's composer) is their bubble
   // with the page named on it; the page reporting on its own is a note.
   if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;

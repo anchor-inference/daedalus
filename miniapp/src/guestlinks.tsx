@@ -41,7 +41,8 @@ type View = { kind: "list" } | { kind: "form" } | { kind: "made"; url: string; t
 
 export function GuestLinksSheet({ sessionId, toast, onClose }: { sessionId: string; toast: (text: string) => void; onClose: () => void }) {
   const [view, setView] = useState<View>({ kind: "list" });
-  const door = useQuery<GuestDoor>("/api/guest/door", { pollMs: 15000 });
+  // Asked about this chat: whether it can be given the sandboxed tools is a fact about the chat.
+  const door = useQuery<GuestDoor>(`/api/guest/door?session_id=${encoded(sessionId)}`, { pollMs: 15000 });
   const data = door.data;
   return (
     <Sheet title={t("guest.title")} onClose={onClose} size="narrow">
@@ -246,7 +247,7 @@ function GuestReader({ id, onBack }: { id: string; onBack: () => void }) {
               {briefing && <div className="guest-briefing guest-msg-text" data-guest-briefing="">{link.briefing}</div>}
             </>
           )}
-          {link.messages.length === 0 ? <div className="sub">{t("guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} />)}
+          {link.messages.length === 0 ? <div className="sub">{t(link.mode === "direct" ? "guest.nomessages.direct" : "guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} />)}
         </>
       )}
     </div>
@@ -389,7 +390,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       briefing: standIn ? briefing : "",
       // Reaching this point means the briefing was typed, or was drafted and then ticked as read.
       briefing_approved: true,
-      tools,
+      tools: chosenTools,
       approval,
       usd_limit: numberOf("usd_limit", numbers.usd_limit)!,
       turns_per_day: numberOf("turns_per_day", numbers.turns_per_day)!,
@@ -413,11 +414,15 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
     { id: "stand_in", label: t("guest.mode.stand_in") },
     { id: "direct", label: t("guest.mode.direct") },
   ];
+  // The door says whether this chat can be given the sandboxed tools; when it cannot, that choice is not
+  // offered at all (a greyed segment would invite the question) and one line says why.
   const toolOptions: { id: GuestTools; label: string }[] = [
     { id: "none", label: t("guest.tools.none") },
     { id: "read", label: t("guest.tools.read") },
-    { id: "all", label: t("guest.tools.all") },
+    ...(door.full_tools ? [{ id: "all" as const, label: t("guest.tools.all") }] : []),
   ];
+  // Never `all` while the door says it is not available, whatever was chosen before it said so.
+  const chosenTools: GuestTools = tools === "all" && !door.full_tools ? "read" : tools;
   return (
     <form className="guest-form" data-guest-form="" onSubmit={(e) => { e.preventDefault(); void create(); }}>
       <label className="field">{t("guest.field.mode")}</label>
@@ -459,7 +464,9 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       ) : (
         <>
           <label className="field">{t("guest.field.tools")}</label>
-          <Segmented value={tools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
+          <Segmented value={chosenTools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
+          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
+          {chosenTools === "all" && <div className="sub" data-guest-tools-all="">{t("guest.tools.all.note")}</div>}
         </>
       )}
 
@@ -475,7 +482,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
         <NumberRow name="turns_total" title={t("guest.field.turnstotal")} value={numbers.turns_total} onChange={set("turns_total")} />
         <NumberRow name="conversation_hours" title={t("guest.field.conversation")} unit={t("guest.unit.hours")} value={numbers.conversation_hours} onChange={set("conversation_hours")} />
         <NumberRow name="idle_hours" title={t("guest.field.idle")} unit={t("guest.unit.hours")} value={numbers.idle_hours} onChange={set("idle_hours")} />
-        <NumberRow name="retention_days" title={t("guest.field.retention")} unit={t("guest.unit.days")} value={numbers.retention_days} onChange={set("retention_days")} />
+        <NumberRow name="retention_days" title={t(standIn ? "guest.field.retention" : "guest.field.retention.direct")} unit={t("guest.unit.days")} value={numbers.retention_days} onChange={set("retention_days")} />
       </details>
       {problem && <div className="sub guest-problem" role="alert" data-guest-problem="">{problem}</div>}
       <div className="sheet-foot">

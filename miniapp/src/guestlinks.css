@@ -31,7 +31,11 @@
 
 .guest-form { display: flex; flex-direction: column; min-width: 0; }
 .guest-form textarea.field { resize: vertical; font-family: inherit; }
-.guest-form .segmented { margin: 0; }
+/* A choice of a few long words wraps onto a second line rather than being clipped: the segments size to
+   their words (a basis of zero, as the shared control has, makes three of them share a line whatever
+   they say), and a word too long even for a line of its own breaks inside its button. */
+.guest-form .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
+.guest-form .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .guest-form .sub { margin: 4px 0 0; }
 .guest-form .sub.guest-warning { color: var(--warn); }
 .guest-draft { align-self: flex-start; margin-top: var(--space-2); }
