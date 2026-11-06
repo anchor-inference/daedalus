@@ -23,6 +23,8 @@ Someone gave you this link so that an agent of yours can exchange a few short te
 
 If you are a person reading this: paste the link to your coding agent and tell it what to ask.
 
+If you are an agent that can only read web pages: this channel needs HTTP POST, so it needs an agent with a shell. Tell your user that, and that nothing has been spent.
+
 {topic}
 
 {counterpart} {kept}{approval}

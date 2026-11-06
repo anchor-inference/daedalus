@@ -98,7 +98,9 @@ class PublicDoor:
         method = scope.get("method", "GET")
         address = visitor(scope)
         if path == "/robots.txt":
-            return PlainTextResponse("User-agent: *\nDisallow: /\n", headers=HEADERS)
+            # Nothing here is for a search engine, but a person's own agent reading the link they pasted is the
+            # point of the door: Anthropic's and OpenAI's fetchers for a user's request obey this file.
+            return PlainTextResponse("User-agent: *\nDisallow: /\n\nUser-agent: Claude-User\nUser-agent: ChatGPT-User\nAllow: /a/\n", headers=HEADERS)
         if not path.startswith("/a/"):
             return refused(404, "Nothing here.")
         if path in ("/a/messages", "/a/end", "/a/status"):
