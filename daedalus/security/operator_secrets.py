@@ -232,6 +232,8 @@ class OperatorSecrets:
         self._pending: set[asyncio.Task[Any]] = set()
         self._logins: dict[str, SavedLogin] = {}
         """Saved sign-ins by site."""
+        self._held_back: set[str] = set()
+        """Sessions whose current turn may not use any secret."""
 
     def _cipher(self) -> AESGCM:
         if self._aead is None:
@@ -452,10 +454,23 @@ class OperatorSecrets:
         items = [s for s in self._by_id.values() if (scope_kind is None or s.scope_kind == scope_kind) and (scope_id is None or s.scope_id == scope_id)]
         return sorted(items, key=lambda s: (s.scope_kind, s.scope_id, s.name))
 
+    def hold_back(self, session_id: str, held: bool) -> None:
+        """Keep a session from its secrets for the length of a turn (a guest's: :mod:`daedalus.host.guest_turns`).
+
+        Here and not at each tool, because every way to a secret goes through :meth:`available`: the
+        prompt's list, a command's environment and files, a placeholder in an argument.
+        """
+        if held:
+            self._held_back.add(session_id)
+        else:
+            self._held_back.discard(session_id)
+
     def available(self, session_id: str, project_id: str | None = None) -> list[Secret]:
         """The secrets a session may use: its own, its project's, and — for a staff member's session — what its
         coordinator handed it. A chat's own secret wins over a project's of the same name: the operator said
         it closer to the work."""
+        if session_id in self._held_back:
+            return []
         project = project_id if project_id is not None else self.project_of(session_id)
         staff = self.staff_of(session_id)
         return self._choose(session_id, project, self._grants.get(staff, set()) if staff else set())

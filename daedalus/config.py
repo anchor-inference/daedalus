@@ -182,7 +182,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("owner_user_id", "api_port", "services_door_port", "usd_per_day", mode="before")
+    @field_validator("owner_user_id", "api_port", "services_door_port", "guest_door_port", "usd_per_day", mode="before")
     @classmethod
     def _blank_means_default(cls, value: object, info: Any) -> object:
         """``OWNER_USER_ID=`` in an env file is an unset value, not the number "".
@@ -296,6 +296,14 @@ class Settings(BaseSettings):
     services_public_url: str = ""
     """The address that listener is reached at when it is not this host's own port: the name a reverse
     proxy gives it, or later a tunnel. Must be another origin than ``miniapp_public_url``."""
+    guest_door_port: int = 8764
+    """The port of the guest door (:mod:`daedalus.guestd`), a process of its own. Only addresses are built
+    from it here: this process never connects to it, it talks to the door over ``guest_run_dir``."""
+    guest_public_url: str = ""
+    """The address the guest door is reached at: the name a reverse proxy gives it, or later a tunnel.
+    Must be another origin than ``miniapp_public_url``."""
+    guest_run_dir: Path | None = None
+    """The guest door's run directory, with its control socket and token. ``None`` when no door was set up."""
     miniapp_public_url: str = ""
 
     terminals_container_dir: Path | None = None
@@ -445,9 +453,10 @@ class Settings(BaseSettings):
         made in them, with none of the policy's confirmations, and reads what any of them shows. The
         desktop daemon's token sees the operator's screens and, inside a lease, moves their mouse. So
         unlike the rest of the sealed set, a container is no boundary for them: the directories are
-        mounted into this container precisely so the app can reach the daemons.
+        mounted into this container precisely so the app can reach the daemons. The guest door's token
+        admits strangers and revokes links: an agent holding it could wave its own guest through.
         """
-        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir, self.computer_host_dir)
+        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir, self.computer_host_dir, self.guest_run_dir)
         return tuple(p for p in dirs if p is not None)
 
     @property

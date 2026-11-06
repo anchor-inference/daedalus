@@ -90,6 +90,7 @@ from daedalus.config import (
 from daedalus.host import (
     attached_files,
     capabilities,
+    guest_turns,
     launcher_bridge,
     nested_rules,
     prompt_coach,
@@ -388,6 +389,10 @@ class SessionState:
     at creation and never changed; what it controls now is ``SessionManager.control_marks``."""
     run_origin: str = "operator"
     """Who started the current run (``operator``, ``schedule``, ``reminder``, ``subagent:…``): StaySilent and the reply routing read it."""
+    guest_turn: guest_turns.GuestTurn | None = None
+    """What the current run may do when a guest's message started it. Set with ``run_origin``, from the
+    message that opens the run, and kept through a continued turn, so an answer to an approval card does
+    not widen it."""
     last_error_kind: str = ""
     """The kind of the error that ended the current run, from the core's ERROR event (``llm_context_window_exceeded`` …)."""
     last_error_message: str = ""
@@ -3779,6 +3784,7 @@ class SessionManager:
         reply_to: dict[str, Any] | None = None,
         secrets: Sequence[str] = (),
         autopilot: dict[str, Any] | None = None,
+        guest: guest_turns.GuestTurn | None = None,
         _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
@@ -3797,6 +3803,9 @@ class SessionManager:
         model may use and how, and the message carries the names for the app to draw.
         ``autopilot`` marks a message autopilot sent (its kind and decision), which the app labels and
         the continuation count reads (:mod:`daedalus.extensions.autopilot`).
+        ``guest`` makes this a guest's turn (:mod:`daedalus.host.guest_turns`). It only ever starts a run
+        of its own and raises ``GuestTurnBusy`` otherwise: placed in a running turn or a queue it would
+        be read by a run with the operator's tools, and a queued item is merged with whatever else waits.
         """
         # Whatever reaches a session — the operator's words, a staff member's report relayed, a wake-up — goes
         # in with each value the operator handed over put back as its placeholder. A password pasted into a
@@ -3808,6 +3817,8 @@ class SessionManager:
             words = {**words, "daedalus.reply_to": dict(reply_to)}
         if autopilot:
             words = {**words, "daedalus.autopilot": dict(autopilot)}
+        if guest is not None:
+            words = {**words, guest_turns.METADATA_KEY: guest.as_metadata()}
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
@@ -3829,6 +3840,8 @@ class SessionManager:
                 raise NoModelConfigured
             if self.shutting_down:
                 raise RuntimeError("the bot is stopping; the run starts after the restart")
+            if guest is not None and await self._busy_for_guest(state):
+                raise guest_turns.GuestTurnBusy(session_id)
             if (self.settings.state_dir / "dependencies" / "maintenance").exists():
                 raise RuntimeError("dependencies are being installed; wait for the application to restart")
             if self.recovering and not state.running:
@@ -3976,6 +3989,10 @@ class SessionManager:
                 # A message sent while the agent works is a steer: the core places it before the
                 # next model call (after the current tool batch). follow_up would wait for the end.
                 kind = "follow_up" if not steer and (follow_up or state.metadata.get("queue_mode") == "follow_up") else "steer"
+                if state.guest_turn is not None:
+                    # A guest's turn reads nothing but the guest. Steered in, the operator's words would
+                    # sit in a turn whose answer goes out to a stranger; they open the next run instead.
+                    kind = "follow_up"
                 placed = body
                 if origin == "operator":
                     for steer_hook in self.steer_hooks:
@@ -4026,7 +4043,7 @@ class SessionManager:
                 # undo of the previous one may restore a tree a turn older, and the log says so.
                 logger.warning("session %s: the previous turn was still being written down after %.0f s; starting the next run anyway", session_id, self.config.ops.settle_wait_seconds)
             recorded_message: Message | None = None
-            if state.metadata.pop("autotitle", None):
+            if guest is None and state.metadata.pop("autotitle", None):
                 # The first message of a chat the operator started by typing, rather than by naming
                 # it first. The clip is already the title; the model may replace it once it answers.
                 # The session row and the live state each hold a copy, and a later write of either
@@ -4059,7 +4076,8 @@ class SessionManager:
             if recorded_message is None:
                 # Hooks may decorate the message (a fired reminder rides along). They run only for
                 # the first placement of a receipt, so a transport retry cannot repeat a side effect.
-                for hook in self.prompt_hooks:
+                # Not on a guest's message: what they add is written for the operator.
+                for hook in () if guest is not None else self.prompt_hooks:
                     try:
                         body = await hook(session_id, body)
                     except Exception:  # noqa: BLE001
@@ -4102,6 +4120,26 @@ class SessionManager:
                 except Exception:  # noqa: BLE001
                     logger.exception("run-started hook failed")
             return run_id
+
+    async def _busy_for_guest(self, state: SessionState) -> bool:
+        """Whether a guest's turn must wait: anything running, asked, settling, or queued ahead of it."""
+        if state.running or state.pending is not None or self._settling(state) or state.compacting is not None:
+            return True
+        waiting = await self.live.load_waiting(state.session.id)
+        return bool(waiting["steer"] or waiting["follow_up"])
+
+    async def guest_answer(self, session_id: str, run_id: str) -> str:
+        """The final words of a guest's turn, with every value the operator handed over masked.
+
+        Masked here as well because the words now leave: the model reads placeholders, but a tool's
+        output or a file the turn read may hold the real thing, and from here on nobody reviews it.
+        """
+        for message in reversed(await self.sessions.list_transcript(session_id, limit=400)):
+            if message.role is MessageRole.assistant and message.metadata.get("daedalus.run_id") == run_id:
+                text = "".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip()
+                if text:
+                    return redact.redact(self.redactor.conceal_named(text))
+        return ""
 
     def file_scope(self, state: SessionState) -> str | None:
         """Where an attachment of this session is kept by handle: the main orchestrator's ``main``, a
@@ -4484,7 +4522,12 @@ class SessionManager:
         An orchestrator's turn hands work over and ends, and it is woken by events with nobody
         watching; its bounds stop one that does not end from spending unattended. They are not a
         mode: no operator's chat has any, and nothing here tells the agent how far to go.
+
+        A guest's turn has them too, for a reason of its own: the door checks a link's limits before the
+        turn starts, but only a turn that stops can be held to what was left of them.
         """
+        if state.guest_turn is not None:
+            return RunBounds(guest_turns.MAX_ITERATIONS, state.guest_turn.usd_left, "guest.usd_per_turn")
         if self.is_orchestrator(state):
             limits = self.config.orchestrator
             return RunBounds(limits.max_iterations, limits.usd_per_run, "orchestrator.usd_per_run")
@@ -4751,6 +4794,10 @@ class SessionManager:
                 data = await self.live.load_waiting(session_id)
                 steer = [item for item in data["steer"] if str(item.get("id") or "") not in state.queue_withdrawn]
                 follow_up = [item for item in data["follow_up"] if str(item.get("id") or "") not in state.queue_withdrawn | state.follow_up_steered]
+                if state.guest_turn is not None:
+                    # Everything that waits stays in the store and opens the next run. The core would
+                    # otherwise fold it into this one, and this one's answer goes out to the guest.
+                    steer, follow_up = [], []
                 state.steer_seen = [str(item.get("id") or "") for item in steer]
                 state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
                 eng._steer_queue = steer  # type: ignore[attr-defined]
@@ -5064,6 +5111,8 @@ class SessionManager:
         state.last_compaction = None
         if message is not None:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
+            state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
+            self.secrets.hold_back(state.session.id, state.guest_turn is not None)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
         if state.engine is None or not continue_turn:
@@ -5241,6 +5290,8 @@ class SessionManager:
             # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
             # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
             volatile.append("\n\n" + style)
+        if state.guest_turn is not None:
+            volatile.append("\n" + guest_turns.turn_note(state.guest_turn))
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.
@@ -5466,6 +5517,8 @@ class SessionManager:
                 state.provider_hold.close()
                 state.provider_hold = None
                 await self.providers.close_retired()
+            if status not in ("awaiting", "interrupted"):
+                self.secrets.hold_back(state.session.id, False)
             # Everything between the last token and the end of this function is time the app spends
             # drawing a run that is over: the chip says "running" and the cursor blinks under the
             # finished answer. So only what the answer itself depends on — writing it down and saying
@@ -5652,6 +5705,10 @@ class SessionManager:
         if status == "completed":
             state.overflow_streak = 0
             state.outage_streak = 0
+        elif state.guest_turn is not None:
+            # Driving a failed turn again is a run with the operator's origin over the guest's words.
+            # The guest has been told it failed, and can send them again.
+            pass
         elif status == "failed" and state.last_error_kind == "llm_context_window_exceeded" and not state.running:
             await self._recover_from_overflow(state)
         elif status == "failed" and state.last_error_kind in PROVIDER_OUTAGE_KINDS and state.last_error_permanent:
@@ -6516,8 +6573,9 @@ class SessionManager:
             # Its own registry is its whole allowlist; the operator may still switch a tool off.
             own = {t.name for t in self.dispatcher_tools.list_all()}
             off = {str(n) for n in (state.metadata.get("tools_off") or ()) if str(n) in own}
-            return ToolVisibilityPolicy(blocked=off)
-        return ToolVisibilityPolicy(blocked=self.blocked_tools_for(state))
+            return guest_turns.narrowed(ToolVisibilityPolicy(blocked=off), state.guest_turn, own)
+        policy = ToolVisibilityPolicy(blocked=self.blocked_tools_for(state))
+        return guest_turns.narrowed(policy, state.guest_turn, (t.name for t in self.tools.list_all()))
 
     def advertised_tools_limit(self, rungs: Sequence[tuple[Any, str]]) -> int:
         """The lowest cap on tools per request among the run's rungs, 0 when none has one.
@@ -6986,13 +7044,35 @@ class SessionManager:
         """
         return (self.governance_path, Path("/opt/launcher"), *self.settings.sealed_paths)
 
+    def _guest_read_refused(self, state: SessionState, tool: str, arguments: dict[str, Any]) -> Decision | None:
+        """A guest's read-only turn reads this chat's folder and nothing else.
+
+        The file tools otherwise reach whatever the agent's user can open, and the sealed set names the
+        installation, not everything worth reading. A guest was given a chat, not this machine. Kept
+        files (``att:``) are out too: their handles are shared across the installation's chats.
+        """
+        turn = state.guest_turn
+        if turn is None or turn.tools == "all" or tool not in guest_turns.READ_TOOLS:
+            return None
+        root = state.workspace.resolve()
+        for key in ("path", "root", "directory"):
+            value = arguments.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            target = (root / value).resolve() if not value.startswith("att:") else None
+            if target is None or not target.is_relative_to(root):
+                return Decision("deny", "a guest's turn reads this chat's folder and nothing else", "guest.read")
+        return None
+
     def policy_gate(self, session_id: str, run_id: str) -> Any:
         """The policy bound to one session: grants are the session's, the egress log names the run."""
 
         def decide(tool: str, arguments: dict[str, Any]) -> Decision:
             state = self._states.get(session_id)
-            if state is not None and tool in self.tool_policy_for(state).blocked:
+            if state is not None and not policy_admits(self.tool_policy_for(state), tool):
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
+            if state is not None and (refused := self._guest_read_refused(state, tool, arguments)) is not None:
+                return refused
             if state is not None and tool == "AskUser" and (asked := self._asks_about_pending(state, arguments)):
                 return asked
             policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
@@ -7681,6 +7761,14 @@ class SessionManager:
             self.stale_runs.append(row["id"])
             logger.warning("run %s was left running by the previous process and could not be resumed; closed as cancelled", row["id"])
 
+    async def _was_guest_run(self, session_id: str, run_id: str) -> bool:
+        row = await self.db.fetchone(
+            "SELECT 1 FROM transcript WHERE session_id = ? AND json_extract(message, '$.metadata.\"daedalus.run_id\"') = ?"
+            " AND json_extract(message, '$.metadata.\"daedalus.origin\"') LIKE 'guest:%' LIMIT 1",
+            (session_id, run_id),
+        )
+        return row is not None
+
     async def _resume_one(self, entry: dict[str, Any], resumed: list[str]) -> None:
         session_id = entry["session_id"] or entry["snapshot"].get("session_id")
         state = await self.get_state(session_id)
@@ -7689,6 +7777,14 @@ class SessionManager:
             return
         if state.running:
             return  # something in this process already drives the session; its own run owns the snapshot
+        if await self._was_guest_run(session_id, entry["run_id"]):
+            # A resumed run knows nothing of whose it was, and would go on with the operator's tools over
+            # the guest's words. The door tells the guest the turn was cut off; they can send it again.
+            logger.warning("run %s was a guest's turn; it is closed rather than resumed", entry["run_id"])
+            await self.runs.update_status(entry["run_id"], TENANT, RunStatus.cancelled)
+            await self.events.delete_snapshot(entry["run_id"])
+            self.secrets.hold_back(session_id, False)
+            return
         try:
             engine = await self._build_engine(state, entry["run_id"])
             await engine.resume_from_snapshot(entry["snapshot"])

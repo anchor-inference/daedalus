@@ -92,6 +92,7 @@ from daedalus.extensions import (
     api_folder_browser,
     api_folder_move,
     api_goal_budget,
+    api_guest,
     api_harnesses,
     api_integrations,
     api_issue_sync,
@@ -1722,6 +1723,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_prompt_coach.register(api, app, auth)
     # A chat's side question (/btw): asked from the composer, answered in a window beside the chat.
     api_btw.register(api, app, auth)
+    api_guest.register(api, app, auth)
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)

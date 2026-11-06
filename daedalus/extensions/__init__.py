@@ -69,6 +69,7 @@ EXTENSIONS = (
     "daedalus.extensions.issue_sync",
     "daedalus.extensions.launcher_updates",
     "daedalus.extensions.keyproxy_clients",
+    "daedalus.extensions.guest_door",
     "daedalus.extensions.calendar_reminders",
     "daedalus.extensions.calendar_hooks",
     "daedalus.extensions.context_windows",

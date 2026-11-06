@@ -120,7 +120,7 @@ def test_a_door_that_moved_is_read_at_the_moment_of_the_call() -> None:
 
 
 def test_own_doors_reads_the_settings_as_they_are_now() -> None:
-    settings = SimpleNamespace(miniapp_public_url="https://Agent.example.test/app/", services_public_url="", services_public_host="192.0.2.1", services_door_port=8766)
+    settings = SimpleNamespace(miniapp_public_url="https://Agent.example.test/app/", services_public_url="", services_public_host="192.0.2.1", services_door_port=8766, guest_public_url="", guest_door_port=8764)
     doors = own_doors(settings)  # type: ignore[arg-type]
     assert doors.app == ("agent.example.test", 443) and doors.hosts == {"agent.example.test", "192.0.2.1"}
     settings.miniapp_public_url = "http://192.0.2.1:8080"

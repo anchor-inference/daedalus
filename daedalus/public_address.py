@@ -4,9 +4,10 @@
 them afterwards, so a tunnel whose address is handed out at start can arrive without a restart: every
 reader asks here, or reads the field at the moment it needs it, and none of them keeps a copy.
 
-Two addresses, because they must not be one. The app's address holds the operator's signed-in session;
+Three addresses, because they must not be one. The app's address holds the operator's signed-in session;
 the services address is where pages an agent wrote run, and it has to be another origin (see
-``daedalus.extensions.api_services_door``).
+``daedalus.extensions.api_services_door``); the guest address is where strangers' agents arrive, and it
+leads to a process with nothing behind it (:mod:`daedalus.guestd`).
 """
 
 from __future__ import annotations
@@ -59,7 +60,25 @@ def services_base(settings: Settings) -> str:
     return f"http://{host}:{port}"
 
 
-def publish(settings: Settings, *, app: str | None = None, services: str | None = None) -> None:
+def guest_base(settings: Settings) -> str:
+    """The address agents' links go to; empty when there is none to hand out.
+
+    Decided as :func:`services_base` is, and for the same reasons: the name the operator gave it, or
+    the door's own port on a host reached directly, never a guess behind a proxy, and never the app's
+    origin. A link pointing at the app's origin would publish the whole API under it.
+    """
+    named = _base(settings.guest_public_url)
+    app = app_base(settings)
+    if named:
+        return "" if app and _origin(named) == _origin(app) else named
+    port = settings.guest_door_port
+    host = settings.services_public_host.strip()
+    if not port or not host or app.lower().startswith("https://"):
+        return ""
+    return f"http://{host}:{port}"
+
+
+def publish(settings: Settings, *, app: str | None = None, services: str | None = None, guest: str | None = None) -> None:
     """Change an address now. ``None`` leaves it as it is and an empty string clears it.
 
     The value lives only as long as the process, which is right for what it is for: a tunnel hands
@@ -69,6 +88,8 @@ def publish(settings: Settings, *, app: str | None = None, services: str | None 
         settings.miniapp_public_url = app
     if services is not None:
         settings.services_public_url = services
+    if guest is not None:
+        settings.guest_public_url = guest
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +105,7 @@ class OwnDoors:
 def own_doors(settings: Settings) -> OwnDoors:
     hosts = {settings.services_public_host.strip().lower()}
     app = None
-    for address in (app_base(settings), services_base(settings)):
+    for address in (app_base(settings), services_base(settings), guest_base(settings)):
         parts = urlsplit(address)
         if parts.hostname:
             hosts.add(parts.hostname.lower())
@@ -94,4 +115,4 @@ def own_doors(settings: Settings) -> OwnDoors:
     return OwnDoors(frozenset(h for h in hosts if h), app)
 
 
-__all__ = ["OwnDoors", "app_base", "own_doors", "publish", "services_base"]
+__all__ = ["OwnDoors", "app_base", "guest_base", "own_doors", "publish", "services_base"]

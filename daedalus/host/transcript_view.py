@@ -109,6 +109,12 @@ def message_view(message: Message) -> dict[str, Any]:
     handed = message.metadata.get("daedalus.secrets") if isinstance(message.metadata, dict) else None
     if handed:
         body = operator_secrets.without_attachment_lines(body)  # the chat draws a chip per name instead
+    guest = message.metadata.get("daedalus.guest") if isinstance(message.metadata, dict) else None
+    if isinstance(guest, dict) and message.role is MessageRole.user:
+        # The model reads these words in a fence with the host's note after them; the chat shows what was said.
+        body = str(guest.get("said") or body)
+    else:
+        guest = None
     headline = ""
     if message.role is MessageRole.assistant:
         body, headline = split_headline(body)
@@ -156,6 +162,8 @@ def message_view(message: Message) -> dict[str, Any]:
         # the host recorded them has them read back from the list the model was given, which is why a
         # stored view from before this field is recomputed.
         "attachments": attached_files.of(message.metadata, body) if message.role is MessageRole.user else [],
+        # A guest's message: who holds the link and what the turn could do, for the chat's mark.
+        "guest": {"label": str(guest.get("label") or ""), "tools": str(guest.get("tools") or "")} if guest else None,
         # The operator's secrets attached to the message, by name and scope; never a value.
         "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.

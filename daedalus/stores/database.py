@@ -3574,6 +3574,19 @@ CREATE TABLE IF NOT EXISTS operator_secret_audit (
 CREATE INDEX IF NOT EXISTS operator_secret_audit_by_secret ON operator_secret_audit(secret_id, seq);
 """)
 
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS guest_links (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    tools TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS guest_links_by_session ON guest_links(session_id);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
