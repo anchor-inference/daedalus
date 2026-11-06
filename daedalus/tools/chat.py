@@ -106,7 +106,8 @@ async def _send_delivered(context: ToolContext, services: Any, deliver: Any, pat
         "path attaches even a picture as a plain file. Use layout=album for 2-10 images, videos or GIFs "
         "in any order, otherwise use single with one item (attach several documents with one call each). "
         "The result contains one Markdown line: copy that line into the final answer exactly where the "
-        "file should appear. This prepares the file; do not also SendFile it."
+        "file should appear. This prepares the file; do not also SendFile it. A line from an earlier "
+        "answer shows the file as it was attached then, so after changing a file attach it again."
     ),
 )
 async def attach_media(context: ToolContext, items: list[dict[str, str]], layout: str = "single") -> ToolResult:

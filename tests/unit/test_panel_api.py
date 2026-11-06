@@ -11,6 +11,7 @@ extension is told of them is the app's notification, through one channel, not a 
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 import shutil
 import tempfile
@@ -22,6 +23,7 @@ from typing import Any
 
 import httpx
 import pytest
+from protocore.contracts.types import Message, MessageRole, TextBlock
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
@@ -53,6 +55,7 @@ REPO = Path(__file__).resolve().parents[2]
 CONNECTED = {"connected": True, "profile_id": "p1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
              "transport": "server", "since": "2026-10-20T10:00:00Z", "last_seen": "2026-10-20T10:00:05Z"}
 PUBLIC = "https://daedalus.example.org"
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 
 
 class Clock:
@@ -561,6 +564,66 @@ async def test_the_panel_sets_the_approval_mode_of_its_own_conversations_only(ri
         assert (await client.put(f"/api/sessions/{mine}/browser-approvals", headers=panel(token), json={"mode": "manual"})).status_code == 401
     assert (await rig.service.choices.get(mine))["approvals"] == "auto"
     assert (await rig.service.choices.get(other))["approvals"] == "manual"
+
+
+async def _attached(rig: Rig, session: str, source: Path) -> tuple[str, str]:
+    """A file an answer of ``session`` carries: its presentation and its item."""
+    staged = await rig.manager.media.stage(session, "run-1", [{"path": str(source), "alt": "Report", "caption": ""}], layout="single")
+    answer = Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-1"})
+    await rig.manager.sessions.append_transcript(session, [answer])
+    view = (await rig.manager.sessions.list_transcript_views(session))[-1]
+    return view["media"][0]["id"], view["media"][0]["items"][0]["id"]
+
+
+async def test_the_panel_reads_the_media_of_its_own_conversations_and_no_others(rig: Rig, chrome: FakeBrowserd, base: Path) -> None:
+    mine = await rig.session(chrome=True)
+    other = await rig.session(chrome=False)
+    second = await rig.session(chrome=True)
+    picture = base / "shot.png"
+    picture.write_bytes(PNG)
+    report = base / "report.md"
+    report.write_text("# Report")
+    token, _ = await rig.grants.mint("dev1")
+    own = await _attached(rig, mine, picture)
+    file = await _attached(rig, mine, report)
+    outside = await _attached(rig, other, picture)
+    beside = await _attached(rig, second, picture)
+
+    def content(session: str, found: tuple[str, str]) -> str:
+        return f"/api/panel/sessions/{session}/media/{found[0]}/{found[1]}/content"
+
+    def download(session: str, found: tuple[str, str], name: str = "shot.png") -> str:
+        return f"/api/panel/sessions/{session}/media/{found[0]}/download?path={found[1]}/{name}"
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        shown = await client.get(content(mine, own), headers=panel(token))
+        assert shown.status_code == 200 and shown.content == PNG and shown.headers["content-type"] == "image/png"
+        assert "inline" in shown.headers["content-disposition"]
+        # A document is handed over, never shown on the app's origin.
+        kept = await client.get(content(mine, file), headers=panel(token))
+        assert kept.status_code == 200 and "attachment" in kept.headers["content-disposition"] and kept.content == b"# Report"
+        assert (await client.get(download(mine, file, "report.md"), headers=panel(token))).content == b"# Report"
+        # Without the credential, or with the operator's address and the panel's credential: an
+        # element's bare request gets nothing, which is why the app reads these with a fetch.
+        assert (await client.get(content(mine, own))).status_code == 401
+        assert (await client.get(content(mine, own).replace("/api/panel/", "/api/"), headers=panel(token))).status_code == 401
+        # Another chat's media: by its own address the conversation does not exist, whatever the
+        # credential; and through a conversation the panel may open, its item is not in that one.
+        assert (await client.get(content(other, outside), headers=panel(token))).status_code == 404
+        assert (await client.get(download(other, outside), headers=panel(token))).status_code == 404
+        assert (await client.get(content(mine, outside), headers=panel(token))).status_code == 404
+        assert (await client.get(download(mine, outside), headers=panel(token))).status_code == 404
+        assert (await client.get(content(mine, beside), headers=panel(token))).status_code == 404
+        assert (await client.get(content(mine, (own[0], beside[1])), headers=panel(token))).status_code == 404
+        # The workspace's own download is a file browser, not a message's media, and stays closed.
+        assert (await client.get(f"/api/panel/sessions/{mine}/download?path=shot.png", headers=panel(token))).status_code == 404
+        assert (await client.get(f"/api/panel/sessions/{mine}/media/{own[0]}/{own[1]}/content/x", headers=panel(token))).status_code == 404
+        assert (await client.get(f"/api/panel/sessions/{mine}/media/../../{other}/media/{outside[0]}/{outside[1]}/content", headers=panel(token))).status_code == 404
+        # A write of any kind is not a read of it.
+        assert (await client.post(content(mine, own), headers=panel(token))).status_code == 404
+    # The other things a conversation draws take the same door, each scoped by the conversation.
+    for path in (f"/api/panel/sessions/{mine}/attachments/download", f"/api/panel/sessions/{mine}/sent/call_1/download", f"/api/panel/sessions/{mine}/tool-results/call_1/images/download"):
+        assert any(m == "GET" and rx.fullmatch(path) for m, rx in api_panel.FORWARDED), path
 
 
 async def test_the_panel_uploads_into_its_own_conversations_only_new_ones_included_and_within_its_cap(rig: Rig, chrome: FakeBrowserd, monkeypatch: pytest.MonkeyPatch) -> None:

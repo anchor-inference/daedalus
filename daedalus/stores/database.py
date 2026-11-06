@@ -3589,6 +3589,37 @@ CREATE TABLE IF NOT EXISTS guest_links (
 CREATE INDEX IF NOT EXISTS guest_links_by_session ON guest_links(session_id);
 """)
 
+async def _repeated_media(conn: aiosqlite.Connection) -> None:
+    """Answers that repeated a file an earlier answer held were stored without it, because only a
+    staged item was bound, and the app printed their raw Markdown. They take the file now, as the
+    same repeat does when it is written (``MediaStore.bind_message``); dropping the view has it built
+    again from the message on the next read."""
+    from daedalus.stores.media import MEDIA_REF_RE, presentation_views  # media imports this module
+
+    rows = await (await conn.execute("SELECT seq, session_id, message FROM transcript WHERE message LIKE '%](daedalus-media:%' AND key LIKE 'assistant:%'")).fetchall()
+    repaired = 0
+    for row in rows:
+        message = json.loads(row["message"])
+        metadata = message.get("metadata") or {}
+        if metadata.get("daedalus.media"):
+            continue
+        text = "".join(str(block.get("text") or "") for block in message.get("content_blocks") or [] if isinstance(block, dict))
+        ids = list(dict.fromkeys(match.group("id") for match in MEDIA_REF_RE.finditer(text)))
+        marks = ",".join("?" for _ in ids)
+        ready = {str(item["id"]) for item in await (await conn.execute(f"SELECT id FROM media_presentations WHERE session_id = ? AND state = 'ready' AND id IN ({marks})", (row["session_id"], *ids))).fetchall()}
+        known = [item for item in ids if item in ready]
+        if not known:
+            continue
+        metadata["daedalus.media"] = await presentation_views(conn, row["session_id"], known)
+        message["metadata"] = metadata
+        await conn.execute("UPDATE transcript SET message = ?, view = NULL, view_key = '' WHERE seq = ?", (json.dumps(message, ensure_ascii=False), row["seq"]))
+        repaired += 1
+    if repaired:
+        logger.info("gave %d stored answer(s) the files they repeat", repaired)
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _repeated_media))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

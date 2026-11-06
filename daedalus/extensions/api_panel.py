@@ -6,7 +6,8 @@ generic authentication never accepts it, so every other route stays the operator
 does open is listed here and nowhere else:
 
 - the conversations given the operator's Chrome — read, streamed, written to, stopped, answered, their
-  model, effort and mode set, their pending actions allowed or refused. The list shows fewer: only
+  model, effort and mode set, their pending actions allowed or refused, and the pictures, clips and
+  files drawn in them. The list shows fewer: only
   this Chrome's own conversations (``daedalus.browser.panel.follows_in_chrome``), the ones made for it
   and any other while it controls it. The door stays wider than the list so that a conversation open
   in the panel does not answer 404 mid-reply the moment its control lapses;
@@ -58,6 +59,14 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("GET", _SESSION + "/stream"),
         ("GET", _SESSION + r"/tool-results/[A-Za-z0-9_.:-]{1,200}"),
         ("GET", _SESSION + r"/policy/similar/[^/]{1,512}"),
+        # The pictures, clips and files the conversation shows, each by the conversation and the item
+        # or call it belongs to, so these name nothing outside it. The session's own /download, which
+        # takes any path under its workspace, stays closed: that is a file browser, not a message.
+        ("GET", _SESSION + r"/media/[0-9a-f-]{36}/[0-9a-f-]{36}/content"),
+        ("GET", _SESSION + r"/media/[0-9a-f-]{36}/download"),
+        ("GET", _SESSION + "/attachments/download"),
+        ("GET", _SESSION + r"/sent/[A-Za-z0-9_.:-]{1,200}/download"),
+        ("GET", _SESSION + r"/tool-results/[A-Za-z0-9_.:-]{1,200}/images/download"),
         ("POST", _SESSION + "/messages"),
         ("POST", _SESSION + "/upload"),
         ("POST", _SESSION + "/stop"),
