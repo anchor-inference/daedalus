@@ -607,8 +607,10 @@ network as a change of this machine's addresses. It says `reconnecting` when the
 connection, and it calls an address answering only when a request sent out through it has come back.
 A client that has not recovered in 45 seconds is started again, which on a quick tunnel means a new address,
 so it gets that chance first. Measured on `cloudflared` 2026.10.7, freezing it and `tunneld` to stand in for
-a sleep: the address came back by itself, unchanged, 7 s after 130 s and 10 s after 7 min. That is a frozen
-process and not a real laptop lid, and the other clients have not been measured.
+a sleep: the address came back by itself, unchanged, 7 s after 130 s and 10 s after 7 min. After 30 min the
+edge had dropped the tunnel: it stayed down, `tunneld` said `reconnecting`, started the client again after
+50 s and was answering on a new address a minute after the thaw, so links handed out before that are dead. A
+frozen process is not a real laptop lid, and the other clients have not been measured.
 
 ### What the door gives up here
 

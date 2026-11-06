@@ -10,7 +10,7 @@ package main
 // addresses. Either marks the moment to look harder, and a client that has not recovered by itself soon
 // after is started again. Not at once: a quick tunnel that is restarted comes back with a new address,
 // and links already handed out die with the old one, so it gets its chance to reconnect first (cloudflared
-// did, in what was measured: see desktop/README.md).
+// took it after minutes and not after half an hour, in what was measured: see desktop/README.md).
 
 import (
 	"context"
