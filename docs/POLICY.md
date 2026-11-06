@@ -21,6 +21,18 @@ than something in a container:
 - **a path in your home folder, outside every project and outside the installation, asks.** Inside a
   project, a workspace or the checkouts it does not — that is where the work is.
 
+**A public tunnel is yours to open, not the agent's.** `ngrok`, a Cloudflare tunnel, `tailscale
+funnel`, `frpc`, `zrok`, `ssh -R` and the SSH services that hand out an address (localhost.run, Pinggy
+and the like) are refused to the agent whatever starts them — `Exec`, `Verify`, `ServiceStart`, or a
+server it adds with `McpAdd` — because a tunnel is a way in from the internet that goes around your own
+switch; you open tunnels from settings. The rule (`egress.tunnel`) reads what a command *does*, not
+what it says: `ngrok --version`, `cloudflared tunnel list`, `pip install pyngrok`, `grep ngrok`, a
+README that explains it, ordinary `ssh host` and `ssh host ls -R` all pass. It reads command lines,
+so a tunnel raised from inside a script, a copy of the program under another name, a compose file,
+`sudo -u user …` or a command-line team member's own shell is beyond it. For those the Health screen
+lists every process of the installation's user that looks like a tunnel, and the Inbox says so once
+when one first appears. It tells and does not stop it: the process may be one you started yourself.
+
 Beside the policy: a **project** contains every path a session *resolves* (`..`, an absolute path
 elsewhere and a symlink out of the tree are one refusal, checked on the real path). That is the file
 tools, the file browser, the preview, the download and `SendFile` — the one point a path becomes a

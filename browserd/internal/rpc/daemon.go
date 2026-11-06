@@ -517,15 +517,24 @@ type navigated struct {
 	Status      int                  `json:"status,omitempty"`
 	DialogsAuto []browser.AutoDialog `json:"dialogs_auto,omitempty"`
 	Logged      map[string]int       `json:"logged,omitempty"`
+	// WaitingOn is what a page that did not finish was still asking for, so a slow page can be
+	// told from a slow path by the hosts that never answered.
+	WaitingOn []page.Unanswered `json:"waiting_on,omitempty"`
 }
 
+// unansweredShown is how many requests a navigation that did not finish names.
+const unansweredShown = 8
+
 func (d *Daemon) loaded(t *browser.Tab, nav func() (browser.NavResult, error)) (any, error) {
-	logs, dialogs := d.Page.Mark(t), t.AutoDialogMark()
+	logs, dialogs, began := d.Page.Mark(t), t.AutoDialogMark(), time.Now()
 	r, err := nav()
 	if err != nil {
 		return nil, err
 	}
 	out := navigated{NavResult: r, Status: d.Page.DocumentStatus(t), DialogsAuto: t.AutoDialogsSince(dialogs)}
+	if r.Loading || r.Error != "" {
+		out.WaitingOn = d.Page.UnansweredSince(t, began, unansweredShown)
+	}
 	if errs, warns := d.Page.LogCounts(t, logs); errs+warns > 0 {
 		out.Logged = map[string]int{"errors": errs, "warnings": warns}
 	}

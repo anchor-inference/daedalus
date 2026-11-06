@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -462,8 +463,10 @@ type Tab struct {
 	title   string
 	loading bool
 	dialog  *Dialog
-	loader  string          // the main frame's current document
-	life    map[string]bool // lifecycle events of that document
+	loader  string               // the main frame's current document
+	life    map[string]bool      // lifecycle events of that document
+	marks   map[string]time.Time // when each of them came
+	recent  []string             // the main frame's last documents, oldest first, the current one last
 	wake    chan struct{}
 	closed  bool
 	values  map[any]any
@@ -824,10 +827,20 @@ func (t *Tab) event(e cdp.Event) {
 		}
 		t.mu.Lock()
 		if p.Name == "init" || p.LoaderID != t.loader {
+			if p.LoaderID != t.loader {
+				t.recent = append(t.recent, p.LoaderID)
+				if len(t.recent) > recentDocuments {
+					t.recent = t.recent[1:]
+				}
+			}
 			t.loader = p.LoaderID
 			t.life = map[string]bool{}
+			t.marks = map[string]time.Time{}
 		}
 		t.life[p.Name] = true
+		if _, seen := t.marks[p.Name]; !seen {
+			t.marks[p.Name] = time.Now()
+		}
 		t.broadcastLocked()
 		t.mu.Unlock()
 	case "Page.frameStartedLoading", "Page.frameStoppedLoading":
@@ -915,6 +928,82 @@ func (t *Tab) WaitLifecycle(ctx context.Context, loader, name string) error {
 			return ctx.Err()
 		}
 	}
+}
+
+// recentDocuments is how many of the main frame's documents a tab remembers: enough to tell that the
+// tab has gone past the one a navigation asked for, however quickly a page sends it on.
+const recentDocuments = 8
+
+// WaitDocument waits for the document a navigation brought (loader) and reports whether it loaded.
+// It stops waiting, with false, once that document has been parsed for grace: waiting for load alone
+// held the agent for the whole timeout on pages whose words were there in a second (parsedGrace). A
+// document the page sends the tab on to (location.replace, a consent gate) stands in for the one
+// asked for, whose load will never come now. Like WaitLifecycle it ends with an error on a tab that
+// closed or lost its debugger, and on a dialog nothing can load past.
+func (t *Tab) WaitDocument(ctx context.Context, loader string, grace time.Duration) (bool, error) {
+	var parsed string
+	var enough <-chan time.Time
+	for {
+		t.mu.Lock()
+		// Ours or one after it: a late event of the page left also makes it current for a moment, and
+		// its load is not this navigation's.
+		at := slices.Index(t.recent, loader)
+		ours := at >= 0 && slices.Index(t.recent, t.loader) >= at
+		current, loaded, ready := t.loader, t.life["load"], t.life["DOMContentLoaded"]
+		wake, closed, dialog, detached := t.wake, t.closed, t.dialog, t.detached
+		t.mu.Unlock()
+		if ours && loaded {
+			return true, nil
+		}
+		if closed {
+			return false, errNoSuchTab(t.ID)
+		}
+		if detached {
+			return false, ErrDetached(t)
+		}
+		if dialog != nil {
+			return false, ErrDialogOpen(dialog)
+		}
+		if ours && ready && parsed != current {
+			// The grace is the document's own: one the tab was sent on to starts it again.
+			parsed = current
+			enough = time.After(grace)
+		}
+		select {
+		case <-wake:
+		case <-enough:
+			return false, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+}
+
+// NavTiming is where a navigation's time went, in milliseconds since it was asked for: what a
+// complaint about a slow page is answered from. A part that had not happened by the time the
+// navigation returned is left out, so a missing LoadedMS says the page never fired its load.
+type NavTiming struct {
+	AnsweredMS int64 `json:"answered_ms,omitempty"` // Chrome said the navigation is under way
+	CommitMS   int64 `json:"commit_ms,omitempty"`   // the document began to arrive
+	ParsedMS   int64 `json:"parsed_ms,omitempty"`   // DOMContentLoaded
+	PaintedMS  int64 `json:"painted_ms,omitempty"`  // the first content on screen
+	LoadedMS   int64 `json:"loaded_ms,omitempty"`   // load
+	WaitedMS   int64 `json:"waited_ms"`             // the navigation returned
+}
+
+// timing reads the current document's marks against the moment a navigation began.
+func (t *Tab) timing(began time.Time) *NavTiming {
+	since := func(marks map[string]time.Time, name string) int64 {
+		at, ok := marks[name]
+		if !ok || at.Before(began) {
+			return 0
+		}
+		return max(at.Sub(began).Milliseconds(), 1)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return &NavTiming{CommitMS: since(t.marks, "init"), ParsedMS: since(t.marks, "DOMContentLoaded"),
+		PaintedMS: since(t.marks, "firstContentfulPaint"), LoadedMS: since(t.marks, "load"), WaitedMS: time.Since(began).Milliseconds()}
 }
 
 // Wake is closed at the tab's next change of state (lifecycle, loading, dialog, closing).

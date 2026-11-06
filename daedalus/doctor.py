@@ -21,7 +21,7 @@ import httpx
 
 from daedalus import public_address, supervisor_client
 from daedalus.config import RuntimeConfig, Settings, keyproxy_base, keyproxy_configured, keyproxy_unresolved
-from daedalus.host import capabilities, components, launcher_bridge
+from daedalus.host import capabilities, components, launcher_bridge, tunnels
 from daedalus.providers.llamacpp import describe_discovery, discover_llamacpp
 from daedalus.providers.pricing import pricing_table
 from daedalus.providers.registry import _is_vendor_host
@@ -70,7 +70,7 @@ class DoctorContext:
 
 async def run_checks(ctx: DoctorContext) -> list[Check]:
     checks: list[Check] = []
-    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _shared_services, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
+    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _tunnels, _shared_services, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
         try:
             checks.extend(await probe(ctx))
         except Exception as exc:  # noqa: BLE001 — one broken probe must not hide the others
@@ -568,6 +568,23 @@ async def _native(ctx: DoctorContext) -> list[Check]:
     git = shutil.which("git")
     out.append(Check("portable runtime", bool(git), f"git {git}" if git else "git is not on PATH; the checkouts and self-development need it", "ok" if git else "fail", "install git, or start the launcher again — it puts the runtime's own on PATH"))
     return out
+
+
+TUNNEL_FIX = "if you did not start it, stop it (kill <pid>) and look at what the agent ran lately; the agent may not open tunnels, you open them from settings"
+
+
+async def _tunnels(ctx: DoctorContext) -> list[Check]:
+    """Processes that are a tunnel by the same reading that refuses one to the agent.
+
+    The policy refuses what it can read in a command line; this finds what was raised some way it
+    could not (a script, a renamed program, a container), or by the operator from a terminal, and says
+    which. It looks at this user's processes only."""
+    found = await asyncio.to_thread(tunnels.running)
+    if found is None:
+        return [Check("tunnels", True, "not looked for on this platform", "info")]
+    if not found:
+        return [Check("tunnels", True, "no tunnel is running as this user", "ok")]
+    return [Check("tunnels", False, f"{len(found)} running: " + "; ".join(r.line for r in found[:5]) + (f"; and {len(found) - 5} more" if len(found) > 5 else ""), "warn", TUNNEL_FIX)]
 
 
 TERMINAL_FIXES = {

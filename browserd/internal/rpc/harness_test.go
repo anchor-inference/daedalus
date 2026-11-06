@@ -93,6 +93,19 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/pop/shell", "Pop shell", `<div style="position:fixed;inset:0;overflow:auto"><h1>Mail</h1>`+strings.Repeat("<p>A letter from a friend about the weekend.</p>", 30)+`</div>`)
 	page("/pop/alert", "Pop alert", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="alert('Saved');document.title='after alert'">Save</button>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
+	// A page that is there to read while something on it never answers, as a tracker that does not
+	// come back holds a real page's load (navigate_test.go), and pages that move on by themselves.
+	mux.HandleFunc("/never", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(45 * time.Second):
+		}
+	})
+	page("/held", "Held", `<h1>Goods</h1><p>The words of the page.</p><iframe src="/never"></iframe>`)
+	page("/held/script", "Held by a script", `<script src="/never"></script><h1>Goods</h1>`)
+	page("/moves", "Moves", `<script>location.replace("/moved")</script><p>Taking you there.</p>`)
+	page("/moved", "Moved", `<h1>Arrived</h1>`)
+	page("/moves/twice", "Moves twice", `<script>location.replace("/moves")</script>`)
 	mux.Handle("/site/", http.StripPrefix("/site/", http.FileServer(http.Dir("testdata/site"))))
 	// A PDF sent in chunks with no Content-Length, as a generated report is (attach_rpc_test.go).
 	mux.HandleFunc("/chunked/statement.pdf", func(w http.ResponseWriter, r *http.Request) {

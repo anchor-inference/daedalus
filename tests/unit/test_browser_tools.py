@@ -17,8 +17,10 @@ from typing import Any
 import pytest
 from protocore.contracts.tools import ToolContext
 
+from daedalus.browser.agent import UNFINISHED
 from daedalus.browser.model import Owner
 from daedalus.browser.monitor import InjectionMonitor
+from daedalus.browser.service import ACTION_LOG
 from daedalus.config import BrowserConfig, BrowserRuleConfig, RuntimeConfig, Settings
 from daedalus.extensions import browser as browser_extension
 from daedalus.host import prompts
@@ -568,6 +570,34 @@ async def test_the_injection_monitor_pauses_a_page_that_talks_to_the_agent(rig: 
     before = len(asked)
     await rig.call(sid, "BrowserText")
     assert len(asked) == before
+
+
+async def test_a_page_that_has_not_finished_is_told_as_there_to_read_and_its_time_is_kept(rig: Rig) -> None:
+    sid = await rig.session()
+    timing = {"answered_ms": 180, "commit_ms": 190, "parsed_ms": 640, "waited_ms": 3640}
+    rig.daemon.navigated = {"loading": True, "timing": timing, "waiting_on": [{"host": "ads.test", "type": "document", "ms": 3400}]}
+    opened, failed = await rig.call(sid, "BrowserOpen", url="https://shop.test/search")
+    assert not failed and UNFINISHED in opened
+    went, failed = await rig.call(sid, "BrowserNavigate", url="https://shop.test/shoes")
+    # The page is there, so "did not load" would be wrong as well as alarming.
+    assert not failed and UNFINISHED in went and "did not load" not in went
+    assert "ads.test" not in went
+    tab, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.test/cart")
+    assert not failed and UNFINISHED in tab
+    rows = await rig.manager.db.fetchall("SELECT detail_json FROM browser_audit WHERE action = 'page_load' ORDER BY seq")
+    kept = [json.loads(r["detail_json"]) for r in rows]
+    assert [k["url"] for k in kept] == ["https://shop.test/search", "https://shop.test/shoes", "https://shop.test/cart"]
+    assert all(k["timing"] == timing and k["loading"] and k["waiting_on"][0]["host"] == "ads.test" for k in kept)
+    # What the page cost is for answering a complaint, not a thing the agent did.
+    assert "page_load" not in ACTION_LOG
+
+
+async def test_a_page_that_loaded_says_nothing_of_it(rig: Rig) -> None:
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://shop.test/search")
+    rig.daemon.navigated = {"timing": {"parsed_ms": 300, "loaded_ms": 700, "waited_ms": 710}}
+    went, failed = await rig.call(sid, "BrowserNavigate", url="https://shop.test/shoes")
+    assert not failed and UNFINISHED not in went
 
 
 async def test_a_popup_over_the_page_opens_every_read_with_its_close_ref(rig: Rig) -> None:

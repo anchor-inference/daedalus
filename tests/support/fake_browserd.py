@@ -232,6 +232,8 @@ class FakeBrowserd:
         self.events: list[dict[str, Any]] = []
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.fail: dict[str, tuple[int, str, dict[str, Any] | None]] = {}
+        self.navigated: dict[str, Any] = {}
+        """What a test adds to every page.navigate's reply: a page that did not finish, its timing."""
         """Method → the error its next call answers with, once."""
         self.screenshot = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
         self.machine: dict[str, Any] = {"mem_total_bytes": 16 << 30, "mem_available_bytes": 8 << 30, "cpus": 8, "cpu_percent": 10.0}
@@ -776,7 +778,7 @@ class FakeBrowserd:
             warnings = sum(1 for e in tab.page.logs if e.get("level") == "warning")
             if errors or warnings:
                 reply["logged"] = {"errors": errors, "warnings": warnings}
-            return reply
+            return {**reply, **self.navigated}
         if method in ("page.back", "page.forward", "page.reload"):
             group, tab = self._tab(params)
             await self._held_back(group, params)

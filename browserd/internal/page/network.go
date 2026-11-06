@@ -63,7 +63,8 @@ type Request struct {
 	Frame           bool     `json:"frame,omitempty"` // made by a frame of the page, not the page itself
 
 	requestID string
-	started   float64 // Chromium's monotonic seconds
+	started   float64   // Chromium's monotonic seconds
+	seen      time.Time // when the daemon heard of it, by this machine's clock and not the browser's
 }
 
 // Header is one header as the agent may read it.
@@ -97,6 +98,7 @@ func (p *Model) requestsOf(t *browser.Tab, create bool) *requestLog {
 }
 
 func (l *requestLog) addLocked(r *Request) {
+	r.seen = time.Now()
 	l.seq++
 	r.Seq = l.seq
 	r.ID = "r" + strconv.FormatInt(l.seq, 10)
@@ -537,6 +539,41 @@ func (p *Model) Network(t *browser.Tab, after int64, f NetworkFilter, limit int)
 		out.Requests = append(out.Requests, q.summary())
 	}
 	return out, nil
+}
+
+// Unanswered is a request of the page's that has had no response yet.
+type Unanswered struct {
+	Host string `json:"host"`
+	Type string `json:"type,omitempty"`
+	MS   int64  `json:"ms"`
+}
+
+// UnansweredSince is the longest-waiting requests made since a moment that have no response yet, at
+// most limit. Only those with no response at all: a frame of another site reports its document's end
+// on a session of its own that nobody listens to, so a request with a response may look unfinished
+// for ever. For the same reason a request made inside such a frame is not here.
+func (p *Model) UnansweredSince(t *browser.Tab, since time.Time, limit int) []Unanswered {
+	l := p.requestsOf(t, false)
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []Unanswered
+	for _, q := range l.entries {
+		if len(out) == limit {
+			break
+		}
+		if !q.Pending || q.Status != 0 || q.seen.Before(since) {
+			continue
+		}
+		host := q.URL
+		if u, err := url.Parse(q.URL); err == nil && u.Hostname() != "" {
+			host = u.Hostname()
+		}
+		out = append(out, Unanswered{Host: host, Type: q.Type, MS: time.Since(q.seen).Milliseconds()})
+	}
+	return out
 }
 
 // DocumentStatus is the HTTP status the page's own document came with, when it is the page now
