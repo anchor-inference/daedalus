@@ -46,6 +46,10 @@
 #                                                       and the browser-user service
 #   browser-user-state    -> /var/lib/browserd-user (browser-user only)  its recordings and the files
 #                                                       it keeps of downloads
+#   guest-run             -> /run/daedalus-guest        the guest door's control socket and token, shared
+#                                                       by the agent and the guest service
+#   guest-state           -> /var/lib/guestd (guest only)  the door's own database: links and what guests said.
+#                                                       Never mounted into the agent, and nothing else is mounted into the door.
 #
 # Host terminal (optional). `bash deploy/setup.sh` can install `ptyd` on the server itself as a
 # systemd user unit of the operator's (deploy/ptyd/daedalus-ptyd.service): a shell on the server as
@@ -57,7 +61,9 @@
 #
 # Networks: "telegram" (bot ⇄ local Bot API), "keys" (bot ⇄ key proxy), "search" (bot ⇄ SearXNG),
 # "terminals" (the terminals service's own way out, with no route to the key proxy or SearXNG),
-# "browser" (the browser service's own way out, with no route to anything else in this file).
+# "browser" (the browser service's own way out, with no route to anything else in this file),
+# "guest" (the guest door's published port) and "guest-model" (the door and the key proxy, nothing else,
+# with no way out: the door's one route anywhere, and it does not lead to the agent's API).
 #
 # Terminals. The `terminals` service is the same image started as `ptyd`, the daemon that owns the
 # container terminals of the app. It is a service of its own so that the terminals outlive the agent:
@@ -84,6 +90,8 @@
 #                        image (the `:browser` tag), which the agent drives and the app shows live.
 #                        Without it the browser tools are not offered. `COMPOSE_PROFILES=browser` in
 #                        .env keeps it on for every command, the rebuilder's included.
+#   --profile guest      the guest door: agents of other people reach a link here. Off until the operator
+#                        opens it, and with it off the app says so instead of making links.
 services:
   daedalus:
     stop_grace_period: 40s  # the supervisor drains the bot for 25 s before killing it; Docker must wait longer
@@ -122,6 +130,10 @@ services:
       SERVICES_PUBLIC_HOST: ${SERVICES_PUBLIC_HOST:-}
       SERVICES_DOOR_PORT: ${SERVICES_DOOR_PORT:-8766}
       SERVICES_PUBLIC_URL: ${SERVICES_PUBLIC_URL:-}
+      GUEST_DOOR_PORT: ${GUEST_DOOR_PORT:-8764}
+      GUEST_PUBLIC_URL: ${GUEST_PUBLIC_URL:-}
+      # The guest door's run directory (the guest-run volume): empty until that service runs.
+      GUEST_RUN_DIR: /run/daedalus-guest
       # The terminals service's run directory (the terminal-run volume) and the ports it publishes.
       TERMINALS_CONTAINER_DIR: /run/daedalus-terminals
       # The host terminal's run directory: empty until the systemd user unit is installed on the host.
@@ -169,6 +181,9 @@ services:
       # The socket and token of the daemon for the operator's Chrome, sealed the same way: its token
       # drives the operator's real, signed-in browser.
       - browser-user-run:/run/daedalus-browser-user
+      # The guest door's socket and token, sealed the same way: the token admits strangers. This
+      # container dials the door through it, and it is the only connection between the two.
+      - guest-run:/run/daedalus-guest
     entrypoint: ["python3", "/opt/launcher/state_mount_guard.py", "--", "python3", "/opt/launcher/supervisor.py"]
     ports:
       - "127.0.0.1:${API_PORT:-8765}:${API_PORT:-8765}"
@@ -362,6 +377,62 @@ services:
       - browser-user-run:/run/daedalus-browser-user
       - browser-user-state:/var/lib/browserd-user
 
+  # The guest door: where other people's agents arrive (daedalus/guestd). The least privileged thing in
+  # this file, because it is the one service strangers talk to: its own uid, no capabilities, a read-only
+  # filesystem, its code baked into the image rather than mounted from the checkout the agent can write,
+  # and two volumes that hold nothing else. It has no network route to the agent: the agent reaches
+  # it over the guest-run socket, and it reaches only the key proxy, for a stand-in's model call.
+  #
+  # Published on the loopback interface, for a reverse proxy in front of it. A server reached by bare
+  # address sets GUEST_DOOR_BIND=0.0.0.0. Never point a proxy at the API's port for this: that would
+  # publish the app, and this door exists so that nothing of the app is on the address.
+  #
+  # GUEST_TRUSTED_PROXIES names the peer allowed to say who a visitor is, as API_TRUSTED_PROXIES does
+  # for the app. It differs from that one: a proxy on the Docker host arrives here through this
+  # service's network gateway (`docker network inspect` the "guest" network). Empty, every visitor
+  # counts as that one peer in the per-address limits.
+  guest:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: daedalus:local
+    profiles: [guest]
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    working_dir: /opt/guestd
+    entrypoint: ["/srv/venv/bin/python", "-m", "guestd"]
+    environment:
+      HOME: /var/lib/guestd
+      PYTHONPATH: /opt/guestd
+      GUEST_DOOR_PORT: ${GUEST_DOOR_PORT:-8764}
+      GUEST_STATE_DIR: /var/lib/guestd
+      GUEST_RUN_DIR: /run/daedalus-guest
+      GUEST_MODEL_BASE: http://keyproxy:3200
+      GUEST_TRUSTED_PROXIES: ${GUEST_TRUSTED_PROXIES:-}
+    mem_limit: 256m
+    pids_limit: 64
+    stop_grace_period: 5s
+    healthcheck:
+      test: ["CMD", "/srv/venv/bin/python", "-c", "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ['GUEST_DOOR_PORT'] + '/robots.txt', timeout=2).status == 200 else 1)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+    volumes:
+      - guest-state:/var/lib/guestd
+      - guest-run:/run/daedalus-guest
+    ports:
+      - "${GUEST_DOOR_BIND:-127.0.0.1}:${GUEST_DOOR_PORT:-8764}:${GUEST_DOOR_PORT:-8764}"
+    networks: [guest, guest-model]
+    depends_on:
+      keyproxy:
+        condition: service_healthy
+
   # A metasearch over Bing, Brave, DuckDuckGo, Google (CSE), Mojeek and Wikipedia with a JSON API,
   # reachable only from the agent container. Settings in deploy/searxng/settings.yml. Behind the
   # "search" profile and off by default: it is 382 MB for a better version of a search WebSearch can
@@ -384,8 +455,9 @@ services:
     networks: [search]
 
   # Holds the provider keys and injects them into upstream calls; refuses model calls once the daily
-  # budget is spent (the supervisor's flag or its own read of the database). Reachable only from the
-  # agent container over the private "keys" network; it holds nothing but the keys it injects.
+  # budget is spent (the supervisor's flag or its own read of the database). Reachable from the agent
+  # container over the private "keys" network, and from the guest door over "guest-model" for a
+  # stand-in's call; it holds nothing but the keys it injects.
   keyproxy:
     # The agent's image, started as the key proxy instead of as the agent: proxy.py needs httpx and
     # aiohttp, which the agent's virtualenv already has, and a second image bought nothing. The
@@ -440,7 +512,7 @@ services:
     # loopback, which from in here is the container itself. The setup wizard writes such an endpoint
     # as host.docker.internal; this makes that name resolve to the Docker host.
     extra_hosts: ["host.docker.internal:host-gateway"]
-    networks: [keys]
+    networks: [keys, guest-model]
 
   # The only container that can talk to Docker. It rebuilds and replaces the agent container when
   # the supervisor drops a trigger file; the agent container itself never sees the docker socket.
@@ -491,6 +563,9 @@ networks:
   search:
   terminals:
   browser:
+  guest:
+  guest-model:
+    internal: true
 
 volumes:
   daedalus-state:
@@ -507,3 +582,5 @@ volumes:
   browser-state:
   browser-user-run:
   browser-user-state:
+  guest-run:
+  guest-state:

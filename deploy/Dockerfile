@@ -189,6 +189,8 @@ COPY --from=browserd /out/browserd /usr/local/bin/browserd
 # container comes first. Root in the agent's container reads it all the same. The same for the
 # daemon of the operator's Chrome (the browser-user service) and its state.
 RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-browser /run/daedalus-browser-user /var/lib/browserd-user
+# The guest door's two volumes, for the same reason: its service runs as that user and may be second.
+RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-guest /var/lib/guestd
 # The bot and the core are mounted, not installed: pointing the interpreter at the mounted checkouts
 # is what an editable install would have written anyway, and it needs no sync at the first start.
 RUN printf '%s\n' /srv/daedalus /srv/protocore-exp > /srv/venv/lib/python3.12/site-packages/_daedalus_checkouts.pth
@@ -200,6 +202,9 @@ RUN python3 /opt/launcher/dependencies.py /opt/dependency-recipe/local.json
 # The key proxy runs from this image as a second container with its own environment; see
 # deploy/compose.yaml. Its dependencies are already in the virtualenv above.
 COPY deploy/keyproxy /opt/keyproxy
+# The guest door runs from this image as a package of its own, baked in: it is what strangers talk to,
+# so it does not run from the checkout the agent can write. It needs nothing else of Daedalus.
+COPY daedalus/guestd /opt/guestd/guestd
 
 WORKDIR /srv/daedalus
 # The virtualenv lives outside the mounted checkout so host and container never share one.

@@ -256,6 +256,44 @@ An address or a network; several are separated by commas. A proxy on the Docker 
 the gateway of the network that publishes the port, not from `127.0.0.1`; `docker network inspect` shows
 it. Never `*`: then anyone can claim any address, and the limit counts nothing.
 
+### Agent links: the guest door
+
+A link from a chat lets somebody else's agent talk to your side over plain HTTP. What it reaches is a
+process of its own with its own port (`GUEST_DOOR_PORT`, 8764) and its own database, in the `guest`
+compose profile, off until you open it. Nothing of the app is on that port.
+
+```bash
+# .env, in the checkout root
+COMPOSE_PROFILES=...,guest
+GUEST_PUBLIC_URL=https://agents.example.test
+GUEST_TRUSTED_PROXIES=<the "guest" network's gateway>
+```
+
+`docker compose -f deploy/compose.yaml --env-file .env up -d --build` then builds the image that holds the
+door and adds the socket the app dials it through. A reverse proxy gives the name to the door's port and to
+nothing else; only `/a/` needs to pass:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name agents.example.test;
+    location /a/ {
+        proxy_pass http://127.0.0.1:8764;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 40s;
+    }
+    location / { return 404; }
+}
+```
+
+The address must not be the app's own origin: the app refuses to hand out such a link. With only one name,
+give the door a location on another port rather than a path on the app's server. Without a proxy, set
+`GUEST_DOOR_BIND=0.0.0.0` and the link is `http://<SERVICES_PUBLIC_HOST>:8764/a/…`, plain http, with the invite
+and every token readable on the way. `GUEST_TRUSTED_PROXIES` matters because the per-address limits count the
+peer that connected; `docker network inspect` shows the gateway a proxy on the host arrives through.
+
 ### Shared services: the services door
 
 A service the operator shares runs pages an agent wrote, so they never run as themselves on the app's

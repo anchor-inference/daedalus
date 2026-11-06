@@ -789,7 +789,7 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 		// are not there, which is true and is better than a path to an empty folder.
 		add("PLAYWRIGHT_BROWSERS_PATH", p.RuntimeBrowsers)
 	}
-	for _, key := range []string{"API_PORT", "SERVICES_PORT_RANGE", "SERVICES_DOOR_PORT", "USD_PER_DAY", "TELEGRAM_BOT_TOKEN", "OWNER_USER_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "MINIAPP_PUBLIC_URL", "DAEDALUS_SELFDEV_MODE", "GITHUB_TOKEN", "GITHUB_DAEDALUS_TOKEN", "DAEDALUS_GITHUB_ORG"} {
+	for _, key := range []string{"API_PORT", "SERVICES_PORT_RANGE", "SERVICES_DOOR_PORT", "GUEST_DOOR_PORT", "USD_PER_DAY", "TELEGRAM_BOT_TOKEN", "OWNER_USER_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "MINIAPP_PUBLIC_URL", "DAEDALUS_SELFDEV_MODE", "GITHUB_TOKEN", "GITHUB_DAEDALUS_TOKEN", "DAEDALUS_GITHUB_ORG"} {
 		add(key, settings[key])
 	}
 	return env

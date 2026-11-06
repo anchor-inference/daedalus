@@ -206,6 +206,7 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"API_PORT", firstSet(current["API_PORT"], "8765")},
 		{"SERVICES_PORT_RANGE", firstSet(current["SERVICES_PORT_RANGE"], "8100-8119")},
 		{"SERVICES_DOOR_PORT", firstSet(current["SERVICES_DOOR_PORT"], "8766")},
+		{"GUEST_DOOR_PORT", firstSet(current["GUEST_DOOR_PORT"], "8764")},
 		{"SERVICES_PUBLIC_HOST", firstSet(current["SERVICES_PUBLIC_HOST"], "localhost")},
 		{"KEYPROXY_PORT", firstSet(current["KEYPROXY_PORT"], "3201")},
 		{"DAEDALUS_COMPOSE_PROJECT_DIR", p.Bot},
