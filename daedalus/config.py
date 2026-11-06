@@ -310,6 +310,8 @@ class Settings(BaseSettings):
     guest_door_uid: int = 1002
     """The user the door runs as. The socket is held to it: a path in a directory the door writes can be
     made to point at any other daemon's socket here."""
+    guest_door_wall: str = ""
+    """What the launcher got the door to run inside, natively: ``namespaces``, ``seatbelt``, or nothing at all."""
     guest_model_upstreams: str = ""
     """The key proxy's upstreams a stand-in may use, comma separated, as ``KEYPROXY_GUEST_UPSTREAMS`` tells the proxy."""
     miniapp_public_url: str = ""

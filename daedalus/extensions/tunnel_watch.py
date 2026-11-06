@@ -9,8 +9,8 @@ their notification settings send a system notice), with its command line and how
 It tells and does not kill: a tunnel the operator started themselves from a terminal looks the same
 as one the agent started, and ending the operator's own process on a guess is worse than a notice.
 Once per process, so a tunnel that stays up is not an hourly nag; a restart of the host tells again,
-because what was said before it is not remembered. Whatever the installation itself raises, once it
-raises any, must be kept out of this by the process it starts, or it will be reported as a stranger.
+because what was said before it is not remembered. The operator's own public address is kept out of
+this by process id, as the launcher states them: see :func:`daedalus.host.tunnels.not_ours`.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from daedalus.extensions import tunnel_address
 from daedalus.extensions.notifications import Draft
 from daedalus.host import tunnels
 from daedalus.host.notify_text import render
@@ -43,7 +44,10 @@ class TunnelWatch:
 
     async def check(self) -> list[tunnels.Running]:
         """Look once, tell about what is new, and return what was found."""
-        found = await asyncio.to_thread(tunnels.running)
+        address = self.app.extensions.get(tunnel_address.EXTENSION_KEY)
+        if address is not None:
+            await address.refresh()  # a client started a moment ago is the operator's, and is news to nobody
+        found = tunnels.not_ours(await asyncio.to_thread(tunnels.running), address.own_pids if address is not None else ())
         if not found:
             self.known = set()  # nothing runs, so the next one is news whatever its id
             return []

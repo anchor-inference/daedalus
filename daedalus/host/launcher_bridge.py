@@ -256,6 +256,14 @@ COMPUTER_TIMEOUT = 30.0
 hold that call while its own prompt is on the screen."""
 
 
+class LauncherTooOld(LauncherUnavailable):
+    """A launcher from before the route that was asked for: the checkouts move apart from it."""
+
+
+class TunnelRefused(RuntimeError):
+    """The launcher turned down a change of the public address, and says why in words fit to show."""
+
+
 class DesktopUnavailable(RuntimeError):
     """The launcher answered, but it has no desktop daemon to speak for: none in this build, or it is
     not running. The message is the launcher's own plain sentence, meant for the operator."""
@@ -270,6 +278,39 @@ class DesktopRefused(RuntimeError):
         self.code = code
         self.message = message
         self.data = data
+
+
+async def tunnel(launcher: Launcher, change: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The launcher's public address (``desktop/tunnel.go``): how it stands, or a change of it.
+
+    Every call carries the token, because the answer names what is exposed. A change may carry a provider's
+    token on its way to the launcher's private folder, and that is the only time one passes through this
+    process: it is not kept, not logged, and the launcher never hands one back.
+    """
+    async with httpx.AsyncClient(timeout=COMPUTER_TIMEOUT) as client:
+        try:
+            if change is None:
+                response = await client.get(f"{launcher.base}/api/tunnel", headers={HEADER: launcher.token})
+            else:
+                response = await client.post(f"{launcher.base}/api/tunnel", headers={HEADER: launcher.token}, json=change)
+        except httpx.HTTPError as exc:
+            raise LauncherUnavailable(f"the launcher on port {launcher.port} did not answer: {type(exc).__name__}") from None
+    if response.status_code == 404:
+        raise LauncherTooOld("this launcher knows nothing of a public address; it is older than this build of the app")
+    if response.status_code in (401, 403):
+        raise LauncherUnavailable("the launcher refused the request; it may have been restarted since this process started")
+    try:
+        answer = response.json()
+    except ValueError:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code}") from None
+    if not isinstance(answer, dict):
+        raise LauncherUnavailable(f"the launcher answered {response.status_code} with something that is not an object")
+    if response.status_code == 400:
+        error = answer.get("error")
+        raise TunnelRefused(str(error.get("message") if isinstance(error, dict) else "the launcher refused that change"))
+    if response.status_code != 200:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code}")
+    return answer
 
 
 async def computer(launcher: Launcher, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -363,7 +404,9 @@ __all__ = [
     "DesktopUnavailable",
     "Launcher",
     "LauncherBusy",
+    "LauncherTooOld",
     "LauncherUnavailable",
+    "TunnelRefused",
     "USER_BROWSER_ACTIONS",
     "act",
     "busy",
@@ -373,5 +416,6 @@ __all__ = [
     "job",
     "read",
     "status",
+    "tunnel",
     "user_browser",
 ]

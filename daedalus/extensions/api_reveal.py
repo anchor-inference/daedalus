@@ -20,12 +20,13 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from daedalus.extensions.api_services_door import SCOPE_KEY as DOOR_KEY
 from daedalus.host.reveal import (
     Platform,
     RevealRefused,
     Runner,
     confine,
-    is_local_client,
+    is_local_request,
     platform_family,
     reveal,
     start_detached,
@@ -45,7 +46,7 @@ class RevealRequest(BaseModel):
 
 def available(native: bool, request: Request) -> bool:
     """Whether this request may reveal anything: a native installation, asked from its own machine."""
-    return native and is_local_client(request.client.host if request.client else None)
+    return native and is_local_request(request.client.host if request.client else None, request.headers, door=bool(request.scope.get(DOOR_KEY)))
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, runner: Runner = start_detached, platform: Platform | None = None) -> None:

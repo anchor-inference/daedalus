@@ -51,7 +51,7 @@ class Inbox:
 def _watch(monkeypatch: pytest.MonkeyPatch, inbox: Inbox | None) -> tuple[tunnel_watch.TunnelWatch, list]:
     seen: list = []
     monkeypatch.setattr(tunnels, "running", lambda split=None: list(seen))
-    return tunnel_watch.TunnelWatch(SimpleNamespace(notifications=inbox)), seen  # type: ignore[arg-type]
+    return tunnel_watch.TunnelWatch(SimpleNamespace(notifications=inbox, extensions={})), seen  # type: ignore[arg-type]
 
 
 async def test_a_new_tunnel_is_told_once_and_again_after_it_has_gone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,7 +86,7 @@ async def test_two_new_tunnels_are_one_notice(monkeypatch: pytest.MonkeyPatch) -
 
 async def test_a_platform_that_cannot_be_looked_at_says_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     inbox = Inbox()
-    watch = tunnel_watch.TunnelWatch(SimpleNamespace(notifications=inbox))  # type: ignore[arg-type]
+    watch = tunnel_watch.TunnelWatch(SimpleNamespace(notifications=inbox, extensions={}))  # type: ignore[arg-type]
     monkeypatch.setattr(tunnels, "running", lambda split=None: None)
     assert await watch.check() == [] and inbox.drafts == []
 

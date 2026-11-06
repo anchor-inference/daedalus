@@ -27,7 +27,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal, get_args
-from urllib.parse import parse_qsl, quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 import httpx
 import uvicorn
@@ -110,6 +110,7 @@ from daedalus.extensions import (
     api_projects,
     api_prompt_coach,
     api_provider_holds,
+    api_public_address,
     api_recurring,
     api_remote,
     api_remote_relay,
@@ -137,7 +138,7 @@ from daedalus.extensions import (
 from daedalus.extensions import commands as slash
 from daedalus.extensions.api_host_pane import HostPane
 from daedalus.extensions.api_origin import CookieOriginGuard
-from daedalus.extensions.api_proxy import forward_http
+from daedalus.extensions.api_proxy import forward_http, forward_websocket
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
@@ -1798,6 +1799,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_widgets.register(api, app, auth)
     # The operator's own file manager on a folder or a file of the agent's, natively and on this machine only.
     api_reveal.register(api, app, auth)
+    api_public_address.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
@@ -4918,6 +4920,35 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    @api.websocket("/s/{slug}/{path:path}")
+    async def shared_socket(websocket: WebSocket, slug: str, path: str) -> None:
+        """A shared service's WebSocket, on the rules its pages are on.
+
+        It is opened at the door, as its page was. On the app's address only a sandboxed page may have
+        one, for the service that has no door, and that page's origin is the word ``null``. A browser
+        always names an origin here, and a page of another site is sent away before the key in a visitor's
+        cookie can be used on its behalf.
+        """
+        at_door = bool(websocket.scope.get(api_services_door.SCOPE_KEY))
+        origin = websocket.headers.get("origin")
+        if at_door:
+            allowed = origin is None or urlsplit(origin).netloc.lower() == websocket.headers.get("host", "").lower()
+        else:
+            allowed = origin == "null" and not public_address.services_base(settings)
+        slug, _, carried = slug.partition("~")
+        services = app.extensions.get("services")
+        row = await services.by_slug(slug) if allowed and services is not None else None  # type: ignore[attr-defined]
+        if row is None or (row.get("share_mode") or "local") not in SHARE_MODES[1:]:
+            await websocket.close(code=1008)
+            return
+        presented = carried or websocket.query_params.get("key") or websocket.cookies.get(SHARE_COOKIE_PREFIX + slug) or websocket.headers.get("x-share-key")
+        if not services.share_allows(row, presented) or row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):  # type: ignore[attr-defined]
+            await websocket.close(code=1008)
+            return
+        rest = [(k, v) for k, v in websocket.query_params.multi_items() if k != "key"]
+        upstream = f"ws://127.0.0.1:{row['port']}/{path}" + (f"?{urlencode(rest)}" if rest else "")
+        await forward_websocket(websocket, upstream, f"/s/{slug}~{carried}" if carried else f"/s/{slug}", strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE))
+
     @api.post("/api/sessions/{session_id}/loop")
     async def set_session_loop(session_id: str, body: LoopBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Attach (or replace) the session's loop."""
@@ -7002,7 +7033,9 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         token = secrets.token_urlsafe(24)
         await app.db.kv_set("api_token", token)
     api = build_app(app, token)
-    config = server_config(api, trusted_proxies=app.settings.api_trusted_proxies, host=app.settings.api_host, port=app.settings.api_port)
+    # Natively every peer is loopback, a tunnel's visitors among them, so no peer may name anyone.
+    trusted = "" if app.settings.native else app.settings.api_trusted_proxies
+    config = server_config(api, trusted_proxies=trusted, host=app.settings.api_host, port=app.settings.api_port)
     loop = asyncio.get_running_loop()
     server = _AppServer(config, lambda: loop.call_soon_threadsafe(app.stopping.set))
     app.extensions["api_token"] = token
@@ -7035,7 +7068,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         app.front.command_hooks["doctor"] = cmd_doctor
     tasks = [asyncio.create_task(server.serve(), name="api-server")]
     # lifespan off: the API server runs the app's start and stop, and they run once.
-    door = api_services_door.open_door(app.settings, server_config(api_services_door.ServicesDoor(api), trusted_proxies=app.settings.api_trusted_proxies, lifespan="off"))
+    door = api_services_door.open_door(app.settings, server_config(api_services_door.ServicesDoor(api), trusted_proxies=trusted, lifespan="off"))
     if door is not None:
         tasks.append(door[1])
     return tasks

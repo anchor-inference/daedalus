@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -43,7 +43,11 @@ def platform_family(platform: str | None = None) -> Platform:
 
 
 def is_local_client(host: str | None) -> bool:
-    """Whether a request came from this machine: a loopback address, IPv4 or IPv6."""
+    """Whether a peer's address is this machine's: a loopback address, IPv4 or IPv6.
+
+    That is not the same as a person at this machine: see :func:`is_local_request`, which is what a
+    decision about a request has to use. A tunnel's client is a local program too.
+    """
     if not host:
         return False
     if host == "localhost":
@@ -52,6 +56,35 @@ def is_local_client(host: str | None) -> bool:
         return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
     except ValueError:
         return False
+
+
+THROUGH_HEADER = "x-daedalus-through"
+"""What the router in ``tunneld`` writes on everything that came from outside."""
+FORWARDING_HEADERS = (THROUGH_HEADER, "forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "true-client-ip")
+"""Any of these says something stood between the visitor and this socket. Their presence can only ever take
+trust away, so a visitor forging one gains nothing, and their values are never read here."""
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
+
+
+def came_through(headers: Mapping[str, str]) -> bool:
+    """Whether the router of a tunnel sent this: the header has no value to spoof, only a presence."""
+    return THROUGH_HEADER in headers
+
+
+def is_local_request(peer: str | None, headers: Mapping[str, str], *, door: bool = False) -> bool:
+    """Whether a request came from a browser on this machine, and not merely through a program on it.
+
+    A tunnel's client connects from loopback, so the peer alone says nothing the moment one exists. A
+    request is local when its peer is loopback, it did not arrive by a door meant for outside, nothing
+    forwarded it, and it was addressed to this machine by a name that only this machine answers to. The
+    last one catches what the others cannot: a client the operator pointed at the app's port themselves,
+    which adds no header this code knows, still carries the public name it was reached under.
+    """
+    if door or not is_local_client(peer) or any(name in headers for name in FORWARDING_HEADERS):
+        return False
+    host = headers.get("host", "")
+    name = host.rsplit(":", 1)[0] if host.rsplit(":", 1)[-1].isdigit() else host
+    return name.lower() in LOOPBACK_HOSTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,4 +154,4 @@ def reveal(target: Target, *, platform: Platform | None = None, runner: Runner =
     runner(reveal_command(target, platform or platform_family()))
 
 
-__all__ = ["Platform", "RevealRefused", "Runner", "Target", "confine", "is_local_client", "platform_family", "reveal", "reveal_command", "start_detached"]
+__all__ = ["FORWARDING_HEADERS", "THROUGH_HEADER", "Platform", "RevealRefused", "Runner", "Target", "came_through", "confine", "is_local_client", "is_local_request", "platform_family", "reveal", "reveal_command", "start_detached"]

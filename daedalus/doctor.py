@@ -21,6 +21,7 @@ import httpx
 
 from daedalus import public_address, supervisor_client
 from daedalus.config import RuntimeConfig, Settings, keyproxy_base, keyproxy_configured, keyproxy_unresolved
+from daedalus.extensions import tunnel_address
 from daedalus.host import capabilities, components, launcher_bridge, tunnels
 from daedalus.providers.llamacpp import describe_discovery, discover_llamacpp
 from daedalus.providers.pricing import pricing_table
@@ -70,7 +71,7 @@ class DoctorContext:
 
 async def run_checks(ctx: DoctorContext) -> list[Check]:
     checks: list[Check] = []
-    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _tunnels, _shared_services, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
+    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _tunnels, _public_address, _shared_services, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
         try:
             checks.extend(await probe(ctx))
         except Exception as exc:  # noqa: BLE001 — one broken probe must not hide the others
@@ -579,11 +580,12 @@ async def _tunnels(ctx: DoctorContext) -> list[Check]:
     The policy refuses what it can read in a command line; this finds what was raised some way it
     could not (a script, a renamed program, a container), or by the operator from a terminal, and says
     which. It looks at this user's processes only."""
-    found = await asyncio.to_thread(tunnels.running)
+    address = ctx.extensions.get(tunnel_address.EXTENSION_KEY)
+    found = tunnels.not_ours(await asyncio.to_thread(tunnels.running), address.own_pids if address is not None else ())
     if found is None:
         return [Check("tunnels", True, "not looked for on this platform", "info")]
     if not found:
-        return [Check("tunnels", True, "no tunnel is running as this user", "ok")]
+        return [Check("tunnels", True, "no tunnel but the app's own" if address is not None and address.own_pids else "no tunnel is running as this user", "ok")]
     return [Check("tunnels", False, f"{len(found)} running: " + "; ".join(r.line for r in found[:5]) + (f"; and {len(found) - 5} more" if len(found) > 5 else ""), "warn", TUNNEL_FIX)]
 
 
@@ -658,6 +660,43 @@ async def _terminals(ctx: DoctorContext) -> list[Check]:
         # webview connects from the Mini App's address, which nothing but this setting names.
         out.append(Check("terminals in Telegram", False, "MINIAPP_PUBLIC_URL is empty, so a terminal opened inside Telegram is refused", "warn", "set MINIAPP_PUBLIC_URL to the address the bot's menu button opens"))
     return out
+
+
+PUBLIC_ADDRESS_STATES = {
+    "off": "off: nothing of this installation can be reached from outside",
+    "installing": "fetching its client",
+    "starting": "starting",
+    "sign_in": "waiting for a sign-in, in Settings",
+    "reconnecting": "reconnecting",
+}
+DOOR_WALLS = {
+    "namespaces": "the guest door runs with no network and a root of its own",
+    "seatbelt": "the guest door runs in a seatbelt with no network and no home folder",
+}
+
+
+async def _public_address(ctx: DoctorContext) -> list[Check]:
+    """A native installation's public address, and what stands around the door it leads to. Nothing to say
+    on a server, whose address is its own affair."""
+    address = ctx.extensions.get(tunnel_address.EXTENSION_KEY)
+    if not ctx.settings.native or address is None:
+        return []
+    view = await address.refresh()
+    state = str(view.get("state") or "off")
+    checks = []
+    if view.get("unavailable"):
+        checks.append(Check("public address", True, str(view["unavailable"]), "info"))
+    elif state == "up":
+        proved = "answering" if view.get("confirmed") else "connected, not proved from outside yet"
+        checks.append(Check("public address", True, f"{view.get('address')} by {view.get('provider')}: {proved}", "ok" if view.get("confirmed") else "info"))
+    elif state == "failed":
+        checks.append(Check("public address", False, f"{view.get('provider')} failed: {view.get('detail') or view.get('code')}", "warn", "open Settings, Public address"))
+    else:
+        checks.append(Check("public address", True, PUBLIC_ADDRESS_STATES.get(state, state), "ok" if state == "off" else "info"))
+    if ctx.settings.guest_run_dir is not None:
+        wall = DOOR_WALLS.get(ctx.settings.guest_door_wall)
+        checks.append(Check("guest door wall", wall is not None, wall or "the guest door runs as you with the network of this machine: it holds no secrets and starts nothing, and that is all that stands there", "ok" if wall else "info"))
+    return checks
 
 
 async def _shared_services(ctx: DoctorContext) -> list[Check]:

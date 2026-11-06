@@ -43,16 +43,20 @@ SCOPE_KEY = "daedalus.api_services_door"
 
 
 class ServicesDoor:
-    """The whole application of the door's listener: ``/s/`` reaches the API's routes, nothing else does."""
+    """The whole application of the door's listener: ``/s/`` reaches the API's routes, nothing else does.
+
+    A WebSocket under ``/s/`` goes the same way: a hot reload and a live app need it, and its route holds
+    it to the same rules as a page. Anywhere else one is closed before it opens.
+    """
 
     def __init__(self, api: ASGIApp) -> None:
         self.api = api
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "websocket":
+        path = scope.get("path", "")
+        if scope["type"] == "websocket" and not path.startswith("/s/"):
             await WebSocketClose(code=1008)(scope, receive, send)
             return
-        path = scope.get("path", "")
         if path.startswith("/s/"):
             scope[SCOPE_KEY] = True
             await self.api(scope, receive, send)

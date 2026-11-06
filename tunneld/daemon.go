@@ -325,7 +325,9 @@ func (d *Daemon) watch(ctx context.Context) {
 			}
 			if slept || moved {
 				d.logf("the machine slept or changed network; looking at the tunnel again")
-				d.status.update(func(s *Status) { s.Wakes++ })
+				// Measured: for some seconds after a thaw the address is dead and the last proof still
+				// says otherwise, so what was proved before is not carried across.
+				d.status.update(func(s *Status) { s.Wakes, s.Confirmed = s.Wakes+1, false })
 			}
 			d.look(ctx, slept || moved)
 		}

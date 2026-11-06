@@ -4,7 +4,7 @@ Two places put such a server on the site's own address: a shared service at ``/s
 service page at ``/pages/<slug>/``. Both forward any method, any path, a body of any size (streamed,
 never read into memory) and an answer of any length (streamed as it comes, so server-sent events and
 long downloads work), and both tell the server where it is mounted with ``X-Forwarded-Prefix``.
-A page also forwards WebSocket connections, so an existing web app with live updates works inside it.
+WebSocket connections are forwarded too, so an existing web app with live updates works in either.
 
 A shared service normally reaches this code through its own listener (``api_services_door``). When no
 separate origin is available it arrives on the app's address instead, and ``sandbox`` is what keeps
@@ -27,6 +27,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 # ``websockets`` comes with uvicorn's standard extra, which serves this API.
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
+
+from daedalus.host.reveal import THROUGH_HEADER, came_through
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +112,11 @@ async def forward_http(
         if remaining:
             headers["cookie"] = remaining
     headers.pop("x-daedalus-token", None)
+    headers.pop(THROUGH_HEADER, None)
     headers["x-forwarded-prefix"] = prefix
     headers["x-forwarded-host"] = request.headers.get("host", "")
-    headers["x-forwarded-proto"] = request.url.scheme
+    # A tunnel is always https at the visitor's end, and an app building its own links needs to hear so.
+    headers["x-forwarded-proto"] = "https" if came_through(request.headers) else request.url.scheme
     has_body = request.method not in BODYLESS or "content-length" in request.headers or "transfer-encoding" in request.headers
     # Streamed, not read: an upload of a few gigabytes into an app goes through at the network's pace
     # without the host holding it in memory.
@@ -178,7 +182,8 @@ async def forward_websocket(
         cookie = without_cookies(cookie, drop) if drop else cookie
         if cookie:
             headers.append(("Cookie", cookie))
-    headers += [("X-Forwarded-Prefix", prefix), ("X-Forwarded-Host", websocket.headers.get("host", "")), ("X-Forwarded-Proto", "https" if websocket.url.scheme == "wss" else "http")]
+    secure = websocket.url.scheme == "wss" or came_through(websocket.headers)
+    headers += [("X-Forwarded-Prefix", prefix), ("X-Forwarded-Host", websocket.headers.get("host", "")), ("X-Forwarded-Proto", "https" if secure else "http")]
     offered = [p.strip() for p in websocket.headers.get("sec-websocket-protocol", "").split(",") if p.strip()]
     try:
         server = await connect(upstream, additional_headers=headers, subprotocols=offered or None, open_timeout=30, max_size=None, ping_interval=None)  # type: ignore[arg-type]

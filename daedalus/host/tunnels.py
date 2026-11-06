@@ -37,7 +37,7 @@ import os
 import re
 import shlex
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,6 +170,7 @@ PROGRAMS: dict[str, Callable[[Sequence[str]], bool]] = {
     "expo": lambda args: "start" in _operands(args) and _flag(args, "--tunnel"),
     "netlify": lambda args: "dev" in _operands(args) and _flag(args, "--live"),
     "tor": lambda args: any("HiddenService" in a for a in args),
+    "tunneld": lambda args: "serve" in _operands(args),
     "pinggy": lambda args: True,
     "pagekite": lambda args: True,
     "pagekite.py": lambda args: True,
@@ -461,6 +462,15 @@ def scan_ps(text: str, split: Split) -> list[Running]:
 PS_SECONDS = 5.0
 
 
+def not_ours(found: list[Running] | None, own: Collection[int]) -> list[Running] | None:
+    """What was found, less the processes the launcher says hold the operator's own public address.
+
+    By process id, from the launcher, and never by what a command line looks like: an agent's tunnel can
+    be made to look like anything, and the launcher's word is out of its reach.
+    """
+    return None if found is None else [process for process in found if process.pid not in own]
+
+
 def running(split: Split | None = None) -> list[Running] | None:
     """The tunnels running as this user, or ``None`` where this platform cannot be looked at (Windows)."""
     if os.name == "nt":
@@ -478,4 +488,4 @@ def running(split: Split | None = None) -> list[Running] | None:
     return scan_ps(done.stdout, split) if done.returncode == 0 else None
 
 
-__all__ = ["PROGRAMS", "REFUSAL", "Running", "age_text", "parse_etime", "running", "scan_proc", "scan_ps", "shown", "tunnel_in"]
+__all__ = ["PROGRAMS", "REFUSAL", "Running", "age_text", "not_ours", "parse_etime", "running", "scan_proc", "scan_ps", "shown", "tunnel_in"]

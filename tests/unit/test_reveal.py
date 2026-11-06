@@ -164,7 +164,7 @@ def _api(tmp_path: Path, *, native: bool) -> tuple[FastAPI, list[object], Path, 
 
 
 async def _post(api: FastAPI, body: dict[str, object], client: tuple[str, int] = ("127.0.0.1", 50000)) -> httpx.Response:
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api, client=client), base_url="http://test") as http:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api, client=client), base_url="http://127.0.0.1:8765") as http:
         return await http.post("/api/reveal", json=body)
 
 
@@ -225,6 +225,6 @@ async def test_the_route_is_not_there_off_a_native_installation_or_for_a_remote_
 @pytest.mark.parametrize(("native", "client", "available"), [(False, "127.0.0.1", False), (True, "127.0.0.1", True), (True, "192.168.1.20", False)])
 async def test_the_capabilities_say_whether_to_offer_it(tmp_path: Path, db: Database, native: bool, client: str, available: bool) -> None:
     api = build_app(_api_app(_settings(tmp_path, native=native), _config("auto"), db), "tok")  # type: ignore[arg-type]
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api, client=(client, 50000)), base_url="http://test") as http:  # type: ignore[arg-type]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api, client=(client, 50000)), base_url="http://127.0.0.1:8765") as http:  # type: ignore[arg-type]
         body = (await http.get("/api/capabilities", headers={"X-Daedalus-Token": "tok"})).json()
     assert body["reveal"] == {"available": available, "platform": platform_family()}

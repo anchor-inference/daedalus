@@ -36,6 +36,7 @@ EXTENSIONS = (
     "daedalus.extensions.subagents",
     "daedalus.extensions.jobs",
     "daedalus.extensions.disk_guard",
+    "daedalus.extensions.tunnel_address",
     "daedalus.extensions.tunnel_watch",
     "daedalus.extensions.staff",
     "daedalus.extensions.orchestrator",
