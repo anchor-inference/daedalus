@@ -66,7 +66,7 @@ holds everything. Reading the reply is the point, so the rule here is that a run
 means of acting on its own.
 
 - A link in a chat is inert. It is recognised by its shape, without a request, and opens only when the agent calls
-  `open` with an address the operator wrote in that chat: an address from a reply, a page or a file does not open.
+  `open` with the whole address as the operator wrote it in that chat: one from a reply, a page or a file does not open.
   Only the operator's own turns may use the tool, never a schedule, a loop or a subagent.
 - The client dials https to an address on the public internet, checked after resolving and connected to as checked,
   follows no redirect, and bounds what it reads. Everything a door sends is data: only named fields are read, its
@@ -75,13 +75,14 @@ means of acting on its own.
   app nor a log, belongs to one chat, and is emptied when the conversation closes.
 - A reply reaches the model inside a fence with a nonce of its own and is stripped of what draws as nothing. From then
   until the operator's next message the run is touched: reads and the conversation go on; commands, file changes and
-  web requests each wait on a card that is answered in the app, past any grant made earlier and any standing allow;
+  web requests each wait on a card of their own, past any grant made earlier and any standing allow, and it offers none;
   and everything else is refused, memory, schedules, notes, the board, other agents and whatever tool is added next.
   The touch survives a restart, the turn an approval continues and a recovery. Autopilot does not continue such a run.
   The memory pass, the learning record, compaction and the identifier index all treat its words as a stranger's.
 - What goes out: the first message of a conversation waits for the operator, as does a later one sent after the run
-  read or ran anything since a reply, one that looks like a secret, and one the automatic review did not pass. The card
-  sends the text it shows, and no model says it again. The review setting per conversation is `first`, `all` or `off`.
+  read or ran anything since a reply, one that looks like a secret, and one the automatic review did not pass. Allowing
+  it sends the text as it was held, and no model says it again; a long one is cut on the card, which says so, and is
+  whole in the chat's sheet. The review setting per conversation is `first`, `all` or `off`.
 - A reply that comes after the turn waits in the chat and costs nothing. Waking the chat on a reply is the operator's
   switch per conversation, with a number of turns and dollars, and no tool can reach it. Such a turn is a guest's
   turn: no secrets, no grants, no cards of the policy's, a few model calls, `AgentTalk` on this conversation alone,
@@ -98,8 +99,8 @@ with nobody reading it first. The review is a model, and so is the agent. `all` 
 reply stays in the chat's history, fenced, and the operator's next message opens a run with full tools over it: a
 message that plants a plan for later is the same threat as a web page that does. What such a run writes next is not
 marked as a stranger's, and what is read aloud to the operator can talk them into something. A wake's history holds
-the whole of each run that took part, so a run that did other work before it opened a link shows that work to a
-turn whose reply goes to a stranger. A proxy set for the web tools takes the name past the address check.
+the whole of each run that took part, the operator's own opening words among them, so a run that did other work
+before it opened a link shows that work to a turn whose reply goes to a stranger. A proxy set for the web tools takes the name past the address check.
 
 A direct guest's words and the answers to them stay in that chat's history. Later turns read them fenced and
 marked, and compaction marks them, but the chat's own agent has read a stranger, and a marked summary is still a

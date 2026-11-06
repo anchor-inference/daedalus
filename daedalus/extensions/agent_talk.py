@@ -42,6 +42,7 @@ import hashlib
 import ipaddress
 import json as jsonlib
 import logging
+import math
 import secrets
 import socket
 import time
@@ -58,6 +59,7 @@ from daedalus.extensions.notifications import Draft
 from daedalus.host import agent_talk, guest_turns
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.notify_text import render
+from daedalus.host.prompts import without_host_notes
 from daedalus.security.untrusted import inert
 
 if TYPE_CHECKING:
@@ -76,6 +78,11 @@ MAX_ANSWER_BYTES = 256 * 1024
 MAX_TEXT = 8000
 MAX_TOPIC = 240
 MAX_PER_READ = 20
+MAX_READ_CHARS = 16_000
+"""What one tool result or one wake takes in. What is past it stays unread: a tool's result is clipped at its
+budget, so a reply marked read and then cut would be lost to the model, and a turn opened on a pile of them would
+cost past what its first call was priced at."""
+CARD_CHARS = 600
 MAX_MESSAGES = 300
 """Everything kept of a conversation. A door that talks without end must not fill this database."""
 MAX_SENDS = 30
@@ -164,8 +171,8 @@ def _now() -> str:
 
 def _seconds(value: Any) -> float | None:
     """A wait a door asked for, within what this side will honour."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None  # ``nan`` passes every comparison, and a sleep of it takes the floor off the loop
     return min(max(float(value), 0.0), QUIET_POLL_SECONDS)
 
 
@@ -249,18 +256,20 @@ class Dialer:
         if token:
             headers["authorization"] = f"Bearer {token}"
         try:
-            async with httpx.AsyncClient(transport=self.transport, proxy=self.proxy or None, timeout=timeout, follow_redirects=False, trust_env=False) as client:
+            # The whole call, and not httpx's own bound: that one is per read, and a door dripping a byte
+            # at a time would hold the tool, a lock and the sweep for as long as it liked.
+            async with asyncio.timeout(timeout), httpx.AsyncClient(transport=self.transport, proxy=self.proxy or None, timeout=timeout, follow_redirects=False, trust_env=False) as client:
                 async with client.stream(method, target, json=body, headers=headers, extensions=extensions) as response:
                     raw = bytearray()
                     async for chunk in response.aiter_bytes():
                         raw.extend(chunk)
                         if len(raw) > MAX_ANSWER_BYTES:
                             break
-        except (httpx.HTTPError, OSError) as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, OSError, TimeoutError, ValueError) as exc:
             raise DoorGone(type(exc).__name__) from exc
         try:
             parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else {}
-        except ValueError:
+        except (ValueError, RecursionError):
             parsed = {}
         parsed = parsed if isinstance(parsed, dict) else {}
         try:
@@ -386,14 +395,24 @@ class AgentTalks:
             return Outcome("This chat has no open conversation. Open one with the link the operator gave you.", error=True)
         return Outcome("Several conversations are open; say which: " + ", ".join(f"{talk['id']} ({talk['host']})" for talk in live), error=True)
 
-    async def _in_operators_words(self, session_id: str, invite: str) -> bool:
-        """Whether the operator wrote this address in this chat. Asked of the stored transcript and of nothing a model
-        could have put there: an address in a reply, a page or a tool's output is not a thing the operator handed over."""
-        return await self.db.fetchone(
-            "SELECT 1 FROM transcript WHERE session_id = ? AND json_extract(message, '$.role') = 'user' "
-            "AND json_extract(message, '$.metadata.\"daedalus.origin\"') = 'operator' AND instr(message, ?) > 0 LIMIT 1",
-            (session_id, invite),
-        ) is not None
+    async def _in_operators_words(self, session_id: str, door: agent_talk.DoorLink) -> bool:
+        """Whether the operator wrote this very address in this chat, in their own words.
+
+        Asked of the stored transcript and of nothing a model could have put there. The whole address, parsed out of
+        what they wrote: testing for the code alone let a stranger name their own host with any long string from the
+        operator's message as the code, and the GET that followed carried that string out, on a free tool.
+        """
+        rows = await self.db.fetchall(
+            "SELECT message FROM transcript WHERE session_id = ? AND json_extract(message, '$.role') = 'user' "
+            "AND json_extract(message, '$.metadata.\"daedalus.origin\"') = 'operator' AND instr(message, ?) > 0",
+            (session_id, door.invite),
+        )
+        for row in rows:
+            blocks = jsonlib.loads(row["message"]).get("content_blocks") or []
+            said = without_host_notes("".join(str(block.get("text") or "") for block in blocks if isinstance(block, dict) and block.get("kind") == "text"))
+            if door in agent_talk.find_links(said):
+                return True
+        return False
 
     async def _open(self, state: SessionState, link: str) -> Outcome:
         session_id = state.session.id
@@ -401,7 +420,7 @@ class AgentTalks:
         if len(found) != 1:
             return Outcome("That is not an agent link: an address ending in /a/ and a long code.", error=True)
         door = found[0]
-        if not await self._in_operators_words(session_id, door.invite):
+        if not await self._in_operators_words(session_id, door):
             return Outcome(
                 "That link did not come from the operator in this chat, so it stays closed: a link from a reply, a page or a file is not theirs to have given. Show it to them; if they write it here you can open it.",
                 error=True,
@@ -438,7 +457,7 @@ class AgentTalks:
             await self.db.execute("DELETE FROM agent_talks WHERE id = ?", (talk_id,))
             return Outcome(f"{door.host} did not answer the redeem. The link may or may not be spent: opening it again will show which.", error=True)
         token = answer.body.get("token")
-        if answer.status != 201 or not isinstance(token, str) or not token or len(token) > 512:
+        if answer.status != 201 or not isinstance(token, str) or not token or len(token) > 512 or not (token.isascii() and token.isprintable()):
             await self.db.execute("DELETE FROM agent_talks WHERE id = ?", (talk_id,))
             return Outcome("The door would not open this link. Ask the operator for a new one.", error=True)
         conversation_state = PENDING if answer.body.get("status") == PENDING else OPEN
@@ -489,8 +508,9 @@ class AgentTalks:
         state.review_holds_send = False
         message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold)
         if hold:
+            shown = clean if len(clean) <= CARD_CHARS else f"{clean[:CARD_CHARS]}… [{len(clean)} characters in all: read the whole message in the chat's conversation before you allow it]"
             self.manager.ask_operator(
-                session_id, key=ask_key(message_id), tool=agent_talk.TOOL, text=f"To {talk['host']}: {clean}", on_answer=ASK_HOOK, extra={"talk": talk["id"], "message": message_id},
+                session_id, key=ask_key(message_id), tool=agent_talk.TOOL, text=f"To {talk['host']}: {shown}", on_answer=ASK_HOOK, extra={"talk": talk["id"], "message": message_id},
             )
             settled = await self._await_decision(talk["id"], message_id, wait)
             if settled == HELD:
@@ -574,7 +594,7 @@ class AgentTalks:
                 await self._close(talk_id, "token" if answer.status == 401 else self._reason(answer.body))
             elif word == "limit":
                 limit = answer.body.get("limit")
-                await self._mark(message_id, FAILED, note=f"limit:{limit}" if limit in LIMIT_WORDS else "limit:")
+                await self._mark(message_id, FAILED, note=f"limit:{limit}" if isinstance(limit, str) and limit in LIMIT_WORDS else "limit:")
             else:
                 await self._mark(message_id, FAILED, note="busy" if word == "busy" else "refused")
 
@@ -622,7 +642,21 @@ class AgentTalks:
             return Outcome("This conversation is gone.", error=True)
         if not unread:
             return Outcome(self._state_line(talk, lead), talk=talk_id)
-        return Outcome("\n".join([self._state_line(talk, lead), *await self._fenced(unread, talk, state.run_id or ""), agent_talk.TOUCHED_NOTE]), talk=talk_id)
+        taken = self._portion(unread)
+        more = [f"{len(unread) - len(taken)} more replies are unread: read again."] if len(taken) < len(unread) else []
+        return Outcome("\n".join([self._state_line(talk, lead), *await self._fenced(taken, talk, state.run_id or ""), *more, agent_talk.TOUCHED_NOTE]), talk=talk_id)
+
+    @staticmethod
+    def _portion(rows: list[Any]) -> list[Any]:
+        """As many of ``rows`` as fit in :data:`MAX_READ_CHARS`, always at least one."""
+        taken: list[Any] = []
+        size = 0
+        for row in rows:
+            size += len(row["text"])
+            if taken and size > MAX_READ_CHARS:
+                break
+            taken.append(row)
+        return taken
 
     async def _fenced(self, rows: list[Any], talk: Any, run_id: str) -> list[str]:
         """Hand unread replies to a run: fenced, marked read by that run, and the run touched. In that order of
@@ -826,14 +860,15 @@ class AgentTalks:
                 await self._tell(talk, "reply", every=REPLY_NOTICE_SECONDS)
                 return
             runs = (await self.runs_of(talk))[-RUNS_KEPT:]
+            unread = self._portion(unread)
+            said = "\n\n".join(str(row["text"]) for row in unread)
+            body = "\n".join(agent_talk.fence_reply(str(row["text"]), talk["host"]) for row in unread)
             usd_left: float | None = None
             if any(price):
                 usd_left = min(float(talk["wake_usd"]), TURN_USD)
-                if usd_left <= 0 or await manager.guest_first_call_usd(session_id, price, runs=runs) > usd_left:
+                if usd_left <= 0 or await manager.guest_first_call_usd(session_id, price, runs=runs, extra_chars=len(body)) > usd_left:
                     await self._wake_spent(talk)
                     return
-            said = "\n\n".join(str(row["text"]) for row in unread)
-            body = "\n".join(agent_talk.fence_reply(str(row["text"]), talk["host"]) for row in unread)
             turn = GuestTurn(talk_id, str(talk["host"]), "none", usd_left, said, "reply", tuple(runs))
             try:
                 run_id = await manager.submit(session_id, body, as_answer=False, origin=turn.origin, via="agent_talk", guest=turn)
@@ -887,17 +922,22 @@ class AgentTalks:
         """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again."""
         talk = await self.talk(talk_id)
         message = await self._message(message_id)
-        if talk is None or message is None or message["talk_id"] != talk_id or message["state"] != HELD:
+        if talk is None or message is None or message["talk_id"] != talk_id or not await self._claim(message_id, SENDING if allowed else REFUSED):
             return False
         if allowed:
             await self._post(talk_id, message_id, str(message["text"]))
-            self.manager.touch_sent(talk["session_id"])
-        else:
-            await self._mark(message_id, REFUSED)
         if via:
             await self.manager.settle_ask(talk["session_id"], ask_key(message_id), "allow" if allowed else "deny", via=via)
         self._wake_readers(talk_id)
         return True
+
+    async def _claim(self, message_id: int, state: str) -> bool:
+        """Take a held message out of waiting, once: a card and the sheet answered together must not both act."""
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute("UPDATE agent_talk_messages SET state = ? WHERE id = ? AND state = ?", (state, message_id, HELD))
+            claimed = cursor.rowcount > 0
+            await cursor.close()
+        return claimed
 
     async def configure(self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None) -> None:
         if review is not None:
@@ -912,10 +952,11 @@ class AgentTalks:
         talk = await self.talk(talk_id)
         if talk is None or talk["state"] == CLOSED:
             return
+        # Closed here first: whatever the door does with the call below, the token is gone from this side.
+        await self._close(talk_id, reason, quiet=True)
         if talk["token"]:
             with suppress(DoorGone, NotReachable):
                 await self.dialer.call("POST", f"{talk['base_url']}/a/end", token=talk["token"])
-        await self._close(talk_id, reason, quiet=True)
 
     async def _close(self, talk_id: str, reason: str, *, quiet: bool = False) -> None:
         talk = await self.talk(talk_id)
@@ -924,7 +965,7 @@ class AgentTalks:
         await self._update(talk_id, state=CLOSED, reason=reason, token="", waiting_for="", quiet=0, wake_turns=0, closed_at=_now())
         held = await self.db.fetchall("SELECT id FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk_id, HELD))
         for row in held:
-            await self._mark(int(row["id"]), REFUSED)
+            await self._claim(int(row["id"]), REFUSED)
             await self.manager.settle_ask(talk["session_id"], ask_key(int(row["id"])), "deny", via="app")
         self._wake_readers(talk_id)
         if not quiet:
@@ -963,14 +1004,17 @@ class AgentTalks:
     async def _sweep(self) -> None:
         cutoff = (datetime.now(UTC) - timedelta(seconds=IDLE_SECONDS)).isoformat()
         for talk in await self.db.fetchall("SELECT * FROM agent_talks WHERE state != ?", (CLOSED,)):
-            if talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
-                await self.end(talk["id"], reason="idle")
-                await self._tell(talk, "closed")
-                continue
-            if talk["waiting_for"]:
-                self.follow(talk["id"])
-            if talk["wake_turns"] > 0:
-                self.wake(talk["id"])
+            try:
+                if talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
+                    await self.end(talk["id"], reason="idle")
+                    await self._tell(talk, "closed")
+                    continue
+                if talk["waiting_for"]:
+                    self.follow(talk["id"])
+                if talk["wake_turns"] > 0:
+                    self.wake(talk["id"])
+            except Exception:  # noqa: BLE001 — one conversation that cannot be swept must not cost the others theirs
+                logger.exception("could not sweep conversation %s", talk["id"])
 
     async def serve(self) -> None:
         """Pick up what a restart left, then keep the slow clock: idle ends, and anything that fell off.

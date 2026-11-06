@@ -45,6 +45,8 @@ SEEN_KEY = "guest_turns"
 WROTE_KEY = "guest_wrote_folder"
 """Session metadata: a guest's turn could write in this chat's folder, so nothing there is the operator's word."""
 ORIGIN_PREFIX = "guest:"
+TOUCHED_MARK = "daedalus.touched"
+"""Message metadata: written while the run was touched (:mod:`daedalus.host.agent_talk`)."""
 
 READ_TOOLS = tuple(BTW_TOOLS)
 """What ``read`` means: the same read-only set a side question has. ``WebFetch`` is left out because a URL is
@@ -200,9 +202,13 @@ def guest_runs(history: Iterable[Message]) -> set[str]:
 
 
 def talk_runs(history: Iterable[Message]) -> set[str]:
-    """The runs that talked to another agent over ``AgentTalk``. What they wrote was written with a stranger's
-    reply in front of them. The whole run rather than what follows the reply: a run is what these readers can tell apart."""
-    return {str(m.metadata.get("daedalus.run_id") or "") for m in history if any(isinstance(b, ToolUseBlock) and b.name == TALK_TOOL for b in m.content_blocks)} - {""}
+    """The runs that wrote with a stranger's reply in front of them: those that used ``AgentTalk``, and those that
+    went on from one, a turn an approval continued above all, which never called it. The whole run rather than
+    what follows the reply: a run is what these readers can tell apart."""
+    return {
+        str(m.metadata.get("daedalus.run_id") or "") for m in history
+        if m.metadata.get(TOUCHED_MARK) or any(isinstance(b, ToolUseBlock) and b.name == TALK_TOOL for b in m.content_blocks)
+    } - {""}
 
 
 def stranger_runs(history: Sequence[Message]) -> set[str]:
@@ -254,5 +260,5 @@ def turn_note(turn: GuestTurn) -> str:
 
 __all__ = [
     "ALL_TOOLS", "ANSWER_MARK", "DEFAULT_TOOLS", "FOLDER_TOOLS", "GUEST_TOOLS", "GuestTools", "GuestTurn", "GuestTurnBusy", "LATER_TURN_NOTE", "MAX_ITERATIONS", "METADATA_KEY", "NO_TOOL",
-    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "login_route", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
+    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TOUCHED_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "login_route", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
 ]

@@ -169,7 +169,8 @@ def categories_of(tool: str, arguments: dict[str, Any]) -> list[str]:
     if tool in TOOL_CATEGORIES:
         return [TOOL_CATEGORIES[tool]]
     if tool == "AgentTalk":
-        return ["message"] if arguments.get("action") == "send" else []  # opening, reading and ending say nothing to anyone
+        # Opening, reading and ending say nothing to anyone; ``open`` with a first message does.
+        return ["message"] if arguments.get("action") == "send" or (arguments.get("action") == "open" and arguments.get("text")) else []
     return mcp_categories(tool)
 
 

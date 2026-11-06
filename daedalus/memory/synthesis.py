@@ -1748,7 +1748,7 @@ class Synthesizer:
                 continue
             metadata = message.get("metadata") or {}
             blocks = [b for b in message.get("content_blocks") or [] if isinstance(b, dict)]
-            if any(b.get("kind") == "tool_use" and b.get("name") == TALK_TOOL for b in blocks):
+            if metadata.get("daedalus.touched") or any(b.get("kind") == "tool_use" and b.get("name") == TALK_TOOL for b in blocks):
                 # From here on the run wrote with another agent's reply in front of it, and the reply
                 # itself is kept from this pass only by tool results being out of its reach.
                 guest_runs.add(str(metadata.get("daedalus.run_id") or ""))

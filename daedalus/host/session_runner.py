@@ -4181,16 +4181,6 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": decision, "via": via})
 
-    def touch_sent(self, session_id: str) -> None:
-        """A person let a message of the touched run out: what it had looked at has been seen."""
-        state = self._states.get(session_id)
-        touch = agent_talk.touch_of(state.metadata) if state is not None else None
-        if state is None or touch is None or not touch.get("looked"):
-            return
-        for meta in (state.metadata, state.session.metadata):
-            meta[agent_talk.TOUCHED_KEY] = {**touch, "looked": False}
-        self._spawn_background(self.sessions.update_metadata(session_id, state.session.metadata), f"agent-talk-looked:{session_id}")
-
     async def _clear_touch(self, state: SessionState) -> None:
         if agent_talk.TOUCHED_KEY not in state.metadata:
             return
@@ -4244,18 +4234,19 @@ class SessionManager:
             return None
         return float(pricing.input), float(pricing.output)
 
-    async def guest_first_call_usd(self, session_id: str, price: tuple[float, float], *, runs: Sequence[str] | None = None) -> float:
+    async def guest_first_call_usd(self, session_id: str, price: tuple[float, float], *, runs: Sequence[str] | None = None, extra_chars: int = 0) -> float:
         """A guess at the first model call of a turn in this chat, before anything is spent on it.
 
         The cap on a run is read after each call, so a single call on a long chat could pass it whole.
         This is the fresh-input price of the whole history: what a cold cache costs. ``runs`` limits it to what
-        a turn opened by a reply will be sent, which on a long chat is a small part of it.
+        a turn opened by a reply will be sent, which on a long chat is a small part of it, and ``extra_chars``
+        adds what opens the turn, which is not in the history yet.
         """
         state = await self.get_state(session_id)
         if state is None:
             return 0.0
         history = await self._working_history(state)
-        chars = sum(len(message.model_dump_json()) for message in (history if runs is None else agent_talk.for_reply(history, "", runs)))
+        chars = extra_chars + sum(len(message.model_dump_json()) for message in (history if runs is None else agent_talk.for_reply(history, "", runs)))
         return (chars / 3 * price[0] + GUEST_ESTIMATED_OUTPUT_TOKENS * price[1]) / 1_000_000
 
     def file_scope(self, state: SessionState) -> str | None:
@@ -5127,9 +5118,12 @@ class SessionManager:
         """The writes themselves, under the caller's lock: the transcript, then the working history."""
         session_id = state.session.id
         known = set(previous_keys)
+        touched = agent_talk.touch_of(state.metadata) is not None
         for message in fresh if fresh is not None else history:
             if self.sessions.transcript_key(message) not in known:
                 message.metadata.setdefault("daedalus.run_id", state.run_id)
+                if touched:
+                    message.metadata[guest_turns.TOUCHED_MARK] = True
         self._stamp_model(state, fresh if fresh is not None else history, previous_keys)
         await self._label_summaries(state, history, previous_keys)
         await self.sessions.append_transcript(session_id, fresh if fresh is not None else history, from_history=True)
@@ -5192,9 +5186,12 @@ class SessionManager:
             await asyncio.wait([chain])  # its outcome is its own; this waits only for its turn
         history = list(engine.history)
         known = set(state.history_keys)
+        touched = agent_talk.touch_of(state.metadata) is not None
         for message in history:
             if self.sessions.transcript_key(message) not in known:
                 message.metadata.setdefault("daedalus.run_id", state.run_id)
+                if touched:
+                    message.metadata[guest_turns.TOUCHED_MARK] = True
         self._stamp_model(state, history, state.history_keys)
         async with state.persist_lock:
             await self.sessions.append_transcript(state.session.id, history, from_history=True)
@@ -5249,7 +5246,8 @@ class SessionManager:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
             state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
             self.secrets.hold_back(state.session.id, state.guest_turn is not None)
-            if state.run_origin == "operator" and not continue_turn:
+            if state.run_origin == "operator" and not continue_turn and message.metadata.get("daedalus.delivery") != "drained":
+                # Not a message drained from the queue: it may have been written before the reply came.
                 await self._clear_touch(state)
             if state.guest_turn is not None and state.guest_turn.kind == "guest" and not state.metadata.get(guest_turns.SEEN_KEY):
                 state.metadata[guest_turns.SEEN_KEY] = True
@@ -7364,7 +7362,7 @@ class SessionManager:
         # The family "Allow similar" would grant, worked out now: the arguments are gone by the
         # time the operator answers, and the pending entry keeps only a redacted preview.
         # A touched run's questions have no family: "allow the like" is exactly what a stranger would ask for.
-        family = similar_grant(tool, arguments, decision.rule) if decision.rule != agent_talk.RULE else None
+        family = similar_grant(tool, arguments, decision.rule) if agent_talk.touch_of(state.metadata) is None else None
         if family is not None:
             pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
         for meta in (state.metadata, state.session.metadata):
@@ -7533,7 +7531,7 @@ class SessionManager:
     def _permission_payload(self, state: SessionState, decision: Decision, refused: dict[str, Any]) -> dict[str, Any]:
         # A rule about the machine itself (the operator's home, the installation) is answered in the
         # app, never from a lock screen: whoever holds the phone should not be the whole check.
-        elevated = decision.rule.startswith(("host.", "agent_talk."))
+        elevated = decision.rule.startswith("host.") or agent_talk.touch_of(state.metadata) is not None
         return {
             "request_id": decision.key,
             "request_ref": f"policy:{state.session.id}:{decision.key}",

@@ -38,7 +38,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from protocore.contracts.types import Message
+from protocore.contracts.types import COMPACTION_SUMMARY_METADATA_KEY, Message
 
 from daedalus.host.guest_turns import READ_TOOLS, REPLY_TOOLS, for_guest
 from daedalus.security.untrusted import fenced
@@ -145,6 +145,8 @@ def for_reply(history: Sequence[Message], run_id: str, runs: Iterable[str]) -> l
     what it needs; the rest of a long working chat is only more to leak, and more to pay for.
     """
     earlier = set(runs)
+    # A summary is of the whole chat, and a compaction in the middle of a run stamps it with that run's id.
+    history = [message for message in history if not message.metadata.get(COMPACTION_SUMMARY_METADATA_KEY)]
     # The running turn is everything from its opening message on: a message it has only just produced has
     # no run id yet, and a filter on the id would take its own tool results away from it.
     opening = next((at for at, message in enumerate(history) if message.metadata.get("daedalus.run_id") == run_id), len(history))
