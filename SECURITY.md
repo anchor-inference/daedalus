@@ -15,6 +15,9 @@ a hole in it.
   machine, the operator's paths or the operator's checkouts are refused; a forced push, deleting a
   workspace or a host outside the egress allowlist wait for the operator's approval key. The built-in
   rules change only through a pull request; the operator's rules can tighten them, never loosen them.
+  Raising a public tunnel (`ngrok`, `cloudflared`, `tailscale funnel`, `ssh -R` and the like) is refused
+  outright: the operator opens tunnels from settings, and the doctor and the Inbox report a process
+  that looks like one ([docs/POLICY.md](docs/POLICY.md)).
 - **A shared page holds nothing of the app's.** A shared service runs on an origin of its own, or with
   no origin at all, never on the app's; and the session cookie counts only on a request the app itself
   made, because a port or a sibling subdomain is another origin but not another site, and a browser
