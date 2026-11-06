@@ -2014,6 +2014,10 @@ export type Preset = {
   max_output_tokens: number;
   /** Tool groups on demand held back for this model; absent or null follows what the model is known for. */
   on_demand_tool_groups?: boolean | null;
+  /** OpenRouter's endpoint slugs the model is limited to; empty leaves the routing to OpenRouter. */
+  openrouter_providers?: string[];
+  /** Which of those OpenRouter no longer lists. */
+  openrouter_providers_gone?: string[];
 };
 
 /** The operator's levels for what the agent does in the world (`[action_rules]`). */
