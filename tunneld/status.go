@@ -1,0 +1,99 @@
+package main
+
+// What the launcher reads. A file and not a socket: the launcher may read it from a request handler,
+// from a start that has not reached the daemon yet, and after the daemon has died, and each of those
+// has a true answer in the last thing written. Renamed into place, so a reader never sees half of it.
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// The states a tunnel reports. "up" means its client holds a connection; Confirmed says that a request
+// to the public address has also come back through it, which is the only proof the address answers.
+const (
+	StateStarting     = "starting"
+	StateSignIn       = "sign_in"
+	StateUp           = "up"
+	StateReconnecting = "reconnecting"
+	StateFailed       = "failed"
+)
+
+// Failure codes, which the app words in the operator's language. Detail stays in English for the log.
+const (
+	CodeNoClient      = "no_client"
+	CodeTokenRejected = "token_rejected"
+	CodeBlocked       = "blocked"
+	CodeHTTPSOff      = "https_off"
+	CodeFunnelOff     = "funnel_off"
+	CodeServerRefused = "server_refused"
+	CodeNotConfigured = "not_configured"
+	CodeOther         = "other"
+)
+
+// Status is the whole of status.json.
+type Status struct {
+	Provider  string    `json:"provider"`
+	State     string    `json:"state"`
+	Address   string    `json:"address,omitempty"`
+	SignIn    string    `json:"sign_in,omitempty"`
+	Code      string    `json:"code,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	Confirmed bool      `json:"confirmed"`
+	Since     time.Time `json:"since"`
+	Updated   time.Time `json:"updated"`
+	// PIDs are this process and any client it runs. The host keeps them out of its tunnel watch: they
+	// come by way of the launcher, so nothing the agent raises can name itself the app's own.
+	PIDs  []int `json:"pids"`
+	Wakes int   `json:"wakes"`
+}
+
+type statusFile struct {
+	mu      sync.Mutex
+	path    string
+	current Status
+	logf    func(string, ...any)
+}
+
+func newStatusFile(dir, provider string, logf func(string, ...any)) *statusFile {
+	now := time.Now().UTC()
+	return &statusFile{path: filepath.Join(dir, "status.json"), logf: logf, current: Status{Provider: provider, State: StateStarting, Since: now, PIDs: []int{os.Getpid()}}}
+}
+
+func (s *statusFile) update(change func(*Status)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := s.current.State
+	change(&s.current)
+	now := time.Now().UTC()
+	if s.current.State != before {
+		s.current.Since = now
+		s.logf("the tunnel is %s", s.current.State)
+	}
+	s.current.Updated = now
+	s.write()
+}
+
+func (s *statusFile) read() Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current
+}
+
+func (s *statusFile) write() {
+	body, err := json.Marshal(s.current)
+	if err != nil {
+		return
+	}
+	scratch := s.path + ".tmp"
+	if err := os.WriteFile(scratch, body, 0o600); err != nil {
+		s.logf("the status file: %v", err)
+		return
+	}
+	if err := os.Rename(scratch, s.path); err != nil {
+		s.logf("the status file: %v", err)
+	}
+}
