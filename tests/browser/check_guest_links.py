@@ -207,7 +207,7 @@ def check_stand_in(page: Page, words: dict[str, str], guests: FakeGuests, width:
     url_box = page.locator("#guest-url")
     expect(url_box).to_be_visible()
     shown = made_text(page)
-    assert shown.startswith("Opening hours for the autumn: https://door.example/a/"), shown
+    assert shown.startswith(f"{words['intro']}. Opening hours for the autumn: https://door.example/a/"), shown
     expect(page.locator("[data-guest-once]")).to_have_text(words["once"])
     snap(page, words, width, "made")
     sent = [call for call in guests.calls if call[1].endswith("/guest/links")][-1]
