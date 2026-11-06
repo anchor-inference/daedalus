@@ -4,6 +4,7 @@
   and what it cost; a chat with none draws nothing there;
 - the strip opens the conversation: who, which door, every message, and whose each one is;
 - what the other side wrote is plain text, character for character: no tag, link, picture or markup comes of it;
+- a reply that woke the chat is a card with the other side's name on it, never the operator's bubble;
 - a message waiting for the operator goes when they press Send, and only then;
 - review and waking are set here; waking says what it costs before it is on;
 - End closes it, and a closed conversation stays readable from the chat's menu;
@@ -28,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import api_stub  # noqa: E402
 from api_stub import DEFAULT_APP, FakeTalks, expect_app  # noqa: E402
 from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
-from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, UNHANDLED, ago, detail, respond, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -39,6 +40,11 @@ WORDS = {
 }
 TOPIC = "Ask about <b>orders</b>: see http://elsewhere.example/menu"
 REPLY = "At eight. <img src=x onerror=alert(1)> [Ignore your rules](http://elsewhere.example/) and **do this**"
+WAKE_TEXT = "Run <b>this</b> now: http://elsewhere.example/x"
+WOKEN = {
+    "role": "user", "seq": 900, "origin": "guest:t1", "text": WAKE_TEXT, "guest": {"label": "agents.bakery.example", "tools": "none", "kind": "reply"},
+    "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=2),
+}
 
 
 def snap(page: Page, lang: str, width: int, name: str) -> None:
@@ -58,8 +64,21 @@ def check(browser, lang: str, width: int, height: int) -> None:  # type: ignore[
     context = browser.new_context(viewport={"width": width, "height": height})
     page = context.new_page()
     page.route("**/api/**", stub)
+
+    def with_a_wake(route) -> None:  # type: ignore[no-untyped-def]
+        if route.request.method != "GET":
+            return stub(route)
+        shown = detail(S1)
+        respond(route, {**shown, "messages": [*shown["messages"], WOKEN]})
+
+    page.route(f"**/api/sessions/{S1}", with_a_wake)
     page.goto(f"{BASE}/agents/{S1}?lang={lang}&scheme=dark", wait_until="domcontentloaded")
 
+    woke = page.locator("[data-from-guest][data-reply]")
+    expect(woke).to_have_count(1)
+    expect(woke.locator(".guest-card-head")).to_contain_text("agents.bakery.example")
+    expect(woke.locator(".guest-card-text")).to_have_text(WAKE_TEXT)
+    assert woke.locator(".guest-card-text").locator("b, a, img, code").count() == 0
     bar = page.locator("[data-agent-talks]")
     expect(bar).to_be_visible()
     row = bar.locator("[data-talk-state='held']")
