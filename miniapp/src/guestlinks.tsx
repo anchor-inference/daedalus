@@ -20,10 +20,12 @@ const POLL_MS = 5000;
 const ms = (seconds: number) => seconds * 1000;
 
 /** What the Copy button puts on the clipboard: one line of intent, then the address. A bare address
- *  does not start a conversation: the guest's agent has to be told what the address is for. */
+ *  does not start a conversation: the guest's agent has to be told what the address is for. The intro
+ *  stays when there is a topic: with the topic alone, four of five real runs took the address for the
+ *  service being asked about instead of a way to talk to anyone. */
 export function inviteText(topic: string, url: string): string {
   const said = topic.trim().replace(/[\s:.,;!?]+$/, "");
-  return `${said || t("guest.intro")}: ${url}`;
+  return `${t("guest.intro")}${said ? `. ${said}` : ""}: ${url}`;
 }
 
 /** The word and tone a link is shown with: its own state until it is spent, then its conversation's. */
@@ -429,7 +431,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       <Segmented value={mode} options={modeOptions} onChange={(next) => { setMode(next); setProblem(""); }} label={t("guest.field.mode")} />
       {standIn
         ? <div className="sub" data-guest-note="standin">{t("guest.standin.note")}</div>
-        : <div className="sub guest-warning" data-guest-warning="">{t("guest.direct.warning")}</div>}
+        : <div className="sub guest-warning" data-guest-warning="">{t(door.direct ? "guest.direct.warning" : "guest.direct.private")}</div>}
 
       <label className="field" htmlFor="guest-label">{t("guest.field.label")}</label>
       <input id="guest-label" ref={labelField} className="field" value={label} maxLength={120} placeholder={t("guest.field.label.ph")} autoComplete="off" onChange={(e) => setLabel(e.target.value)} />
@@ -465,7 +467,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
         <>
           <label className="field">{t("guest.field.tools")}</label>
           <Segmented value={chosenTools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
-          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
+          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" || door.full_tools_why === "project_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
           {chosenTools === "all" && <div className="sub" data-guest-tools-all="">{t("guest.tools.all.note")}</div>}
         </>
       )}

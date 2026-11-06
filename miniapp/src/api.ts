@@ -981,7 +981,7 @@ export type GuestDefaults = {
   retention_days: number;
 };
 /** Why a direct link cannot be given every tool this chat could be: it has no sandbox to run commands in, or its folder is on the host. */
-export type GuestToolsWhy = "" | "no_sandbox" | "host_folder";
+export type GuestToolsWhy = "" | "no_sandbox" | "host_folder" | "project_folder";
 /** `full_tools` and `full_tools_why` are about the chat the door was asked about (`?session_id=`). */
 export type GuestDoor = {
   available: boolean;
@@ -992,6 +992,8 @@ export type GuestDoor = {
   spent_today: number;
   full_tools: boolean;
   full_tools_why: GuestToolsWhy;
+  /** Whether a direct link can be made in that chat: only a private one holds no memory. */
+  direct: boolean;
 };
 /** What making a link sends (`LinkBody` in daedalus/extensions/api_guest.py). */
 export type GuestLinkBody = {

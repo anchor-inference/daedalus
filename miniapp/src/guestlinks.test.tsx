@@ -56,6 +56,7 @@ const DOOR: GuestDoor = {
   usd_per_day: 2,
   spent_today: 0.5,
   full_tools: true,
+  direct: true,
   full_tools_why: "",
 };
 const NOW = Math.floor(Date.now() / 1000);
@@ -109,7 +110,7 @@ const sent = (suffix: string) => world.posted.find(([path]) => path.endsWith(suf
 
 describe("what is copied", () => {
   it("is one line of intent and then the address, because a bare address starts nothing", () => {
-    expect(inviteText("the schedule for next week.", "https://x.example/a/1")).toBe("the schedule for next week: https://x.example/a/1");
+    expect(inviteText("the schedule for next week.", "https://x.example/a/1")).toBe(`${t("guest.intro")}. the schedule for next week: https://x.example/a/1`);
     expect(inviteText("   ", "https://x.example/a/1")).toBe(`${t("guest.intro")}: https://x.example/a/1`);
     setLang("ru");
     expect(inviteText("", "https://x.example/a/1")).toBe(`Поговорите с этим агентом и спросите, что вам нужно: https://x.example/a/1`);
@@ -187,7 +188,7 @@ describe("the list", () => {
     await act(async () => button(t("guest.new")).click());
     expect(world.posted[0][0]).toBe("/api/guest/links/l1/reissue");
     const copy = document.querySelector<HTMLTextAreaElement>("#guest-url")!;
-    expect(copy.value).toBe(`the schedule: ${world.invite}`);
+    expect(copy.value).toBe(`${t("guest.intro")}. the schedule: ${world.invite}`);
   });
 
   it("saves the daily limit across guests and says what is spent today", async () => {
@@ -241,7 +242,7 @@ describe("making a stand-in link", () => {
     const [path, body] = sent("/guest/links")!;
     expect(path).toBe("/api/sessions/s1/guest/links");
     expect(body).toMatchObject({ label: "Anna's agent", topic: "the schedule", mode: "stand_in", model_id: "cheap", briefing: "We meet on Tuesday.", briefing_approved: true, approval: true, usd_limit: 1, turns_per_day: 40, invite_hours: 72 });
-    expect(document.querySelector<HTMLTextAreaElement>("#guest-url")!.value).toBe(`the schedule: ${world.invite}`);
+    expect(document.querySelector<HTMLTextAreaElement>("#guest-url")!.value).toBe(`${t("guest.intro")}. the schedule: ${world.invite}`);
     expect(document.querySelector("[data-guest-once]")?.textContent).toBe(t("guest.once"));
   });
 
@@ -307,7 +308,13 @@ describe("making a direct link", () => {
     expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "all" });
   });
 
-  it.each(["no_sandbox", "host_folder"] as const)("does not offer all tools to a chat that cannot have them (%s), and says why once", async (why) => {
+  it("says why an ordinary chat cannot take a direct link", async () => {
+    world.door = { ...DOOR, direct: false };
+    await direct();
+    expect(document.querySelector("[data-guest-warning]")!.textContent).toBe(t("guest.direct.private"));
+  });
+
+  it.each(["no_sandbox", "host_folder", "project_folder"] as const)("does not offer all tools to a chat that cannot have them (%s), and says why once", async (why) => {
     world.door = { ...DOOR, full_tools: false, full_tools_why: why };
     await direct();
     expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent === t("guest.tools.all"))).toBe(false);

@@ -9479,6 +9479,8 @@ Object.assign(DICT, {
   "guest.tools.all.note": { en: "This chat's folder only; commands run sandboxed, with no network or secrets.", ru: "Только папка чата; команды в песочнице, без сети и секретов." },
   "guest.tools.why.no_sandbox": { en: "There is no sandbox here, so the guest cannot have all tools.", ru: "Здесь нет песочницы, поэтому все инструменты гостю недоступны." },
   "guest.tools.why.host_folder": { en: "This chat works in a folder on the host, so the guest cannot have all tools.", ru: "Этот диалог работает в папке на хосте, поэтому все инструменты гостю недоступны." },
+  "guest.tools.why.project_folder": { en: "This chat works in a project's folder, which other chats read, so the guest cannot have all tools.", ru: "Этот диалог работает в папке проекта, которую читают другие диалоги, поэтому все инструменты гостю недоступны." },
+  "guest.direct.private": { en: "A direct link needs a private chat: an ordinary one carries your memory in its history.", ru: "Для прямой ссылки нужен приватный диалог: обычный содержит вашу память в своей истории." },
   "guest.tools.why.other": { en: "All tools are not available for this chat.", ru: "Для этого диалога все инструменты недоступны." },
   "guest.field.lifetime": { en: "Link works for", ru: "Ссылка действует" },
   "guest.field.usd": { en: "Spending limit", ru: "Лимит расходов" },

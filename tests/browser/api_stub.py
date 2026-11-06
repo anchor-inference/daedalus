@@ -1164,7 +1164,7 @@ class FakeGuests:
                 {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "price_in": 2.0, "price_out": 8.0, "free": False},
             ],
             "usd_per_day": self.usd_per_day, "spent_today": 0.5,
-            "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why,
+            "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why, "direct": True,
         }
 
     def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:
