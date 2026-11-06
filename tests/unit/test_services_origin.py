@@ -159,11 +159,27 @@ def test_a_neighbours_reads_and_frames_are_refused_and_a_link_in_is_not() -> Non
     assert not rule(method="POST", origin="http://h:8766", site="same-site", mode="navigate", dest="document")
 
 
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_only_a_page_that_names_its_framers_may_be_framed(site: str) -> None:
+    frame = {"method": "GET", "site": site, "mode": "navigate", "dest": "iframe"}
+    assert cookie_may_act(method="GET", origin=None, fetch_site=site, fetch_mode="navigate", fetch_dest="iframe", host_header="h:8765", public_url="", frameable=True)
+    assert not rule(**frame)
+    assert not cookie_may_act(method="POST", origin=None, fetch_site=site, fetch_mode="navigate", fetch_dest="iframe", host_header="h:8765", public_url="", frameable=True)
+
+
 def test_with_neither_header_it_is_not_a_browser() -> None:
     assert rule(method="POST", origin=None, site=None, mode=None, dest=None)
 
 
 # -- the guard in front of the app ------------------------------------------------------------------
+
+
+def test_the_side_panel_can_open_the_app_in_its_frame_and_nothing_else_is_framed(upstream: HTTPServer) -> None:
+    client = signed_in(FakeApp(upstream.server_port))
+    frame = {"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe"}
+    assert client.get("/app/panel", headers=frame).status_code != 403
+    assert client.get("/pages/some-page/", headers=frame).status_code == 403
+    assert client.get("/api/auth/me", headers=frame).status_code == 403
 
 
 def test_a_neighbours_post_is_refused_before_the_route_runs(upstream: HTTPServer) -> None:

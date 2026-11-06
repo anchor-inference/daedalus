@@ -52,6 +52,7 @@ class CookieOriginGuard:
             allowed = cookie_may_act(
                 method=scope["method"], origin=headers.get("origin"), fetch_site=headers.get("sec-fetch-site"), fetch_mode=headers.get("sec-fetch-mode"),
                 fetch_dest=headers.get("sec-fetch-dest"), host_header=host, public_url=public_address.app_base(self.settings),
+                frameable=scope["path"] == "/app" or scope["path"].startswith("/app/"),
             )
             if not allowed:
                 await JSONResponse({"detail": "this request did not come from the app"}, status_code=403)(scope, receive, send)
