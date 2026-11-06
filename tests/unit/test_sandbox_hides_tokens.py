@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +21,9 @@ from daedalus.tools.shell import hidden_installation, sandbox_argv
 
 
 @pytest.fixture
-def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def installation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    # Not under /tmp: the sandbox has a /tmp of its own, which would hide these for a reason that proves nothing.
+    tmp_path = Path(tempfile.mkdtemp(prefix="daedalus-test-", dir="/var/tmp"))  # noqa: S108
     local = tmp_path / "local"
     (local / "tunnel").mkdir(parents=True)
     (local / "tunnel" / "secrets.json").write_text('{"ngrok_token": "the-token"}')
@@ -28,7 +32,8 @@ def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DAEDALUS_LOCAL", str(local))
     monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("DAEDALUS_NATIVE", "1")
-    return tmp_path
+    yield tmp_path
+    shutil.rmtree(tmp_path, ignore_errors=True)
 
 
 def test_the_sandbox_covers_both(installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,8 +63,18 @@ def test_a_real_command_that_builds_the_path_reads_nothing(installation: Path, m
     monkeypatch.setattr(shell, "_native", lambda: True)
     monkeypatch.setattr(shell, "bwrap_status", lambda: "ok")
     built = f'd="{installation}"; cat "$d/lo""cal/tunnel/secrets.json"; cat "$d/launcher"".json"; echo done'
-    argv, sandboxed = asyncio.run(sandbox_argv(built, SimpleNamespace(sandbox="workspace", sandbox_extra_writable=[]), writable=[], sealed=[]))
-    assert sandboxed
-    done = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
-    assert "done" in done.stdout, done.stderr
-    assert "the-token" not in done.stdout and "the-launcher-token" not in done.stdout
+    config = SimpleNamespace(sandbox="workspace", sandbox_extra_writable=[])
+
+    def run() -> str:
+        argv, sandboxed = asyncio.run(sandbox_argv(built, config, writable=[], sealed=[]))
+        assert sandboxed
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
+        assert "done" in done.stdout, done.stderr
+        return done.stdout
+
+    output = run()
+    assert "the-token" not in output and "the-launcher-token" not in output
+    # The control: without the two covers the same command reads both, which is what this test is about.
+    monkeypatch.setattr(shell, "hidden_installation", list)
+    output = run()
+    assert "the-token" in output and "the-launcher-token" in output
