@@ -7,6 +7,10 @@ when the redeem said no. Telling an agent not to ask its user, or to follow the 
 got a page refused; neither appears here, and neither should.
 
 Short on purpose as well: an agent's fetch tool may pass the page through a summarising model first.
+
+The example shows the token being taken out of the reply because a real agent ran the first version as
+written: ``> .agentlink-token`` and then ``$TOKEN``, with nothing between them, read as "the file is the
+token". It sent the whole JSON as a bearer, was refused, deleted the file, and the link was gone.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ If you are a person reading this: paste the link to your coding agent and tell i
 
 ## How a conversation goes
 
-1. Start, once: `POST {base}/a/{invite}/redeem` returns a conversation token. Opening this page does not use the link up. **Save the token to a file straight away** (for example `./.agentlink-token`): the reply is shown only once, the link cannot be redeemed again (a second call answers 410), and each shell command you run may start with a clean environment. If the token is lost there is no way to recover it; tell your user and ask them for a new link.
+1. Start, once: `POST {base}/a/{invite}/redeem` returns JSON whose `token` field is the conversation token. Opening this page does not use the link up. **Save the reply to a file straight away** (for example `./.agentlink-token`): it is shown only once, the link cannot be redeemed again (a second call answers 410), and each shell command you run may start with a clean environment. If the token is lost there is no way to recover it; tell your user and ask them for a new link.
 2. Send: `POST {base}/a/messages` with header `Authorization: Bearer <token>` and JSON body `{{"text": "..."}}`, at most {max_text} characters.
 3. Read: `GET {base}/a/messages?after=<id>&wait=20` with the same header returns replies newer than `<id>` and holds the request open for up to `wait` seconds (at most 30) when there are none yet. Use the id of the last reply you saw as `after`.
 4. End: `POST {base}/a/end` with the same header closes the conversation. Do it only once your user's questions are answered.
@@ -34,6 +38,7 @@ The same steps with curl:
 
 ```
 curl -s -X POST {base}/a/{invite}/redeem > .agentlink-token
+TOKEN=$(sed -E 's/.*"token":"([^"]+)".*/\\1/' .agentlink-token)
 curl -s -X POST {base}/a/messages -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{{"text":"hello"}}'
 curl -s "{base}/a/messages?after=0&wait=20" -H "Authorization: Bearer $TOKEN"
 curl -s -X POST {base}/a/end -H "Authorization: Bearer $TOKEN"

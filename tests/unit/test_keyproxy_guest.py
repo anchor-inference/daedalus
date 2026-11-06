@@ -112,3 +112,23 @@ async def test_the_listener_opens_only_when_named(tmp_path: Path, monkeypatch: p
     await proxy.start_guest_listener(app)
     assert path.is_socket() and path.stat().st_mode & 0o777 == 0o666
     await proxy.stop_guest_listener(app)
+
+
+@pytest.mark.parametrize("path", ["/acme/../other/chat/completions", "/acme/./chat/completions", "/acme/v1/../../chat/completions", "/acme/.hidden/chat/completions"])
+def test_a_dot_segment_is_refused_because_it_would_leave_the_upstreams_root(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """``request.path`` is decoded, so ``%2e%2e`` arrives here as ``..``. On the real socket the first
+    version sent that on with the key attached; a client library normalises it away before a mock sees it."""
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "acme")
+    assert load().guest_refusal(path, "POST", json.dumps(GOOD).encode())
+
+
+def test_a_segment_may_still_hold_a_dot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "acme")
+    assert load().guest_refusal("/acme/v4.1/chat/completions", "POST", json.dumps(GOOD).encode()) == ""
+
+
+def test_the_bill_an_upstream_states_is_reported_and_an_absent_one_is_not_invented() -> None:
+    proxy = load()
+    usage = {"prompt_tokens": 2, "completion_tokens": 1}
+    assert proxy.parse_usage(json.dumps({"model": "m", "usage": {**usage, "cost": 0.25}}).encode(), "application/json")[1]["cost_usd"] == 0.25
+    assert "cost_usd" not in proxy.parse_usage(json.dumps({"model": "m", "usage": usage}).encode(), "application/json")[1]

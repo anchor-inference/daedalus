@@ -632,8 +632,12 @@ def is_completion(rest: str) -> bool:
     return any(segments[-len(tail):] == tail for tail in COMPLETION_TAILS if len(segments) >= len(tail))
 
 
-def parse_usage(body: bytes, content_type: str) -> tuple[str, dict[str, int]] | None:
-    """``(model, tokens)`` from a completion response, streamed or not; None when it carries no usage."""
+def parse_usage(body: bytes, content_type: str) -> tuple[str, dict[str, int | float]] | None:
+    """``(model, tokens)`` from a completion response, streamed or not; None when it carries no usage.
+
+    ``cost_usd`` is among them when the upstream states its own bill. It is what was really charged, where
+    the host's price table is what somebody typed: on one model the two were forty times apart.
+    """
     candidates: list[dict[str, Any]] = []
     if "text/event-stream" in content_type:
         for line in body.decode("utf-8", "replace").splitlines():
@@ -664,12 +668,15 @@ def parse_usage(body: bytes, content_type: str) -> tuple[str, dict[str, int]] | 
         return None
     details_in = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
     details_out = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
-    tokens = {
+    tokens: dict[str, int | float] = {
         "input_tokens": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
         "output_tokens": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
         "cache_read_tokens": int(usage.get("prompt_cache_hit_tokens") or usage.get("cache_read_input_tokens") or (details_in.get("cached_tokens") if isinstance(details_in, dict) else 0) or 0),
         "reasoning_tokens": int((details_out.get("reasoning_tokens") if isinstance(details_out, dict) else 0) or 0),
     }
+    stated = usage.get("cost")
+    if isinstance(stated, int | float) and not isinstance(stated, bool) and stated >= 0:
+        tokens["cost_usd"] = float(stated)
     return model, tokens
 
 
@@ -1241,7 +1248,10 @@ async def handle(request: web.Request) -> web.StreamResponse:
     return out
 
 
-GUEST_PATH = re.compile(r"/([a-z0-9_]+)((?:/[a-z0-9.]+)*)/chat/completions")
+GUEST_PATH = re.compile(r"/([a-z0-9_]+)((?:/(?!\.)[a-z0-9.]+)*)/chat/completions")
+"""A segment may hold a dot (``v4.1``) but not start with one. ``request.path`` is decoded, so ``%2e%2e`` reaches
+this as ``..``: the first version matched it, the proxy sent it on with the key attached, and the path left the
+upstream's API root. Found by trying it on the real socket; the mock transport never resolves a path."""
 GUEST_MAX_BYTES = 256 * 1024
 GUEST_MAX_TOKENS = 4096
 GUEST_HEADERS = ("content-type", "accept")
