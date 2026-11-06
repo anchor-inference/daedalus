@@ -58,6 +58,7 @@ var portDefaults = map[string]string{
 	"KEYPROXY_PORT":            defaultKeyproxyPort,
 	"DAEDALUS_SUPERVISOR_PORT": defaultSupervisorPort,
 	"SERVICES_PORT_RANGE":      "8100-8119",
+	"SERVICES_DOOR_PORT":       "8766",
 	"TERMINALS_PORT_RANGE":     "8120-8139",
 }
 
@@ -71,10 +72,14 @@ func portRoles(mode Mode, supervisorTCP bool) []portRole {
 		if supervisorTCP {
 			roles = append(roles, portRole{key: "DAEDALUS_SUPERVISOR_PORT", name: "the supervisor's port"})
 		}
-		return append(roles, portRole{key: "SERVICES_PORT_RANGE", name: "the services' ports", spare: true})
+		return append(roles,
+			portRole{key: "SERVICES_PORT_RANGE", name: "the services' ports", spare: true},
+			portRole{key: "SERVICES_DOOR_PORT", name: "the services door's port"},
+		)
 	}
 	return append(roles,
 		portRole{key: "SERVICES_PORT_RANGE", name: "the services' ports"},
+		portRole{key: "SERVICES_DOOR_PORT", name: "the services door's port"},
 		portRole{key: "TERMINALS_PORT_RANGE", name: "the terminals' ports"},
 	)
 }

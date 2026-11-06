@@ -13,6 +13,10 @@ Sharing: a service is reachable on the LAN at ``SERVICES_PUBLIC_HOST:<port>``; t
 also open it under ``/s/<slug>/`` — to anyone (``public``) or to whoever presents its key (``key``).
 Those requests are proxied to the service's port by a listener of their own, on another origin than
 the app (``daedalus.extensions.services_door``); ``public_address.services_base`` says where it is.
+
+Natively a service is told to listen on loopback, through ``$HOST``. In a container it has to listen
+on every interface of the container, because a published port arrives at the container's own address
+and not at its loopback; the container's edge is what is published, and ``compose.yaml`` decides that.
 """
 
 from __future__ import annotations
@@ -77,6 +81,7 @@ class Services:
         self.app = app
         self.lo, self.hi = parse_range(app.settings.services_port_range)
         self.public_host = app.settings.services_public_host.strip()
+        self.bind_host = "127.0.0.1" if app.settings.native else "0.0.0.0"  # noqa: S104 — the module's docstring says why
         self._procs: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
 
     # -- views ----------------------------------------------------------------------
@@ -243,7 +248,7 @@ class Services:
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{name}.log"
         env = shell_environment(session_id, {"PORT": str(chosen)} if chosen else None, cwd=workdir)
-        env["HOST"] = "0.0.0.0"
+        env["HOST"] = self.bind_host
         # The same wall Exec has: a service is a long-lived command, not a way around the sandbox.
         argv, _sandboxed = await sandbox_argv(
             command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace], session_id=session_id,

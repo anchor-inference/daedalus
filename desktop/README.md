@@ -185,6 +185,7 @@ over:
 | the key proxy (`KEYPROXY_PORT`) | 3201 | native |
 | the supervisor (`DAEDALUS_SUPERVISOR_PORT`), where it listens on TCP | 8769 | native, Windows |
 | the agent's services (`SERVICES_PORT_RANGE`) | 8100–8119 | both modes |
+| the services door (`SERVICES_DOOR_PORT`) | 8766 | both modes |
 | servers in a container terminal (`TERMINALS_PORT_RANGE`) | 8120–8139 | Docker |
 | the launcher's own page | 8770 | both modes |
 
@@ -731,11 +732,15 @@ What is gone is the wall behind them:
   is still `0600` outside every folder the agent works in — the agent process never holds a key. But
   a shell the agent starts runs as the same user, and a file mode protects nothing from a process
   that owns the file. So the rule below names it instead.
-- **The ports are the machine's.** `SERVICES_PUBLIC_HOST` is `127.0.0.1` and a service a session
-  starts binds there, so nothing is published to the network — but it is the same loopback interface
-  every other program of yours can reach. The supervisor's own command channel is a socket file with
-  an owner everywhere but Windows, where it has to be a loopback port: there it asks for a secret it
-  keeps in `data/state/supervisor.token`, because a port has no owner and a file does.
+- **The ports are the machine's.** A service a session starts is given `$HOST=127.0.0.1` and told to
+  bind it, and nothing is published to the network; a server that ignores `$HOST`, as many do by
+  default, or a command that names `0.0.0.0` itself, listens on your LAN as well, and nothing here
+  stops it. Even on loopback it is the interface every other program of yours can reach.
+  `SERVICES_PUBLIC_HOST` is `localhost` and not the `127.0.0.1` the app opens on, because cookies
+  ignore ports: on the same name, opening a service would send it your session cookie. The
+  supervisor's own command channel is a socket file with an owner everywhere but Windows, where it
+  has to be a loopback port: there it asks for a secret it keeps in `data/state/supervisor.token`,
+  because a port has no owner and a file does.
 
 **Two rules exist only here**, and both are off in Docker mode, where the directories they name are
 not in the container at all:

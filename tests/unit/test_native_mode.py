@@ -84,7 +84,7 @@ def test_services_are_reached_at_the_loopback_address_natively(monkeypatch: pyte
     """There is no docker host to publish from: a service the agent starts listens here."""
     config = isolated_config(monkeypatch, DAEDALUS_NATIVE="1")
     try:
-        assert config.Settings().services_public_host == "127.0.0.1"
+        assert config.Settings().services_public_host == "localhost"
         assert config.Settings().native is True
     finally:
         monkeypatch.delenv("DAEDALUS_NATIVE", raising=False)

@@ -217,7 +217,7 @@ Nothing here is a tier: it is the same program, and each row is a real consequen
 | **Self-development** | `local`: the agent commits into the checkout the app runs from and the change applies on a restart, with a preflight on a copy of itself first and an automatic rollback if it cannot stay up | `local` by default; `server` with a GitHub token | `server`: a worktree, a pull request you approve in the chat, a merge, a rebuild |
 | **Browser skills** | `daedalus-desktop install browser`, into the folder | the `:browser` tag | the `:browser` tag |
 | **The agent's browser** | `browserd` beside the launcher, Chromium from `install browser`. **The daemon's proxy is the only wall** between a page and your machine's ports and LAN | the `browser` service: a network of its own, not root, no folders, and the proxy inside it | the same |
-| **Reach** | your machine only: services a session starts bind `127.0.0.1` | the same | a domain, a PWA, Telegram's Mini App |
+| **Reach** | your machine only: a service a session starts is told to bind `127.0.0.1` | the same | a domain, a PWA, Telegram's Mini App |
 | **When you close it** | the agent stops, and a run in flight is drained, snapshotted and resumed on the next start | it keeps running and comes back with the machine | it keeps running |
 
 ## Signing in without Telegram

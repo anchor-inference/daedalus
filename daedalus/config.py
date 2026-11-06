@@ -285,10 +285,11 @@ class Settings(BaseSettings):
     default trusts loopback, which is also where a tunnel's client connects from."""
     services_port_range: str = "8100-8119"
     """Ports a session's services may listen on; the compose file publishes the same range from the container."""
-    services_public_host: str = Field(default_factory=lambda: "127.0.0.1" if native_mode() else "")
+    services_public_host: str = Field(default_factory=lambda: "localhost" if native_mode() else "")
     """The address the operator reaches those ports at (the docker host on the LAN); empty = shown as <host>.
-    Natively there is no host but this one: a service the agent starts listens on the loopback interface of
-    the operator's own machine, and that is the address to open."""
+    Natively there is no host but this one: a service the agent starts listens on the loopback interface
+    of the operator's own machine. ``localhost`` and not the ``127.0.0.1`` the app opens on, because
+    cookies ignore ports: on the same name, opening a service sends it the operator's session cookie."""
     services_door_port: int = 8766
     """The port of the listener that serves shared services and nothing else, on the same interface as
     the API; 0 turns it off. ``daedalus.extensions.services_door`` says why it exists."""

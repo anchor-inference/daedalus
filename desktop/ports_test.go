@@ -45,12 +45,12 @@ func takenBlock(lo, hi int) map[int]bool {
 
 func TestAQuietMachineKeepsTheDocumentedPorts(t *testing.T) {
 	got, moves := planPorts(map[string]string{}, portRoles(ModeNative, true), fakeMachine(nil, nil), true)
-	want := map[string]string{"API_PORT": "8765", "KEYPROXY_PORT": "3201", "DAEDALUS_SUPERVISOR_PORT": "8769", "SERVICES_PORT_RANGE": "8100-8119"}
+	want := map[string]string{"API_PORT": "8765", "KEYPROXY_PORT": "3201", "DAEDALUS_SUPERVISOR_PORT": "8769", "SERVICES_DOOR_PORT": "8766", "SERVICES_PORT_RANGE": "8100-8119"}
 	if fmt.Sprint(values(got)) != fmt.Sprint(want) || len(moves) != 0 {
 		t.Fatalf("got %v, moves %v", values(got), moves)
 	}
 	got, _ = planPorts(map[string]string{}, portRoles(ModeDocker, false), fakeMachine(nil, nil), true)
-	want = map[string]string{"API_PORT": "8765", "SERVICES_PORT_RANGE": "8100-8119", "TERMINALS_PORT_RANGE": "8120-8139"}
+	want = map[string]string{"API_PORT": "8765", "SERVICES_DOOR_PORT": "8766", "SERVICES_PORT_RANGE": "8100-8119", "TERMINALS_PORT_RANGE": "8120-8139"}
 	if fmt.Sprint(values(got)) != fmt.Sprint(want) {
 		t.Fatalf("docker: got %v", values(got))
 	}
@@ -64,8 +64,9 @@ func TestEveryTakenDefaultMovesNearbyAndNothingCollides(t *testing.T) {
 	for _, mode := range []Mode{ModeNative, ModeDocker} {
 		got, moves := planPorts(map[string]string{}, portRoles(mode, true), fakeMachine(taken, nil), true)
 		v := values(got)
-		if v["API_PORT"] != "8766" {
-			t.Fatalf("%s: the app's port went to %s, not the next free one", mode, v["API_PORT"])
+		// 8766 is free but it is the services door's default, and the door keeps it.
+		if v["API_PORT"] != "8767" || v["SERVICES_DOOR_PORT"] != "8766" {
+			t.Fatalf("%s: the app's port went to %s, not the next free one (the door is on %s)", mode, v["API_PORT"], v["SERVICES_DOOR_PORT"])
 		}
 		if mode == ModeNative && (v["KEYPROXY_PORT"] != "3202" || v["DAEDALUS_SUPERVISOR_PORT"] != "8771") {
 			// 8770 is the launcher's own page: never handed to anything else.
@@ -137,14 +138,14 @@ func TestAPortTheInstallationHoldsItselfIsKept(t *testing.T) {
 	held[8765] = true
 	settings := map[string]string{"API_PORT": "8765", "SERVICES_PORT_RANGE": "8100-8119"}
 	got, moves := planPorts(settings, portRoles(ModeDocker, false), fakeMachine(held, held), false)
-	want := map[string]string{"API_PORT": "8765", "SERVICES_PORT_RANGE": "8100-8119", "TERMINALS_PORT_RANGE": "8120-8139"}
+	want := map[string]string{"API_PORT": "8765", "SERVICES_DOOR_PORT": "8766", "SERVICES_PORT_RANGE": "8100-8119", "TERMINALS_PORT_RANGE": "8120-8139"}
 	if fmt.Sprint(values(got)) != fmt.Sprint(want) || len(moves) != 0 {
 		t.Fatalf("got %v, moves %v", values(got), moves)
 	}
 }
 
 func TestAPortChosenByHandIsKeptWhileItIsFree(t *testing.T) {
-	settings := map[string]string{"API_PORT": "18765", "KEYPROXY_PORT": "13201", "SERVICES_PORT_RANGE": "18100-18109"}
+	settings := map[string]string{"API_PORT": "18765", "KEYPROXY_PORT": "13201", "SERVICES_PORT_RANGE": "18100-18109", "SERVICES_DOOR_PORT": "18766"}
 	got, moves := planPorts(settings, portRoles(ModeNative, false), fakeMachine(map[int]bool{8765: true}, nil), false)
 	if fmt.Sprint(values(got)) != fmt.Sprint(settings) || len(moves) != 0 {
 		t.Fatalf("got %v, moves %v", values(got), moves)

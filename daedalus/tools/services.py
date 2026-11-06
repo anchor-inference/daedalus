@@ -31,8 +31,9 @@ def _line(s: dict) -> str:  # type: ignore[type-arg]
     description=(
         "Run a long-lived process (a demo site, a dev server, a worker) detached from this turn, in the "
         "workspace, with its output in a log the operator and you can read. port='auto' (default) picks a "
-        "free port from the range the container publishes and passes it as $PORT — bind to 0.0.0.0 and use "
-        "it, e.g. `python3 -m http.server $PORT --bind 0.0.0.0` or `npx vite --host 0.0.0.0 --port $PORT`; "
+        "free port from the range this installation publishes and passes it as $PORT, with the address to "
+        "bind as $HOST — use both, e.g. `python3 -m http.server $PORT --bind $HOST` or `npx vite --host $HOST "
+        "--port $PORT`, because many servers default to every interface; "
         "the result carries the URL the operator opens from their network. port='none' for a process without "
         "a listener. restart=true (default) brings it back after a rebuild of the bot. Stop what is no longer "
         "needed with ServiceStop; a command that exits within a second is reported with its log instead."

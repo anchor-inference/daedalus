@@ -62,7 +62,7 @@ func TestEnvUpdatesPointAtTheDataFolderAndLoopback(t *testing.T) {
 	if !filepath.IsAbs(env["DAEDALUS_COMPOSE_PROJECT_DIR"]) {
 		t.Fatal("the rebuilder resolves its paths on the host: they must be absolute")
 	}
-	if env["SERVICES_PUBLIC_HOST"] != "127.0.0.1" {
+	if env["SERVICES_PUBLIC_HOST"] != "localhost" {
 		t.Fatalf("SERVICES_PUBLIC_HOST = %q", env["SERVICES_PUBLIC_HOST"])
 	}
 	if env["MINIAPP_PUBLIC_URL"] != "" {

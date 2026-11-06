@@ -562,7 +562,7 @@ async def _native(ctx: DoctorContext) -> list[Check]:
         return []
     out = [
         Check("isolation", True, await asyncio.to_thread(native_sandbox_note), "info", "the policy rules, the approval gates, the protected paths, the egress allowlist and the spend caps all still apply"),
-        Check("services address", True, f"{ctx.settings.services_public_host or '127.0.0.1'}:{ctx.settings.services_port_range} — bound on this machine, not published from anywhere", "ok"),
+        Check("services address", True, f"{ctx.settings.services_public_host or 'localhost'}:{ctx.settings.services_port_range} — told to bind loopback, not published from anywhere", "ok"),
     ]
     out.append(Check("container-only checks", True, CONTAINER_ONLY, "info"))
     git = shutil.which("git")

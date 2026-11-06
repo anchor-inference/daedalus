@@ -50,7 +50,7 @@ publish is undone with `PageRollback(slug, version)`; `PageList` shows the versi
 | `service` | a web app you run, reverse-proxied at `/pages/<slug>/` (any method, streaming, WebSockets) | a port of the services range, or the name of a service from `ServiceStart` |
 | `link` | another site in a full-size frame, with a way to open it in a tab when it refuses framing | its `https://` address |
 
-For a **service** page: start the server with `ServiceStart` (it binds `$PORT` on `0.0.0.0`), then
+For a **service** page: start the server with `ServiceStart` (it gives the server `$HOST` and `$PORT` to bind), then
 `PageCreate(kind="service", target="<service name>")`. The server sees
 `X-Forwarded-Prefix: /pages/<slug>`; an app that builds absolute links needs its base path set to
 `/pages/<slug>/` (Jupyter `--ServerApp.base_url`, Vite `base`, many apps have a `BASE_URL` setting) or

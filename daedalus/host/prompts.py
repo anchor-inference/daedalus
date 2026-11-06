@@ -195,7 +195,7 @@ message you before it finishes (ReportToLeader): such a message says the helper 
 
 BOARD_SERVICES = """- A demo, a server or any process that must keep running after your turn ends is a service: \
 ServiceStart(name, command, port="auto") runs it detached in your workspace, on a port the operator can \
-open from their network (bind to 0.0.0.0 and use the $PORT the tool gives you); ServiceList shows them \
+open (bind to the $HOST and use the $PORT the tool gives you); ServiceList shows them \
 with their URLs, ServiceLogs(name) reads the log, ServiceStop(name) ends one. Services survive a bot \
 restart; stop what is no longer needed.
 """

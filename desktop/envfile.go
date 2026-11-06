@@ -157,8 +157,10 @@ func dailyCap(given, existing string) string {
 
 // envUpdates is everything the launcher sets in <data>/.env. The three DAEDALUS_* paths are
 // absolute because the rebuilder container resolves them on the host, not inside a project
-// directory; SERVICES_PUBLIC_HOST is the loopback address because a desktop install serves the
-// operator's own machine. `current` is what a previous run left in the file.
+// directory; SERVICES_PUBLIC_HOST is the loopback name because a desktop install serves the
+// operator's own machine, `localhost` and not the 127.0.0.1 the app opens on because cookies ignore
+// ports, and on the same name a service would receive the session cookie. `current` is what a
+// previous run left in the file.
 func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home string) []envVar {
 	answer := answered(s, current)
 	localModel := answer("DAEDALUS_LOCAL_MODEL", "local_model", s.LocalModel)
@@ -203,7 +205,8 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		// moves one only when another program has taken it since (ports.go).
 		{"API_PORT", firstSet(current["API_PORT"], "8765")},
 		{"SERVICES_PORT_RANGE", firstSet(current["SERVICES_PORT_RANGE"], "8100-8119")},
-		{"SERVICES_PUBLIC_HOST", firstSet(current["SERVICES_PUBLIC_HOST"], "127.0.0.1")},
+		{"SERVICES_DOOR_PORT", firstSet(current["SERVICES_DOOR_PORT"], "8766")},
+		{"SERVICES_PUBLIC_HOST", firstSet(current["SERVICES_PUBLIC_HOST"], "localhost")},
 		{"KEYPROXY_PORT", firstSet(current["KEYPROXY_PORT"], "3201")},
 		{"DAEDALUS_COMPOSE_PROJECT_DIR", p.Bot},
 		{"DAEDALUS_COMPOSE_FILE", p.Compose},

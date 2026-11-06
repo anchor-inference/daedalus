@@ -104,6 +104,21 @@ async def test_reconcile_restarts_or_reports_after_a_rebuild(app: Any) -> None:
 
 
 @pytest.mark.usefixtures("brief_start_grace")
+async def test_a_service_binds_loopback_natively_and_the_container_interface_otherwise(app: Any) -> None:
+    """Natively the machine is the operator's and its network is their LAN. In a container a published
+    port arrives at the container's own address, so loopback there would be a service nobody reaches."""
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    for native, expected in ((True, "127.0.0.1"), (False, "0.0.0.0")):  # noqa: S104
+        app.settings.native = native
+        services = Services(app)
+        name = f"host-{int(native)}"
+        await services.start(sid, name=name, command=f'printf "%s" "$HOST" > {name}.txt; sleep 30')
+        assert (state.workspace / f"{name}.txt").read_text() == expected
+        await services.stop(sid, name)
+
+
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_sharing_mints_a_slug_once_and_a_key_only_for_key_mode(app: Any) -> None:
     app.settings.miniapp_public_url = "https://daedalus.example.com/app/"
     services = Services(app)

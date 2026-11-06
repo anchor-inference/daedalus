@@ -774,9 +774,10 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	add("DAEDALUS_BOT_CMD", quoteArgv(venvPython(p))+" -m daedalus serve")
 	add("DAEDALUS_PREFLIGHT_VENV", filepath.Join(p.Runtime, "preflight-venv"))
 	add("UV_PROJECT_ENVIRONMENT", p.RuntimeVenv)
-	// The app serves the operator's own machine, and the services a session starts are reached at
-	// the same address: nothing here is published to a network.
-	add("SERVICES_PUBLIC_HOST", "127.0.0.1")
+	// The app serves the operator's own machine and the services a session starts are reached there
+	// too, with nothing published to a network; under the other loopback name, so that opening a
+	// service does not hand it the session cookie, which goes by name and ignores ports.
+	add("SERVICES_PUBLIC_HOST", "localhost")
 	if supervisorOverTCP(p, runtime.GOOS) {
 		add("DAEDALUS_SUPERVISOR_TCP", "127.0.0.1:"+parsePort(settings["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort))
 	} else {
@@ -788,7 +789,7 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 		// are not there, which is true and is better than a path to an empty folder.
 		add("PLAYWRIGHT_BROWSERS_PATH", p.RuntimeBrowsers)
 	}
-	for _, key := range []string{"API_PORT", "SERVICES_PORT_RANGE", "USD_PER_DAY", "TELEGRAM_BOT_TOKEN", "OWNER_USER_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "MINIAPP_PUBLIC_URL", "DAEDALUS_SELFDEV_MODE", "GITHUB_TOKEN", "GITHUB_DAEDALUS_TOKEN", "DAEDALUS_GITHUB_ORG"} {
+	for _, key := range []string{"API_PORT", "SERVICES_PORT_RANGE", "SERVICES_DOOR_PORT", "USD_PER_DAY", "TELEGRAM_BOT_TOKEN", "OWNER_USER_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "MINIAPP_PUBLIC_URL", "DAEDALUS_SELFDEV_MODE", "GITHUB_TOKEN", "GITHUB_DAEDALUS_TOKEN", "DAEDALUS_GITHUB_ORG"} {
 		add(key, settings[key])
 	}
 	return env
