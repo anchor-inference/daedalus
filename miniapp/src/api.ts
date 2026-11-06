@@ -968,6 +968,8 @@ export type GuestLink = {
   idle_hours: number;
   retention_days: number;
   spent_usd: number;
+  /** False on a plan or a free model: the link's dollars count nothing there. */
+  priced: boolean;
   turns_used: number;
   turns_today: number;
   refused_redeems: number;
@@ -976,7 +978,8 @@ export type GuestLink = {
 /** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person). */
 export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number };
 export type GuestLinkDetail = GuestLink & { briefing: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
-export type GuestModelOption = { id: string; label: string; path: string; model: string; price_in: number; price_out: number; free: boolean };
+export type GuestBilling = "metered" | "plan" | "free";
+export type GuestModelOption = { id: string; label: string; path: string; model: string; billing: GuestBilling; price_in: number; price_out: number; free: boolean };
 export type GuestDefaults = {
   mode: GuestMode;
   approval: boolean;
@@ -1001,8 +1004,8 @@ export type GuestDoor = {
   spent_today: number;
   full_tools: boolean;
   full_tools_why: GuestToolsWhy;
-  /** Whether a direct link can be made in that chat: only a private one holds no memory. */
-  direct: boolean;
+  /** Whether that chat's model counts dollars; on a plan or a free model only the turn limits bound a link. */
+  chat_priced: boolean;
 };
 /** What making a link sends (`LinkBody` in daedalus/extensions/api_guest.py). */
 export type GuestLinkBody = {

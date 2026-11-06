@@ -3,7 +3,7 @@
 // that says whose it is, and nothing here turns it into markdown, a link or a picture.
 
 import { useEffect, useRef, useState } from "react";
-import { api, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestMode, GuestTools } from "./api";
+import { api, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestBilling, GuestMode, GuestTools } from "./api";
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
@@ -145,7 +145,7 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead }: {
   const meta = [
     t(`guest.mode.${link.mode}`),
     link.mode === "stand_in" ? link.model_name : t(`guest.tools.${link.guest_tools}`),
-    `${usd(link.spent_usd)} / ${usd(link.usd_limit)}`,
+    link.priced ? `${usd(link.spent_usd)} / ${usd(link.usd_limit)}` : "",
     plural("guest.turns", link.turns_used),
     link.state === "waiting" ? t("guest.expires", { when: relTimeLong(ms(link.invite_expires_at)) }) : "",
   ].filter(Boolean).join(" · ");
@@ -306,6 +306,7 @@ function NumberRow({ name, title, unit, value, onChange }: { name: NumberName; t
 }
 
 function priceHint(model: GuestDoor["models"][number]): string {
+  if (model.billing === "plan") return t("guest.model.plan");
   if (model.free) return t("fmt.free");
   const price = (n: number) => `$${Number(n.toFixed(2))}`;
   return t("guest.model.price", { input: price(model.price_in), output: price(model.price_out) });
@@ -344,7 +345,10 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
 
   const set = (name: NumberName) => (next: string) => setNumbers((current) => ({ ...current, [name]: next }));
   const standIn = mode === "stand_in";
-  const parsed = (Object.keys(numbers) as NumberName[]).map((name) => numberOf(name, numbers[name]));
+  // What bounds this link: dollars only where the model counts them, so no field stands there doing nothing.
+  const billing: GuestBilling = standIn ? door.models.find((model) => model.id === modelId)?.billing ?? "metered" : door.chat_priced ? "metered" : "plan";
+  const priced = billing === "metered";
+  const parsed = (Object.keys(numbers) as NumberName[]).filter((name) => priced || name !== "usd_limit").map((name) => numberOf(name, numbers[name]));
   const valid = parsed.every((value) => value !== null)
     && (!standIn || (!!modelId && briefing.trim() !== "" && (!drafted || read)));
 
@@ -390,7 +394,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       briefing_approved: true,
       tools: chosenTools,
       approval,
-      usd_limit: numberOf("usd_limit", numbers.usd_limit)!,
+      usd_limit: numberOf("usd_limit", numbers.usd_limit) ?? defaults.usd_limit,
       turns_per_day: numberOf("turns_per_day", numbers.turns_per_day)!,
       turns_total: numberOf("turns_total", numbers.turns_total)!,
       invite_hours: numberOf("invite_hours", numbers.invite_hours)!,
@@ -427,7 +431,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       <Segmented value={mode} options={modeOptions} onChange={(next) => { setMode(next); setProblem(""); }} label={t("guest.field.mode")} />
       {standIn
         ? <div className="sub" data-guest-note="standin">{t("guest.standin.note")}</div>
-        : <div className="sub guest-warning" data-guest-warning="">{t(door.direct ? "guest.direct.warning" : "guest.direct.private")}</div>}
+        : <div className="sub guest-warning" data-guest-warning="">{t("guest.direct.warning")}</div>}
 
       <label className="field" htmlFor="guest-label">{t("guest.field.label")}</label>
       <input id="guest-label" ref={labelField} className="field" value={label} maxLength={120} placeholder={t("guest.field.label.ph")} autoComplete="off" onChange={(e) => setLabel(e.target.value)} />
@@ -469,7 +473,9 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       )}
 
       <NumberRow name="invite_hours" title={t("guest.field.lifetime")} unit={t("guest.unit.hours")} value={numbers.invite_hours} onChange={set("invite_hours")} />
-      <NumberRow name="usd_limit" title={t("guest.field.usd")} unit="$" value={numbers.usd_limit} onChange={set("usd_limit")} />
+      {priced
+        ? <NumberRow name="usd_limit" title={t("guest.field.usd")} unit="$" value={numbers.usd_limit} onChange={set("usd_limit")} />
+        : <div className="sub" data-guest-bound={billing}>{t(`guest.bound.${billing}`)}</div>}
       <NumberRow name="turns_per_day" title={t("guest.field.turnsday")} value={numbers.turns_per_day} onChange={set("turns_per_day")} />
       <div className="settings-row">
         <span className="settings-row-text"><span className="settings-row-title">{t("guest.field.approval")}</span></span>

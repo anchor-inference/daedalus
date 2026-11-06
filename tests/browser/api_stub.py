@@ -1129,7 +1129,7 @@ class FakeGuests:
         row = {
             "id": id_, "state": state, "label": label, "topic": topic, "mode": mode, "model_name": model if mode == "stand_in" else "", "approval": True, "usd_limit": 1.0,
             "turns_per_day": 40, "turns_total": 200, "guest_tools": tools, "created_at": now - 3600, "invite_expires_at": now + 2 * 86400, "conversation_hours": 168.0,
-            "idle_hours": 24.0, "retention_days": 30.0, "spent_usd": spent, "turns_used": turns, "turns_today": turns, "refused_redeems": redeems, "conversation": conversation,
+            "idle_hours": 24.0, "retention_days": 30.0, "spent_usd": spent, "priced": True, "turns_used": turns, "turns_today": turns, "refused_redeems": redeems, "conversation": conversation,
         }
         row.update(over)
         self.links[id_] = row
@@ -1160,11 +1160,11 @@ class FakeGuests:
             "defaults": {"mode": "stand_in", "approval": True, "tools": "read", "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200, "invite_hours": 72.0,
                          "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0},
             "models": [
-                {"id": "cheap", "label": "Cheap model", "path": "openrouter/v1", "model": "cheap-1", "price_in": 0.1, "price_out": 0.4, "free": False},
-                {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "price_in": 2.0, "price_out": 8.0, "free": False},
+                {"id": "cheap", "label": "Cheap model", "path": "openrouter/v1", "model": "cheap-1", "billing": "metered", "price_in": 0.1, "price_out": 0.4, "free": False},
+                {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "billing": "metered", "price_in": 2.0, "price_out": 8.0, "free": False},
             ],
             "usd_per_day": self.usd_per_day, "spent_today": 0.5,
-            "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why, "direct": True,
+            "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why, "chat_priced": True, "left_out": [],
         }
 
     def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:

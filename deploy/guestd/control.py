@@ -86,7 +86,7 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
     day_key_matches = link["turns_day"] == store._day()
     out: dict[str, Any] = {
         "id": link["id"], "state": link["state"], "label": link["label"], "topic": link["topic"], "mode": link["mode"], "model_name": link["model_name"],
-        "approval": bool(link["approval"]), "usd_limit": link["usd_limit"], "turns_per_day": link["turns_per_day"], "turns_total": link["turns_total"],
+        "approval": bool(link["approval"]), "usd_limit": link["usd_limit"], "priced": link["mode"] == DIRECT or float(link["price_in"]) + float(link["price_out"]) > 0, "turns_per_day": link["turns_per_day"], "turns_total": link["turns_total"],
         "guest_tools": link["guest_tools"], "created_at": link["created_at"], "invite_expires_at": link["invite_expires_at"], "conversation_hours": link["conversation_hours"],
         "idle_hours": link["idle_hours"], "retention_days": link["retention_days"], "spent_usd": link["spent_usd"] + link["reserved_usd"], "turns_used": link["turns_used"],
         "turns_today": link["turns_today"] if day_key_matches else 0, "refused_redeems": store.refused_redeems(link["id"]), "conversation": None,

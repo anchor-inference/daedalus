@@ -50,19 +50,19 @@ const DOOR: GuestDoor = {
   public_base: "https://door.example",
   defaults: { mode: "stand_in", approval: true, tools: "read", usd_limit: 1, turns_per_day: 40, turns_total: 200, invite_hours: 72, conversation_hours: 168, idle_hours: 24, retention_days: 30 },
   models: [
-    { id: "cheap", label: "Cheap model", path: "p/cheap", model: "cheap-1", price_in: 0.1, price_out: 0.4, free: false },
-    { id: "good", label: "Good model", path: "p/good", model: "good-1", price_in: 2, price_out: 8, free: false },
+    { id: "cheap", label: "Cheap model", path: "p/cheap", model: "cheap-1", billing: "metered", price_in: 0.1, price_out: 0.4, free: false },
+    { id: "good", label: "Good model", path: "p/good", model: "good-1", billing: "metered", price_in: 2, price_out: 8, free: false },
   ],
   usd_per_day: 2,
   spent_today: 0.5,
   full_tools: true,
-  direct: true,
+  chat_priced: true,
   full_tools_why: "",
 };
 const NOW = Math.floor(Date.now() / 1000);
 const LINK: GuestLink = {
   id: "l1", state: "spent", label: "Anna's agent", topic: "the schedule", mode: "direct", model_name: "", approval: true, usd_limit: 1, turns_per_day: 40, turns_total: 200, guest_tools: "read",
-  created_at: NOW - 600, invite_expires_at: NOW + 3600, conversation_hours: 168, idle_hours: 24, retention_days: 30, spent_usd: 0, turns_used: 0, turns_today: 0, refused_redeems: 0,
+  created_at: NOW - 600, invite_expires_at: NOW + 3600, conversation_hours: 168, idle_hours: 24, retention_days: 30, spent_usd: 0, priced: true, turns_used: 0, turns_today: 0, refused_redeems: 0,
   conversation: { id: "c1", state: "pending", reason: "", created_at: NOW - 300, decide_by: NOW + 3000, expires_at: NOW + 9000, last_guest_at: null, first_message: "Hello <b>there</b> ![x](http://a.example/p.png) http://evil.example" },
 };
 
@@ -308,10 +308,19 @@ describe("making a direct link", () => {
     expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "all" });
   });
 
-  it("says why an ordinary chat cannot take a direct link", async () => {
-    world.door = { ...DOOR, direct: false };
+  it.each([["plan", "guest.bound.plan"], ["free", "guest.bound.free"]] as const)("on a %s stand-in model the dollar field goes and one line says what bounds the link", async (billing, line) => {
+    world.door = { ...DOOR, models: [{ ...DOOR.models[0], billing, price_in: 0, price_out: 0, free: billing === "free" }] };
+    await open();
+    await act(async () => button(t("guest.make")).click());
+    expect(document.querySelector("#guest-usd_limit")).toBeNull();
+    expect(document.querySelector(`[data-guest-bound="${billing}"]`)!.textContent).toBe(t(line));
+  });
+
+  it("shows no dollar field on a chat whose model counts no dollars, and says what bounds the link", async () => {
+    world.door = { ...DOOR, chat_priced: false };
     await direct();
-    expect(document.querySelector("[data-guest-warning]")!.textContent).toBe(t("guest.direct.private"));
+    expect(document.querySelector("#guest-usd_limit")).toBeNull();
+    expect(document.querySelector('[data-guest-bound="plan"]')!.textContent).toBe(t("guest.bound.plan"));
   });
 
   it.each(["no_sandbox", "host_folder", "project_folder"] as const)("does not offer all tools to a chat that cannot have them (%s), and says why once", async (why) => {

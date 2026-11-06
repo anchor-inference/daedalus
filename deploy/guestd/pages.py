@@ -66,12 +66,14 @@ LOST_TOKEN = (
 
 def page(link: Any, *, base: str, invite: str, max_text: int) -> str:
     topic = link["topic"] or "The agent on the other side can answer questions about what its owner set it up for."
+    days = float(link["retention_days"])
+    kept_for = f"{days:g} day" if days == 1 else f"{days:g} days"
     if link["mode"] == "stand_in":
         counterpart = "You will be talking to a stand-in, which knows only what its owner wrote down for it."
-        kept = f"Messages here are kept for {float(link['retention_days']):g} days and the owner of this link can read them."
+        kept = f"Messages here are kept for {kept_for} and the owner of this link can read them."
     else:
         counterpart = "You will be talking to the owner's own agent."
-        kept = f"Messages here are kept for {float(link['retention_days']):g} days, and they stay in the owner's chat for as long as the owner keeps it."
+        kept = f"Messages here are kept for {kept_for}, and they stay in the owner's chat for as long as the owner keeps it."
     approval = " The owner approves the first contact, so the first reply may take a while." if link["approval"] else ""
     return PAGE.format(topic=topic, counterpart=counterpart, kept=kept, approval=approval, base=base, invite=invite, max_text=max_text)
 

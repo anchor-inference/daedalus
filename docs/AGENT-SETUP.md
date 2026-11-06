@@ -305,8 +305,15 @@ The address must not be the app's own origin: the app refuses to hand out such a
 door another port rather than a path on the app's server. Without a proxy, set `GUEST_DOOR_BIND=0.0.0.0` and the link
 is `http://<SERVICES_PUBLIC_HOST>:8764/a/…`, plain http, with the invite and every token readable on the way.
 
-Stand-ins use the key proxy's upstreams named in `KEYPROXY_GUEST_UPSTREAMS`, and never a CLI login or a prepaid plan. A
-direct link needs a private chat: an ordinary one carries your memory in its history, and a guest's turn reads that history. A chat's `All tools`
+A stand-in can use any model the app lists that is behind the key proxy, CLI logins and prepaid plans included.
+`KEYPROXY_GUEST_UPSTREAMS` narrows that to named upstreams; the default `*` is all of them, search backends never. The
+door's socket takes one non-streaming chat completion with no tools and a small output bound on any of them. A plan
+counts no dollars, so its link is bounded by its message limits alone; the form hides the dollar field and says so.
+A model that is left out has a stated reason in `/api/guest/door` (`left_out`): outside the key proxy, not named, or
+metered with no known price.
+
+A direct link's turn reads the chat's messages and nothing the host added to them: memory, the folder's notes, the board,
+the project's facts and side questions are taken out of what its model is sent, in that turn only. A chat's `All tools`
 setting needs the namespaces the agent's container already has for the sandbox; the app says so where it cannot have them.
 
 ### Shared services: the services door

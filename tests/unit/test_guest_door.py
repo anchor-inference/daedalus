@@ -23,6 +23,7 @@ from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STA
 from guestd.pages import LOST_TOKEN, SPENT_PAGE
 from guestd.public import HEADERS, PublicDoor
 from guestd.standin import (
+    FAILED_TEXT,
     MAX_OUTPUT_TOKENS,
     SYSTEM,
     KeyProxyCaller,
@@ -219,6 +220,32 @@ def test_a_visit_to_a_spent_link_reaches_the_owner_once_in_a_while(rig: Rig) -> 
     rig.clock.now += 601
     rig.public.get(f"/a/{invite}")
     assert rig.events(link_id).count("redeem_refused") == 2
+
+
+def test_the_page_counts_its_days(rig: Rig) -> None:
+    _, invite = rig.link(retention_days=1)
+    assert "kept for 1 day and" in rig.public.get(f"/a/{invite}").text
+
+
+async def test_a_reply_with_no_text_is_a_failure_the_guest_is_told_of(rig: Rig) -> None:
+    """A reasoning model at its bound, or a plan's route with an error in a 200: left silent, a guest polls on."""
+    _, invite = rig.link(price_in=0.0, price_out=0.0)
+    token = rig.redeem(invite)
+    rig.say(token, "hello")
+    rig.stand_in.caller = lambda _link, _request: asyncio.sleep(0, ModelReply("", 10, 10))
+    assert await rig.turn() is True
+    assert [m["text"] for m in rig.read(token).json()["messages"]] == [FAILED_TEXT]
+
+
+async def test_a_plan_is_bounded_by_its_turns_whatever_the_dollars_say(rig: Rig) -> None:
+    link_id, invite = rig.link(price_in=0.0, price_out=0.0, usd_limit=0.0, turns_total=2)
+    token = rig.redeem(invite)
+    assert rig.control.get(f"/control/links/{link_id}", headers=CONTROL).json()["link"]["priced"] is False
+    for _ in range(2):
+        assert rig.say(token, "hello").status_code == 202
+        assert await rig.turn() is True
+    refused = rig.say(token, "and again")
+    assert refused.status_code == 403 and refused.json()["limit"] == "turns_total"
 
 
 def test_the_pages_example_takes_the_token_out_of_the_reply(rig: Rig, tmp_path: Path) -> None:

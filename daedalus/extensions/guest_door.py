@@ -558,42 +558,74 @@ class GuestBridge:
         return ActionOutcome(render("guest.admitted" if request.action == "admit" else "guest.refused", self.app.notifications.language()))
 
 
-def model_options(app: Application | Any) -> list[dict[str, Any]]:
-    """The models the door can reach: those the key proxy's guest listener serves, cheapest first.
+LEFT_OUT = {
+    "outside_key_proxy": "this endpoint is not behind the key proxy, and the door has no way out but the proxy's socket",
+    "no_provider": "the model's provider is missing or could not be set up",
+    "not_named": "its upstream is not in KEYPROXY_GUEST_UPSTREAMS",
+    "no_price": "a metered model with no known price, so no dollar limit could hold on it",
+}
+"""Every reason a model the app lists is not offered to a stand-in. Nothing else may keep one out."""
 
-    Priced, or free outright. One with no known price is left out rather than guessed at, because a limit
-    in dollars cannot be checked before the spending on a model nobody can price. A prepaid plan is left
-    out as well, whichever upstream it hides behind: it costs no dollars, so no limit of the link would
-    ever stop a stranger from spending the operator's allowance on it.
+
+def model_choices(app: Application | Any) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Every model the app lists, as what a stand-in can be given and what cannot be, with the reason.
+
+    ``billing`` is what bounds a link on the model. ``metered``: dollars and turns. ``plan``: a prepaid plan or a
+    CLI login, whose calls cost no dollars and whose allowance is spent all the same, so turns alone. ``free``: a
+    model at no price, turns alone. A metered model with no price is left out rather than guessed at, because a
+    limit in dollars cannot be checked before the spending on a model nobody can price: "no price" reads as "free"
+    only where the route is a known plan.
     """
     base = keyproxy_base()
-    allowed = {name.strip().lower() for name in app.settings.guest_model_upstreams.split(",") if name.strip()}
+    named = {name.strip().lower() for name in app.settings.guest_model_upstreams.split(",") if name.strip()}
     options: list[dict[str, Any]] = []
+    left_out: list[dict[str, str]] = []
+
+    def leave_out(preset_id: str, preset: Any, why: str) -> None:
+        left_out.append({"id": preset_id, "label": preset.display(preset_id), "why": why})
+
     for preset_id, preset in app.config.presets.items():
         provider = app.config.providers.get(preset.provider)
-        if provider is None or not is_keyproxy_url(provider.base_url):
+        if provider is None:
+            leave_out(preset_id, preset, "no_provider")
             continue
-        manager = app.manager
+        if not is_keyproxy_url(provider.base_url):
+            leave_out(preset_id, preset, "outside_key_proxy")
+            continue
         try:
-            endpoint = manager.providers.get(preset.provider).endpoint
+            endpoint = app.manager.providers.get(preset.provider).endpoint
         except KeyError:
+            leave_out(preset_id, preset, "no_provider")
             continue
-        if endpoint.subscription:
+        path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
+        if "*" not in named and path.split("/", 1)[0] not in named:
+            leave_out(preset_id, preset, "not_named")
             continue
         pricing = endpoint.pricing_for(preset.model)
-        free = endpoint.kind == "llamacpp" or preset.model.endswith((":free", "-free"))
-        if not free and (pricing is None or pricing.input is None or pricing.output is None):
+        plan = bool(endpoint.subscription) or guest_turns.login_route(provider.base_url)
+        if plan:
+            billing = "plan"
+        elif endpoint.kind == "llamacpp" or preset.model.endswith((":free", "-free")):
+            billing = "free"
+        elif pricing is None or pricing.input is None or pricing.output is None:
+            leave_out(preset_id, preset, "no_price")
             continue
-        free = free or not (pricing.input or pricing.output)  # type: ignore[union-attr]
-        path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
-        if path.split("/", 1)[0] not in allowed:
-            continue  # the key proxy's guest listener would refuse it
+        else:
+            billing = "metered" if pricing.input or pricing.output else "free"
+        metered = billing == "metered"
         options.append({
-            "id": preset_id, "label": preset.display(preset_id), "path": path, "model": preset.model,
-            "price_in": 0.0 if free else float(pricing.input), "price_out": 0.0 if free else float(pricing.output), "free": free,  # type: ignore[union-attr]
+            "id": preset_id, "label": preset.display(preset_id), "path": path, "model": preset.model, "billing": billing,
+            "price_in": float(pricing.input) if metered else 0.0, "price_out": float(pricing.output) if metered else 0.0, "free": billing == "free",  # type: ignore[union-attr]
         })
-    options.sort(key=lambda o: (o["price_in"] + o["price_out"] * 4, str(o["label"]).lower()))
-    return options
+    # A plan last: the first is the form's default, and what a stranger's questions should cost by default is
+    # nothing or next to it, not the operator's own allowance.
+    options.sort(key=lambda o: (o["billing"] == "plan", o["price_in"] + o["price_out"] * 4, str(o["label"]).lower()))
+    return options, left_out
+
+
+def model_options(app: Application | Any) -> list[dict[str, Any]]:
+    """The models a stand-in can be given, cheapest first."""
+    return model_choices(app)[0]
 
 
 def bridge_of(app: Application | Any) -> GuestBridge | None:
@@ -613,4 +645,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(bridge.serve(), name="guest-door")]
 
 
-__all__ = ["EXTENSION_KEY", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_options"]
+__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options"]

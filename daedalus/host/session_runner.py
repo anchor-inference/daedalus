@@ -4160,10 +4160,6 @@ class SessionManager:
             return "a loop runs in this chat, and it would read the guest's words with nobody watching"
         if await self.db.fetchone("SELECT 1 FROM schedules WHERE enabled = 1 AND target_session = ?", (session_id,)) is not None:
             return "a schedule runs in this chat, and it would read the guest's words with nobody watching"
-        if not privacy.is_private(state):
-            # An ordinary chat carries the memory block in its first operator message, and that history
-            # is what a guest's turn reads: everything memory holds, one polite model from a stranger.
-            return "not_private"
         return "" if tools != "all" else await self.guest_full_tools(state)
 
     async def guest_full_tools(self, state: SessionState) -> str:
@@ -4183,7 +4179,7 @@ class SessionManager:
             return None
         provider, model = rungs[0]
         endpoint = provider.endpoint
-        if getattr(endpoint, "subscription", False) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
+        if getattr(endpoint, "subscription", False) or guest_turns.login_route(str(getattr(endpoint, "base_url", ""))) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
             return 0.0, 0.0
         pricing = endpoint.pricing_for(model) if hasattr(endpoint, "pricing_for") else endpoint.pricing.get(model)
         if pricing is None or pricing.input is None or pricing.output is None:
@@ -4841,11 +4837,28 @@ class SessionManager:
         rows = await self.db.fetchall("SELECT DISTINCT tool_call_id FROM tool_calls WHERE session_id = ?", (state.session.id,))
         engine.reserve_tool_call_ids(str(row["tool_call_id"]) for row in rows)
         self._attach_hooks(engine, state)
+        self._guard_guest_view(engine, state)
         self._stamp_memory(state, engine)
         if chain is not None:
             # The fit check reads the prompt size the engine last saw; before the first call it is zero and every rung fits.
             chain.bind_prompt_size(lambda: int(getattr(engine, "last_observed_prompt_tokens", 0) or 0))
         return engine
+
+    def _guard_guest_view(self, engine: QueryEngine, state: SessionState) -> None:
+        """Every request of a guest's turn reads :func:`guest_turns.for_guest` of the history.
+
+        At the context builder, because it is the one place every request passes, and it comes before the
+        request manifest: what is recorded as sent is what was sent. Asked of ``state`` per request, as the
+        same engine serves the operator's turns, which get the history as it is, byte for byte.
+        """
+        build = engine.context_manager.build_context
+
+        def build_context(*args: Any, **options: Any) -> Any:
+            if state.guest_turn is not None and "history" in options:
+                options["history"] = guest_turns.for_guest(options["history"], state.run_id or "")
+            return build(*args, **options)
+
+        engine.context_manager.build_context = build_context  # type: ignore[method-assign]
 
     def _attach_hooks(self, engine: QueryEngine, state: SessionState) -> None:
         session_id = state.session.id
@@ -7195,7 +7208,8 @@ class SessionManager:
             if turn is not None and decision.action != "allow":
                 # Never a card. An allowed card starts a run with the operator's origin and tools, over
                 # what a guest asked for, and nothing on it says so; and the turn would wait on a person.
-                return Decision("deny", decision.reason or "a guest's turn asks nobody for anything", "guest.no_questions")
+                # A refusal keeps its own rule: the name is only true of what would have asked.
+                return Decision("deny", decision.reason or "a guest's turn asks nobody for anything", decision.rule if decision.action == "deny" and decision.rule else "guest.no_questions")
             if decision.key and decision.action == "allow" and state is not None:
                 self._consume_grant(state, decision.key)
             elif decision.key and decision.action == "ask" and state is not None:
