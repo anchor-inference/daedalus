@@ -1739,18 +1739,27 @@ class Synthesizer:
         )
         last = await self.db.fetchone("SELECT max(seq) AS last FROM transcript WHERE session_id = ?", (chat.id,))
         out: list[Turn] = []
+        guest_runs: set[str] = set()
         for row in rows:
             try:
                 message = json.loads(row["message"])
             except ValueError:
                 continue
+            metadata = message.get("metadata") or {}
             text = "".join(str(b.get("text") or "") for b in message.get("content_blocks") or [] if isinstance(b, dict) and b.get("kind") == "text")
             if message.get("role") == "user":
-                if (message.get("metadata") or {}).get("daedalus.origin") != "operator":
+                origin = str(metadata.get("daedalus.origin") or "")
+                if origin.startswith("guest:"):
+                    guest_runs.add(str(metadata.get("daedalus.run_id") or ""))
+                if origin != "operator":
                     continue
                 text = without_host_notes(text).strip()
                 role = "operator"
             else:
+                # An answer to a guest is shaped by a stranger's words, and what is read here is written
+                # down as what the operator's own work established.
+                if metadata.get("daedalus.run_id") in guest_runs:
+                    continue
                 text = split_headline(text)[0].strip()
                 role = "assistant"
             if not text:

@@ -47,6 +47,10 @@ class Learning:
             return
         try:
             state = await manager.get_state(session_id)
+            if state is not None and state.guest_turn is not None:
+                # For a private chat's reason, and a stronger one: the digest and the memory pass read
+                # this record with the operator's trust, and these are a stranger's words.
+                return
             history = list(state.engine.history) if state is not None and state.engine is not None else []
             # The working history spans the whole session; this record is about the run that just ended.
             start = min(state.run_history_start, len(history)) if state is not None else 0
