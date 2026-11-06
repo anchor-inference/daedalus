@@ -101,6 +101,14 @@ async def test_nothing_is_served_with_no_upstreams_named(monkeypatch: pytest.Mon
     assert load().guest_upstreams() == frozenset()
 
 
+@pytest.mark.parametrize("field", ["models", "plugins", "transforms", "route", "something_a_vendor_adds_next"])
+def test_a_field_a_stand_in_does_not_send_is_refused(monkeypatch: pytest.MonkeyPatch, field: str) -> None:
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "openrouter")
+    proxy = load()
+    assert proxy.guest_refusal("/openrouter/chat/completions", "POST", json.dumps(GOOD).encode()) == ""
+    assert "no tools" in proxy.guest_refusal("/openrouter/chat/completions", "POST", json.dumps({**GOOD, field: ["x"]}).encode())
+
+
 def test_the_star_is_every_model_upstream_the_logins_included_and_never_a_search_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Perplexity answers on the same path as a model, so a search key must not become a stand-in's reach."""
     monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "*")

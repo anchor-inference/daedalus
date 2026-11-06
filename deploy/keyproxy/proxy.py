@@ -1260,8 +1260,10 @@ OPENCODE_SESSION_HEADER = "x-opencode-session"
 GUEST_HEADERS = ("content-type", "accept")
 """What of a guest door's request reaches the handler. Above all not ``x-daedalus-metered``: a call that says
 the host books it itself is not reported, and a door that could say so would spend without appearing."""
-GUEST_REFUSED_BODY = ("tools", "functions", "tool_choice", "n", "reasoning_effort")
-"""``reasoning_effort`` with the rest because the Claude route raises the output bound to fit it, past the cap below."""
+GUEST_BODY_FIELDS = frozenset({"model", "messages", "max_tokens", "max_completion_tokens", "stream", "provider"})
+"""The whole of a stand-in's request, as a list of what may be there. A list of what may not left ``models``,
+``plugins`` and whatever a vendor adds next open to a taken door: ``models`` alone reroutes a call past the one the
+link named, and ``reasoning_effort`` makes the Claude route raise the output bound past the cap below."""
 GUEST_ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
 """OpenRouter's ``provider[/variant][/region][/tier]``."""
 GUEST_ROUTE_MAX_SLUGS = 32
@@ -1310,7 +1312,7 @@ def guest_refusal(path: str, method: str, body: bytes) -> str:
         request = json.loads(body)
     except ValueError:
         return "not JSON"
-    if not isinstance(request, dict) or request.get("stream") or any(key in request for key in GUEST_REFUSED_BODY):
+    if not isinstance(request, dict) or request.get("stream") or not GUEST_BODY_FIELDS.issuperset(request):
         return "a stand-in's call has no tools and does not stream"
     bound = request.get("max_tokens", request.get("max_completion_tokens"))
     if not isinstance(bound, int) or isinstance(bound, bool) or not 0 < bound <= GUEST_MAX_TOKENS:
