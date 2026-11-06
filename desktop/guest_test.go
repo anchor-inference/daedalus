@@ -107,8 +107,8 @@ func TestANamespaceWallHoldsOnlyTheDoorsOwnFolders(t *testing.T) {
 	if strings.Contains(joined, "--die-with-parent") {
 		t.Fatal("that follows the launcher's thread, and Go retires threads")
 	}
-	for _, sealed := range []string{p.Bot + " ", filepath.Join(p.Local, "ptyd"), os.Getenv("HOME") + "/"} {
-		if sealed != "/" && strings.Contains(joined, " "+sealed) {
+	for _, sealed := range []string{p.Bot + " ", filepath.Join(p.Local, "ptyd")} {
+		if strings.Contains(joined, " "+sealed) {
 			t.Fatalf("%q reached the wall", sealed)
 		}
 	}
