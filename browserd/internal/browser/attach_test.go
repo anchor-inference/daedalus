@@ -29,6 +29,7 @@ import (
 
 type scripted struct {
 	t    *testing.T
+	name string
 	link *relay.Link
 	join relay.Joiner
 
@@ -102,7 +103,8 @@ func (s *scripted) answer(f map[string]any) {
 		}
 		switch f["method"] {
 		case "Page.getFrameTree":
-			result(map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F" + session, "url": "about:blank"}}})
+			// Each Chrome has its own numbering of tabs; a frame's id is unique across them, as Chrome's are.
+			result(map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": s.name + "F" + session, "url": "about:blank"}}})
 		case "Runtime.evaluate":
 			s.mu.Lock()
 			inner := s.inner
@@ -179,7 +181,7 @@ func attachManager(t *testing.T) (*Manager, *scripted, *relay.Hub) {
 	s.link = hub.Open(s, relay.TransportNative, "")
 	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "141.0", ProfileID: "p", ProfileName: "Home"})
 	deadline := time.Now().Add(5 * time.Second)
-	for hub.Current() == nil {
+	for hub.Session("") == nil {
 		if time.Now().After(deadline) {
 			t.Fatal("the relay was not accepted")
 		}
@@ -187,6 +189,255 @@ func attachManager(t *testing.T) (*Manager, *scripted, *relay.Hub) {
 	}
 	t.Cleanup(m.Shutdown)
 	return m, s, hub
+}
+
+// anotherChrome connects a second Chrome beside the first: a scripted extension of its own, whose
+// tabs Chrome numbers from 1 as it does the first's.
+func anotherChrome(t *testing.T, hub *relay.Hub, profile, name string) *scripted {
+	t.Helper()
+	s := &scripted{t: t, name: name, join: relay.Joiner{Max: relay.MaxToExtension}}
+	s.link = hub.Open(s, relay.TransportServer, "")
+	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "142.0", ProfileID: profile, ProfileName: name})
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.Session(relay.ChromeID(profile)) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the relay was not accepted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return s
+}
+
+// reasonOf is the reason a refusal carries for the host.
+func reasonOf(err error) string {
+	var we *wire.Error
+	if !errors.As(err, &we) {
+		return ""
+	}
+	data, _ := we.Data.(map[string]any)
+	reason, _ := data["reason"].(string)
+	return reason
+}
+
+// openIn opens a group in one named Chrome.
+func openIn(t *testing.T, m *Manager, group, profile string) (*Group, *Tab) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	g, tab, _, err := m.Open(ctx, OpenParams{GroupID: group, Profile: "project-a", Chrome: relay.ChromeID(profile)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g, tab
+}
+
+// Two Chromes number their tabs alike: tab 1 is on each. The daemon's name for each stays its own, a
+// command goes down its own Chrome's relay, and an event of one Chrome's tab reaches that tab alone.
+func TestAttachTwoChromesSameTabNumbers(t *testing.T) {
+	m, home, hub := attachManager(t)
+	mac := anotherChrome(t, hub, "q", "Mac")
+	g1, t1 := openIn(t, m, "s-1", "p")
+	g2, t2 := openIn(t, m, "s-2", "q")
+	if t1.Session != t2.Session {
+		t.Fatalf("the test wants the same Chrome tab id on both, got %s and %s", t1.Session, t2.Session)
+	}
+	if t1.ID == t2.ID || g1.Browser == g2.Browser {
+		t.Fatalf("tabs %s %s, browsers %s %s", t1.ID, t2.ID, g1.Browser.ID, g2.Browser.ID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sent := func(s *scripted, method string) int {
+		return len(slices.DeleteFunc(s.seen(relay.TCDP), func(f map[string]any) bool { return f["method"] != method }))
+	}
+	if err := t2.Call(ctx, "Page.reload", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if sent(home, "Page.reload") != 0 || sent(mac, "Page.reload") != 1 {
+		t.Fatalf("Page.reload reached Home %d times and Mac %d", sent(home, "Page.reload"), sent(mac, "Page.reload"))
+	}
+	// The address of tab 1 on the Mac changes, and the Mac's tab alone hears of it.
+	mac.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsUpdated, Tab: &relay.Tab{ID: 1, URL: "https://mac.example/", Title: "Mac"}})
+	deadline := time.Now().Add(2 * time.Second)
+	for t2.View()["url"] != "https://mac.example/" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the Mac's tab did not follow: %+v", t2.View())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if t1.View()["url"] == "https://mac.example/" {
+		t.Fatal("the Mac's change reached the other computer's tab")
+	}
+	// Closing tab 1 on the Mac leaves the first Chrome's tab 1 in place.
+	mac.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsRemoved, Tab: &relay.Tab{ID: 1}})
+	for !t2.Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("the Mac's tab was not forgotten")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if t1.Closed() {
+		t.Fatal("the other computer's tab was forgotten with it")
+	}
+}
+
+// Two Chromes with the same tab number at once take different names, the second with the next free
+// number, and that number is not one a third tab already holds. A call names a tab by this alone.
+func TestAttachTabNamesNeverCollide(t *testing.T) {
+	m, _, hub := attachManager(t)
+	anotherChrome(t, hub, "q", "Mac")
+	anotherChrome(t, hub, "r", "Office")
+	_, t1 := openIn(t, m, "s-1", "p")
+	_, t2 := openIn(t, m, "s-2", "q")
+	_, t3 := openIn(t, m, "s-3", "r")
+	seen := map[string]bool{t1.ID: true, t2.ID: true, t3.ID: true}
+	if len(seen) != 3 {
+		t.Fatalf("tab names %s %s %s", t1.ID, t2.ID, t3.ID)
+	}
+	for _, tab := range []*Tab{t1, t2, t3} {
+		if got, err := m.Tab(tab.ID); err != nil || got != tab {
+			t.Fatalf("tab %s found %v %v", tab.ID, got, err)
+		}
+	}
+}
+
+// A call that names no Chrome is refused while there are several, and a group is never taken to
+// another Chrome than the one it is open in.
+func TestAttachUnnamedChromeRefused(t *testing.T) {
+	m, _, hub := attachManager(t)
+	anotherChrome(t, hub, "q", "Mac")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, _, err := m.Open(ctx, OpenParams{GroupID: "s-1", Profile: "project-a"})
+	if reasonOf(err) != "chrome_choice" {
+		t.Fatalf("an open naming no Chrome: %v", err)
+	}
+	if _, err := m.Notify(ctx, "", ""); err == nil {
+		t.Fatal("a check naming no Chrome reached one")
+	}
+	if err := m.CallExtension(ctx, "", relay.OpPanelGrant, map[string]any{}); err == nil {
+		t.Fatal("a panel token naming no Chrome reached one")
+	}
+	openIn(t, m, "s-1", "p")
+	_, _, _, err = m.Open(ctx, OpenParams{GroupID: "s-1", Profile: "project-a", Chrome: relay.ChromeID("q")})
+	if reasonOf(err) != "chrome_other" {
+		t.Fatalf("a group asked for in the other Chrome: %v", err)
+	}
+	_, _, _, err = m.Open(ctx, OpenParams{GroupID: "s-2", Profile: "project-a", Chrome: relay.ChromeID("nobody")})
+	if reasonOf(err) != "chrome_not_connected" {
+		t.Fatalf("a Chrome that is not connected: %v", err)
+	}
+}
+
+// The side panel's calls go down the relay of the Chrome they name and no other.
+func TestAttachPanelCallReachesItsChrome(t *testing.T) {
+	m, home, hub := attachManager(t)
+	mac := anotherChrome(t, hub, "q", "Mac")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.CallExtension(ctx, relay.ChromeID("q"), relay.OpPanelGrant, map[string]any{"token": "pnl_x"}); err != nil {
+		t.Fatal(err)
+	}
+	if home.calls(relay.OpPanelGrant) != 0 || mac.calls(relay.OpPanelGrant) != 1 {
+		t.Fatalf("a grant reached Home %d times and Mac %d", home.calls(relay.OpPanelGrant), mac.calls(relay.OpPanelGrant))
+	}
+}
+
+// A Chrome going away ends its own browser and nothing of the other's, and a call for it is never
+// answered by the other one: the agent acting on the wrong computer is what this prevents.
+func TestAttachOneChromeGoes(t *testing.T) {
+	m, home, hub := attachManager(t)
+	m.backend.(*attach).grace = 50 * time.Millisecond
+	anotherChrome(t, hub, "q", "Mac")
+	g1, _ := openIn(t, m, "s-1", "p")
+	_, t2 := openIn(t, m, "s-2", "q")
+	home.link.Closed()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := m.Group(g1.ID); codeOf(err) == CodeBrowserGone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the group of the Chrome that left is still there")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := t2.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err != nil {
+		t.Fatalf("the other Chrome's tab: %v", err)
+	}
+	_, _, _, err := m.Open(ctx, OpenParams{GroupID: "s-1", Profile: "project-a", Chrome: relay.ChromeID("p")})
+	if reasonOf(err) != "chrome_not_connected" {
+		t.Fatalf("opening in the Chrome that left: %v", err)
+	}
+}
+
+// A Chrome reconnecting comes back to its own browser with the other one still working, and a call
+// for the other waits for nothing meanwhile.
+func TestAttachChromeReconnectsBesideAnother(t *testing.T) {
+	m, home, hub := attachManager(t)
+	anotherChrome(t, hub, "q", "Mac")
+	g1, t1 := openIn(t, m, "s-1", "p")
+	g2, _ := openIn(t, m, "s-2", "q")
+	home.link.Closed()
+	report := m.RelayReport()
+	if !report.Connected || len(report.Chromes) != 2 {
+		t.Fatalf("report %+v", report)
+	}
+	if c := report.Chromes[1]; c.Chrome != relay.ChromeID("p") || c.Connected || !c.Reconnecting || c.Groups != 1 || c.Tabs != 1 {
+		t.Fatalf("the Chrome reconnecting %+v", c)
+	}
+	begin := time.Now()
+	raw, _ := json.Marshal(map[string]string{"group_id": g2.ID})
+	m.AwaitRelay(context.Background(), raw)
+	if took := time.Since(begin); took > 200*time.Millisecond {
+		t.Fatalf("a call for the Mac waited for the other Chrome (%s)", took)
+	}
+	s := &scripted{t: t, join: relay.Joiner{Max: relay.MaxToExtension}}
+	s.link = hub.Open(s, relay.TransportNative, "")
+	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "141.0", ProfileID: "p", ProfileName: "Home"})
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.Session(relay.ChromeID("p")) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the relay was not accepted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got, err := m.Group(g1.ID); err != nil || got != g1 {
+		t.Fatalf("the group after the reconnect: %v %v", got, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := t1.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err != nil {
+		t.Fatalf("the tab after the reconnect: %v", err)
+	}
+}
+
+// A Chrome's relay reporting a tab or group of the other Chrome's changes nothing: the extension is
+// the wall of one computer, not of the daemon's other groups.
+func TestAttachChromeReachesOnlyItsOwnGroups(t *testing.T) {
+	m, _, hub := attachManager(t)
+	mac := anotherChrome(t, hub, "q", "Mac")
+	g1, t1 := openIn(t, m, "s-1", "p")
+	openIn(t, m, "s-2", "q")
+	mac.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsGroupClosed, Group: g1.ID})
+	mac.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 77, Group: g1.ID}})
+	time.Sleep(100 * time.Millisecond)
+	if got, err := m.Group(g1.ID); err != nil || got != g1 || t1.Closed() || len(g1.Tabs()) != 1 {
+		t.Fatalf("the other Chrome reached this group: %v %v, %d tabs", got, err, len(g1.Tabs()))
+	}
+}
+
+// The cap on browsers is on Chromiums the daemon runs; the operator's fifth Chrome is not one.
+func TestAttachChromesAreNotCapped(t *testing.T) {
+	m, _, hub := attachManager(t)
+	one := 1
+	if _, err := m.SetLimits(LimitsUpdate{MaxBrowsers: &one}); err != nil {
+		t.Fatal(err)
+	}
+	anotherChrome(t, hub, "q", "Mac")
+	openIn(t, m, "s-1", "p")
+	openIn(t, m, "s-2", "q")
 }
 
 func openAttached(t *testing.T, m *Manager, group string) (*Group, *Tab) {
@@ -206,7 +457,7 @@ func openAttached(t *testing.T, m *Manager, group string) (*Group, *Tab) {
 func TestAttachNeverReachesTheBrowser(t *testing.T) {
 	m, s, _ := attachManager(t)
 	g, tab := openAttached(t, m, "s-1")
-	if g.Browser.Profile != UserProfile || !g.Browser.Attached() || g.Browser.Pid() != 0 {
+	if g.Browser.Profile != userKey(relay.ChromeID("p")) || !g.Browser.Attached() || g.Browser.Pid() != 0 {
 		t.Fatalf("browser %+v", g.Browser.View())
 	}
 	if tab.Session != "x1" || tab.TargetID != "Fx1" {
@@ -266,7 +517,7 @@ func TestAttachLeavesOtherTabsAlone(t *testing.T) {
 	if n := len(g.Tabs()); n != 1 {
 		t.Fatalf("the group has %d tabs", n)
 	}
-	if hub.Current() == nil {
+	if hub.Session("") == nil {
 		t.Fatal("the relay ended")
 	}
 	// A popup of the agent's tab is the agent's.
@@ -324,7 +575,7 @@ func TestAttachNeverClosesTheBrowser(t *testing.T) {
 	if n := s.calls(relay.OpGroupClose); n != 0 {
 		t.Fatalf("shutdown closed %d groups in the operator's Chrome", n)
 	}
-	if hub.Current() == nil {
+	if hub.Session("") == nil {
 		t.Fatal("the daemon's shutdown of its browsers ended the relay; the hub's own Close does")
 	}
 	if !g.Closed() {
@@ -340,8 +591,8 @@ func TestAttachCloseBrowserDetaches(t *testing.T) {
 	if _, err := m.CloseBrowser(g.Browser.ID, "closed"); err != nil {
 		t.Fatal(err)
 	}
-	if s.calls(relay.OpGroupClose) != 1 || hub.Current() == nil {
-		t.Fatalf("%d group.close, relay %v", s.calls(relay.OpGroupClose), hub.Current() != nil)
+	if s.calls(relay.OpGroupClose) != 1 || hub.Session("") == nil {
+		t.Fatalf("%d group.close, relay %v", s.calls(relay.OpGroupClose), hub.Session("") != nil)
 	}
 	if _, err := m.Group("s-1"); codeOf(err) != CodeBrowserGone {
 		t.Fatalf("the group after its browser closed: %v", err)
@@ -356,11 +607,11 @@ func TestAttachCloseBrowserDetaches(t *testing.T) {
 func connectAgain(t *testing.T, hub *relay.Hub) *scripted {
 	t.Helper()
 	s := &scripted{t: t, join: relay.Joiner{Max: relay.MaxToExtension}}
-	old := hub.Current()
+	old := hub.Session("")
 	s.link = hub.Open(s, relay.TransportNative, "")
 	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "141.0", ProfileID: "p", ProfileName: "Home"})
 	deadline := time.Now().Add(5 * time.Second)
-	for hub.Current() == nil || hub.Current() == old {
+	for hub.Session("") == nil || hub.Session("") == old {
 		if time.Now().After(deadline) {
 			t.Fatal("the relay was not accepted")
 		}
@@ -382,7 +633,7 @@ func TestAttachRelayComesBackWithinTheGrace(t *testing.T) {
 	waited := make(chan time.Duration, 1)
 	go func() {
 		begin := time.Now()
-		m.AwaitRelay(context.Background())
+		m.AwaitRelay(context.Background(), json.RawMessage(`{"group_id":"s-1"}`))
 		waited <- time.Since(begin)
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -456,15 +707,16 @@ func TestAttachOperatorInput(t *testing.T) {
 	m, _, _ := attachManager(t)
 	g, tab := openAttached(t, m, "s-1")
 	a := m.backend.(*attach)
-	obs := &attachObserver{a: a, b: g.Browser}
-	a.markDispatch(1)
+	p := g.Browser.proc.(*attachProc)
+	obs := &attachObserver{a: a, b: g.Browser, p: p}
+	p.markDispatch(1)
 	obs.RelayInput(1)
 	if c := g.Control(); c.Owner != OwnerAgent {
 		t.Fatalf("the daemon's own input took control: %+v", c)
 	}
-	a.mu.Lock()
-	a.dispatched[1] = time.Now().Add(-time.Second)
-	a.mu.Unlock()
+	p.mu.Lock()
+	p.dispatched[1] = time.Now().Add(-time.Second)
+	p.mu.Unlock()
 	obs.RelayInput(1)
 	c := g.Control()
 	if c.Owner != OwnerHuman || c.Holder != ChromeHolder || time.Until(c.Until) > ChromeInputTTL {

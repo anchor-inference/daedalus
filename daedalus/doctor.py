@@ -746,8 +746,10 @@ async def _user_browser(ctx: DoctorContext, service: Any) -> Check:
         fix = "the desktop launcher starts it; restart the launcher" if ctx.settings.native else "docker compose -f deploy/compose.yaml --env-file .env up -d browser-user"
         return Check(name, False, f"its browser service is not available: {status['detail'] or status['reason']}", "warn", fix)
     relay = status.get("relay") or {}
-    if relay.get("connected"):
-        return Check(name, True, f"Chrome «{relay.get('profile_name') or 'Chrome'}» connected ({relay.get('transport') or '?'}), extension {relay.get('ext_version') or '?'}, Chrome {relay.get('chrome_version') or '?'}", "ok")
+    connected = [c for c in relay.get("chromes") or [] if c.get("connected")]
+    if connected:
+        each = "; ".join(f"Chrome «{c.get('profile_name') or 'Chrome'}» connected ({c.get('transport') or '?'}), extension {c.get('ext_version') or '?'}, Chrome {c.get('chrome_version') or '?'}" for c in connected)
+        return Check(name, True, each, "ok")
     why = str(relay.get("last_error") or "no Chrome has connected since the service started")
     return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Environments → Your Chrome")
 

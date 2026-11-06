@@ -83,12 +83,11 @@ const (
 // The reasons of a bye frame. The extension shows its own words for each; message is the daemon's,
 // for a log.
 const (
-	ByeShutdown     = "shutdown"      // the daemon is stopping
-	ByeReplaced     = "replaced"      // the same Chrome profile connected again, and this relay is the stale one
-	ByeAnotherRelay = "another_relay" // another Chrome is connected; one relay at a time
-	ByeProto        = "proto"         // the protocol versions differ
-	ByeLost         = "lost"          // the relay stopped answering pings
-	ByeBadFrame     = "bad_frame"     // a frame the daemon cannot read
+	ByeShutdown = "shutdown"  // the daemon is stopping
+	ByeReplaced = "replaced"  // the same Chrome profile connected again, and this relay is the stale one
+	ByeProto    = "proto"     // the protocol versions differ
+	ByeLost     = "lost"      // the relay stopped answering pings
+	ByeBadFrame = "bad_frame" // a frame the daemon cannot read
 )
 
 // The codes of a result's error.

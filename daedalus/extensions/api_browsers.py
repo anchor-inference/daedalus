@@ -231,8 +231,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             # The panel's switch: which browser this conversation uses, and whether the operator's
             # Chrome is there to switch to.
             choice = await found.choices.get(session)
-            relay = next((e.get("relay") for e in envs if e["env"] == "user"), None) or {}
-            out["user"] = {"env": choice["env"], "consented": choice["consented"], "connected": bool(relay.get("connected")), "name": str(relay.get("profile_name") or "")}
+            connected, name = await found.conversation_chrome(session)
+            out["user"] = {"env": choice["env"], "consented": choice["consented"], "connected": connected, "name": name}
         return out
 
     @api.get("/api/browsers/load")

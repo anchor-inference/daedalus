@@ -3,12 +3,13 @@
 The panel is the host's own app framed inside the extension (``/app/panel``). It signs in with a
 credential of its own rather than the operator's cookie or the installation's token, because it is
 handed to a page inside another program and must be able to do no more than the panel shows: the
-conversations that use the paired Chrome, and nothing else of the installation.
+conversations of that Chrome, and nothing else of the installation.
 
-- A panel token is minted for the Chrome connected now (a paired device on a server, the one Chrome
-  of this computer natively) and only ever delivered over that Chrome's relay, which is already
-  authenticated: the host asks the ``user`` daemon to pass it on (``relay.call panel.grant``). No
-  HTTP endpoint hands one out.
+- A panel token is minted for one Chrome (a paired device on a server, a Chrome profile of this
+  computer natively: the daemon's name for it either way) and only ever delivered over that Chrome's
+  relay, which is already authenticated: the host asks the ``user`` daemon to pass it on (``relay.call
+  panel.grant``, naming the Chrome). No HTTP endpoint hands one out, and a token one Chrome holds opens
+  nothing of another's.
 - Only its SHA-256 is kept, it is compared in constant time against every live one, and it lapses
   after twelve hours unused. Unpairing the device, or the operator ending every browser session,
   revokes it at once.
@@ -17,11 +18,12 @@ conversations that use the paired Chrome, and nothing else of the installation.
 The same relay carries the panel's news: a conversation in this Chrome needs the operator, or
 finished (``relay.call panel.event``), which the extension turns into a notification and the badge.
 
-Which conversations are this Chrome's (:func:`follows_in_chrome`): the ones the operator made for it
-(the side panel, *Ask Daedalus about this page*, a Browser chat from the app), and any other while it
-is controlling this Chrome now (:mod:`daedalus.host.control_marks`). Any conversation the operator ever
-gave their Chrome used to count, for good, so the main chat that once opened a page was announced in
-Chrome after every turn it took.
+Which conversations are this Chrome's (:func:`follows_in_chrome`): of those that belong to it or to no
+Chrome yet (``UserChoices.bind``), the ones the operator made for it (the side panel, *Ask Daedalus
+about this page*, a Browser chat from the app), and any other while it is controlling this Chrome now
+(:mod:`daedalus.host.control_marks`). Any conversation the operator ever gave their Chrome used to
+count, for good, so the main chat that once opened a page was announced in Chrome after every turn it
+took.
 
 The news is not a second notifier. It is a channel of the app's notifications (:class:`ChromeChannel`):
 the same router decides whether a turn's end or a question is worth a sound at all — the operator's
@@ -60,8 +62,6 @@ left open overnight still opens in the morning without a reconnect."""
 TOUCH_EVERY = timedelta(minutes=1)
 """A use is written down at most this often: every request of an open panel would otherwise be a
 write to the database."""
-NATIVE_DEVICE = "native"
-"""The device a token is for when Chrome is on this computer, which pairs nothing."""
 KEEP_PER_DEVICE = 2
 """The newest token and the one before: a panel that loaded just before a fresh one arrived keeps
 working until it picks the new one up."""
@@ -154,64 +154,65 @@ class PanelGrants:
             await self.db.kv_set(self.KEY, [])
 
 
-Call = Callable[[str, dict[str, Any]], Awaitable[Any]]
-"""``(op, args)`` passed to the connected Chrome through the user daemon's ``relay.call``."""
+Call = Callable[[str, dict[str, Any], str], Awaitable[Any]]
+"""``(op, args, chrome)`` passed to that Chrome through the user daemon's ``relay.call``."""
 
 
 class PanelHerald:
-    """Hands the connected Chrome its panel token, and tells it a conversation's news.
+    """Hands each connected Chrome its panel token, and tells it a conversation's news.
 
-    ``device`` names the Chrome connected now (empty when none is); ``base`` is the address of the
-    app as that Chrome reaches it, which a paired Chrome replaces with the address it was paired with. Neither the herald nor anything it calls waits for an answer that
-    matters: a Chrome that went away between the check and the call misses one grant, and gets the
-    next when it connects again.
+    ``chromes`` names the Chromes connected now; ``base`` is the address of the app as a Chrome reaches
+    it, which a paired Chrome replaces with the address it was paired with. Neither the herald nor
+    anything it calls waits for an answer that matters: a Chrome that went away between the check and
+    the call misses one grant, and gets the next when it connects again.
     """
 
-    def __init__(self, grants: PanelGrants, *, call: Call, device: Callable[[], str], base: Callable[[], str]) -> None:
+    def __init__(self, grants: PanelGrants, *, call: Call, chromes: Callable[[], list[str]], base: Callable[[], str]) -> None:
         self.grants = grants
         self.call = call
-        self.device = device
+        self.chromes = chromes
         self.base = base
         self._lock = asyncio.Lock()
 
-    async def grant(self, *, force: bool = True) -> bool:
-        """Mint and deliver a token for the Chrome connected now. Without ``force`` only when its
-        newest one runs out soon. Whether one was delivered."""
-        device = self.device()
+    async def grant(self, chrome: str, *, force: bool = True) -> bool:
+        """Mint a token for one Chrome and deliver it down that Chrome's relay. Without ``force`` only
+        when its newest one runs out soon. Whether one was delivered."""
         base = self.base().rstrip("/")
-        if not device:
+        if not chrome:
             return False
         async with self._lock:
             if not force:
-                left = await self.grants.expires(device)
+                left = await self.grants.expires(chrome)
                 if left is not None and left - self.grants.now() > REFRESH_AHEAD:
                     return False
-            token, expires = await self.grants.mint(device)
+            token, expires = await self.grants.mint(chrome)
             try:
-                await self.call("panel.grant", {"base": base, "token": token, "expires": expires.isoformat().replace("+00:00", "Z")})
+                await self.call("panel.grant", {"base": base, "token": token, "expires": expires.isoformat().replace("+00:00", "Z")}, chrome)
             except Exception as exc:  # noqa: BLE001 — a Chrome that went away gets the next grant when it comes back
                 logger.info("the side panel's grant did not reach Chrome: %s", exc)
                 return False
         return True
 
-    async def event(self, session_id: str, kind: str, title: str, *, waiting: int, tab: int | None = None) -> None:
-        if not self.device():
-            return
+    async def grant_all(self, *, force: bool = True) -> None:
+        for chrome in self.chromes():
+            await self.grant(chrome, force=force)
+
+    async def event(self, chrome: str, session_id: str, kind: str, title: str, *, waiting: int, tab: int | None = None) -> None:
         args: dict[str, Any] = {"session": session_id, "kind": kind, "title": title[:120], "waiting": max(0, waiting)}
         if tab is not None:
             args["tab"] = tab
         with contextlib.suppress(Exception):
-            await self.call("panel.event", args)
+            await self.call("panel.event", args, chrome)
 
     async def keep_fresh(self, *, first: float = 15.0, every: float = 600.0) -> None:
-        """Runs for the life of the host: a connected Chrome's token is renewed before it lapses. The
-        first round is soon after the start and hands one over whatever the Chrome holds: a Chrome that
+        """Runs for the life of the host: each connected Chrome's token is renewed before it lapses. The
+        first round is soon after the start and hands one over whatever a Chrome holds: a Chrome that
         connected before the host listened never had a connection to be handed a token on."""
         delay, force = first, True
         while True:
             await asyncio.sleep(delay)
             try:
-                await self.grant(force=force)
+                await self.grant_all(force=force)
             except Exception:  # noqa: BLE001 — the next round tries again
                 logger.exception("renewing the side panel's grant failed")
             delay, force = every, False
@@ -256,9 +257,21 @@ async def mark_panel_session(manager: Any, session_id: str) -> None:
     await manager.sessions.update_metadata(session_id, state.session.metadata)
 
 
-def follows_in_chrome(kind: str, controlling: Iterable[str]) -> bool:
+async def hold_in_chrome(service: Any, session_id: str, chrome: str) -> None:
+    """The operator holds this conversation from this Chrome's side panel: it belongs to that Chrome,
+    and stays there. What it is talking about is the page beside the panel, on that computer."""
+    if chrome:
+        name = next((str(c.get("profile_name") or "") for c in service.user_chromes() if c["chrome"] == chrome), "")
+        await service.choices.bind(session_id, chrome, name, held=True)
+
+
+def follows_in_chrome(kind: str, controlling: Iterable[str], *, bound: str = "", chrome: str = "") -> bool:
     """Whether a conversation given the operator's Chrome is one this Chrome's side panel lists and
-    the extension announces: made for their Chrome, or controlling it now."""
+    the extension announces: made for their Chrome, or controlling it now, and not another Chrome's.
+    ``bound`` is the Chrome the conversation belongs to, ``chrome`` the one asking; a conversation of
+    none yet is listed by each, since either may turn out to be it."""
+    if bound and chrome and bound != chrome:
+        return False
     return kind == "chrome" or "chrome" in controlling
 
 
@@ -271,35 +284,45 @@ class ChromeChannel:
     """The app's notifications, out through the extension: its notification and its badge.
 
     Registered with the notification service as ``chrome``. ``covers`` says whether an entry's
-    conversation is one this Chrome follows; the router then gives the entry to this channel instead
-    of the push and the desktop, which on the same computer would be the same sound twice. ``held``
-    is what the conversation controlled when the thing happened, for an entry posted after the control
+    conversation is one a Chrome connected now follows; the router then gives the entry to this channel
+    instead of the push and the desktop, which on the same computer would be the same sound twice. A
+    conversation of a Chrome that is away is left to those: told to nobody, the operator would not hear
+    of it at all, and told to the other computer it would be news from the wrong machine. ``held`` is
+    what the conversation controlled when the thing happened, for an entry posted after the control
     ended: a turn's end is posted once the turn's tabs are already closed.
     """
 
     name = "chrome"
 
-    def __init__(self, herald: PanelHerald, *, manager: Any, using: Callable[[], Awaitable[list[str]]], offered: Callable[[], bool]) -> None:
+    def __init__(self, herald: PanelHerald, *, manager: Any, using: Callable[..., Awaitable[list[str]]], bound: Callable[[str], Awaitable[str]], offered: Callable[[], bool]) -> None:
         self.herald = herald
         self.manager = manager
         self.using = using
+        self.bound = bound
         self.offered = offered
 
     def available(self) -> bool:
-        return bool(self.herald.device())
+        return bool(self.herald.chromes())
 
     async def _kind(self, session_id: str) -> str:
         state = self.manager.live_state(session_id)
         return str(state.kind) if state is not None else await self.manager.sessions.kind(session_id)
 
+    async def _targets(self, session_id: str) -> list[str]:
+        """The connected Chromes that a conversation's news is for: its own when it has one, else every
+        one, since each lists it."""
+        live = self.herald.chromes()
+        bound = await self.bound(session_id)
+        return ([bound] if bound in live else []) if bound else list(live)
+
     async def covers(self, session_id: str, held: Iterable[str] = ()) -> bool:
-        if not self.offered() or session_id not in await self.using():
+        if not self.offered() or session_id not in await self.using() or not await self._targets(session_id):
             return False
         return follows_in_chrome(await self._kind(session_id), [*self.manager.control_marks.of(session_id), *held])
 
-    async def waiting(self) -> int:
-        """How many of this Chrome's conversations wait for the operator: the badge's number."""
-        ids = await self.using()
+    async def waiting(self, chrome: str) -> int:
+        """How many of this Chrome's conversations wait for the operator: its badge's number."""
+        ids = await self.using(chrome)
         kinds = await self.manager.sessions.kinds(ids)
         return sum(
             1 for sid in ids
@@ -315,7 +338,8 @@ class ChromeChannel:
         kind = "needs_you" if view.get("needs_you") or view.get("category") in ("question", "permission") else "done"
         state = self.manager.live_state(session_id)
         title = str(state.session.title) if state is not None else str(view.get("title") or "")
-        await self.herald.event(session_id, kind, title, waiting=await self.waiting())
+        for chrome in await self._targets(session_id):
+            await self.herald.event(chrome, session_id, kind, title, waiting=await self.waiting(chrome))
         return "sent"
 
 
@@ -323,13 +347,13 @@ __all__ = [
     "CHROME_CHAT_LINE",
     "EXTENSION_ID",
     "IDLE",
-    "NATIVE_DEVICE",
     "PANEL_LINE",
     "PANEL_SESSION_KEY",
     "ChromeChannel",
     "PanelGrants",
     "PanelHerald",
     "follows_in_chrome",
+    "hold_in_chrome",
     "mark_panel_session",
     "waits_for_operator",
 ]

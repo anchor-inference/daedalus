@@ -8,6 +8,11 @@ opens ``wss://<server>/api/browser/relay``, presents a device token in its first
 opens the relay on the daemon's socket (``relay.open``) and copies frames both ways, split and joined
 exactly as the bridge does. The daemon never listens on the network.
 
+Any number of Chromes stay connected at once, each with its relay and, in the daemon, a browser of its
+own. A Chrome is named by its paired device's id on a server, proved by the token, so one paired
+Chrome cannot claim another's place by what its hello says; the operator's second computer used to be
+refused at connect, after a pairing that had succeeded, which no amount of pairing again could mend.
+
 A device token is made by spending a one-time code the operator reads in the app. Codes and tokens
 are kept as their SHA-256 only; a token is compared in constant time against every paired device, and
 the pairing and the relay's first frame each have a limit on failed attempts per address and overall,
@@ -36,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlsplit
 
 from daedalus.browser import wire
-from daedalus.browser.model import USER, Conflict, EnvUnavailable, Forbidden, InvalidRequest
+from daedalus.browser.model import USER, ChromeChoice, Conflict, EnvUnavailable, Forbidden, InvalidRequest
 from daedalus.host.policy import APPROVAL_MODES
 from daedalus.terminals.client import PtydClient, Unavailable
 from daedalus.terminals.wire import MAX_PAYLOAD
@@ -168,11 +173,14 @@ SKIP_WARNING = (
 
 
 class UserChoices:
-    """Per conversation: which browser it uses, whether the operator consented, the sites granted.
+    """Per conversation: which browser it uses, whether the operator consented, the sites granted, and
+    which of the operator's Chromes it belongs to.
 
     Kept in one ``kv`` row, bounded, and dropped with the session: a grant is the operator's yes for
-    one conversation, and a new one asks again. The agent has no way to write here — only the
-    operator's switch and the operator's answer to a site question do.
+    one conversation, and a new one asks again. The agent writes only the Chrome, and that only by
+    opening one; its way into the operator's Chrome at all, the sites and the approvals stay the
+    operator's. A conversation with no Chrome yet belongs to none: it joins the first one it opens in,
+    or the panel it is first written to from.
     """
 
     KEY = "browser.user.sessions"
@@ -190,17 +198,54 @@ class UserChoices:
         entry = (await self._all()).get(session_id) or {}
         env = entry.get("env") if entry.get("env") in CHOICES else AGENT
         approvals = entry.get("approvals") if entry.get("approvals") in APPROVAL_MODES else "manual"
-        return {"env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []], "approvals": approvals}
+        return {
+            "env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []], "approvals": approvals,
+            "chrome": str(entry.get("chrome") or ""), "chrome_name": str(entry.get("chrome_name") or ""), "held": bool(entry.get("held")),
+        }
 
     async def env(self, session_id: str | None) -> str:
         if not session_id:
             return AGENT
         return str((await self.get(session_id))["env"])
 
-    async def using_user(self) -> list[str]:
-        """The conversations the operator gave their Chrome, newest switch last: what the extension's
-        side panel lists, and the only ones its credential may open."""
-        return [sid for sid, entry in (await self._all()).items() if isinstance(entry, dict) and entry.get("env") == USER]
+    async def using_user(self, chrome: str = "") -> list[str]:
+        """The conversations the operator gave their Chrome, newest switch last. With ``chrome``, the
+        ones of that Chrome or of none yet: what its side panel lists, and the only ones its credential
+        may open."""
+        return [
+            sid for sid, entry in (await self._all()).items()
+            if isinstance(entry, dict) and entry.get("env") == USER and (not chrome or entry.get("chrome") in (None, "", chrome))
+        ]
+
+    async def chrome_of(self, session_id: str) -> str:
+        """The Chrome a conversation belongs to, ``""`` while it belongs to none."""
+        return str((await self.get(session_id))["chrome"])
+
+    async def bind(self, session_id: str, chrome: str, name: str = "", *, held: bool = False) -> bool:
+        """The conversation belongs to this Chrome from now on; ``held`` says the operator holds it from
+        that Chrome's side panel, which keeps it there. Whether it moved from another.
+
+        A move forgets the sites granted and the approval mode: each was the operator's yes about what
+        the agent may do signed in on one computer, and the other computer holds other accounts."""
+        current = await self.get(session_id)
+        if current["chrome"] == chrome and (current["chrome_name"] == name[:80] or not name) and (current["held"] or not held):
+            return False  # every open and every message of a panel come here; nothing to write
+        moved = False
+
+        def change(entry: dict[str, Any]) -> None:
+            nonlocal moved
+            moved = bool(entry.get("chrome")) and entry["chrome"] != chrome
+            if moved:
+                entry["sites"] = []
+                entry["approvals"] = "manual"
+                entry.pop("held", None)
+            entry["chrome"] = chrome
+            entry["chrome_name"] = name[:80] or entry.get("chrome_name") or ""
+            if held:
+                entry["held"] = True
+
+        await self._update(session_id, change)
+        return moved
 
     async def _update(self, session_id: str, change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         async with self._lock:
@@ -223,6 +268,9 @@ class UserChoices:
 
         def change(entry: dict[str, Any]) -> None:
             entry["env"] = env
+            # The operator moving it by hand is the way out for a conversation held from a panel that
+            # will not come back; the agent can name another Chrome again.
+            entry.pop("held", None)
             if env == USER and not entry.get("consented_at"):
                 entry["consented_at"] = datetime.now(UTC).isoformat()
 
@@ -249,6 +297,15 @@ class UserChoices:
             entry["sites"] = (sites + [site])[-200:]
 
         await self._update(session_id, change)
+
+    async def release(self, chrome: str) -> None:
+        """A Chrome was unpaired: its panel will not come back, so no conversation is held from it. They
+        still belong to it, so nothing slides to another computer; the agent may now name one."""
+        async with self._lock:
+            entries = await self._all()
+            held = [entry for entry in entries.values() if isinstance(entry, dict) and entry.get("chrome") == chrome and entry.pop("held", None)]
+            if held:
+                await self.db.kv_set(self.KEY, entries)
 
     async def forget(self, session_id: str) -> None:
         async with self._lock:
@@ -313,6 +370,56 @@ DEVICE_IDLE = timedelta(days=90)
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+# -- which Chrome ------------------------------------------------------------------------------------
+
+
+def live_chromes(relay: Any) -> list[dict[str, Any]]:
+    """The Chromes of a ``relay.status`` report that a call could mean: connected now, or reconnecting
+    for a moment. One reconnecting stays listed so that the other is not taken for the only one."""
+    if not isinstance(relay, dict):
+        return []
+    return [c for c in relay.get("chromes") or [] if isinstance(c, dict) and c.get("chrome") and (c.get("connected") or c.get("reconnecting"))]
+
+
+def chrome_state(chrome: dict[str, Any]) -> str:
+    """``active`` while the agent has tabs there, ``idle`` while it has none, ``reconnecting`` for a
+    moment after a drop. The extension reports nothing of what the operator is doing in their browser,
+    so this says what is known: whether Daedalus is working in that Chrome now."""
+    if not chrome.get("connected"):
+        return "reconnecting"
+    return "active" if chrome.get("groups") else "idle"
+
+
+def chrome_entry(chrome: dict[str, Any]) -> str:
+    """One Chrome as the agent reads it in a list."""
+    name = str(chrome.get("profile_name") or "Chrome")
+    details = [str(chrome.get("platform") or ""), chrome_state(chrome)]
+    if chrome.get("tabs"):
+        details.append(f"{chrome['tabs']} tab{'' if chrome['tabs'] == 1 else 's'} of agents")
+    if chrome.get("last_seen"):
+        details.append(f"last heard from {chrome['last_seen']}")
+    details += [f"Chrome {chrome.get('chrome_version') or '?'}", f"extension {chrome.get('ext_version') or '?'}"]
+    return f"- «{name}» (id {chrome['chrome']}): {', '.join(d for d in details if d)}"
+
+
+def chrome_list(chromes: list[dict[str, Any]]) -> str:
+    return "\n".join(chrome_entry(c) for c in chromes)
+
+
+def named_chrome(chromes: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
+    """The Chrome ``wanted`` names, by id or by the name the operator gave it, whatever the case. Two
+    of the same name, or a name nothing has, is refused with the list: the default name is "Chrome",
+    so two computers named alike are ordinary, and a near match could be the wrong computer."""
+    text = wanted.strip()
+    found = [c for c in chromes if c["chrome"] == text] or [c for c in chromes if str(c.get("profile_name") or "").casefold() == text.casefold()]
+    if len(found) == 1:
+        return found[0]
+    listed = chrome_list(chromes) or "(none is connected)"
+    if found:
+        raise ChromeChoice(f"two connected Chromes are named «{text}»; name one by its id:\n{listed}", reason="chrome_ambiguous")
+    raise ChromeChoice(f"no connected Chrome is named «{text}». Connected:\n{listed}", reason="chrome_unknown")
 
 
 def normal_code(code: str) -> str:
@@ -397,9 +504,13 @@ class Pairing:
             await self.db.kv_set(self.CODES, [])
             token = secrets.token_urlsafe(32)
             stamp = self.now().isoformat()
-            devices = [d for d in await self._devices() if not (profile_id and d.get("profile_id") == profile_id)]
+            known = await self._devices()
+            # The same Chrome pairing again keeps its id, which names it to the conversations that work
+            # in it: "Pair again" must not orphan them.
+            again = next((d for d in known if profile_id and d.get("profile_id") == profile_id), None)
+            devices = [d for d in known if d is not again]
             device = {
-                "id": secrets.token_hex(6), "token_hash": _digest(token), "name": (profile_name or "Chrome").strip()[:80] or "Chrome",
+                "id": again["id"] if again is not None else secrets.token_hex(6), "token_hash": _digest(token), "name": (profile_name or "Chrome").strip()[:80] or "Chrome",
                 "profile_id": profile_id[:200], "ext_version": ext_version[:64], "chrome_version": chrome_version[:64], "paired_at": stamp, "last_seen": stamp,
             }
             devices.append(device)
@@ -470,8 +581,6 @@ HELLO_SECONDS = 10.0
 
 CLOSE_UNAUTHORIZED = 4401
 """The pairing expired or was revoked, or the token is wrong: the extension asks to pair again."""
-CLOSE_BUSY = 4409
-"""Another Chrome is connected to this installation; the reason names it."""
 CLOSE_BAD_FRAME = 4400
 CLOSE_UNAVAILABLE = 4503
 
@@ -520,7 +629,6 @@ class RelaySocket(Protocol):
 @dataclass(slots=True)
 class LiveRelay:
     device: Device
-    profile_id: str
     name: str
     socket: RelaySocket
     since: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -528,13 +636,15 @@ class LiveRelay:
 
 
 class RelayDesk:
-    """The host's end of ``wss /api/browser/relay``: one relay at a time, proxied to the user daemon."""
+    """The host's end of ``wss /api/browser/relay``: a relay for each paired Chrome, proxied to the
+    user daemon on a connection of its own."""
 
     def __init__(self, pairing: Pairing, run_dir: Callable[[], Path | None], *, install_name: Callable[[], str] = lambda: "Daedalus") -> None:
         self.pairing = pairing
         self.run_dir = run_dir
         self.install_name = install_name
-        self.current: LiveRelay | None = None
+        self.live: dict[str, LiveRelay] = {}
+        """The relays carried now, by device."""
         self._lock = asyncio.Lock()
 
     async def _bye(self, sock: RelaySocket, reason: str, message: str, code: int) -> None:
@@ -558,29 +668,28 @@ class RelayDesk:
         if device is None:
             await self._bye(sock, "unauthorized", "pairing expired or revoked; pair this Chrome again in the app", CLOSE_UNAUTHORIZED)
             return
-        profile_id = str(hello.get("profile_id") or "")
+        # The daemon knows this Chrome by the device the token proved, not by what its hello claims: a
+        # paired Chrome saying another's profile id would otherwise take that one's place.
+        hello["profile_id"] = device.id
         name = str(hello.get("profile_name") or device.name or "Chrome")[:80]
         run_dir = self.run_dir()
         if run_dir is None:
             await self._bye(sock, "unavailable", "this installation has no browser for your Chrome", CLOSE_UNAVAILABLE)
             return
-        live = LiveRelay(device, profile_id, name, sock)
+        live = LiveRelay(device, name, sock)
         async with self._lock:
-            old = self.current
+            old = self.live.get(device.id)
             if old is not None and not old.ended.is_set():
-                if not profile_id or old.profile_id != profile_id:
-                    await self._bye(sock, "another_relay", f"another Chrome is already connected: {old.name}", CLOSE_BUSY)
-                    return
-                # The same Chrome profile again: its worker restarted, or its old socket is half dead.
+                # The same Chrome again: its worker restarted, or its old socket is half dead.
                 await self._bye(old.socket, "replaced", "this Chrome connected again", 1000)
                 old.ended.set()
-            self.current = live
+            self.live[device.id] = live
         try:
             await self._carry(live, hello, run_dir)
         finally:
             live.ended.set()
-            if self.current is live:
-                self.current = None
+            if self.live.get(device.id) is live:
+                del self.live[device.id]
             with contextlib.suppress(Exception):
                 await self.pairing.seen(device.id, name=name, ext_version=str(hello.get("ext_version") or ""), chrome_version=str(hello.get("chrome_version") or ""))
 
@@ -597,7 +706,6 @@ class RelayDesk:
             return
         channel = client.channel(int(opened["channel"]))
         await self.pairing.seen(live.device.id, name=live.name)
-        busy = asyncio.Event()
 
         async def to_daemon() -> None:
             await _send_pieces(channel, json.dumps(hello, separators=(",", ":")).encode())
@@ -623,8 +731,6 @@ class RelayDesk:
                 await sock.send_text(frame.decode("utf-8", errors="replace"))
                 parsed = _frame(frame)
                 if parsed is not None and parsed.get("t") == "bye":
-                    if parsed.get("reason") == "another_relay":
-                        busy.set()
                     return
 
         tasks = [asyncio.create_task(to_daemon()), asyncio.create_task(to_chrome()), asyncio.create_task(live.ended.wait())]
@@ -639,23 +745,17 @@ class RelayDesk:
             with contextlib.suppress(Exception):
                 await channel.close()
             await client.close()
-            if busy.is_set():
-                # The daemon has a relay of its own already (a Chrome through the bridge on the
-                # server itself): refused as the host refuses a second WebSocket.
-                await sock.close(CLOSE_BUSY, "another Chrome is already connected")
-            else:
-                await sock.close(1000, "relay ended")
+            await sock.close(1000, "relay ended")
 
     async def revoked(self, device_id: str) -> None:
         """A device was revoked: its live relay ends now, with the code that says pair again."""
-        live = self.current
-        if live is not None and live.device.id == device_id and not live.ended.is_set():
+        live = self.live.get(device_id)
+        if live is not None and not live.ended.is_set():
             await self._bye(live.socket, "unauthorized", "this Chrome's pairing was revoked", CLOSE_UNAUTHORIZED)
             live.ended.set()
 
-    def connected_device(self) -> str:
-        live = self.current
-        return live.device.id if live is not None and not live.ended.is_set() else ""
+    def connected_devices(self) -> set[str]:
+        return {device for device, live in self.live.items() if not live.ended.is_set()}
 
 
 async def _send_pieces(channel: Any, frame: bytes) -> None:
@@ -677,7 +777,18 @@ def not_connected(reason: str) -> EnvUnavailable:
     return EnvUnavailable(f"your Chrome is not connected to Daedalus: {reason or 'the extension has not connected'}", env=USER, reason="chrome_not_connected")
 
 
+def chrome_away(name: str, others: list[dict[str, Any]]) -> EnvUnavailable:
+    """The conversation's own Chrome is not connected. Going on in another one instead is exactly what
+    must not happen by itself: the agent would act on the wrong computer, signed in as someone else's
+    idea of the operator, so it is told, and only naming the other moves it."""
+    text = f"this conversation works in the operator's Chrome «{name or 'Chrome'}», which is not connected to Daedalus now, so nothing was opened"
+    if others:
+        text += f". To work in another one instead, name it with BrowserOpen(chrome=…); the operator's site approvals start over there:\n{chrome_list(others)}"
+    return EnvUnavailable(text, env=USER, reason="chrome_not_connected")
+
+
 __all__ = [
-    "ANTI_BOT_WORDS", "AGENT", "CHOICES", "CLOSE_BUSY", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
-    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "anti_bot", "chrome_forbids", "normal_code", "not_connected", "site_granted", "site_of", "split",
+    "ANTI_BOT_WORDS", "AGENT", "CHOICES", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
+    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "anti_bot", "chrome_away", "chrome_entry", "chrome_forbids", "chrome_list", "chrome_state",
+    "live_chromes", "named_chrome", "normal_code", "not_connected", "site_granted", "site_of", "split",
 ]

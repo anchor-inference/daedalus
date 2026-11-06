@@ -138,7 +138,7 @@ func TestGoldenFrames(t *testing.T) {
 			t.Errorf("no golden tabs frame of %s", op)
 		}
 	}
-	for _, r := range []string{ByeShutdown, ByeReplaced, ByeAnotherRelay, ByeProto, ByeLost, ByeBadFrame, "not_running", "unavailable"} {
+	for _, r := range []string{ByeShutdown, ByeReplaced, ByeProto, ByeLost, ByeBadFrame, "not_running", "unavailable"} {
 		if !byes[r] {
 			t.Errorf("no golden bye of %s", r)
 		}

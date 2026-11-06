@@ -43,7 +43,7 @@ WORDS = {
     "en": {"tabs": ["All", "Chats", "Computer", "Browser", "Remote"], "computer": "Computer", "browser": "Browser", "consent": "Use my Chrome", "live": "Controlling your Chrome now"},
     "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер", "Удалённо"], "computer": "Компьютер", "browser": "Браузер", "consent": "Использовать мой Chrome", "live": "Сейчас управляет вашим Chrome"},
 }
-CHROME = {"configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "profile_name": "Work"}, "native": True,
+CHROME = {"configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "chromes": [{"chrome": "c1", "connected": True, "profile_name": "Work"}]}, "native": True,
           "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""}
 
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -162,41 +163,111 @@ func TestHelloWelcome(t *testing.T) {
 		t.Fatalf("relay.connected %v", ev)
 	}
 	st := h.Status()
-	if !st.Connected || st.ProfileName != "Work" || st.ExtVersion != "1.0.0" || st.Since == nil || st.LastSeen == nil {
+	if !st.Connected || len(st.Chromes) != 1 {
 		t.Fatalf("status %+v", st)
+	}
+	if c := st.Chromes[0]; c.Chrome != ChromeID("p1") || c.ProfileName != "Work" || c.ExtVersion != "1.0.0" || c.Since == nil || c.LastSeen == nil {
+		t.Fatalf("chrome %+v", c)
+	}
+	if ev["chrome"] != ChromeID("p1") {
+		t.Fatalf("relay.connected names no Chrome: %v", ev)
 	}
 	// The server transport welcomes as a server installation, under the name relay.open gave.
 	s := newChannel()
 	s.link = h.Open(s, TransportServer, "Office")
-	h.Current().end(LostClosed, nil)
+	h.Session("").end(LostClosed, nil)
 	s.send(t, Hello{T: THello, Proto: Proto, ProfileID: "p2"})
 	s.next(t, TWelcome, &w)
 	if w.InstallKind != InstallServer || w.InstallName != "Office" {
 		t.Fatalf("server welcome %+v", w)
 	}
-	if h.Status().ProfileName != "Chrome" {
-		t.Fatalf("a hello without a name is Chrome: %+v", h.Status())
+	if got := h.Status().Chromes; !got[0].Connected || got[0].ProfileName != "Chrome" {
+		t.Fatalf("a hello without a name is Chrome: %+v", got)
 	}
 }
 
-// One relay at a time: a second Chrome is refused with the name of the one connected, and the first
-// keeps working.
-func TestSecondRelayRefused(t *testing.T) {
-	h, _ := testHub(Options{})
-	first := h.connect(t, "p1", "Home Chrome")
+// Two Chromes stay connected at once, each with its own relay, and neither hears of the other going.
+func TestTwoChromesAtOnce(t *testing.T) {
+	h, pub := testHub(Options{})
+	first := h.connect(t, "p1", "Windows")
 	first.next(t, TWelcome, nil)
-	second := h.connect(t, "p2", "Laptop")
-	var bye Bye
-	second.next(t, TBye, &bye)
-	if bye.Reason != ByeAnotherRelay || !strings.Contains(bye.Message, "another Chrome is already connected: Home Chrome") {
-		t.Fatalf("bye %+v", bye)
-	}
-	second.waitClosed(t)
-	if st := h.Status(); !st.Connected || st.ProfileName != "Home Chrome" || !strings.Contains(st.LastError, "Laptop") {
+	second := h.connect(t, "p2", "MacBook")
+	second.next(t, TWelcome, nil)
+	st := h.Status()
+	if !st.Connected || len(st.Chromes) != 2 || st.Chromes[0].ProfileName != "Windows" || st.Chromes[1].ProfileName != "MacBook" {
 		t.Fatalf("status %+v", st)
 	}
-	first.send(t, Check{T: TCheck, N: 1})
-	first.next(t, TCheckOK, nil)
+	if h.Session("") != nil {
+		t.Fatal("a call naming no Chrome found one of two")
+	}
+	win, mac := h.Session(ChromeID("p1")), h.Session(ChromeID("p2"))
+	if win == nil || mac == nil || win == mac {
+		t.Fatalf("sessions %v %v", win, mac)
+	}
+	win.end(LostClosed, nil)
+	if ev := pub.wait(t, "relay.lost"); ev["chrome"] != ChromeID("p1") {
+		t.Fatalf("relay.lost %v", ev)
+	}
+	st = h.Status()
+	if !st.Connected || st.Chromes[0].ProfileName != "MacBook" || st.Chromes[1].Connected || st.Chromes[1].LastError != "Chrome closed the connection" {
+		t.Fatalf("status after one left %+v", st)
+	}
+	if h.Session("") != mac {
+		t.Fatal("the one left is the only one")
+	}
+	if expected, _ := h.Expected(ChromeID("p1"), time.Minute); !expected {
+		t.Fatal("the Chrome that left is expected back")
+	}
+	if expected, _ := h.Expected(ChromeID("p2"), time.Minute); expected {
+		t.Fatal("the Chrome still here is not one to wait for")
+	}
+	if got := h.Candidates(time.Minute); len(got) != 2 {
+		t.Fatalf("a Chrome reconnecting is still a candidate: %v", got)
+	}
+	second.send(t, Check{T: TCheck, N: 1})
+	second.next(t, TCheckOK, nil)
+}
+
+// A hello without a profile can be told from nobody: it takes no other Chrome's place, not even
+// another's without one.
+func TestChromeWithoutAProfile(t *testing.T) {
+	h, _ := testHub(Options{})
+	a := h.connect(t, "", "One")
+	a.next(t, TWelcome, nil)
+	b := h.connect(t, "", "Two")
+	b.next(t, TWelcome, nil)
+	if st := h.Status(); len(st.Chromes) != 2 {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+// The table of Chromes that went away stays bounded, and a connected one is never dropped from it.
+func TestGoneChromesBounded(t *testing.T) {
+	h, _ := testHub(Options{})
+	stays := h.connect(t, "stays", "Stays")
+	stays.next(t, TWelcome, nil)
+	for i := range keepChromes + 10 {
+		id := fmt.Sprintf("p%d", i)
+		c := h.connect(t, id, id)
+		c.next(t, TWelcome, nil)
+		h.Session(ChromeID(id)).end(LostClosed, nil)
+	}
+	st := h.Status()
+	if len(st.Chromes) > keepChromes || !st.Chromes[0].Connected {
+		t.Fatalf("%d remembered, first %+v", len(st.Chromes), st.Chromes[0])
+	}
+}
+
+// A paired device's id, which the host puts in the hello, is the Chrome's name as it stands; anything
+// else is a digest of it, of the length a group's id has room for.
+func TestChromeID(t *testing.T) {
+	if got := ChromeID("a1b2c3d4e5f6"); got != "a1b2c3d4e5f6" {
+		t.Fatalf("a device id became %q", got)
+	}
+	id := ChromeID("5b0c3c3e-6a51-4f7e-9d8a-2f0f8f6f1c11")
+	if len(id) != 12 || id == ChromeID("5b0c3c3e-6a51-4f7e-9d8a-2f0f8f6f1c12") {
+		t.Fatalf("a profile id became %q", id)
+	}
 }
 
 // The same Chrome profile connecting again (its worker restarted, its old bridge not yet gone)
@@ -205,7 +276,7 @@ func TestSameProfileReplaces(t *testing.T) {
 	h, pub := testHub(Options{})
 	old := h.connect(t, "p1", "Home")
 	old.next(t, TWelcome, nil)
-	oldSession := h.Current()
+	oldSession := h.Session("")
 	fresh := h.connect(t, "p1", "Home")
 	fresh.next(t, TWelcome, nil)
 	var bye Bye
@@ -214,7 +285,7 @@ func TestSameProfileReplaces(t *testing.T) {
 		t.Fatalf("bye %+v", bye)
 	}
 	old.waitClosed(t)
-	if h.Current() == oldSession || h.Current() == nil {
+	if h.Session("") == oldSession || h.Session("") == nil {
 		t.Fatal("the new relay is not the current one")
 	}
 	if ev := pub.wait(t, "relay.lost"); ev["reason"] != LostReplaced {
@@ -289,7 +360,7 @@ func TestPingLiveness(t *testing.T) {
 	if ev := pub.wait(t, "relay.lost"); ev["reason"] != LostNoPong {
 		t.Fatalf("relay.lost %v", ev)
 	}
-	if st := h.Status(); st.Connected || st.LastError != "Chrome stopped answering" || st.ProfileName != "Home" {
+	if st := h.Status(); st.Connected || st.LastError != "Chrome stopped answering" || st.Chromes[0].ProfileName != "Home" {
 		t.Fatalf("status %+v", st)
 	}
 }
@@ -320,7 +391,7 @@ func TestCall(t *testing.T) {
 	h, _ := testHub(Options{})
 	c := h.connect(t, "p1", "Home")
 	c.next(t, TWelcome, nil)
-	s := h.Current()
+	s := h.Session("")
 	go func() {
 		var call struct {
 			ID   int64          `json:"id"`
@@ -352,7 +423,7 @@ func TestCall(t *testing.T) {
 	if err := <-done; !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("a call across the end: %v", err)
 	}
-	if h.Current() != nil || h.Status().LastError != "Chrome closed the connection" {
+	if h.Session("") != nil || h.Status().LastError != "Chrome closed the connection" {
 		t.Fatalf("status %+v", h.Status())
 	}
 }
@@ -382,7 +453,7 @@ func TestConn(t *testing.T) {
 	h, _ := testHub(Options{})
 	c := h.connect(t, "p1", "Home")
 	c.next(t, TWelcome, nil)
-	s := h.Current()
+	s := h.Session("")
 	events := make(chan cdp.Event, 16)
 	var dispatched []int
 	var dmu sync.Mutex
@@ -483,7 +554,7 @@ func TestLargeResult(t *testing.T) {
 	h, _ := testHub(Options{})
 	c := h.connect(t, "p1", "Home")
 	c.next(t, TWelcome, nil)
-	conn, drop := h.Current().NewConn(func(cdp.Event) {}, nil)
+	conn, drop := h.Session("").NewConn(func(cdp.Event) {}, nil)
 	defer drop()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

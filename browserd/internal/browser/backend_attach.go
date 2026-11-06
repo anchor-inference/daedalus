@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,22 +20,20 @@ import (
 // it owned it: none of what launch does to a browser of its own (adopting or closing pages it did
 // not open, pausing every new page, moving the downloads, writing the profile, closing the browser
 // when idle, rewriting the user agent, the screen position script) has a path here.
+//
+// Every Chrome connected is a browser of its own (attachProc), whatever the host's groups are called,
+// and nothing is shared between two: Chrome numbers its tabs per process, so the same "x412" names a
+// tab on each of two computers, and a command meant for one must never find the other's.
 type attach struct {
 	m   *Manager
 	hub *relay.Hub
 
 	mu sync.Mutex
-	// cur is the browser of the operator's Chrome, which a relay the same Chrome makes again is
-	// bound to (onSession).
-	cur *attachProc
+	// procs are the browsers of the Chromes open now, by ChromeID: a relay the same Chrome makes
+	// again is bound to its browser (onSession).
+	procs map[string]*attachProc
 	// grace is RelayGrace, shorter in a test.
 	grace time.Duration
-	// dispatched is when the daemon last sent input to each tab, by Chrome's tab id: the operator's
-	// own input is told from the echo of the daemon's by it.
-	dispatched map[int]time.Time
-	// setting are the tabs being prepared, by tab id, so a tab the extension announces while
-	// tab.create is still answering is prepared once.
-	setting map[int]chan *Tab
 }
 
 // ChromeHolder is the holder of human control the operator's own input in Chrome takes: a person at
@@ -59,10 +58,24 @@ func ErrAttachRefused(what string) *wire.Error {
 		"%s is not done in the operator's own Chrome; use the agent's browser for it", what)
 }
 
-// errNotConnected is browser.open while no Chrome is connected.
-func errNotConnected() *wire.Error {
-	return errWith(wire.CodeUnsupported, map[string]any{"reason": "chrome_not_connected"},
+// errNotConnected is a call for a Chrome that has no relay; empty, for any Chrome at all.
+func errNotConnected(chrome string) *wire.Error {
+	return errWith(wire.CodeUnsupported, map[string]any{"reason": "chrome_not_connected", "chrome": chrome},
 		"the operator's Chrome is not connected: the Daedalus extension must be installed, and connected in its popup")
+}
+
+// errChromeChoice is a call that names no Chrome while several are there. The host names one on every
+// call; this is the wall behind it, because picking one here would be acting on some computer because
+// of the order of a map.
+func errChromeChoice(chromes []string) *wire.Error {
+	return errWith(wire.CodeUnsupported, map[string]any{"reason": "chrome_choice", "chromes": chromes},
+		"several of the operator's Chromes are connected; the call must name one")
+}
+
+// errOtherChrome is an open group asked for in another Chrome than the one it is in.
+func errOtherChrome(group, chrome string) *wire.Error {
+	return errWith(wire.CodeForbidden, map[string]any{"reason": "chrome_other", "chrome": chrome},
+		"group %q is open in Chrome %q; it never moves to another", group, chrome)
 }
 
 // relayErr turns a call's failure into the daemon's errors: a refusal of the extension's is 1004,
@@ -106,18 +119,27 @@ const rebindSettle = 15 * time.Second
 // the same Chrome does not connect again within RelayGrace, or the daemon lets go of it. Closing it
 // closes the agent's groups, never the browser.
 type attachProc struct {
-	a       *attach
-	b       *Browser
-	line    *relay.Line
-	profile string
-	done    chan struct{}
-	once    sync.Once
-	closing sync.Mutex
+	a      *attach
+	b      *Browser
+	line   *relay.Line
+	chrome string
+	// anonymous is a hello without a profile: it cannot be told from another Chrome, so its browser
+	// ends with its relay.
+	anonymous bool
+	done      chan struct{}
+	once      sync.Once
+	closing   sync.Mutex
 
 	mu        sync.Mutex
 	s         *relay.Session // the relay bound now, or the one that ended while none is
 	rebound   chan struct{}  // closed when another relay is bound
 	reboundAt time.Time
+	// dispatched is when the daemon last sent input to each tab, by Chrome's tab id: the operator's
+	// own input is told from the echo of the daemon's by it.
+	dispatched map[int]time.Time
+	// setting are the tabs being prepared, by tab id, so a tab the extension announces while
+	// tab.create is still answering is prepared once.
+	setting map[int]chan *Tab
 }
 
 func (p *attachProc) Done() <-chan struct{} { return p.done }
@@ -133,6 +155,11 @@ func (p *attachProc) finish() {
 	p.once.Do(func() {
 		p.line.Close()
 		close(p.done)
+		p.a.mu.Lock()
+		if p.a.procs[p.chrome] == p {
+			delete(p.a.procs, p.chrome)
+		}
+		p.a.mu.Unlock()
 	})
 }
 
@@ -160,7 +187,7 @@ func (p *attachProc) watch() {
 			continue // bound to the next relay already
 		}
 		reason := s.Reason()
-		if reason == relay.LostShutdown || p.profile == "" {
+		if reason == relay.LostShutdown || p.anonymous {
 			p.end("chrome disconnected (" + reason + ")")
 			return
 		}
@@ -180,11 +207,12 @@ func (p *attachProc) watch() {
 	}
 }
 
-// onSession binds the browser to a relay the hub accepted, before its welcome goes out and so before
-// the extension replays the tabs it holds. Another Chrome than the browser's ends it.
+// onSession binds a Chrome's browser to a relay the hub accepted, before its welcome goes out and so
+// before the extension replays the tabs it holds. Another Chrome connecting used to end the browser
+// here; it has a browser of its own now, and this one never hears of it.
 func (a *attach) onSession(s *relay.Session) {
 	a.mu.Lock()
-	p := a.cur
+	p := a.procs[s.Chrome()]
 	a.mu.Unlock()
 	if p == nil {
 		return
@@ -197,12 +225,8 @@ func (a *attach) onSession(s *relay.Session) {
 	if p.session() == s {
 		return
 	}
-	if p.profile == "" || s.Hello().ProfileID != p.profile {
-		p.end("chrome disconnected (another Chrome connected)")
-		return
-	}
 	p.line.Bind(s)
-	s.SetObserver(&attachObserver{a: a, b: p.b})
+	s.SetObserver(&attachObserver{a: a, b: p.b, p: p})
 	p.mu.Lock()
 	p.s = s
 	p.reboundAt = time.Now()
@@ -243,19 +267,46 @@ func (p *attachProc) Close(grace time.Duration) {
 
 func (p *attachProc) Kill() { p.finish() }
 
-func (a *attach) session() (*relay.Session, error) {
-	if a.hub == nil {
-		return nil, errNotConnected()
+// chromeOfKey is the Chrome of a browser's key in the manager (userKey), which is all start is given.
+func chromeOfKey(key string) string { return strings.TrimPrefix(key, UserProfile+":") }
+
+// userKey is what the manager keeps a Chrome's browser under.
+func userKey(chrome string) string { return UserProfile + ":" + chrome }
+
+// pick is the Chrome a call means: the one it names, or the only candidate. Several candidates and no
+// name is refused, and a Chrome expected back counts: one reconnecting for a moment must not leave
+// the other to be taken for "the only one".
+func (a *attach) pick(chrome string) (string, error) {
+	if chrome != "" {
+		return chrome, nil
 	}
-	s := a.hub.Current()
+	if a.hub == nil {
+		return "", errNotConnected("")
+	}
+	switch ids := a.hub.Candidates(a.grace); len(ids) {
+	case 0:
+		return "", errNotConnected("")
+	case 1:
+		return ids[0], nil
+	default:
+		return "", errChromeChoice(ids)
+	}
+}
+
+func (a *attach) session(chrome string) (*relay.Session, error) {
+	if a.hub == nil {
+		return nil, errNotConnected(chrome)
+	}
+	s := a.hub.Session(chrome)
 	if s == nil {
-		return nil, errNotConnected()
+		return nil, errNotConnected(chrome)
 	}
 	return s, nil
 }
 
 func (a *attach) start(ctx context.Context, profile string) (*Browser, error) {
-	s, err := a.session()
+	chrome := chromeOfKey(profile)
+	s, err := a.session(chrome)
 	if err != nil {
 		return nil, err
 	}
@@ -268,25 +319,47 @@ func (a *attach) start(ctx context.Context, profile string) (*Browser, error) {
 	// any page asks.
 	b.screenAsked = true
 	close(b.screenKnown)
+	p := &attachProc{a: a, b: b, chrome: chrome, anonymous: hi.ProfileID == "", s: s, done: make(chan struct{}), rebound: make(chan struct{}),
+		dispatched: map[int]time.Time{}, setting: map[int]chan *Tab{}}
 	// The operator's yes to a site is kept by group, where net.grant puts it (Manager.WallKey).
-	conn, line := relay.NewLine(func(e cdp.Event) { m.onEvent(b, e) }, a.markDispatch)
+	conn, line := relay.NewLine(func(e cdp.Event) { m.onEvent(b, e) }, p.markDispatch)
 	b.conn = conn
-	p := &attachProc{a: a, b: b, line: line, profile: hi.ProfileID, s: s, done: make(chan struct{}), rebound: make(chan struct{})}
+	p.line = line
 	b.proc = p
 	line.Bind(s)
-	s.SetObserver(&attachObserver{a: a, b: b})
+	s.SetObserver(&attachObserver{a: a, b: b, p: p})
 	a.mu.Lock()
-	a.cur = p
+	a.procs[chrome] = p
 	a.mu.Unlock()
 	go p.watch()
-	m.log.Info("browser attached", "browser", b.ID, "profile", hi.ProfileName, "chrome", hi.ChromeVersion, "extension", hi.ExtVersion)
+	// A relay accepted between the session read above and the line above found no browser to bind:
+	// without this the browser would answer "reconnecting" to a Chrome that is connected, and close.
+	if now := a.hub.Session(chrome); now != nil && now != s {
+		a.onSession(now)
+	}
+	m.log.Info("browser attached", "browser", b.ID, "chrome", chrome, "profile", hi.ProfileName, "chrome_version", hi.ChromeVersion, "extension", hi.ExtVersion)
 	return b, nil
 }
 
-func (a *attach) markDispatch(tab int) {
+func (p *attachProc) markDispatch(tab int) {
+	p.mu.Lock()
+	p.dispatched[tab] = time.Now()
+	p.mu.Unlock()
+}
+
+// load is how many of the agent's groups and tabs are open in a Chrome now.
+func (a *attach) load(chrome string) (groups, tabs int) {
 	a.mu.Lock()
-	a.dispatched[tab] = time.Now()
+	p := a.procs[chrome]
 	a.mu.Unlock()
+	if p == nil {
+		return 0, 0
+	}
+	for _, g := range p.b.groupList() {
+		groups++
+		tabs += len(g.Tabs())
+	}
+	return groups, tabs
 }
 
 // openGroup asks for the agent's own window for the group, and takes up the tabs the extension's tab
@@ -312,11 +385,11 @@ func (a *attach) openGroup(ctx context.Context, g *Group) error {
 	return nil
 }
 
-// sessionOf is the relay of b, which is the hub's current one for as long as b lives.
+// sessionOf is the relay of b, its own Chrome's and no other, for as long as b lives.
 func (a *attach) sessionOf(b *Browser) (*relay.Session, error) {
 	p, ok := b.proc.(*attachProc)
 	if !ok {
-		return nil, errNotConnected()
+		return nil, errNotConnected("")
 	}
 	select {
 	case <-p.done:
@@ -374,19 +447,17 @@ func (a *attach) newTab(ctx context.Context, g *Group) (*Tab, error) {
 func (a *attach) prepare(ctx context.Context, g *Group, tab relay.Tab, opener string, claimed bool) (*Tab, error) {
 	m := a.m
 	b := g.Browser
+	p := b.proc.(*attachProc)
 	session := relay.SessionOf(tab.ID)
 	m.mu.Lock()
-	if t := m.bySession[session]; t != nil {
+	if t := m.bySession[b.sessionKey(session)]; t != nil {
 		m.mu.Unlock()
 		return t, nil
 	}
 	m.mu.Unlock()
-	a.mu.Lock()
-	if a.setting == nil {
-		a.setting = map[int]chan *Tab{}
-	}
-	if wait := a.setting[tab.ID]; wait != nil {
-		a.mu.Unlock()
+	p.mu.Lock()
+	if wait := p.setting[tab.ID]; wait != nil {
+		p.mu.Unlock()
 		select {
 		case t := <-wait:
 			wait <- t
@@ -396,14 +467,14 @@ func (a *attach) prepare(ctx context.Context, g *Group, tab relay.Tab, opener st
 		}
 	}
 	mine := make(chan *Tab, 1)
-	a.setting[tab.ID] = mine
-	a.mu.Unlock()
+	p.setting[tab.ID] = mine
+	p.mu.Unlock()
 	var t *Tab
 	defer func() {
 		mine <- t
-		a.mu.Lock()
-		delete(a.setting, tab.ID)
-		a.mu.Unlock()
+		p.mu.Lock()
+		delete(p.setting, tab.ID)
+		p.mu.Unlock()
 	}()
 	var tree struct {
 		FrameTree struct {
@@ -596,52 +667,81 @@ func (m *Manager) CookieNames(ctx context.Context, g *Group, url string) ([]rela
 	return r.Cookies, nil
 }
 
-// Notify shows text in the extension's popup, and is how the app's "Check connection" reaches the
+// chromeSession is the relay of the Chrome a call for the host names; see attach.pick.
+func (m *Manager) chromeSession(chrome string) (*relay.Session, error) {
+	a, ok := m.backend.(*attach)
+	if !ok {
+		return nil, errNotConnected(chrome)
+	}
+	id, err := a.pick(chrome)
+	if err != nil {
+		return nil, err
+	}
+	return a.session(id)
+}
+
+// Notify shows text in one Chrome's extension, and is how the app's "Check connection" reaches that
 // browser; it answers how long the round trip took.
-func (m *Manager) Notify(ctx context.Context, text string) (time.Duration, error) {
-	hub := m.deps.Relay
-	if hub == nil || hub.Current() == nil {
-		return 0, errNotConnected()
+func (m *Manager) Notify(ctx context.Context, chrome, text string) (time.Duration, error) {
+	s, err := m.chromeSession(chrome)
+	if err != nil {
+		return 0, err
 	}
 	begin := time.Now()
-	if err := hub.Current().Call(ctx, relay.OpNotify, relay.NotifyArgs{Text: text}, nil); err != nil {
+	if err := s.Call(ctx, relay.OpNotify, relay.NotifyArgs{Text: text}, nil); err != nil {
 		return 0, relayErr(err)
 	}
 	return time.Since(begin), nil
 }
 
-// CallExtension runs one of the side panel's operations (relay.PanelOps) on the connected Chrome for
-// the host: its credential, and a conversation's news for a notification. Anything else is refused,
-// so the host's socket cannot reach the tabs around the daemon's own rules.
-func (m *Manager) CallExtension(ctx context.Context, op string, args map[string]any) error {
+// CallExtension runs one of the side panel's operations (relay.PanelOps) on one Chrome for the host:
+// its credential, and a conversation's news for a notification. A token goes down that Chrome's own
+// relay or nowhere, so an unnamed call with several connected is refused. Anything else is refused
+// too, so the host's socket cannot reach the tabs around the daemon's own rules.
+func (m *Manager) CallExtension(ctx context.Context, chrome, op string, args map[string]any) error {
 	if !relay.PanelOps[op] {
 		return wire.Errorf(wire.CodeInvalidParams, "relay.call carries the side panel's operations only, not %q", op)
 	}
-	hub := m.deps.Relay
-	if hub == nil || hub.Current() == nil {
-		return errNotConnected()
+	s, err := m.chromeSession(chrome)
+	if err != nil {
+		return err
 	}
-	if err := hub.Current().Call(ctx, op, args, nil); err != nil {
+	if err := s.Call(ctx, op, args, nil); err != nil {
 		return relayErr(err)
 	}
 	return nil
+}
+
+// RelayReport is the hub's report with what only the browsers know: how many of the agent's groups
+// and tabs each Chrome holds, and whether one without a relay is expected back.
+func (m *Manager) RelayReport() relay.Report {
+	a, ok := m.backend.(*attach)
+	if !ok || a.hub == nil {
+		return relay.Report{Chromes: []relay.Status{}}
+	}
+	r := a.hub.Status()
+	for i := range r.Chromes {
+		st := &r.Chromes[i]
+		st.Groups, st.Tabs = a.load(st.Chrome)
+		if !st.Connected {
+			st.Reconnecting, _ = a.hub.Expected(st.Chrome, a.grace)
+		}
+	}
+	return r
 }
 
 // attachObserver hears what the operator changed in the agent's scope in Chrome.
 type attachObserver struct {
 	a *attach
 	b *Browser
+	p *attachProc
 }
 
 func (o *attachObserver) tab(id int) *Tab {
 	m := o.a.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := m.bySession[relay.SessionOf(id)]
-	if t == nil || t.Group.Browser != o.b {
-		return nil
-	}
-	return t
+	return m.bySession[o.b.sessionKey(relay.SessionOf(id))]
 }
 
 func (o *attachObserver) group(id string) *Group {
@@ -740,9 +840,9 @@ func (o *attachObserver) RelayInput(id int) {
 	if t == nil {
 		return
 	}
-	o.a.mu.Lock()
-	echo := time.Since(o.a.dispatched[id]) < inputEcho
-	o.a.mu.Unlock()
+	o.p.mu.Lock()
+	echo := time.Since(o.p.dispatched[id]) < inputEcho
+	o.p.mu.Unlock()
 	if echo {
 		return
 	}

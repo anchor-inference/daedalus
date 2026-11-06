@@ -43,6 +43,12 @@ class SwitchBody(BaseModel):
     """The operator said yes to the consent summary; needed for a conversation's first switch."""
 
 
+class CheckBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chrome: str = Field(default="", max_length=64)
+    """Which Chrome's connection; empty while only one is connected."""
+
+
 class PairBody(BaseModel):
     """What the extension sends with the code. Unknown fields are ignored rather than refused: an
     extension a release ahead must still be able to pair."""
@@ -114,12 +120,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if found is None or settings.native:
             return []
         live = relays()
-        connected = live.connected_device() if live is not None else ""
-        return [d.view(connected=d.id == connected) for d in await cast("Pairing", found).devices()]
+        connected = live.connected_devices() if live is not None else set()
+        return [d.view(connected=d.id in connected) for d in await cast("Pairing", found).devices()]
 
     @api.get("/api/browser/user")
     async def user_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The card "Your Chrome": the daemon and the Chrome connected to it, natively the launcher's
+        """The card "Your Chrome": the daemon and the Chromes connected to it, natively the launcher's
         report on the connector and the extension, on a server the paired devices."""
         found = cast("Browsers | None", app.extensions.get("browser"))
         status: dict[str, Any] = await found.user_status() if found is not None else {"configured": False, "enabled": False, "daemon": False, "reason": "not_configured", "detail": "", "relay": None}
@@ -157,9 +163,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {"launcher": report, "error": str(report.get("error") or "")}
 
     @api.post("/api/browser/user/check")
-    async def user_check(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Host → daemon → extension and back: the round trip, while the extension flashes."""
-        return await service().check_user()
+    async def user_check(body: CheckBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Host → daemon → one Chrome's extension and back: the round trip, while it flashes."""
+        return await service().check_user(body.chrome if body is not None else "")
 
     @api.post("/api/browser/user/pairing")
     async def user_pairing(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -187,6 +193,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         live = relays()
         if live is not None:
             await live.revoked(device_id)
+        await service().choices.release(device_id)
         return {"ok": True}
 
     async def session_choice(session_id: str) -> dict[str, Any]:

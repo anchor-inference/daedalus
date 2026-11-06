@@ -51,7 +51,6 @@
     {"name": "check", "from": "extension", "frame": {"t": "check", "n": 1}},
     {"name": "check_ok", "from": "daemon", "frame": {"t": "check_ok", "n": 1, "host_seen": true}},
     {"name": "bye: stopping", "from": "daemon", "frame": {"t": "bye", "reason": "shutdown", "message": "Daedalus is stopping"}},
-    {"name": "bye: another Chrome", "from": "daemon", "frame": {"t": "bye", "reason": "another_relay", "message": "another Chrome is already connected: Chrome"}},
     {"name": "bye: replaced", "from": "daemon", "frame": {"t": "bye", "reason": "replaced", "message": "this Chrome connected again"}},
     {"name": "bye: versions differ", "from": "daemon", "frame": {"t": "bye", "reason": "proto", "message": "versions differ: the extension speaks relay protocol 3, Daedalus 2; update Daedalus", "proto": 2}},
     {"name": "bye: no answer to pings", "from": "daemon", "frame": {"t": "bye", "reason": "lost", "message": "no answer to 3 pings"}},

@@ -15,7 +15,8 @@ an agent's default: the operator switches a conversation to it, and nothing the 
 AGENT_ENVS = ("container", "host")
 """The environments of the agent's own browser, one of which ``[browser] env`` picks."""
 USER_PROFILE = "user"
-"""The one profile the ``user`` daemon has: the operator's Chrome profile the extension runs in."""
+"""What the ``user`` daemon's profiles start with: each of the operator's Chromes is a profile of its
+own (:func:`profile_id`), the Chrome profile its extension runs in."""
 OWNER_KINDS = ("session", "staff")
 GROUP_STATUSES = ("open", "closed", "lost")
 CONTROL_OWNERS = ("agent", "human", "paused")
@@ -70,30 +71,38 @@ class Owner:
             return None
 
 
-def group_id(owner: Owner, *, fresh: bool = False, env: str = "") -> str:
+def group_id(owner: Owner, *, fresh: bool = False, env: str = "", chrome: str = "") -> str:
     """The one group an owner has in its profile's browser, and a second one for a throwaway context.
 
     A session's is ``s-<session>``, a command-line member's ``m-<staff>``; ``-x`` is the ephemeral one
-    and ``-u`` the one in the operator's own Chrome, so a conversation switched between the two keeps
-    both rows apart. The host makes one group per owner and profile, so two sessions of one project
-    share the project's cookies but never see each other's tabs.
+    and ``-u-<chrome>`` the one in one of the operator's own Chromes, so a conversation switched
+    between browsers keeps their rows apart. The Chrome is in the id because everything kept by group
+    (the recording, the action log, the daemon's site grants) must stay with the computer it happened
+    on when the conversation moves to another. The host makes one group per owner and profile, so two
+    sessions of one project share the project's cookies but never see each other's tabs.
     """
     base = f"{'s' if owner.kind == 'session' else 'm'}-{owner.id}"
     if env == USER:
-        return (base[:62] + "-u")[:64]
+        suffix = f"-u-{chrome}"
+        return base[:64 - len(suffix)] + suffix
     return (base + "-x" if fresh else base)[:64]
 
 
-def profile_id(owner: Owner, *, fresh: bool = False, env: str = "") -> str:
+def profile_id(owner: Owner, *, fresh: bool = False, env: str = "", chrome: str = "") -> str:
     """Where the owner's cookies live: its project's profile, else its own; a fresh group has none.
-    In the operator's Chrome they live in the operator's profile, which is the one there is."""
+    In the operator's Chrome they live in that Chrome's profile, which each Chrome has one of."""
     if env == USER:
-        return USER_PROFILE
+        return f"{USER_PROFILE}-{chrome}"
     if fresh:
         return EPHEMERAL
     if owner.project_id:
         return f"project-{owner.project_id}"[:64]
     return f"{owner.kind}-{owner.id}"[:64]
+
+
+def chrome_of_profile(profile: str) -> str:
+    """The Chrome a profile of the ``user`` daemon is (:func:`profile_id`)."""
+    return (profile or "").removeprefix(f"{USER_PROFILE}-")
 
 
 def valid_id(value: str) -> bool:
@@ -123,6 +132,20 @@ class InvalidRequest(BrowserError):
 
 class Conflict(BrowserError):
     status, code = 409, "conflict"
+
+
+class ChromeChoice(Conflict):
+    """Several of the operator's Chromes could be meant and nothing says which: the agent is told them
+    and names one, rather than being put on a computer by the order of a list."""
+
+    code = "chrome_choice"
+
+
+class ChromeElsewhere(Conflict):
+    """A Chrome was named that the conversation cannot go to now: its tabs are open in another, or it
+    is held from the side panel of another."""
+
+    code = "chrome_elsewhere"
 
 
 class OverCap(BrowserError):
@@ -268,6 +291,8 @@ __all__ = [
     "Blocked",
     "BrowserError",
     "BrowserGone",
+    "ChromeChoice",
+    "ChromeElsewhere",
     "ChromeForbids",
     "Conflict",
     "Detached",
@@ -289,6 +314,7 @@ __all__ = [
     "Unsupported",
     "chrome_refused",
     "detached",
+    "chrome_of_profile",
     "group_id",
     "profile_id",
     "rpc_failure",

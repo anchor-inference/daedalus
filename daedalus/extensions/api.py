@@ -50,7 +50,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from daedalus import public_address
 from daedalus.browser.model import USER as BROWSER_USER
-from daedalus.browser.panel import EXTENSION_ID, mark_panel_session
+from daedalus.browser.panel import EXTENSION_ID, hold_in_chrome, mark_panel_session
 from daedalus.config import (
     NO_MODEL_MESSAGE,
     NOTIFICATION_CATEGORIES,
@@ -3090,11 +3090,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if extension is not None:
             await extension.before_session_turn(session_id)
 
+    async def panel_wrote(session_id: str, who: dict[str, Any]) -> None:
+        """The operator wrote into a conversation from a side panel: it is held from that Chrome now."""
+        await mark_panel_session(manager, session_id)
+        found = app.extensions.get("browser")
+        if found is not None:
+            await hold_in_chrome(found, session_id, str(who.get("device") or ""))
+
     @api.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: SendMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         text, reply = body.text, None
         if _.get("via") == "panel":
-            await mark_panel_session(manager, session_id)
+            await panel_wrote(session_id, _)
         if body.reply_to is not None:
             # The message names what it answers, in words the model reads and a reference the app
             # draws: a complaint about a member's missing instruction was once taken for one about
@@ -3145,7 +3152,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if state is None:
             raise HTTPException(404, "no such session")
         if _.get("via") == "panel":
-            await mark_panel_session(manager, session_id)
+            await panel_wrote(session_id, _)
         staging = manager.settings.state_dir / "upload-staging"
         staging.mkdir(parents=True, exist_ok=True)
         attachments: list[Attachment] = []

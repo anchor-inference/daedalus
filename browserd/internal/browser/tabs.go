@@ -109,20 +109,27 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		m.publish("tab.refused", map[string]any{"group_id": g.ID, "url": info.URL, "reason": "tab_cap"})
 		return nil
 	}
-	m.tabSeq++
-	id := "t" + strconv.Itoa(m.tabSeq)
-	if chromeTab, _, ok := relay.ParseSession(session); ok && g.Browser.attached && m.tabs["t"+strconv.Itoa(chromeTab)] == nil {
+	id := ""
+	if chromeTab, _, ok := relay.ParseSession(session); ok && g.Browser.attached && m.tabNameFree("t"+strconv.Itoa(chromeTab)) {
 		// In the operator's Chrome a tab is named by Chrome's own id, so the tab keeps its name when
 		// it is set up again: the same tab was once t8, t10, t12 and t14 across three reconnects.
 		id = "t" + strconv.Itoa(chromeTab)
 	}
+	// Every name is free here, whichever Chrome numbered it: two Chromes both have a tab 412, and a
+	// call names a tab by this alone, so a name taken twice would reach the other computer's page.
+	for id == "" {
+		m.tabSeq++
+		if name := "t" + strconv.Itoa(m.tabSeq); m.tabNameFree(name) {
+			id = name
+		}
+	}
 	t := &Tab{ID: id, Group: g, TargetID: info.TargetID, Session: session, Opener: opener,
 		CreatedAt: time.Now().UTC(), Given: info.given, url: info.URL, title: info.Title, life: map[string]bool{}, wake: make(chan struct{})}
-	m.settingUp[session] = t
+	m.settingUp[b.sessionKey(session)] = t
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
-		delete(m.settingUp, session)
+		delete(m.settingUp, b.sessionKey(session))
 		m.mu.Unlock()
 	}()
 	// The page's size is its window's: in the pinned Chromium the screencast shows the window whatever
@@ -212,7 +219,7 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		t.values = map[any]any{fetchKey{}: fetch}
 	}
 	m.tabs[t.ID] = t
-	m.bySession[session] = t
+	m.bySession[b.sessionKey(session)] = t
 	m.byTarget[info.TargetID] = t
 	g.tabs = append(g.tabs, t)
 	if g.active == nil || opener != "" {
@@ -227,6 +234,20 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 	}
 	m.publish("tab.created", map[string]any{"group_id": g.ID, "tab": t.View()})
 	return t
+}
+
+// tabNameFree reports whether no tab has the name, a tab still being set up included. The caller
+// holds m.mu.
+func (m *Manager) tabNameFree(name string) bool {
+	if m.tabs[name] != nil {
+		return false
+	}
+	for _, t := range m.settingUp {
+		if t.ID == name {
+			return false
+		}
+	}
+	return true
 }
 
 // NewTab opens a tab in the group and makes it the active one; with url set, it navigates there.

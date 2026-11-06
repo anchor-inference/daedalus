@@ -157,17 +157,14 @@ func TestAttachOnlyTabsAndCalls(t *testing.T) {
 			Kind    string `json:"kind"`
 			Version string `json:"version"`
 		} `json:"chromium"`
-		Relay struct {
-			Connected   bool   `json:"connected"`
-			ProfileName string `json:"profile_name"`
-			Transport   string `json:"transport"`
-			ExtVersion  string `json:"ext_version"`
-		} `json:"relay"`
+		Relay relay.Report `json:"relay"`
 	}
 	h.must("daemon.info", map[string]any{}, &info)
-	if info.Backend != "attach" || info.Chromium.Kind != "relay" || info.Chromium.Version == "" || !info.Relay.Connected ||
-		info.Relay.ProfileName != "Fake Chrome" || info.Relay.Transport != "native" || info.Relay.ExtVersion != "0.0.0-test" {
+	if info.Backend != "attach" || info.Chromium.Kind != "relay" || info.Chromium.Version == "" || !info.Relay.Connected || len(info.Relay.Chromes) != 1 {
 		t.Fatalf("daemon.info %+v", info)
+	}
+	if c := info.Relay.Chromes[0]; c.ProfileName != "Fake Chrome" || c.Transport != "native" || c.ExtVersion != "0.0.0-test" || c.Groups != 1 || c.Tabs < 1 {
+		t.Fatalf("the Chrome in daemon.info %+v", c)
 	}
 }
 
@@ -216,8 +213,8 @@ func TestAttachConnectionCheck(t *testing.T) {
 	}
 }
 
-// One relay at a time, over the real socket: a second Chrome is refused with the first one's name.
-func TestAttachSecondRelayRefused(t *testing.T) {
+// A second Chrome is welcomed over the real socket, and relay.status lists both.
+func TestAttachSecondChromeStays(t *testing.T) {
 	attachOnly(t)
 	h := start(t, nil)
 	var r struct {
@@ -235,14 +232,19 @@ func TestAttachSecondRelayRefused(t *testing.T) {
 			if f.Channel != r.Channel || len(f.Payload) == 0 {
 				continue
 			}
-			var bye relay.Bye
-			_ = json.Unmarshal(f.Payload[1:], &bye)
-			if bye.Reason != relay.ByeAnotherRelay || !strings.Contains(bye.Message, "Fake Chrome") {
-				t.Fatalf("bye %+v", bye)
+			var w relay.Welcome
+			_ = json.Unmarshal(f.Payload[1:], &w)
+			if w.T != relay.TWelcome {
+				t.Fatalf("frame %s", f.Payload[1:])
+			}
+			var st relay.Report
+			h.must("relay.status", nil, &st)
+			if !st.Connected || len(st.Chromes) != 2 {
+				t.Fatalf("relay.status %+v", st)
 			}
 			return
 		case <-deadline:
-			t.Fatal("no bye")
+			t.Fatal("no welcome")
 		}
 	}
 }

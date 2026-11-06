@@ -37,8 +37,9 @@ from screenshots import S1, UNHANDLED, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 CONSENT = "The agent will work in your own Chrome, signed in as you."
-RELAY = {"connected": True, "profile_id": "p1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
-         "transport": "native", "since": "2026-10-20T09:00:00Z", "last_seen": "2026-10-20T09:59:58Z"}
+CHROME = {"chrome": "c1", "connected": True, "profile_id": "c1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
+          "transport": "native", "since": "2026-10-20T09:00:00Z", "last_seen": "2026-10-20T09:59:58Z", "groups": 0, "tabs": 0}
+RELAY = {"connected": True, "chromes": [CHROME]}
 WORDS = {
     "en": {"connected": "Connected: Work", "check": "Check connection", "rtt": "14 ms", "register": "Register", "waiting": "Not connected", "pair": "Pair a browser",
            "agent": "Agent's browser", "chrome": "Your Chrome · Work", "consent": "Every new site asks you first"},
@@ -135,6 +136,21 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     page.wait_for_selector(".bs-chrome-rtt", timeout=5000)
     if w["rtt"] not in page.inner_text(".bs-chrome-rtt") or not any(p == "/api/browser/user/check" for _, p, _ in host.calls):
         say("Check connection did not show the round trip from the host")
+    # Two Chromes: both are listed, each with its own check, and the check names the one pressed.
+    host.card = status(relay={"connected": True, "chromes": [CHROME, {**CHROME, "chrome": "c2", "profile_name": "MacBook", "tabs": 2, "groups": 1}]})
+    page.reload()
+    page.wait_for_selector(".bs-chrome [data-chrome='c2']")
+    second = page.locator(".bs-chrome [data-chrome='c2']")
+    if "MacBook" not in second.inner_text() or page.locator(".bs-chrome [data-conn='connected']").count() != 2:
+        say("two connected Chromes are not both listed")
+    host.calls.clear()
+    second.get_by_role("button", name=w["check"]).click()
+    second.locator(".bs-chrome-rtt").wait_for(timeout=5000)
+    if not any(p == "/api/browser/user/check" and '"c2"' in body for _, p, body in host.calls):
+        say("the check did not name the Chrome it was pressed for")
+    host.card = status()
+    page.reload()
+    page.wait_for_selector(".bs-chrome")
     # The defaults are the host's [browser.user].
     page.locator(".bs-chrome [data-setting='browser.user.bodies'] [role=switch]").click()
     page.locator("#browser-user-sites").fill("example.com\nMail.Example.org\nexample.com")

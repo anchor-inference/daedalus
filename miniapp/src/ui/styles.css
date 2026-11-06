@@ -5175,6 +5175,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .bs-chrome-step, .bs-chrome-conn[data-conn="down"], .bs-chrome-conn[data-conn="waiting"] { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .bs-chrome-step .dot, .bs-chrome-conn .dot { margin-top: 6px; flex: none; }
 .bs-chrome-conn { margin-top: 10px; }
+.bs-chrome-conn + .bs-chrome-conn { padding-top: 10px; border-top: 1px solid var(--line); }
 .bs-chrome-howto { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .bs-chrome-howto code { overflow-wrap: anywhere; }
 .bs-chrome-code-value { letter-spacing: 0.08em; }

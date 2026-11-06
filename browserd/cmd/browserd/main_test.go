@@ -216,8 +216,10 @@ func TestUserDaemonAndBridge(t *testing.T) {
 	var info struct {
 		Backend string `json:"backend"`
 		Relay   struct {
-			Connected   bool   `json:"connected"`
-			ProfileName string `json:"profile_name"`
+			Connected bool `json:"connected"`
+			Chromes   []struct {
+				ProfileName string `json:"profile_name"`
+			} `json:"chromes"`
 		} `json:"relay"`
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -226,7 +228,7 @@ func TestUserDaemonAndBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Close()
-	if info.Backend != "attach" || !info.Relay.Connected || info.Relay.ProfileName != "Home Chrome" {
+	if info.Backend != "attach" || !info.Relay.Connected || len(info.Relay.Chromes) != 1 || info.Relay.Chromes[0].ProfileName != "Home Chrome" {
 		t.Fatalf("daemon.info %+v", info)
 	}
 	if err := daemon.Process.Signal(syscall.SIGTERM); err != nil {

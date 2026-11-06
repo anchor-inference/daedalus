@@ -60,7 +60,7 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import ANTI_BOT_WORDS, CONSENT, anti_bot, chrome_forbids, site_granted
+from daedalus.browser.user import ANTI_BOT_WORDS, CONSENT, anti_bot, chrome_forbids, chrome_list, site_granted
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import (
     ALLOW,
@@ -587,6 +587,10 @@ WEBGL_ORDER = {"ask": 0, "software": 1, "gpu": 2}
 """The operator's standing permission (``[browser] webgl_allow``) against the mode asked for: each
 level allows itself and every level below it, and ``off`` never needs one."""
 WEBGL_WORDS = {"software": "software WebGL (drawn on the CPU)", "gpu": "GPU WebGL (drawn on the machine's GPU)", "off": "no WebGL"}
+CHROME_LIST = "?"
+"""``BrowserOpen(chrome='?')`` asks what is connected. A value of the parameter rather than a tool of
+its own: the agent needs the list only to name one, and one more tool is one more line in every
+request that carries the browser's tools."""
 NOT_OFFERED = (
     "The operator's Chrome is not offered on this installation (Settings → Environments → Your Chrome). Nothing was "
     "asked and no browser was opened: tell the operator, or use your own browser (BrowserOpen) if they agree."
@@ -891,11 +895,11 @@ class BrowserAgent:
         reason = str(row["close_reason"] or "") if row is not None else ""
         return self.service._gone_text({"close_reason": reason}).removeprefix("this browser is not open: ").split(".")[0] if reason.startswith("chrome disconnected") else ""
 
-    def _user_name(self) -> str:
-        """The name the operator gave their Chrome in the extension's popup, as its relay reported it."""
-        relay = self.service.links[USER_ENV].info.get("relay") if USER_ENV in self.service.links else None
-        name = str(relay.get("profile_name") or "") if isinstance(relay, dict) else ""
-        return name or "Chrome"
+    async def _chrome_name(self, caller: Caller) -> str:
+        """The name of the Chrome this conversation works in, as the operator gave it in the extension's
+        popup. Every result says it: with two computers, which one a page is on is the thing to know."""
+        session_id = caller.owner.session_id
+        return (await self.service.conversation_chrome(session_id))[1] or "Chrome" if session_id else "Chrome"
 
     async def _granted_sites(self, caller: Caller) -> list[str]:
         """The sites the agent may open in the operator's Chrome without asking: the operator's
@@ -968,12 +972,12 @@ class BrowserAgent:
             raise NoSuchTab("the browser has no tab open; BrowserTabs(action='new') opens one", tab_id=wanted, reason="no_tabs")
         raise NoSuchTab(f"no tab {wanted}", tab_id=wanted)
 
-    def _chrome_check(self, url: str | None) -> None:
+    async def _chrome_check(self, caller: Caller, url: str | None) -> None:
         """Refuse, before anything is asked or opened, an address Chrome keeps the extension off: a site
         question the operator answers yes to, or a tab opened in their window, would only end in Chrome's
         refusal. Called where the browser is the operator's Chrome."""
         if url and (kind := chrome_forbids(url)):
-            raise ChromeForbids(chrome_forbids_text(url, kind, self._user_name()), reason="chrome_forbids", kind=kind, url=url[:2000])
+            raise ChromeForbids(chrome_forbids_text(url, kind, await self._chrome_name(caller)), reason="chrome_forbids", kind=kind, url=url[:2000])
 
     def _origin(self, caller: Caller) -> dict[str, Any]:
         return self.service.origin(actor="agent", launch_id=caller.launch_id)
@@ -1111,12 +1115,19 @@ class BrowserAgent:
 
     # -- the tools --------------------------------------------------------------------------------
 
-    async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> str:
+    async def chromes(self) -> str:
+        """``BrowserOpen(chrome='?')``: what is connected, and nothing opened."""
+        if not self.service.user_offered():
+            return NOT_OFFERED
+        live = await self.service.chromes_now() if self.service.available(USER_ENV) else []
+        return f"The operator's Chromes connected now:\n{chrome_list(live)}" if live else "None of the operator's Chromes is connected now."
+
+    async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False, why: str | None = None, chrome: str | None = None) -> str:
         # Opened blank and then sent to the address, so the address meets the network wall as any
         # navigation does: an ask becomes the operator's question, not a failed start.
         if url and await self.service.env_for(caller.owner) == USER_ENV:
-            self._chrome_check(url)
-        opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor)
+            await self._chrome_check(caller, url)
+        opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor, chrome=(chrome or "").strip())
         group = opened["group"]
         found = ""
         unfinished = ""
@@ -1140,13 +1151,15 @@ class BrowserAgent:
         if url:
             await self._site_notes(caller, url)
         if found:
-            where = f" in the operator's own Chrome «{self._user_name()}»" if group.get("env") == USER_ENV else ""
+            where = f" in the operator's own Chrome «{await self._chrome_name(caller)}»" if group.get("env") == USER_ENV else ""
             return f"Browser already open{where}. Tab {found} already shows {url}: switched to it rather than opening the page twice.\nTabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see it."
         if group.get("env") == USER_ENV:
             head = (
-                f"Browser {'opened' if opened['created'] else 'already open'} in the operator's own Chrome «{self._user_name()}», which they gave this conversation: "
+                f"Browser {'opened' if opened['created'] else 'already open'} in the operator's own Chrome «{await self._chrome_name(caller)}», which they gave this conversation: "
                 "signed in as them, in a tab group of yours in a window of its own. Every new site asks them first; a purchase, a message, a deletion or a sign-in always asks."
             )
+            if opened.get("moved"):
+                head += " This conversation worked in another of their Chromes before: it stays in this one now, and the sites and the approval mode it had there start over."
             return f"{head} Tabs:\n{await self._tabs_text(group['id'])}{unfinished}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
@@ -1232,7 +1245,7 @@ class BrowserAgent:
         connected, name, why_not = self.service.user_connection()
         name = name or "Chrome"
         if await self.service.env_for(owner) == USER_ENV:
-            return f"This conversation already uses the operator's Chrome «{name}». BrowserOpen opens your tabs there.", False
+            return f"This conversation already uses the operator's Chrome «{await self._chrome_name(caller)}». BrowserOpen opens your tabs there.", False
         if not connected:
             return (
                 f"The operator's Chrome is not connected to Daedalus now{f' ({why_not})' if why_not else ''}. Nothing was asked and your own browser "
@@ -1304,7 +1317,7 @@ class BrowserAgent:
         ``tool`` is the call that loads it, as the operator's card names it."""
         user = group.get("env") == USER_ENV
         if url and user:
-            self._chrome_check(url)
+            await self._chrome_check(caller, url)
         if url:
             await self._site_ask(caller, group, url, why, tool=tool)
         try:
@@ -1336,7 +1349,7 @@ class BrowserAgent:
             dropped = isinstance(exc, Detached) or "detached" in exc.message.lower()
             if dropped:
                 self._mark_dead(str(group.get("id") or ""), tab)
-            said = chrome_forbids_text(url, chrome_forbids(url) or "refused", self._user_name())
+            said = chrome_forbids_text(url, chrome_forbids(url) or "refused", await self._chrome_name(caller))
             if dropped and tab:
                 said += f" Tab {tab} lost its debugger on the way: close it with BrowserClose(tab='{tab}')."
             raise ChromeForbids(said, reason="chrome_forbids", kind=chrome_forbids(url) or "refused", url=url[:2000], chrome=exc.message[:300]) from None
@@ -2401,7 +2414,7 @@ class BrowserAgent:
         closed: list[str] = []
         if group.get("env") == USER_ENV:
             # Before room is made: a tab closed to make room for a page Chrome will refuse is lost for nothing.
-            self._chrome_check(url)
+            await self._chrome_check(caller, url)
             tabs, closed = await self._make_room(caller, group, tabs)
         if url:
             # Asked before the tab exists, so a site the operator has not answered about yet leaves
@@ -2767,14 +2780,15 @@ class BrowserAgent:
         first, once."""
         text, failed = await self._dispatch(tool, arguments, caller)
         notices: list[str] = []
-        for gid in (group_id(caller.owner), group_id(caller.owner, fresh=True), group_id(caller.owner, env=USER_ENV)):
+        own = await self.service.choices.chrome_of(caller.owner.session_id) if caller.owner.session_id else ""
+        for gid in (group_id(caller.owner), group_id(caller.owner, fresh=True), group_id(caller.owner, env=USER_ENV, chrome=own)):
             notices.extend(self.service.take_notices(gid))
         if notices:
             text = "\n".join(notices) + "\n\n" + text
         if tool != "BrowserOpen" and await self.service.env_for(caller.owner) == USER_ENV:
             # Every result says which browser it is about: an agent that forgot it is acting in the
             # operator's own Chrome would read a page there as if it were its own browser's.
-            text = f"[in the operator's own Chrome «{self._user_name()}»]\n{text}"
+            text = f"[in the operator's own Chrome «{await self._chrome_name(caller)}»]\n{text}"
         if caller.notes:
             # After the result and outside its fence: the operator's site notes and the loop hints
             # are the host's words to the agent, not the page's.
@@ -2786,9 +2800,12 @@ class BrowserAgent:
         a = dict(arguments or {})
         try:
             if tool == "BrowserOpen":
+                chrome = _str(a, "chrome")
+                if chrome == CHROME_LIST:
+                    return await self.chromes(), False
                 if (webgl := _str(a, "webgl")) is not None:
                     return await self.open_webgl(caller, webgl, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why"))
-                return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why")), False
+                return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why"), chrome=chrome), False
             if tool == "BrowserAskOperatorChrome":
                 return await self.ask_operator_chrome(caller, reason=_str(a, "reason") or "")
             if tool == "BrowserNavigate":

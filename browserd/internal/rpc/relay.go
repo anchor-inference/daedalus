@@ -9,7 +9,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
 
-// The relay methods of a `user` daemon (--backend attach): relay.open is how the operator's Chrome
+// The relay methods of a `user` daemon (--backend attach): relay.open is how each of the operator's Chromes
 // arrives, through `browserd bridge` on this machine or the host's WebSocket on a server; relay.status
 // and relay.notify are the app's connection card and its "Check connection"; relay.call is the host
 // handing the extension's side panel its credential and a conversation's news.
@@ -68,12 +68,13 @@ func (d *Daemon) relayStatus(ctx context.Context, c *server.Conn, params json.Ra
 	if d.Relay == nil {
 		return nil, errNoRelay()
 	}
-	return d.Relay.Status(), nil
+	return d.Manager.RelayReport(), nil
 }
 
 func (d *Daemon) relayNotify(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
 	var p struct {
-		Text string `json:"text,omitempty"`
+		Text   string `json:"text,omitempty"`
+		Chrome string `json:"chrome,omitempty"`
 	}
 	if err := decode(params, &p); err != nil {
 		return nil, err
@@ -84,7 +85,7 @@ func (d *Daemon) relayNotify(ctx context.Context, c *server.Conn, params json.Ra
 	if len(p.Text) > 200 {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "text is at most 200 bytes")
 	}
-	rtt, err := d.Manager.Notify(ctx, p.Text)
+	rtt, err := d.Manager.Notify(ctx, p.Chrome, p.Text)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +94,9 @@ func (d *Daemon) relayNotify(ctx context.Context, c *server.Conn, params json.Ra
 
 func (d *Daemon) relayCall(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
 	var p struct {
-		Op   string         `json:"op"`
-		Args map[string]any `json:"args,omitempty"`
+		Op     string         `json:"op"`
+		Args   map[string]any `json:"args,omitempty"`
+		Chrome string         `json:"chrome,omitempty"`
 	}
 	if err := decode(params, &p); err != nil {
 		return nil, err
@@ -102,7 +104,7 @@ func (d *Daemon) relayCall(ctx context.Context, c *server.Conn, params json.RawM
 	if d.Relay == nil {
 		return nil, errNoRelay()
 	}
-	if err := d.Manager.CallExtension(ctx, p.Op, p.Args); err != nil {
+	if err := d.Manager.CallExtension(ctx, p.Chrome, p.Op, p.Args); err != nil {
 		return nil, err
 	}
 	return map[string]any{}, nil

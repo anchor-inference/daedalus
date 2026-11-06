@@ -89,6 +89,8 @@ type Manager struct {
 	starting  map[string]chan struct{} // profiles whose browser is starting
 	groups    map[string]*Group
 	tabs      map[string]*Tab
+	// bySession, settingUp and frameTabs are by Browser.sessionKey: a session id means something on
+	// one browser's connection only.
 	bySession map[string]*Tab
 	settingUp map[string]*Tab // pages being set up, by session: their first navigation may pause already
 	byTarget  map[string]*Tab
@@ -128,7 +130,7 @@ func New(deps Deps) *Manager {
 	if deps.Config.Backend == BackendAttach {
 		// The operator's Chrome is the browser: the daemon neither looks for a Chromium of its own
 		// nor runs one to ask its version.
-		a := &attach{m: m, hub: deps.Relay, dispatched: map[int]time.Time{}, grace: RelayGrace}
+		a := &attach{m: m, hub: deps.Relay, procs: map[string]*attachProc{}, grace: RelayGrace}
 		if deps.Config.RelayGrace > 0 {
 			a.grace = deps.Config.RelayGrace
 		}
@@ -323,6 +325,9 @@ type OpenParams struct {
 	Labels   map[string]string `json:"labels,omitempty"`
 	Viewport *Viewport         `json:"viewport,omitempty"`
 	URL      string            `json:"url,omitempty"`
+	// Chrome is which of the operator's Chromes the group opens in (relay.ChromeID); the attach
+	// backend's only. Empty means the only one there is.
+	Chrome string `json:"chrome,omitempty"`
 }
 
 // Viewport is a page's size in CSS pixels.
@@ -345,6 +350,9 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 	if m.Attached() && p.Profile == EphemeralProfile {
 		return nil, nil, false, ErrAttachRefused("a throwaway context")
 	}
+	if p.Chrome != "" && !ValidID(p.Chrome) {
+		return nil, nil, false, wire.Errorf(wire.CodeInvalidParams, "chrome must be 1-64 of A-Z a-z 0-9 - _")
+	}
 	vp := Viewport{W: config.DefaultViewportW, H: config.DefaultViewportH}
 	if p.Viewport != nil {
 		vp = *p.Viewport
@@ -363,13 +371,20 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 		if g.Profile != p.Profile {
 			return nil, nil, false, wire.Errorf(wire.CodeForbidden, "group %q is open on profile %q, not %q", g.ID, g.Profile, p.Profile)
 		}
+		if p.Chrome != "" && g.Browser.chrome() != p.Chrome {
+			return nil, nil, false, errOtherChrome(g.ID, g.Browser.chrome())
+		}
 		return g, g.ActiveTab(), false, nil
 	}
 	m.mu.Unlock()
 	key := p.Profile
-	if m.Attached() {
-		// One browser, the operator's Chrome, whatever profile the host keeps its groups under.
-		key = UserProfile
+	if a, ok := m.backend.(*attach); ok {
+		// One browser for each Chrome, whatever profile the host keeps its groups under.
+		chrome, err := a.pick(p.Chrome)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		key = userKey(chrome)
 	}
 	b, err := m.ensureBrowser(ctx, key)
 	if err != nil {
@@ -438,7 +453,9 @@ func (m *Manager) ensureBrowser(ctx context.Context, profile string) (*Browser, 
 				return nil, ctx.Err()
 			}
 		}
-		if n := len(m.browsers) + len(m.starting); n >= m.lim.MaxBrowsers {
+		// The cap is on Chromiums this daemon runs. Every browser of the attach backend is a Chrome the
+		// operator runs, and their fifth one must not be refused for a limit on something else.
+		if n := len(m.browsers) + len(m.starting); n >= m.lim.MaxBrowsers && !m.Attached() {
 			m.mu.Unlock()
 			return nil, errLimit("browsers", m.lim.MaxBrowsers, "%d browsers are running, the most this daemon runs at once; close one first", n)
 		}
@@ -610,17 +627,22 @@ func (m *Manager) CloseGroup(ctx context.Context, id string) (int, error) {
 	return len(tabs), nil
 }
 
-// AwaitRelay holds a call while the operator's Chrome is expected back: its relay ended by itself
+// AwaitRelay holds a call while the Chrome it is for is expected back: its relay ended by itself
 // moments ago and its extension reconnects within seconds. The call goes on when the relay is bound
 // again, or after RelayWait, or the rest of RelayGrace, whichever is first, and then fails as it
-// would have. A call made in that second once failed at once with "Chrome is not connected".
-func (m *Manager) AwaitRelay(ctx context.Context) {
+// would have. A call made in that second once failed at once with "Chrome is not connected". Only
+// that Chrome counts: a tab on the other computer has nothing to wait for.
+func (m *Manager) AwaitRelay(ctx context.Context, params json.RawMessage) {
 	a, ok := m.backend.(*attach)
 	if !ok || a.hub == nil {
 		return
 	}
-	connected := a.hub.Connected()
-	expected, left := a.hub.Expected(a.grace)
+	chrome, known := m.chromeOfCall(params)
+	if !known {
+		return
+	}
+	connected := a.hub.Connected(chrome)
+	expected, left := a.hub.Expected(chrome, a.grace)
 	if !expected {
 		return
 	}
@@ -631,6 +653,33 @@ func (m *Manager) AwaitRelay(ctx context.Context) {
 	case <-timer.C:
 	case <-ctx.Done():
 	}
+}
+
+// chromeOfCall is the Chrome a call's params are about: the one they name, or the one their group or
+// tab is in. A call naming neither is about any ("", true); one naming a group or tab no browser
+// holds has no Chrome to wait for.
+func (m *Manager) chromeOfCall(params json.RawMessage) (string, bool) {
+	var p struct {
+		Chrome  string `json:"chrome"`
+		GroupID string `json:"group_id"`
+		TabID   string `json:"tab_id"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if p.Chrome != "" {
+		return p.Chrome, true
+	}
+	if p.GroupID == "" && p.TabID == "" {
+		return "", true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if g := m.groups[p.GroupID]; g != nil {
+		return g.Browser.chrome(), true
+	}
+	if t := m.tabs[p.TabID]; t != nil && t.Group != nil {
+		return t.Group.Browser.chrome(), true
+	}
+	return "", false
 }
 
 // closeGrants ends the grants a group of the operator's Chrome keeps (WallKey), when the group itself
@@ -717,12 +766,12 @@ func (m *Manager) watch(b *Browser) {
 
 func (m *Manager) forgetTabLocked(t *Tab) {
 	delete(m.tabs, t.ID)
-	delete(m.bySession, t.Session)
 	delete(m.byTarget, t.TargetID)
-	for _, s := range t.frameSessions() {
-		delete(m.frameTabs, s)
-	}
 	if g := t.Group; g != nil {
+		delete(m.bySession, g.Browser.sessionKey(t.Session))
+		for _, s := range t.frameSessions() {
+			delete(m.frameTabs, g.Browser.sessionKey(s))
+		}
 		for i, x := range g.tabs {
 			if x == t {
 				g.tabs = append(g.tabs[:i], g.tabs[i+1:]...)
@@ -912,17 +961,18 @@ func (m *Manager) onEvent(b *Browser, e cdp.Event) {
 	if m.workerEvent(e) {
 		return
 	}
+	key := b.sessionKey(e.Session)
 	m.mu.Lock()
-	t := m.bySession[e.Session]
+	t := m.bySession[key]
 	tab := t != nil
 	frame := false
 	if t == nil {
 		// A page still being set up: its first navigation may pause already, and its first frames
 		// attach, before it is a tab.
-		t = m.settingUp[e.Session]
+		t = m.settingUp[key]
 	}
 	if t == nil {
-		if t = m.frameTabs[e.Session]; t != nil {
+		if t = m.frameTabs[key]; t != nil {
 			frame = true
 		}
 	}
@@ -986,7 +1036,7 @@ func (m *Manager) attachFrame(b *Browser, t *Tab, parent string, raw json.RawMes
 		return
 	}
 	m.mu.Lock()
-	m.frameTabs[p.SessionID] = t
+	m.frameTabs[b.sessionKey(p.SessionID)] = t
 	m.mu.Unlock()
 	t.setFrame(p.TargetInfo.TargetID, p.SessionID)
 	type call struct {
@@ -1038,7 +1088,7 @@ func (m *Manager) detachFrame(t *Tab, raw json.RawMessage) {
 		return
 	}
 	m.mu.Lock()
-	delete(m.frameTabs, p.SessionID)
+	delete(m.frameTabs, t.Group.Browser.sessionKey(p.SessionID))
 	m.mu.Unlock()
 	t.dropFrame(p.SessionID)
 	t.dropScriptSession(p.SessionID)
@@ -1107,7 +1157,7 @@ func (m *Manager) browserEvent(b *Browser, e cdp.Event) {
 		m.mu.Lock()
 		t := m.byTarget[p.TargetID]
 		if t == nil && p.SessionID != "" {
-			t = m.bySession[p.SessionID]
+			t = m.bySession[b.sessionKey(p.SessionID)]
 		}
 		if t != nil {
 			m.forgetTabLocked(t)

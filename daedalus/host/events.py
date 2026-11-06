@@ -332,12 +332,13 @@ class BrowserWorkflow(TypedDict):
 
 
 class BrowserUser(TypedDict):
-    """The operator's Chrome and the ``user`` daemon: ``connected``, ``lost``, or ``check`` (the operator
-    pressed "Check connection" in the extension's popup, which the app shows as a toast). Ephemeral:
-    the status the card reads is the truth."""
+    """One of the operator's Chromes and the ``user`` daemon: ``connected``, ``lost``, or ``check`` (the
+    operator pressed "Check connection" in the extension's popup, which the app shows as a toast).
+    Ephemeral: the status the card reads is the truth."""
 
     kind: str
     profile_name: str
+    chrome: NotRequired[str]
     reason: NotRequired[str]
 
 
