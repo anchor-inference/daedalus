@@ -61,6 +61,8 @@ Fill `.env` (secrets do NOT go here; it is mounted into the agent container):
 | `SEARXNG_SECRET` | any random string (`openssl rand -hex 16`) |
 | `DAEDALUS_COMPOSE_PROJECT_DIR`, `DAEDALUS_COMPOSE_FILE`, `DAEDALUS_CORE_PROJECT_DIR` | absolute paths: the `daedalus` checkout, its `deploy/compose.yaml`, the `protocore-exp` checkout |
 | `SERVICES_PUBLIC_HOST` | the server's LAN or public address (the operator opens agent-hosted services at `<host>:<port>`) |
+| `SERVICES_PUBLIC_URL` | the address of the services door, when a reverse proxy gives it one (see below); else empty |
+| `API_TRUSTED_PROXIES` | the address your reverse proxy connects from, as the container sees it; else empty (see below) |
 | `GITHUB_TOKEN` | the self-development token, or empty (empty resolves self-development to `local`) |
 
 Fill `../daedalus-secrets/keyproxy.env` with the provider keys (`DEEPSEEK_API_KEY=…`, `OPENROUTER_API_KEY=…`,
@@ -200,7 +202,7 @@ whole home directory — the point of a project is that the boundary is a real o
 
 Put any reverse proxy with TLS in front of port 8765 and set `MINIAPP_PUBLIC_URL=https://<domain>` (that is
 what marks the session cookie secure). The proxy must keep long connections open (the app streams events)
-and pass WebSocket upgrades on `/ws/` (terminals). A terminal's socket is accepted only from the app's
+and pass WebSocket upgrades on every path (terminals under `/ws/`, service pages under `/pages/`). A terminal's socket is accepted only from the app's
 own origin: the `Host` the proxy forwards, or exactly the origin of `MINIAPP_PUBLIC_URL` — which is also
 what Telegram's webview sends, so with Telegram the setting is required. Caddy needs one line, and
 forwards upgrades by itself:
@@ -211,25 +213,100 @@ forwards upgrades by itself:
 }
 ```
 
-nginx:
+nginx, in one block, because a service page's WebSocket under `/pages/` needs the same upgrade as a
+terminal's under `/ws/`:
 
 ```
-location / {
-    proxy_pass http://127.0.0.1:8765;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_buffering off;
-    proxy_read_timeout 3600s;
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
 }
-location /ws/ {
-    proxy_pass http://127.0.0.1:8765;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_read_timeout 3600s;
+
+server {
+    server_name <domain>;
+    # listen, TLS, and your certificate as usual
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
 }
 ```
+
+`$proxy_add_x_forwarded_for` appends the address nginx saw, and the API reads the header from the right,
+so a value a visitor forged stays to the left of the real one. Caddy does the same by itself.
+
+### Who the client is
+
+The failed-attempt limits count per address. By default nobody is believed about who the client is,
+so behind a proxy every visitor is the proxy, in one bucket: safe, and blunt. To count each visitor,
+name the proxy:
+
+```
+API_TRUSTED_PROXIES=<the address it connects from>
+```
+
+An address or a network; several are separated by commas. A proxy on the Docker host connects through
+the gateway of the network that publishes the port, not from `127.0.0.1`; `docker network inspect` shows
+it. Never `*`: then anyone can claim any address, and the limit counts nothing.
+
+### Shared services: the services door
+
+A service the operator shares runs pages an agent wrote, so they never run as themselves on the app's
+origin, where their script would hold everything the operator's browser holds. Port `8766`
+(`SERVICES_DOOR_PORT`) is a listener of its own that answers `/s/…` and nothing else, on another origin.
+A link to `/s/…` on the app's address is redirected there.
+
+| The app is at | The door is at | What you do |
+|---|---|---|
+| plain `http`, or no public address | `http://<SERVICES_PUBLIC_HOST>:8766`, the next port | nothing |
+| `https://<domain>`, and you can add a name | `https://<services-domain>` | a second host in the proxy, below |
+| `https://<domain>`, and you cannot add a name | `https://<domain>:8443` | another `listen` in the proxy, below |
+| `https://<domain>`, with none of the above | no door: pages stay on the app's address in a sandbox | nothing, and read what that costs |
+
+A second host, pointed at the door and not at port 8765, which refuses a host of the door's name:
+
+```
+<services-domain> {
+    reverse_proxy 127.0.0.1:8766
+}
+```
+
+```
+server {
+    server_name <services-domain>;
+    # listen, TLS, and your certificate as usual
+    location / {
+        proxy_pass http://127.0.0.1:8766;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+Then `SERVICES_PUBLIC_URL=https://<services-domain>` in `.env`. Without a new name, the same block with
+`server_name <domain>` and `listen 8443 ssl` serves the door on the certificate you already have, with
+`SERVICES_PUBLIC_URL=https://<domain>:8443`. A port and a sibling subdomain are both real origins, but
+neither is another *site*: cookies ignore ports, and a subdomain of the app's parent domain is the same
+site. So the API refuses a request with the session cookie that its own pages did not send, whichever
+way you go, and the session cookie is bound to the app's exact host. A domain of its own is stronger
+still: a page on a sibling can plant a cookie of the app's name on the parent domain, which signs the
+operator out, though it gains nothing.
+
+A page in the sandbox has no origin at all. Its scripts, its forms and its own backend work; local
+storage, IndexedDB, `document.cookie`, its server's cookies and service workers do not, and a page
+that needs those stops there. The app says so where you share the service, and `doctor` reports which
+of the two you have. A shared link keeps working when you add a door: it is redirected.
 
 Restart the stack after changing `.env`
 (`docker compose … up -d`). With Telegram, register `https://<domain>/app` as the bot's menu button in

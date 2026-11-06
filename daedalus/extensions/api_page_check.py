@@ -49,7 +49,7 @@ SETTLE_MS = 700
 """After the page has loaded and shaken hands, a moment for fonts, a CDN's script and a first render."""
 
 
-class _QuietServer(uvicorn.Server):
+class QuietServer(uvicorn.Server):
     """uvicorn without the signal handlers it installs while it serves: a check's server is one of
     two in this process, and taking SIGTERM for itself would leave the application's own server and
     the rest of the bot running through a stop that only ended a page check."""
@@ -301,7 +301,7 @@ class CheckServer:
         self._arrived: dict[int, asyncio.Event] = {}
         self.exchanges: list[Exchange] = []
         self.port = 0
-        self._server: _QuietServer | None = None
+        self._server: QuietServer | None = None
         self._task: asyncio.Task[None] | None = None
 
     # -- the address --------------------------------------------------------------------------
@@ -418,7 +418,7 @@ class CheckServer:
     async def start(self, sock: socket.socket) -> None:
         self.port = int(sock.getsockname()[1])
         config = uvicorn.Config(self.build(), log_level="warning", access_log=False, lifespan="off")
-        self._server = _QuietServer(config)
+        self._server = QuietServer(config)
         self._task = asyncio.create_task(self._server.serve(sockets=[sock]), name=f"page-check-{self.slug}")
         for _ in range(500):
             if self._server.started:

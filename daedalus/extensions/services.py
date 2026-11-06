@@ -10,9 +10,9 @@ what the table says was running and is not is started again when it was
 marked ``restart``, and reported otherwise.
 
 Sharing: a service is reachable on the LAN at ``SERVICES_PUBLIC_HOST:<port>``; the operator can
-also open it through the bot's public address (``MINIAPP_PUBLIC_URL``, the reverse-proxied site)
-under ``/s/<slug>/`` — to anyone (``public``) or to whoever presents its key (``key``); the API
-proxies those requests to the service's port.
+also open it under ``/s/<slug>/`` — to anyone (``public``) or to whoever presents its key (``key``).
+Those requests are proxied to the service's port by a listener of their own, on another origin than
+the app (``daedalus.extensions.services_door``); ``public_address.services_base`` says where it is.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from daedalus import public_address
 from daedalus.extensions.notifications import Draft
 from daedalus.processes import end_tree, pid_alive
 from daedalus.tools.shell import sandbox_argv, shell_environment
@@ -76,10 +77,16 @@ class Services:
         self.app = app
         self.lo, self.hi = parse_range(app.settings.services_port_range)
         self.public_host = app.settings.services_public_host.strip()
-        self.public_base = app.settings.miniapp_public_url.strip().rstrip("/").removesuffix("/app")
         self._procs: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
 
     # -- views ----------------------------------------------------------------------
+
+    @property
+    def public_base(self) -> str:
+        """Read each time, since a tunnel's address arrives while the process runs. The door when
+        there is one, and the app's address, where pages are sandboxed, when there is not."""
+        settings = self.app.settings
+        return public_address.services_base(settings) or public_address.app_base(settings)
 
     def url_for(self, port: int | None) -> str | None:
         if not port:
@@ -108,6 +115,8 @@ class Services:
                 "key": row.get("share_key") if mode == "key" else None,
                 "url": self.share_url(row),
                 "public_base": self.public_base,
+                # On the app's own address a page gets no origin of its own: no storage, no cookies.
+                "sandboxed": not public_address.services_base(self.app.settings),
             },
             "name": row["name"],
             "command": row["command"],

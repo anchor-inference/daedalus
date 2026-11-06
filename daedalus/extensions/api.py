@@ -48,6 +48,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from daedalus import public_address
 from daedalus.browser.model import USER as BROWSER_USER
 from daedalus.browser.panel import EXTENSION_ID, mark_panel_session
 from daedalus.config import (
@@ -130,9 +131,11 @@ from daedalus.extensions import (
     api_worktrees,
     keyproxy_clients,
     launcher_updates,
+    services_door,
 )
 from daedalus.extensions import commands as slash
 from daedalus.extensions.api_host_pane import HostPane
+from daedalus.extensions.api_origin import CookieOriginGuard
 from daedalus.extensions.api_proxy import forward_http
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
@@ -1461,6 +1464,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
     # Each socket's own message cap; the server's is the largest of them (server_config).
     api.add_middleware(SocketLimits)
+    # A cookie the browser attached on a neighbour's behalf is no credential. The door's own requests
+    # pass it untouched: nothing there reads the cookie.
+    api.add_middleware(CookieOriginGuard, cookie=SESSION_COOKIE, settings=app.settings)
 
     # The desktop launcher gives each start of the supervisor an id, and the bot inherits it. Echoing
     # it on the answers to /app and /app/ — what the launcher's health check asks for — is how the
@@ -4807,10 +4813,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             )
         return response
 
-    # -- shared services: the site proxies /s/<slug>/… to the service's port --------------
-    # The reverse proxy in front of the API already makes the site public; a shared service rides on the
-    # same address instead of a port of its own. No auth dependency here: public mode is open to anyone,
-    # key mode to whoever presents the key (once in the query, then in a cookie scoped to the slug).
+    # -- shared services: /s/<slug>/… is proxied to the service's port ---------------------
+    # A shared service runs pages an agent wrote, so it never runs as itself on the app's origin: it is
+    # served by the door, a listener of its own (``services_door``), and a request that arrives here
+    # is sent there. Only when no door can be reached (an https app with no name for one yet) is the
+    # page served here, in a sandbox that takes its origin away.
+    # No auth dependency: public mode is open to anyone, key mode to whoever presents the key.
 
     @api.get("/s/{slug}/robots.txt")
     async def shared_robots(slug: str) -> Any:
@@ -4823,6 +4831,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.api_route("/s/{slug}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
     async def shared_proxy(slug: str, path: str, request: Request) -> Any:
+        at_door = bool(request.scope.get(services_door.SCOPE_KEY))
+        door = public_address.services_base(settings)
+        if not at_door and door:
+            # 307 keeps the method and the body. The raw path, because the decoded one is not an address.
+            raw = request.scope.get("raw_path", request.url.path.encode()).decode("latin-1")
+            return RedirectResponse(door + raw + (f"?{request.url.query}" if request.url.query else ""), status_code=307)
+        # In the sandbox a page's own requests carry no cookie at all, so a key cannot live in one:
+        # it travels in the prefix, which every relative address the page uses inherits.
+        slug, _, carried = slug.partition("~")
+        prefix = f"/s/{slug}~{carried}" if carried else f"/s/{slug}"
         services = app.extensions.get("services")
         row = await services.by_slug(slug) if services is not None else None  # type: ignore[attr-defined]
         if row is None or (row.get("share_mode") or "local") not in SHARE_MODES[1:]:
@@ -4832,18 +4850,30 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if row["share_mode"] == "key" and presented is not None:
             if not services.share_allows(row, presented):  # type: ignore[attr-defined]
                 raise HTTPException(403, "wrong key")
-            # The key moves from the address into a cookie, so the link people copy afterwards does not carry it.
             rest = [(k, v) for k, v in request.query_params.multi_items() if k != "key"]
-            response: Any = RedirectResponse(f"/s/{slug}/{path}" + (f"?{urlencode(rest)}" if rest else ""), status_code=303)
-            response.set_cookie(cookie_name, presented, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=30 * 86400, secure=request.url.scheme == "https")
+            query = f"?{urlencode(rest)}" if rest else ""
+            if not at_door:
+                return RedirectResponse(f"/s/{slug}~{quote(presented, safe='')}/{path}{query}", status_code=303)
+            # The key moves from the address into a cookie, so the link people copy afterwards does not carry it.
+            response: Any = RedirectResponse(f"/s/{slug}/{path}{query}", status_code=303)
+            response.set_cookie(cookie_name, presented, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=30 * 86400, secure=door.lower().startswith("https://"))
             return response
-        if not services.share_allows(row, request.cookies.get(cookie_name) or request.headers.get("x-share-key")):  # type: ignore[attr-defined]
+        if not services.share_allows(row, carried or request.cookies.get(cookie_name) or request.headers.get("x-share-key")):  # type: ignore[attr-defined]
             raise HTTPException(403, "this service needs its key: open the link that carries ?key=…")
         if row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):
             raise HTTPException(503, "the service is not running")
-        upstream = f"http://127.0.0.1:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
         # Nothing under /s/ is for search engines: the address is the only secret of a public share.
-        response = await forward_http(request, upstream, f"/s/{slug}", strip_cookies=(SESSION_COOKIE,), extra_headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})
+        answer = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
+        if not at_door and request.headers.get("origin") == "null":
+            # A sandboxed page is a stranger to its own address: a module script, a font and a plain
+            # fetch of its own backend are all cross-origin requests now, and a modern bundle is a
+            # blank page without this. They carry no credentials, so this opens nothing.
+            answer |= {"Access-Control-Allow-Origin": "null", "Access-Control-Expose-Headers": "*", "Vary": "Origin"}
+            if request.method == "OPTIONS" and "access-control-request-method" in request.headers:
+                allowed = {"Access-Control-Allow-Methods": "*", "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*")}
+                return Response(status_code=204, headers={**answer, **allowed})
+        upstream = f"http://127.0.0.1:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+        response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE), sandbox=not at_door, extra_headers=answer)
         # A page must not outlive the share in a browser cache: switching a service back to LAN-only takes
         # effect on the next reload, not when the cached copy expires.
         if response.headers.get("content-type", "").startswith("text/html"):
@@ -6927,14 +6957,21 @@ class _AppServer(uvicorn.Server):
         self._on_exit()
 
 
-def server_config(api: FastAPI, **options: Any) -> uvicorn.Config:
+def server_config(api: Any, *, trusted_proxies: str = "", **options: Any) -> uvicorn.Config:
     """The API server's settings, which a test that serves the API takes too.
 
     uvicorn's own 20 s WebSocket pings stay on: they are what notices a phone that dropped off the
     network while a terminal was open. The size cap is the largest message any socket takes; each
     socket is held to its own by ``SocketLimits``.
+
+    The proxy settings are spelled out because uvicorn's defaults are a decision nobody here made: it
+    believes ``X-Forwarded-For`` from loopback, so a tunnel's local client would let any visitor name
+    their own address to the failed-attempt limits, while a proxy reached through Docker's gateway was
+    not believed at all. ``forwarded_allow_ips`` is passed even when off, or uvicorn reads it from
+    the environment.
     """
-    return uvicorn.Config(api, log_level="warning", access_log=False, ws_max_size=SERVER_MAX_BYTES, **options)
+    trusted = trusted_proxies.strip()
+    return uvicorn.Config(api, log_level="warning", access_log=False, ws_max_size=SERVER_MAX_BYTES, proxy_headers=bool(trusted), forwarded_allow_ips=trusted, **options)
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
@@ -6943,7 +6980,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         token = secrets.token_urlsafe(24)
         await app.db.kv_set("api_token", token)
     api = build_app(app, token)
-    config = server_config(api, host=app.settings.api_host, port=app.settings.api_port)
+    config = server_config(api, trusted_proxies=app.settings.api_trusted_proxies, host=app.settings.api_host, port=app.settings.api_port)
     loop = asyncio.get_running_loop()
     server = _AppServer(config, lambda: loop.call_soon_threadsafe(app.stopping.set))
     app.extensions["api_token"] = token
@@ -6974,7 +7011,12 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
                 await outbox.send_text(chunk, markdown=False)
 
         app.front.command_hooks["doctor"] = cmd_doctor
-    return [asyncio.create_task(server.serve(), name="api-server")]
+    tasks = [asyncio.create_task(server.serve(), name="api-server")]
+    # lifespan off: the API server runs the app's start and stop, and they run once.
+    door = services_door.open_door(app.settings, server_config(services_door.ServicesDoor(api), trusted_proxies=app.settings.api_trusted_proxies, lifespan="off"))
+    if door is not None:
+        tasks.append(door[1])
+    return tasks
 
 
 __all__ = ["build_app", "install", "message_view", "validate_init_data"]

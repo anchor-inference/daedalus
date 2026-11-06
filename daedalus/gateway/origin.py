@@ -1,4 +1,4 @@
-"""The Origin rule: whether a WebSocket comes from the app itself."""
+"""The Origin rule: whether a WebSocket, or a request carrying the session cookie, comes from the app itself."""
 
 from __future__ import annotations
 
@@ -53,4 +53,34 @@ def allowed_origin(origin: str | None, host_header: str | None, public_url: str)
     return public is not None and public == parsed
 
 
-__all__ = ["allowed_origin"]
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def cookie_may_act(*, method: str, origin: str | None, fetch_site: str | None, fetch_mode: str | None, fetch_dest: str | None, host_header: str | None, public_url: str) -> bool:
+    """Whether a request that holds the session cookie was made by the app, or by the operator's own hand.
+
+    A cookie is attached by the browser, whoever asked. ``SameSite=Lax`` keeps a foreign site out but
+    not a neighbour: another port of this host and a sibling subdomain are the same site, and from
+    either one a POST with ``credentials: "include"`` arrives signed in, which is exactly where a
+    shared service's page sits.
+
+    ``Sec-Fetch-Site`` is the plain answer, and a page cannot forge it. It is not always there: a
+    browser sends it only to a secure address, and http on a LAN address is not one, so ``Origin`` has
+    to carry the rule too. Every browser sends that on a request that changes something, and ``null``
+    (a sandboxed page, or one with no referrer) never matches. With neither header the request is
+    not from a browser, and there is no ambient cookie to worry about: whoever sent it put the cookie
+    there on purpose.
+
+    Following a link in from elsewhere stays possible, as a top-level GET; the app framed by a
+    neighbour does not, or a page on the same site could lay itself over a signed-in app.
+    """
+    if fetch_site in ("same-origin", "none"):
+        return True
+    if method.upper() in SAFE_METHODS and fetch_mode == "navigate" and fetch_dest == "document":
+        return True
+    if origin is not None:
+        return allowed_origin(origin, host_header, public_url)
+    return not fetch_site
+
+
+__all__ = ["SAFE_METHODS", "allowed_origin", "cookie_may_act"]

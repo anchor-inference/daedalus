@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX
+from daedalus.extensions.services_door import ServicesDoor
 
 
 class Upstream(BaseHTTPRequestHandler):
@@ -114,6 +115,7 @@ def test_root_relative_redirects_stay_under_the_slug(client: TestClient) -> None
 
 
 def test_key_share_needs_the_key_once_then_a_cookie(client: TestClient) -> None:
+    client = TestClient(ServicesDoor(client.app))  # type: ignore[arg-type]
     assert client.get("/s/vault-cd34/").status_code == 403
     assert client.get("/s/vault-cd34/?key=wrong").status_code == 403
     r = client.get("/s/vault-cd34/page?key=s3cret&a=b", follow_redirects=False)

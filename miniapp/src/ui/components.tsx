@@ -557,6 +557,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
             ))}
           </div>
           {!s.share?.public_base && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.nopublic")}</div>}
+          {s.share?.public_base && s.share.sandboxed && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.sandboxed")}</div>}
           {mode !== "local" && s.share?.url && (
             <>
               <label className="field">{t("svc.link")}</label>

@@ -182,7 +182,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("owner_user_id", "api_port", "usd_per_day", mode="before")
+    @field_validator("owner_user_id", "api_port", "services_door_port", "usd_per_day", mode="before")
     @classmethod
     def _blank_means_default(cls, value: object, info: Any) -> object:
         """``OWNER_USER_ID=`` in an env file is an unset value, not the number "".
@@ -277,12 +277,24 @@ class Settings(BaseSettings):
 
     api_host: str = "127.0.0.1"
     api_port: int = 8765
+    api_trusted_proxies: str = ""
+    """The peers allowed to say who the client is through ``X-Forwarded-For`` and ``X-Forwarded-Proto``:
+    addresses or networks, comma separated. Empty trusts nobody, and every client is the peer that
+    connected. That is the safe mistake: behind a proxy everyone shares one failed-attempt bucket,
+    where trusting the wrong peer would let a visitor name any address they like. uvicorn's own
+    default trusts loopback, which is also where a tunnel's client connects from."""
     services_port_range: str = "8100-8119"
     """Ports a session's services may listen on; the compose file publishes the same range from the container."""
     services_public_host: str = Field(default_factory=lambda: "127.0.0.1" if native_mode() else "")
     """The address the operator reaches those ports at (the docker host on the LAN); empty = shown as <host>.
     Natively there is no host but this one: a service the agent starts listens on the loopback interface of
     the operator's own machine, and that is the address to open."""
+    services_door_port: int = 8766
+    """The port of the listener that serves shared services and nothing else, on the same interface as
+    the API; 0 turns it off. ``daedalus.extensions.services_door`` says why it exists."""
+    services_public_url: str = ""
+    """The address that listener is reached at when it is not this host's own port: the name a reverse
+    proxy gives it, or later a tunnel. Must be another origin than ``miniapp_public_url``."""
     miniapp_public_url: str = ""
 
     terminals_container_dir: Path | None = None

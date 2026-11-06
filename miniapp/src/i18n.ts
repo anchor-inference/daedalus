@@ -1174,6 +1174,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "svc.access.local.addr": { en: "its LAN address", ru: "его адресу в сети" },
   "svc.access.key.sub": { en: "Served through the site; the link carries a key once and sets a cookie.", ru: "Отдаётся через сайт: ссылка один раз несёт ключ и ставит cookie." },
   "svc.access.public.sub": { en: "Served through the site; anyone with the link, no login.", ru: "Отдаётся через сайт: любой со ссылкой и без входа." },
+  "svc.sandboxed": { en: "This address has no separate origin for shared pages yet, so a page runs in a sandbox: its own storage and cookies will not work. Set SERVICES_PUBLIC_URL to give it one.", ru: "У этого адреса пока нет отдельного источника для общих страниц, поэтому страница работает в песочнице: её локальное хранилище и куки недоступны. Задайте SERVICES_PUBLIC_URL, чтобы это исправить." },
   "svc.nopublic": { en: "MINIAPP_PUBLIC_URL is not set: the link has no public address yet.", ru: "MINIAPP_PUBLIC_URL не задан: у ссылки пока нет публичного адреса." },
   "svc.link": { en: "Link", ru: "Ссылка" },
   "svc.key": { en: "Key", ru: "Ключ" },

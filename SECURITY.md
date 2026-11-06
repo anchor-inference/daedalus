@@ -15,6 +15,10 @@ a hole in it.
   machine, the operator's paths or the operator's checkouts are refused; a forced push, deleting a
   workspace or a host outside the egress allowlist wait for the operator's approval key. The built-in
   rules change only through a pull request; the operator's rules can tighten them, never loosen them.
+- **A shared page holds nothing of the app's.** A shared service runs on an origin of its own, or with
+  no origin at all, never on the app's; and the session cookie counts only on a request the app itself
+  made, because a port or a sibling subdomain is another origin but not another site, and a browser
+  attaches the cookie there. A custom page, by contrast, is the operator's own and has the whole API.
 - **Secrets are masked** in tool output, logs, transcripts, proposal cards and pull requests.
 - **The sandbox fails closed.** With `tools.exec.sandbox = "workspace"`, a container that cannot create
   namespaces refuses commands instead of running them bare.
@@ -24,6 +28,9 @@ a hole in it.
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.
 - Anything you mount into the container is the agent's. Mount only what it should have.
+- A service opened directly on its own port, on the same host name as the app, receives the app's
+  cookies, because cookies ignore ports. Natively the two names differ for that reason. On a bare
+  address, open shared services through the door, which strips them.
 - Telegram is the operator channel: whoever controls the operator's Telegram account controls the agent.
 
 ## Reporting

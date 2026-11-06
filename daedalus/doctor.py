@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from daedalus import supervisor_client
+from daedalus import public_address, supervisor_client
 from daedalus.config import RuntimeConfig, Settings, keyproxy_base, keyproxy_configured, keyproxy_unresolved
 from daedalus.host import capabilities, components, launcher_bridge
 from daedalus.providers.llamacpp import describe_discovery, discover_llamacpp
@@ -640,6 +640,11 @@ async def _terminals(ctx: DoctorContext) -> list[Check]:
         # A terminal's socket is refused unless it comes from the app's own origin, and Telegram's
         # webview connects from the Mini App's address, which nothing but this setting names.
         out.append(Check("terminals in Telegram", False, "MINIAPP_PUBLIC_URL is empty, so a terminal opened inside Telegram is refused", "warn", "set MINIAPP_PUBLIC_URL to the address the bot's menu button opens"))
+    door = public_address.services_base(ctx.settings)
+    if door:
+        out.append(Check("shared services", True, f"served from {door}, an origin of their own", "ok"))
+    else:
+        out.append(Check("shared services", False, "no separate origin: a shared page runs in a sandbox, without local storage or cookies", "info", "give the services door a name in your reverse proxy and set SERVICES_PUBLIC_URL"))
     return out
 
 

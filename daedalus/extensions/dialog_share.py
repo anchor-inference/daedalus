@@ -18,6 +18,7 @@ import re
 import secrets
 from typing import TYPE_CHECKING, Any
 
+from daedalus import public_address
 from daedalus.extensions.services import SHARE_MODES
 from daedalus.host import attached_files
 from daedalus.security import redact
@@ -158,7 +159,11 @@ def public_messages(views: list[dict[str, Any]], slug: str) -> list[dict[str, An
 class DialogShares:
     def __init__(self, app: Application) -> None:
         self.app = app
-        self.public_base = app.settings.miniapp_public_url.strip().rstrip("/").removesuffix("/app")
+
+    @property
+    def public_base(self) -> str:
+        """Read each time, since a tunnel's address arrives while the process runs."""
+        return public_address.app_base(self.app.settings)
 
     def share_url(self, row: dict[str, Any], *, with_key: bool = True) -> str | None:
         mode = row.get("share_mode") or "local"

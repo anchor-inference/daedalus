@@ -43,7 +43,9 @@ talking to the app. A page that uses neither works just as well.
 For a `service` page Daedalus drops `X-Frame-Options` from the answers, turns a `frame-ancestors`
 directive into `'self'`, moves a cookie the server sets on `/` under `/pages/<slug>/`, and keeps a
 redirect to the server's root under the page's prefix. The app's own session cookie is never
-forwarded to the server.
+forwarded to the server. A server's cookie loses any `Domain`, and what an answer says about the whole
+origin (`Clear-Site-Data`, `Strict-Transport-Security`, `Alt-Svc`, `Service-Worker-Allowed`) is dropped:
+a page is one address of the app's origin and does not speak for the rest of it.
 
 ## On disk
 

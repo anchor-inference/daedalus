@@ -110,7 +110,7 @@ async def test_sharing_mints_a_slug_once_and_a_key_only_for_key_mode(app: Any) -
     state = await app.manager.create_session("host")
     sid = state.session.id
     s = await services.start(sid, name="site", command="sleep 30")
-    assert s["share"] == {"mode": "local", "slug": None, "key": None, "url": None, "public_base": "https://daedalus.example.com"}
+    assert s["share"] == {"mode": "local", "slug": None, "key": None, "url": None, "public_base": "https://daedalus.example.com", "sandboxed": True}
     public = await services.share(sid, "site", "public")
     slug = public["share"]["slug"]
     assert slug and slug.startswith("site-") and len(slug) >= 5 + 24 and public["share"]["key"] is None

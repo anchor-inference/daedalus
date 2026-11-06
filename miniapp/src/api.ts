@@ -922,7 +922,7 @@ export type LoopView = {
 };
 
 export type ShareMode = "local" | "public" | "key";
-export type ShareView = { mode: ShareMode; slug: string | null; key: string | null; url: string | null; public_base: string };
+export type ShareView = { mode: ShareMode; slug: string | null; key: string | null; url: string | null; public_base: string; sandboxed?: boolean };
 /** One custom page as `GET /api/pages` lists it: what the navigation draws. `title` is the plain (or
  *  English) title; `titles` has one per language when the page was given them. */
 export type PageListing = { slug: string; title: string; titles: Record<string, string>; icon: string | null; icon_path: string | null; path: string; version: number | null; updated_at: string | null };
