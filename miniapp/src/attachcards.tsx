@@ -6,7 +6,7 @@
 
 import type { MessageAttachment } from "./api";
 import { Icon, type IconName } from "./icons";
-import { canPreview, downloadHref, useBlobUrl, type PreviewSource } from "./preview";
+import { canPreview, downloadHref, openOrSave, useBlobUrl, type PreviewSource } from "./preview";
 import { t } from "./i18n";
 import { bytes } from "./format";
 import { attachmentKind, attachmentSource, splitAttachments, type AttachmentKind } from "./attachments";
@@ -32,7 +32,7 @@ function Thumb({ item, src, onOpen }: { item: MessageAttachment; src: PreviewSou
 function FileCard({ item, src, onOpen }: { item: MessageAttachment; src: PreviewSource & { base: string; path: string }; onOpen: (src: PreviewSource) => void }) {
   const kind = attachmentKind(item);
   const openable = canPreview(src.path);
-  const open = () => (openable ? onOpen(src) : window.open(downloadHref(src.base, src.path), "_blank", "noreferrer"));
+  const open = () => (openable ? onOpen(src) : openOrSave(downloadHref(src.base, src.path), item.name));
   return (
     <button type="button" className="msg-file" data-kind={kind} onClick={open} aria-label={t(openable ? "attach.open" : "attach.save", { name: item.name })} title={described(item)}>
       <span className="msg-file-icon" aria-hidden><Icon name={KIND_ICON[kind]} size={18} /></span>

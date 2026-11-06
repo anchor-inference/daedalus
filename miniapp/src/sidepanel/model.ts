@@ -78,3 +78,9 @@ export function dataFile(dataUrl: string, name: string): File {
   const bytes = Uint8Array.from(atob(body ?? ""), (c) => c.charCodeAt(0));
   return new File([bytes], name, { type });
 }
+
+/** Whether a file is one a conversation carries, which the panel's door opens: an attached item, what
+ *  the operator sent, what the agent sent, a picture a tool returned. Not a path in the workspace. */
+export function panelCarries(src: { base: string } | { file: File }): boolean {
+  return "base" in src && /^\/api\/sessions\/[^/]+\/(media\/[^/]+|attachments|sent\/[^/]+|tool-results\/[^/]+\/images)$/.test(src.base);
+}

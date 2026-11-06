@@ -25,7 +25,7 @@ export function HtmlPreview({ text, base, path, onNavigation }: { text: string; 
     const file = current.split("#")[0];
     if (file === path && gen === 0) setBody({ text, path: current, gen });
     else if (base) {
-      fetch(`${base}/download?path=${encodeURIComponent(file)}`, { headers: api.authHeaders(), signal: controller.signal }).then(async (r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text(); }).then((s) => { if (!controller.signal.aborted) setBody({ text: s, path: current, gen }); }).catch((e) => { if (!controller.signal.aborted) { setError(errorText(e)); setBusy(false); } });
+      api.fetch(`${base}/download?path=${encodeURIComponent(file)}`, { signal: controller.signal }).then(async (r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text(); }).then((s) => { if (!controller.signal.aborted) setBody({ text: s, path: current, gen }); }).catch((e) => { if (!controller.signal.aborted) { setError(errorText(e)); setBusy(false); } });
     } else { setBody({ text, path: current, gen }); setBusy(false); }
     return () => controller.abort();
   }, [base, current, path, text, gen]);

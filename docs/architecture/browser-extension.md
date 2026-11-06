@@ -202,6 +202,15 @@ Esc refuses).
   when the device is unpaired or every browser session is ended. It opens `/api/panel/*` alone: the
   conversations switched to the operator's Chrome, and nothing else of the installation (a
   conversation outside them answers 404, every other route 401).
+- **What a conversation carries**: the pictures, clips and files drawn in it come through the same
+  door, each by the conversation and the item or call that holds it: attached media, what the
+  operator sent, what the agent sent with SendFile, a picture a tool returned. A conversation's own
+  `download`, which takes any path under its workspace, stays closed: a press on such a file opens
+  the app. An `<img>` or a `<video>` cannot carry the header and the frame has no cookie, so the app
+  reads the bytes with a `fetch` and draws them from a blob: a picture as it is drawn, a clip on a
+  press, because a blob is the whole file. These requests go to `/api/`, which the app's service
+  worker leaves alone, so the header reaches the host as sent. Saving is the same read handed to the
+  browser as a blob, which the frame's `allow-downloads` lets through.
 - **Framing**: `/app/panel` answers `frame-ancestors chrome-extension://lkhhklicnjlplokpadpccndipomikoaj`;
   the rest of the app is framed only by itself and Telegram's web client.
 - **The bridge** (the extension's `src/bridge.ts`, and `miniapp/src/sidepanel/bridge.ts` on the app's side): the frame
