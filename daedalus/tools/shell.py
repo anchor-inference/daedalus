@@ -345,6 +345,27 @@ def guest_limits_status() -> str:
     return _guest_limits_state
 
 
+def folders_with_keys(state: str) -> list[Path]:
+    """The folder of the provider keys and every folder the launcher keeps a copy of it in.
+
+    The folder and not the file: the key proxy saves a key by renaming a new file over the old one, and the
+    kernel drops a mount from a name that is renamed over, in every namespace. Measured with a real sandbox: a
+    command already running when a key was saved read ``/dev/null`` before the save and the new keys after it.
+    Nothing in a sandbox needs this folder: the proxy that reads and writes the file is outside it, and the ssh
+    material in it reaches a command through ``~/.ssh``, where the supervisor copies it at start.
+
+    The copies are the sealed set's (:attr:`daedalus.config.Settings.sealed_paths`), named again because that
+    module imports this one. A backup is an archive of the data folder, keys included, one built path away.
+    Resolved, because bubblewrap cannot mount over a name that is a link, and would refuse every command.
+    """
+    secrets = os.environ.get("DAEDALUS_SECRETS", "").strip()
+    found = [Path(secrets)] if secrets else []
+    if state:
+        data = Path(state).parent
+        found += [Path(state) / "secrets", data / "backups", data / "upgrade", data.parent / ".daedalus-update", *sorted(data.parent.glob(f".{data.name}-slot-*"))]
+    return [folder.resolve() for folder in found if folder.is_dir()]
+
+
 def hidden_installation() -> list[str]:
     """What covers the launcher's private files in a command's sandbox. Natively only: in a container they
     are not on this filesystem, and nothing here may fail a command over a path that is not there."""
@@ -356,6 +377,9 @@ def hidden_installation() -> list[str]:
     handover = Path(state).parent / "launcher.json" if state else None
     if _native() and handover is not None and handover.is_file():
         argv += ["--ro-bind", "/dev/null", str(handover)]
+    if _native():
+        for folder in folders_with_keys(state):
+            argv += ["--tmpfs", str(folder)]
     return argv
 
 
@@ -383,10 +407,11 @@ async def sandbox_argv(
     ``session_id`` draws from are bound back, read-only: the read-only root bind would otherwise show a
     session every other chat's and project's secrets.
 
-    The launcher's local state goes the same way, and its handover file is covered: the first holds the
-    tokens of the public address and of the daemons, the second a token that runs the installation. The
-    policy refuses a command that names them, by matching words, and a command that builds the path is
-    not one it can read. Here there is simply nothing at that path.
+    The launcher's local state goes the same way, its handover file is covered, and so is the provider
+    keys' folder with the copies of it: the first holds the tokens of the public address and of the
+    daemons, the second a token that runs the installation, the third ``keyproxy.env``. The policy refuses
+    a command that names them, by matching words, and a command that builds the path is not one it can
+    read. Here there is simply nothing at that path.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)

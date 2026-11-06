@@ -295,7 +295,7 @@ data/
   daedalus/               the bot checkout; deploy/compose.yaml runs from here
   protocore-exp/          the core checkout
   daedalus-secrets/
-    keyproxy.env          provider keys (0600) — outside every folder the agent can read
+    keyproxy.env          provider keys (0600) — outside every checkout; who can read it is below
     ssh/                  keys and config for hosts the agent may reach; may stay empty
   .env                    what compose interpolates and the agent container reads; the ports the
                           installation chose for itself are kept here
@@ -566,10 +566,10 @@ replaced if they differ; a copy on your `PATH` is not used, because `PATH` holds
 Tokens stay in the local state folder, in `0600` files. They are never logged and no answer of the API
 carries one. Whether the agent can read them depends on the machine: the policy refuses a command that names
 the file, which is a match on words, so what really stands in the way is the sandbox. On Linux with
-`tools.exec.sandbox = workspace` (the default), the folder and `launcher.json` are not in a command's
-filesystem at all. On a Mac, on Windows, or with the sandbox off, a command that builds the path can read
-them, and the settings say so beside the token field. A team member in a terminal (Claude Code, Codex) runs
-outside the sandbox everywhere. The provider keys in `keyproxy.env` are not hidden by this, on any system.
+`tools.exec.sandbox = workspace` (the default), the folder, `launcher.json`, the provider keys' folder and
+the backups that copy it are not in a command's filesystem at all. On a Mac, on Windows, or with the sandbox
+off, a command that builds the path can read them, `keyproxy.env` included, and the settings say so beside the
+token field. A team member in a terminal (Claude Code, Codex) runs outside the sandbox everywhere.
 
 None of the clients opens a local control port. ngrok runs with `web_addr: false` and `--inspect=false`, and
 `frpc` with no admin server: open, either would take orders from any program on this machine. Their state
