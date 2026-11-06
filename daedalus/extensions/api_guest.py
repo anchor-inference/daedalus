@@ -24,6 +24,7 @@ from daedalus import public_address
 from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable, GuestBridge, bridge_of, model_options
 from daedalus.host import guest_turns
 from daedalus.host.engine_factory import TENANT
+from daedalus.host.notify_text import render
 from daedalus.memory import privacy
 
 if TYPE_CHECKING:
@@ -172,6 +173,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         await bridge().revoked(link_id, door_told=False)
         out = await door("POST", f"/control/links/{link_id}/revoke")
         await bridge().revoked(link_id)
+        await bridge().contact_settled(str(((out.get("link") or {}).get("conversation") or {}).get("id") or ""), render("guest.revoked", app.notifications.language()) if app.notifications is not None else "")
         return out
 
     @api.post("/api/guest/links/{link_id}/reissue")
@@ -187,7 +189,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.post("/api/guest/conversations/{conversation_id}/{decision}")
     async def decide(conversation_id: str, decision: Literal["admit", "refuse"], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return await door("POST", f"/control/conversations/{conversation_id}/{decision}")
+        out = await door("POST", f"/control/conversations/{conversation_id}/{decision}")
+        if app.notifications is not None:
+            await bridge().contact_settled(conversation_id, render("guest.admitted" if decision == "admit" else "guest.refused", app.notifications.language()))
+        return out
 
     @api.post("/api/sessions/{session_id}/guest/draft")
     async def draft_briefing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

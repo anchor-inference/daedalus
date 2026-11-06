@@ -710,7 +710,7 @@ async def trapped(settings: Settings, db: Database, rig: Rig) -> Any:
     guest_door_extension.model_options = lambda _app: [{"id": "cheap", "label": "cheap", "path": "deepseek/v1", "model": "cheap-model", "price_in": 0.1, "price_out": 0.2, "free": False}]  # type: ignore[assignment]
     api_guest.model_options = guest_door_extension.model_options  # type: ignore[assignment]
     routes = httpx.AsyncClient(transport=httpx.ASGITransport(api), base_url="http://app")
-    yield SimpleRig(sid, routes, rig, manager)
+    yield SimpleRig(sid, routes, rig, manager, bridge)
     await routes.aclose()
     api_guest.model_options = model_options  # type: ignore[assignment]
     guest_door_extension.model_options = model_options
@@ -718,8 +718,9 @@ async def trapped(settings: Settings, db: Database, rig: Rig) -> Any:
 
 
 class SimpleRig:
-    def __init__(self, session_id: str, routes: httpx.AsyncClient, rig: Rig, manager: SessionManager) -> None:
+    def __init__(self, session_id: str, routes: httpx.AsyncClient, rig: Rig, manager: SessionManager, bridge: GuestBridge) -> None:
         self.session_id = session_id
+        self.bridge = bridge
         self.routes = routes
         self.rig = rig
         self.manager = manager
@@ -958,3 +959,26 @@ async def test_a_call_past_the_bot_is_booked_at_the_bill_its_upstream_stated(set
     await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000, "cost_usd": 0.25})
     await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000})
     assert [record.cost_usd for record in captured] == [0.25, 1.0]
+
+
+async def test_a_first_contact_card_closes_when_the_contact_is_settled_some_other_way(trapped: SimpleRig) -> None:
+    """Admitted in the sheet, or revoked, the card stayed urgent with its buttons until somebody pressed one."""
+    resolved: list[tuple[str, str]] = []
+
+    async def resolve(ref: str, resolution: str, *, via: str) -> int:
+        resolved.append((ref, resolution))
+        return 1
+
+    host = trapped.bridge.app
+    host.notifications = SimpleNamespace(resolve=resolve, language=lambda: "en", post=None)
+    url = await trapped.stand_in_link(approval=True)
+    rig = trapped.rig
+    await rig.public.post(f"/a/{url.rsplit('/', 1)[1]}/redeem")
+    listed = (await trapped.routes.get(f"/api/guest/links?session_id={trapped.session_id}")).json()["links"]
+    conversation = listed[-1]["conversation"]["id"]
+    assert (await trapped.routes.post(f"/api/guest/conversations/{conversation}/admit")).status_code == 200
+    assert resolved == [(f"guest:{conversation}", "Admitted")]
+    await trapped.bridge.on_event({"kind": "approval_timeout", "link_id": listed[-1]["id"]})
+    assert resolved[-1] == (f"guest:{conversation}", "Refused")
+    assert (await trapped.routes.post(f"/api/guest/links/{listed[-1]['id']}/revoke")).status_code == 200
+    assert resolved[-1] == (f"guest:{conversation}", "Link closed")

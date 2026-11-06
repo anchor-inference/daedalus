@@ -363,11 +363,15 @@ class GuestBridge:
         if notifications is None:
             return
         kind, link_id = str(event.get("kind")), str(event.get("link_id"))
-        if kind not in ("first_contact", "redeem_refused", "limit"):
+        if kind not in ("first_contact", "redeem_refused", "limit", "approval_timeout"):
             return
         row = await self.known_link(link_id)
         if row is None or row["revoked_at"]:
             return  # a link this side never made: an event about it is the door's invention
+        if kind == "approval_timeout":
+            known = await self.client.call("GET", f"/control/links/{link_id}")
+            await self.contact_settled(str(((known.get("link") or {}).get("conversation") or {}).get("id") or ""), render("guest.refused", notifications.language()))
+            return
         now = time.monotonic()
         if kind == "first_contact":
             while self._contacts and now - self._contacts[0] > NOTIFY_EVERY_SECONDS:
@@ -518,7 +522,10 @@ class GuestBridge:
             logger.warning("the door was out of reach for the reply to message %s", delivery.message_id)
 
     async def on_session_deleted(self, session_id: str) -> None:
-        """A chat that is gone cannot answer: its links close with it."""
+        """A chat that is gone cannot answer: its links close with it, and their cards with them."""
+        notifications = getattr(self.app, "notifications", None)
+        if notifications is not None:
+            await notifications.resolve_session(session_id, render("guest.revoked", notifications.language()), via="app", prefixes=(REF,))
         for link_id in await self.links_of(session_id):
             row = await self.known_link(link_id)
             if row is None or row["revoked_at"]:
@@ -530,6 +537,13 @@ class GuestBridge:
                 logger.warning("could not close link %s at the door along with its chat", link_id)
 
     # -- notification buttons ---------------------------------------------------------
+
+    async def contact_settled(self, conversation_id: str, resolution: str) -> None:
+        """The card of a first contact goes when the contact is decided by any other way: left open it
+        stays urgent in the operator's inbox, offering Admit on a conversation that is already over."""
+        notifications = getattr(self.app, "notifications", None)
+        if notifications is not None and conversation_id:
+            await notifications.resolve(f"{REF}:{conversation_id}", resolution, via="app")
 
     async def resolve_action(self, request: ActionRequest) -> ActionOutcome:
         """Admit or Refuse on ``guest:<conversation id>``. No "admit all": each request is one decision."""
