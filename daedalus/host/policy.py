@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from daedalus.host import tunnels
 from daedalus.public_address import OwnDoors
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
@@ -888,10 +889,10 @@ class Policy:
         checkouts = list(self.operator_checkouts)
         where = real_path(cwd, self.base_dir) if cwd else self.base_dir
 
-        def escalate(action: str, reason: str, rule: str) -> None:
+        def escalate(action: str, reason: str, rule: str, told: str = "") -> None:
             nonlocal worst
             if _SEVERITY[action] > _SEVERITY[worst.action]:
-                worst = Decision(action, reason, rule, hosts=hosts)
+                worst = Decision(action, reason, rule, hosts=hosts, told=told)
 
         if (host := self._host_paths([cwd] if cwd else [])) is not None:
             escalate(host.action, host.reason, host.rule)
@@ -909,6 +910,8 @@ class Policy:
         for words in segments:
             if words[0] == "cd" and len(words) > 1:
                 where = real_path(expand_home(words[1], self.home), where)  # a `cd` earlier in the line moves every later command
+            if (tunnel := tunnels.tunnel_in([_substitute(w, variables) for w in words], shell_segments)) is not None:
+                escalate(DENY, f"{tunnel} would raise a public tunnel, which the operator opens from settings", "egress.tunnel", tunnels.REFUSAL.format(what=tunnel))
             head = words[0].lstrip("\\")
             if head.startswith("/") and head.count("/") >= 2:
                 head = head.rsplit("/", 1)[-1]  # /bin/rm is rm
@@ -970,6 +973,20 @@ class Policy:
             if blocked:
                 escalate(ASK, f"network access to {', '.join(blocked)} is outside the egress allowlist", "egress.allowlist")
         return worst
+
+    @staticmethod
+    def _mcp_command(arguments: dict[str, Any]) -> Decision | None:
+        """What a stdio MCP server the agent adds would run, read as a command the agent typed.
+
+        ``McpAdd`` starts a process as surely as ``Exec`` does, so a rule that only read Exec would
+        leave it as the way round: the server's command is ``cloudflared`` and its arguments are a
+        tunnel."""
+        command, args = str(arguments.get("command") or ""), [str(a) for a in arguments.get("args") or []]
+        line = command if re.search(r"\s", command) and not args else shlex.join([command, *args])
+        for words in shell_segments(line):
+            if (tunnel := tunnels.tunnel_in(words, shell_segments)) is not None:
+                return Decision(DENY, f"{tunnel} would raise a public tunnel, which the operator opens from settings", "egress.tunnel", told=tunnels.REFUSAL.format(what=tunnel))
+        return None
 
     def _web(self, url: str) -> Decision:
         parts = urlsplit(url)
@@ -1049,7 +1066,7 @@ class Policy:
         elif tool in BROWSER_NAV_TOOLS:
             decision = self._browser_url(text)
         else:
-            decision = self._host_paths(argument_paths(arguments)) or Decision(ALLOW)
+            decision = (self._mcp_command(arguments) if tool == "McpAdd" else None) or self._host_paths(argument_paths(arguments)) or Decision(ALLOW)
             if decision.action == ALLOW and self.mcp_approvals.get(tool) == ASK:
                 decision = Decision(ASK, "an MCP tool that may change or reach the outside world, and no rule allows it", "mcp.annotations")
         decision = self._config_rules(tool, text, decision)
@@ -1084,6 +1101,7 @@ class Policy:
             ("git.operator_push", "Exec", DENY, "git push from the operator's checkouts"),
             ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
+            ("egress.tunnel", "Exec, Verify, ServiceStart, McpAdd", DENY, "raising a public tunnel — ngrok, cloudflared, tailscale funnel, frpc, zrok, ssh -R, an SSH service such as localhost.run or Pinggy; the operator opens tunnels from settings"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
             ("mcp.annotations", "MCP tools", ASK, "an MCP tool whose annotations do not say it only reads, or say it may destroy or reach the outside world, unless the server's settings or an operator rule allow it"),
             ("browser.sensitive", "BrowserAct", ASK, "an action that changes the world: a sign-in submitted, a purchase, a message sent, a deletion, terms accepted, a file uploaded, a form sent to another site"),
