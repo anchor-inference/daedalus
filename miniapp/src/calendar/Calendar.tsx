@@ -202,7 +202,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     if (!linkedEvent && !linkedTask && !linked) return;
     const clear = () => navigate(pathFor("calendar"), { replace: true });
     if (linked) {
-      toast(t("cal.connected"));
       clear();
       return;
     }
@@ -269,14 +268,13 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
           title: q.title.trim(), list_id: defaultList?.id, due_date: q.day, notes: "", priority: 0, reminders: [],
           scheduled_start: blocked ? fromWall(q.day, q.start, zone) : null, scheduled_end: blocked ? fromWall(q.day, q.end, zone) : null, duration: blocked ? q.end - q.start : null,
         });
-        toast(t("cal.task.created"));
       } else {
         const fields: EventFields = {
           calendar_id: q.calendar_id, title: q.title.trim(), description: "", location: "", timezone: zone, recurrence: "", reminders: reminderDefaults(q.calendar_id), color: null,
           ...(q.allDay ? { all_day: true, start_at: `${q.day}T00:00:00Z`, end_at: `${addDays(q.day, 1)}T00:00:00Z`, start_date: q.day, end_date: addDays(q.day, 1) } : { all_day: false, start_at: fromWall(q.day, q.start, zone), end_at: fromWall(q.day, q.end, zone), start_date: null, end_date: null }),
         };
         const made = await createEvent(fields);
-        showToast(t("cal.event.created"), { undo: made?.event_id ? () => { void deleteEvent(made, "all").then(refreshPlanner, (exc) => toast(errorText(exc))); } : undefined });
+        if (made?.event_id) showToast(t("cal.event.created"), { undo: () => { void deleteEvent(made, "all").then(refreshPlanner, (exc) => toast(errorText(exc))); } });
       }
       setQuick(null);
       refreshPlanner();
@@ -329,7 +327,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
         setEditor(null);
       }
       refreshPlanner();
-      toast(t("cal.event.saved"));
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
   }
@@ -358,7 +355,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       await deleteEvent(occurrence, scope);
       setEditor(null);
       refreshPlanner();
-      toast(t("cal.event.deleted"));
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
   }
@@ -370,7 +366,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       setEditor(null);
       refreshPlanner();
       invalidate("/api/calendar/accounts");
-      toast(t("cal.conflict.resolved"));
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
   }
@@ -490,7 +485,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       else await createTask(fields);
       setEditor(null);
       refreshPlanner();
-      toast(t("cal.task.saved"));
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
   }
@@ -501,7 +495,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       await deleteTask(task);
       setEditor(null);
       refreshPlanner();
-      toast(t("cal.task.deleted"));
     } catch (exc) { toast(errorText(exc)); }
   }
 

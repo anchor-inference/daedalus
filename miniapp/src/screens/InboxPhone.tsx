@@ -363,8 +363,7 @@ function ProposalSheet({ p, toast, onClose, onDone }: { p: Proposal; toast: (tex
   async function decide(decision: "approve" | "reject") {
     setBusy(true);
     try {
-      const r = await api.post<{ result: string }>(`/api/proposals/${p.id}/decide`, { decision, reason });
-      toast(r.result);
+      await api.post(`/api/proposals/${p.id}/decide`, { decision, reason });
       onDone();
     } catch (e) {
       toast(errorText(e));
@@ -410,7 +409,8 @@ function AllowSheet({ entries, names, toast, onClose, onDone }: { entries: Notif
     }
     afterChange();
     const elsewhere = results.filter(([, r]) => r.conflict).length;
-    toast([plural("ph.inbox.allowed", results.length - elsewhere), elsewhere ? plural("ph.inbox.allowed.elsewhere", elsewhere) : "", failed ? plural("ph.inbox.allowed.failed", failed) : ""].filter(Boolean).join(" · "));
+    // A press that all went through shows in the list; this says what did not.
+    if (elsewhere || failed) toast([elsewhere ? plural("ph.inbox.allowed.elsewhere", elsewhere) : "", failed ? plural("ph.inbox.allowed.failed", failed) : ""].filter(Boolean).join(" · "));
     setBusy(false);
     onDone(results);
   }

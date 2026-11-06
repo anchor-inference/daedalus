@@ -27,6 +27,7 @@ from api_stub import (  # noqa: E402
     folders,
     fulfil_shared,
     open_task_tool,
+    wait_until,
 )
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -37,12 +38,12 @@ WORDS = {
     "en": {
         "title": "Board · Bakery", "needs": "Needs you", "doing": "In progress", "review": "Review", "queue": "Queue", "done": "Done",
         "answer": "Answer", "accept": "Accept", "merge": "Merge", "new": "New task", "create": "Create", "save": "Save", "working": "working",
-        "after": "after “Checkout”", "accepted": "is done", "queued": "Starting the task", "missing": "Missing", "started": "Starting the task",
+        "after": "after “Checkout”", "accepted": "is done", "missing": "Missing",
     },
     "ru": {
         "title": "Доска · Bakery", "needs": "Нужны вы", "doing": "В работе", "review": "Проверка", "queue": "Очередь", "done": "Готово",
         "answer": "Ответить", "accept": "Принять", "merge": "Слить", "new": "Новая задача", "create": "Создать", "save": "Сохранить", "working": "работает",
-        "after": "после «Checkout»", "accepted": "готово", "queued": "Запускаем задачу", "missing": "Не заполнено", "started": "Запускаем задачу",
+        "after": "после «Checkout»", "accepted": "готово", "missing": "Не заполнено",
     },
 }
 
@@ -160,7 +161,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet = page.locator(".sheet.pboard-sheet")
     sheet.get_by_role("button", name="Stop this task" if lang == "en" else "Остановить задачу").click()
     page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-    expect(page.locator(".toast")).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
+    wait_until(page, lambda: stub.stops)
     assert stub.stops and stub.stops[-1][0] == "t-checkout" and stub.stops[-1][1]["client_operation_id"], stub.stops
     expect(cols.locator(".pboard-col.doing .pcard", has_text="Checkout")).to_be_visible()
     owned = open_task_tool(page, "Stop work owned by this task" if lang == "en" else "Остановить связанную работу задачи", lang)
@@ -201,7 +202,6 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     }, made
     assert made["expected_collection_revision"] == 5 and made["client_operation_id"], made
     assert stub.launched[-1][1]["staff_id"] == "st-lev" and stub.launched[-1][1]["resume_from"] is None
-    expect(page.locator(".toast")).to_contain_text(words["queued"])
     expect(cols.locator(".pboard-col.queue .pcard", has_text="Delivery zones")).to_be_visible()
 
     # The delivery receipt can fail definitively or remain unknown; neither completes the task.
@@ -240,7 +240,6 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     edited_id, edited = stub.updated[-1]
     assert edited_id == "t-photos" and edited["assignee_staff_id"] == "st-max" and edited["expected_entity_revision"] == 1 and edited["client_operation_id"], stub.updated[-1]
     assert stub.launched[-1][0] == "t-photos" and stub.launched[-1][1]["staff_id"] == "st-max"
-    expect(page.locator(".toast")).to_contain_text(words["started"])
     page.keyboard.press("Escape")
     expect(sheet).to_have_count(0)
 
@@ -256,7 +255,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".toast")).to_contain_text("Task saved, but couldn't confirm it started" if lang == "en" else "Задача сохранена, но запуск не подтверждён")
     cols.locator(".pcard", has_text="Retry launch").click()
     sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу", exact=True).click()
-    expect(page.locator(".toast")).to_contain_text(words["queued"])
+    wait_until(page, lambda: stub.launched[-1][0] == next(task["id"] for task in stub.tasks if task["title"] == "Retry launch"))
     assert stub.launched[-1][0] == next(task["id"] for task in stub.tasks if task["title"] == "Retry launch")
     page.keyboard.press("Escape")
 

@@ -60,7 +60,7 @@ function SinceDiff({ taskId, head, onLine }: { taskId: string; head: string; onL
 type RequirementIntent = { client_operation_id: string; expected_entity_revision: number; provider: "github"; repository_id: string; check_names: string[] };
 
 /** A policy change returns the submitted result for another review, so the old verdict cannot approve new checks. */
-function CiRequirements({ taskId, checks, onChanged, toast }: { taskId: string; checks: Review["ci_checks"]; onChanged: () => void; toast: (text: string) => void }) {
+function CiRequirements({ taskId, checks, onChanged }: { taskId: string; checks: Review["ci_checks"]; onChanged: () => void; }) {
   const contractKey = `/api/board/${encodeURIComponent(taskId)}/contract`;
   const { data: contract, error: contractError, refresh } = useQuery<{ entity_revision: number }>(contractKey, { staleMs: 0 });
   const offline = useOffline();
@@ -84,7 +84,6 @@ function CiRequirements({ taskId, checks, onChanged, toast }: { taskId: string; 
     try {
       await api.post<{ receipt_id: string; entity_revision: number }>(`/api/board/${encodeURIComponent(taskId)}/ci/requirements`, pending.current);
       pending.current = null;
-      toast(t("pboard.review.ci.saved"));
       invalidate(contractKey);
       invalidate(reviewKey(taskId));
       onChanged();
@@ -215,7 +214,7 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
           ))}
         </ul>
       )}
-      {data.ci_status !== "passed" && data.status === "review" && !data.merged && <CiRequirements taskId={taskId} checks={data.ci_checks} onChanged={onChanged} toast={toast} />}
+      {data.ci_status !== "passed" && data.status === "review" && !data.merged && <CiRequirements taskId={taskId} checks={data.ci_checks} onChanged={onChanged} />}
       {others.length > 0 && (
         <ul className="review-blockers">
           {others.map((b) => <li key={b.code} className={b.code === "conflicts" ? "bad" : "attn"} title={b.text}>{blockerText(b, data)}</li>)}

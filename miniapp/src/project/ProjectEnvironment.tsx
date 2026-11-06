@@ -82,7 +82,6 @@ function EnvironmentContent({ projectId, toast }: { projectId: string; toast: (m
       setBaseline(JSON.stringify(view.spec));
       setDraft(view.spec);
       invalidate(key);
-      toast(t("common.saved"));
     } catch (failure) {
       toast(errorText(failure));
     } finally { setBusy(false); }
@@ -95,7 +94,6 @@ function EnvironmentContent({ projectId, toast }: { projectId: string; toast: (m
       await api.post(`${key}/prepare`);
       setPolling(true);
       invalidate(key);
-      toast(t("env.prepare.started"));
     } catch (failure) {
       toast(errorText(failure));
     } finally { setBusy(false); }

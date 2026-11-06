@@ -79,16 +79,14 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
     const name = query.get("mcp");
     if (name === null) return;
     const failed = query.get("mcp_error");
-    toast(failed ? t("settings.mcp.signin.failed", { name, error: failed }) : t("settings.mcp.signin.done", { name }));
+    if (failed) toast(t("settings.mcp.signin.failed", { name, error: failed }));
     for (const key of ["mcp", "mcp_error", "mcp_linked"]) query.delete(key);
     const rest = query.toString();
     window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
   }, [toast]);
 
   const said = (name: string, probe: Probe) => {
-    if (probe.state === "ready") toast(t("settings.mcp.ready", { name, n: probe.tools.length }));
-    else if (probe.state === "auth_required") toast(t("settings.mcp.needsSignin", { name }));
-    else toast(t("settings.mcp.notAnswering", { name, error: probe.error || probe.state }));
+    if (probe.state !== "ready" && probe.state !== "auth_required") toast(t("settings.mcp.notAnswering", { name, error: probe.error || probe.state }));
   };
   async function save() {
     if (!draft) return;
@@ -109,7 +107,6 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
     setBusy(name);
     try {
       setServers((await api.delete<{ servers: McpServerView[] }>(`/api/mcp/servers/${enc(name)}`)).servers);
-      toast(t("settings.mcp.removed", { name }));
     } catch (error) {
       toast(errorText(error));
     } finally { setBusy(null); }

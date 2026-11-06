@@ -3,7 +3,7 @@ import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, 
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
-import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
+import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
@@ -31,7 +31,7 @@ import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
-import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
+import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer, withoutMediaRefs } from "../media";
 import { SavedToMemory } from "../memory/savedchip";
 import { conversationMedia, galleryFor, toolImageSource, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
@@ -350,7 +350,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   async function loopAction(a: string) {
     try {
       await api.post(`/api/sessions/${id}/loop/action`, { action: a });
-      toast(t("session.loop.action", { action: a }));
       load(true);
     } catch (e) {
       toast(errorText(e));
@@ -360,7 +359,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   async function setAutopilot(on: boolean) {
     try {
       const status = await api.post<AutopilotStatus>(`/api/sessions/${id}/autopilot`, { on });
-      toast(t(!on ? "composer.autopilot.toast.off" : status.enabled ? "composer.autopilot.toast.on" : "composer.autopilot.toast.disabled"));
+      // Asked for and held off by the setting for the whole app: the switch alone would read as on.
+      if (on && !status.enabled) toast(t("composer.autopilot.toast.disabled"));
       load();
     } catch (e) {
       toast(errorText(e));
@@ -371,7 +371,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   async function setYagni(on: boolean) {
     try {
       await api.post(`/api/sessions/${id}/yagni`, { on });
-      toast(t(on ? "composer.yagni.toast.on" : "composer.yagni.toast.off"));
       load();
     } catch (e) {
       toast(errorText(e));
@@ -416,16 +415,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           cutMessages(r.seq, r.through);
           const words = reverted ? withoutAttachedList(reverted.text).trim() : "";
           if (words) composer.current?.insert(words, !phone);
-          const ws = r.workspace_restored
-            ? r.untouched.length
-              ? t("session.reverted.ws.nested", { n: r.untouched.length })
-              : t("session.reverted.ws")
-            : t("session.reverted.ws.none");
-          toast(plural("session.reverted", r.dropped, { ws }));
+          // The messages are gone from the screen; repositories the revert left alone show nowhere else.
+          if (r.workspace_restored && r.untouched.length) toast(plural("session.reverted", r.dropped, { ws: t("session.reverted.ws.nested", { n: r.untouched.length }) }));
           void readSnapshots();
         } else {
           const r = await api.post<{ id: string; title: string; messages: number }>(`/api/sessions/${id}/fork`, { seq });
-          toast(t("session.fork.done", { title: r.title, n: r.messages }));
+          // The copy opens nowhere by itself, so the way to it stays, as a button rather than a remark.
+          actionToast(t("session.fork.done", { title: r.title, n: r.messages }), onOpen ? { action: { label: t("common.open"), run: () => onOpen(r.id) } } : {});
         }
         load();
       } catch (e) {
@@ -616,10 +612,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       if (action === "delete") {
         if (!(await confirmAsync(t("session.sched.delete.title", { name: sc.name })))) return;
         await api.delete(`/api/schedules/${sc.id}`);
-        toast(t("session.sched.deleted"));
       } else {
         const r = await api.post<{ session_id: string }>(`/api/schedules/${sc.id}/run`);
-        toast(t(r.session_id === id ? "session.sched.runninghere" : "session.sched.runningown"));
         if (r.session_id !== id) onOpen?.(r.session_id);
       }
       loadSchedules();
@@ -678,8 +672,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (edit) {
           const back = readReturned([r?.message])[0] ?? { id: message.id, text: message.text, files: message.files };
           composer.current?.insert(back.text);
-          toast(back.files.length ? t("composer.steer.edit.files", { names: back.files.join(", ") }) : t("composer.steer.withdrawn"));
-        } else toast(t("composer.steer.withdrawn"));
+          // The words are back in the field; the files are not, and only this says so.
+          if (back.files.length) toast(t("composer.steer.edit.files", { names: back.files.join(", ") }));
+        }
       } catch (e) {
         const detail = e instanceof ApiError ? String(e.message || "") : "";
         toast(e instanceof ApiError && e.status === 409 ? t(detail.includes("no longer waiting") ? "composer.steer.missing" : "composer.steer.gone") : errorText(e));
@@ -709,7 +704,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         await api.post(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`, {});
         setQueuedInput((q) => q.map((x) => (x.id === message.id ? { ...x, kind: "steer" } : x)));
-        toast(t("composer.delivery.steered"));
       } catch (e) {
         toast(e instanceof ApiError && e.status === 409 ? t("composer.steer.gone") : errorText(e));
         void loadQueued();
@@ -748,7 +742,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
         setSeenKeys((k) => new Set(k).add(a.key));
-        toast(a.chrome ? t("composer.chrome.switched", { name: a.chrome.name }) : t("composer.approved"));
       } catch (e) {
         toast(errorText(e));
       }
@@ -779,7 +772,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         const r = await api.post<{ resolved?: unknown; similar?: { label?: unknown } }>(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
         const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
         setSeenKeys((k) => new Set([...k, a.key, ...answered]));
-        toast(t("composer.approved.similar", { label: typeof r?.similar?.label === "string" ? r.similar.label : similar?.label ?? "" }));
       } catch (e) {
         toast(errorText(e));
       }
@@ -1245,7 +1237,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (e.dataTransfer?.files?.length) composer.current?.addFiles(e.dataTransfer.files);
   }
 
-  // A slash command, run by the host. A short answer is a toast, a long one a sheet; a failure is
+  // A slash command, run by the host. Its answer is a sheet, short or long; a failure is
   // thrown back so the composer can put the line back in the field.
   async function runCommand(line: string) {
     const name = line.slice(1).split(" ")[0].toLowerCase();
@@ -1261,9 +1253,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       raiseFromError(e, id);
       throw e;
     }
-    const short = r.text.length < 140 && !r.text.includes("\n");
-    if (short) toast(r.text);
-    else setCommandResult({ line, text: r.text });
+    setCommandResult({ line, text: r.text });
     load();
   }
 
@@ -1325,7 +1315,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     try {
       await api.post(`/api/sessions/${id}/stop`);
       haptic("medium");
-      toast(t("session.stopping"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -1337,7 +1326,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (!(await confirmDialog({ title: t("remote.cancel.title"), body: t("remote.cancel.body", { device }), action: t("remote.paused.cancel"), danger: true, cancel: t("remote.cancel.keep") }))) return;
     try {
       await api.post(`/api/sessions/${id}/stop`);
-      toast(t("remote.cancelled"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -1360,11 +1348,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       return;
     }
     if (!(await confirmAsync(t("session.compact.title"), { body: t("session.compact.body"), action: t("session.compact.action"), danger: false }))) return;
-    toast(t("session.compacting"));
     try {
       await api.post(`/api/sessions/${id}/compact`, { instructions: "" });
       await load();
-      toast(t("session.compacted"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -1377,8 +1363,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
     if (!(await confirmAsync(t("session.clear.title"), { body: t("session.clear.body"), action: t("session.clear.action") }))) return;
     try {
-      const r = await api.post<{ dropped: number }>(`/api/sessions/${id}/clear`);
-      toast(plural("session.cleared", r.dropped));
+      await api.post(`/api/sessions/${id}/clear`);
       await load();
     } catch (e) {
       toast(errorText(e));
@@ -1389,8 +1374,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function chooseModel(body: ModelChoice) {
     try {
-      const r = await api.post<{ model: string }>(`/api/sessions/${id}/model`, body);
-      toast(t("session.model.picked", { model: r.model }));
+      await api.post(`/api/sessions/${id}/model`, body);
       load();
     } catch (e) {
       toast(errorText(e));
@@ -1399,8 +1383,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function chooseEffort(effort: string) {
     try {
-      const r = await api.post<{ reasoning_effort?: string }>(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
-      toast(t("session.effort.picked", { effort: t(`add.effort.${effort === "off" ? "off" : r.reasoning_effort || effort}`) }));
+      await api.post(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
       load();
     } catch (e) {
       toast(errorText(e));
@@ -1427,7 +1410,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     try {
       await api.delete(`/api/sessions/${id}/telegram`);
       setDetail((current) => current ? { ...current, telegram_linked: false } : current);
-      toast(t("session.telegram.detach.done"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -2060,7 +2042,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
       {receipt && <ReceiptDialog sessionId={id} receipt={receipt} onClose={() => setReceipt(null)} />}
 
-      {computerOpen && <ComputerSheet sessionId={id} toast={toast} onClose={() => setComputerOpen(false)} />}
+      {computerOpen && <ComputerSheet sessionId={id} onClose={() => setComputerOpen(false)} />}
       {phoneSheet === "menu" && <SessionMenuSheet tiles={phoneTiles} rows={phoneRows} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "search" && <SearchSheet sessionId={id} onPick={openMessage} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}
@@ -2299,7 +2281,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const answered = answerTime(turn, closing, live);
   const answeredStamp = answered ? <MessageTime at={answered.at} took={answered.took} /> : undefined;
   const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
-    ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), onSelect: copyLink }] : []),
+    ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
     ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
   ];
@@ -2311,7 +2293,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
     : undefined;
   const copyLink = async () => {
     const url = `${window.location.origin}${link}#m${seq}`;
-    toast((await copyText(url)) ? t("turn.link.copied") : url);
+    const ok = await copyText(url);
+    if (!ok) toast(url);
+    return ok;
   };
   return (
     <div className={`turn ${turn.note?.kind === "loop" ? "loop-turn" : ""} ${folded && !live ? "folded" : ""}`} id={seq ? `m${seq}` : undefined}>
@@ -2372,9 +2356,16 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </Fragment>
       ) : (
         <Fragment key={`t${index}`}>
-          <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} quote={segment.seq ?? null} />
+          {/* The model may write a file's line in a message it goes on from, not only in its last. */}
+          {turn.media?.length && splitMediaAnswer(segment.text, turn.media).some((part) => part.kind === "media") ? (
+            <div className="answer interim answer-with-media" data-quote={segment.seq ?? ""}>
+              {splitMediaAnswer(segment.text, turn.media).map((part, at) => part.kind === "text"
+                ? <Md key={`text-${at}`} text={part.text} cacheKey={live ? undefined : `r${turn.key}-${index}-${at}`} />
+                : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
+            </div>
+          ) : <Md className="answer interim" text={withoutMediaRefs(segment.text)} cacheKey={live ? undefined : `r${turn.key}-${index}`} quote={segment.seq ?? null} />}
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
-          {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} trail={answeredStamp} />}
+          {closing === segment && <MessageActions text={mediaCopyText(segment.text, turn.media ?? [])} actions={answerActions(segment.text, segment.seq)} more={turnMenu} trail={answeredStamp} />}
         </Fragment>
       ))}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
@@ -2384,7 +2375,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             ? <Md key={`text-${index}`} text={part.text} cacheKey={live ? undefined : `a${turn.key}-${index}`} />
             : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
         </div>
-      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} quote={turn.answerSeq ?? null} />)}
+      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={withoutMediaRefs(turn.answer)} cacheKey={live ? undefined : `a${turn.key}`} quote={turn.answerSeq ?? null} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
       {turn.answer && !live && <TurnSources turn={turn} />}
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
@@ -2810,7 +2801,7 @@ function useClock(ms: number): void {
   }, [ms]);
 }
 
-type MessageAction = { icon: IconName; label: string; danger?: boolean; onSelect: () => void };
+type MessageAction = { icon: IconName; label: string; danger?: boolean; ticks?: boolean; onSelect: () => unknown };
 
 /**
  * When a message was sent or an answer given, as the row under it says it: an age while it is recent,
@@ -3475,8 +3466,6 @@ export function Files({ base, uploadUrl, onPreview, toast }: { base: string; upl
       for (const f of Array.from(files)) form.append("files", f, f.name);
       const res = await fetch(uploadUrl, { method: "POST", headers: api.authHeaders(), body: form });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? res.statusText);
-      const r = (await res.json()) as { files: string[] };
-      toast?.(plural("session.files.added", r.files.length));
       setGen((g) => g + 1);
     } catch (e) {
       toast?.(errorText(e));

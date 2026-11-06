@@ -170,7 +170,6 @@ export function NoteEditor(props: NoteEditorProps) {
   // A draft found on open that was typed on the version the host still has is simply saved now.
   useEffect(() => {
     if (initial.dirty && !initial.conflict) {
-      toast(t("notes.draft.restored"));
       void save();
     }
     return () => {
@@ -491,7 +490,6 @@ export function NoteEditor(props: NoteEditorProps) {
       const copy = await notesApi.create(sessionId, { scope, title: `${latest.current.title || t("notes.untitled")} · ${t("notes.conflict.mine")}`, body: latest.current.body });
       props.onSaved(copy);
       takeTheirs(theirs);
-      toast(t("notes.conflict.copied"));
     } catch (e) {
       toast(errorText(e));
     }

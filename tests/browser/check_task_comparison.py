@@ -11,15 +11,24 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    BoardStub,
+    Unhandled,
+    expect_app,
+    folders,
+    fulfil_shared,
+    open_task_tool,
+    wait_until,
+)
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PROJECT = {"id": "p1", "name": "Bakery", "entity_revision": 1, "folders": folders("/home/operator/work/bakery"),
            "created_at": "2026-09-20T00:00:00Z", "settings": {"snapshots": False, "default_env": "container"}, "system": "", "sessions": []}
 WORDS = {
-    "en": {"title": "Compare two approaches", "prepare": "Prepare a comparison", "start": "Start comparison", "retry": "Retry", "queued": "Comparison queued", "unknown": "Observed cost is unknown", "capacity": "Project capacity: 1 of 10 simultaneous workers.", "raise": "Set capacity to 2"},
-    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "queued": "Сравнение в очереди", "unknown": "Фактические затраты одного из вариантов неизвестны", "capacity": "Одновременно в проекте: 1 из 10 исполнителей.", "raise": "Установить лимит 2"},
+    "en": {"title": "Compare two approaches", "prepare": "Prepare a comparison", "start": "Start comparison", "retry": "Retry", "unknown": "Observed cost is unknown", "capacity": "Project capacity: 1 of 10 simultaneous workers.", "raise": "Set capacity to 2"},
+    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "unknown": "Фактические затраты одного из вариантов неизвестны", "capacity": "Одновременно в проекте: 1 из 10 исполнителей.", "raise": "Установить лимит 2"},
 }
 
 
@@ -167,7 +176,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     section = open_task_tool(page, words["title"], language)
     pending_status = section.get_by_role("status").filter(has_text="Couldn't confirm the comparison started" if language == "en" else "Не удалось подтвердить запуск сравнения")
     pending_status.get_by_role("button").first.click()
-    expect(page.get_by_text(words["queued"], exact=False)).to_be_visible()
+    wait_until(page, lambda: len(state["commands"]) == 2)
     assert len(state["commands"]) == 2 and state["commands"][0] == state["commands"][1]
     expect(section.get_by_text("Both alternatives have not been admitted" if language == "en" else "Ещё не приняты оба варианта", exact=False)).to_be_visible()
     assert section.get_by_role("button", name="Choose" if language == "en" else "Выбрать").count() == 0

@@ -43,7 +43,6 @@ function ExtensionCard({ item, installed, activeVersion, revision, projectId, to
     try {
       await api.post("/api/plugins/install", { manifest: item.manifest, expected_digest: item.digest, expected_collection_revision: revision, client_operation_id: operation.current.id });
       operation.current = null;
-      toast(t("extension.staged"));
       invalidate(installedKey);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) operation.current = null;
@@ -92,7 +91,6 @@ function ExtensionCard({ item, installed, activeVersion, revision, projectId, to
       else await api.post(`${path}/retry`, body);
       lifecycleOperation.current = null;
       invalidate(installedKey);
-      toast(action === "remove" ? t("extension.removeRecorded") : t("extension.staged"));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) lifecycleOperation.current = null;
       toast(errorText(error));
@@ -191,7 +189,6 @@ function CustomReadBuilder({ models, installed, projectId, offline, safe, toast 
       operation.current = null;
       setReviewed(null);
       invalidate(installedKey);
-      toast(t("extension.staged"));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) operation.current = null;
       toast(errorText(error));
@@ -244,7 +241,6 @@ function ExtensionContent({ projectId, toast }: { projectId: string; toast: (mes
       operation.current = null;
       safeMode.refresh();
       installed.refresh();
-      toast(t("extension.safeChanged"));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) operation.current = null;
       toast(errorText(error));

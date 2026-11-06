@@ -319,7 +319,6 @@ function Devices({ toast }: { toast: (text: string) => void }) {
   async function remove(device: PushDevice) {
     try {
       await api.delete(`/api/push/subscriptions/${device.id}`);
-      toast(t("nset.devices.removed"));
     } catch (e) {
       toast(errorText(e));
     } finally {

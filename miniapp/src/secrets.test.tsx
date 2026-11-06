@@ -191,7 +191,8 @@ describe("the secrets manager", () => {
     expect(calls.posted).toEqual([["/api/secrets/s0/reveal", { purpose: "copy" }]]);
     expect(written).toEqual([SHOWN]);
     expect(document.body.innerHTML).not.toContain(SHOWN);
-    expect(document.body.textContent).toContain(t("secret.row.copied"));
+    // Said at the button pressed, not in a line that leaves.
+    expect(row("wifi")!.querySelector(".secret-copy svg path")?.getAttribute("d")).toBe("M5 12l5 5 9-11");
   });
 
   it("edits in place, sending only what changed and never fetching the value", async () => {

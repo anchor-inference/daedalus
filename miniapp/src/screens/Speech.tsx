@@ -71,7 +71,7 @@ function LoadLine({ load }: { load: SpeechView["load"] }) {
   );
 }
 
-export function SpeechModels({ toast }: { toast: (t: string) => void }) {
+export function SpeechModels() {
   const [view, setView] = useState<SpeechView | null>(null);
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState("");
@@ -150,11 +150,9 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
         // The engine is an optional extra natively; the first download is when it becomes worth
         // installing, so it is fetched before the model rather than after, when it would be missed.
         if (view && !view.engine_installed) {
-          toast(t("stt.engine.installing"));
           await api.post("/api/stt/engine");
         }
         await api.post(`/api/stt/models/${encodeURIComponent(id)}/download`);
-        toast(t("stt.toast.downloading"));
       } else if (what === "cancel") {
         await api.post(`/api/stt/models/${encodeURIComponent(id)}/cancel`);
       } else if (what === "use") {
@@ -163,12 +161,10 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
         // just changed that, so they are told rather than left until something reloads them.
         invalidate("/api/voice");
         haptic("medium");
-        toast(id ? t("stt.toast.using") : t("stt.toast.stopped"));
         return;
       } else {
         take(await api.delete<Partial<SpeechView>>(`/api/stt/models/${encodeURIComponent(id)}`));
         invalidate("/api/voice");
-        toast(t("stt.toast.removed"));
       }
       await load();
     } catch (e) {

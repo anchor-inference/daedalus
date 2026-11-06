@@ -77,7 +77,6 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
       await api.post(`${base}/evidence`, { ...body, client_operation_id: evidenceOperation.current.id });
       evidenceOperation.current = null;
       setObservation("");
-      toast(t("result.evidenceRecorded"));
       await evidence.refresh();
       onChanged();
     } catch (error) {
@@ -97,7 +96,6 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
       await api.post(`${base}/evidence/check`, { ...body, client_operation_id: checkOperation.current.id });
       checkOperation.current = null;
       setChoosing(null);
-      toast(t("result.checks.recorded"));
       await evidence.refresh();
       onChanged();
     } catch (error) {
@@ -123,7 +121,6 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
     try {
       await api.post(`${base}/verdicts`, { ...body, client_operation_id: verdictOperation.current.id });
       verdictOperation.current = null;
-      toast(t("result.verdictRecorded"));
       onChanged();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) verdictOperation.current = null;

@@ -161,29 +161,28 @@ export function NotesPanel({ sessionId, project, phone, toast }: NotesPanelProps
       if (action === "pin") return pin(note);
       if (action === "delete") return remove(note);
       if (action === "copy") {
-        await copyMarkdown(note);
-        return toast(t("notes.copied"));
+        return await copyMarkdown(note);
       }
       if (action === "download") {
         await downloadNote(note, files, t("notes.untitled"));
         return;
       }
       if (action === "attach") {
-        const where = await attachToMessage(sessionId, note, files, t("notes.untitled"));
+        await attachToMessage(sessionId, note, files, t("notes.untitled"));
         setEditor(null);
-        return toast(t(where === "composer" ? "notes.attached" : "notes.attached.draft"));
+        return;
       }
       if (action === "duplicate") {
         const copy = await notesApi.duplicate(note.id, t("notes.copy.title", { title: shownTitle(note) || t("notes.untitled") }));
         put(copy);
-        return toast(t("notes.duplicated"));
+        return;
       }
       if (action === "move") {
         const target: NoteScope = note.scope === "chat" ? "project" : "chat";
         const moved = await notesApi.move(note.id, sessionId, target);
         put(moved);
         refreshSoon();
-        return toast(t(target === "project" ? "notes.moved.project" : "notes.moved.chat"));
+        return;
       }
     } catch (e) {
       toast(errorText(e));
@@ -329,12 +328,11 @@ export function NotesPanel({ sessionId, project, phone, toast }: NotesPanelProps
     }
     setPreview({ base: fileBase(file.id), path: file.name, mime: file.mime });
   }, [current.files]);
-  const copyRef = (file: NoteFile) => navigator.clipboard.writeText(reference(file)).then(() => toast(t("notes.files.copied")), (e) => toast(errorText(e)));
+  const copyRef = (file: NoteFile) => navigator.clipboard.writeText(reference(file)).catch((e) => toast(errorText(e)));
   const removeFile = async (file: NoteFile) => {
     try {
       await notesApi.removeFile(file.id);
       putFiles([file], true);
-      toast(t("notes.files.removed", { name: file.name }));
     } catch (e) {
       const users = referencedBy(e);
       if (!users) return toast(errorText(e));
@@ -343,7 +341,6 @@ export function NotesPanel({ sessionId, project, phone, toast }: NotesPanelProps
       try {
         await notesApi.removeFile(file.id, true);
         putFiles([file], true);
-        toast(t("notes.files.removed", { name: file.name }));
       } catch (again) {
         toast(errorText(again));
       }
@@ -355,7 +352,7 @@ export function NotesPanel({ sessionId, project, phone, toast }: NotesPanelProps
     params.set("panel", "notes");
     params.set("note", noteId);
     const href = `${window.location.origin}${window.location.pathname}?${params}#${encodeURIComponent(slug)}`;
-    navigator.clipboard.writeText(href).then(() => toast(t("notes.heading.copied")), (e) => toast(errorText(e)));
+    navigator.clipboard.writeText(href).catch((e) => toast(errorText(e)));
   }, [toast]);
 
   // ── what is drawn ───────────────────────────────────────────────────────────────────────────

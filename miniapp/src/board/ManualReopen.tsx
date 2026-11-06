@@ -20,8 +20,8 @@ function keep(key: string, value: unknown | null) {
   catch { /* keep the mounted draft and exact command */ }
 }
 
-export function ManualReopen({ task, result, contract, onChanged, toast }: { task: ProjectTask;
-  result: ResultReceipt; contract: ResultContract; onChanged: () => void; toast: (message: string) => void }) {
+export function ManualReopen({ task, result, contract, onChanged }: { task: ProjectTask;
+  result: ResultReceipt; contract: ResultContract; onChanged: () => void; }) {
   const draftKey = `daedalus.manual.reopen.draft.${task.id}`;
   const pendingKey = `daedalus.manual.reopen.pending.${task.id}`;
   const [reason, setReason] = useState(() => saved<string>(draftKey) ?? "");
@@ -44,7 +44,6 @@ export function ManualReopen({ task, result, contract, onChanged, toast }: { tas
       await api.post(`/api/board/${encodeURIComponent(task.id)}/results/${encodeURIComponent(intent.result_id)}/reopen`, intent.body);
       remember(null);
       setReason("");
-      toast(t("manual.reopened"));
       onChanged();
     } catch (failure) {
       setMessage(errorText(failure));
@@ -75,8 +74,8 @@ export function ManualReopen({ task, result, contract, onChanged, toast }: { tas
 }
 
 /** A committed reopen can remove its own result panel before a lost reply reaches the browser. */
-export function ManualReopenRecovery({ task, onChanged, toast }: { task: ProjectTask;
-  onChanged: () => void; toast: (message: string) => void }) {
+export function ManualReopenRecovery({ task, onChanged }: { task: ProjectTask;
+  onChanged: () => void; }) {
   const key = `daedalus.manual.reopen.pending.${task.id}`;
   const [pending, setPending] = useState<Intent | null>(() => saved<Intent>(key));
   const [busy, setBusy] = useState(false);
@@ -91,7 +90,6 @@ export function ManualReopenRecovery({ task, onChanged, toast }: { task: Project
       await api.post(`/api/board/${encodeURIComponent(task.id)}/results/${encodeURIComponent(pending.result_id)}/reopen`, pending.body);
       keep(key, null);
       setPending(null);
-      toast(t("manual.reopened"));
       onChanged();
     } catch (failure) {
       setMessage(errorText(failure));

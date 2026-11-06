@@ -62,7 +62,6 @@ const SAME_IN_BOTH = [
   "pboard.review.ci.namesPlaceholder",
   "sched.cron",
   "sched.when.cron",
-  "session.mcp.toggled",
   // The fallback pill's second name: an arrow and the configured model, nothing to translate.
   "session.model.fallback",
   "session.sched.cron",
@@ -233,7 +232,6 @@ describe("the keys the code asks for", () => {
       ["guest.mode.", ["stand_in", "direct"]],
       ["guest.tools.", ["none", "read", "all"]],
       ["guest.tools.why.", ["no_sandbox", "host_folder", "other"]],
-      ["svc.copied.", ["address", "link", "key"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
       ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about", "memory"]],

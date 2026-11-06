@@ -112,8 +112,8 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"Ctrl+C went as {kinds}, not a copy and then the key")
     if got != EMAIL:
         say(f"the clipboard holds {got!r} after a copy of {EMAIL!r}")
-    if WORDS[lang]["copied"] not in toast_text(page):
-        say(f"the copy says {toast_text(page)!r}")
+    if page.locator(".toast").count():
+        say(f"a copy that went through left a line: {toast_text(page)!r}")
 
     # Ctrl+X: the same copy, and the cut's key after it.
     group.selection = "cut me"

@@ -31,9 +31,8 @@ function covered(criterion: Criterion, evidence: Evidence[], artifacts: ResultRe
     : item.verification === "operator_attested"));
 }
 
-export function ManualEvidenceReview({ task, result, contract, blockingComments, toast, onChanged }: {
-  task: ProjectTask; result: ResultReceipt; contract: ResultContract; blockingComments: number;
-  toast: (message: string) => void; onChanged: () => void;
+export function ManualEvidenceReview({ task, result, contract, blockingComments, onChanged }: {
+  task: ProjectTask; result: ResultReceipt; contract: ResultContract; blockingComments: number; onChanged: () => void;
 }) {
   const base = `/api/board/${encodeURIComponent(task.id)}/results/${encodeURIComponent(result.result_id)}`;
   const draftKey = `daedalus.manual.evidence.draft.${result.result_id}`;
@@ -70,8 +69,7 @@ export function ManualEvidenceReview({ task, result, contract, blockingComments,
     try {
       await api.post(command.path, command.body);
       remember(null);
-      if (command.path.endsWith("/verdicts")) toast(t("result.verdictRecorded"));
-      else { setObservation(""); toast(t("manual.attested")); }
+      if (!command.path.endsWith("/verdicts")) setObservation("");
       await evidence.refresh();
       onChanged();
     } catch (failure) {

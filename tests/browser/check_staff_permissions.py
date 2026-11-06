@@ -72,7 +72,6 @@ def permissions(browser, lang: str, check: Check) -> None:  # type: ignore[no-un
     rules.locator(".staff-rule[data-rule='mcp__daedalus_browser__BrowserSnapshot'] .btn").click()
     expect(rules.locator(".staff-rule")).to_have_count(1, timeout=5000)
     check.that(focus.revoked == [("st-ira", "mcp__daedalus_browser__BrowserSnapshot")], f"{lang}: revoked {focus.revoked}")
-    expect(page.locator(".toast", has_text=words["revoked"]).first).to_be_visible(timeout=3000)
     check.that(sideways(page) <= 0, f"{lang}: the staff view scrolls sideways")
 
     # The Questions tab of the project offers the same answer for the same request.

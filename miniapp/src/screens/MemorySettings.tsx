@@ -155,7 +155,7 @@ function LearningCard() {
     setBusy(true);
     try {
       const res = await api.post<{ started: boolean }>(again ? "/api/memory/synthesis/reread" : "/api/memory/synthesis/run", {});
-      toast(t(res.started ? "settings.memory.learning.started" : "settings.memory.learning.already"));
+      if (!res.started) toast(t("settings.memory.learning.already"));
       setWatchUntil(Date.now() + 30_000);
       refresh();
     } catch (e) {
@@ -218,8 +218,7 @@ function ResetSheet({ onClose }: { onClose: () => void }) {
   async function reset() {
     setBusy(true);
     try {
-      const res = await api.post<{ deleted: { records: number } }>("/api/memory/reset", { confirm: typed.trim() });
-      toast(plural("settings.memory.reset.done", res.deleted.records));
+      await api.post("/api/memory/reset", { confirm: typed.trim() });
       invalidate("/api/memory");
       onClose();
     } catch (e) {

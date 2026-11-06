@@ -45,11 +45,10 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
     return history;
   };
 
-  async function run<T>(key: string, work: () => Promise<T>, done?: string): Promise<T | undefined> {
+  async function run<T>(key: string, work: () => Promise<T>): Promise<T | undefined> {
     setBusy(key);
     try {
       const result = await work();
-      if (done) toast(done);
       return result;
     } catch (e) {
       // Changed elsewhere first: the next press is a new command on what the host now holds.
@@ -79,7 +78,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       const body = { expected_schedule_revision: revisionOf(s), expected_collection_revision: history.collection_revision! };
       await api.post(`/api/recurring/${encodeURIComponent(s.id)}/run`, { ...body, client_operation_id: operationId(`${s.id}:run`, body) });
       delete pending.current[`${s.id}:run`];
-    }, t("sched.queued")),
+    }),
 
     /** Pause, or resume and approve again: a resumed schedule that kept no approval would sit there and never fire. */
     setEnabled: (s: ScheduleRow, enabled: boolean) => run(`${s.id}:enabled`, async () => {
@@ -88,12 +87,12 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       const changed = await api.patch<{ schedule_revision: number; entity_revision: number }>(`/api/recurring/${encodeURIComponent(s.id)}`, { ...body, client_operation_id: operationId(`${s.id}:enabled`, body) });
       delete pending.current[`${s.id}:enabled`];
       if (enabled) await approveRevision(s, changed.schedule_revision, changed.entity_revision, `${s.id}:enabled`);
-    }, t(enabled ? "sched.resumed" : "sched.pausedtoast")),
+    }),
 
     approve: (s: ScheduleRow) => run(`${s.id}:approve`, async () => {
       const history = await current(s);
       await approveRevision(s, history.schedule_revision, history.collection_revision!, s.id);
-    }, t("sched.approval.saved")),
+    }),
 
     save: (s: ScheduleRow, edit: ScheduleEdit) => run(`${s.id}:save`, async () => {
       const history = await current(s);
@@ -102,7 +101,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       delete pending.current[`${s.id}:save`];
       await approveRevision({ ...s, ...edit }, changed.schedule_revision, changed.entity_revision, `${s.id}:save`);
       return true;
-    }, t("sched.saved")),
+    }),
 
     remove: (s: ScheduleRow) => run(`${s.id}:remove`, async () => {
       const history = await current(s);
@@ -110,7 +109,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       await api.post(`/api/recurring/${encodeURIComponent(s.id)}/remove`, { ...body, client_operation_id: operationId(`${s.id}:remove`, body) });
       delete pending.current[`${s.id}:remove`];
       return true;
-    }, t("sched.deleted")),
+    }),
 
     decide: (p: ScheduleProposal, action: "accept" | "withdraw" | "review-files") => run(`${p.id}:${action}`, async () => {
       const revision = proposals?.collection_revisions[proposalScope(p)];
@@ -121,7 +120,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       const answer = await api.post<{ id?: string }>(`/api/recurring/proposals/${encodeURIComponent(p.id)}/${action}`, { ...body, client_operation_id: operationId(key, body) });
       delete pending.current[key];
       return answer;
-    }, t(action === "accept" ? "sched.proposal.accepted" : action === "review-files" ? "sched.proposal.reviewed" : "sched.proposal.withdrawn")),
+    }),
   };
 }
 

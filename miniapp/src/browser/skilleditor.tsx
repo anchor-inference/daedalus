@@ -43,9 +43,8 @@ export function SkillEditor({ group, recording, toast, onDone }: { group: string
   const save = async () => {
     setBusy(true);
     try {
-      const saved = await saveWorkflowSkill(group, recording.id, skillRequest(rows, steps, name, description));
+      await saveWorkflowSkill(group, recording.id, skillRequest(rows, steps, name, description));
       haptic("medium");
-      toast(t("browser.skill.saved", { name: saved.skill }));
       onDone();
     } catch (e) {
       toast(errorText(e));

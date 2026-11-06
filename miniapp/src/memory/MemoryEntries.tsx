@@ -277,7 +277,6 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
     if (!entry) return;
     try {
       await api.patch(`${ENTRIES_KEY}/${encodeURIComponent(entry.id)}`, { version: entry.version, ...patch });
-      toast(t("memory.entry.saved"));
       changed();
     } catch (e) {
       toast(errorText(e));

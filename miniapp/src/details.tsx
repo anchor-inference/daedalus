@@ -198,7 +198,6 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
             if (brief === (detail.brief ?? "")) return;
             try {
               await api.post(`/api/sessions/${id}/brief`, { brief });
-              toast(t(brief ? "session.brief.saved" : "session.brief.removed"));
               reload();
             } catch (err) {
               toast(errorText(err));
@@ -223,7 +222,6 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
             if (cap === (detail.usd_cap ?? null)) return;
             try {
               await api.post(`/api/sessions/${id}/cap`, { usd_cap: cap });
-              toast(cap === null ? t("session.cap.removed") : t("session.cap.set", { n: cap }));
               reload();
             } catch (err) {
               toast(errorText(err));
@@ -234,8 +232,8 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
 
       <Section ids={ids} id="advanced" icon="settings" label={t("session.advanced")}>
         <Facts>
-          <Fact label={t("session.id")}><CopyValue value={id} shown={id} toast={toast} copied={t("session.id.copied")} /></Fact>
-          <Fact label={t("session.workspace")}><CopyValue value={detail.workspace} shown={detail.workspace_own === false ? detail.workspace_name : undefined} max={28} toast={toast} copied={t("session.path.copied")} /></Fact>
+          <Fact label={t("session.id")}><CopyValue value={id} shown={id} toast={toast} /></Fact>
+          <Fact label={t("session.workspace")}><CopyValue value={detail.workspace} shown={detail.workspace_own === false ? detail.workspace_name : undefined} max={28} toast={toast} /></Fact>
           {detail.run_id && <Fact label={t("session.runid")} mono>{detail.run_id}</Fact>}
         </Facts>
         <div className="btnrow">
@@ -345,7 +343,6 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
   async function action(a: string) {
     try {
       await api.post(`/api/sessions/${sessionId}/loop/action`, { action: a });
-      toast(t("session.loop.action", { action: a }));
       onChange();
     } catch (e) {
       toast(errorText(e));
@@ -355,7 +352,6 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
     if (!text.trim()) return;
     try {
       await api.post(`/api/sessions/${sessionId}/loop`, { instruction: text.trim(), mode, interval_minutes: mode === "interval" ? Math.max(1, Number(minutes) || 10) : null, max_runs: maxRuns.trim() ? Math.max(1, Number(maxRuns) || 1) : null, start_now: true });
-      toast(t(loop ? "session.loop.updated" : "session.loop.started"));
       setEditing(false);
       onChange();
     } catch (e) {
@@ -511,7 +507,6 @@ function McpPanel({ sessionId, toast }: { sessionId: string; toast: (t: string) 
     setBusy(server);
     try {
       setData(await api.put(`/api/sessions/${sessionId}/mcp`, { server, enabled }));
-      toast(t("session.mcp.toggled", { name: server, state: t(enabled ? "session.mcp.enabled" : "session.mcp.disabled") }));
     } catch (e) {
       toast(errorText(e));
     } finally {

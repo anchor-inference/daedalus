@@ -65,7 +65,6 @@ export function CoordinatorHandoff({ projectId, revision, sessionId, onChanged, 
       if (reply.state === "blocked") toast(t(`coordinatorHandoff.blocker.${reply.blocker ?? "unknown"}`));
       else {
         edit("");
-        toast(t("coordinatorHandoff.committed"));
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {

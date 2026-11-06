@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, fulfil_shared, wait_until  # noqa: E402
 from check_message_actions import DETAIL  # noqa: E402
 from event_feed import EventFeed  # noqa: E402
 
@@ -43,12 +43,12 @@ PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
 WORDS = {
     "en": {
         "tab": "Questions", "line": "4 questions waiting", "asker": "Side question", "withdrawn": "The agent took it back", "aside": "Put aside",
-        "sent": "2 answers sent", "sent1": "1 answer sent", "empty": "When the agent has a question that can wait",
+        "empty": "When the agent has a question that can wait",
         "port": "Which port should the dev server use?", "look": "What should the empty state look like?", "readme": "Is the old README still current?", "tabs": "Tabs or spaces in the new files?",
     },
     "ru": {
         "tab": "Вопросы", "line": "4 вопроса ждут ответа", "asker": "Попутный вопрос", "withdrawn": "Агент снял вопрос", "aside": "Убрано без ответа",
-        "sent": "Отправлено 2 ответа", "sent1": "Отправлен 1 ответ", "empty": "Когда у агента появится вопрос",
+        "empty": "Когда у агента появится вопрос",
         "port": "Какой порт взять для dev-сервера?", "look": "Как должно выглядеть пустое состояние?", "readme": "Старый README ещё актуален?", "tabs": "Табы или пробелы в новых файлах?",
     },
 }
@@ -225,7 +225,7 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
 
     # Send: one multipart request, each answer naming its own files among the uploads.
     page.locator(".questions-send-btn").click()
-    expect(page.get_by_text(words["sent"])).to_be_visible()
+    wait_until(page, lambda: stub.sends)
     assert len(stub.sends) == 1, stub.sends
     sent = stub.sends[0]
     assert sent["type"].startswith("multipart/form-data"), sent["type"]
@@ -284,7 +284,7 @@ def phone(page: Page, lang: str, theme: str) -> None:
     send_box = send.bounding_box()
     assert send_box and send_box["y"] + send_box["height"] <= 844 + 0.5, f"{lang} 390: Send is below the screen ({send_box})"
     send.tap()
-    expect(page.get_by_text(words["sent1"])).to_be_visible()
+    wait_until(page, lambda: stub.sends)
     [sent] = stub.sends
     assert sent["items"] == [{"ask_id": "ask-look", "text": "Like this, with a hint", "files": [0]}], sent["items"]
     assert [f["name"] for f in sent["files"]] == ["empty-state.png"], sent["files"]

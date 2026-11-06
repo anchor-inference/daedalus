@@ -225,7 +225,7 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
   const instance = () => instanceFor(id);
   const items: MenuItem[] = [
     { label: t("term.search"), icon: "search", onSelect: () => instance()?.openSearch() },
-    { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => { const text = instance()?.screenText(200); if (text !== undefined) void copyText(text).then((ok) => toast(ok ? t("term.phone.copiedAll") : t("term.phone.copyFailed"))); } },
+    { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => { const text = instance()?.screenText(200); if (text !== undefined) void copyText(text).then((ok) => { if (!ok) toast(t("term.phone.copyFailed")); }); } },
     ...(commands?.active ? [{ label: t("term.marks.copy"), icon: "copy" as const, disabled: !commands.ended, onSelect: () => { const i = instance(); if (i) void copyLastOutput(i); } }] : []),
     { label: t("term.phone.select"), icon: "copy", hint: t("term.phone.select.hint"), onSelect: openSelection },
     "-",
@@ -461,16 +461,16 @@ function SelectionLayer({ text, onClose }: { text: string; onClose: () => void }
     document.addEventListener("selectionchange", onChange);
     return () => document.removeEventListener("selectionchange", onChange);
   }, []);
-  const copy = async (what: string, done: string) => {
-    toast((await copyText(what)) ? done : t("term.phone.copyFailed"));
+  const copy = async (what: string) => {
+    if (!(await copyText(what))) toast(t("term.phone.copyFailed"));
     onClose();
   };
   return (
     <div className="term-select" role="dialog" aria-label={t("term.phone.select")}>
       <div className="term-select-head">
         <span className="grow sub">{t("term.phone.select.hint")}</span>
-        <button className="btn small primary" disabled={!selected} onClick={() => void copy(selected, t("term.phone.copied"))}>{t("term.copy")}</button>
-        <button className="btn small" onClick={() => void copy(text, t("term.phone.copiedAll"))}>{t("term.phone.copyAll")}</button>
+        <button className="btn small primary" disabled={!selected} onClick={() => void copy(selected)}>{t("term.copy")}</button>
+        <button className="btn small" onClick={() => void copy(text)}>{t("term.phone.copyAll")}</button>
         <button className="iconbtn" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}><Icon name="close" /></button>
       </div>
       <pre className="term-select-text" ref={pre}>{text}</pre>

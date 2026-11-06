@@ -41,7 +41,6 @@ export function Setups({ team, toast, onDone }: { team: Team; toast: (text: stri
         invalidate("/api/sessions");
       }
       for (const hire of plan.hires) await api.post(`/api/projects/${project}/staff`, { ...hire, folder_id: null });
-      toast(t("team.setup.done", { name: t(`team.setup.${kind}`) }));
     } catch (e) {
       toast(errorText(e));
     } finally {

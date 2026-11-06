@@ -4,7 +4,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "./api";
 import { errorText } from "./ui";
-import { copyText } from "./ui/components";
+import { useCopied } from "./ui/components";
+import { Icon } from "./icons";
 import { shortDateTime } from "./format";
 import { t } from "./i18n";
 import { Row } from "./settingsrow";
@@ -51,7 +52,8 @@ function grouped(secret: string): string {
   return secret.replace(/(.{4})(?=.)/g, "$1 ");
 }
 
-function RecoveryCodes({ codes, toast, onDone }: { codes: string[]; toast: (text: string) => void; onDone: () => void }) {
+function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+  const [copied, copy] = useCopied();
   return (
     <div className="totp-codes-box">
       <div className="settings-row-title">{t("settings.totp.codes.title")}</div>
@@ -60,7 +62,7 @@ function RecoveryCodes({ codes, toast, onDone }: { codes: string[]; toast: (text
         {codes.map((code) => <li key={code}>{code}</li>)}
       </ol>
       <div className="totp-actions">
-        <button className="btn small" onClick={() => void copyText(codes.join("\n")).then((ok) => ok && toast(t("settings.totp.codes.copied")))}>{t("settings.totp.codes.copy")}</button>
+        <button className="btn small" onClick={() => void copy(codes.join("\n"))}>{copied && <Icon name="check" size={13} />}{t("settings.totp.codes.copy")}</button>
         <button className="btn primary small" onClick={onDone}>{t("settings.totp.codes.done")}</button>
       </div>
     </div>
@@ -123,13 +125,12 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
       setCode("");
       setStatus(r);
       setCodes(r.recovery_codes);
-      toast(t("settings.totp.enabled"));
     });
   }
   function confirm(e: FormEvent) {
     e.preventDefault();
     if (ask === "disable") {
-      void run(() => twoFactor.disable(code.trim()), (r) => (setStatus(r), cancel(), toast(t("settings.totp.disabled"))));
+      void run(() => twoFactor.disable(code.trim()), (r) => (setStatus(r), cancel()));
     } else {
       void run(() => twoFactor.regenerate(code.trim()), (r) => (setStatus(r), cancel(), setCodes(r.recovery_codes)));
     }
@@ -144,7 +145,7 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
         <>
           <div className="sub">{t("settings.totp.sub")}</div>
           {status === null && <div className="empty">{t("common.loading")}</div>}
-          {codes && <RecoveryCodes codes={codes} toast={toast} onDone={() => setCodes(null)} />}
+          {codes && <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />}
           {status && !status.enabled && !setup && (
             <Row title={t("settings.totp.off")}>
               <button className="btn primary small" disabled={busy} onClick={() => void begin()}>{t("settings.totp.setup")}</button>

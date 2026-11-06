@@ -150,8 +150,8 @@ class Run:
             say(f"{copy} typed into the terminal: {term.inputs(ID)[mark:]!r}")
         if not focused_in_terminal(page):
             say(f"the focus left the terminal after {copy}")
-        if "Copied" not in toast(page):
-            say("no toast said the selection was copied")
+        if page.locator(".toast").count():
+            say("a copy that went through left a line")
         # The keys typed after a copy still reach the terminal.
         page.keyboard.type("ls")
         page.wait_for_timeout(300)

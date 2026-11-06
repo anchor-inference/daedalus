@@ -93,13 +93,12 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
   const [shiftBy, setShiftBy] = useState(1);
   const [busy, setBusy] = useState(false);
 
-  async function act(run: () => Promise<unknown>, done: string) {
+  async function act(run: () => Promise<unknown>) {
     setBusy(true);
     try {
       await run();
       invalidate(GROUPS);
       refreshPlanner();
-      toast(done);
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
   }
@@ -107,13 +106,13 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
   async function remove() {
     if (!group) return;
     const withEvents = await confirmAsync(t("cal.group.delete.title", { name: group.name }), { body: t("cal.group.delete.body", { n: group.event_count ?? items.length }), action: t("cal.group.delete.events"), danger: true });
-    if (withEvents) { await act(() => deleteGroup(group.id, "delete"), t("cal.group.deleted")); onClose(); }
+    if (withEvents) { await act(() => deleteGroup(group.id, "delete")); onClose(); }
   }
 
   async function ungroup() {
     if (!group) return;
     if (!(await confirmAsync(t("cal.group.ungroup.title", { name: group.name }), { body: t("cal.group.ungroup.body"), action: t("cal.group.ungroup") }))) return;
-    await act(() => deleteGroup(group.id, "keep"), t("cal.group.ungrouped"));
+    await act(() => deleteGroup(group.id, "keep"));
     onClose();
   }
 
@@ -136,9 +135,9 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
         </div>
       </div>
       <OverflowMenu label={t("cal.group.menu")} items={[
-        { label: t("cal.group.duplicate.week"), icon: "copy", disabled: busy, onSelect: () => void act(() => duplicateGroup(group.id, 7), t("cal.group.duplicated")) },
-        { label: group.hidden ? t("cal.group.unhide") : t("cal.group.hide"), icon: group.hidden ? "eye" : "eyeoff", disabled: busy, onSelect: () => void act(() => patchGroup(group.id, { hidden: !group.hidden }), group.hidden ? t("cal.group.shown") : t("cal.group.hidden.done")) },
-        { label: group.archived ? t("cal.group.unarchive") : t("cal.group.archive"), icon: "archive", disabled: busy, onSelect: () => void act(() => patchGroup(group.id, { archived: !group.archived }), group.archived ? t("cal.group.unarchived") : t("cal.group.archived.done")) },
+        { label: t("cal.group.duplicate.week"), icon: "copy", disabled: busy, onSelect: () => void act(() => duplicateGroup(group.id, 7)) },
+        { label: group.hidden ? t("cal.group.unhide") : t("cal.group.hide"), icon: group.hidden ? "eye" : "eyeoff", disabled: busy, onSelect: () => void act(() => patchGroup(group.id, { hidden: !group.hidden })) },
+        { label: group.archived ? t("cal.group.unarchive") : t("cal.group.archive"), icon: "archive", disabled: busy, onSelect: () => void act(() => patchGroup(group.id, { archived: !group.archived })) },
         "-",
         { label: t("cal.group.ungroup"), icon: "unlink", disabled: busy, onSelect: () => void ungroup() },
         { label: t("cal.group.delete"), icon: "trash", danger: true, disabled: busy, onSelect: () => void remove() },
@@ -158,8 +157,8 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
             <button type="button" className="iconbtn small" onClick={() => setShiftBy((n) => Math.min(60, n + 1 === 0 ? 1 : n + 1))} aria-label={t("cal.group.shift.more")}><Icon name="forward" size={14} /></button>
             <span className="cal-bulk-unit">{t("cal.group.days")}</span>
           </div>
-          <button type="button" className="btn small" disabled={busy} onClick={() => void act(() => shiftGroup(group.id, shiftBy), t("cal.group.shifted", { n: shiftBy }))}>{t("cal.group.shift.do")}</button>
-          <button type="button" className="btn small" disabled={busy} onClick={() => void act(() => duplicateGroup(group.id, 7), t("cal.group.duplicated"))}><Icon name="copy" size={14} /> {t("cal.group.duplicate.week")}</button>
+          <button type="button" className="btn small" disabled={busy} onClick={() => void act(() => shiftGroup(group.id, shiftBy))}>{t("cal.group.shift.do")}</button>
+          <button type="button" className="btn small" disabled={busy} onClick={() => void act(() => duplicateGroup(group.id, 7))}><Icon name="copy" size={14} /> {t("cal.group.duplicate.week")}</button>
         </div>
         {events.data ? (
           <AgendaView days={days} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} embedded

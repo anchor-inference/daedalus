@@ -1,5 +1,4 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useChromeChecks } from "./browser/yourchrome";
 import { openPathOf } from "./subagents";
 import { SchedulesDialogHost } from "./schedules/host";
 import { api, SessionList, telegram, TerminalList } from "./api";
@@ -152,7 +151,6 @@ const SIDEBAR_W_MAX = 360;
 
 export function App() {
   useLang();
-  useChromeChecks();
   const route = useRoute();
   const wide = useWide();
   // Which mode the shell is in: the route's, where the route belongs to one, and otherwise the one the
@@ -714,7 +712,7 @@ export function App() {
           left the operator thinking every other chat was gone. Now it only opens its folder, and a
           lens on some other project is lifted so the new folder is not hidden behind it. */}
       <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); if (project && project !== created.id) clearProject(); }} />
-      <ImportHost toast={showToast} />
+      <ImportHost />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
           <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>

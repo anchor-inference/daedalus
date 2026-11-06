@@ -104,7 +104,6 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
       setReason("");
       if (intent.path.endsWith("/candidates")) { setClaim(""); setSourceId(""); }
       markConflict(false);
-      toast(intent.path.endsWith("/revalidate") ? t("knowledge.rechecked") : t("knowledge.recorded"));
       await inspection.refresh();
       if (staleOpen) await stale.refresh();
       if (historyOpen) await history.refresh();

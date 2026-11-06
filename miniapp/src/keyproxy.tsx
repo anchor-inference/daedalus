@@ -237,7 +237,6 @@ function ClientRow({ client, writable, onDone, toast }: { client: KeyproxyClient
         ? [t("keyproxy.clients.updated", { label: client.label, from: moved?.from ?? client.version, to: result.client.version }), kept.length ? t("keyproxy.clients.kept", { fields: keptLabels(client, kept) }) : ""].filter(Boolean).join(" ")
         : t("keyproxy.clients.reverted.done", { label: client.label, version: result.client.version });
       setSaid(text);
-      toast(text);
       onDone(result);
     } catch (e) {
       toast(errorText(e));

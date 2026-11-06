@@ -73,7 +73,7 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
       {menu && (
         <ActionSheet onClose={() => setMenu(false)} preview={{ title: task.title, meta: sub }} items={[
           ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
-          { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+          { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
           ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: t(`board.col.${status}`) }), icon: "forward" as const, disabled: writeBlocked, onSelect: () => onMove(status) })),
           "-",
           ...tools.map((item) => ({ ...item, onSelect: () => { setTab("task"); item.onSelect(); } })),

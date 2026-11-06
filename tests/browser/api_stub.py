@@ -1689,6 +1689,17 @@ def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
         page.wait_for_timeout(150)
 
 
+def wait_until(page, ready, timeout: float = 5.0) -> bool:  # type: ignore[no-untyped-def]
+    """Waits for what the stub has heard. The app says nothing when an action goes through, and a stub's
+    lists only move while the page's events are being pumped, so a plain sleep would hear nothing."""
+    deadline = time.monotonic() + timeout
+    while not ready():
+        if time.monotonic() > deadline:
+            return False
+        page.wait_for_timeout(50)
+    return True
+
+
 def expect_app(base: str) -> None:
     """Refuse to drive a browser at an address that is not the built Mini App.
 

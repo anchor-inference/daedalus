@@ -121,7 +121,7 @@ describe("the control", () => {
   });
 
   it("offers the grant form when nobody holds the computer, and grants one window", async () => {
-    await show(state(), <><Head /><ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} /></>);
+    await show(state(), <><Head /><ComputerSheet sessionId={SESSION} onClose={() => undefined} /></>);
     expect(host.querySelector<HTMLElement>(".computer-button")?.dataset.computer).toBe("free");
     const box = sheet()!;
     expect(box.textContent).toContain("Give control");
@@ -148,7 +148,7 @@ describe("the control", () => {
   });
 
   it("grants one of two monitors, chosen on the map of the desk", async () => {
-    await show(state({ displays: DISPLAYS }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ displays: DISPLAYS }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const box = sheet()!;
     await act(async () => button(box, "Monitor")!.click());
     const tiles = [...box.querySelectorAll<HTMLButtonElement>(".cu-map-tile")];
@@ -168,7 +168,7 @@ describe("the control", () => {
   });
 
   it("refuses a number of minutes out of bounds before anything is sent", async () => {
-    await show(state(), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state(), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const box = sheet()!;
     await act(async () => button(box, "Whole desktop")!.click());
     await act(async () => button(box, "Other")!.click());
@@ -208,7 +208,7 @@ describe("the control", () => {
   });
 
   it("says when another conversation holds the computer, and can take it back", async () => {
-    await show(held("s2"), <><ComputerBanner sessionId={SESSION} /><ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} /></>);
+    await show(held("s2"), <><ComputerBanner sessionId={SESSION} /><ComputerSheet sessionId={SESSION} onClose={() => undefined} /></>);
     expect(host.querySelector(".computer-banner")).toBeNull();
     const box = sheet()!;
     expect(box.querySelector<HTMLElement>("[data-computer=other]")?.textContent).toContain("Another conversation controls the computer");
@@ -218,7 +218,7 @@ describe("the control", () => {
 
   it("on macOS lists both permissions with Ask, the settings link and the warning about updates", async () => {
     const links = { screen: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture", accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" };
-    await show(state({ os: "darwin", session_type: "quartz", permissions: { screen: "denied", accessibility: "granted" }, settings_links: links }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ os: "darwin", session_type: "quartz", permissions: { screen: "denied", accessibility: "granted" }, settings_links: links }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const box = sheet()!;
     const screen = box.querySelector<HTMLElement>("[data-permission=screen]")!;
     expect(screen.dataset.state).toBe("denied");
@@ -234,18 +234,18 @@ describe("the control", () => {
   });
 
   it("names Windows' limits, and Linux's session type with the word on Wayland", async () => {
-    await show(state({ os: "windows", session_type: "win32" }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ os: "windows", session_type: "win32" }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     expect(sheet()!.querySelector("[data-os=windows]")?.textContent).toContain("Programs running as administrator, UAC prompts and the lock screen cannot be driven");
-    await show(state(), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state(), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const linux = sheet()!.querySelector("[data-os=linux]")!;
     expect(linux.textContent).toContain("Session type: x11");
     expect(linux.textContent).toContain("Wayland is not supported yet");
   });
 
   it("says a grant ended by a locked screen, and only while nobody holds the computer", async () => {
-    await show(state({ lease: { active: false, last_ended: "locked" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ lease: { active: false, last_ended: "locked" } }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     expect(sheet()!.querySelector("[data-ended=locked]")?.textContent).toBe("The last grant ended when the screen locked or a secure system prompt came up.");
-    await show(state({ lease: { active: false, last_ended: "stopped" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ lease: { active: false, last_ended: "stopped" } }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     expect(sheet()!.querySelector("[data-ended]")).toBeNull();
   });
 
@@ -258,7 +258,7 @@ describe("the control", () => {
 
   it("shows a refusal in its words, never its code", async () => {
     refuse["/api/computer/grant"] = { detail: "That is one of Daedalus's own windows.", error: { code: 1203, message: "protected", data: { app: "com.example.daedalus" }, explanation: "That is one of Daedalus's own windows (or another protected app)." } };
-    await show(state(), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state(), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const box = sheet()!;
     await act(async () => button(box, "Whole desktop")!.click());
     await act(async () => button(box, "Give control for 30 min")!.click());
@@ -269,7 +269,7 @@ describe("the control", () => {
 
   it("says why the computer cannot be driven, in Russian too", async () => {
     setLang("ru");
-    await show(state({ available: false, reason: "The desktop launcher is not running." }), <><Head /><ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} /></>);
+    await show(state({ available: false, reason: "The desktop launcher is not running." }), <><Head /><ComputerSheet sessionId={SESSION} onClose={() => undefined} /></>);
     expect(host.querySelector<HTMLElement>(".computer-button")?.dataset.computer).toBe("unavailable");
     expect(sheet()!.textContent).toContain("Управление этим компьютером");
     expect(sheet()!.textContent).toContain("The desktop launcher is not running.");
@@ -277,11 +277,11 @@ describe("the control", () => {
 
   it("says why by its key in Russian, with the launcher's own reason as the detail", async () => {
     setLang("ru");
-    await show(state({ available: false, reason: "this build carries no deskd; computer use is unavailable", reason_words: { key: "cu.reason.no_daemon" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ available: false, reason: "this build carries no deskd; computer use is unavailable", reason_words: { key: "cu.reason.no_daemon" } }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     const reason = sheet()!.querySelector<HTMLElement>(".computer-reason")!;
     expect(reason.firstChild?.textContent).toBe("Часть Daedalus, которая управляет рабочим столом, на этом компьютере не запущена.");
     expect(reason.querySelector(".computer-reason-detail")?.textContent).toBe("this build carries no deskd; computer use is unavailable");
-    await show(state({ available: false, reason: "The desktop launcher is not running, so nothing can reach this computer's desktop.", reason_words: { key: "cu.reason.no_launcher" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    await show(state({ available: false, reason: "The desktop launcher is not running, so nothing can reach this computer's desktop.", reason_words: { key: "cu.reason.no_launcher" } }), <ComputerSheet sessionId={SESSION} onClose={() => undefined} />);
     expect(sheet()!.querySelector(".computer-reason-detail")).toBeNull();
     expect(sheet()!.textContent).not.toContain("nothing can reach");
   });

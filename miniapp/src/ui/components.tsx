@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { int, relTime, usd } from "../format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "../api";
@@ -414,6 +414,27 @@ export function timeAgo(iso: string | null | undefined): string {
 export const fmtUsd = usd;
 export const fmtInt = int;
 
+/**
+ * A copy that answers at the control pressed: ``copied`` holds the key of the last copy for a moment
+ * after it went through, so a button can show a tick. A line at the foot of the screen used to say
+ * this, over a phone's composer. A copy that fails is the caller's to say, from the false it gets.
+ */
+export function useCopied(): [string | null, (text: string, key?: string) => Promise<boolean>] {
+  const [copied, setCopied] = useState<string | null>(null);
+  const timer = useRef(0);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = useCallback(async (text: string, key = "copied") => {
+    const ok = await copyText(text);
+    if (ok) {
+      setCopied(key);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(null), 1600);
+    }
+    return ok;
+  }, []);
+  return [copied, copy];
+}
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -460,7 +481,6 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
     if (!(await confirmAsync(t("svc.stop.title", { name: s.name }), { body: t("svc.stop.body"), action: t("common.stop") }))) return;
     try {
       await api.post(`/api/sessions/${sessionId}/services/${encodeURIComponent(s.name)}/stop`);
-      toast(t("svc.stopped", { name: s.name }));
       onChange();
     } catch (e) {
       toast(errorText(e));
@@ -470,7 +490,6 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
     if (!(await confirmAsync(t(s.status === "running" ? "svc.remove.title.running" : "svc.remove.title", { name: s.name }), { body: t("svc.remove.body"), action: t("common.remove") }))) return;
     try {
       await api.delete(`/api/sessions/${sessionId}/services/${encodeURIComponent(s.name)}`);
-      toast(t("svc.removed", { name: s.name }));
       onChange();
     } catch (e) {
       toast(errorText(e));
@@ -489,7 +508,6 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
     setBusy(true);
     try {
       await api.post(`/api/sessions/${sessionId}/services/${encodeURIComponent(s.name)}/share`, { mode, rotate_key: rotate });
-      toast(t(mode === "local" ? "svc.mode.local" : mode === "public" ? "svc.mode.public" : rotate ? "svc.mode.newkey" : "svc.mode.key", { name: s.name }));
       onChange();
     } catch (e) {
       toast(errorText(e));
@@ -497,8 +515,11 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
       setBusy(false);
     }
   }
+  const [copied, copyValue] = useCopied();
   async function copy(text: string, what: "address" | "link" | "key") {
-    toast((await copyText(text)) ? t(`svc.copied.${what}`) : t("svc.copyfail"));
+    const ok = await copyValue(text, what);
+    if (!ok) toast(t("svc.copyfail"));
+    return ok;
   }
   const mode = s.share?.mode ?? "local";
   const shared = mode !== "local" && s.status === "running";
@@ -511,7 +532,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
       items={[
         ...(s.status === "running" && s.port ? [{ label: t("svc.menu.access"), icon: "share" as const, onSelect: () => setShare(true) }] : []),
         { label: t("svc.menu.log"), icon: "file", onSelect: logs },
-        ...(openUrl ? [{ label: t("svc.menu.copyaddr"), icon: "copy" as const, onSelect: () => copy(openUrl, "address") }] : []),
+        ...(openUrl ? [{ label: t("svc.menu.copyaddr"), icon: "copy" as const, ticks: true as const, onSelect: () => copy(openUrl, "address") }] : []),
         "-" as const,
         ...(s.status === "running" ? [{ label: t("common.stop"), icon: "stop" as const, onSelect: stop }] : []),
         { label: t(s.status === "running" ? "svc.menu.remove.running" : "svc.menu.remove"), icon: "trash", danger: true, onSelect: remove },
@@ -563,14 +584,14 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
               <label className="field">{t("svc.link")}</label>
               <div className="share-field">
                 <input className="field mono" readOnly value={s.share.url} title={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
-                <button className="btn small" onClick={() => copy(s.share!.url!, "link")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
+                <button className="btn small" onClick={() => void copy(s.share!.url!, "link")}><Icon name={copied === "link" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
               </div>
               {mode === "key" && s.share.key && (
                 <>
                   <label className="field">{t("svc.key")}</label>
                   <div className="share-field">
                     <input className="field mono" readOnly value={s.share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
-                    <button className="btn small" onClick={() => copy(s.share!.key!, "key")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
+                    <button className="btn small" onClick={() => void copy(s.share!.key!, "key")}><Icon name={copied === "key" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
                     <button className="btn small" disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</button>
                   </div>
                 </>

@@ -541,7 +541,7 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
                   {/* The page where the absence is felt: the chip above says "the browser's own" and
                       this says what would change that, with the size on the button. It renders
                       nothing once the runtime is installed. */}
-                  <SpeechRuntimeNotice toast={toast} onInstalled={refresh} />
+                  <SpeechRuntimeNotice onInstalled={refresh} />
 
                   {voiceMascot === "off" ? <div className="voice-orb-wrap">
                     <button
@@ -763,7 +763,7 @@ function spokenLine(data: VoiceState): string {
 }
 
 /** The Settings card: what the page runs on and what it can and cannot do here. */
-export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
+export function VoiceSettings() {
   const { data, refresh } = useQuery<VoiceState>("/api/companion/voice", { staleMs: 10000 });
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
@@ -860,7 +860,7 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
       )}
       {/* Where the two lines above say "the browser's own" because nothing else is installed, the
           offer to install it belongs directly under them rather than on another page. */}
-      <SpeechRuntimeNotice toast={toast} onInstalled={refresh} />
+      <SpeechRuntimeNotice onInstalled={refresh} />
       <div className="btnrow">
         <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
           {t("voice.card.open")}

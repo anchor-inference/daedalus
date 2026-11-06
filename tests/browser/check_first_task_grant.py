@@ -112,7 +112,6 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str, pre
             expect(dialog).to_contain_text("execution.start")
             assert "board.task.update" not in dialog.inner_text()
             dialog.get_by_role("button", name="Approve" if language == "en" else "Разрешить").click()
-            expect(page.locator(".toast")).to_contain_text("Approval recorded" if language == "en" else "Разрешение записано")
             expect(authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")).to_have_count(0)
             expect(authority_section.get_by_text("Prepare menu").first).to_be_visible()
             expect(authority_section.get_by_role("button", name=continue_label)).to_be_visible()

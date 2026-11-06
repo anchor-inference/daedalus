@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, panelPath, setPanelCredential } from "../api";
 import { setLang, t } from "../i18n";
 import { connectShell, EXTENSION_ORIGIN, HELLO, PANEL_PROTO, READY, type Current, type Shell } from "./bridge";
-import { cardKey, cropRect, lineStops, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
+import { cardKey, cropRect, lineStops, pageFile, panelCarries, pickSession, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
 import { SidePanel } from "./SidePanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -110,6 +110,18 @@ describe("what the panel decides", () => {
     expect(await file.text()).toBe("A\nhttps://a.example/\n\nbody");
     expect(selectionQuote({ url: "https://a.example/", text: "one\ntwo" })).toBe("> one\n> two\n— https://a.example/\n\n");
     expect(cropRect({ x: 50, y: 40, w: -20, h: 10 }, { w: 200, h: 100 }, { w: 400, h: 200 })).toEqual({ x: 60, y: 80, w: 40, h: 20 });
+  });
+});
+
+describe("what a conversation carries", () => {
+  it("is what the door opens, and a path in the workspace is not", () => {
+    for (const base of ["/api/sessions/s1/media/p1", "/api/sessions/s1/attachments", "/api/sessions/s1/sent/c1", "/api/sessions/s1/tool-results/c1/images"]) {
+      expect(panelCarries({ base }), base).toBe(true);
+    }
+    for (const base of ["/api/sessions/s1", "/api/sessions/s1/folders/f1", "/api/files/k1"]) {
+      expect(panelCarries({ base }), base).toBe(false);
+    }
+    expect(panelCarries({ file: new File([], "a.txt") })).toBe(false);
   });
 });
 
@@ -309,7 +321,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     await act(async () => { host.querySelector<HTMLButtonElement>(".sp-new .composer .mic")!.click(); });
     await settle();
     expect(requests.map((r) => r.op)).toContain("mic.grant");
-    expect(host.querySelector(".sp-toast")?.textContent).toBe(t("sidepanel.mic.grant"));
+    expect(host.querySelector(".toast")?.textContent).toBe(t("sidepanel.mic.grant"));
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
   });
 

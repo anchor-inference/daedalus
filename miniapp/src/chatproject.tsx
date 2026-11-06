@@ -54,7 +54,6 @@ export function MakeProjectSheet({ project, title, onClose, onMade }: { project:
       // would hide the one thing that tells them where the chat went.
       rememberFolder(project.id, true);
       afterChange();
-      toast(t("chat.toproject.done", { name: label }));
       onClose();
       onMade?.();
     } catch (error) {
@@ -80,11 +79,10 @@ export function MakeProjectSheet({ project, title, onClose, onMade }: { project:
   );
 }
 
-async function asChat(project: ProjectRef, title: string): Promise<void> {
+async function asChat(project: ProjectRef): Promise<void> {
   try {
     await api.post(`/api/projects/${encodeURIComponent(project.id)}/as-chat`, command(project));
     afterChange();
-    toast(t("project.tochat.done", { name: title }));
   } catch (error) {
     afterChange();
     toast(errorText(error));
@@ -100,7 +98,7 @@ export function asChatCommand(folder: Folder): Exclude<MenuItem, "-"> | null {
   if (folder.chat || folder.system || !ordinary(folder.project)) return null;
   const one = folder.total === 1;
   const title = folder.rows[0]?.s.title || folder.name;
-  return { label: t("project.tochat"), icon: "bots", disabled: !one, hint: one ? undefined : t("project.tochat.one"), onSelect: () => void asChat(folder.project, title) };
+  return { label: t("project.tochat"), icon: "bots", disabled: !one, hint: one ? undefined : t("project.tochat.one"), onSelect: () => void asChat(folder.project) };
 }
 
 /** The chat being dragged across the sidebar. A drag's data cannot be read until the drop, and a

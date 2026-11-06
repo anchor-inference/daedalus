@@ -211,7 +211,7 @@ export function NewProjectDialog({ onClose, onCreated, onOrchestration, toast }:
       setFailed(null);
       afterChange();
       const unmounted = sent.folders && choice?.unmounted;
-      toast(t(unmounted ? "project.added.unmounted" : "project.added", { name: created.name }));
+      if (unmounted) toast(t("project.added.unmounted", { name: created.name }));
       onCreated(created);
     } catch (error) {
       if (uncertain(error)) setFailed({ body: sent, message: error instanceof TimeoutError ? t("np.failed.timeout") : t("np.failed.server", { reason: errorText(error) }) });
@@ -413,7 +413,6 @@ export function OrchestrationProjectDialog({ onClose, toast, initialName }: { on
       keepStored(START_DRAFT, null);
       setPending(null);
       afterChange();
-      toast(t("project.start.created"));
       onClose();
       navigate(projectPagePath(created.id, "board", { task: receipt.task_id }));
     } catch (failure) {

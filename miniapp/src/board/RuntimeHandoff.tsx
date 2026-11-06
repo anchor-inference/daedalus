@@ -36,8 +36,8 @@ function keep(taskId: string, intent: Intent | null): void {
   catch { /* the mounted intent still keeps its exact operation identity */ }
 }
 
-export function RuntimeHandoff({ task, onChanged, toast, bare = false }: { task: ProjectTask;
-  onChanged: () => void; toast: (message: string) => void; bare?: boolean }) {
+export function RuntimeHandoff({ task, onChanged, bare = false }: { task: ProjectTask;
+  onChanged: () => void; bare?: boolean }) {
   // `bare` is the handoff opened from the task's menu, already open and without a fold of its own.
   const [open, setOpen] = useState(bare);
   const [targetId, setTargetId] = useState("");
@@ -69,7 +69,6 @@ export function RuntimeHandoff({ task, onChanged, toast, bare = false }: { task:
       keep(task.id, null);
       setPending(null);
       setEffectId(receipt.effect_id);
-      toast(t("handoff.queued"));
       options.refresh();
       onChanged();
     } catch (error) {

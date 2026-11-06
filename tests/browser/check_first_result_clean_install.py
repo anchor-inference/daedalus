@@ -256,8 +256,8 @@ def scenario(language: str, width: int) -> None:
         assert evidence[0]["manifest_digest_before"] in {item["digest"] for item in result["artifacts"]}
         sheet.get_by_role("textbox", name="Review conclusion" if language == "en" else "Вывод проверки").fill("Bread price matches the approved list")
         sheet.get_by_role("button", name="Approve reviewed result" if language == "en" else "Одобрить проверенный результат").click()
-        sheet.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат").click()
-        expect(page.locator(".toast")).to_contain_text("Result accepted" if language == "en" else "Результат принят")
+        with page.expect_response(lambda r: "accept" in r.url and r.request.method != "GET"):
+            sheet.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат").click()
         page.reload()
         expect(sheet.locator(".result-state")).to_contain_text("Operator approved" if language == "en" else "Оператор принял")
         # A phone's task page keeps its other tabs mounted and hidden; the result's own fold is the visible one.

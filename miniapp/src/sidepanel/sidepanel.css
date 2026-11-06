@@ -174,27 +174,13 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-new-tab .truncate { flex: 1 1 auto; min-width: 0; }
 .sp-new-cancel { flex: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 
-/* Under the header, never at the foot: there a note covered the composer's controls. */
-.sp-toasts {
-  position: absolute;
-  z-index: 30;
+/* Under the header, never at the foot: there a line covered the composer's controls. */
+.sidepanel .toast {
   top: calc(var(--ctl-h) + var(--space-2));
+  bottom: auto;
   left: var(--space-3);
   right: var(--space-3);
-  display: grid;
-  gap: var(--space-1);
-  pointer-events: none;
-}
-.sp-toast {
-  pointer-events: auto;
-  padding: var(--space-1) var(--space-3);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface-3);
-  color: var(--fg);
-  font: inherit;
+  max-width: none;
+  transform: none;
   font-size: var(--fs-12);
-  text-align: left;
-  box-shadow: var(--shadow-pop);
-  cursor: pointer;
 }

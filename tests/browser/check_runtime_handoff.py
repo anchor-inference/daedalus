@@ -11,7 +11,16 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    BoardStub,
+    Unhandled,
+    expect_app,
+    folders,
+    fulfil_shared,
+    open_task_tool,
+    wait_until,
+)
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -86,7 +95,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     page.reload()
     section = open_task_tool(page, title, language)
     section.get_by_role("status").get_by_role("button").click()
-    expect(page.get_by_text("Starting the new worker" if language == "en" else "Запускаем нового исполнителя")).to_be_visible()
+    wait_until(page, lambda: len(state["commands"]) == 2)
     assert len(state["commands"]) == 2 and state["commands"][0] == state["commands"][1]
 
 

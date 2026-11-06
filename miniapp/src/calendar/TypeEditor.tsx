@@ -81,7 +81,6 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
       await saveType(next);
       invalidate(TYPES);
       refreshPlanner();
-      toast(t("cal.type.saved"));
       onClose();
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
@@ -94,7 +93,6 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
       await deleteType(type.id);
       invalidate(TYPES);
       refreshPlanner();
-      toast(t("cal.type.deleted"));
       onClose();
     } catch (exc) { toast(errorText(exc)); }
   }

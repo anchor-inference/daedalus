@@ -234,9 +234,8 @@ export function SnapshotButton({ capture, session, toast, className = "iconbtn s
   };
   const attach = async (file: File) => {
     try {
-      const where = await handToComposer(target, [file], open?.text ?? "");
+      await handToComposer(target, [file], open?.text ?? "");
       setOpen(null);
-      toast(t(where === "composer" ? "annotate.attached" : "annotate.saved"));
     } catch (e) {
       toast(errorText(e));
     }

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, folders, fulfil_shared, wait_until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -78,7 +78,7 @@ def scenario(language: str, width: int) -> None:
         expect(goal_input).to_have_value("Publish a clear menu")
         page.get_by_role("button", name="Check current goal" if language == "en" else "Проверить текущую цель").click()
         page.get_by_role("button", name="Save" if language == "en" else "Сохранить", exact=True).click()
-        expect(page.get_by_text("Goal and criteria saved" if language == "en" else "Цель и критерии сохранены")).to_be_visible()
+        wait_until(page, lambda: len(writes) == 2)
         assert len(writes) == 2 and writes[0]["client_operation_id"] != writes[1]["client_operation_id"]
         assert [path for path in posts if "scope-revisions" in path] == ["/api/projects/p-guided/scope-revisions"] * 2, posts
         assert not any("/run" in path or "/attempt" in path for path in posts), posts
@@ -142,7 +142,7 @@ def failed_reply_keeps_the_exact_request() -> None:
         page.reload()
         expect(page.locator("#guided-goal-body")).to_have_value("Publish a clear menu")
         page.get_by_role("button", name="Try again").click()
-        expect(page.get_by_text("Goal and criteria saved")).to_be_visible()
+        wait_until(page, lambda: len(writes) == 2)
         assert len(writes) == 2 and writes[0] == writes[1]
         browser.close()
 
@@ -257,7 +257,7 @@ def change_from_the_brief(language: str, width: int) -> None:
         sheet.get_by_label("Menu page").check()
         expect(sheet.get_by_role("status")).to_contain_text("2")
         sheet.get_by_role("button", name="Save" if language == "en" else "Сохранить", exact=True).click()
-        expect(page.get_by_text("Goal and criteria saved" if language == "en" else "Цель и критерии сохранены")).to_be_visible()
+        wait_until(page, lambda: len(writes) == 1)
         assert len(writes) == 1 and writes[0]["root_task_ids"] == ["t-menu"], writes
         assert writes[0]["body"] == "Publish a clear menu with holiday hours" and writes[0]["expected_goal_revision"] == 2
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")

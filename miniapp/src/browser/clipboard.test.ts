@@ -58,7 +58,7 @@ describe("copying from the page", () => {
     expect(written).not.toBeNull();
     expect(await (await written!).text()).toBe("someone@example.com");
     expect(writeText).not.toHaveBeenCalled();
-    expect(toasts.map((x) => x.text)).toEqual(["Copied 19 characters"]);
+    expect(toasts).toEqual([]);
   });
 
   it("writes plainly where the item is refused, and offers a button where that is refused too", async () => {
@@ -74,7 +74,8 @@ describe("copying from the page", () => {
     // The button's own tap is a gesture: the write is allowed there.
     writeText.mockImplementation(async () => undefined);
     toasts[0].action!.run();
-    await vi.waitFor(() => expect(toasts.map((x) => x.text)).toContain("Copied 3 characters"));
+    await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith("abc"));
+    expect(toasts).toHaveLength(1);
   });
 
   it("never copies a password field, and says when nothing is selected or the page cannot answer", async () => {
@@ -106,7 +107,7 @@ describe("pasting onto the page", () => {
     const live = fakeLive(new Promise<Copied>(() => undefined));
     await pasteFromClipboard(live, true);
     expect(live.sent).toEqual([{ t: "text", text: "пароль-1" }]);
-    expect(toasts.map((x) => x.text)).toEqual(["Pasted 8 characters"]);
+    expect(toasts).toEqual([]);
   });
 
   it("points a phone at the line under the page when the clipboard may not be read", async () => {

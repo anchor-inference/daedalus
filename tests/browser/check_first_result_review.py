@@ -6,7 +6,7 @@ import json
 import os
 from urllib.parse import urlsplit
 
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app
+from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, wait_until
 from check_project_board import PID, project, serve
 from playwright.sync_api import expect, sync_playwright
 
@@ -114,7 +114,8 @@ def scenario(language: str, width: int) -> None:
         accept = sheet.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат")
         expect(accept).to_be_enabled()
         accept.click()
-        expect(page.locator(".toast")).to_contain_text("Result accepted" if language == "en" else "Результат принят")
+        assert wait_until(page, lambda: len(accepts) == 1), "the result was not accepted"
+        expect(page.locator(".toast")).to_have_count(0)
         assert len(originals) >= 2 and len(evidence) == len(verdicts) == len(accepts) == 1
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         browser.close()

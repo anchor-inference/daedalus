@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, FocusStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, FocusStub, expect_app, wait_until  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -29,12 +29,12 @@ PID = "b4k3ry20f0c5"
 
 WORDS = {
     "en": {
-        "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits", "merged": "Merge requested; waiting for the result",
-        "rejected": "Result returned for changes", "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review", "ci": "CI passed for branch head",
+        "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits",
+        "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review", "ci": "CI passed for branch head",
     },
     "ru": {
-        "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита", "merged": "Слияние запрошено; ждём итога",
-        "rejected": "Результат возвращён на доработку", "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку", "ci": "CI пройден для ветки head",
+        "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита",
+        "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку", "ci": "CI пройден для ветки head",
     },
 }
 
@@ -129,7 +129,7 @@ def desktop(page: Page, lang: str) -> None:
     expect(send).to_be_disabled()
     evidence.locator(".result-return textarea").fill("Log unpaid orders as well")
     send.click()
-    expect(page.locator(".toast")).to_contain_text(words["rejected"])
+    wait_until(page, lambda: focus.board.rejected)
     assert focus.board.rejected == [("t-endpoint", "Log unpaid orders as well")], focus.board.rejected
     fits(page, f"{lang} desktop review")
 
@@ -175,7 +175,7 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     merge = merge_button(page, words, phone)
     expect(merge).to_be_enabled()
     merge.click()
-    expect(page.locator(".toast")).to_contain_text(words["merged"])
+    wait_until(page, lambda: focus.board.merge_requests)
     assert len(focus.board.merge_requests) == 1, focus.board.merge_requests
     assert focus.board.merge_requests[0][1]["verdict_id"] == "verdict-endpoint"
     page.reload()
@@ -304,10 +304,6 @@ def configure_ci(page: Page, lang: str) -> None:
     assert second["expected_entity_revision"] == task["entity_revision"] - 1
     assert second["provider"] == "github" and second["repository_id"] == "7"
     assert second["check_names"] == ["unit", "build"]
-    saved = "Required checks saved; the result went back to the queue" if lang == "en" else "Проверки сохранены; результат возвращён в очередь"
-    expect(page.locator(".toast")).to_contain_text(saved)
-    # The receipt id is bookkeeping for the server; the operator's toast says what happened, not its id.
-    expect(page.locator(".toast")).not_to_contain_text("ci-receipt")
     expect(page.locator(".sheet.pboard-sheet .review-panel")).to_have_count(0)
     fits(page, f"{lang} CI requirements")
 

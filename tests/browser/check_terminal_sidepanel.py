@@ -239,7 +239,6 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     page.locator(".tside-save .tside-input").fill("Bakery review")
     page.locator(".tside-save button[type='submit']").click()
     page.wait_for_selector(".tside-layout", timeout=5000)
-    c.that("saved" in toast_text(page).lower(), "saving a layout does not say so")
     saved = term.layouts[0]["workspace"] if term.layouts else {}
     c.that(saved.get("panes") == [*IDS, SPARE] and saved.get("layout") == 4, f"the host was sent {saved}")
     c.that(page.locator(".tside-layout .tside-chip:not(.shape)").count() == 4, "the saved layout does not list its panes")
@@ -250,7 +249,6 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     page.locator(".tside-restore").click()
     page.wait_for_timeout(500)
     c.that(panes(page) == [*IDS, SPARE] and page.locator(".tp-pane:not(.hidden)").count() == 4, f"restoring gave {panes(page)}")
-    c.that("restored" in toast_text(page).lower(), "restoring does not say so")
     page.locator(".tside-layout button[aria-haspopup='menu']").click()
     page.locator(".menu [role='menuitem']").filter(has_text="Rename").first.click()
     page.locator(".tside-layout .tside-input").fill("Night shift")

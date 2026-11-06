@@ -52,7 +52,6 @@ function HostContent({ toast }: { toast: (message: string) => void }) {
       intent.current = null;
       setLabel(""); setPublicKey("");
       setSshHost(""); setSshPort("22"); setSshUser(""); setRemoteRoot("");
-      toast(t("host.enrolled"));
       query.refresh();
     } catch (error) { toast(errorText(error)); query.refresh(); }
     finally { setBusy(false); }
@@ -117,7 +116,6 @@ function HostCard({ host, revision, readCurrent, refresh, offline, toast }: { ho
         expected_collection_revision: revision, expected_host_revision: host.entity_revision, client_operation_id: intent.current.id,
       });
       intent.current = null;
-      toast(t("host.probeRecorded"));
       refresh();
     } catch (error) { toast(errorText(error)); refresh(); }
     finally { setBusy(false); }
@@ -131,7 +129,6 @@ function HostCard({ host, revision, readCurrent, refresh, offline, toast }: { ho
         challenge_id: challenge.challenge_id, nonce: challenge.nonce, public_key: challenge.public_key, signature: signature.trim(),
       });
       setChallenge(null); setSignature("");
-      toast(t("host.proofRecorded"));
       refresh();
     } catch (error) { toast(errorText(error)); refresh(); }
     finally { setBusy(false); }
@@ -148,7 +145,6 @@ function HostCard({ host, revision, readCurrent, refresh, offline, toast }: { ho
         expected_host_revision: host.entity_revision, expected_collection_revision: revision, client_operation_id: intent.current.id,
       });
       intent.current = null; setReason("");
-      toast(t("host.decisionRecorded"));
       refresh();
     } catch (error) { toast(errorText(error)); refresh(); }
     finally { setBusy(false); }

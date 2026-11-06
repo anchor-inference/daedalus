@@ -360,7 +360,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
-      const delivery = await onSend(body, going, queue, clientMessageId, going.length ? setProgress : undefined, handed.length ? handed : undefined);
+      await onSend(body, going, queue, clientMessageId, going.length ? setProgress : undefined, handed.length ? handed : undefined);
       clearSendIntent(sessionId);
       setDraftState("");
       clearDraft(sessionId);
@@ -371,7 +371,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       writeDraftTarget(sessionId, null);
       if (fileInput.current) fileInput.current.value = "";
       haptic("light");
-      toast(t(`composer.delivery.${delivery}`));
     } catch (e) {
       // A conflict has an authoritative answer from the host. The next deliberate send is a new
       // attempt; an unconfirmed network failure keeps its original identity for safe retry.

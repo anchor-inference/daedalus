@@ -54,7 +54,7 @@ function ImportedBudget({ projectId }: { projectId: string }) {
   return history.data ? <ArchivedBudget history={history.data} /> : null;
 }
 
-export function ProjectArchive({ project, toast, onChanged, onOpenRestored, readFailed }: { project: Project; toast: (message: string) => void; onChanged: () => void; onOpenRestored: (id: string) => void; readFailed: boolean }) {
+export function ProjectArchive({ project, onChanged, onOpenRestored, readFailed }: { project: Project; onChanged: () => void; onOpenRestored: (id: string) => void; readFailed: boolean }) {
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<SelectedPath[]>([]);
@@ -100,7 +100,6 @@ export function ProjectArchive({ project, toast, onChanged, onOpenRestored, read
       setReceipt(result);
       latest.refresh();
       onChanged();
-      toast(t("archive.ready"));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         exportIntent.current = null;

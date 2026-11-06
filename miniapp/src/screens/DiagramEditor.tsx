@@ -20,7 +20,7 @@ import { invalidate } from "../store";
 import { errorText } from "../ui";
 import { OverflowMenu, Popover, Sheet, useMedia } from "../ui/index";
 import type { MenuItem } from "../ui/dialogs";
-import { copyText } from "../ui/components";
+import { copyText, useCopied } from "../ui/components";
 import { changeSummary, clockTime, groupByDay, type RevisionItem } from "../diagram-history";
 import { relTimeLong } from "../format";
 import { DiagramThumb, UI_OPTIONS, download, fileName, exposeView, fitOnOpen, sceneSignature, useCanvasTheme, useExcalidrawLang, type Diagram, type Head, type Scene } from "./diagramparts";
@@ -259,7 +259,6 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
         download(await exportToBlob({ elements: scene.elements as any, appState: scene.appState as any, files: scene.files as any, mimeType: "image/png", exportPadding: 16 }), `${name}.png`);
       } else {
         await exportToClipboard({ elements: scene.elements as any, appState: scene.appState as any, files: scene.files as any, type: "png" });
-        toast(t("diagrams.export.copied"));
       }
     } catch (error) { toast(format === "clipboard" ? t("diagrams.export.copy.failed") : errorText(error)); }
   }
@@ -280,7 +279,6 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
       setStatus("saved");
       invalidate("/api/diagrams");
       historyRefresh.current();
-      toast(t("diagrams.restored"));
     } catch (error) {
       toast(error instanceof ApiError && error.status === 409 ? t("diagrams.restore.stale") : errorText(error));
     }
@@ -378,6 +376,7 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
 }
 
 function SharePanel({ id, title, token, onToken, toast }: { id: string; title: string; token: string; onToken: (token: string) => void; toast: (message: string) => void }) {
+  const [copied, copy] = useCopied();
   const [busy, setBusy] = useState(false);
   const url = token ? `${window.location.origin}/app/d/${token}` : "";
   async function create() {
@@ -386,7 +385,7 @@ function SharePanel({ id, title, token, onToken, toast }: { id: string; title: s
       const result = await api.post<{ url: string }>(`/api/diagrams/${id}/share`, {});
       onToken(result.url.split("/").pop() ?? "");
       invalidate("/api/diagrams");
-      if (await copyText(`${window.location.origin}${result.url}`)) toast(t("diagrams.link.copied"));
+      await copyText(`${window.location.origin}${result.url}`);
     } catch (error) { toast(errorText(error)); } finally { setBusy(false); }
   }
   async function revoke() {
@@ -395,7 +394,6 @@ function SharePanel({ id, title, token, onToken, toast }: { id: string; title: s
       await api.delete(`/api/diagrams/${id}/share`);
       onToken("");
       invalidate("/api/diagrams");
-      toast(t("diagrams.share.revoked"));
     } catch (error) { toast(errorText(error)); } finally { setBusy(false); }
   }
   return (
@@ -409,7 +407,7 @@ function SharePanel({ id, title, token, onToken, toast }: { id: string; title: s
         <>
           <input className="field" aria-label={t("diagrams.share.link")} readOnly value={url} onFocus={(event) => event.target.select()} />
           <div className="diagram-share-actions">
-            <button className="btn primary" onClick={() => void copyText(url).then((ok) => toast(ok ? t("diagrams.link.copied") : t("diagrams.link.copy.failed")))}><Icon name="copy" size={15} />{t("diagrams.share.copy")}</button>
+            <button className="btn primary" onClick={() => void copy(url).then((ok) => { if (!ok) toast(t("diagrams.link.copy.failed")); })}><Icon name={copied ? "check" : "copy"} size={15} />{t("diagrams.share.copy")}</button>
             {typeof navigator.share === "function" && <button className="btn" onClick={() => void navigator.share({ title, url }).catch(() => undefined)}><Icon name="share" size={15} />{t("diagrams.share.send")}</button>}
             <button className="btn danger" disabled={busy} onClick={() => void revoke()}><Icon name="unlink" size={15} />{t("diagrams.share.revoke")}</button>
           </div>

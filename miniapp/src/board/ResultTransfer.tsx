@@ -43,7 +43,6 @@ export function ResultTransfer({ projectId, artifacts, toast }: { projectId: str
         });
       }
       operation.current = null;
-      toast(t("transfer.queued"));
       readiness.refresh(); revision.refresh(); hosts.refresh();
     } catch (error) {
       toast(errorText(error));

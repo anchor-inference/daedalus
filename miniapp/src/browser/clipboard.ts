@@ -47,7 +47,7 @@ export async function pasteFromClipboard(live: LiveView | null, phone: boolean):
     toast(t("browser.paste.empty"));
     return;
   }
-  if (pasteText(live, text)) toast(plural("browser.paste.done", text.length));
+  pasteText(live, text);
 }
 
 /** Why a copy brought nothing to write: the words the toast says. */
@@ -94,7 +94,8 @@ async function finish(answer: Promise<Copied>, started: Promise<void> | null): P
     return;
   }
   if (await wrote(started, copied.text)) {
-    toast(copiedWords(copied));
+    // Less than was selected went in, and a paste is the first anyone would learn of it.
+    if (copied.truncated) toast(plural("browser.copy.truncated", copied.text.length));
     return;
   }
   // Both writes refused: the gesture was spent by the time the page answered. A tap on the toast's
@@ -104,10 +105,7 @@ async function finish(answer: Promise<Copied>, started: Promise<void> | null): P
     action: {
       label: t("browser.copy.action"),
       run: () => {
-        void navigator.clipboard?.writeText(copied.text).then(
-          () => toast(copiedWords(copied)),
-          () => toast(t("browser.copy.refused")),
-        );
+        void navigator.clipboard?.writeText(copied.text).catch(() => toast(t("browser.copy.refused")));
       },
     },
   });
@@ -130,8 +128,4 @@ async function wrote(started: Promise<void> | null, text: string): Promise<boole
   } catch {
     return false;
   }
-}
-
-function copiedWords(c: Copied): string {
-  return plural(c.truncated ? "browser.copy.truncated" : "browser.copy.done", c.text.length);
 }

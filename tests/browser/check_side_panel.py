@@ -17,7 +17,11 @@ side panel's width:
 - a running conversation shows one compact activity line inside the composer, with no Stop of its
   own; the composer's Stop goes to the door, and a stop the stream never confirms says so after three
   seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab,
-  and the note it leaves sits under the header, clear of the composer, until clicked away;
+  and says so in the line alone, with no note beside it;
+- a failure does leave a note, under the header, clear of the composer, until clicked away;
+- what a conversation carries is drawn: a picture, a GIF and an album from the panel's own routes, a
+  clip and a voice note on a press, a document as a card that opens and saves, and an answer that
+  repeats a file; no raw Markdown is left on the page and nothing asks for the cookie upgrade;
 - a new conversation shows the consent summary once and the app's whole composer (attach, dictation,
   the model, the approval mode, the page's offers) on one row at 360 and 420 px, starts on the
   operator's words, gives the current tab to its group before the first message, and sends it;
@@ -33,6 +37,7 @@ Exit 0 when every step holds.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -75,7 +80,8 @@ FAKE_EXTENSION = """
       channel.port1.onmessage = (e) => {
         const { id, op, args } = e.data;
         shell.requests.push({ op, args });
-        channel.port1.postMessage({ id, ok: true, value: op === "tab.current" ? shell.current : answers[op] ?? null });
+        if (shell.fail) channel.port1.postMessage({ id, ok: false, error: shell.fail });
+        else channel.port1.postMessage({ id, ok: true, value: op === "tab.current" ? shell.current : answers[op] ?? null });
       };
       const hello = { t: "DAEDALUS_PANEL_HELLO", proto: 1, nonce: message.nonce, generation: 1, token: "pnl_check", expires: "", lang: shell.lang,
         current: shell.current, show: null, profile: "Work", connected: true };
@@ -104,6 +110,42 @@ def messages(*, refusal: str | None = None) -> list[dict]:
     return out
 
 
+def presentation(pid: str, layout: str, *items: dict) -> dict:
+    return {"id": pid, "layout": layout, "items": list(items)}
+
+
+def media_item(item: str, kind: str, mime: str, filename: str, *, alt: str = "", caption: str = "", width: int | None = None, height: int | None = None) -> dict:
+    return {"id": item, "kind": kind, "mime_type": mime, "filename": filename, "byte_size": 2048, "width": width, "height": height, "alt": alt, "caption": caption, "url": ""}
+
+
+IMAGE, GIF, ALBUM, CLIP, VOICE, FILE = (f"{n}{n}{n}{n}{n}{n}{n}{n}-{n}{n}{n}{n}-{n}{n}{n}{n}-{n}{n}{n}{n}-{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}" for n in "abcdef")
+UNIT = "Подбор модели: условия и цены"
+CARRIED = [
+    presentation(IMAGE, "single", media_item("i1", "image", "image/png", "shot.png", alt="The bill", width=160, height=100)),
+    presentation(GIF, "single", media_item("g1", "animation", "image/gif", "wave.gif", alt="A wave", width=160, height=100)),
+    presentation(ALBUM, "album", media_item("a1", "image", "image/png", "one.png", alt="One", width=160, height=100), media_item("a2", "image", "image/png", "two.png", alt="Two", width=160, height=100)),
+    presentation(CLIP, "single", media_item("c1", "video", "video/webm", "walk.webm", caption="The walkthrough")),
+    presentation(VOICE, "single", media_item("v1", "audio", "audio/wav", "note.wav", caption="The voice note")),
+    presentation(FILE, "single", media_item("f1", "file", "text/markdown", "station-pick.md", alt=UNIT, caption="The whole comparison")),
+]
+
+
+def carried_messages() -> list[dict]:
+    """An answer with one of each, and a later answer that repeats the document, which is what the
+    host wrote to the screen as raw Markdown."""
+    lines = "\n\n".join(f"![{p['items'][0]['alt'] or 'x'}](daedalus-media:{p['id']})" for p in CARRIED)
+    file = next(p for p in CARRIED if p["id"] == FILE)
+    return [
+        {"role": "user", "text": "Show me what you found", "thinking": "", "created_at": "2026-10-20T10:00:00Z", "seq": 1, "tool_calls": [], "tool_results": [],
+         "attachments": [{"name": "my-photo.png", "mime": "image/png", "size": 2048, "file": "my-photo.png"}]},
+        {"role": "assistant", "text": "", "thinking": "", "created_at": "2026-10-20T10:00:01Z", "seq": 11, "tool_calls": [{"id": "call_sent", "name": "SendFile", "arguments": {"path": "chart.png"}}], "tool_results": []},
+        {"role": "tool", "text": "", "thinking": "", "created_at": "2026-10-20T10:00:01Z", "seq": 12, "tool_calls": [], "tool_results": [{"id": "call_sent", "content": "sent", "is_error": False}]},
+        {"role": "assistant", "text": f"Here it all is.\n\n{lines}\n\nThat is everything.", "thinking": "", "created_at": "2026-10-20T10:00:02Z", "seq": 2, "tool_calls": [], "tool_results": [], "media": CARRIED},
+        {"role": "user", "text": "Add the prices", "thinking": "", "created_at": "2026-10-20T10:01:00Z", "seq": 3, "tool_calls": [], "tool_results": []},
+        {"role": "assistant", "text": f"Done.\n\n![{UNIT}](daedalus-media:{FILE})\n\nThe prices are in.", "thinking": "", "created_at": "2026-10-20T10:01:02Z", "seq": 4, "tool_calls": [], "tool_results": [], "media": [file]},
+    ]
+
+
 class Door:
     """The panel's door: the conversations of this Chrome, and what was sent to each."""
 
@@ -118,6 +160,9 @@ class Door:
             "s1": {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "messages": messages(refusal="0123456789ab"), "open_approvals": ["0123456789ab"], "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
             "s2": {"id": "s2", "title": "Find flights to Lisbon", "status": "idle", "messages": messages()[:1], "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
         }
+        self.details["s3"] = {**self.details["s2"], "id": "s3", "title": "What I found", "messages": carried_messages()}
+        self.sessions.append({"id": "s3", "title": "What I found", "status": "idle", "last_message_at": "2026-10-20T08:00:00Z", "needs_you": False, "group": "s-s3-u"})
+        self.media: list[str] = []
         self.posts: list[tuple[str, object]] = []
         self.foreign: list[str] = []
         self.auth: set[str] = set()
@@ -156,6 +201,22 @@ class Door:
                 return self.json(route, self.details[sid])
             if tail == "stream":
                 return route.fulfill(status=200, content_type="text/event-stream", body='event: hello\ndata: {"event_seq": 0}\n\n')
+            if tail in ("attachments/download", "sent/call_sent/download"):
+                self.media.append(tail)
+                known = sid == "s3" and request.headers.get("authorization") == "Panel pnl_check"
+                return route.fulfill(status=200 if known else 404, content_type="image/png", body=base64.b64decode(PNG))
+            if tail.startswith("media/"):
+                # As the host answers: only an item of this conversation, only with the credential.
+                self.media.append(tail)
+                known = {p["id"]: {i["id"]: i for i in p["items"]} for p in CARRIED}
+                _, pid, *rest = tail.split("/")
+                wanted = request.url.split("path=", 1)[1].split("%2F", 1)[0] if rest == ["download"] else rest[0]
+                found = known.get(pid, {}).get(wanted) if sid == "s3" else None
+                if found is None or request.headers.get("authorization") != "Panel pnl_check":
+                    return route.fulfill(status=404, content_type="application/json", body='{"detail": "no such media"}')
+                if found["kind"] == "file":
+                    return route.fulfill(status=200, headers={"Content-Type": "text/markdown", "Content-Disposition": 'attachment; filename="station-pick.md"'}, body="# Station pick\n\nThe whole comparison.\n")
+                return route.fulfill(status=200, content_type=found["mime_type"], body=base64.b64decode(PNG))
             if tail.startswith("policy/similar/"):
                 return self.json(route, {"similar": None})
             if tail in ("policy/grant", "policy/refuse") and isinstance(body, dict):
@@ -207,6 +268,48 @@ def open_panel(browser, door: Door, *, lang: str = "en", current: dict | None = 
     page.route("**/api/**", door)
     page.goto(f"{BASE}/panel")
     return ctx, page
+
+
+def carried(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
+    """Everything a conversation carries, drawn in the panel from the panel's own routes."""
+    door = Door()
+    ctx, page = open_panel(browser, door, lang=lang, current=tab("s3", "Found", "https://shop.example/"))
+    expect(page.locator(".sp-title")).to_contain_text("What I found", timeout=10000)
+    timeline = page.locator(".timeline")
+    # Every still, from a blob, with its bytes: the element's own request could not carry the credential.
+    expect(timeline.locator(".inline-media-image img")).to_have_count(4, timeout=10000)
+    page.wait_for_function("[...document.querySelectorAll('.timeline .inline-media-image img')].every((i) => i.src.startsWith('blob:') && i.naturalWidth > 0)")
+    # What the operator attached and what the agent sent, through the same door.
+    page.wait_for_function("document.querySelector('.msg-thumb img')?.naturalWidth > 0 && document.querySelector('.turn-files .artifact-thumb img')?.naturalWidth > 0")
+    assert "attachments/download" in door.media and "sent/call_sent/download" in door.media, door.media
+    # A document is the file it is, in the answer that attached it and in the one that repeats it.
+    expect(timeline.locator(".inline-file .artifact-name")).to_have_count(2)
+    expect(timeline.locator(".inline-file .artifact-name").first).to_have_text("station-pick.md")
+    assert "daedalus-media:" not in timeline.inner_text(), timeline.inner_text()
+    assert "![" not in timeline.inner_text(), timeline.inner_text()
+    page.screenshot(path=str(SHOTS / f"side-panel-media-{lang}.png"), full_page=True)
+    # It opens here, from the door, and saves under its own name.
+    timeline.locator(".inline-file .artifact-main").first.click()
+    expect(page.locator(".preview")).to_contain_text("The whole comparison")
+    page.screenshot(path=str(SHOTS / f"side-panel-media-preview-{lang}.png"))
+    page.keyboard.press("Escape")
+    with page.expect_download() as saved:
+        timeline.locator(".inline-file .artifact-actions a").first.click()
+    assert saved.value.suggested_filename == "station-pick.md", saved.value.suggested_filename
+    with page.expect_download() as saved:
+        timeline.locator(".inline-media-actions a").first.click()
+    assert saved.value.suggested_filename == "shot.png", saved.value.suggested_filename
+    # A clip and a voice note wait for a press: a blob is the whole file.
+    fetched = list(door.media)
+    assert not any("/c1/" in m or "/v1/" in m or m.endswith("/download") and "c1" in m for m in fetched), fetched
+    loads = timeline.locator(".inline-media-load")
+    expect(loads).to_have_count(2)
+    loads.first.click()
+    loads.first.click()
+    expect(timeline.locator(".inline-media-load")).to_have_count(0)
+    assert not [f for f in door.foreign], door.foreign
+    assert door.auth == {"Panel pnl_check"}, door.auth
+    ctx.close()
 
 
 def run() -> int:
@@ -326,25 +429,30 @@ def run() -> int:
         page.set_viewport_size({"width": 400, "height": 760})
         line.get_by_role("button", name="Take over").click()
         expect(page.locator(".sp-live")).to_contain_text("Paused")
-        # The note it leaves sits under the header and never over the composer or its controls.
-        expect(page.locator(".sp-toast")).to_be_visible()
+        # The line says it; a note beside it would only stand in the way.
+        expect(page.locator(".toast")).to_have_count(0)
+        # A failure does leave one: under the header, never over the composer or its controls.
+        page.evaluate("window.__shell.fail = 'no_group'")
+        line.get_by_role("button", name="Show the tab").click()
+        expect(page.locator(".toast")).to_be_visible()
         for width in (360, 420):
             page.set_viewport_size({"width": width, "height": 760})
             page.wait_for_timeout(50)
             overlap = page.evaluate("""() => {
               const c = document.querySelector('.composer').getBoundingClientRect();
-              return [...document.querySelectorAll('.sp-toast')].some((el) => {
+              return [...document.querySelectorAll('.toast')].some((el) => {
                 const r = el.getBoundingClientRect();
                 return r.width > 0 && r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top;
               });
             }""")
-            assert page.locator(".sp-toast").count() and not overlap, f"a note covers the composer at {width} px"
+            assert page.locator(".toast").count() and not overlap, f"a note covers the composer at {width} px"
             page.screenshot(path=str(SHOTS / f"side-panel-note-{width}.png"))
-        page.locator(".sp-toast").first.click()
-        expect(page.locator(".sp-toast")).to_have_count(0)
+        page.locator(".toast").first.click()
+        expect(page.locator(".toast")).to_have_count(0)
+        page.evaluate("window.__shell.fail = null")
         page.set_viewport_size({"width": 400, "height": 760})
         assert requests(page, "group.pause")[-1]["args"] == {"session": "s1", "paused": True}
-        assert requests(page, "tab.focus")[-1]["args"] == {"session": "s1"}
+        assert requests(page, "tab.focus")[0]["args"] == {"session": "s1"}
 
         # No sideways scroll at a narrow panel.
         page.set_viewport_size({"width": 360, "height": 760})
@@ -392,6 +500,9 @@ def run() -> int:
         assert "Find a birthday gift under 50 euros" in sent["text"] and "https://shop.example/gifts" in sent["text"], sent  # type: ignore[index]
         assert not door.foreign, door.foreign
         ctx.close()
+
+        for lang in ("en", "ru"):
+            carried(browser, lang)
 
         # In Russian, as the extension says.
         door = Door()

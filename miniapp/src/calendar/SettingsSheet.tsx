@@ -27,7 +27,6 @@ export function SettingsSheet({ settings, zone, onClose, toast }: { settings: Ca
     try {
       const saved = await api.put<CalendarSettings>(SETTINGS, s);
       prime(SETTINGS, saved ?? s);
-      toast(t("cal.settings.saved"));
       onClose();
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }

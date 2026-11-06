@@ -1786,8 +1786,7 @@ connected, so a model that opened the wrong one can see it.
 
 `GET /api/browsers?session=<id>` carries `user: {env, consented, connected, name}` where the
 installation offers the operator's Chrome. The events `browser.user {kind: connected | lost | check |
-switched, profile_name, reason?}` follow the relay (a popup's "Check connection" is a toast in the
-app) and a conversation's switch.
+switched, profile_name, reason?}` follow the relay and a conversation's switch.
 
 **The public doors on a server.** `POST /api/browser/pair {code, profile_id, profile_name,
 ext_version, chrome_version}` → `{token}` spends a code (single use; spending one voids the others)

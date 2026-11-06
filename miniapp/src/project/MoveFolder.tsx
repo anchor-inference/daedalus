@@ -111,7 +111,6 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
           invalidate(MOVES_KEY);
           invalidate("/api/projects");
           invalidate("/api/sessions");
-          if (next.state === "done") toast(t("move.done.toast", { path: next.destination }));
         }
       } catch { /* the next tick asks again */ }
     }, 1000);

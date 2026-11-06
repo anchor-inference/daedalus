@@ -77,7 +77,6 @@ export function useMeeting(sessionId: string, toast: (text: string) => void) {
     try {
       await api.post(`/api/sessions/${session.current}/meeting/${state.job.id}/calendar`, { day });
       setState({ phase: "job", job: { ...state.job, calendar_event: "added" } });
-      toast(t("meeting.calendar.added", { day }));
     } catch (e) {
       toast(errorText(e));
     }
@@ -88,7 +87,6 @@ export function useMeeting(sessionId: string, toast: (text: string) => void) {
     try {
       await api.post(`/api/sessions/${session.current}/meeting/${state.job.id}/send`);
       setState(null);
-      toast(t("meeting.sent"));
     } catch (e) {
       toast(errorText(e));
     }

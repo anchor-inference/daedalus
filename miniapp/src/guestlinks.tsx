@@ -8,7 +8,7 @@ import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
 import { invalidate, useQuery } from "./store";
-import { copyText, Dropdown, Segmented, Switch } from "./ui/components";
+import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
 import { Sheet } from "./ui/dialogs";
 import { confirmAsync, errorText } from "./ui";
 import "./guestlinks.css";
@@ -80,13 +80,12 @@ function GuestList({ sessionId, door, toast, onNew, onRead, onMade }: {
   const links = useQuery<{ links: GuestLink[] }>(`${LINKS}?session_id=${encoded(sessionId)}`, { pollMs: POLL_MS });
   const [busy, setBusy] = useState<string | null>(null);
 
-  async function act(key: string, work: () => Promise<string | void>) {
+  async function act(key: string, work: () => Promise<void>) {
     if (busy) return;
     setBusy(key);
     try {
-      const said = await work();
+      await work();
       invalidate("/api/guest/");
-      if (said) toast(said);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -96,11 +95,9 @@ function GuestList({ sessionId, door, toast, onNew, onRead, onMade }: {
 
   const decide = (link: GuestLink, decision: "admit" | "refuse") => act(`${decision}:${link.id}`, async () => {
     await api.post(`/api/guest/conversations/${encoded(link.conversation!.id)}/${decision}`);
-    return t(decision === "admit" ? "guest.admitted" : "guest.refused");
   });
   const revoke = (link: GuestLink) => act(`revoke:${link.id}`, async () => {
     await api.post(`${LINKS}/${encoded(link.id)}/revoke`);
-    return t("guest.revoked");
   });
   const reissue = (link: GuestLink) => act(`reissue:${link.id}`, async () => {
     const made = await api.post<GuestInvite>(`${LINKS}/${encoded(link.id)}/reissue`);
@@ -199,7 +196,6 @@ function DailyLimit({ door, toast }: { door: GuestDoor; toast: (text: string) =>
       await api.put("/api/guest/settings", { usd_per_day: value });
       setDirty(false);
       invalidate("/api/guest/door");
-      toast(t("guest.daily.saved"));
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -499,15 +495,16 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
  *  the sheet is the last time anyone sees it. */
 function MadeLink({ url, topic, toast, onDone }: { url: string; topic: string; toast: (text: string) => void; onDone: () => void }) {
   const text = inviteText(topic, url);
+  const [copied, copyInvite] = useCopied();
   async function copy() {
-    toast(t((await copyText(text)) ? "guest.copied" : "svc.copyfail"));
+    if (!(await copyInvite(text))) toast(t("svc.copyfail"));
   }
   return (
     <div className="guest-made" data-guest-made="">
       <label className="field" htmlFor="guest-url">{t("guest.made")}</label>
       {/* The whole text, wrapped: an address cut short at the field's edge looks broken and cannot be checked. */}
       <textarea id="guest-url" className="field mono" readOnly rows={3} value={text} onFocus={(e) => e.target.select()} />
-      <button type="button" className="btn primary guest-copy" data-guest-copy="" onClick={() => void copy()}><Icon name="copy" size={13} /> {t("common.copy")}</button>
+      <button type="button" className="btn primary guest-copy" data-guest-copy="" onClick={() => void copy()}><Icon name={copied ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
       <div className="sub attn" data-guest-once="">{t("guest.once")}</div>
       <div className="sheet-foot">
         <button type="button" className="btn primary" onClick={onDone}>{t("guest.done")}</button>

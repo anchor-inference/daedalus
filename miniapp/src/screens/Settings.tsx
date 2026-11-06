@@ -760,7 +760,6 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
     void loadIntegrations();
     try {
       setData(fix ? await api.post("/api/doctor/fix") : await api.get("/api/doctor"));
-      if (fix) toast(t("settings.health.fixed"));
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -877,7 +876,6 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         dirtyRef.current = false;
         setText(r.text);
       }
-      toast(t("common.saved"));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -885,8 +883,7 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
 
   async function runNow() {
     try {
-      const r = await api.post<{ session_id: string }>("/api/heartbeat/run");
-      toast(t("settings.heartbeat.started", { id: r.session_id }));
+      await api.post("/api/heartbeat/run");
       load();
     } catch (e) {
       toast((e as Error).message);
@@ -988,11 +985,13 @@ export function HealthScreen({ toast }: { toast: (t: string) => void }) {
 
 /** Security: each concern its own card — two-factor sign-in, the operator's secrets, signing out everywhere. */
 function SecurityTab({ toast }: { toast: (t: string) => void }) {
+  // Nothing on this screen changes when the other sessions end, so the button keeps the answer.
+  const [signedOut, setSignedOut] = useState(false);
   const signOutEverywhere = async () => {
     if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
     try {
       await api.post("/api/auth/sessions/revoke");
-      toast(t("settings.security.signedout"));
+      setSignedOut(true);
     } catch (e) {
       toast(errorText(e));
     }
@@ -1004,7 +1003,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
       <SecretsCard toast={toast} ago={timeAgo} confirm={(title, body) => confirmAsync(title, { body, action: t("common.remove") })} />
       <div className="card">
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")} data-setting="security.signout">
-          <button className="btn small" onClick={() => void signOutEverywhere()}>{t("settings.security.signoutall.action")}</button>
+          <button className="btn small" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</button>
         </Row>
       </div>
     </>
@@ -1107,7 +1106,6 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       if (!validation.valid) throw new Error(validation.problems?.[0]?.message || t("settings.validation.invalid"));
       const next = await api.put<Settings>("/api/settings", { ...patch, base_revision: s.revision });
       setS({ ...next, providers_available: next.providers_available ?? s?.providers_available ?? [] });
-      toast(t("common.saved"));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -1160,7 +1158,6 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     try {
       const next = await api.delete<Settings>(`/api/providers/${encodeURIComponent(id)}`);
       setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-      toast(t("settings.provider.removed"));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -1449,10 +1446,10 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       case "voice":
         return (
           <>
-            <VoiceSettings toast={toast} />
+            <VoiceSettings />
             <AsrSettingsCard s={s} save={save} />
-            <SpeechModels toast={toast} />
-            <TtsVoices toast={toast} />
+            <SpeechModels />
+            <TtsVoices />
           </>
         );
       case "components":
@@ -1579,10 +1576,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       <AddModel
         toast={toast}
         onCancel={stopAdding}
-        onSaved={(id, next) => {
+        onSaved={(_, next) => {
           setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
           stopAdding();
-          toast(t("settings.added", { id }));
         }}
       />
     </Sheet>

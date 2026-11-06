@@ -218,7 +218,6 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
       invalidate("/api/pages");
       await refresh();
       catchUp(n);
-      toast(t("page.rollback.done", { n }));
     } catch (e) {
       toast(t("page.rollback.failed", { error: e instanceof ApiError ? e.message : String(e) }));
     }
@@ -226,14 +225,9 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
 
   const bind = async (sessionId: string | null) => {
     try {
-      const page = await api.patch<PageDetail>(key, { session_id: sessionId });
+      await api.patch<PageDetail>(key, { session_id: sessionId });
       await refresh();
-      if (sessionId) {
-        setShown(true);
-        toast(t("page.agent.bound", { title: page.agent?.title || sessionId }));
-      } else {
-        toast(t("page.agent.unbound"));
-      }
+      if (sessionId) setShown(true);
     } catch (e) {
       toast(t("page.agent.failed", { error: e instanceof ApiError ? e.message : String(e) }));
     }
@@ -241,10 +235,9 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
 
   const newAgent = async () => {
     try {
-      const made = await api.post<{ session_id: string; title: string }>(`${key}/agent`, { title: t("page.agent.sessionTitle", { title }) });
+      await api.post(`${key}/agent`, { title: t("page.agent.sessionTitle", { title }) });
       await refresh();
       setShown(true);
-      toast(t("page.agent.bound", { title: made.title }));
     } catch (e) {
       toast(t("page.agent.failed", { error: e instanceof ApiError ? e.message : String(e) }));
     }

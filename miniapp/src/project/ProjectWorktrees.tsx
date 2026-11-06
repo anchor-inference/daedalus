@@ -48,9 +48,8 @@ function WorktreeList({ projectId, toast }: { projectId: string; toast: (message
     if (!(await confirmAsync(t("worktrees.remove.title", { name: tree.name }), { body, action: t("worktrees.remove") }))) return;
     setBusy(tree.path);
     try {
-      const done = await api.post<{ removed: boolean; branch_deleted: boolean }>(`${key}/remove`,
+      await api.post(`${key}/remove`,
         { folder_id: tree.folder_id, path: tree.path, delete_branch: dropBranch });
-      toast(t(done.branch_deleted ? "worktrees.removed.withBranch" : "worktrees.removed", { name: tree.name }));
     } catch (error) { toast(errorText(error)); }
     finally { setBusy(""); invalidate(key); }
   }

@@ -127,7 +127,7 @@ export function TerminalView({ id, visible, readOnly, env, fileOpener, workspace
       if (request.kind === "search") setSearching(true);
       else if (request.kind === "paste") void confirmPaste(instance, request.text, request.lines);
       else if (request.kind === "link") void confirmLink(request.uri);
-      else if (request.kind === "copied") toast(request.ok ? t("term.copied") : t("term.copyFailed"));
+      else if (request.kind === "copied") { if (!request.ok) toast(t("term.copyFailed")); }
       // A button as well as the key: a phone has no copy key, and the button's own tap may write.
       else if (request.kind === "copy-held") toast(t("term.copyHeld", { key: isMac() ? "⌘C" : "Ctrl+Shift+C" }), { action: { label: t("term.copy"), run: () => void instance.copyHeld() }, ms: 10_000 });
     });
@@ -189,7 +189,7 @@ export function TerminalView({ id, visible, readOnly, env, fileOpener, workspace
 /** Copies the last command's output and says how it went. */
 export async function copyLastOutput(instance: TerminalInstance): Promise<void> {
   const outcome = await instance.copyLastOutput();
-  toast(outcome === "copied" ? t("term.marks.copied") : outcome === "none" ? t("term.marks.none") : t("term.marks.copyFailed"));
+  if (outcome !== "copied") toast(outcome === "none" ? t("term.marks.none") : t("term.marks.copyFailed"));
 }
 
 /** The toolbar's "copy last command output": shown only for a shell that marks its commands. */

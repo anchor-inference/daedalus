@@ -103,7 +103,6 @@ export function NeedsYouCard({ projectId, asks, toast }: { projectId: string; as
     setBusy(true);
     try {
       await api.post(`/api/asks/${enc(ask.id)}/answer`, answer);
-      toast(t("focus.ask.sent"));
       setHeld(null);
       setWriting(false);
       setText("");
@@ -226,7 +225,7 @@ export function NeedsYouCard({ projectId, asks, toast }: { projectId: string; as
 export function SetupCard({ project, goal, staff, toast }: { project: Project; goal: boolean; staff: number | null; toast: (text: string) => void }) {
   const { data: budget } = useGoalBudget(project.id);
   const money = budgetCompact(budget);
-  const { busy, finish } = useFinishSetup(project.id, project.name, toast);
+  const { busy, finish } = useFinishSetup(project.id, toast);
   const steps = [
     { key: "brief", done: goal, label: t(goal ? "needs.setup.brief.done" : "needs.setup.brief"), href: projectPagePath(project.id, "brief") },
     { key: "budget", done: !!money, label: money ? t("needs.setup.budget.set", { amount: money }) : t("needs.setup.budget"), href: null },
