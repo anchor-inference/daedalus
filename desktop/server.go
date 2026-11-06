@@ -108,6 +108,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/computer/stop", s.handleComputerBare("stop"))
 	mux.HandleFunc("/api/computer/resume", s.handleComputerBare("resume"))
 	mux.HandleFunc("/api/computer/permissions", s.handleComputerPermissions)
+	mux.HandleFunc("/api/tunnel", s.handleTunnel)
 	mux.HandleFunc("/focus", s.handleFocus)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(mustSub()))))
 	s.http = &http.Server{Handler: s.sameOrigin(mux), ReadHeaderTimeout: 10 * time.Second}

@@ -103,6 +103,9 @@ type Process struct {
 	Log     func(string, ...any)
 	// PidFile is where the running child is recorded (orphans.go), or empty for none.
 	PidFile string
+	// HoldStdin gives the child a pipe this process holds the other end of. A child that reads it to its
+	// end learns that this process has gone, however it went, which no signal can promise.
+	HoldStdin bool
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -186,6 +189,19 @@ func (pr *Process) runOnce(ctx context.Context) error {
 		cmd.Stdout, cmd.Stderr = file, file
 	}
 	setProcessGroup(cmd)
+	var held *os.File
+	if pr.HoldStdin {
+		read, write, err := os.Pipe()
+		if err != nil {
+			if logFile != nil {
+				logFile.Close()
+			}
+			return err
+		}
+		defer read.Close()
+		cmd.Stdin, held = read, write
+		defer held.Close()
+	}
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
 			logFile.Close()
@@ -297,6 +313,9 @@ type Native struct {
 
 	// guestWall names what the door runs inside, for the Health screen (guest.go).
 	guestWall string
+	// tunnel is the public address, if the operator opened one.
+	tunnel     *tunnels
+	tunnelOnce sync.Once
 
 	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
 	bootID string
@@ -930,10 +949,20 @@ func (n *Native) Start(ctx context.Context) error {
 		n.guestFront.Start(ctx)
 	}
 	n.supervisor.Start(ctx)
+	// After everything it leads to, and it waits for nothing: a tunnel that cannot come up is shown in
+	// the settings, and it leaves the rest of a start alone.
+	n.tunnels().Start(ctx)
 	n.enter(StageStart)
 	n.log("waiting for the app to answer")
 	expectBoot(port, n.expectation(portWasFree))
 	return WaitReadyNative(ctx, port, nativeReadyTimeout)
+}
+
+// tunnels is the installation's public address (tunnel.go), made on first use because a Native that
+// only answers a status never needs one.
+func (n *Native) tunnels() *tunnels {
+	n.tunnelOnce.Do(func() { n.tunnel = newTunnels(n.paths, n.log) })
+	return n.tunnel
 }
 
 // childBase is the environment the supervisor and the key proxy start from — and through the
@@ -1080,9 +1109,11 @@ const nativeReadyTimeout = 90 * time.Second
 // ends any lease and lets go of every key and button it holds; then the user browser daemon, which
 // lets go of the operator's Chrome and closes nothing in it; then the browser daemon, which closes
 // every browser; then the terminal daemon, which ends every host terminal; then the key proxy,
-// which the agent needed until it stopped. The guest door goes right after the supervisor, front first,
-// so a stranger is refused at the door rather than left waiting behind it.
+// which the agent needed until it stopped. The public address goes before all of them, and the guest
+// door right after the supervisor, front first, so a stranger is refused at the door rather than left
+// waiting behind it.
 func (n *Native) Stop(ctx context.Context) {
+	n.tunnels().Stop(ctx)
 	for _, c := range []child{n.supervisor, n.guestFront, n.guestDoor, n.deskd, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
 		if c != nil {
 			c.Stop(ctx)

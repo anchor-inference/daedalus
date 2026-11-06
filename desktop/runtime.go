@@ -42,7 +42,8 @@ type download struct {
 	size    int64
 	// kind is "tar.gz" or "zip" — the two formats the standard library can open. Node publishes a
 	// smaller .tar.xz and it is deliberately not used: xz would be the module's second dependency,
-	// paid on every platform to save twenty megabytes on one optional extra.
+	// paid on every platform to save twenty megabytes on one optional extra. "binary" is a program
+	// published as it is, written under the one name in only.
 	kind string
 	// strip is how many leading path segments of every entry belong to the archive rather than to
 	// the tree inside it. Publishers wrap their trees in a folder named after the release.
@@ -385,6 +386,11 @@ func unpackIntoReporting(d download, body []byte, dir string, report reporter) e
 		return unpackTarInto(d, body, dir, report)
 	case "zip":
 		return unpackZipInto(d, body, dir, report)
+	case "binary":
+		if len(d.only) != 1 {
+			return fmt.Errorf("a plain binary needs one name, %d were given", len(d.only))
+		}
+		return os.WriteFile(filepath.Join(dir, d.only[0]), body, 0o755)
 	default:
 		return fmt.Errorf("unknown archive kind %q", d.kind)
 	}
