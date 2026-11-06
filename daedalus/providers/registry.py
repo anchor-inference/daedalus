@@ -77,6 +77,8 @@ class ProviderRegistry:
         """Context windows from the same models.dev catalogue, by model id (see ``context_window``)."""
         self.on_context_refusal: Callable[[str, str, int], None] | None = None
         """Told of every refusal that states a model's real window; set by the context-window service."""
+        self.on_route_refusal: Callable[[str, str], None] | None = None
+        """Told when none of a model's chosen OpenRouter providers could serve it; set by the routes service."""
         self.reload(config)
 
     def _images_for(self, provider_id: str, model: str) -> bool:
@@ -90,6 +92,15 @@ class ProviderRegistry:
         # installed after the registry has built its adapters.
         if self.on_context_refusal is not None:
             self.on_context_refusal(provider_id, model, window)
+
+    def _route_of(self, provider_id: str, model: str) -> tuple[str, ...]:
+        config = getattr(self, "_config", None)
+        return config.openrouter_route(provider_id, model) if config is not None else ()
+
+    def _route_refusal(self, provider_id: str, model: str) -> None:
+        # Late for the same reason as the window's: this service is installed after the adapters are built.
+        if self.on_route_refusal is not None:
+            self.on_route_refusal(provider_id, model)
 
     def reload(self, config: RuntimeConfig) -> None:
         fresh: dict[str, OpenAICompatibleProvider] = {}
@@ -111,6 +122,8 @@ class ProviderRegistry:
                 usage_sink=self._usage_sink,
                 image_loader=self._image_loader,
                 images_for=lambda model, pid=provider_id: self._images_for(pid, model),
+                routing_for=lambda model, pid=provider_id: self._route_of(pid, model),
+                route_refusal=self._route_refusal,
                 admission=self._admission,
                 context_refusal=self._context_refusal,
                 fitted_images=self._fitted_images,

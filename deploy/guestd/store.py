@@ -11,6 +11,7 @@ and it also settles what a repeated redeem can do: there is no token here to han
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import sqlite3
 import time
@@ -160,6 +161,17 @@ class Store:
         return self.conn.execute(sql, params)
 
     # -- settings ---------------------------------------------------------------------
+
+    def routed(self, link: Any) -> Any:
+        """``link`` as today's table of model routes has it: limited to its providers and at their price.
+
+        Read for each turn and not kept on the link, so a choice made after the link was made holds for it.
+        A link's own price stands for a model the table does not name.
+        """
+        for route in json.loads(self.setting("model_routes", "[]")):
+            if route["path"] == link["model_path"] and route["model"] == link["model_name"]:
+                return {**dict(link), "provider_only": route["only"], "price_in": route["price_in"], "price_out": route["price_out"]}
+        return link
 
     def setting(self, key: str, default: str = "") -> str:
         row = self._one("SELECT value FROM settings WHERE key = ?", key)

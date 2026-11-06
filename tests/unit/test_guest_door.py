@@ -296,6 +296,69 @@ async def test_the_caller_reads_the_bill_when_the_upstream_states_one() -> None:
     assert reply == ModelReply("hi", 10, 3, 0.5)
 
 
+ROUTE = {"path": "openrouter", "model": "cheap", "only": ["wafer/us", "alibaba"], "price_in": 2.0, "price_out": 8.0}
+
+
+async def test_a_stand_in_is_limited_by_todays_table_and_not_what_the_link_was_made_with(rig: Rig) -> None:
+    """A link lives for weeks: the operator limiting a model afterwards has to hold for it as well."""
+    link_id, invite = rig.link(model_path="openrouter", model_name="cheap", price_in=0.1, price_out=0.1)
+    token = rig.redeem(invite)
+    assert rig.control.put("/control/settings", json={"model_routes": [ROUTE]}, headers=CONTROL).status_code == 200
+    rig.say(token, "hello")
+    assert await rig.turn() is True
+    assert rig.model.requests[0]["provider"] == {"only": ["wafer/us", "alibaba"], "allow_fallbacks": False}
+    # The turn is priced by the table too: at the link's old rate the same call would cost a tenth.
+    assert rig.control.get(f"/control/links/{link_id}", headers=CONTROL).json()["link"]["spent_usd"] == pytest.approx((100 * 2.0 + 50 * 8.0) / 1_000_000)
+
+
+async def test_a_stand_in_on_another_model_sends_no_provider(rig: Rig) -> None:
+    _link_id, invite = rig.link(model_path="deepseek/v1", model_name="cheap")
+    token = rig.redeem(invite)
+    rig.control.put("/control/settings", json={"model_routes": [ROUTE]}, headers=CONTROL)
+    rig.say(token, "hello")
+    assert await rig.turn() is True
+    assert "provider" not in rig.model.requests[0]
+
+
+async def test_a_table_emptied_takes_the_limit_off_at_the_next_turn(rig: Rig) -> None:
+    _link_id, invite = rig.link(model_path="openrouter", model_name="cheap")
+    token = rig.redeem(invite)
+    rig.control.put("/control/settings", json={"model_routes": [ROUTE]}, headers=CONTROL)
+    rig.control.put("/control/settings", json={"model_routes": []}, headers=CONTROL)
+    rig.say(token, "hello")
+    assert await rig.turn() is True
+    assert "provider" not in rig.model.requests[0]
+
+
+async def test_the_caller_keeps_the_limit_when_it_retries_under_the_newer_name() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        if len(bodies) == 1:
+            return httpx.Response(400, text="use max_completion_tokens")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
+
+    caller = KeyProxyCaller("guest.sock", httpx.AsyncClient(transport=httpx.MockTransport(answer)))
+    limited = {"model": "m", "messages": [], "max_tokens": 5, "provider": {"only": ["wafer/us"], "allow_fallbacks": False}}
+    await caller({"model_path": "openrouter"}, limited)
+    assert [body["provider"] for body in bodies] == [limited["provider"]] * 2
+
+
+@pytest.mark.parametrize("routes", [
+    "nope",
+    [{"path": "openrouter", "model": "m", "only": [], "price_in": 1, "price_out": 1}],
+    [{"path": "openrouter", "model": "m", "only": ["Not A Slug"], "price_in": 1, "price_out": 1}],
+    [{"path": "openrouter", "model": "m", "only": ["wafer/us"], "price_in": True, "price_out": 1}],
+    [{"path": "openrouter", "model": "m", "only": ["wafer/us"], "price_in": -1, "price_out": 1}],
+    [{"model": "m", "only": ["wafer/us"], "price_in": 1, "price_out": 1}],
+])
+def test_a_table_that_is_wrong_anywhere_is_refused_whole_and_the_old_one_stands(rig: Rig, routes: Any) -> None:
+    rig.control.put("/control/settings", json={"model_routes": [ROUTE]}, headers=CONTROL)
+    assert rig.control.put("/control/settings", json={"model_routes": routes}, headers=CONTROL).status_code == 422
+    assert json.loads(rig.store.setting("model_routes")) == [ROUTE]
+
+
 def test_an_unknown_invite_counts_against_the_address_and_a_good_guest_is_not_held(tmp_path: Path) -> None:
     rig = Rig(tmp_path, failures=Failures(per_address=3))
     _, invite = rig.link()

@@ -26,6 +26,7 @@ auto_fallback = false    # opt in before the chain can replace a session's chose
 # provider = "openrouter"
 # model = "deepseek/deepseek-v4-flash"
 # images = true
+# openrouter_providers = ["deepinfra/fp8"]  # limit it to these endpoints, with fallbacks off; Settings fills this in and keeps the price up to date
 
 # [presets."opencode.glm-5.3-flash"]
 # provider = "opencode"

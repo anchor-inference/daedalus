@@ -131,6 +131,7 @@ from daedalus.extensions import (
     api_workflows,
     api_workspace_archive,
     api_worktrees,
+    guest_door,
     keyproxy_clients,
     launcher_updates,
 )
@@ -180,12 +181,14 @@ from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.memory import privacy
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
+from daedalus.providers import openrouter_routes
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.image_fit import sniffed_mime
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
+from daedalus.providers.openrouter_routes import per_million
 from daedalus.remote import door as remote_door
 from daedalus.remote.turns import EXTERNAL_CALL
 from daedalus.search.service import ConversationSearch, SearchBusy
@@ -920,6 +923,8 @@ class PresetPatch(BaseModel):
     max_output_tokens: int | None = None
     on_demand_tool_groups: bool | None = None
     """Sent as null, it goes back to what the model is known for; the one field where null is a value."""
+    openrouter_providers: list[str] | None = None
+    """The OpenRouter providers to limit the model to; an empty list hands the routing back to OpenRouter."""
 
 
 CONTEXT_WINDOW_WAIT_SECONDS = 12.0
@@ -974,23 +979,6 @@ def resolve_model_patch(current: dict[str, Any], patch: dict[str, Any]) -> None:
     if "fallback_to_session" in patch:
         merged["fallback_to_session"] = bool(patch["fallback_to_session"])
     current["model"] = merged
-
-
-def per_million(pricing: Any) -> dict[str, float]:
-    """A price per token (what OpenRouter publishes) as a price per million (what everything here uses)."""
-    if not isinstance(pricing, dict):
-        return {}
-    out: dict[str, float] = {}
-    for name, key in (("input", "prompt"), ("output", "completion"), ("cache_hit", "input_cache_read")):
-        if isinstance(pricing.get(key), bool):
-            continue
-        try:
-            value = float(pricing[key])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if value >= 0 and math.isfinite(value * 1_000_000):
-            out[name] = round(value * 1_000_000, 6)
-    return out
 
 
 def model_entry(raw: dict[str, Any]) -> dict[str, Any]:
@@ -6782,7 +6770,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         api_key = configured.api_key if configured else ""
         if body.provider == "openrouter" and configured and not api_key:
             api_key = settings.openrouter_api_key
-        passed = await probe_agent_cycle(base_url, body.model, api_key)
+        passed = await probe_agent_cycle(base_url, body.model, api_key, route=app.config.openrouter_route(body.provider, body.model))
         if passed:
             free_catalog.mark_probed(body.provider, body.model)
         return {"agent_ready": passed}
@@ -6850,11 +6838,89 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # -- model presets -------------------------------------------------------------------
 
+    @api.get("/api/providers/{provider_id}/model-providers")
+    async def model_providers(provider_id: str, model: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The providers OpenRouter offers ``model`` through. ``rows`` empty and ``unavailable`` true when the
+        listing cannot be had, an answer and not an error: the add-a-model flow then goes on without the step."""
+        nothing = {"model": model, "images": False, "rows": [], "unavailable": True}
+        endpoint = _openrouter_endpoint(provider_id)
+        if endpoint is None:
+            return nothing
+        listing = await openrouter_routes.fetch_listing(endpoint.base_url, endpoint.api_key, model, zero_retention=True)
+        return {**listing, "unavailable": False} if listing else nothing
+
+    def _openrouter_endpoint(provider_id: str) -> Any | None:
+        """The live endpoint of an OpenRouter client, or ``None`` for any other, or one with no way in."""
+        config = app.config.providers.get(provider_id)
+        if config is None or config.kind != "openrouter" or manager is None:
+            return None
+        try:
+            return manager.providers.get(provider_id).endpoint
+        except KeyError:
+            return None
+
+    async def _catalogue_price(provider_id: str, model: str) -> dict[str, float] | None:
+        """What the model listing says a model costs: its price under OpenRouter's own routing."""
+        endpoint = _openrouter_endpoint(provider_id)
+        if endpoint is None:
+            return None
+        try:
+            found = await lookup_openai_models(endpoint.base_url, endpoint.api_key)
+        except ValueError:
+            return None
+        return next((entry.get("pricing") for entry in found["entries"] if entry["id"] == model), None)
+
+    async def _openrouter_facts(provider_id: str, model: str, chosen: list[str] | None) -> tuple[dict[str, Any] | None, dict[str, float] | None]:
+        """What a change of a model's providers has to be priced from: the listing, or to go back, the catalogue.
+
+        Read before the configuration is, and not inside the save: this waits on the network, and a save
+        built on a copy taken before the wait would undo whatever the operator saved during it.
+        """
+        if chosen:
+            endpoint = _openrouter_endpoint(provider_id)
+            return (await openrouter_routes.fetch_listing(endpoint.base_url, endpoint.api_key, model) if endpoint else None), None
+        if chosen is not None and app.config.openrouter_route(provider_id, model):
+            return None, await _catalogue_price(provider_id, model)
+        return None, None
+
+    def _choose_openrouter_providers(raw: dict[str, Any], entry: dict[str, Any], chosen: list[str], listing: dict[str, Any] | None, catalogue: dict[str, float] | None) -> None:
+        """Write a model's providers and the price they make, into ``raw`` and for every preset of the pair.
+
+        The price is the listing's and not the app's: the request to save is the one moment it can be
+        checked against what OpenRouter says today. ``chosen`` empty hands routing back and the price with it.
+        """
+        provider_id, model = str(entry["provider"]), str(entry["model"])
+        chosen = list(dict.fromkeys(slug.strip() for slug in chosen if slug.strip()))
+        if raw["providers"][provider_id].get("kind") != "openrouter":
+            if chosen:
+                raise HTTPException(400, f"{provider_id!r} is not an OpenRouter client, and only OpenRouter routes between providers")
+            return
+        pricing = raw["providers"][provider_id].setdefault("pricing", {})
+        if chosen:
+            if not listing or not listing["rows"]:
+                raise HTTPException(502, "OpenRouter's list of providers for this model could not be read, so nothing was changed")
+            missing = openrouter_routes.gone(listing["rows"], chosen)
+            if missing:
+                raise HTTPException(400, f"not among this model's providers: {', '.join(missing)}")
+            pricing[model] = openrouter_routes.priced_entry(pricing.get(model), openrouter_routes.bill_for(listing["rows"], chosen))
+            lowest = openrouter_routes.lowest_output(listing["rows"], chosen)
+            if lowest is not None:
+                entry["max_output_tokens"] = max(1_024, min(int(entry["max_output_tokens"]), lowest))
+        elif catalogue:
+            pricing[model] = openrouter_routes.priced_entry(pricing.get(model), dict(catalogue))
+        for preset in raw["presets"].values():
+            if (preset.get("provider"), preset.get("model")) == (provider_id, model):
+                preset["openrouter_providers"] = list(chosen)
+                preset["openrouter_providers_gone"] = []
+
     @api.put("/api/presets/{preset_id}")
     async def put_preset(preset_id: str, body: PresetPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Create or edit a named model: client, model id, label, thinking, effort, images, window, output cap."""
         if not PRESET_ID_RE.fullmatch(preset_id):
             raise HTTPException(400, "preset id: letters, digits, . _ - (max 64)")
+        known = app.config.presets.get(preset_id)
+        listing, catalogue = await _openrouter_facts(
+            (body.provider or (known.provider if known else "")).strip(), (body.model or (known.model if known else "")).strip(), body.openrouter_providers)
         raw = app.config.model_dump(mode="json")
         existing = raw.setdefault("presets", {}).get(preset_id)
         entry = dict(existing or ModelPresetConfig().model_dump(mode="json"))
@@ -6863,6 +6929,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # A new model whose caller did not say: the family decides, not a default of "no".
             entry["images"] = True
         source = sent.pop("context_window_source", None)
+        chosen = sent.pop("openrouter_providers", None)
+        before = list(entry.get("openrouter_providers") or [])
         was = (entry.get("provider"), entry.get("model"))
         for key, value in sent.items():
             if value is not None or key == "on_demand_tool_groups":
@@ -6878,7 +6946,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(400, f"provider {entry['provider']!r} is not a configured client")
         if not entry["model"]:
             raise HTTPException(400, "a preset needs a model id")
+        pair = (entry["provider"], entry["model"])
+        if chosen is None and pair != was:
+            # A slug belongs to one model on one endpoint: anywhere else it names nothing, or another price.
+            # What this pair already runs on holds for the newcomer too, since a call cannot tell them apart.
+            sibling = next((p for p in raw["presets"].values() if (p.get("provider"), p.get("model")) == pair and p.get("openrouter_providers")), {})
+            entry["openrouter_providers"] = list(sibling.get("openrouter_providers") or [])
+            entry["openrouter_providers_gone"] = list(sibling.get("openrouter_providers_gone") or [])
         raw["presets"][preset_id] = entry
+        if chosen is not None:
+            _choose_openrouter_providers(raw, entry, chosen, listing, catalogue)
+            find_window = find_window or (entry["openrouter_providers"] != before and entry.get("context_window_source") != "manual")
         model = raw.setdefault("model", {})
         if str(model.get("preset") or "") not in raw["presets"]:
             # The first model added is the one that runs: an install is not finished until one is.
@@ -6891,6 +6969,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, str(exc)) from exc
         view = await _save_provider_config(new_config)
+        if chosen is not None:
+            await guest_door.routes_changed(app)
         windows = getattr(app, "extensions", {}).get("context_windows")
         if find_window and windows is not None:
             try:

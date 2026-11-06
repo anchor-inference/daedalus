@@ -206,3 +206,98 @@ def test_the_bill_an_upstream_states_is_reported_and_an_absent_one_is_not_invent
     usage = {"prompt_tokens": 2, "completion_tokens": 1}
     assert proxy.parse_usage(json.dumps({"model": "m", "usage": {**usage, "cost": 0.25}}).encode(), "application/json")[1]["cost_usd"] == 0.25
     assert "cost_usd" not in proxy.parse_usage(json.dumps({"model": "m", "usage": usage}).encode(), "application/json")[1]
+
+
+# -- a stand-in limited to some of OpenRouter's providers --------------------------------------------
+
+
+ROUTED = {**GOOD, "provider": {"only": ["deepinfra/fp8/flex", "wafer/us"], "allow_fallbacks": False}}
+
+
+@pytest.fixture
+async def router(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The same door on the OpenRouter upstream, whose key is the only thing this listener may add."""
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "openrouter,acme")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "the-key")
+    monkeypatch.setenv("KEYPROXY_UPSTREAM_ACME", "https://upstream.example.test/v1")
+    monkeypatch.setenv("KEYPROXY_KEY_ACME", "the-key")
+    proxy = load()
+    proxy.AGENT_API = "http://agent.example.test"
+    upstream: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        upstream.append(request)
+        return httpx.Response(200, json={"model": "m", "choices": [{"message": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+
+    async def noted(*_: Any) -> None:
+        pass
+
+    monkeypatch.setattr(proxy, "report_direct_usage", noted)
+    app = web.Application()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    app.router.add_route("*", "/{upstream}/{rest:.*}", proxy.handle_guest)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    yield client, upstream, proxy
+    await client.close()
+
+
+async def test_a_limited_call_reaches_openrouter_with_the_field_untouched(router: Any) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", json=ROUTED)
+    assert answer.status == 200
+    assert json.loads(upstream[0].content)["provider"] == ROUTED["provider"]
+
+
+async def test_a_call_with_no_provider_object_is_as_it_was(router: Any) -> None:
+    client, upstream, _proxy = router
+    assert (await client.post("/openrouter/chat/completions", json=GOOD)).status == 200
+    assert "provider" not in json.loads(upstream[0].content)
+
+
+@pytest.mark.parametrize("route", [
+    {"only": ["wafer/us"]},  # fallbacks left to the default, which is on
+    {"only": ["wafer/us"], "allow_fallbacks": True},
+    {"only": ["wafer/us"], "allow_fallbacks": 0},
+    {"only": [], "allow_fallbacks": False},
+    {"only": "wafer/us", "allow_fallbacks": False},
+    {"only": ["wafer/us", 7], "allow_fallbacks": False},
+    {"only": ["WAFER"], "allow_fallbacks": False},
+    {"only": ["../credits"], "allow_fallbacks": False},
+    {"only": ["a/b/c/d/e"], "allow_fallbacks": False},
+    {"only": ["wafer/us"] * 33, "allow_fallbacks": False},
+    {"only": ["wafer/us"], "allow_fallbacks": False, "sort": "price"},
+    {"only": ["wafer/us"], "allow_fallbacks": False, "max_price": {"prompt": 100}},
+    {"only": ["wafer/us"], "allow_fallbacks": False, "data_collection": "allow"},
+    {"only": ["wafer/us"], "allow_fallbacks": False, "ignore": ["baseten"]},
+    {"only": ["wafer/us"], "allow_fallbacks": False, "order": ["wafer/us"]},
+    {"order": ["wafer/us"], "allow_fallbacks": False},
+    {"allow_fallbacks": False},
+    {},
+    ["wafer/us"],
+    "wafer/us",
+    None,
+])
+async def test_any_other_shape_of_the_field_is_refused_before_it_is_sent(router: Any, route: Any) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", json={**GOOD, "provider": route})
+    assert answer.status == 403 and upstream == []
+
+
+async def test_only_openrouter_may_be_sent_the_field(router: Any) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/acme/v1/chat/completions", json=ROUTED)
+    assert answer.status == 403 and upstream == []
+
+
+def test_an_upstream_with_another_name_on_openrouters_host_is_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KEYPROXY_UPSTREAM_ROUTER2", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("KEYPROXY_KEY_ROUTER2", "k")
+    assert load().routes_between_providers("router2") is True
+
+
+def test_reading_a_models_providers_is_not_spending(router: Any) -> None:
+    _client, _upstream, proxy = router
+    assert proxy.budget_exempt("models/deepseek/deepseek-v4.1-flash-1017/endpoints")
+    assert proxy.budget_exempt("endpoints/zdr")
+    assert not proxy.budget_exempt("chat/completions")

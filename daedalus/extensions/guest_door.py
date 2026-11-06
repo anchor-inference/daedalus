@@ -328,7 +328,18 @@ class GuestBridge:
                 await self.app.db.kv_set(FEED_KV, cursor)
 
     async def publish_address(self) -> None:
-        await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings)})
+        await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings), "model_routes": model_routes(self.app)})
+
+    async def publish_routes(self) -> None:
+        """Tell the door now rather than at its next connection. A door out of reach hears it when it is back:
+        marked as unconnected, the feed's next round publishes again before it goes on."""
+        if not self.client.configured:
+            return
+        try:
+            await self.client.call("PUT", "/control/settings", json={"model_routes": model_routes(self.app)})
+        except (DoorUnavailable, DoorRefused) as exc:
+            self.connected = False
+            logger.debug("the guest door did not take the model routes: %s", exc)
 
     async def absorb(self, feed: dict[str, Any]) -> None:
         for event in _items(feed.get("events")):
@@ -623,6 +634,38 @@ def model_choices(app: Application | Any) -> tuple[list[dict[str, Any]], list[di
     return options, left_out
 
 
+def model_routes(app: Application | Any) -> list[dict[str, Any]]:
+    """The OpenRouter providers each key-proxy model is limited to, with what that makes it cost.
+
+    A table the door holds rather than fields on a link. A link is made once and lives for weeks; had it
+    kept the choice of the day it was made, a model limited afterwards would go on being routed anywhere for its
+    links, and the price would go on being reserved at the old provider's rate. Every preset is in it,
+    offered to new links or not, because a link already made does not stop running when its model stops being offered.
+    """
+    base = keyproxy_base()
+    routes: dict[tuple[str, str], dict[str, Any]] = {}
+    for preset in app.config.presets.values():
+        provider = app.config.providers.get(preset.provider)
+        if not preset.openrouter_providers or provider is None or not is_keyproxy_url(provider.base_url):
+            continue
+        try:
+            pricing = app.manager.providers.get(preset.provider).endpoint.pricing_for(preset.model)
+        except KeyError:
+            continue
+        if pricing is None or pricing.input is None or pricing.output is None:
+            continue
+        path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
+        routes[(path, preset.model)] = {"path": path, "model": preset.model, "only": list(preset.openrouter_providers), "price_in": float(pricing.input), "price_out": float(pricing.output)}
+    return list(routes.values())
+
+
+async def routes_changed(app: Application | Any) -> None:
+    """A model's providers or their price moved: the door's table follows."""
+    bridge = bridge_of(app)
+    if bridge is not None:
+        await bridge.publish_routes()
+
+
 def model_options(app: Application | Any) -> list[dict[str, Any]]:
     """The models a stand-in can be given, cheapest first."""
     return model_choices(app)[0]
@@ -645,4 +688,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(bridge.serve(), name="guest-door")]
 
 
-__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options"]
+__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options", "model_routes", "routes_changed"]

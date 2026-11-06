@@ -47,11 +47,11 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import clients
 import httpx
 from aiohttp import web
-from multidict import CIMultiDict, CIMultiDictProxy
 from claude import (
     CLAUDE_API,
     CLAUDE_FALLBACK_MODELS,
@@ -64,6 +64,7 @@ from claude import (
     request_betas,
     without_thinking,
 )
+from multidict import CIMultiDict, CIMultiDictProxy
 from subscriptions import (
     CODEX_BASE,
     CODEX_FALLBACK_CATALOGUE,
@@ -128,8 +129,8 @@ the OpenAI shape never sends it."""
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))
 BUDGET_CACHE_SECONDS = 30.0
-BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",))
-"""Reading a balance or the model list spends nothing; only completions are refused over budget.
+BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",), ("endpoints",), ("endpoints", "zdr"))
+"""Reading a balance, the model list or a model's providers spends nothing; only completions are refused over budget.
 Matched on path segments (a leading ``v1`` ignored), so a ``…/deepseek/v1`` base_url behaves the same."""
 HOP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "authorization", "x-api-key", "api-key", "x-goog-api-key", "cookie", "proxy-authorization"}
 DROP_RESPONSE_HEADERS = {"content-length", "transfer-encoding", "connection", "content-encoding"}
@@ -1261,6 +1262,9 @@ GUEST_HEADERS = ("content-type", "accept")
 the host books it itself is not reported, and a door that could say so would spend without appearing."""
 GUEST_REFUSED_BODY = ("tools", "functions", "tool_choice", "n", "reasoning_effort")
 """``reasoning_effort`` with the rest because the Claude route raises the output bound to fit it, past the cap below."""
+GUEST_ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
+"""OpenRouter's ``provider[/variant][/region][/tier]``."""
+GUEST_ROUTE_MAX_SLUGS = 32
 
 
 def guest_upstreams() -> frozenset[str]:
@@ -1271,6 +1275,28 @@ def guest_upstreams() -> frozenset[str]:
     if "*" in named:
         named = set(upstreams()) | set(CLI_LOGINS)
     return frozenset(named - set(SEARCH_UPSTREAMS))
+
+
+def routes_between_providers(name: str) -> bool:
+    """Whether this upstream is OpenRouter, which alone reads a ``provider`` object."""
+    base = upstreams().get(name, DEFAULT_UPSTREAMS.get(name, ("", "")))[0]
+    return (urlsplit(base).hostname or "").lower() == "openrouter.ai"
+
+
+def guest_route_refusal(route: Any) -> str:
+    """Why this ``provider`` object is not the one thing a stand-in may say about routing; empty when it is.
+
+    Exactly ``{"only": [slugs], "allow_fallbacks": false}``. The rest of the object spends or widens: ``order``
+    with fallbacks on reaches any provider, ``sort`` and ``max_price`` move a call between prices, and
+    ``ignore`` and ``data_collection`` overrule what the operator chose. A door that could send them would hold
+    the operator's routing, where this key lets it only narrow a call to providers of a listed shape.
+    """
+    if not isinstance(route, dict) or set(route) != {"only", "allow_fallbacks"} or route["allow_fallbacks"] is not False:
+        return "a stand-in's provider object is only and allow_fallbacks false"
+    only = route["only"]
+    if not isinstance(only, list) or not 0 < len(only) <= GUEST_ROUTE_MAX_SLUGS or not all(isinstance(slug, str) and GUEST_ROUTE_SLUG.fullmatch(slug) for slug in only):
+        return "a stand-in's provider object lists provider slugs"
+    return ""
 
 
 def guest_refusal(path: str, method: str, body: bytes) -> str:
@@ -1289,6 +1315,10 @@ def guest_refusal(path: str, method: str, body: bytes) -> str:
     bound = request.get("max_tokens", request.get("max_completion_tokens"))
     if not isinstance(bound, int) or isinstance(bound, bool) or not 0 < bound <= GUEST_MAX_TOKENS:
         return "a stand-in's call names a small max_tokens"
+    if "provider" in request:
+        if not routes_between_providers(matched.group(1)):
+            return "only OpenRouter takes a provider object"
+        return guest_route_refusal(request["provider"])
     return ""
 
 
