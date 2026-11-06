@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from daedalus.config import ModelPresetConfig, ProviderConfig, RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.context_windows import ContextWindows
-from daedalus.extensions.guest_door import DoorUnavailable, GuestBridge, model_routes
+from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable, GuestBridge, model_routes
 from daedalus.extensions.openrouter_routes import OpenRouterRoutes
 from daedalus.host.session_runner import LLMObservabilityContext, SessionManager
 from daedalus.providers import openrouter_routes as routes
@@ -702,6 +702,12 @@ def test_the_door_is_told_each_limited_model_with_the_price_it_is_billed_at() ->
     assert routes_table == [{"path": "openrouter", "model": MODEL, "only": ["wafer/us", "alibaba"], "price_in": 0.15, "price_out": 0.6}]
 
 
+def test_a_model_with_no_price_stays_in_the_table_or_its_limit_would_lift() -> None:
+    config = routed_config()
+    config.providers["openrouter"].pricing = {}
+    assert model_routes(door_host(config)) == [{"path": "openrouter", "model": MODEL, "only": ["wafer/us", "alibaba"], "price_in": None, "price_out": None}]
+
+
 def test_a_model_with_nothing_chosen_is_not_in_the_table() -> None:
     assert model_routes(door_host(routed_config(openrouter_providers=[]))) == []
 
@@ -725,6 +731,25 @@ async def test_a_change_is_told_to_the_door_at_once() -> None:
     bridge = GuestBridge(door_host(routed_config()), door)  # type: ignore[arg-type]
     await bridge.publish_routes()
     assert door.calls[0][:2] == ("PUT", "/control/settings") and door.calls[0][2]["model_routes"][0]["only"] == ["wafer/us", "alibaba"]
+
+
+async def test_with_no_agent_here_the_door_is_told_nothing_rather_than_an_empty_table() -> None:
+    door = FakeDoor()
+    app = door_host(routed_config())
+    app.manager = None
+    await GuestBridge(app, door).publish_routes()  # type: ignore[arg-type]
+    assert door.calls == []
+
+
+async def test_a_table_the_door_refuses_does_not_end_the_connection() -> None:
+    class Refusing(FakeDoor):
+        async def call(self, method: str, path: str, **options: Any) -> dict[str, Any]:
+            raise DoorRefused(422, "no")
+
+    bridge = GuestBridge(door_host(routed_config()), Refusing())  # type: ignore[arg-type]
+    bridge.connected = True
+    await bridge.publish_routes()
+    assert bridge.connected is True
 
 
 async def test_a_door_out_of_reach_hears_at_its_next_connection() -> None:

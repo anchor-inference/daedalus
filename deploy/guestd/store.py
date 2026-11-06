@@ -170,7 +170,8 @@ class Store:
         """
         for route in json.loads(self.setting("model_routes", "[]")):
             if route["path"] == link["model_path"] and route["model"] == link["model_name"]:
-                return {**dict(link), "provider_only": route["only"], "price_in": route["price_in"], "price_out": route["price_out"]}
+                prices = {name: route[name] for name in ("price_in", "price_out") if route[name] is not None}
+                return {**dict(link), "provider_only": route["only"], **prices}
         return link
 
     def setting(self, key: str, default: str = "") -> str:

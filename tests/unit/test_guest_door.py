@@ -330,6 +330,16 @@ async def test_a_table_emptied_takes_the_limit_off_at_the_next_turn(rig: Rig) ->
     assert "provider" not in rig.model.requests[0]
 
 
+async def test_a_model_the_host_cannot_price_stays_limited_at_the_links_own_price(rig: Rig) -> None:
+    link_id, invite = rig.link(model_path="openrouter", model_name="cheap", price_in=1.0, price_out=2.0)
+    token = rig.redeem(invite)
+    rig.control.put("/control/settings", json={"model_routes": [{**ROUTE, "price_in": None, "price_out": None}]}, headers=CONTROL)
+    rig.say(token, "hello")
+    assert await rig.turn() is True
+    assert rig.model.requests[0]["provider"]["only"] == ROUTE["only"]
+    assert rig.control.get(f"/control/links/{link_id}", headers=CONTROL).json()["link"]["spent_usd"] == pytest.approx((100 * 1.0 + 50 * 2.0) / 1_000_000)
+
+
 async def test_the_caller_keeps_the_limit_when_it_retries_under_the_newer_name() -> None:
     bodies: list[dict[str, Any]] = []
 

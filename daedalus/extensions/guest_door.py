@@ -303,6 +303,7 @@ class GuestBridge:
             try:
                 if not self.connected:
                     await self.publish_address()
+                    await self.publish_routes()
                     await self.tell_door_of_revocations()
                     if not started:
                         # Once per process, not per connection: a door that restarted leaves this
@@ -328,18 +329,23 @@ class GuestBridge:
                 await self.app.db.kv_set(FEED_KV, cursor)
 
     async def publish_address(self) -> None:
-        await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings), "model_routes": model_routes(self.app)})
+        await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings)})
 
     async def publish_routes(self) -> None:
-        """Tell the door now rather than at its next connection. A door out of reach hears it when it is back:
-        marked as unconnected, the feed's next round publishes again before it goes on."""
-        if not self.client.configured:
+        """Tell the door which providers its models are limited to. A call of its own, apart from the address:
+        a table the door refuses must not take the connection down with it, and it is only ever one model's
+        trouble. A door out of reach hears at its next connection, which this marks as owed. With no agent
+        in this process there is nothing to say, and an empty table would lift every limit the door holds.
+        """
+        if self.app.manager is None or self.app.config is None:
             return
         try:
             await self.client.call("PUT", "/control/settings", json={"model_routes": model_routes(self.app)})
-        except (DoorUnavailable, DoorRefused) as exc:
+        except DoorUnavailable as exc:
             self.connected = False
             logger.debug("the guest door did not take the model routes: %s", exc)
+        except DoorRefused as exc:
+            logger.warning("the guest door refused the model routes and keeps its old table: %s", exc)
 
     async def absorb(self, feed: dict[str, Any]) -> None:
         for event in _items(feed.get("events")):
@@ -641,6 +647,7 @@ def model_routes(app: Application | Any) -> list[dict[str, Any]]:
     kept the choice of the day it was made, a model limited afterwards would go on being routed anywhere for its
     links, and the price would go on being reserved at the old provider's rate. Every preset is in it,
     offered to new links or not, because a link already made does not stop running when its model stops being offered.
+    A model with no price stays in with ``None`` for it: left out, its limit would be lifted for want of a number.
     """
     base = keyproxy_base()
     routes: dict[tuple[str, str], dict[str, Any]] = {}
@@ -651,18 +658,20 @@ def model_routes(app: Application | Any) -> list[dict[str, Any]]:
         try:
             pricing = app.manager.providers.get(preset.provider).endpoint.pricing_for(preset.model)
         except KeyError:
-            continue
-        if pricing is None or pricing.input is None or pricing.output is None:
-            continue
+            pricing = None
+        priced = pricing is not None and pricing.input is not None and pricing.output is not None
         path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
-        routes[(path, preset.model)] = {"path": path, "model": preset.model, "only": list(preset.openrouter_providers), "price_in": float(pricing.input), "price_out": float(pricing.output)}
+        routes[(path, preset.model)] = {
+            "path": path, "model": preset.model, "only": list(preset.openrouter_providers),
+            "price_in": float(pricing.input) if priced else None, "price_out": float(pricing.output) if priced else None,  # type: ignore[union-attr, arg-type]
+        }
     return list(routes.values())
 
 
 async def routes_changed(app: Application | Any) -> None:
     """A model's providers or their price moved: the door's table follows."""
     bridge = bridge_of(app)
-    if bridge is not None:
+    if bridge is not None and bridge.client.configured:
         await bridge.publish_routes()
 
 

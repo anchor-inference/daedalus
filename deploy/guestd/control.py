@@ -122,9 +122,10 @@ def model_routes(body: Any) -> list[dict[str, Any]]:
         if not isinstance(only, list) or not 0 < len(only) <= ROUTE_MAX_SLUGS or not all(isinstance(slug, str) and ROUTE_SLUG.fullmatch(slug) for slug in only):
             raise Invalid("a model route lists provider slugs")
         prices = [route.get("price_in"), route.get("price_out")]
-        if not all(not isinstance(price, bool) and isinstance(price, int | float) and 0 <= price <= 10_000 for price in prices):
+        # None is a model the host cannot price today: the limit holds and the link's own price stands.
+        if not all(price is None or (not isinstance(price, bool) and isinstance(price, int | float) and 0 <= price <= 10_000) for price in prices):
             raise Invalid("a model route has its prices")
-        routes.append({"path": route["path"], "model": route["model"], "only": only, "price_in": float(prices[0]), "price_out": float(prices[1])})
+        routes.append({"path": route["path"], "model": route["model"], "only": only, "price_in": prices[0], "price_out": prices[1]})
     return routes
 
 
