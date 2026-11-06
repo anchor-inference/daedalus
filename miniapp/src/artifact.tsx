@@ -6,7 +6,8 @@
 
 import { useState } from "react";
 import { Icon, IconName } from "./icons";
-import { AuthImg, PreviewSource, canPreview, downloadHref, previewKind } from "./preview";
+import { AuthImg, PreviewSource, canPreview, downloadHref, openOrSave, previewKind, saveFromPanel } from "./preview";
+import { inPanel } from "./api";
 import type { Artifact } from "./turns";
 import { plural, t } from "./i18n";
 import { bytes } from "./format";
@@ -69,7 +70,7 @@ export function ArtifactCard({ item, src, downloadUrl, onOpen }: ArtifactCardPro
   // full-screen glyph rather than the panel's.
   const media = viewerKind(item.name) !== null;
   const meta = [item.size, extOf(item.name), t(`turn.artifact.${item.how}`)].filter(Boolean).join(" · ");
-  const open = () => (openable ? onOpen(src) : window.open(downloadUrl, "_blank", "noreferrer"));
+  const open = () => (openable ? onOpen(src) : openOrSave(downloadUrl, item.name));
   return (
     <div className={`artifact ${image ? "image" : ""} ${media ? "media" : ""}`} data-path={item.path}>
       <button type="button" className="artifact-main" onClick={open} title={openable ? t("turn.artifact.open") : t("preview.download")}>
@@ -80,7 +81,10 @@ export function ArtifactCard({ item, src, downloadUrl, onOpen }: ArtifactCardPro
         </span>
       </button>
       <span className="artifact-actions">
-        <a className="iconbtn small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label={t("preview.download")} title={t("preview.download")} onClick={(e) => e.stopPropagation()}>
+        <a className="iconbtn small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label={t("preview.download")} title={t("preview.download")} onClick={(e) => {
+          e.stopPropagation();
+          if (inPanel()) { e.preventDefault(); void saveFromPanel(downloadUrl, item.name); }
+        }}>
           <Icon name="download" size={15} />
         </a>
         {openable && (

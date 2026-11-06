@@ -26,7 +26,7 @@ from pathlib import Path
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app, wait_until  # noqa: E402
 from check_project_focus import PID, fits, serve  # noqa: E402
 from event_feed import EventFeed  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
@@ -43,14 +43,14 @@ WORDS = {
         "perm": ["Allow", "Always", "Deny", "No, because…"], "draft": "Draft", "ready": "Ready", "more": "Show more", "less": "Show less",
         "withdrawn": "Withdrawn by the orchestrator — your draft was dropped", "sent": "Sent", "conflict": "Already answered elsewhere",
         "elsewhere": "answered in Telegram: Inter", "toast": "Sent 4; 1 already answered elsewhere", "send": "Send (5)", "info": "5 of 6 ready to send",
-        "new": "Menu languages", "because": "Why not? They will read it…", "note": "Add a note to your choice…", "sent1": "1 answer sent",
+        "new": "Menu languages", "because": "Why not? They will read it…", "note": "Add a note to your choice…",
     },
     "ru": {
         "tab": "Вопросы", "line": "6 вопросов ждут ответа", "open": "Открыть", "requests": "Команда ждёт", "questions": "Вопросы",
         "perm": ["Разрешить", "Всегда", "Запретить", "Нет, потому что…"], "draft": "Черновик", "ready": "Готово", "more": "Показать больше", "less": "Свернуть",
         "withdrawn": "Оркестратор отозвал вопрос — ваш черновик удалён", "sent": "Отправлено", "conflict": "Уже ответили в другом месте",
         "elsewhere": "ответ в Telegram: Inter", "toast": "Отправлено: 4; уже отвечено в другом месте: 1", "send": "Отправить (5)", "info": "5 из 6 готовы к отправке",
-        "new": "Языки меню", "because": "Почему нет? Это прочитают…", "note": "Добавьте комментарий к выбору…", "sent1": "Отправлен 1 ответ",
+        "new": "Языки меню", "because": "Почему нет? Это прочитают…", "note": "Добавьте комментарий к выбору…",
     },
 }
 
@@ -275,7 +275,7 @@ def phone(page: Page, lang: str) -> None:
     send_box = send.bounding_box()
     assert send_box and send_box["y"] + send_box["height"] <= 844 + 0.5, f"{lang} 390: Send is below the screen ({send_box})"
     send.tap()
-    expect(page.get_by_text(words["sent1"])).to_be_visible()
+    wait_until(page, lambda: focus.batches)
     assert focus.batches == [(f"/api/projects/{PID}/asks/answer", [{"ask_id": "ask-push", "allow": True}])], focus.batches
     expect(sheet.locator(".q-card[data-ask='qg1t04']")).to_have_count(0, timeout=10000)
     expect(sheet.locator(".panel-tab[data-tab='questions'] .count")).to_have_text("5")

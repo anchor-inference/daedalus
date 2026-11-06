@@ -47,7 +47,6 @@ export function RecordButton({ group, toast }: { group: string; toast: (text: st
     try {
       await startWorkflow(group, keep ? "literal" : "slots");
       haptic("medium");
-      toast(t("browser.steps.started"));
       setAnchor(null);
     } catch (e) {
       toast(errorText(e));
@@ -109,8 +108,7 @@ export function RecordBar({ group, recording, tab, toast }: { group: string; rec
       {/* The press must not take the page's selection away: mousedown would move the focus first. */}
       <button type="button" className="btn small bp-recbar-mark" disabled={busy} title={t("browser.steps.mark.title")} onMouseDown={(e) => e.preventDefault()}
         onClick={() => void run(async () => {
-          const step = await markWorkflow(group, tab);
-          toast(t("browser.steps.marked", { text: step.text || step.title || "" }));
+          await markWorkflow(group, tab);
         })}>
         <Icon name="check" size={13} />
         {t("browser.steps.mark")}
@@ -226,7 +224,6 @@ export function ProcedureEditor({ draft, toast, onDone }: { draft: BrowserDraft 
         <div className="bp-proc-foot">
           <button type="button" className="btn small primary" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
             await editNote(note.id, text, title);
-            toast(t("browser.steps.saved"));
             onDone();
           })}>{t("browser.steps.save")}</button>
           <button type="button" className="btn small" disabled={busy} onClick={onDone}>{t("bs.notes.cancel")}</button>
@@ -236,12 +233,10 @@ export function ProcedureEditor({ draft, toast, onDone }: { draft: BrowserDraft 
         <button type="button" className="btn small primary" disabled={busy || !text.trim() || !title.trim()} onClick={() => void run(async () => {
           if (changed) await editNote(note.id, text, title);
           await approveNote(note.id);
-          toast(t("browser.steps.approved", { host: note.host }));
           onDone();
         })}>{t("browser.steps.approve")}</button>
         <button type="button" className="btn small" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
           await editNote(note.id, text, title);
-          toast(t("browser.steps.saved"));
         })}>{t("browser.steps.save")}</button>
         <button type="button" className="btn small" disabled={busy} title={t("browser.steps.later.title")} onClick={() => void run(async () => {
           if (changed) await editNote(note.id, text, title);
@@ -249,7 +244,6 @@ export function ProcedureEditor({ draft, toast, onDone }: { draft: BrowserDraft 
         })}>{t("browser.steps.later")}</button>
         <button type="button" className="btn small danger" disabled={busy} onClick={() => void run(async () => {
           await deleteNote(note.id);
-          toast(t("browser.steps.discarded"));
           onDone();
         })}>{t("browser.steps.discard")}</button>
       </div>

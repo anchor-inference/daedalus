@@ -85,7 +85,6 @@ export function AgentCompose({ pane, toast }: { pane: PaneContext; toast: (text:
     queue.current = queue.current.then(async () => {
       try {
         await api.post(`/api/staff/${enc(staffId)}/messages`, body);
-        toast(t("phone.told", { name }));
         invalidate(`/api/staff/${enc(staffId)}/messages`);
       } catch (e) {
         setText((now) => now || kept.text);

@@ -40,7 +40,6 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
       const { settings, ...catalogue } = next;
       setData(catalogue);
       if (settings && onSettings) onSettings(settings);
-      toast(t("tgroup.saved", { name: groupName(name), load: loadWord(load) }));
     } catch (e) {
       toast(errorText(e));
       // Refused because the configuration moved under the screen: show what it is now, so the next
@@ -113,7 +112,6 @@ export function SessionToolGroups({ sessionId, toast }: { sessionId: string; toa
     try {
       const r = await api.post<{ groups: SessionToolGroup[] }>(`/api/sessions/${sessionId}/tool-groups/${encodeURIComponent(name)}/load`);
       setGroups(r.groups);
-      toast(t("tgroup.loadnow.done", { name: groupName(name) }));
     } catch (e) {
       toast(errorText(e));
     }

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { MediaItem, MediaPresentation } from "./api";
-import { api } from "./api";
+import { api, inPanel } from "./api";
 import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
-import { downloadHref, useBlobUrl, type PreviewSource } from "./preview";
+import { downloadHref, openOrSave, saveFromPanel, useBlobUrl, type PreviewSource } from "./preview";
 import { ArtifactCard } from "./artifact";
 import { bytes } from "./format";
 import { sourceKey, viewerKind, type HostSource } from "./mediaroute";
-export { mediaCopyText, splitMediaAnswer } from "./mediaformat";
+export { mediaCopyText, splitMediaAnswer, withoutMediaRefs } from "./mediaformat";
 
 // A clip opened from a chat used to start at the browser's full volume. A tenth is loud enough
 // to hear and quiet enough that opening an album does not take over the room.
@@ -53,7 +53,9 @@ export function mediaSave(sessionId: string, presentationId: string, item: Media
  */
 export function SaveLink({ save, className }: { save: MediaSave; className?: string }) {
   const label = t("media.download", { name: save.filename });
-  return <a className={className} href={save.href} download={save.filename} target={save.outside ? "_blank" : undefined} rel="noreferrer" aria-label={label} title={label}><Icon name="download" /></a>;
+  // The side panel's link carries no credential, so its press reads the file itself.
+  const panelSave = inPanel() && !save.outside;
+  return <a className={className} href={save.href} download={save.filename} target={save.outside ? "_blank" : undefined} rel="noreferrer" aria-label={label} title={label} onClick={panelSave ? (e) => { e.preventDefault(); void saveFromPanel(save.href, save.filename); } : undefined}><Icon name="download" /></a>;
 }
 
 function clock(seconds: number): string {
@@ -78,7 +80,7 @@ function requestMediaAccess(): Promise<void> {
   return accessRequest;
 }
 
-function VideoPlayer({ src }: { src: string }) {
+function VideoPlayer({ src, autoPlay }: { src: string; autoPlay?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const hide = useRef<number>(0);
   const [playing, setPlaying] = useState(false);
@@ -131,6 +133,7 @@ function VideoPlayer({ src }: { src: string }) {
       src={src}
       playsInline
       preload="metadata"
+      autoPlay={autoPlay}
       onLoadedMetadata={(event) => {
         event.currentTarget.volume = QUIET_VOLUME;
         setVolume(QUIET_VOLUME);
@@ -176,8 +179,7 @@ function VideoPlayer({ src }: { src: string }) {
   </div>;
 }
 
-function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: string; presentation: MediaPresentation; item: MediaItem; onOpen: () => void }) {
-  const src = source(sessionId, presentation.id, item);
+function MediaElement({ sessionId, presentation, item, src, autoPlay, onOpen }: { sessionId: string; presentation: MediaPresentation; item: MediaItem; src: string; autoPlay?: boolean; onOpen: () => void }) {
   const save = mediaSave(sessionId, presentation.id, item);
   if (item.kind === "image" || item.kind === "animation" || (item.kind === "video" && presentation.layout === "album")) {
     return <figure className="inline-media-image">
@@ -194,13 +196,44 @@ function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: st
   // The clip's save control sits under the player, beside its caption, and not in the player's bar:
   // the bar hides while the clip plays, and a single clip had no way to be saved at all.
   if (item.kind === "video") return <figure className="inline-media-player">
-    <VideoPlayer src={src} />
+    <VideoPlayer src={src} autoPlay={autoPlay} />
     <div className="inline-media-player-foot"><figcaption>{item.caption || item.filename}</figcaption><SaveLink save={save} /></div>
   </figure>;
   return <figure className="inline-media-player audio">
     <div className="inline-media-player-head"><span>{item.caption || item.filename}</span><SaveLink save={save} /></div>
-    <audio controls preload="metadata" src={src} />
+    <audio controls preload="metadata" src={src} autoPlay={autoPlay} />
   </figure>;
+}
+
+/**
+ * An attached item in the side panel. Its frame has no cookie and must not get one, so an element's
+ * bare request is refused: the bytes are read with the panel's credential, through its door, and
+ * drawn from a blob. A picture comes as it is drawn, as the app's would. A clip waits for a press,
+ * because a blob is the whole file, and reading up to 100 MB each time a conversation opens is not
+ * what an element's ``preload="metadata"`` would have cost.
+ */
+function PanelItem({ sessionId, presentation, item, onOpen, onRetry }: { sessionId: string; presentation: MediaPresentation; item: MediaItem; onOpen: () => void; onRetry: () => void }) {
+  const still = item.kind === "image" || item.kind === "animation";
+  const [pressed, setPressed] = useState(false);
+  const wanted = !item.url && (still || pressed);
+  const { url, error } = useBlobUrl(wanted ? attachedSource(sessionId, presentation.id, item) : null);
+  if (item.url) return <MediaElement sessionId={sessionId} presentation={presentation} item={item} src={item.url} onOpen={onOpen} />;
+  if (error) return <button type="button" className="inline-media-error" onClick={onRetry}>{t("media.retry")}</button>;
+  if (url) return <MediaElement sessionId={sessionId} presentation={presentation} item={item} src={url} autoPlay={pressed} onOpen={onOpen} />;
+  if (still || pressed) return <div className="inline-media-loading" aria-label={t("media.loading")} />;
+  const name = item.caption || item.alt || item.filename;
+  return <figure className="inline-media-player audio">
+    <div className="inline-media-player-head">
+      <button type="button" className="inline-media-load" onClick={() => setPressed(true)} aria-label={t("media.play")}><Icon name="play" /><span>{name}</span></button>
+      <SaveLink save={mediaSave(sessionId, presentation.id, item)} />
+    </div>
+  </figure>;
+}
+
+/** The panel's item, drawn anew by a press on retry, which reads it again. */
+function PanelElement(props: { sessionId: string; presentation: MediaPresentation; item: MediaItem; onOpen: () => void }) {
+  const [attempt, setAttempt] = useState(0);
+  return <PanelItem key={attempt} {...props} onRetry={() => setAttempt((n) => n + 1)} />;
 }
 
 /**
@@ -210,6 +243,14 @@ function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: st
  * press away for the file the viewer took over from it.
  */
 export type ViewerItem = { key: string; kind: "image" | "video"; name: string; filename: string; url?: string; source?: HostSource; download: string; outside?: boolean; onPanel?: () => void };
+
+/** A clip in the side panel's viewer, read as its stills are: an element's bare request is refused there. */
+function SourceClip({ source, name }: { source: HostSource; name: string }) {
+  const { url, error } = useBlobUrl(source);
+  if (error) return <span className="media-viewer-error">{name}: {error}</span>;
+  if (!url) return <span className="media-viewer-wait" aria-busy="true" aria-label={t("media.loading")} />;
+  return <VideoPlayer src={url} />;
+}
 
 /** A still from a session file: the same bytes, and the same shared fetch, as the panel's preview. */
 function SourceStill({ source, name, style }: { source: HostSource; name: string; style: CSSProperties }) {
@@ -300,7 +341,7 @@ export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; st
     <div ref={root} className="media-viewer lightbox" tabIndex={-1} role="dialog" aria-modal="true" aria-label={name} onKeyDown={onKey} style={pull ? { background: `rgba(0,0,0,${Math.max(0.35, 1 - pull / 400)})` } : undefined}>
       <div className={`media-viewer-stage ${video ? "video" : ""}`} style={pull ? { background: "transparent" } : undefined} onPointerDown={video ? undefined : down} onPointerMove={video ? undefined : move} onPointerUp={video ? undefined : up} onPointerCancel={video ? undefined : up} onWheel={video ? undefined : wheel} onDoubleClick={video ? undefined : () => changeZoom(zoom === 1 ? 2 : 1)}>
         {video
-          ? <VideoPlayer key={item.key} src={item.url ?? item.download} />
+          ? item.source && inPanel() ? <SourceClip key={item.key} source={item.source} name={name} /> : <VideoPlayer key={item.key} src={item.url ?? item.download} />
           : item.source ? <SourceStill key={item.key} source={item.source} name={name} style={style} /> : <img src={item.url} alt={name} draggable={false} style={style} />}
       </div>
       <div className="lightbox-top">
@@ -337,7 +378,8 @@ export function FileGallery({ sources, start, onClose, onPanel }: { sources: Hos
 function presentationItems(sessionId: string, presentation: MediaPresentation): ViewerItem[] {
   return presentation.items.map((item) => {
     const save = mediaSave(sessionId, presentation.id, item);
-    return { key: item.id, kind: item.kind === "video" ? "video" : "image", name: item.alt || item.filename, filename: item.filename, url: source(sessionId, presentation.id, item), download: save.href, outside: save.outside };
+    const shown = { key: item.id, kind: item.kind === "video" ? "video" as const : "image" as const, name: item.alt || item.filename, filename: item.filename, download: save.href, outside: save.outside };
+    return inPanel() && !item.url ? { ...shown, source: attachedSource(sessionId, presentation.id, item) } : { ...shown, url: source(sessionId, presentation.id, item) };
   });
 }
 
@@ -366,7 +408,7 @@ function AttachedFile({ sessionId, presentation, item, onPreview }: { sessionId:
       downloadUrl={download}
       // Without a panel to open it in, the press still gets the file: a card that did nothing would
       // read as broken.
-      onOpen={onPreview ?? (() => window.open(download, "_blank", "noreferrer"))}
+      onOpen={onPreview ?? (() => openOrSave(download, item.filename))}
     />
   </div>;
 }
@@ -375,12 +417,15 @@ export function InlineMedia({ sessionId, presentation, onPreview }: { sessionId:
   // A file is read through the download address with the session token, as the files panel reads
   // it, so it needs none of the cookie upgrade a picture's <img> needs, and waiting for one would
   // only hold the card back behind a spinner, or behind a retry button if the upgrade failed.
+  // The side panel has no cookie to upgrade: the upgrade answered 401, and every picture and clip
+  // there stopped at the retry button.
   const file = presentation.items.length === 1 && presentation.items[0].kind === "file" ? presentation.items[0] : null;
+  const panel = inPanel();
   const [open, setOpen] = useState<number | null>(null);
-  const [access, setAccess] = useState<"loading" | "ready" | "error">(file ? "ready" : "loading");
+  const [access, setAccess] = useState<"loading" | "ready" | "error">(file || panel ? "ready" : "loading");
   const rail = useRef<HTMLDivElement>(null);
   const load = () => {
-    if (file) return;
+    if (file || panel) return;
     setAccess("loading");
     requestMediaAccess().then(() => setAccess("ready")).catch(() => setAccess("error"));
   };
@@ -392,7 +437,9 @@ export function InlineMedia({ sessionId, presentation, onPreview }: { sessionId:
   return <>
     <div className={`inline-media ${presentation.layout} items-${Math.min(4, presentation.items.length)}`} style={ratio ? { "--album-ratio": ratio } as CSSProperties : undefined}>
       <div className="inline-media-track" ref={rail}>
-        {presentation.items.map((item, index) => <MediaElement key={item.id} sessionId={sessionId} presentation={presentation} item={item} onOpen={() => setOpen(index)} />)}
+        {presentation.items.map((item, index) => panel
+          ? <PanelElement key={item.id} sessionId={sessionId} presentation={presentation} item={item} onOpen={() => setOpen(index)} />
+          : <MediaElement key={item.id} sessionId={sessionId} presentation={presentation} item={item} src={source(sessionId, presentation.id, item)} onOpen={() => setOpen(index)} />)}
       </div>
       {presentation.layout === "album" && presentation.items.length > 3 && <>
         <button type="button" className="inline-media-nav previous" onClick={() => rail.current?.scrollBy({ left: -rail.current.clientWidth * .8, behavior: "smooth" })} aria-label={t("media.previous")}><Icon name="back" /></button>

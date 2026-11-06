@@ -24,7 +24,7 @@ import { t } from "./i18n";
 import { Icon } from "./icons";
 import { invalidate, useQuery } from "./store";
 import { errorText } from "./ui";
-import { Sheet, toast } from "./ui/dialogs";
+import { Sheet } from "./ui/dialogs";
 
 export const CLI_DEVICES = "/api/cli/devices";
 export const PAIRS = "/api/cli/pairs";
@@ -317,7 +317,6 @@ export function PairSheet({ code, request, loaded, onClose }: { code: string; re
       await api.post(`/api/cli/pair/${encodeURIComponent(request.user_code)}/${how}`, how === "approve" ? {} : undefined);
       invalidate(PAIRS);
       invalidate(CLI_DEVICES);
-      toast(t(how === "approve" ? "pair.approved" : "pair.denied", { name: request.name }));
       onClose();
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 ? t("pair.decided") : e instanceof ApiError && e.status === 404 ? t("pair.missing") : errorText(e));

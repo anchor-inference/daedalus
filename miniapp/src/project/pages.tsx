@@ -67,7 +67,6 @@ function BriefCard({ projectId, project, section, toast }: { projectId: string; 
     setBusy(true);
     try {
       await api.put(briefKey(projectId), { section: section.section, body: draft });
-      toast(t("focus.brief.saved", { section: name }));
       setDraft(null);
       invalidate(briefKey(projectId));
     } catch (e) {
@@ -152,7 +151,6 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
       await api.post(journalKey(projectId), asRule ? { text, kind: "rule" } : { text });
       setNote("");
       setAsRule(false);
-      toast(t(asRule ? "focus.rules.added" : "focus.journal.added"));
       invalidate(journalKey(projectId));
     } catch (e) {
       toast(errorText(e));
@@ -164,7 +162,6 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
     setLifting(rule.id);
     try {
       await api.post(`${journalKey(projectId)}/${rule.id}/lift`, {});
-      toast(t("focus.rules.lifted"));
       invalidate(journalKey(projectId));
     } catch (e) {
       toast(errorText(e));
@@ -349,7 +346,7 @@ export function TerminalsPage({ projectId, selected, back, toast }: { projectId:
 // ── switching the orchestrator on ────────────────────────────────────────────────────────────
 
 /** The centre of a project without an orchestrator: what one is, and the way to switch it on. */
-export function EnableOrchestrator({ project, toast, back }: { project: Project; toast: (text: string) => void; back?: string | null }) {
+export function EnableOrchestrator({ project, back }: { project: Project; back?: string | null }) {
   const [open, setOpen] = useState(false);
   // The header every other page of the project carries: without it a tablet with its column folded,
   // or a phone, showed the prompt alone, with no project name and no way back.
@@ -367,13 +364,13 @@ export function EnableOrchestrator({ project, toast, back }: { project: Project;
         <div>{t("focus.enable.body")}</div>
         <button className="btn primary" onClick={() => setOpen(true)}>{t("focus.enable.action")}</button>
       </div>
-      {open && <EnableSheet project={project} onClose={() => setOpen(false)} toast={toast} />}
+      {open && <EnableSheet project={project} onClose={() => setOpen(false)} />}
     </div>
     </>
   );
 }
 
-function EnableSheet({ project, onClose, toast }: { project: Project; onClose: () => void; toast: (text: string) => void }) {
+function EnableSheet({ project, onClose }: { project: Project; onClose: () => void; }) {
   const { data: team } = useQuery<Team>(staffKey(project.id), { staleMs: 5000 });
   const settings = project.settings.orchestrator;
   const [model, setModel] = useState(settings?.model ?? "");
@@ -432,7 +429,6 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
     setError("");
     try {
       await api.post(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, { model, autonomy, concurrency_cap: cap });
-      toast(t("focus.enable.done"));
       invalidate("/api/projects");
       invalidate("/api/sessions");
       onClose();

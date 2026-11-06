@@ -3,8 +3,8 @@
 - a group whose "needs you" carries a sign-in request draws the form under the session's conversation:
   the site, the agent's reason, a username field, a masked password field and a code field, none of
   which offers to remember what is typed (``autocomplete="off"``);
-- signing in posts the values once to ``POST /api/browsers/{group}/login`` with the request's id, says
-  where the page ended in a toast, and the form goes when the request is over;
+- signing in posts the values once to ``POST /api/browsers/{group}/login`` with the request's id, and
+  the form goes when the request is over; only an answer that went wrong leaves a line;
 - a site with a saved sign-in offers it first; "Always in this session" posts ``use_saved: always``;
 - the Inbox's "needs you" entry for a sign-in draws the same form;
 - every word is in English and in Russian.
@@ -37,6 +37,16 @@ WORDS = {
 }
 
 
+def posted_soon(page, bs) -> list:  # type: ignore[no-untyped-def]
+    """What the host was sent, once a press has gone out."""
+    for _ in range(50):
+        sent = bs.posted("/g1/login")
+        if sent:
+            return sent
+        page.wait_for_timeout(100)
+    return bs.posted("/g1/login")
+
+
 def in_conversation(browser, scenes, lang: str) -> None:  # type: ignore[no-untyped-def]
     words = WORDS[lang]
     bs = BrowserStub(scenes)
@@ -58,8 +68,8 @@ def in_conversation(browser, scenes, lang: str) -> None:  # type: ignore[no-unty
     fields.nth(0).fill("someone@example.com")
     password.fill(PASSWORD)
     card.get_by_role("button", name=words["submit"], exact=True).click()
-    expect(page.get_by_text(words["done"])).to_be_visible(timeout=5000)
-    sent = bs.posted("/g1/login")
+    sent = posted_soon(page, bs)
+    assert page.get_by_text(words["done"]).count() == 0, f"{lang}: a sign-in that went through left a line"
     assert len(sent) == 1 and sent[0] == {"login_id": "l1", "username": "someone@example.com", "password": PASSWORD, "save": False}, f"{lang}: sent {sent!r}"
     expect(page.locator(".login-card")).to_have_count(0, timeout=10000)
     assert PASSWORD not in page.content(), f"{lang}: the password stayed in the page"
@@ -77,7 +87,7 @@ def saved_offered(browser, scenes, lang: str) -> None:  # type: ignore[no-untype
     expect(card).to_contain_text(words["saved"], timeout=10000)
     assert card.locator("input[type=password]").count() == 0, f"{lang}: the saved sign-in did not come first"
     card.get_by_role("button", name=words["always"]).click()
-    expect(page.get_by_text(words["done"])).to_be_visible(timeout=5000)
+    posted_soon(page, bs)
     assert bs.posted("/g1/login") == [{"login_id": "l2", "use_saved": "always"}], f"{lang}: sent {bs.posted('/g1/login')!r}"
     context.close()
 
@@ -116,7 +126,7 @@ def in_inbox(browser, scenes, lang: str) -> None:  # type: ignore[no-untyped-def
     card.locator("input.field").nth(0).fill("someone@example.com")
     card.locator("input[type=password]").fill(PASSWORD)
     card.get_by_role("button", name=words["submit"], exact=True).click()
-    expect(page.get_by_text(words["done"])).to_be_visible(timeout=5000)
+    posted_soon(page, bs)
     assert [b["login_id"] for b in bs.posted("/g1/login")] == ["l3"], f"{lang}: sent {bs.posted('/g1/login')!r}"
     context.close()
 

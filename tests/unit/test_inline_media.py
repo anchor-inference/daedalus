@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -14,7 +15,7 @@ from daedalus.extensions.api import build_app
 from daedalus.host.session_runner import SessionManager
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.stores.blobs import FileBlobStore
-from daedalus.stores.database import Database
+from daedalus.stores.database import Database, _repeated_media
 from daedalus.stores.media import MEDIA_TENANT, MediaStore
 from daedalus.stores.sqlite import SqliteSessionStore
 
@@ -74,6 +75,60 @@ async def test_an_unstaged_or_cross_session_reference_never_binds(db: Database, 
     stored = (await sessions.list_transcript("media-session"))[0]
     assert message_view(stored)["media"] == []
     assert await media.item("media-session", missing, missing) is None
+
+
+async def test_a_later_answer_repeating_a_file_is_given_it_and_a_guess_beside_it_costs_only_itself(db: Database, tmp_path) -> None:
+    media, sessions = await _stores(db, tmp_path)
+    source = tmp_path / "report.md"
+    source.write_text("# Report")
+    staged = await media.stage("media-session", "run-1", [{"path": str(source), "alt": "Report", "caption": ""}], layout="single")
+    first = Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-1"})
+    await sessions.append_transcript("media-session", [first])
+    # The model reads the line back from its history and writes it again in a later run.
+    guess = "![guess](daedalus-media:00000000-0000-0000-0000-000000000000)"
+    later = Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=f"Updated.\n\n{staged['markdown']}\n\n{guess}")], metadata={"daedalus.run_id": "run-2"})
+    await sessions.append_transcript("media-session", [later])
+    stored = await sessions.list_transcript("media-session")
+    assert [p["id"] for p in message_view(stored[1])["media"]] == [staged["id"]]
+    assert message_view(stored[1])["media"] == message_view(stored[0])["media"]
+    item = message_view(stored[1])["media"][0]["items"][0]
+    assert item["kind"] == "file"
+    # It stays bound to the first answer, so a cut that keeps that answer keeps the file.
+    row = await db.fetchone("SELECT message_key, run_id FROM media_presentations WHERE id = ?", (staged["id"],))
+    assert row is not None and row["run_id"] == "run-1" and row["message_key"] == sessions.transcript_key(stored[0])
+    assert await media.item("media-session", staged["id"], item["id"])
+
+
+async def test_another_conversations_file_is_not_bound_by_repeating_its_line(db: Database, tmp_path) -> None:
+    media, sessions = await _stores(db, tmp_path)
+    await sessions.create(Session(id="other-session", tenant_id="daedalus", title="Other"))
+    source = tmp_path / "report.md"
+    source.write_text("# Report")
+    staged = await media.stage("media-session", "run-1", [{"path": str(source), "alt": "Report", "caption": ""}], layout="single")
+    await sessions.append_transcript("media-session", [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-1"})])
+    await sessions.append_transcript("other-session", [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-2"})])
+    assert message_view((await sessions.list_transcript("other-session"))[0])["media"] == []
+
+
+async def test_the_migration_gives_stored_repeats_their_file_and_runs_twice_without_harm(db: Database, tmp_path) -> None:
+    media, sessions = await _stores(db, tmp_path)
+    source = tmp_path / "report.md"
+    source.write_text("# Report")
+    staged = await media.stage("media-session", "run-1", [{"path": str(source), "alt": "Report", "caption": ""}], layout="single")
+    await sessions.append_transcript("media-session", [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-1"})])
+    await sessions.append_transcript("media-session", [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-2"})])
+    # The row as the old code wrote it: the reference in the text and no file on the message.
+    row = await db.fetchone("SELECT seq, message FROM transcript WHERE session_id = 'media-session' ORDER BY seq DESC LIMIT 1")
+    assert row is not None
+    before = json.loads(row["message"])
+    before["metadata"].pop("daedalus.media")
+    await db.execute("UPDATE transcript SET message = ? WHERE seq = ?", (json.dumps(before), row["seq"]))
+    for _ in range(2):
+        async with db.transaction() as conn:
+            await _repeated_media(conn)
+    views = await sessions.list_transcript_views("media-session")
+    assert [len(view["media"]) for view in views] == [1, 1]
+    assert views[1]["media"] == views[0]["media"]
 
 
 async def test_retry_tail_removes_media_access_without_a_backup(db: Database, tmp_path) -> None:

@@ -70,7 +70,6 @@ export function LifecycleCancel({ kind, id, projectId, onDone, toast, bare = fal
     try {
       await api.post(`${path}/cancel`, { ...body, client_operation_id: operation.current.id });
       operation.current = null;
-      toast(t("lifecycle.requested"));
       preview.refresh();
       onDone?.();
     } catch (error) {

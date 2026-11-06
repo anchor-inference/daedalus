@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { api, ShareMode, ShareView } from "./api";
-import { copyText } from "./ui/components";
+import { useCopied } from "./ui/components";
 import { Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
@@ -33,7 +33,6 @@ export function ShareSheet({
     try {
       const updated = await api.post<ShareView>(`/api/sessions/${sessionId}/share`, { mode: next, rotate_key: rotate });
       onChanged(updated);
-      toast(t(next === "local" ? "session.share.mode.local" : next === "public" ? "session.share.mode.public" : rotate ? "session.share.mode.newkey" : "session.share.mode.key"));
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -41,8 +40,9 @@ export function ShareSheet({
     }
   }
 
+  const [copied, copyValue] = useCopied();
   async function copy(text: string, what: "link" | "key") {
-    toast((await copyText(text)) ? t(`svc.copied.${what}`) : t("svc.copyfail"));
+    if (!(await copyValue(text, what))) toast(t("svc.copyfail"));
   }
 
   return (
@@ -65,14 +65,14 @@ export function ShareSheet({
           <label className="field">{t("svc.link")}</label>
           <div className="share-field">
             <input className="field mono" readOnly value={share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
-            <button className="btn small" onClick={() => copy(share.url!, "link")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
+            <button className="btn small" onClick={() => void copy(share.url!, "link")}><Icon name={copied === "link" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
           </div>
           {mode === "key" && share.key && (
             <>
               <label className="field">{t("svc.key")}</label>
               <div className="share-field">
                 <input className="field mono" readOnly value={share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
-                <button className="btn small" onClick={() => copy(share.key!, "key")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
+                <button className="btn small" onClick={() => void copy(share.key!, "key")}><Icon name={copied === "key" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
                 <button className="btn small" disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</button>
               </div>
             </>

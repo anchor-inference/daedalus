@@ -57,7 +57,8 @@ function LoginForm({ group, ask, toast, compact }: { group: string; ask: Browser
         ? { login_id: ask.id, use_saved: useSaved, ...(otp ? { otp } : {}) }
         : { login_id: ask.id, ...(username ? { username } : {}), ...(password ? { password } : {}), ...(otp ? { otp } : {}), save: save && !!password };
       const result = await submitLogin(group, body);
-      toast(loginOutcome(result));
+      // Signed in, the page moves on by itself; anything else says what the site answered.
+      if (result.signed_in !== "yes") toast(loginOutcome(result));
     } catch (e) {
       setProblem(errorText(e));
     } finally {
@@ -71,7 +72,6 @@ function LoginForm({ group, ask, toast, compact }: { group: string; ask: Browser
     setBusy(true);
     try {
       await declineLogin(group, ask.id);
-      toast(t("browser.login.declined", { site: ask.site }));
     } catch (e) {
       setProblem(errorText(e));
     } finally {

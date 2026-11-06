@@ -110,13 +110,14 @@ export function EventView({ occurrence, calendars, types, groups, zone, phone, b
     if (!(await confirmAsync(t("cal.action.confirm"), { body: block.prompt ?? "", action: t("cal.action.send") }))) return;
     try {
       await runAction(occurrence.event_id, block.id);
-      toast(t("cal.action.sent"));
     } catch (exc) { toast(errorText(exc)); }
   }
 
   async function copy(markdown: boolean) {
     const text = eventAsText({ title: event.title || t("cal.untitled"), when, description: event.description, fields: event.fields, blocks, status: event.status, tags: event.tags }, type, markdown);
-    toast((await copyText(text)) ? t("cal.copied") : t("cal.copy.failed"));
+    const ok = await copyText(text);
+    if (!ok) toast(t("cal.copy.failed"));
+    return ok;
   }
 
   async function toggleHistory() {
@@ -151,8 +152,8 @@ export function EventView({ occurrence, calendars, types, groups, zone, phone, b
       </div>
       {!readOnly && <button type="button" className="iconbtn cal-view-edit" onClick={() => onEdit(event)} aria-label={t("cal.edit")} title={t("cal.edit")} disabled={busy}><Icon name="pen" size={16} /></button>}
       <OverflowMenu label={t("cal.view.menu")} items={[
-        { label: t("cal.copy.text"), icon: "copy", onSelect: () => void copy(false) },
-        { label: t("cal.copy.markdown"), icon: "copy", onSelect: () => void copy(true) },
+        { label: t("cal.copy.text"), icon: "copy", ticks: true, onSelect: () => copy(false) },
+        { label: t("cal.copy.markdown"), icon: "copy", ticks: true, onSelect: () => copy(true) },
         { label: t("cal.history"), icon: "journal", onSelect: () => { if (!historyOpen) void toggleHistory(); window.setTimeout(() => box?.querySelector(".cal-history")?.scrollIntoView({ block: "start", behavior: "smooth" }), 60); } },
         ...(!readOnly ? ["-" as const, { label: t("common.delete"), icon: "trash" as const, danger: true, onSelect: () => onDelete(event) }] : []),
       ]} />

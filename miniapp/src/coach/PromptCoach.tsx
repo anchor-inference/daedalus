@@ -9,7 +9,7 @@ import { t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
-import { copyText } from "../ui/components";
+import { useCopied } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { Banner } from "../ui/phone";
 import { type CoachResult, type CoachView, type Point, COMPOSER_CLEARANCE, EDGE, clampPosition, defaultPosition, readPosition, seedMessage, windowSize, writePosition } from "./coach";
@@ -57,7 +57,6 @@ export function PromptCoach({ parentId, draft, raise, phone, toast, onClose, onI
 
   const insert = (prompt: string) => {
     onInsert(prompt);
-    toast(t("coach.inserted"));
     if (phone) onClose();
   };
   const menu = (
@@ -86,7 +85,8 @@ export function PromptCoach({ parentId, draft, raise, phone, toast, onClose, onI
 /** The saved prompt: its first lines, the way into the message, a copy, and where it was saved. */
 function ResultCard({ result, phone, onInsert, toast, onOpenFile }: { result: CoachResult; phone: boolean; onInsert: (prompt: string) => void; toast: (text: string) => void; onOpenFile?: (path: string) => void }) {
   const [open, setOpen] = useState(false);
-  const copy = async () => toast(t(await copyText(result.prompt) ? "coach.copied" : "coach.copy.failed"));
+  const [copied, copyPrompt] = useCopied();
+  const copy = async () => { if (!(await copyPrompt(result.prompt))) toast(t("coach.copy.failed")); };
   return (
     <section className="coach-result" aria-label={t("coach.ready")}>
       <div className="coach-result-head">
@@ -101,7 +101,7 @@ function ResultCard({ result, phone, onInsert, toast, onOpenFile }: { result: Co
       <pre className={`coach-prompt ${open ? "open" : ""}`} role="button" tabIndex={0} aria-expanded={open} title={t(open ? "coach.less" : "coach.more")}
         onClick={() => setOpen((o) => !o)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}>{result.prompt}</pre>
       <div className="coach-result-actions">
-        <button type="button" className={`btn ${phone ? "" : "small"} coach-copy`} onClick={() => void copy()}><Icon name="copy" size={16} />{t("coach.copy")}</button>
+        <button type="button" className={`btn ${phone ? "" : "small"} coach-copy`} onClick={() => void copy()}><Icon name={copied ? "check" : "copy"} size={16} />{t("coach.copy")}</button>
         <button type="button" className={`btn primary ${phone ? "" : "small"} coach-insert`} onClick={() => onInsert(result.prompt)}><Icon name="send" size={16} />{t("coach.insert")}</button>
       </div>
     </section>

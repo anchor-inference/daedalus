@@ -40,14 +40,13 @@ export function MainFlow({ view, toast }: { view: MainView; toast: Toast }) {
 }
 
 /** Ending a project's setup by hand: the desktop's line and the phone's setup card share it. */
-export function useFinishSetup(projectId: string, name: string, toast: Toast): { busy: boolean; finish: () => Promise<void> } {
+export function useFinishSetup(projectId: string, toast: Toast): { busy: boolean; finish: () => Promise<void> } {
   const [busy, setBusy] = useState(false);
   async function finish() {
     if (busy) return;
     setBusy(true);
     try {
       await api.post(`/api/projects/${encodeURIComponent(projectId)}/setup/finish`, {});
-      toast(t("main.setup.finished", { name }));
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -61,7 +60,7 @@ export function useFinishSetup(projectId: string, name: string, toast: Toast): {
 
 /** A project that the main orchestrator is setting up, and the button that ends the setup by hand. */
 export function SetupLine({ projectId, name, toast }: { projectId: string; name: string; toast: Toast }) {
-  const { busy, finish } = useFinishSetup(projectId, name, toast);
+  const { busy, finish } = useFinishSetup(projectId, toast);
   return (
     <div className="main-setup" data-setup={projectId}>
       <Icon name="conductor" size={14} />
@@ -83,7 +82,6 @@ export function DispatchCard({ dispatch, toast }: { dispatch: Dispatch; toast: T
     setBusy(true);
     try {
       await api.post(`/api/dispatches/${encodeURIComponent(dispatch.id)}/cancel`, {});
-      toast(t("main.dispatch.cancelled.toast"));
     } catch (e) {
       toast(errorText(e));
     } finally {

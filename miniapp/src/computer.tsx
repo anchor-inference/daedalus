@@ -215,7 +215,7 @@ function Unavailable({ state }: { state: ComputerState | undefined }) {
 }
 
 /** The control itself: where control stands, the grant, and what the system allows. */
-export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string; toast: (text: string) => void; onClose: () => void }) {
+export function ComputerSheet({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const query = useQuery<ComputerState>(COMPUTER, { pollMs: POLL_MS, staleMs: 2000 });
   const state = query.data;
   const view = computerView(state, sessionId);
@@ -223,12 +223,11 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setError(""), [view]);
-  async function act(path: string, body: unknown, done?: string) {
+  async function act(path: string, body: unknown) {
     setBusy(true);
     setError("");
     const ok = await send(path, body, setError);
     setBusy(false);
-    if (ok && done) toast(done);
     return ok;
   }
   return (
@@ -250,7 +249,7 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
                 <span className="sub"> {[left !== null ? timeLeft(left) : "", scopeWords(state?.lease?.lease?.scope)].filter(Boolean).join(" · ")}</span>
               </span>
               {view === "paused" && <button type="button" className="btn small" disabled={busy} onClick={() => void act(`${COMPUTER}/resume`, {})}>{t("cu.resume")}</button>}
-              <button type="button" className="btn small danger solid" disabled={busy} onClick={() => void act(`${COMPUTER}/stop`, {}, t("cu.stopped"))}><Icon name="stop" size={14} />{t("cu.stop")}</button>
+              <button type="button" className="btn small danger solid" disabled={busy} onClick={() => void act(`${COMPUTER}/stop`, {})}><Icon name="stop" size={14} />{t("cu.stop")}</button>
             </div>
           )}
           {view === "other" && (
@@ -260,14 +259,14 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
                 <b>{t("cu.other")}</b>
                 <span className="sub"> {[left !== null ? timeLeft(left) : "", t("cu.other.sub")].filter(Boolean).join(" · ")}</span>
               </span>
-              <button type="button" className="btn small" disabled={busy} onClick={() => void act(`${COMPUTER}/revoke`, { session_id: state?.lease?.lease?.session }, t("cu.revoked"))}>{t("cu.revoke")}</button>
+              <button type="button" className="btn small" disabled={busy} onClick={() => void act(`${COMPUTER}/revoke`, { session_id: state?.lease?.lease?.session })}>{t("cu.revoke")}</button>
             </div>
           )}
           {error && <div className="runerror computer-error" role="alert"><Icon name="alert" size={14} /><span>{error}</span></div>}
           {view !== "mine" && view !== "paused" && (
             <div className="computer-grant">
               <div className="section-title">{t("cu.grant.title")}</div>
-              <ComputerScopePicker busy={busy} onGrant={(scope, minutes) => void act(`${COMPUTER}/grant`, { session_id: sessionId, scope, minutes }, t("cu.granted", { n: minutes }))} />
+              <ComputerScopePicker busy={busy} onGrant={(scope, minutes) => void act(`${COMPUTER}/grant`, { session_id: sessionId, scope, minutes })} />
               <div className="sub computer-grant-note">{t("cu.grant.note")}</div>
             </div>
           )}

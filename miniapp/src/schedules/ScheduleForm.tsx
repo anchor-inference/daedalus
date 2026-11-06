@@ -113,7 +113,6 @@ export function ScheduleFormBody({ existing, onCancel, onSave, onCreated, toast,
       });
       created.fingerprint = "";
       reloadSchedules();
-      toast(t("sched.created"));
       onCreated?.();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) created.fingerprint = "";

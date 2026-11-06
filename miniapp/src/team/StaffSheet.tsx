@@ -153,10 +153,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
         if (notes !== member.notes) changes.notes = notes;
         if (color && color !== member.color) changes.color = color;
         if (Object.keys(changes).length) await api.patch(`/api/staff/${encodeURIComponent(member.id)}`, changes);
-        toast(t("common.saved"));
       } else {
         await api.post(`/api/projects/${encodeURIComponent(project.id)}/staff`, { name: name.trim(), harness, ...fields, folder_id: sentFolder || null, one_off: oneOff });
-        toast(t("team.hired", { name: name.trim() }));
       }
       onDone();
       onClose();
@@ -173,7 +171,6 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
     if (!(await confirmAsync(t("team.dismiss.title", { name: member.name }), { body, action: t("team.dismiss") }))) return;
     try {
       await api.delete(`/api/staff/${encodeURIComponent(member.id)}`);
-      toast(t("team.dismissed", { name: member.name }));
       onDone();
       onClose();
     } catch (e) {

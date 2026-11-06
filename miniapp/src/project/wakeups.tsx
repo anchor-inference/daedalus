@@ -39,7 +39,6 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
       if (pendingDeletes.current[w.id]?.fingerprint !== fingerprint) pendingDeletes.current[w.id] = { fingerprint, id: crypto.randomUUID() };
       await api.request("DELETE", `${wakeupsKey(projectId)}/${enc(w.id)}`, { ...body, client_operation_id: pendingDeletes.current[w.id].id });
       delete pendingDeletes.current[w.id];
-      say(t("focus.wakeups.cancelled"));
       invalidate(wakeupsKey(projectId));
     } catch (e) {
       say(errorText(e));
@@ -116,7 +115,6 @@ function WakeupSheet({ projectId, collectionRevision, unverified, onClose, toast
       if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
       await api.post(wakeupsKey(projectId), { ...fields, client_operation_id: pending.current.id });
       pending.current = null;
-      toast(t("focus.wakeups.added"));
       invalidate(wakeupsKey(projectId));
       onClose();
     } catch (e) {
@@ -218,7 +216,6 @@ function useWatchWrites(projectId: string, data: WatchList | undefined, failed: 
       setNeedsRefresh(true);
       invalidate(watchesKey(projectId));
       onSuccess?.();
-      toast(intent.label);
       const fresh = await api.get<WatchList>(watchesKey(projectId));
       if (!Number.isInteger(fresh.collection_revision) || !Number.isInteger(fresh.project_entity_revision))
         throw new Error(t("focus.watches.unverified"));

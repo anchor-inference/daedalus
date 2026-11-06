@@ -230,7 +230,6 @@ function CycleRow({ cycle, schedule, revision, onOpenSession, toast, onDone }: {
       await api.post(`/api/recurring/${encodeURIComponent(schedule.id)}/cycles/${encodeURIComponent(cycle.id)}/reconcile`, { ...body, client_operation_id: pending.current.id });
       pending.current = null;
       setReason("");
-      toast(t("sched.cycle.reconciled"));
       onDone();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) pending.current = null;

@@ -36,7 +36,6 @@ export async function closeCard(task: Closable, status: "done" | "dropped", { on
       status, reason: reason || t("pboard.close.defaultReason"),
       expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID(),
     });
-    toast(t(`pboard.close.${status}.saved`));
     onDone();
   } catch (error) {
     toast(errorText(error));
@@ -50,7 +49,6 @@ export async function removeCard(task: Closable, { onDone, toast }: Hooks): Prom
   try {
     const query = `client_operation_id=${enc(crypto.randomUUID())}&expected_entity_revision=${task.entity_revision}&reason=${enc(reason)}`;
     await api.delete(`/api/board/${enc(task.id)}?${query}`);
-    toast(t("pboard.remove.saved"));
     onDone();
     return true;
   } catch (error) {

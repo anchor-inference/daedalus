@@ -291,7 +291,6 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         client_operation_id: id,
       });
       operation.current = null;
-      toast(t("result.accepted"));
       invalidate(base);
       invalidate(`/api/projects/${encodeURIComponent(task.project_id ?? "")}/board`);
       onAccepted();
@@ -317,7 +316,6 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         expected_entity_revision: contract.data.entity_revision, client_operation_id: id,
       });
       mergeOperation.current = null;
-      toast(t("result.mergeQueued"));
       review.refresh();
       contract.refresh();
       results.refresh();
@@ -341,7 +339,6 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       returnOperation.current = null;
       setReturning(false);
       setReturnNote("");
-      toast(t("result.returned"));
       results.refresh();
       contract.refresh();
       review.refresh();
@@ -368,7 +365,6 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       setCommentText("");
       setCommentPath("");
       setCommentLine("");
-      toast(t("result.commentAdded"));
       comments.refresh();
       contract.refresh();
       return true;
@@ -392,7 +388,6 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       resolutionOperation.current = null;
       setResolving(null);
       setResolutionReason("");
-      toast(t("result.commentUpdated"));
       comments.refresh();
       contract.refresh();
     } catch (error) {
@@ -455,11 +450,11 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         </div>
       </details>}
       {contract.data && task.status === "review" && (result.origin_kind === "operator_manual"
-        ? <ManualEvidenceReview task={task} result={result} contract={contract.data} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />
+        ? <ManualEvidenceReview task={task} result={result} contract={contract.data} blockingComments={blockingComments.length} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />
         : reviewing && <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length}
           originalAvailable={originalAvailable}
           toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
-      {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} toast={toast} />}
+      {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />}
       <details className="result-details" open={notesOpen} onToggle={(event) => setNotesOpen(event.currentTarget.open)}>
         <summary>{t("result.annotations", { count: (comments.data ?? []).length })}</summary>
         {comments.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => comments.refresh()}>{t("common.retry")}</button></div>}

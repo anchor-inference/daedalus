@@ -26,7 +26,6 @@ export function PhoneAskAnswers({ ask, projectId, toast, always = false, server 
     setBusy(true);
     try {
       await api.post(`/api/asks/${enc(ask.id)}/answer`, body);
-      toast(t("focus.ask.sent"));
       onDone?.();
     } catch (e) {
       const who = e instanceof ApiError && e.status === 409 ? answeredBy(e.message) : "";

@@ -3,9 +3,9 @@
 // auth header (an <img src> cannot carry one) and shown from a blob URL; the office formats are
 // converted in the browser by libraries loaded only when such a file is opened.
 
-import { Overlay, useLayer } from "./ui/dialogs";
+import { Overlay, toast, useLayer } from "./ui/dialogs";
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, inPanel } from "./api";
 import { Icon } from "./icons";
 import { renderMarkdown } from "./md";
 import { errorText, fmtBytes } from "./ui";
@@ -86,6 +86,35 @@ export function downloadHref(base: string, path: string): string {
   return `${base}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
+/**
+ * Saves a file from the side panel. A link there goes out with no credential and answered 401, so
+ * the bytes are read with the panel's own and handed to the browser as a blob; the extension's frame
+ * allows the download. Anywhere else the link itself does this and this is not called.
+ */
+export async function saveFromPanel(href: string, filename: string): Promise<void> {
+  try {
+    const res = await api.fetch(href);
+    if (!res.ok) throw new Error(res.status === 404 ? t("preview.nofile") : t("preview.failed", { status: res.status }));
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    // A download reads the blob after the click returns; a minute is long past that for any file.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/** What a press on a file with no preview does: the link's own address in a new tab, or the panel's save. */
+export function openOrSave(href: string, filename: string): void {
+  if (inPanel()) void saveFromPanel(href, filename);
+  else window.open(href, "_blank", "noreferrer");
+}
+
 function sourceName(src: PreviewSource): string {
   return "file" in src ? src.file.name : src.path.split("/").pop() || src.path;
 }
@@ -101,7 +130,7 @@ function sourceBlob(src: PreviewSource, onProgress: (value: number | null) => vo
 }
 
 async function fetchBlob(url: string, signal: AbortSignal, progress: (value: number | null) => void): Promise<Blob> {
-  const res = await fetch(url, { headers: api.authHeaders(), signal });
+  const res = await api.fetch(url, { signal });
   if (!res.ok) throw new Error(res.status === 404 ? t("preview.nofile") : t("preview.failed", { status: res.status }));
   if (!res.body) return res.blob();
   const reader = res.body.getReader();

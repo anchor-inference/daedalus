@@ -10,7 +10,6 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
 - on a server: "Pair a browser" shows a one-time code and the server's address, a paired browser is
   listed and revoked only after asking;
 - the defaults (bodies off) and the always-allowed sites are saved as the host's `[browser.user]`;
-- the extension popup's check (a `browser.user` event) is a toast;
 - in a conversation the panel's header switches between the agent's browser and "Your Chrome ·
   Work", and the first switch asks with the consent summary (in the reader's language) before it
   is sent;
@@ -42,9 +41,9 @@ RELAY = {"connected": True, "profile_id": "p1", "profile_name": "Work", "ext_ver
          "transport": "native", "since": "2026-10-20T09:00:00Z", "last_seen": "2026-10-20T09:59:58Z"}
 WORDS = {
     "en": {"connected": "Connected: Work", "check": "Check connection", "rtt": "14 ms", "register": "Register", "waiting": "Not connected", "pair": "Pair a browser",
-           "agent": "Agent's browser", "chrome": "Your Chrome · Work", "toast": "Chrome «Work» checked the connection", "consent": "Every new site asks you first"},
+           "agent": "Agent's browser", "chrome": "Your Chrome · Work", "consent": "Every new site asks you first"},
     "ru": {"connected": "Подключён: Work", "check": "Проверить связь", "rtt": "14 мс", "register": "Зарегистрировать", "waiting": "Не подключён", "pair": "Подключить браузер",
-           "agent": "Браузер агента", "chrome": "Ваш Chrome · Work", "toast": "Chrome «Work» проверил связь", "consent": "Каждый новый сайт сначала спрашивает вас"},
+           "agent": "Браузер агента", "chrome": "Ваш Chrome · Work", "consent": "Каждый новый сайт сначала спрашивает вас"},
 }
 
 
@@ -145,16 +144,6 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     print(f"[{lang}] saved user: {saved}")
     if not saved.get("bodies") or saved.get("granted_sites") != ["example.com", "mail.example.org"]:
         say(f"the defaults were saved as {saved}")
-    # The extension popup's check is a toast here at the same moment.
-    for _ in range(50):
-        if feed.connected():
-            break
-        page.wait_for_timeout(100)
-    feed.send("browser.user", {"kind": "check", "profile_name": "Work"})
-    try:
-        page.get_by_text(w["toast"]).wait_for(timeout=5000)
-    except Exception:  # noqa: BLE001 — said as a problem, with the rest of the run going on
-        say("the popup's check was not a toast")
     page.context.close()
     feed.close()
 

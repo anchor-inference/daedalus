@@ -237,6 +237,14 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     print(f"[{lang}] phone toast: {toast.inner_text()!r}")
     if not toast.locator(".toast-action").count():
         say("the first browser has no line offering to view it")
+    # At the top of a phone: at the foot it stood over the composer.
+    clash = page.evaluate("""() => {
+      const line = document.querySelector('.toast')?.getBoundingClientRect();
+      const field = document.querySelector('.composer')?.getBoundingClientRect();
+      return !!line && !!field && line.top < field.bottom && line.bottom > field.top;
+    }""")
+    if clash:
+        say("the line covers the phone's composer")
     bs.needs_you(gid, "login", "Sign in to accounts.example.com")
     page.wait_for_selector(".browser-headbtn.needs .browser-dot.needs", timeout=5000)
     chip = page.locator(".browser-headbtn").inner_text()

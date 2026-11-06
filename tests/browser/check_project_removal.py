@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_projects  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_projects, wait_until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -31,11 +31,9 @@ PROJECT = {
 }
 WORDS = {
     "en": {"settings": "Settings for Firm", "remove": "Remove", "chats": "Notes works in it, so this will be refused",
-           "goes": "Goes with it: the orchestrator, 3 team members, 4 tasks on the board", "files": "Not one file of its folders is deleted.",
-           "removed": "Firm removed"},
+           "goes": "Goes with it: the orchestrator, 3 team members, 4 tasks on the board", "files": "Not one file of its folders is deleted."},
     "ru": {"settings": "Настройки: Firm", "remove": "Убрать", "chats": "В нём работает Notes, поэтому запрос отклонят",
-           "goes": "Вместе с ним уйдут: оркестратор, 3 сотрудника команды, 4 задачи на доске", "files": "Ни один файл в его папках не удаляется.",
-           "removed": "Firm: проект убран"},
+           "goes": "Вместе с ним уйдут: оркестратор, 3 сотрудника команды, 4 задачи на доске", "files": "Ни один файл в его папках не удаляется."},
 }
 
 
@@ -130,7 +128,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 0, f"the page scrolls sideways: {overflow}"
     dialog.locator("button", has_text=words["remove"]).last.click()
-    expect(page.locator(".toast")).to_contain_text(words["removed"])
+    wait_until(page, lambda: deleted)
     assert deleted == ["/api/projects/p1"], deleted
 
 

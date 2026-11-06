@@ -672,7 +672,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     } catch { /* no site data */ }
     launchOperation.current = null;
     setLaunchEffectId(receipt.effect_id);
-    toast(t("pboard.launch.queued"));
   }
 
   async function launchAfterSave(saved: TaskCommand) {
@@ -700,7 +699,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         const made = await api.post<TaskCommand>(`${boardKey(projectId)}`, { ...body, client_operation_id: intentId(body) });
         operation.current = null;
         createRevision.current = null;
-        toast(t("pboard.saved"));
         await launchAfterSave(made);
         onDone();
         onClose();
@@ -721,7 +719,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
           body.expected_entity_revision = revision;
           saved = await api.put<TaskCommand>(`/api/board/${encodeURIComponent(task.id)}`, { ...body, client_operation_id: intentId(body) });
           operation.current = null;
-          toast(t("pboard.saved"));
         }
         if (assignee && (assignee !== (task.assignee_staff_id ?? "") || !!resumeFrom)) await launchAfterSave(saved);
         // The dialog stays open on the task: an edit is a moment in tracking it, not the end of it.
@@ -759,7 +756,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       const response = await api.post<{ effect_id: string }>(`/api/board/${encodeURIComponent(task.id)}/stop`, { expected_entity_revision: task.entity_revision, client_operation_id: id, reason: "operator_requested" });
       stopOperation.current = null;
       setStopEffectId(response.effect_id);
-      toast(t("result.stopTaskQueued"));
       onDone();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) stopOperation.current = null;
@@ -922,12 +918,12 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const toolPanel = tool && (
     <ToolPanel title={toolLabels[tool]} onClose={() => setTool(null)}>
       {tool === "lifecycle" && <LifecycleCancel bare kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
-      {tool === "comparison" && <TaskComparison bare task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
-      {tool === "handoff" && <RuntimeHandoff bare task={task} onChanged={onDone} toast={toast} />}
+      {tool === "comparison" && <TaskComparison bare task={task} staff={data.staff} onChanged={onDone} />}
+      {tool === "handoff" && <RuntimeHandoff bare task={task} onChanged={onDone} />}
       {tool === "workflow" && <TaskWorkflow bare projectId={projectId} task={task} tasks={data.tasks} />}
       {tool === "context" && <TaskContext bare task={task} staff={data.staff} />}
       {/* A submitted result is the thing to look at next, so the form gives way to it. */}
-      {tool === "manual" && <ManualResult bare task={task} toast={toast} onChanged={() => { setTool(null); onDone(); }} />}
+      {tool === "manual" && <ManualResult bare task={task} onChanged={() => { setTool(null); onDone(); }} />}
       {tool === "diagnostics" && <TaskDiagnostics bare task={task} toast={toast} />}
     </ToolPanel>
   );
@@ -1099,7 +1095,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   );
   const menuItems: MenuItem[] = [
     ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
-    { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+    { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
     "-",
     ...toolItems,
     "-",
@@ -1112,7 +1108,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       taskTab={<div className="ptask ptask-phone">
         {titleBlock}
         {state}
-        <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />
+        <ManualReopenRecovery task={task} onChanged={onDone} />
         {toolPanel || <>
           {briefPart}
           {requirementsPart}
@@ -1135,7 +1131,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       {state}
       <div className="ptask-grid">
         <div className="ptask-main">
-          <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />
+          <ManualReopenRecovery task={task} onChanged={onDone} />
           {toolPanel || <>
             {briefPart}
             {requirementsPart}

@@ -108,7 +108,6 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
       await api.post(intent.path, intent.body);
       remember(null);
       setReason(""); setWithdrawId("");
-      toast(t(intent.kind === "approve" ? "authority.approval.recorded" : "authority.withdrawal.recorded"));
       authority.refresh();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {

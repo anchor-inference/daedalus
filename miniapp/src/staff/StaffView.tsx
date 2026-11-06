@@ -493,7 +493,6 @@ function StaffComposer({ staffId, name, caps, live, toast }: { staffId: string; 
       await api.post(`/api/staff/${enc(staffId)}/messages`, { text: words, when: chosen });
       if (draftRef.current.text.trim() === words && composerWhen(now, draftRef.current.when) === chosen)
         change({ ...draftRef.current, text: "" });
-      toast(t("phone.told", { name }));
       invalidate(`/api/staff/${enc(staffId)}/messages`);
     } catch (err) {
       toast(errorText(err));
@@ -742,7 +741,6 @@ function RulesSection({ staffId, rules, toast }: { staffId: string; rules: Stand
     setBusy(rule);
     try {
       await api.delete(`/api/staff/${enc(staffId)}/rules/${enc(rule)}`);
-      toast(t("staff.rules.revoked"));
     } catch (e) {
       toast(errorText(e));
     } finally {

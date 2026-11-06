@@ -1,3 +1,4 @@
+import { useCopied } from "../ui/components";
 // Connected calendars: what is connected and how its sync is going, and how to connect another. Each
 // provider is a card; picking one shows the few steps it takes, in order, beside the form they fill.
 // A conflict is offered as the two versions to keep, read from the account's conflict fields.
@@ -94,21 +95,21 @@ export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toas
 
   async function sync(account: Account) {
     setBusy(account.id);
-    try { await api.post(`/api/calendar/accounts/${encodeURIComponent(account.id)}/sync`); toast(t("cal.synced")); }
+    try { await api.post(`/api/calendar/accounts/${encodeURIComponent(account.id)}/sync`); }
     catch (exc) { toast(errorText(exc)); }
     finally { setBusy(""); after(); }
   }
 
   async function disconnect(account: Account) {
     if (!(await confirmAsync(t("cal.disconnect.title", { name: account.name }), { body: t(account.provider === "ics" ? "cal.disconnect.body.ics" : "cal.disconnect.body"), action: t("cal.disconnect") }))) return;
-    try { await api.delete(`/api/calendar/accounts/${encodeURIComponent(account.id)}`); toast(t("cal.disconnected")); }
+    try { await api.delete(`/api/calendar/accounts/${encodeURIComponent(account.id)}`); }
     catch (exc) { toast(errorText(exc)); }
     after();
   }
 
   async function resolve(eventId: string, choice: "local" | "remote") {
     setBusy(eventId);
-    try { await api.post(`/api/calendar/events/${encodeURIComponent(eventId)}/resolve`, { choice }); toast(t("cal.conflict.resolved")); }
+    try { await api.post(`/api/calendar/events/${encodeURIComponent(eventId)}/resolve`, { choice }); }
     catch (exc) { toast(errorText(exc)); }
     finally { setBusy(""); after(); }
   }
@@ -163,6 +164,7 @@ export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toas
 }
 
 function ConnectForm({ provider, toast, onDone }: { provider: Provider; toast: (text: string) => void; onDone: () => void }) {
+  const [copied, copy] = useCopied();
   const [name, setName] = useState(t(`cal.provider.${provider}`));
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -189,7 +191,6 @@ function ConnectForm({ provider, toast, onDone }: { provider: Provider; toast: (
       if (provider === "ics") await api.post("/api/calendar/subscriptions", { name, url, color });
       // Yandex and iCloud are CalDAV with a known server, which the host fills in from the provider's name.
       else await api.post("/api/calendar/accounts", { provider, name, remote_calendar_id: remoteId || "primary", credentials: provider === "caldav" ? { server_url: server, username, password } : { username, password } });
-      toast(t("cal.connected"));
       onDone();
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }
@@ -205,7 +206,7 @@ function ConnectForm({ provider, toast, onDone }: { provider: Provider; toast: (
         <div className="cal-redirect">
           <span>{t("cal.redirect")}</span>
           <code>{redirect}</code>
-          <button type="button" className="iconbtn small" onClick={() => { void navigator.clipboard?.writeText(redirect).then(() => toast(t("cal.copied")), () => undefined); }} aria-label={t("cal.copy.redirect")} title={t("cal.copy.redirect")}><Icon name="copy" size={14} /></button>
+          <button type="button" className="iconbtn small" onClick={() => void copy(redirect)} aria-label={t("cal.copy.redirect")} title={t("cal.copy.redirect")}><Icon name={copied ? "check" : "copy"} size={14} /></button>
         </div>
       )}
       <label className="field" htmlFor="cal-connect-name">{t("cal.connect.name")}</label>

@@ -298,12 +298,11 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
   const done = task.checklist.filter((c) => c.done).length;
   const words = statusWords(task, titles);
   const meta = [task.assignee?.name, words.text, task.checklist.length ? t("pbph.parts", { done, n: task.checklist.length }) : "", t("pbph.id", { id: task.id })].filter(Boolean).join(" · ");
-  async function run(work: () => Promise<unknown>, after?: string) {
+  async function run(work: () => Promise<unknown>) {
     if (blocked) { toast(t("result.block.unconfirmed")); return; }
     setBusy(true);
     try {
       await work();
-      if (after) toast(after);
       onDone();
       onClose();
     } catch (error) {
@@ -314,7 +313,7 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
   const move = (status: TaskStatus) => void run(() => api.put(`/api/board/${enc(task.id)}`, { status, expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID() }));
   const stop = async () => {
     if (!(await confirmAsync(t("result.stopTaskTitle", { title: task.title }), { body: t("result.stopTaskBody"), action: t("result.stopTaskAction"), danger: true }))) return;
-    void run(() => api.post(`/api/board/${enc(task.id)}/stop`, { expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID(), reason: "operator_requested" }), t("result.stopTaskQueued"));
+    void run(() => api.post(`/api/board/${enc(task.id)}/stop`, { expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID(), reason: "operator_requested" }));
   };
   const ending = closeItems(task, blocked, { onDone, toast });
   return (
@@ -333,7 +332,7 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
         )}
         <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { onDone(); onClose(); }} />
         {task.assignee?.session_id && <SheetRow icon="bots" label={t("pboard.open.staff", { name: task.assignee.name })} onClick={() => { onClose(); navigate(projectSessionPath(projectId, task.assignee!.session_id!)); }} />}
-        <SheetRow icon="copy" label={t("board.copyid")} value={<code>{task.id}</code>} onClick={async () => { onClose(); toast((await copyText(task.id)) ? t("board.copied") : task.id); }} />
+        <SheetRow icon="copy" label={t("board.copyid")} value={<code>{task.id}</code>} onClick={async () => { onClose(); if (!(await copyText(task.id))) toast(task.id); }} />
         <div className="ph-msep" role="separator" />
         {task.status === "doing" && <SheetRow icon="stop" danger label={t("result.stopTaskAction")} hint={t("result.stopTaskScope")} disabled={blocked} onClick={() => void stop()} />}
         {ending.map((item) => item !== "-" && (

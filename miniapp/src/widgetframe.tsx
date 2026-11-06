@@ -95,7 +95,6 @@ export function WidgetFrame({ sessionId, widget, toast, compose }: WidgetFramePr
       // A widget may not fill the composer on a timer while the operator is typing elsewhere.
       if (!userActive()) return reply(message.id, { error: "ask answers a click of the operator's, not a timer" });
       if (!composeRef.current?.(text)) return reply(message.id, { error: "there is no message field here" });
-      toast(t("widget.asked"));
       reply(message.id, { result: true });
     };
     let last = "";
@@ -132,7 +131,6 @@ export function WidgetFrame({ sessionId, widget, toast, compose }: WidgetFramePr
         title, html: widget.html, data: widget.data ?? null,
       });
       invalidate("/api/pages");
-      toast(t("widget.page.done", { title }));
       navigate(made.path);
     } catch (error) {
       toast(t("widget.page.failed", { error: error instanceof ApiError ? error.message : String(error) }));

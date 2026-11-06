@@ -86,7 +86,6 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
         expected_entity_revision: project.entity_revision, client_operation_id: crypto.randomUUID() });
       invalidate("/api/projects");
       invalidate("/api/sessions");
-      toast(t("project.restored", { name: project.name }));
     } catch (error) { toast(errorText(error)); }
     finally { setRestoring(""); }
   }

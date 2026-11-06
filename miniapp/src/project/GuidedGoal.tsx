@@ -82,7 +82,6 @@ export function GuidedGoal({ project, toast, wide, ready, embedded = false, chan
       invalidate(boardKey(project.id));
       invalidate(`/api/projects/${encodeURIComponent(project.id)}/brief`);
       invalidate("/api/projects");
-      toast(t("goal.start.saved"));
       onSaved?.();
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409 &&

@@ -72,7 +72,6 @@ function DiagramList({ toast, sessionId }: { toast: (message: string) => void; s
   async function duplicate(item: DiagramItem) {
     try {
       await api.post<Diagram>(`/api/diagrams/${item.id}/duplicate`, { title: t("diagrams.copy.title", { title: item.title }).slice(0, 160) });
-      toast(t("diagrams.duplicated"));
       invalidate("/api/diagrams");
       refresh();
     } catch (exc) { toast(errorText(exc)); }

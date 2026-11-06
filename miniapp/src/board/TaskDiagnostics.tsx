@@ -2,7 +2,8 @@ import { useState } from "react";
 import { bytes } from "../format";
 import { t } from "../i18n";
 import { useQuery } from "../store";
-import { copyText } from "../ui/components";
+import { useCopied } from "../ui/components";
+import { Icon } from "../icons";
 import type { ProjectTask } from "./board";
 
 type Fault = { kind: string; diagnostic_ref?: string; created_at?: string; cancelled_by?: string };
@@ -27,12 +28,12 @@ export function TaskDiagnostics({ task, toast, bare = false }: { task: ProjectTa
   const base = attemptId ? `/api/board/${encodeURIComponent(task.id)}/attempts/${encodeURIComponent(attemptId)}` : "";
   const query = useQuery<Diagnostics>(open && attemptId ? `${base}/diagnostics` : null);
   const resources = useQuery<Resources>(open && attemptId ? `${base}/resources` : null);
+  const [copied, copyReport] = useCopied();
   if (!attemptId || task.status === "done" || task.status === "dropped") return null;
   const reason = stopReason(resources.data);
   // What a bug report needs, already redacted by the host: the fault list and the resource record.
   async function copy() {
-    const ok = await copyText(JSON.stringify({ task_id: task.id, diagnostics: query.data, resources: resources.data ?? null }, null, 2));
-    toast?.(t(ok ? "pboard.attempt.copied" : "pboard.attempt.copyFailed"));
+    if (!(await copyReport(JSON.stringify({ task_id: task.id, diagnostics: query.data, resources: resources.data ?? null }, null, 2)))) toast?.(t("pboard.attempt.copyFailed"));
   }
   const body = open && (query.loading ? <p className="sub">{t("common.loading")}</p>
       : query.error ? <p className="result-warning" role="alert">{t("pboard.attempt.unavailable")} <button type="button" className="linkbtn" onClick={() => void query.refresh()}>{t("common.retry")}</button></p>
@@ -44,7 +45,7 @@ export function TaskDiagnostics({ task, toast, bare = false }: { task: ProjectTa
               {t(`pboard.attempt.kind.${fault.kind}`)}{fault.diagnostic_ref && <> · <code>{fault.diagnostic_ref}</code></>}
             </li>)}</ul>}
           {query.data.truncated && <p>{t("pboard.attempt.more")}</p>}
-          <button type="button" className="btn small" onClick={() => void copy()}>{t("pboard.attempt.copy")}</button>
+          <button type="button" className="btn small" onClick={() => void copy()}>{copied && <Icon name="check" size={13} />}{t("pboard.attempt.copy")}</button>
         </div> : null);
   if (bare) return <div className="task-diagnostics">{body}</div>;
   return <details className="result-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>

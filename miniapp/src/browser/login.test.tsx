@@ -74,7 +74,8 @@ describe("the sign-in form", () => {
     const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/browsers/s-abc/login");
     expect(JSON.parse(String(init.body))).toEqual({ login_id: "x1", username: "someone@example.com", password: "FAKE-PASSWORD-1", save: false });
-    expect(told).toEqual(["Signed in to acme.test; the page is now https://acme.test/home"]);
+    // Signed in, the page moves on; only an answer that went wrong is worth a line.
+    expect(told).toEqual([]);
     // Emptied whatever the answer: nothing typed stays in the page.
     expect(host.querySelector<HTMLInputElement>("input[type=password]")!.value).toBe("");
   });
@@ -110,7 +111,7 @@ describe("the sign-in form", () => {
     await draw(<BrowserLoginCard group={group()} toast={(text) => told.push(text)} />);
     await reactAct(async () => host.querySelector<HTMLButtonElement>("button[data-decline]")!.click());
     expect((fetch.mock.calls[0] as [string])[0]).toContain("/api/browsers/s-abc/login/decline");
-    expect(told).toEqual(["You declined the sign-in to acme.test"]);
+    expect(told).toEqual([]);
   });
 
   it("draws nothing for a group that asks nothing", async () => {

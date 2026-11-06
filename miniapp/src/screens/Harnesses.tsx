@@ -44,11 +44,10 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
   const updates = updateCount(rows);
   const hostReachable = !!data?.environments.includes("host");
 
-  async function run(what: string, path: string, done: string, label: string) {
+  async function run(what: string, path: string) {
     try {
       const answer = await api.post<Record<string, unknown>>(path, { env });
       setRefused((r) => ({ ...r, [what]: [] }));
-      toast(t(done, { name: label }));
       const terminal = (answer?.operation as { terminal_id?: string } | undefined)?.terminal_id ?? (answer?.terminal_id as string | undefined);
       if (what.endsWith(":signin") && terminal) navigate(pathFor("terminals", terminal));
     } catch (e) {
@@ -75,7 +74,6 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
     try {
       const answer = await api.put<{ row: HarnessRow }>(`/api/harnesses/${row.harness}/models`, { env, models });
       if (data && answer?.row) prime(key(env), { ...data, rows: data.rows.map((r) => (r.harness === row.harness ? answer.row : r)) });
-      toast(t(models ? "harness.models.saved" : "harness.models.reset", { name: row.label }));
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -84,9 +82,9 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
   }
   const act = (row: HarnessRow) => {
     const state = rowState(row);
-    if (state === "install") void run(`${row.harness}:install`, `/api/harnesses/${row.harness}/install`, "harness.installing", row.label);
-    if (state === "signin") void run(`${row.harness}:signin`, `/api/harnesses/${row.harness}/login-terminal`, "harness.signingin", row.label);
-    if (state === "update") void run(`${row.harness}:update`, `/api/harnesses/${row.harness}/update`, "harness.updating", row.label);
+    if (state === "install") void run(`${row.harness}:install`, `/api/harnesses/${row.harness}/install`);
+    if (state === "signin") void run(`${row.harness}:signin`, `/api/harnesses/${row.harness}/login-terminal`);
+    if (state === "update") void run(`${row.harness}:update`, `/api/harnesses/${row.harness}/update`);
   };
 
   const subtitle = data
@@ -108,7 +106,7 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
               <Icon name="reload" size={14} />
               <span>{checking ? t("harness.checking") : t("harness.check")}</span>
             </button>
-            <button className="btn small primary harness-update-all" disabled={updates === 0} onClick={() => void run("all:update", "/api/harnesses/update-all", "harness.updating.all", "")}>
+            <button className="btn small primary harness-update-all" disabled={updates === 0} onClick={() => void run("all:update", "/api/harnesses/update-all")}>
               <Icon name="download" size={14} />
               <span>{t("harness.update.all")}</span>
             </button>
@@ -156,7 +154,7 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
             <span className="harness-node-name">Node</span>
             <span className="mono">{data.node.installed ? data.node.version : "—"}</span>
             <span className="sub">{t("harness.node.pinned", { version: data.node.pinned })}</span>
-            {!data.node.installed && <button className="btn small" onClick={() => void run("node:install", "/api/harnesses/node/install", "harness.installing", "Node")}>{t("harness.node.install")}</button>}
+            {!data.node.installed && <button className="btn small" onClick={() => void run("node:install", "/api/harnesses/node/install")}>{t("harness.node.install")}</button>}
           </div>
         )}
         {data && (

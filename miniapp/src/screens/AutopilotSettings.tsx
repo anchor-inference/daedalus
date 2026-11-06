@@ -69,7 +69,6 @@ export function UserStyleCard({ toast }: { toast: (text: string) => void }) {
     if (!(await confirmAsync(t("settings.style.forget.confirm")))) return;
     try {
       setStyle(await api.delete<UserStyle>("/api/user-style"));
-      toast(t("settings.style.forgotten"));
     } catch (e) {
       toast(errorText(e));
     }

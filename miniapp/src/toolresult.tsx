@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { api } from "./api";
 import { CHROME_ASK_TOOL } from "./composer";
-import { copyText, fmtInt } from "./ui/components";
+import { Icon } from "./icons";
+import { fmtInt, useCopied } from "./ui/components";
 import { t } from "./i18n";
 import type { ToolItem } from "./turns";
 import { errorText } from "./ui";
@@ -62,8 +63,9 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
       setLoading(false);
     }
   }
+  const [copied, copy] = useCopied();
   async function copyAll() {
-    toast(t((await copyText(text)) ? "common.copied" : "session.result.copy.failed"));
+    if (!(await copy(text))) toast(t("session.result.copy.failed"));
   }
   const approval = item.error ? /Approval key: ([0-9a-f]{12})/.exec(text) : null;
   const [granted, setGranted] = useState(false);
@@ -103,7 +105,7 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
       {full !== null && (
         <div className="result-tools">
           <span className="num">{t("session.result.size", { n: fmtInt(full.text.length) })}</span>
-          <button type="button" className="btn small" onClick={copyAll}>{t("session.result.copy")}</button>
+          <button type="button" className="btn small" onClick={() => void copyAll()}>{copied && <Icon name="check" size={13} />}{t("session.result.copy")}</button>
           <button type="button" className="btn small" onClick={() => saveText(text, `${item.name || "result"}-${item.id}.txt`)}>{t("common.download")}</button>
         </div>
       )}

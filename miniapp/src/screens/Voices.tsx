@@ -34,7 +34,7 @@ function Bar({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function TtsVoices({ toast }: { toast: (message: string) => void }) {
+export function TtsVoices() {
   const [view, setView] = useState<TtsView | null>(null);
   // Every answer is folded into the view the page already has rather than replacing it: three
   // endpoints answer with this shape and a field missing from any of them is a blank screen.
@@ -137,21 +137,17 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
         // The engine is an optional extra natively, and it is the same wheel recognition uses, so
         // this is the recognition install endpoint on purpose rather than a second copy of it.
         if (view && !view.engine_installed) {
-          toast(t("tts.engine.installing"));
           await api.post("/api/stt/engine");
         }
         await api.post(`/api/tts/voices/${encodeURIComponent(id)}/download`);
-        toast(t("tts.toast.downloading"));
       } else if (what === "cancel") {
         await api.post(`/api/tts/voices/${encodeURIComponent(id)}/cancel`);
       } else if (what === "use") {
         take(await api.post<Partial<TtsView>>("/api/tts/select", { voice: id }));
         haptic("medium");
-        toast(id ? t("tts.toast.using") : t("tts.toast.stopped"));
         return;
       } else {
         await api.delete(`/api/tts/voices/${encodeURIComponent(id)}`);
-        toast(t("tts.toast.removed"));
       }
       await load();
     } catch (e) {

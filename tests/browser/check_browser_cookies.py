@@ -1,9 +1,9 @@
-"""The Browser tab's menu loads a cookie file into the browser, and says what it loaded without a value.
+"""The Browser tab's menu loads a cookie file into the browser, and shows it went through without a value.
 
 - the toolbar's menu offers "Import cookies" ("Импортировать куки");
 - choosing it opens a file picker; the file picked is sent whole to ``POST /api/browsers/{group}/cookies``
   with the page's site as the domain a bare header would need;
-- the toast says the count and the sites the host answered, in English and Russian.
+- a tick on the menu's button says it went in, with no line beside it, in English and Russian.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_browser_cookies.py
 
@@ -39,7 +39,8 @@ def check(browser, scenes, lang: str) -> None:  # type: ignore[no-untyped-def]
     with page.expect_file_chooser() as chosen:
         page.get_by_role("menuitem", name=item).click()
     chosen.value.set_files({"name": "shop.example_cookies.txt", "mimeType": "text/plain", "buffer": FILE.encode()})
-    expect(page.get_by_text(said)).to_be_visible(timeout=5000)
+    expect(page.locator(f".bp-toolbar button[aria-label='{menu}'] svg path[d='M5 12l5 5 9-11']")).to_be_visible(timeout=5000)
+    assert page.get_by_text(said).count() == 0, f"{lang}: a line says what the tick says"
     sent = bs.posted("/g1/cookies")
     assert len(sent) == 1 and sent[0]["text"] == FILE, f"{lang}: the app sent {sent!r}"
     assert sent[0].get("domain"), f"{lang}: the page's site was not sent as the header's domain: {sent!r}"

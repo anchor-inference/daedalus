@@ -229,7 +229,6 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "",
     setBusy(true);
     try {
       await api.post(`/api/asks/${enc(ask.id)}/answer`, body);
-      toast(t("focus.ask.sent"));
       setWriting(false);
       setText("");
     } catch (e) {
@@ -400,7 +399,6 @@ export function StaffPhoneTerminal({ staffId, projectId, ...props }: PhoneTermin
       try {
         // The same choice the staff view's composer starts on, with no picker here to change it.
         await api.post(`/api/staff/${enc(staffId)}/messages`, { text, when: composerWhen(nowChoice(view?.capabilities), null) });
-        toast(t("phone.told", { name: name || t("focus.team") }));
         invalidate(`/api/staff/${enc(staffId)}/messages`);
         return true;
       } catch (e) {

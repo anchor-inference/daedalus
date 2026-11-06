@@ -28,7 +28,6 @@ export function ChatFinish({ task, onOpenSession, onChanged, toast }: {
       // The host takes a chat's finish back only on the operator's word: the result stays in the
       // history, a return is recorded against it, and the card is open again.
       await api.put(`/api/board/${encodeURIComponent(task.id)}`, { status: "todo", expected_entity_revision: revision, client_operation_id: crypto.randomUUID() });
-      toast(t("board.finishedBy.reopened"));
       onChanged();
     } catch (error) {
       toast(errorText(error));

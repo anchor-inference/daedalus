@@ -22,8 +22,7 @@ import "./imports.css";
 /** Pull in what the other program wrote since the import, by the cursor the host kept. */
 export async function pullNew(sessionId: string, toast: (text: string) => void, after?: () => void): Promise<void> {
   try {
-    const answer = await api.post<{ added: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/import/refresh`, {});
-    toast(answer.added > 0 ? plural("imp.pulled", answer.added) : t("imp.pulled.none"));
+    await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/import/refresh`, {});
     after?.();
   } catch (error) {
     toast(errorText(error));

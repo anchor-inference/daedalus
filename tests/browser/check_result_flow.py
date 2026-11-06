@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from api_stub import BoardStub, Unhandled, expect_app
+from api_stub import BoardStub, Unhandled, expect_app, wait_until
 from check_project_board import BASE, CHROMIUM, PID, project, serve
 from playwright.sync_api import expect, sync_playwright
 
@@ -135,7 +135,7 @@ def run() -> int:
         expect(checks).not_to_contain_text("lint is clean")
         expect(checks).to_contain_text("another commit")
         checks.get_by_role("button", name="Use this check").click()
-        expect(page.locator(".toast")).to_contain_text("Check recorded as evidence")
+        assert wait_until(page, lambda: any(kind == "check" for kind, _ in stub.operations)), stub.operations
         flow.get_by_role("textbox", name="What did you observe?").fill("Opened the export and checked its schema")
         flow.get_by_role("button", name="Record observation").click()
         expect(flow).to_contain_text("Evidence recorded")
@@ -170,7 +170,7 @@ def run() -> int:
         decide.get_by_role("button", name="Merge reviewed branch").click()
         expect(decide.get_by_role("button", name="Accept this result")).to_be_enabled()
         decide.get_by_role("button", name="Accept this result").click()
-        expect(page.locator(".toast")).to_contain_text("Result accepted")
+        assert wait_until(page, lambda: any(kind == "accept" for kind, _ in stub.operations)), stub.operations
         assert [kind for kind, _ in stub.operations] == ["check", "evidence", "comment", "verdict", "merge", "accept"], stub.operations
         check = dict(stub.operations)["check"]
         assert check["verification_id"] == 7 and check["criterion_id"] == "C1", check

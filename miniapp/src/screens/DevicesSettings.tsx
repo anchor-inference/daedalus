@@ -17,7 +17,7 @@ import { Icon } from "../icons";
 import { CLI_DEVICES, PAIRS, normCode, openPairing, osLabel, showCode } from "../remote";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
-import { copyText } from "../ui/components";
+import { useCopied } from "../ui/components";
 
 /** How daedalus-cli is installed, as its guide (`cli/README.md`) says: the install script downloads
  *  the archive for the machine from the newest desktop release, checks it against the release's
@@ -83,11 +83,12 @@ function Waiting() {
 }
 
 function Command({ text, toast }: { text: string; toast: (text: string) => void }) {
+  const [copied, copy] = useCopied();
   return (
     <div className="devices-cmd">
       <code className="truncate">{text}</code>
       <button type="button" className="iconbtn small quiet" aria-label={t("common.copy")} title={t("common.copy")}
-        onClick={() => void copyText(text).then((ok) => toast(t(ok ? "common.copied" : "devices.copy.failed")))}><Icon name="copy" size={14} /></button>
+        onClick={() => void copy(text).then((ok) => { if (!ok) toast(t("devices.copy.failed")); })}><Icon name={copied ? "check" : "copy"} size={14} /></button>
     </div>
   );
 }
@@ -173,7 +174,6 @@ function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: stri
     setBusy(true);
     try {
       await api.delete(`${CLI_DEVICES}/${encodeURIComponent(d.id)}`);
-      toast(t("devices.revoked", { name: d.name }));
       invalidate(CLI_DEVICES);
       invalidate("/api/sessions");
     } catch (e) {

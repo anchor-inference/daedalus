@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, wait_until  # noqa: E402
 from import_stub import IMPORTED_ID, ImportStub, imported_row, imported_session  # noqa: E402
 from screenshots import S1, UNHANDLED, detail, listing, stub  # noqa: E402
 
@@ -52,7 +52,7 @@ WORDS = {
            "found": "Found in 3 folders · 3 sessions", "read": "Read on the host", "parsed": "Parsed: 214 messages", "masked": "Secrets hidden: 3",
            "banner": "Brought over from", "secrets": "secrets hidden: 3", "pull": "Pull in what's new", "original": "Original",
            "handoff": "Continued in Daedalus", "worked": "Work in Claude Code", "origin": "Origin", "down": "The machine is not answering",
-           "card": "Continue from other programs", "fresh": "Fresh on the machine", "phone_title": "Continue a session", "pulled": "Pulled in 2 new messages", "nosessions": "no sessions"},
+           "card": "Continue from other programs", "fresh": "Fresh on the machine", "phone_title": "Continue a session", "nosessions": "no sessions"},
     "ru": {"title": "Продолжить сессию из другой программы", "entry": "Импорт сессии", "palette": "Импорт сессии",
            "notfound": "не найден", "here": "Сессии Claude Code в этой папке · 6", "join": "В проект «Smart home»",
            "import": "Импортировать", "snapshot": "Импортировать снимок", "again": "Импортировать заново как новый чат", "tail": "Сводка и последние сообщения",
@@ -60,7 +60,7 @@ WORDS = {
            "found": "Найдено в 3 папках · 3 сессии", "read": "Прочитано на хосте", "parsed": "Разобрано: 214 сообщений", "masked": "Скрыто секретов: 3",
            "banner": "Перенесено из", "secrets": "скрыто секретов: 3", "pull": "Подтянуть новое", "original": "Оригинал",
            "handoff": "Продолжено в Daedalus", "worked": "Работа в Claude Code", "origin": "Откуда", "down": "Машина не отвечает",
-           "card": "Продолжить из других программ", "fresh": "Свежие на машине", "phone_title": "Продолжить сессию", "pulled": "Подтянуто 2 новых сообщения", "nosessions": "нет сессий"},
+           "card": "Продолжить из других программ", "fresh": "Свежие на машине", "phone_title": "Продолжить сессию", "nosessions": "нет сессий"},
 }
 
 
@@ -198,7 +198,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     expect(banner).to_contain_text(words["banner"], timeout=10000)
     expect(banner).to_contain_text(words["secrets"])
     banner.locator("[data-pull]").click()
-    expect(page.locator(".toast", has_text=words["pulled"]).first).to_be_visible(timeout=5000)
+    wait_until(page, lambda: imports.refreshed)
     if imports.refreshed != [IMPORTED_ID]:
         say(f"Pull in what's new reached {imports.refreshed}")
     with page.expect_download() as download:

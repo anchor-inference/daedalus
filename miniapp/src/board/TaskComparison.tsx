@@ -77,8 +77,8 @@ function blocker(code: string): string {
   return t(`pair.block.${["cost_unknown", "cost_cap_exceeded", "exit_unknown", "result_missing", "alternatives_missing", "contract_stale"].includes(kind) ? kind : "other"}`);
 }
 
-export function TaskComparison({ task, staff, onChanged, toast, bare = false }: { task: ProjectTask; staff: TeamMember[];
-  onChanged: () => void; toast: (message: string) => void; bare?: boolean }) {
+export function TaskComparison({ task, staff, onChanged, bare = false }: { task: ProjectTask; staff: TeamMember[];
+  onChanged: () => void; bare?: boolean }) {
   // `bare` is the comparison opened from the task's menu, already open and without a fold of its own.
   const [open, setOpen] = useState(bare);
   const [preparing, setPreparing] = useState(false);
@@ -162,7 +162,6 @@ export function TaskComparison({ task, staff, onChanged, toast, bare = false }: 
       setPending(null);
       keepLaunch(task.id, null);
       setSelectedId(receipt.group_id);
-      toast(t("pair.queued"));
       history.refresh();
       detail.refresh();
       contract.refresh();
@@ -230,7 +229,6 @@ export function TaskComparison({ task, staff, onChanged, toast, bare = false }: 
       detail.refresh();
       contract.refresh();
       onChanged();
-      toast(t("pair.closed"));
     } catch (error) { setWarning(errorText(error)); history.refresh(); detail.refresh(); }
     finally { setBusy(false); }
   }
@@ -321,7 +319,7 @@ export function TaskComparison({ task, staff, onChanged, toast, bare = false }: 
             <ComparisonReview key={`${selected.group_id}:${slot.slot}`} task={task} groupId={selected.group_id}
               slot={slot.slot} candidate={result} contract={current} attemptId={alternative?.attempt_id ?? null}
               groupOpen={["planned", "active", "ready"].includes(selected.state)} groupReady={selected.blockers.length === 0 && costBound(selected) === "within" &&
-                ["active", "ready"].includes(selected.state)} onChanged={() => { detail.refresh(); results.refresh(); contract.refresh(); onChanged(); }} toast={toast} />
+                ["active", "ready"].includes(selected.state)} onChanged={() => { detail.refresh(); results.refresh(); contract.refresh(); onChanged(); }} />
           </section>;
         })}
         {(["planned", "active", "ready"].includes(selected.state) || pendingClose?.group_id === selected.group_id) && <div className="btnrow">

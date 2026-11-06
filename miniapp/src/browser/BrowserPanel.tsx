@@ -452,7 +452,6 @@ function useControl(group: BrowserGroup, live: LiveView | null, snap: LiveSnapsh
     }),
     giveBack: (note: string) => run(async () => {
       await setControl(group.id, { owner: "agent", note: note.trim() || undefined });
-      toast(t("browser.given"));
     }),
     pause: () => run(() => setControl(group.id, { owner: "paused", reason: t("browser.paused.reason") })),
     resume: () => run(() => setControl(group.id, { owner: "agent" })),
@@ -547,21 +546,28 @@ function GiveBack({ anchor, onClose, onGive }: { anchor: HTMLElement; onClose: (
  * Pick a cookie file (an extension's cookies.txt, a JSON export) and load it into the group's profile:
  * the same path the agent's BrowserCookies takes, for an operator who would rather not ask.
  */
-function pickCookies(group: string, domain: string, toast: (text: string) => void) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".txt,.json,text/plain,application/json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    try {
-      const out = await importCookies(group, await file.text(), domain);
-      toast(t("browser.cookies.loaded", { n: out.set, sites: out.sites }) + (out.rejected + out.skipped ? " " + t("browser.cookies.skipped", { n: out.rejected + out.skipped }) : ""));
-    } catch (e) {
-      toast(errorText(e));
-    }
-  };
-  input.click();
+/** Resolves true when every cookie of the file went in; what did not is said, with what did. */
+function pickCookies(group: string, domain: string, toast: (text: string) => void): Promise<boolean> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".txt,.json,text/plain,application/json";
+    input.oncancel = () => resolve(false);
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(false);
+      try {
+        const out = await importCookies(group, await file.text(), domain);
+        const left = out.rejected + out.skipped;
+        if (left) toast(`${t("browser.cookies.loaded", { n: out.set, sites: out.sites })} ${t("browser.cookies.skipped", { n: left })}`);
+        resolve(!left);
+      } catch (e) {
+        toast(errorText(e));
+        resolve(false);
+      }
+    };
+    input.click();
+  });
 }
 
 function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable, fit, onFit, quality, onQuality }: {
@@ -592,7 +598,6 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   const record = async (on: boolean) => {
     try {
       await setRecording(group.id, on);
-      toast(t(on ? "browser.record.on" : "browser.record.off"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -623,7 +628,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
         },
       },
     ] : []),
-    { label: t("browser.cookies.import"), icon: "import" as IconName, onSelect: () => void pickCookies(group.id, domainOf(url), toast) },
+    { label: t("browser.cookies.import"), icon: "import" as IconName, ticks: true, onSelect: () => pickCookies(group.id, domainOf(url), toast) },
     ...(groups.length > 1 && onGroup ? ["-" as const, ...groups.map((g) => ({ label: `${domainOf(g.tabs.find((x) => x.active)?.url ?? "")} · ${g.profile}`, icon: "globe" as IconName, checked: g.id === group.id, onSelect: () => onGroup(g.id) }))] : []),
     "-",
     {

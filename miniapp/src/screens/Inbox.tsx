@@ -192,8 +192,7 @@ export function ProposalCard({ p, toast, onDone }: { p: Proposal; toast: (t: str
   async function decide(decision: "approve" | "reject") {
     setBusy(true);
     try {
-      const r = await api.post<{ result: string }>(`/api/proposals/${p.id}/decide`, { decision, reason });
-      toast(r.result);
+      await api.post(`/api/proposals/${p.id}/decide`, { decision, reason });
       setRejecting(false);
       onDone();
     } catch (e) {

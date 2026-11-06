@@ -231,7 +231,6 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
               setView((v) => (v ? applyFrame(v, frame) : v));
               if (frame.state === "failed" && frame.error) setProblem(frame.error);
               if (settled(frame)) {
-                if (frame.state === "installed") toast(t("comp.toast.installed", { name: label(frame.id) }));
                 void load();
               }
             } catch {
@@ -251,7 +250,6 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
     try {
       await installComponent(id);
       haptic("medium");
-      toast(t("comp.toast.started", { name: label(id) }));
     } catch (e) {
       setProblem(errorText(e));
     }
@@ -272,7 +270,6 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
     setProblem("");
     try {
       await removeComponent(id);
-      toast(t("comp.toast.removed", { name: label(id) }));
     } catch (e) {
       setProblem(errorText(e));
     }
@@ -283,7 +280,6 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
     setRestarting(true);
     try {
       await restartAgent();
-      toast(t("comp.restart.asked"));
     } catch (e) {
       setProblem(errorText(e));
     } finally {
@@ -343,7 +339,7 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
  * too, as one button with the size on it, and links to the full page for everything else. It renders
  * nothing at all when the runtime is present — a notice about a solved problem is noise.
  */
-export function SpeechRuntimeNotice({ toast, onInstalled }: { toast: (t: string) => void; onInstalled?: () => void }) {
+export function SpeechRuntimeNotice({ onInstalled }: { onInstalled?: () => void }) {
   const [entry, setEntry] = useState<ComponentEntry | null>(null);
   const [problem, setProblem] = useState("");
   const [asked, setAsked] = useState(false);
@@ -383,7 +379,6 @@ export function SpeechRuntimeNotice({ toast, onInstalled }: { toast: (t: string)
     setAsked(true);
     try {
       await installComponent("speech");
-      toast(t("voice.needs.installing"));
       haptic("medium");
     } catch (e) {
       setProblem(errorText(e));

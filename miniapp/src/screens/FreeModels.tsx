@@ -79,7 +79,6 @@ export function FreeModels({ onSaved, toast }: { onSaved: (id: string, settings:
       });
       setKey("");
       await load();
-      toast(t("free.connected"));
     } catch (cause) {
       toast(errorText(cause));
     } finally {
@@ -111,7 +110,6 @@ export function FreeModels({ onSaved, toast }: { onSaved: (id: string, settings:
         max_output_tokens: Math.max(1024, Math.min(model.max_output_tokens ?? 8192, 64000)),
       });
       onSaved(id, next);
-      toast(t("free.added"));
       await load();
     } catch (cause) {
       toast(errorText(cause));

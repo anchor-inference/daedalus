@@ -148,11 +148,14 @@ async function archiveError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, message, data);
 }
 
-async function call<T>(method: string, path: string, body?: unknown, responseType: "json" | "text" = "json"): Promise<T> {
+/** A request with the caller's credential, in whichever mode the app runs. An `<img src>` carries no
+ *  header, so what the side panel shows is read through here and drawn from a blob: its frame has no
+ *  cookie and must not get one. These go to `/api/`, which the app's service worker leaves alone, so
+ *  the header reaches the host as sent. */
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const send = () => fetch(panelPath(path), {
-    method,
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...init,
+    headers: { ...init.headers, ...authHeaders() },
     ...(panelToken !== null ? { credentials: "omit" as const } : {}),
   });
   let response = await send();
@@ -165,6 +168,11 @@ async function call<T>(method: string, path: string, body?: unknown, responseTyp
       response = await send();
     }
   }
+  return response;
+}
+
+async function call<T>(method: string, path: string, body?: unknown, responseType: "json" | "text" = "json"): Promise<T> {
+  const response = await authedFetch(path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!response.ok) {
     let detail: unknown = response.statusText;
     let data: Record<string, unknown> = {};
@@ -234,6 +242,7 @@ export const api = {
     return `/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
   },
   authHeaders,
+  fetch: authedFetch,
   upload,
   /** A workspace file as a blob URL: <img>/<iframe> cannot send the auth header, so the bytes are fetched here. */
   fetchBlob: async (sessionId: string, path: string): Promise<{ url: string; type: string; size: number }> => {

@@ -11,7 +11,7 @@ import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { PreviewSource, downloadHref } from "./preview";
 import { errorText, fmtBytes } from "./ui";
-import { plural, t } from "./i18n";
+import { t } from "./i18n";
 import { Entry, GrepHit, NameHit, Row, SearchMode, Tree, ancestorsOf, emptyTree, filterLoaded, keyMove, loadedRows, openFolder, openFolders, parentOf, readGrep, readNameSearch, setError, setListing, setLoading, toggleFolder, typeAhead, visibleRows } from "./explorer";
 
 import { FileSkeleton } from "./feedback";
@@ -148,8 +148,6 @@ export function Explorer({ base: sessionBase, root, upload: canUpload = false, f
       for (const file of Array.from(files)) form.append("files", file, file.name);
       const res = await fetch(uploadUrl, { method: "POST", headers: api.authHeaders(), body: form });
       if (!res.ok) throw new Error(res.statusText);
-      const result = await res.json() as { files: string[] };
-      toast?.(plural("session.files.added", result.files.length));
       setGeneration((n) => n + 1);
     } catch (e) { toast?.(errorText(e)); }
     finally { setUploading(false); if (upload.current) upload.current.value = ""; }
@@ -192,9 +190,9 @@ export function Explorer({ base: sessionBase, root, upload: canUpload = false, f
           <span className="grow truncate"><span className="title">{row.name}{row.line ? `:${row.line}` : ""}</span>{row.snippet !== undefined && <span className="grep-snippet">{row.snippet}</span>}</span>
           {athome && written.includes(row.path) && <span className="written-badge" title={t("explorer.written")} aria-label={t("explorer.written")}>●</span>}
           {!row.dir && <span className="file-size">{fmtBytes(row.size)}</span>}
-          <span className="explorer-actions"><OverflowMenu contextSelector=".filerow" small items={row.dir ? [{ label: t("panel.tab.files"), icon: "folder", onSelect: () => open(row) }, { label: t("explorer.copy"), icon: "copy", onSelect: () => void copyText(row.path).then((ok) => toast?.(t(ok ? "common.copied" : "svc.copyfail"))) }] : [
+          <span className="explorer-actions"><OverflowMenu contextSelector=".filerow" small items={row.dir ? [{ label: t("panel.tab.files"), icon: "folder", onSelect: () => open(row) }, { label: t("explorer.copy"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(row.path); if (!ok) toast?.(t("svc.copyfail")); return ok; } }] : [
             { label: t("preview.open"), icon: "eye", onSelect: () => open(row) },
-            { label: t("explorer.copy"), icon: "copy", onSelect: () => void copyText(row.path).then((ok) => toast?.(t(ok ? "common.copied" : "svc.copyfail"))) },
+            { label: t("explorer.copy"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(row.path); if (!ok) toast?.(t("svc.copyfail")); return ok; } },
             { label: t("common.download"), icon: "download", onSelect: () => { const a = document.createElement("a"); a.href = downloadHref(base, row.path); a.download = row.path.split("/").pop()!; a.click(); } },
             { label: t("panel.opennew"), icon: "external", onSelect: () => { window.open(downloadHref(base, row.path), "_blank", "noopener,noreferrer"); } },
           ]} /></span>

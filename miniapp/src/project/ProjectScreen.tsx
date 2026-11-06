@@ -71,7 +71,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
       />
     ) : (
       // The project's home, so a phone's way back is the orchestration list it was picked from.
-      <EnableOrchestrator project={project} toast={toast} back={wide ? null : ORCHESTRATION_LIST} />
+      <EnableOrchestrator project={project} back={wide ? null : ORCHESTRATION_LIST} />
     );
     // An existing conversation remains usable while its project goal is being established.
     body = orchestrator?.enabled && orchestrator.session_id ? <>

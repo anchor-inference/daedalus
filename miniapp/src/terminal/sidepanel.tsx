@@ -447,7 +447,6 @@ function Layouts({ ws, update, rows, toast, onFocusRequest, onMissing }: Pick<Si
       const { layout, panes, col, row, active } = ws;
       await api.saveTerminalLayout(clean, { layout, panes, col, row, active });
       invalidate(LAYOUTS_KEY);
-      toast(t(replacing ? "term.side.layouts.replaced" : "term.side.layouts.saved", { name: clean }));
       setName("");
     } catch (e) {
       toast(errorText(e));
@@ -463,7 +462,7 @@ function Layouts({ ws, update, rows, toast, onFocusRequest, onMissing }: Pick<Si
     const focus = next.panes[next.active];
     if (focus) onFocusRequest(focus);
     onMissing({ name: layout.name, items: missing });
-    toast(missing.length ? plural("term.side.layouts.missing", missing.length, { name: layout.name }) : t("term.side.layouts.restored", { name: layout.name }));
+    if (missing.length) toast(plural("term.side.layouts.missing", missing.length, { name: layout.name }));
   };
 
   const rename = async (layout: TerminalLayout, text: string | null) => {
@@ -481,7 +480,6 @@ function Layouts({ ws, update, rows, toast, onFocusRequest, onMissing }: Pick<Si
     try {
       await api.deleteTerminalLayout(layout.id);
       invalidate(LAYOUTS_KEY);
-      toast(t("term.side.layouts.deleted", { name: layout.name }));
     } catch (e) {
       toast(errorText(e));
     }

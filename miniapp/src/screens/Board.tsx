@@ -289,7 +289,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
       ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: columnLabel(status) }), icon: "forward" as const, disabled: blocked, onSelect: () => onMove(task, status) })),
       ...(task.session_id ? [{ label: owner ? t("board.open.owner", { name: owner }) : t("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(task.session_id!) }] : []),
       ...(task.project_id ? [{ label: t("board.on.project", { name: task.project_name ?? task.project_id }), icon: "board" as const, onSelect: () => navigate(projectPagePath(task.project_id!, "board", { task: task.id })) }] : []),
-      { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+      { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
       ...ending(task, blocked),
     ];
     return (
@@ -425,7 +425,7 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSe
           label={t2("board.actions")}
           items={[
             ...(t.session_id ? [{ label: owner ? t2("board.open.owner", { name: owner }) : t2("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(t.session_id!) }] : []),
-            { label: t2("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(t.id)) ? t2("board.copied") : t.id) },
+            { label: t2("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(t.id); if (!ok) toast(t.id); return ok; } },
             "-",
             ...ending(t, writeBlocked),
           ]}

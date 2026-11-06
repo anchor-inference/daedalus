@@ -252,7 +252,6 @@ function Profiles({ toast }: { toast: (text: string) => void }) {
       if (action === "clear") await api.post(`${path}/clear`, {});
       else await api.delete(path);
       invalidate(PROFILES);
-      toast(t(`bs.profile.${action}.done`, { id: p.id }));
     } catch (e) {
       toast(errorText(e));
     }
@@ -459,7 +458,6 @@ function SiteNotes({ toast }: { toast: (text: string) => void }) {
     try {
       await api.post(`${NOTES}/${encodeURIComponent(n.id)}/approve`, {});
       invalidate(NOTES);
-      toast(t("bs.notes.approved", { host: n.host }));
     } catch (e) {
       toast(errorText(e));
     }

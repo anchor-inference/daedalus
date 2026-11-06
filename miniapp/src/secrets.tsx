@@ -8,7 +8,7 @@ import { t } from "./i18n";
 import { Icon } from "./icons";
 import { errorText } from "./ui";
 import { Sheet, toast } from "./ui/dialogs";
-import { Dropdown, Segmented, copyText, timeAgo } from "./ui/components";
+import { Dropdown, Segmented, timeAgo, useCopied } from "./ui/components";
 import { BottomSheet, SegmentedControl } from "./ui/phone";
 
 export type SecretScope = "session" | "project";
@@ -233,13 +233,14 @@ function scopeLabel(secret: SecretView): string {
 
 /** One secret: its name and where it belongs, the note, the value as dots (or, for half a minute after the
  *  eye, as itself), when it changed and was used, and what can be done with it. */
-function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, onEdit, onRemove, confirming, onConfirm, onCancelConfirm, editing, onSaved, onCancelEdit }: {
+function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, copied, onEdit, onRemove, confirming, onConfirm, onCancelConfirm, editing, onSaved, onCancelEdit }: {
   secret: SecretView;
   attach?: () => void;
   attached: boolean;
   revealed: string | undefined;
   onReveal: () => void;
   onCopy: () => void;
+  copied: boolean;
   onEdit: () => void;
   onRemove: () => void;
   confirming: Usage | "loading" | null;
@@ -277,7 +278,7 @@ function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, onEdi
             <Icon name={shown ? "eyeoff" : "eye"} size={16} />
           </button>
           <button type="button" className="iconbtn flat secret-copy" onClick={onCopy} disabled={!secret.readable} aria-label={t("secret.row.copy")} title={t("secret.row.copy")}>
-            <Icon name="copy" size={16} />
+            <Icon name={copied ? "check" : "copy"} size={16} />
           </button>
           <button type="button" className="iconbtn flat secret-edit-open" onClick={onEdit} aria-label={t("secret.row.edit")} title={t("secret.row.edit")}>
             <Icon name="pen" size={16} />
@@ -390,10 +391,12 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
     }
   }
 
+  const [copied, copyValue] = useCopied();
   async function copy(secret: SecretView) {
     try {
       const { value } = await api.post<{ value: string }>(`/api/secrets/${secret.id}/reveal`, { purpose: "copy" });
-      toast(t((await copyText(value)) ? "secret.row.copied" : "secret.row.copy.failed"));
+      if (await copyValue(value, secret.id)) return;
+      toast(t("secret.row.copy.failed"));
     } catch (e) {
       toast(errorText(e));
     }
@@ -442,7 +445,6 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
     const merge = (items?: SecretView[]) => items?.map((s) => (s.id === secret.id ? { ...s, ...secret, scope_title: s.scope_title } : s));
     setList((cur) => cur && { ...cur, secrets: merge(cur.secrets) ?? [], others: merge(cur.others) });
     if (secret.name !== previous.name) onChanged?.(secret.id, secret.name);
-    toast(t("secret.saved", { name: secret.name }));
   }
 
   function kept(secret: SecretView) {
@@ -452,7 +454,6 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
     }
     setAdding(false);
     void load();
-    toast(t("secret.saved", { name: secret.name }));
   }
 
   const own = useMemo(() => (list?.secrets ?? []).filter((s) => !gone.has(s.id)), [list, gone]);
@@ -469,6 +470,7 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
       revealed={revealed[secret.id]}
       onReveal={() => void reveal(secret)}
       onCopy={() => void copy(secret)}
+      copied={copied === secret.id}
       onEdit={() => { setConfirming(null); setEditing(secret.id); }}
       onRemove={() => void askRemove(secret)}
       confirming={confirming?.id === secret.id ? confirming.usage : null}

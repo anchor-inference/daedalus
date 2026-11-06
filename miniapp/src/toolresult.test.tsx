@@ -93,6 +93,7 @@ describe("the whole of a tool result", () => {
     await act(async () => root.render(<ToolResultView sessionId="s1" item={item()} toast={toast} initial={{ text: whole, complete: true }} keep={() => {}} />));
     await act(async () => button(/Copy all/)!.click());
     expect(writeText).toHaveBeenCalledWith(whole);
-    expect(toast).toHaveBeenCalledWith("Copied");
+    expect(toast).not.toHaveBeenCalled();
+    expect(button(/Copy all/)!.querySelector("svg")).not.toBeNull();
   });
 });

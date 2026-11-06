@@ -55,7 +55,6 @@ export async function dismissMember(member: Staff, projectId: string, toast: (te
   if (!(await confirmAsync(t("team.dismiss.title", { name: member.name }), { body: t("team.dismiss.body"), action: t("team.dismiss") }))) return;
   try {
     await api.delete(`/api/staff/${enc(member.id)}`);
-    toast(t("team.dismissed", { name: member.name }));
     invalidate(`/api/projects/${enc(projectId)}/staff`);
     onDone?.();
   } catch (e) {
@@ -68,7 +67,6 @@ export async function act(member: Staff, projectId: string, what: "interrupt" | 
   if (what === "release" && !(await confirmAsync(t("focus.staff.release.title", { name: member.name }), { body: t("focus.staff.release.body"), action: t("focus.staff.release") }))) return;
   try {
     await api.post(`/api/staff/${enc(member.id)}/${what}`, what === "release" ? { keep_worktree: true } : undefined);
-    toast(t(what === "interrupt" ? "focus.staff.interrupted" : what === "pause" ? "focus.staff.pausing" : "focus.staff.released", { name: member.name }));
     invalidate(`/api/staff/${enc(member.id)}`);
     invalidate(`/api/projects/${enc(projectId)}/staff`);
   } catch (e) {

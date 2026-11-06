@@ -191,12 +191,22 @@ function ConfirmDialog({ pending, onDone }: { pending: Pending; onDone: (ok: boo
 
 /** `warn` marks an item that reaches outside the sandbox (a terminal on the machine itself): amber, not red.
  * `checked` makes the item a checkbox, which keeps the menu open: it sets how the items below it act. */
-export type MenuItem = { label: string; icon?: IconName; danger?: boolean; warn?: boolean; disabled?: boolean; hint?: string; checked?: boolean; onSelect: () => void } | "-";
+/** ``ticks`` marks a row that resolves true once its work went through, a copy above all: the menu
+ *  closes on the press, so the tick shows on the button that opened it. */
+export type MenuItem = { label: string; icon?: IconName; danger?: boolean; warn?: boolean; disabled?: boolean; hint?: string; checked?: boolean; ticks?: boolean; onSelect: () => unknown } | "-";
 
 /** With `trigger`, the button is that content (a title with a chevron) rather than an icon. */
 export function OverflowMenu({ items, label, icon = "more", small, className, trigger: customTrigger, contextSelector }: { contextSelector?: string; items: MenuItem[]; label?: string; icon?: IconName; small?: boolean; className?: string; trigger?: ReactNode }) {
   const name = label ?? t("dlg.menu");
   const [open, setOpen] = useState(false);
+  const [ticked, setTicked] = useState(false);
+  const tickTimer = useRef(0);
+  const tick = () => {
+    setTicked(true);
+    window.clearTimeout(tickTimer.current);
+    tickTimer.current = window.setTimeout(() => setTicked(false), 1600);
+  };
+  useEffect(() => () => window.clearTimeout(tickTimer.current), []);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   useContextActions(trigger, items, contextSelector);
@@ -271,7 +281,7 @@ export function OverflowMenu({ items, label, icon = "more", small, className, tr
   return (
     <>
       <button ref={trigger} className={`${customTrigger ? "" : `iconbtn ${small ? "small" : ""}`} ${open ? "on" : ""} ${className ?? ""}`} aria-label={name} title={name} aria-haspopup="menu" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>
-        {customTrigger ?? <Icon name={icon} size={small ? 16 : 18} />}
+        {ticked ? <Icon name="check" size={small ? 16 : 18} /> : customTrigger ?? <Icon name={icon} size={small ? 16 : 18} />}
       </button>
       {open && pos && createPortal(
         // In the document's own stacking context, not the row's: a `position: fixed` menu inside an
@@ -285,7 +295,11 @@ export function OverflowMenu({ items, label, icon = "more", small, className, tr
             it === "-" ? (
               <div key={i} className="menu-sep" />
             ) : (
-              <button key={i} role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={it.checked} className={it.danger ? "danger" : it.warn ? "warn" : ""} disabled={it.disabled} title={it.hint} onClick={() => { if (it.checked === undefined) setOpen(false); it.onSelect(); }}>
+              <button key={i} role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={it.checked} className={it.danger ? "danger" : it.warn ? "warn" : ""} disabled={it.disabled} title={it.hint} onClick={() => {
+                if (it.checked === undefined) setOpen(false);
+                const done = it.onSelect();
+                if (it.ticks) void Promise.resolve(done).then((ok) => { if (ok === true) tick(); });
+              }}>
                 {it.icon && <Icon name={it.icon} size={16} />}
                 {it.label}
                 {it.checked !== undefined && <span className={`menu-check ${it.checked ? "on" : ""}`} aria-hidden="true">{it.checked && <Icon name="check" size={14} />}</span>}
@@ -387,13 +401,20 @@ type ToastUpdate = (f: (cur: ToastState | null) => ToastState | null) => void;
 let toastSetter: ToastUpdate | null = null;
 let toastSeq = 0;
 
-/** A short status line at the bottom; with `undo`, a button that calls it before the timer runs out,
- *  and with `action`, a button of its own words (a browser that opened offers "View"). */
+/** How long a line stays: a failure has to be read, and it does not come back. */
+const TOAST_MS = 6000;
+
+/**
+ * A line for what would otherwise go unnoticed: a failure or a refusal. With `undo`, a button that
+ * calls it before the timer runs out, and with `action`, a button of its own words (a browser that
+ * opened offers "View"). Never use it to say that something worked: the thing itself says so, and a
+ * line of that kind stood over a phone's composer after every press. A press takes it away.
+ */
 export function toast(text: string, opts: { undo?: () => void; action?: { label: string; run: () => void }; ms?: number } = {}): number {
   if (!toastSetter) return 0;
   const id = ++toastSeq;
   toastSetter(() => ({ text, undo: opts.undo, action: opts.action, id }));
-  window.setTimeout(() => toastSetter?.((cur) => (cur && cur.id === id ? null : cur)), opts.ms ?? (opts.undo || opts.action ? 6000 : 2600));
+  window.setTimeout(() => toastSetter?.((cur) => (cur && cur.id === id ? null : cur)), opts.ms ?? TOAST_MS);
   return id;
 }
 
@@ -412,7 +433,7 @@ export function ToastHost() {
   }, []);
   if (!state) return null;
   return (
-    <div className="toast" role="status" aria-live="polite">
+    <div className="toast" role="status" aria-live="polite" onClick={(e) => { if (!(e.target as HTMLElement).closest("button")) setState(null); }}>
       <span>{state.text}</span>
       {state.undo && (
         <button className="btn small ghost" onClick={() => { state.undo?.(); setState(null); }}>

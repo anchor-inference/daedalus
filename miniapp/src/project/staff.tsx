@@ -48,7 +48,6 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
     if (what === "release" && !(await confirmAsync(t("focus.staff.release.title", { name: member.name }), { body: t("focus.staff.release.body"), action: t("focus.staff.release") }))) return;
     try {
       await api.post(`/api/staff/${encodeURIComponent(member.id)}/${what}`, what === "release" ? { keep_worktree: true } : undefined);
-      toast(t(what === "interrupt" ? "focus.staff.interrupted" : what === "pause" ? "focus.staff.pausing" : "focus.staff.released", { name: member.name }));
       invalidate(memberKey(member.id));
       invalidate(`/api/projects/${encodeURIComponent(projectId)}/staff`);
     } catch (e) {

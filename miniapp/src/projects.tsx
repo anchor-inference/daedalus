@@ -110,7 +110,6 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       setRequiredRevision(receipt.entity_revision);
       if (intent.path === budgetKey(projectId) || intent.path === resourceProfileKey(projectId)) invalidate(intent.path);
       afterChange(); refresh();
-      toast(intent.label);
       (onSuccess ?? completion.current)?.();
       completion.current = null;
       return true;
@@ -186,7 +185,6 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
       await api.patch(`/api/projects/${encodeURIComponent(project.id)}`, { archived: false,
         expected_entity_revision: project.entity_revision, client_operation_id: crypto.randomUUID() });
       afterChange();
-      toast(t("project.restored", { name: project.name }));
     } catch (error) { toast(errorText(error)); }
     finally { setRestoring(""); }
   }
@@ -466,7 +464,6 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
     try {
       await api.delete(`/api/projects/${encodeURIComponent(project.id)}`);
       afterChange();
-      toast(t("project.removed", { name: project.name }));
       onRemoved();
     } catch (e) {
       toast(errorText(e));
@@ -519,7 +516,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       {/* Restoring a project opens its team page and nothing more. It used to write the project lens
           into storage too, behind the shell's back, so the column narrowed only at the next load,
           with nothing to connect it to the restore. */}
-      <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
+      <ProjectArchive project={project} onChanged={afterChange} readFailed={!!projects.error}
         onOpenRestored={(id) => { onClose(); navigate(projectPagePath(id, "team")); }} />
       {/* Under normal or full autonomy the coordinator holds a standing project grant; the per-task
           permissions only exist for a project that asks first. */}
@@ -570,7 +567,6 @@ export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMo
       await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/project`, { project_id: target, own_directory: ownDirectory });
       afterChange();
       invalidate(`/api/sessions/${sessionId}`);
-      toast(t("move.done", { name: chosen?.name ?? "" }));
       onMoved();
       onClose();
     } catch (e) {

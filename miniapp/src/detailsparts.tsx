@@ -8,7 +8,7 @@ import { useState } from "react";
 import { readLayout, writeLayout } from "./layout";
 import { absTime, middleTruncate, relTimeLong, untilShort } from "./format";
 import { Icon, type IconName } from "./icons";
-import { copyText } from "./ui/components";
+import { useCopied } from "./ui/components";
 import { t } from "./i18n";
 import type { Tone } from "./detailsmodel";
 
@@ -115,12 +115,13 @@ export function Note({ tone, children, title, data }: { tone?: Tone; children: R
 }
 
 /** A long id or path, shortened in the middle so both ends stay legible, whole in its title, copied on a click. */
-export function CopyValue({ value, shown, toast, copied, max = 22, data }: { value: string; shown?: string; toast: (text: string) => void; copied?: string; max?: number; data?: Record<string, string> }) {
+export function CopyValue({ value, shown, toast, max = 22, data }: { value: string; shown?: string; toast: (text: string) => void; max?: number; data?: Record<string, string> }) {
+  const [copied, copy] = useCopied();
   return (
     <button type="button" className="dt-copy mono" title={value} aria-label={t("details.copy.label", { value })} {...dataAttributes(data)}
-      onClick={async () => toast((await copyText(value)) ? (copied ?? t("common.copied")) : value)}>
+      onClick={async () => { if (!(await copy(value))) toast(value); }}>
       <span className="truncate">{shown ?? middleTruncate(value, max)}</span>
-      <Icon name="copy" size={12} />
+      <Icon name={copied ? "check" : "copy"} size={12} />
     </button>
   );
 }

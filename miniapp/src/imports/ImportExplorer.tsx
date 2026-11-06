@@ -32,7 +32,7 @@ export function openImport(request: OpenRequest = {}): void {
 }
 
 /** Mounted once by the app; listens for `openImport` and draws the desktop's dialog or the phone's screens. */
-export function ImportHost({ toast }: { toast: (text: string) => void }) {
+export function ImportHost() {
   const [open, setOpen] = useState<OpenRequest | null>(null);
   const wide = useMedia("(min-width: 1024px)");
   useEffect(() => {
@@ -42,10 +42,9 @@ export function ImportHost({ toast }: { toast: (text: string) => void }) {
   }, []);
   if (!open) return null;
   const close = () => setOpen(null);
-  const done = (sessionId: string, into: string) => {
+  const done = (sessionId: string) => {
     close();
     forgetFresh();
-    toast(into ? t("imp.done.project", { name: into }) : t("imp.done"));
     navigate(sessionPath(sessionId));
   };
   const openChat = (id: string) => { close(); navigate(sessionPath(id)); };

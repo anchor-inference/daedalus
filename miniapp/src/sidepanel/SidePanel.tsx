@@ -13,6 +13,7 @@ import { api, setPanelCredential, type AsrStatus, type SessionDetail } from "../
 import { applyAppearance } from "../appearance";
 import { ApprovalChip, type ApprovalMode } from "../browser/approvals";
 import { type Approval, type QueuedMessage, pendingApproval, queuedAfter, readQueued, readReturned } from "../composer";
+import { FilePreview, type PreviewSource } from "../preview";
 import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
 import { messageBody } from "../project/goalmodel";
@@ -28,17 +29,15 @@ import { LiveBar, TranscriptView } from "../screens/Session";
 import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type Turn } from "../turns";
 import { followSession } from "../sessionstream";
 import { errorText } from "../ui";
+import { ToastHost, toast } from "../ui/dialogs";
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
-import { cardKey, cropRect, dataFile, lineStops, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
+import { cardKey, cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
 import "./sidepanel.css";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
 
 /** What the extension asks the panel to show when the operator chose "Ask Daedalus about this page". */
 const NEW = "new";
-/** How long a note stays: long enough to read a line, short enough not to sit over the next action. */
-const NOTE_MS = 3000;
-
 function statusOf(detail: SessionDetail | null): Status {
   const status = detail?.status ?? "idle";
   return (["running", "waiting", "failed", "compacting"].includes(status) ? status : "idle") as Status;
@@ -54,22 +53,10 @@ export function SidePanel() {
   const [pinned, setPinned] = useState(false);
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [notes, setNotes] = useState<{ id: number; text: string }[]>([]);
-  const noteId = useRef(0);
   const show = useRef<string | null>(null);
   // The actions answered here, per conversation, for as long as the panel is open: the refusal stays
   // in the transcript after the answer, and coming back to the conversation must not offer it again.
   const answered = useRef(new Map<string, Set<string>>());
-
-  // Notes sit under the header, not at the foot: at the foot one covered the composer's buttons
-  // (attach, mode, model, send) for five seconds after every action. Three at most, each gone after
-  // NOTE_MS or on a click.
-  const dismiss = useCallback((id: number) => setNotes((all) => all.filter((n) => n.id !== id)), []);
-  const toast = useCallback((text: string) => {
-    const id = ++noteId.current;
-    setNotes((all) => [...all.filter((n) => n.text !== text), { id, text }].slice(-3));
-    window.setTimeout(() => dismiss(id), NOTE_MS);
-  }, [dismiss]);
 
   useEffect(() => {
     if (!shell) return;
@@ -78,7 +65,7 @@ export function SidePanel() {
       shell.request("mic.grant").then(() => toast(t("sidepanel.mic.grant"))).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })));
     });
     return () => onMicRefused(null);
-  }, [shell, toast]);
+  }, [shell]);
 
   useEffect(() => {
     applyAppearance();
@@ -106,7 +93,7 @@ export function SidePanel() {
     } catch (e) {
       toast(errorText(e));
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     if (!shell) return;
@@ -197,11 +184,7 @@ export function SidePanel() {
       ) : (
         <Conversation key={session.id} session={session} shell={shell} current={current} toast={toast} onChanged={loadList} answered={answered.current} />
       )}
-      {notes.length > 0 && (
-        <div className="sp-toasts" role="status">
-          {notes.map((n) => <button key={n.id} type="button" className="sp-toast" onClick={() => dismiss(n.id)}>{n.text}</button>)}
-        </div>
-      )}
+      <ToastHost />
     </div>
   );
 }
@@ -456,26 +439,24 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
         const r = await api.delete<{ message?: unknown }>(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`);
         setQueued((q) => q.filter((x) => x.id !== message.id));
         if (edit) composer.current?.insert((readReturned([r?.message])[0] ?? message).text);
-        toast(t("composer.steer.withdrawn"));
       } catch (e) {
         toast(errorText(e));
         void loadQueued();
       }
     },
-    [id, toast, loadQueued],
+    [id, loadQueued],
   );
   const steerNow = useCallback(
     async (message: QueuedMessage) => {
       try {
         await api.post(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`, {});
         setQueued((q) => q.map((x) => (x.id === message.id ? { ...x, kind: "steer" } : x)));
-        toast(t("composer.delivery.steered"));
       } catch (e) {
         toast(errorText(e));
         void loadQueued();
       }
     },
-    [id, toast, loadQueued],
+    [id, loadQueued],
   );
 
   useEffect(() => {
@@ -561,7 +542,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       if (how === "deny") await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
       else if (how === "similar" && similar) await api.post(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
       else await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
-      if (how !== "deny") toast(t("composer.approved"));
       onChanged();
     } catch (e) {
       toast(errorText(e));
@@ -606,7 +586,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       setPaused(next);
       if (takeOver) {
         await shell.request("tab.focus", { session: id });
-        toast(t("sidepanel.takeover.done"));
       }
     } catch (e) {
       toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
@@ -615,8 +594,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
 
   async function chooseModel(body: ModelChoice) {
     try {
-      const r = await api.post<{ model: string }>(`/api/sessions/${id}/model`, body);
-      toast(t("session.model.picked", { model: r.model }));
+      await api.post(`/api/sessions/${id}/model`, body);
       void load();
     } catch (e) {
       toast(errorText(e));
@@ -636,11 +614,18 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     try {
       await shell.request("tab.grant", { group: session.group, session: id, title: session.title });
       await api.post(`/api/panel/sessions/${id}/tab`);
-      toast(t("sidepanel.tab.given"));
     } catch (e) {
       toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
     }
   }
+
+  // A file the conversation carries opens here. Anything else the transcript names, a file in the
+  // workspace, is behind a door the panel does not have, and the press goes to the app, where it is.
+  const [previewing, setPreviewing] = useState<PreviewSource | null>(null);
+  const preview = useCallback((src: PreviewSource) => {
+    if (panelCarries(src)) setPreviewing(src);
+    else void shell.request("open.app", { path: sessionPath(id) }).catch((e) => toast(errorText(e)));
+  }, [id, shell]);
 
   const tab = current?.tab ?? null;
   const tabIsTheirs = current?.owner?.session === id;
@@ -651,7 +636,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       <div className="sp-body" ref={scroller} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
         {detail ? (
-          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={() => toast(t("sidepanel.preview.app"))} toast={toast} onRender={follow} />
+          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} />
         ) : failed ? (
           <div className="empty">{t("sidepanel.unreadable")}</div>
         ) : (
@@ -669,6 +654,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       {sideAsked > 0 && asksOpen && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
       {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} onDecide={(how) => void decide(approval, how)} />}
       {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
+      {previewing && <FilePreview src={previewing} onClose={() => setPreviewing(null)} />}
       {detail?.id === id && (
         <Composer
           ref={composer}

@@ -9,7 +9,7 @@ import { api, type MemoryImportItem } from "../api";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
-import { copyText } from "../ui/components";
+import { useCopied } from "../ui/components";
 import { Sheet, toast } from "../ui/dialogs";
 import { undoToast } from "./undo";
 
@@ -26,7 +26,6 @@ export async function downloadExport(): Promise<void> {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(t("memory.export.done"));
 }
 
 /** A file as base64 without its data-URL prefix, for the preview's ``archive`` field. */
@@ -53,6 +52,7 @@ export function byTarget(items: MemoryImportItem[]): [string, MemoryImportItem[]
 }
 
 export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [copied, copy] = useCopied();
   const [text, setText] = useState("");
   const [items, setItems] = useState<MemoryImportItem[] | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
@@ -137,7 +137,7 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
       <div className="memory-import-step">{t("memory.import.step1")}</div>
       <div className="memory-import-prompt">
         <pre>{prompt}</pre>
-        <button className="btn small" data-action="copy-prompt" onClick={async () => toast((await copyText(prompt)) ? t("memory.import.copied") : prompt)}><Icon name="copy" size={14} /> {t("common.copy")}</button>
+        <button className="btn small" data-action="copy-prompt" onClick={async () => { if (!(await copy(prompt))) toast(prompt); }}><Icon name={copied ? "check" : "copy"} size={14} /> {t("common.copy")}</button>
       </div>
       <div className="memory-import-step">{t("memory.import.step2")}</div>
       <textarea className="field" rows={7} value={text} placeholder={t("memory.import.paste")} aria-label={t("memory.import.paste")} onChange={(e) => setText(e.target.value)} />

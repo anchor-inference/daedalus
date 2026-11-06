@@ -138,6 +138,25 @@ def _admit_link(url: str, kind_hint: str, alt: str, caption: str) -> dict[str, A
     return {"blob_ref": "", "source_url": url, "kind": kind, "mime_type": mime_type, "filename": name[:200], "byte_size": 0, "width": None, "height": None, "alt": alt, "caption": caption}
 
 
+async def presentation_views(conn: Any, session_id: str, ids: list[str]) -> list[dict[str, Any]]:
+    """The presentations a message carries, as the app reads them, in the order given."""
+    if not ids:
+        return []
+    marks = ",".join("?" for _ in ids)
+    cursor = await conn.execute(
+        f"SELECT p.id presentation_id, p.layout, i.* FROM media_presentations p JOIN media_items i ON i.presentation_id = p.id"
+        f" WHERE p.session_id = ? AND p.id IN ({marks}) ORDER BY p.created_at, i.ordinal",
+        (session_id, *ids),
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in await cursor.fetchall():
+        pid = str(row["presentation_id"])
+        view = {key: row[key] for key in ("id", "kind", "mime_type", "filename", "byte_size", "width", "height", "alt", "caption")}
+        view["url"] = str(row["source_url"] or "")
+        grouped.setdefault(pid, {"id": pid, "layout": row["layout"], "items": []})["items"].append(view)
+    return [grouped[item] for item in ids if item in grouped]
+
+
 class MediaStore:
     """Stages immutable blobs, then binds referenced presentations to one persisted answer."""
 
@@ -271,36 +290,29 @@ class MediaStore:
             return message
         marks = ",".join("?" for _ in ids)
         cursor = await conn.execute(
-            f"SELECT id FROM media_presentations WHERE session_id = ? AND run_id = ? AND state = 'staged' AND id IN ({marks})",
-            (session_id, run_id, *ids),
-        )
-        allowed = {str(row["id"]) for row in await cursor.fetchall()}
-        if allowed != set(ids):
-            return message
-        await conn.execute(
-            f"UPDATE media_presentations SET state = 'ready', message_key = ? WHERE session_id = ? AND id IN ({marks})",
-            (message_key, session_id, *ids),
-        )
-        presentations = await self._views(conn, session_id, ids)
-        message.metadata["daedalus.media"] = presentations
-        return message
-
-    async def _views(self, conn: Any, session_id: str, ids: list[str]) -> list[dict[str, Any]]:
-        if not ids:
-            return []
-        marks = ",".join("?" for _ in ids)
-        cursor = await conn.execute(
-            f"SELECT p.id presentation_id, p.layout, i.* FROM media_presentations p JOIN media_items i ON i.presentation_id = p.id"
-            f" WHERE p.session_id = ? AND p.id IN ({marks}) ORDER BY p.created_at, i.ordinal",
+            f"SELECT id, run_id, state FROM media_presentations WHERE session_id = ? AND id IN ({marks})",
             (session_id, *ids),
         )
-        grouped: dict[str, dict[str, Any]] = {}
-        for row in await cursor.fetchall():
-            pid = str(row["presentation_id"])
-            view = {key: row[key] for key in ("id", "kind", "mime_type", "filename", "byte_size", "width", "height", "alt", "caption")}
-            view["url"] = str(row["source_url"] or "")
-            grouped.setdefault(pid, {"id": pid, "layout": row["layout"], "items": []})["items"].append(view)
-        return [grouped[item] for item in ids if item in grouped]
+        found = await cursor.fetchall()
+        staged = [str(row["id"]) for row in found if row["state"] == "staged" and str(row["run_id"]) == run_id]
+        # An answer may repeat a file an earlier answer of this conversation holds: the model reads
+        # the line back from its history. Only a staged item was ever accepted, so a repeat stayed
+        # unbound and the app printed the raw Markdown for good. It is drawn from the same immutable
+        # bytes and stays bound to the answer that first took it.
+        ready = {str(row["id"]) for row in found if row["state"] == "ready"}
+        # A line the host never issued costs that line alone, not the real files beside it, which
+        # would otherwise stay staged and be pruned.
+        known = [item for item in ids if item in ready or item in staged]
+        if not known:
+            return message
+        if staged:
+            bound = ",".join("?" for _ in staged)
+            await conn.execute(
+                f"UPDATE media_presentations SET state = 'ready', message_key = ? WHERE session_id = ? AND id IN ({bound})",
+                (message_key, session_id, *staged),
+            )
+        message.metadata["daedalus.media"] = await presentation_views(conn, session_id, known)
+        return message
 
     async def item(self, session_id: str, presentation_id: str, item_id: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(
@@ -320,7 +332,7 @@ class MediaStore:
         if not ids:
             return []
         async with self.db.transaction() as conn:
-            views = await self._views(conn, session_id, ids)
+            views = await presentation_views(conn, session_id, ids)
         for presentation in views:
             for item in presentation["items"]:
                 row = await self.db.fetchone("SELECT blob_ref, source_url FROM media_items WHERE id = ?", (item["id"],))
@@ -401,4 +413,4 @@ class MediaStore:
         return message.model_copy(update={"content_blocks": tuple(blocks), "metadata": metadata})
 
 
-__all__ = ["MEDIA_REF_RE", "MEDIA_TENANT", "MediaStore"]
+__all__ = ["MEDIA_REF_RE", "MEDIA_TENANT", "MediaStore", "presentation_views"]

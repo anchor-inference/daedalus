@@ -31,7 +31,7 @@ export function CalendarsSection({ calendars, onConnections, toast }: { calendar
 
   async function remove(calendar: CalendarRow) {
     if (!(await confirmAsync(t("cal.calendar.delete.title", { name: calendarName(calendar) }), { body: t("cal.calendar.delete.body"), action: t("common.delete") }))) return;
-    try { await api.delete(`${CALENDARS}/${encodeURIComponent(calendar.id)}`); toast(t("cal.calendar.deleted")); }
+    try { await api.delete(`${CALENDARS}/${encodeURIComponent(calendar.id)}`); }
     catch (exc) { toast(errorText(exc)); }
     invalidate(CALENDARS);
     refreshPlanner();
@@ -101,7 +101,6 @@ function CalendarSheet({ calendar, onClose, toast }: { calendar: CalendarRow | n
       else await api.post(CALENDARS, { name: name.trim(), color });
       invalidate(CALENDARS);
       refreshPlanner();
-      toast(t(calendar ? "cal.calendar.saved" : "cal.calendar.created"));
       onClose();
     } catch (exc) { toast(errorText(exc)); }
     finally { setBusy(false); }

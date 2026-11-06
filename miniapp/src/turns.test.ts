@@ -124,6 +124,20 @@ describe("buildTurns", () => {
   });
 });
 
+describe("a turn's media", () => {
+  const one = { id: "p1", layout: "single" as const, items: [] };
+  const two = { id: "p2", layout: "single" as const, items: [] };
+
+  it("keeps what each of its messages carried, each once", () => {
+    const turns = buildTurns([
+      msg(1, { role: "user", text: "go" }),
+      msg(2, { role: "assistant", text: "first", run_id: "r", tool_calls: [{ id: "c", name: "Read", arguments: {} }], media: [one] }),
+      msg(3, { role: "assistant", text: "last", run_id: "r", media: [one, two] }),
+    ] as MessageView[]);
+    expect(turns.at(-1)?.media?.map((p) => p.id)).toEqual(["p1", "p2"]);
+  });
+});
+
 describe("the step in progress", () => {
   it("times the running call from when the stream named it, and the stretch between calls from the latest message or result", () => {
     let state = liveAfter(EMPTY_LIVE, "message_start", { run_id: "r" });

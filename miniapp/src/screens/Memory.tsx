@@ -309,11 +309,11 @@ function MemorySheet({ r, projects, onClose, onSaved, onForget, toast }: { r?: M
     try {
       if (r) {
         await api.patch(`/api/memory/${encodeURIComponent(r.id)}`, { text: text.trim(), category, topics: parseTopics(topics) });
-        toast(t("memory.updated"));
       } else {
         const typed = parseTopics(topics);
         const res = await api.post<{ decision: string; record: MemoryRecord }>("/api/memory", { scope: scope === "global" ? "global" : "project", scope_key: scope === "global" ? "" : scope.slice("project:".length), category, topics: typed.length ? typed : null, text: text.trim() });
-        toast(res.decision.toLowerCase() === "created" ? t("memory.remembered") : t("memory.similar", { decision: res.decision.toLowerCase() }));
+        // Not stored as written: the operator's words went into what was already there.
+      if (res.decision.toLowerCase() !== "created") toast(t("memory.similar", { decision: res.decision.toLowerCase() }));
       }
       onSaved();
     } catch (e) {
@@ -374,7 +374,6 @@ function MergeSheet({ records, onClose, onDone, toast }: { records: MemoryRecord
     setBusy(true);
     try {
       await api.post("/api/memory/merge", { ids: records.map((r) => r.id), text: text.trim(), category, topics: parseTopics(topics) });
-      toast(t("memory.merged"));
       onDone();
     } catch (e) {
       toast(errorText(e));
@@ -414,8 +413,7 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
   async function rename(target: string) {
     setBusy(true);
     try {
-      const res = await api.post<{ changed: number }>("/api/memory/topics/rename", { topic, to: target });
-      toast(plural("memory.topic.renamed", res.changed));
+      await api.post("/api/memory/topics/rename", { topic, to: target });
       onDone(parseTopics(target)[0] ?? "");
     } catch (e) {
       toast(errorText(e));
@@ -457,8 +455,7 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
   async function tidy() {
     setBusy(true);
     try {
-      const res = await api.post<{ merged: number; suggested: number }>("/api/memory/consolidate", {});
-      toast(t("memory.tidied", res));
+      await api.post("/api/memory/consolidate", {});
       refresh();
       onChanged();
     } catch (e) {
@@ -517,7 +514,6 @@ function HistorySheet({ onClose, onChanged, toast }: { onClose: () => void; onCh
     setBusy(id);
     try {
       await api.post(`/api/memory/history/${id}/undo`, {});
-      toast(t("memory.history.restored"));
       refresh();
       onChanged();
     } catch (e) {

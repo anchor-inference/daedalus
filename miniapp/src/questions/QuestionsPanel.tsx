@@ -263,7 +263,9 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       setFates((f) => ({ ...f, ...nextFates }));
       setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !gone.includes(id))));
       setFiles((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !gone.includes(id))));
-      toast(stale ? t("questions.fate.stale") : failed.length ? t("focus.ask.failed", { reason: failed[0] }) : lost ? t("questions.sent.some", { n: answered, lost }) : plural("questions.sent", answered));
+      if (stale) toast(t("questions.fate.stale"));
+      else if (failed.length) toast(t("focus.ask.failed", { reason: failed[0] }));
+      else if (lost) toast(t("questions.sent.some", { n: answered, lost }));
     } catch (e) {
       for (const item of batch) sent.current.delete(item.ask_id);
       toast(errorText(e));

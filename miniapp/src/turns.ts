@@ -130,6 +130,13 @@ export function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
+/** A turn's presentations, each once, in the order they first appeared. */
+function mergeMedia(held: MediaPresentation[] | undefined, added: MediaPresentation[] | undefined): MediaPresentation[] | undefined {
+  if (!added?.length) return held;
+  if (!held?.length) return added;
+  return [...held, ...added.filter((item) => !held.some((kept) => kept.id === item.id))];
+}
+
 /**
  * Group the flat message list into turns: a user message plus everything the agent did after it.
  *
@@ -214,7 +221,9 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     // and finished on another is answered by the one that finished it, which is the one the reader read.
     current.model = m.model || current.model;
     current.fallback = m.fallback ?? null;
-    current.media = m.media?.length ? m.media : current.media;
+    // A turn's messages each carry their own: the last one replacing the rest left an earlier
+    // message's reference with nothing to draw.
+    current.media = mergeMedia(current.media, m.media);
     if (m.imported?.harness) current.imported = m.imported.harness;
     mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
     if (current.answer) {

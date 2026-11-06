@@ -80,9 +80,6 @@ export function IssueImport({ projectId, onClose, onDone, toast }: { projectId: 
     try {
       const result = await api.post<ImportResult>("/api/issues/sync/import", { ...body, client_operation_id: operation.current.id });
       operation.current = null;
-      const made = result.applied.filter((entry) => entry.action === "import").length;
-      const updated = result.applied.length - made;
-      toast(t("issues.done", { made, updated, skipped: result.skipped.length }));
       onDone();
       if (result.skipped.length === 0) { onClose(); return; }
       // The listing is read again so what was applied shows as on the board, and the reasons for

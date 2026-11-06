@@ -16,10 +16,9 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { copyText, Segmented, Switch, timeAgo } from "../ui/components";
+import { Segmented, Switch, timeAgo, useCopied } from "../ui/components";
 import { Row } from "../settingsrow";
 import { useEvent } from "../events";
-import { toast as statusToast } from "../ui/dialogs";
 
 export const USER_STATUS = "/api/browser/user";
 
@@ -51,15 +50,6 @@ export function notConnectedReason(status: BrowserUserStatus): string {
   return status.relay?.last_error || t("uc.waiting.never");
 }
 
-/** The toast for the extension popup's "Check connection", on whatever page is open: the popup says
- *  "Daedalus confirmed" at the same moment, so both sides confirm the same check. */
-export function useChromeChecks(): void {
-  useEvent(["browser.user"], (event) => {
-    const payload = (event.payload ?? {}) as { kind?: string; profile_name?: string };
-    if (payload.kind === "check") statusToast(t("uc.popup.checked", { name: payload.profile_name || "Chrome" }));
-  }, []);
-}
-
 export function YourChrome({ user, setUser, toast }: { user: BrowserUserSettings; setUser: (patch: Partial<BrowserUserSettings>) => void; toast: (text: string) => void }) {
   const query = useQuery<BrowserUserStatus>(USER_STATUS, { pollMs: 10000 });
   const status = query.data;
@@ -80,6 +70,7 @@ export function YourChrome({ user, setUser, toast }: { user: BrowserUserSettings
 }
 
 function Connector({ status, toast }: { status: BrowserUserStatus; toast: (text: string) => void }) {
+  const [copied, copy] = useCopied();
   const report = status.launcher;
   const connector = connectorState(report);
   const [busy, setBusy] = useState(false);
@@ -88,7 +79,7 @@ function Connector({ status, toast }: { status: BrowserUserStatus; toast: (text:
     try {
       const done = await api.post<{ launcher: ChromeLauncherReport; error: string }>(`${USER_STATUS}/register`, {});
       if (done.error) toast(done.error);
-      else toast(t(done.launcher.connector?.restart_chrome ? "uc.connector.restart" : "uc.connector.done"));
+      else if (done.launcher.connector?.restart_chrome) toast(t("uc.connector.restart"));
       invalidate(USER_STATUS);
     } catch (e) {
       toast(errorText(e));
@@ -118,7 +109,7 @@ function Connector({ status, toast }: { status: BrowserUserStatus; toast: (text:
               <ol className="bs-chrome-howto sub">
                 <li>
                   {t("uc.ext.step1")} <code className="bs-code">chrome://extensions</code>{" "}
-                  <button type="button" className="btn small" onClick={() => void copyText("chrome://extensions").then((ok) => toast(t(ok ? "uc.copied" : "uc.copy.failed")))}>{t("uc.copy")}</button>
+                  <button type="button" className="btn small" onClick={() => void copy("chrome://extensions").then((ok) => { if (!ok) toast(t("uc.copy.failed")); })}>{copied && <Icon name="check" size={13} />}{t("uc.copy")}</button>
                 </li>
                 <li>{t("uc.ext.step2")}</li>
                 <li>{t("uc.ext.step3")} <code className="bs-code mono">{folder}</code></li>

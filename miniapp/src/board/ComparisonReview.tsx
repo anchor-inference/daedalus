@@ -44,9 +44,9 @@ function saveChoice(key: string, value: PendingChoice | null): void {
   catch { /* the mounted intent remains available for retry */ }
 }
 
-export function ComparisonReview({ task, groupId, slot, candidate, contract, groupReady, attemptId, groupOpen, onChanged, toast }: {
+export function ComparisonReview({ task, groupId, slot, candidate, contract, groupReady, attemptId, groupOpen, onChanged }: {
   task: ProjectTask; groupId: string; slot: number; candidate: ResultReceipt | null; contract: Contract | null;
-  groupReady: boolean; attemptId: string | null; groupOpen: boolean; onChanged: () => void; toast: (message: string) => void;
+  groupReady: boolean; attemptId: string | null; groupOpen: boolean; onChanged: () => void;
 }) {
   const offline = useOffline();
   const key = choiceKey(task.id, groupId, slot);
@@ -118,7 +118,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
       evidenceOperation.current = null;
       setObservation("");
       await evidence.refresh();
-      toast(t("pair.evidenceSaved"));
       onChanged();
     } catch (error) { setWarning(errorText(error)); }
     finally { setBusy(false); }
@@ -139,7 +138,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
       verdictOperation.current = null;
       setReason("");
       review.refresh();
-      toast(t("pair.verdictSaved"));
       onChanged();
     } catch (error) { setWarning(errorText(error)); }
     finally { setBusy(false); }
@@ -159,7 +157,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
       setResolutionReason("");
       comments.refresh();
       review.refresh();
-      toast(t("result.commentUpdated"));
       onChanged();
     } catch (error) { setWarning(errorText(error)); }
     finally { setBusy(false); }
@@ -180,7 +177,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
       setCommentText("");
       comments.refresh();
       review.refresh();
-      toast(t("result.commentAdded"));
       onChanged();
     } catch (error) { setWarning(errorText(error)); }
     finally { setBusy(false); }
@@ -204,7 +200,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
       if (!receipt.selection_receipt_id || receipt.selected_result_id !== intent.result_id) throw new Error(t("pair.badReceipt"));
       setPendingChoice(null);
       saveChoice(key, null);
-      toast(t("pair.chosen"));
       onChanged();
     } catch (error) { setWarning(errorText(error)); }
     finally { setBusy(false); }
@@ -228,7 +223,6 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
         if (receipt.effect_id) sessionStorage.setItem(`${stopKey}.effect`, receipt.effect_id);
       } catch { /* no site data */ }
       setStopEffectId(receipt.effect_id ?? null);
-      toast(t(receipt.state === "already_exited" ? "pair.stopEnded" : receipt.state === "cancelled_pending" ? "pair.stopCancelled" : "pair.stopQueued"));
       review.refresh();
       onChanged();
     } catch (error) { setWarning(errorText(error)); review.refresh(); }

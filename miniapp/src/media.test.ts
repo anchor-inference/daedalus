@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MediaPresentation } from "./api";
-import { mediaCopyText, splitMediaAnswer } from "./mediaformat";
+import { mediaCopyText, splitMediaAnswer, withoutMediaRefs } from "./mediaformat";
 
 const id = "11111111-1111-1111-1111-111111111111";
 const presentation: MediaPresentation = {
@@ -19,7 +19,12 @@ describe("inline media answers", () => {
 
   it("does not activate a reference the server did not bind", () => {
     const text = "![guess](daedalus-media:22222222-2222-2222-2222-222222222222)";
-    expect(splitMediaAnswer(text, [presentation])).toEqual([{ kind: "text", text }]);
+    // Nothing to draw, and the raw Markdown means nothing to a reader: its words stand instead.
+    expect(splitMediaAnswer(text, [presentation])).toEqual([{ kind: "text", text: "guess" }]);
+    expect(splitMediaAnswer(`Before.\n\n${text}\n\n![Result](daedalus-media:${id})\n\nAfter.`, [presentation])).toEqual([
+      { kind: "text", text: "Before.\n\nguess" }, { kind: "media", presentation }, { kind: "text", text: "After." },
+    ]);
+    expect(withoutMediaRefs(`See ${text}.`)).toBe("See guess.");
   });
 
   it("copies a human label rather than an internal media id", () => {
