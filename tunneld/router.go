@@ -239,7 +239,8 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/robots.txt" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "User-agent: *\nDisallow: /\n")
+		// The door's own answer: closed to search engines, open to a person's agent reading the link they pasted.
+		io.WriteString(w, "User-agent: *\nDisallow: /\n\nUser-agent: Claude-User\nUser-agent: ChatGPT-User\nAllow: /a/\n")
 		return
 	}
 	path := r.URL.Path

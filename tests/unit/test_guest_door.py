@@ -20,7 +20,7 @@ import pytest
 from guestd.control import ControlDoor, link_fields
 from guestd.limits import Failures, Rate
 from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STAND_IN_REPLY_SECONDS, Mailbox
-from guestd.pages import LOST_TOKEN, SPENT_PAGE
+from guestd.pages import LOST_TOKEN, PAGE, SPENT_PAGE
 from guestd.public import HEADERS, MAX_BODY, PublicDoor
 from guestd.standin import (
     FAILED_TEXT,
@@ -982,3 +982,9 @@ def test_a_turn_stopped_by_revocation_still_books_what_it_spent(rig: Rig) -> Non
     assert rig.control.post(f"/control/deliveries/{message}/reply", json={"ok": False, "cost_usd": 0.1}, headers=CONTROL).status_code == 200
     assert rig.store.link(link_id)["spent_usd"] == 0.1
     assert rig.read(token).status_code == 410
+
+
+def test_a_fetch_only_agent_is_told_what_it_lacks_and_a_users_fetcher_may_read_the_door() -> None:
+    assert "only read web pages" in PAGE
+    text = (Path(guestd.__file__).parent / "public.py").read_text(encoding="utf-8")
+    assert "User-agent: Claude-User" in text and "Allow: /a/" in text
