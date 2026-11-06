@@ -56,7 +56,7 @@ def allowed_origin(origin: str | None, host_header: str | None, public_url: str)
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def cookie_may_act(*, method: str, origin: str | None, fetch_site: str | None, fetch_mode: str | None, fetch_dest: str | None, host_header: str | None, public_url: str, frameable: bool = False) -> bool:
+def cookie_may_act(*, method: str, origin: str | None, fetch_site: str | None, fetch_mode: str | None, fetch_dest: str | None, host_header: str | None, public_url: str) -> bool:
     """Whether a request that holds the session cookie was made by the app, or by the operator's own hand.
 
     A cookie is attached by the browser, whoever asked. ``SameSite=Lax`` keeps a foreign site out but
@@ -71,18 +71,13 @@ def cookie_may_act(*, method: str, origin: str | None, fetch_site: str | None, f
     not from a browser, and there is no ambient cookie to worry about: whoever sent it put the cookie
     there on purpose.
 
-    Following a link in from elsewhere stays possible, as a top-level GET. A frame is allowed only
-    where ``frameable`` says the answer names its own framers: the app's pages carry
-    ``frame-ancestors``, and a browser enforces that against a neighbour. Refusing frames here as
-    well shut out the two framers that policy exists for, the extension's side panel and Telegram's
-    web client. Anything without that policy stays refused, or a page on the same site could lay
-    itself over a signed-in screen.
+    Following a link in from elsewhere stays possible, as a top-level GET; a frame does not, or a page
+    on the same site could lay itself over a signed-in screen.
     """
     if fetch_site in ("same-origin", "none"):
         return True
-    if method.upper() in SAFE_METHODS and fetch_mode == "navigate":
-        if fetch_dest == "document" or (frameable and fetch_dest in ("iframe", "frame")):
-            return True
+    if method.upper() in SAFE_METHODS and fetch_mode == "navigate" and fetch_dest == "document":
+        return True
     if origin is not None:
         return allowed_origin(origin, host_header, public_url)
     return not fetch_site
