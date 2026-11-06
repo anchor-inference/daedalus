@@ -290,7 +290,7 @@ def make_layers(folders: list[str], limits: dict[str, int]) -> None:
         mount("overlay", merged, "overlay", 0, f"lowerdir={lower},upperdir={upper},workdir={work},redirect_dir=on,index=off,metacopy=off,xino=off")
 
 
-def layer_full(limits: dict[str, int]) -> bool:
+def layer_full() -> bool:
     """Whether the tmpfs ran out, by what is left of it: within a page of its bytes, or with no file left."""
     room = os.statvfs(SCRATCH)
     return room.f_bavail * room.f_frsize < MIB or room.f_favail < 16
@@ -505,14 +505,14 @@ def keep(upper_path: str, folder: str, limits: dict[str, int]) -> str:
         room = os.statvfs(folder)
         free = room.f_bavail * room.f_frsize
         why = ""
-        # Only what adds is held against the quota: a command that deletes from a folder past it must get through.
+        # Only what adds is held against a bound: a command that deletes must get through, or nothing past a limit could get back under it.
         if wrote and held + wrote > limits["folder_bytes"]:
             why = f"the folder holds {size_words(held)}, the command wrote {size_words(wrote)}, and a guest's folder may hold {size_words(limits['folder_bytes'])}"
         elif entries and files + entries > limits["folder_files"]:
             why = f"the folder holds {files} files, the command made {entries}, and a guest's folder may hold {limits['folder_files']}"
-        elif free - wrote < limits["disk_floor_bytes"]:
+        elif wrote and free - wrote < limits["disk_floor_bytes"]:
             why = f"the server's disk has {size_words(free)} free and must keep {size_words(limits['disk_floor_bytes'])}, which is for its owner to fix"
-        elif room.f_files and room.f_favail - entries < limits["disk_floor_files"]:
+        elif entries and room.f_files and room.f_favail - entries < limits["disk_floor_files"]:
             why = f"the server's disk has {room.f_favail} free inodes and must keep {limits['disk_floor_files']}, which is for its owner to fix"
         if why:
             return f"nothing this command wrote in {folder} was kept: {why}. To make room in the folder, delete something in a command of its own; deleting always fits."
@@ -557,7 +557,7 @@ def run(folders: list[str], command: list[str], limits: dict[str, int], *, root:
         say(f"the limits on this command could not be set, so it did not run: {exc}")
         return REFUSED
     code = child.wait()
-    notes = limit_notes(group, limits, full=layer_full(limits))
+    notes = limit_notes(group, limits, full=layer_full())
     if not end_group(group):
         notes.append("processes of this command would not die, so nothing it wrote was kept.")
         folders = []
@@ -575,7 +575,7 @@ def main(arguments: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    # ENOSPC on the note itself must not hide the command's own exit.
+    # Whoever read the output has gone. By then the copy is done, and there is nobody left to tell.
     try:
         sys.exit(main(sys.argv[1:]))
     except BrokenPipeError:

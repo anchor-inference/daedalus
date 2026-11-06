@@ -473,7 +473,8 @@ def test_deleting_always_fits(tmp_path: Path) -> None:
     real = tree(tmp_path / "w" / "real", {"big": "x" * 5000})
     upper = tmp_path / "upper"
     whiteout(upper / "big")
-    assert guest_box.keep(str(upper), str(real), QUOTA) == "" and os.listdir(real) == []
+    tight = {**QUOTA, "folder_bytes": 1, "folder_files": 0, "disk_floor_bytes": 1 << 60, "disk_floor_files": 1 << 60}
+    assert guest_box.keep(str(upper), str(real), tight) == "" and os.listdir(real) == []
 
 
 def test_many_small_files_count_as_files(tmp_path: Path) -> None:
