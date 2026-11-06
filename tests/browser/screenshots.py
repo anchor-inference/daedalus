@@ -898,6 +898,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # New chat: the id of a chat the pictures already have, so the app lands on a drawn page.
         status, created = create_session(json.loads(request.post_data or "{}"), S6)
         return respond(route, created, status=status)
+    # The agent link's routes are the shared host's too (api_stub.FakeGuests): making, admitting and revoking
+    # change what the next read of the list returns.
+    if (rel.startswith("/api/guest/") or (rel.startswith("/api/sessions/") and "/guest/" in rel)) and fulfil_shared(route):
+        return None
     # The Notes tab's writes, uploads and files are the shared host's (notes_stub.py), which keeps them.
     if (rel.startswith("/api/notes/") or (rel.startswith("/api/sessions/") and "/notes" in rel)) and fulfil_shared(route):
         return None

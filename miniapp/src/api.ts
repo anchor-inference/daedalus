@@ -923,6 +923,84 @@ export type LoopView = {
 
 export type ShareMode = "local" | "public" | "key";
 export type ShareView = { mode: ShareMode; slug: string | null; key: string | null; url: string | null; public_base: string; sandboxed?: boolean };
+
+/** The agent link: a door another person's agent talks through. A stand-in is a separate toolless model
+ *  that knows only the briefing the operator approved; a direct link reaches the chat's own agent. */
+export type GuestMode = "stand_in" | "direct";
+export type GuestTools = "none" | "read" | "all";
+export type GuestLinkState = "waiting" | "spent" | "revoked" | "expired";
+export type GuestConversation = {
+  id: string;
+  state: "pending" | "open" | "closed";
+  reason: string;
+  created_at: number;
+  decide_by: number;
+  expires_at: number;
+  last_guest_at: number | null;
+  /** The guest's own words, present only while the first contact waits for an answer. Untrusted text. */
+  first_message?: string;
+};
+/** One link as the door describes it. Times are epoch seconds. */
+export type GuestLink = {
+  id: string;
+  state: GuestLinkState;
+  label: string;
+  topic: string;
+  mode: GuestMode;
+  model_name: string;
+  approval: boolean;
+  usd_limit: number;
+  turns_per_day: number;
+  turns_total: number;
+  guest_tools: GuestTools;
+  created_at: number;
+  invite_expires_at: number;
+  conversation_hours: number;
+  idle_hours: number;
+  retention_days: number;
+  spent_usd: number;
+  turns_used: number;
+  turns_today: number;
+  refused_redeems: number;
+  conversation: GuestConversation | null;
+};
+/** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person). */
+export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number };
+export type GuestLinkDetail = GuestLink & { briefing: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
+export type GuestModelOption = { id: string; label: string; path: string; model: string; price_in: number; price_out: number; free: boolean };
+export type GuestDefaults = {
+  mode: GuestMode;
+  approval: boolean;
+  tools: GuestTools;
+  usd_limit: number;
+  turns_per_day: number;
+  turns_total: number;
+  invite_hours: number;
+  conversation_hours: number;
+  idle_hours: number;
+  retention_days: number;
+};
+export type GuestDoor = { available: boolean; public_base: string; defaults: GuestDefaults; models: GuestModelOption[]; usd_per_day: number; spent_today: number };
+/** What making a link sends (`LinkBody` in daedalus/extensions/api_guest.py). */
+export type GuestLinkBody = {
+  label: string;
+  topic: string;
+  mode: GuestMode;
+  model_id: string;
+  briefing: string;
+  briefing_approved: boolean;
+  tools: GuestTools;
+  approval: boolean;
+  usd_limit: number;
+  turns_per_day: number;
+  turns_total: number;
+  invite_hours: number;
+  conversation_hours: number;
+  idle_hours: number;
+  retention_days: number;
+};
+/** The answer to making or re-issuing a link. `url` is in no other answer and is never kept anywhere. */
+export type GuestInvite = { link: GuestLink; url: string };
 /** One custom page as `GET /api/pages` lists it: what the navigation draws. `title` is the plain (or
  *  English) title; `titles` has one per language when the page was given them. */
 export type PageListing = { slug: string; title: string; titles: Record<string, string>; icon: string | null; icon_path: string | null; path: string; version: number | null; updated_at: string | null };
@@ -1090,6 +1168,9 @@ export type MessageView = {
   secrets?: { name: string; scope: "session" | "project" }[] | null;
   /** A custom page's message (origin `page:<slug>`) that is the page's own report, not the operator's request. */
   silent?: boolean;
+  /** A message that came over an agent link (origin `guest:<link>`): who the link was made for and what
+   *  the turn it started could do. The text is the guest's words, never the operator's. */
+  guest?: { label: string; tools: string } | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

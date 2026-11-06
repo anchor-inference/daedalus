@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 import zlib
@@ -1088,6 +1089,136 @@ class FakeSecrets:
 SECRETS = FakeSecrets()
 
 
+class FakeGuests:
+    """The agent link's routes over links held here, as the door describes them (guestd/control.py ``view``).
+
+    Three links belong to the chat: a stand-in one whose guest is talking, a direct one whose first
+    message waits for an answer, and one that was revoked. Writes change what the next read returns, so
+    a check can admit, revoke and make a link and see the list follow. The invite address is in the
+    answer to the write that made it and nowhere else, as on the host. ``calls`` records every write.
+    """
+
+    def __init__(self, *, chat: str = "a1b2c3d4e5f6", available: bool = True, public_base: str = "https://door.example") -> None:
+        self.chat = chat
+        self.available = available
+        self.public_base = public_base
+        self.usd_per_day = 2.0
+        self.calls: list[tuple[str, str, object]] = []
+        self.owner: dict[str, str] = {}
+        self.links: dict[str, dict] = {}
+        self.messages: dict[str, list[dict]] = {}
+        self.briefings: dict[str, str] = {}
+        self.draft = "Daedalus is a personal agent. The subject here is the bakery site: opening hours, the menu and how orders are taken."
+        self.seed()
+
+    @staticmethod
+    def conversation(id_: str, state: str, *, reason: str = "", first: str | None = None) -> dict:
+        now = time.time()
+        out = {"id": id_, "state": state, "reason": reason, "created_at": now - 1800, "decide_by": now + 3 * 3600, "expires_at": now + 7 * 86400, "last_guest_at": now - 120 if state == "open" else None}
+        if state == "pending":
+            out["first_message"] = first or ""
+        return out
+
+    def link(self, id_: str, *, state: str = "waiting", mode: str = "stand_in", label: str = "", topic: str = "", tools: str = "none", model: str = "cheap-1",
+             conversation: dict | None = None, redeems: int = 0, spent: float = 0.0, turns: int = 0, **over: object) -> dict:
+        now = time.time()
+        row = {
+            "id": id_, "state": state, "label": label, "topic": topic, "mode": mode, "model_name": model if mode == "stand_in" else "", "approval": True, "usd_limit": 1.0,
+            "turns_per_day": 40, "turns_total": 200, "guest_tools": tools, "created_at": now - 3600, "invite_expires_at": now + 2 * 86400, "conversation_hours": 168.0,
+            "idle_hours": 24.0, "retention_days": 30.0, "spent_usd": spent, "turns_used": turns, "turns_today": turns, "refused_redeems": redeems, "conversation": conversation,
+        }
+        row.update(over)
+        self.links[id_] = row
+        self.owner[id_] = self.chat
+        return row
+
+    def seed(self) -> None:
+        now = time.time()
+        self.link("1a2b", state="spent", label="Mira's assistant", topic="Opening hours for the autumn", conversation=self.conversation("c1a", "open"), spent=0.04, turns=3)
+        self.briefings["1a2b"] = "The bakery is open from seven to six on weekdays. Orders are taken by phone until noon."
+        self.messages["1a2b"] = [
+            {"id": "m1", "role": "guest", "text": "Hello. When does the bakery open on Saturdays?", "at": now - 900, "state": "answered", "cost_usd": 0.0},
+            {"id": "m2", "role": "agent", "text": "On Saturdays the bakery opens at eight and closes at two.", "at": now - 880, "state": "answered", "cost_usd": 0.01},
+            {"id": "m3", "role": "guest", "text": "Can I order <b>a cake</b> for Sunday? See http://elsewhere.example/menu", "at": now - 300, "state": "answered", "cost_usd": 0.0},
+            {"id": "m4", "role": "door", "text": "A limit of this link was reached before this message could be answered.", "at": now - 290, "state": "answered", "cost_usd": 0.0},
+        ]
+        self.link(
+            "3c4d", state="spent", label="Tomas's agent", topic="Review the menu changes", mode="direct", tools="read", turns=0,
+            conversation=self.conversation("c3c", "pending", first="Hi, I am Tomas's agent. I would like to read the draft of the new menu and send comments."), redeems=2,
+        )
+        self.link("5e6f", state="revoked", label="An old contact", topic="", conversation=self.conversation("c5e", "closed", reason="revoked"), spent=0.2, turns=9)
+        self.messages["5e6f"] = []
+        self.briefings["5e6f"] = "An older briefing."
+
+    def door(self) -> dict:
+        return {
+            "available": self.available, "public_base": self.public_base,
+            "defaults": {"mode": "stand_in", "approval": True, "tools": "read", "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200, "invite_hours": 72.0,
+                         "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0},
+            "models": [
+                {"id": "cheap", "label": "Cheap model", "path": "openrouter/v1", "model": "cheap-1", "price_in": 0.1, "price_out": 0.4, "free": False},
+                {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "price_in": 2.0, "price_out": 8.0, "free": False},
+            ],
+            "usd_per_day": self.usd_per_day, "spent_today": 0.5,
+        }
+
+    def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:
+        method = method.upper()
+        data = body if isinstance(body, dict) else {}
+        parts = path.split("/")
+        if not self.available and path != "/api/guest/door":
+            return 503, {"detail": "the guest door is not available in this installation"}
+        if path == "/api/guest/door" and method == "GET":
+            return 200, self.door()
+        if path == "/api/guest/settings" and method == "PUT":
+            self.calls.append((method, path, dict(data)))
+            self.usd_per_day = float(data.get("usd_per_day") or 0)
+            return 200, {"ok": True, "usd_per_day": self.usd_per_day}
+        if path == "/api/guest/links" and method == "GET":
+            return 200, {"links": [row for id_, row in self.links.items() if not session_id or self.owner[id_] == session_id]}
+        if len(parts) == 5 and parts[:4] == ["", "api", "guest", "links"] and method == "GET":
+            row = self.links.get(parts[4])
+            if row is None:
+                return 404, {"detail": "no such link"}
+            events = [{"id": "e1", "kind": "redeemed", "at": time.time() - 1700}]
+            return 200, {"link": {**row, "briefing": self.briefings.get(row["id"], ""), "events": events, "messages": self.messages.get(row["id"], [])}}
+        if len(parts) == 6 and parts[:4] == ["", "api", "guest", "links"] and method == "POST" and parts[5] in ("revoke", "reissue"):
+            self.calls.append((method, path, None))
+            row = self.links.get(parts[4])
+            if row is None:
+                return 404, {"detail": "no such link"}
+            row["state"] = "revoked"
+            if row["conversation"] and row["conversation"]["state"] != "closed":
+                row["conversation"] = {**row["conversation"], "state": "closed", "reason": "revoked"}
+            if parts[5] == "revoke":
+                return 200, {"link": row}
+            fresh = self.link(f"n{len(self.links)}", label=row["label"], topic=row["topic"], mode=row["mode"], tools=row["guest_tools"])
+            return 200, {"link": fresh, "url": f"{self.public_base}/a/fresh{len(self.links)}token", "replaces": row["id"]}
+        if len(parts) == 6 and parts[:4] == ["", "api", "guest", "conversations"] and method == "POST" and parts[5] in ("admit", "refuse"):
+            self.calls.append((method, path, None))
+            for row in self.links.values():
+                conversation = row["conversation"]
+                if conversation and conversation["id"] == parts[4] and conversation["state"] == "pending":
+                    conversation = {k: v for k, v in conversation.items() if k != "first_message"}
+                    row["conversation"] = {**conversation, "state": "open" if parts[5] == "admit" else "closed", "reason": "" if parts[5] == "admit" else "refused"}
+                    return 200, {"ok": True}
+            return 409, {"detail": "this conversation is not waiting for a decision"}
+        if len(parts) == 6 and parts[:3] == ["", "api", "sessions"] and parts[4:] == ["guest", "draft"] and method == "POST":
+            self.calls.append((method, path, None))
+            return 200, {"briefing": self.draft}
+        if len(parts) == 6 and parts[:3] == ["", "api", "sessions"] and parts[4:] == ["guest", "links"] and method == "POST":
+            self.calls.append((method, path, dict(data)))
+            self.chat = parts[3]
+            row = self.link(f"n{len(self.links)}", label=str(data.get("label") or ""), topic=str(data.get("topic") or ""), mode=str(data.get("mode") or "stand_in"),
+                            tools=str(data.get("tools") or "none") if data.get("mode") == "direct" else "none")
+            self.briefings[row["id"]] = str(data.get("briefing") or "")
+            return 200, {"link": row, "url": f"{self.public_base}/a/n{len(self.links)}tokenvalue"}
+        return None
+
+
+GUESTS = FakeGuests()
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -1117,6 +1248,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 404, "application/json", json.dumps({"detail": "no picture"})
         return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
+    if path.startswith("/api/guest/") or (len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "guest"):
+        session_id = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair).get("session_id", "")
+        answered = GUESTS.answer(method, path, body, session_id)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     if path == "/api/secrets" or path.startswith("/api/secrets/"):
         session_id = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair).get("session_id", "")
         answered = SECRETS.answer(method, path, body, session_id)

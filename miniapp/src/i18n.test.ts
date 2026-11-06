@@ -227,6 +227,11 @@ describe("the keys the code asks for", () => {
       ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic"]],
       ["settings.memory.subject.", ["health", "finances", "intimate", "identity_documents", "precise_location"]],
       ["svc.access.", ["local", "key", "public"]],
+      // An agent link names its state, mode and tools from what the door reports; the state is its
+      // conversation's once the invite is spent.
+      ["guest.state.", ["waiting", "used", "pending", "open", "closed", "revoked", "expired"]],
+      ["guest.mode.", ["stand_in", "direct"]],
+      ["guest.tools.", ["none", "read", "all"]],
       ["svc.copied.", ["address", "link", "key"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],

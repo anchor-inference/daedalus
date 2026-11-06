@@ -73,6 +73,7 @@ import { worktreeFolders } from "../project/worktreefolders";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
+import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
 import { ApprovalChip } from "../browser/approvals";
 import { BrowserTab } from "../browser/BrowserPanel";
@@ -197,6 +198,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [moving, setMoving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [guesting, setGuesting] = useState(false);
   const composer = useRef<ComposerHandle>(null);
   // The right panel: the route carries the open tab and the previewed file for the pane the URL
   // names; the second pane of a dual view keeps its panel to itself. Phones host it in a sheet.
@@ -1631,6 +1633,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const contextPct = detail?.context?.window ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   // A chat that is still alone in a project of its own can become a project from its own menu too.
   const makeProject = makeProjectCommand(detail?.project, () => setPromoting(true));
+  // A link is made from an ordinary chat: not the main chat, a project's orchestrator or a helper's own.
+  const guestable = !!detail && !main && !orchestrating && !detail.subagent_of;
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
@@ -1640,6 +1644,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(lastSeq !== null && !main && !orchestrating ? [{ icon: "fork" as IconName, label: t("session.phone.fork"), onSelect: () => void turnAction("fork", lastSeq) }] : []),
     ...(onSplit ? [{ icon: "split" as IconName, label: t("session.split"), onSelect: onSplit }] : []),
     { icon: "share", label: t("session.share"), value: detail?.share && detail.share.mode !== "local" ? t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key") : undefined, onSelect: () => setSharing(true) },
+    ...(guestable ? [{ icon: "link" as IconName, label: t("session.guest"), onSelect: () => setGuesting(true) }] : []),
     { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
     ...(revealer && hasDetails ? [{ icon: "external" as IconName, label: revealer.label, onSelect: revealWorkspace }] : []),
     { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
@@ -1795,6 +1800,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
               "-",
               { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
+              ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
               { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
               { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
               ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
@@ -2045,6 +2051,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
       {moving && detail && <MoveSessionSheet sessionId={id} current={detail.project.id} currentOwn={!!detail.workspace_own} onClose={() => setMoving(false)} onMoved={() => load(true)} toast={toast} />}
 
+      {guesting && <GuestLinksSheet sessionId={id} toast={toast} onClose={() => setGuesting(false)} />}
       {sharing && <ShareSheet sessionId={id} share={detail?.share} onClose={() => setSharing(false)} onChanged={(share) => setDetail((current) => (current ? { ...current, share } : current))} toast={toast} />}
 
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}
@@ -2269,6 +2276,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const seq = turn.user?.seq ?? null;
   const settled = !!seq && !!onTurnAction && !live;
   const inbound = turn.user?.origin?.startsWith("inbound:") ? turn.user.origin.slice(8) : "";
+  // A stranger's words, over an agent link: a card of their own, never the operator's bubble.
+  const fromGuest = !!turn.user && (!!turn.user.guest || !!turn.user.origin?.startsWith("guest:"));
   const fromPage = turn.user?.origin?.startsWith("page:") ? turn.user.origin.slice(5) : "";
   // The operator's words alone: the files are drawn above the bubble, so the list written for the model goes.
   const words = turn.user ? withoutAttachedList(turn.user.text) : "";
@@ -2316,9 +2325,10 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {turn.user && turn.note && turn.note.kind !== "events" && <SystemNoteRow note={turn.note} cacheKey={live ? undefined : `n${seq ?? turn.key}`} run={turn.note.kind === "loop" && !live ? { folded, toggle: () => setFolded(!folded) } : undefined} />}
       <div className="turn-content" hidden={folded && !live}>
       {turn.user && !turn.note && (
-        <div className="msg-wrap">
+        <div className={`msg-wrap ${fromGuest ? "guest" : ""}`}>
           <MessageAttachments sessionId={sessionId} items={turn.user.attachments} onOpen={preview} />
-          {bubble && <UserBubble>
+          {fromGuest && turn.user && <GuestCard guest={turn.user.guest} text={turn.user.text} />}
+          {bubble && !fromGuest && <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}

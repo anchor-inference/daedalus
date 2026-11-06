@@ -25,6 +25,8 @@ type State = { kind: "idle" } | { kind: "loading" } | { kind: "busy" } | { kind:
 /** Who wrote a hit. A user message with an origin other than the operator's is the host's wake-up,
  *  a schedule's prompt or a batch of events, which the chat draws as a system note, not as "You". */
 function roleWord(role: string, origin?: string | null): string {
+  // A guest's words are neither "You" nor the host's: the chat draws them as a card marked with the guest.
+  if (role === "user" && origin?.startsWith("guest:")) return t("guest.from.none");
   if (role === "user") return !origin || origin === "operator" || origin.startsWith("inbound") ? t("chatsearch.role.user") : t("chatsearch.role.system");
   if (role === "assistant") return t("chatsearch.role.assistant");
   if (role === "tool") return t("chatsearch.role.tool");

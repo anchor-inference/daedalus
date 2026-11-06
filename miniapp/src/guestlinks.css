@@ -1,0 +1,53 @@
+/* The agent link's sheet (guestlinks.tsx) and the card a guest's message is drawn as in the chat.
+   Everything a stranger wrote is text: it is laid out as pre-wrapped plain text and never given a
+   link, a picture or markdown, so these rules only decide where lines break. */
+
+.guest-sheet { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.guest-sheet > .sub { margin: 0; }
+.guest-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.guest-list { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.guest-link { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
+.guest-link[data-state="revoked"], .guest-link[data-state="expired"] { background: transparent; }
+.guest-link[data-state="revoked"] .guest-name, .guest-link[data-state="expired"] .guest-name { color: var(--fg-2); }
+.guest-link-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.guest-name { min-width: 0; font-weight: 600; }
+.guest-link-meta { overflow-wrap: anywhere; }
+.guest-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* What the guest first wrote, in a frame that says it is theirs. It scrolls rather than grows, so a
+   long message cannot push the buttons that answer it out of the sheet. */
+.guest-quote { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-2); }
+.guest-quote-text, .guest-msg-text, .guest-card-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-14); line-height: 1.45; }
+.guest-quote-text { max-height: 8lh; overflow-y: auto; }
+
+.guest-reader { display: flex; flex-direction: column; gap: var(--space-2); }
+.guest-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
+.guest-msg[data-role="guest"] { border-left: 3px solid var(--warn); }
+.guest-msg[data-role="agent"] { background: var(--surface-2); }
+.guest-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
+.guest-msg-head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
+.guest-briefing { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); max-height: 12lh; overflow-y: auto; }
+
+.guest-form { display: flex; flex-direction: column; min-width: 0; }
+.guest-form textarea.field { resize: vertical; font-family: inherit; }
+.guest-form .segmented { margin: 0; }
+.guest-form .sub { margin: 4px 0 0; }
+.guest-form .sub.guest-warning { color: var(--warn); }
+.guest-draft { align-self: flex-start; margin-top: var(--space-2); }
+.guest-toggle { align-self: flex-start; }
+.guest-form .toggle-row { margin-top: var(--space-2); }
+.guest-more { margin-top: var(--space-2); }
+.guest-more > summary { cursor: pointer; padding: var(--space-2) 0; color: var(--fg-2); font-size: var(--fs-13); }
+.guest-problem { margin-top: var(--space-2); color: var(--bad); }
+
+.guest-made { display: flex; flex-direction: column; gap: var(--space-2); }
+.guest-made textarea.field { resize: none; word-break: break-all; }
+.guest-copy { align-self: flex-start; }
+
+/* A guest's message in the chat: a framed card on the answer's side with the guest's mark on it, so it
+   is never read as something the operator typed. */
+.msg-wrap.guest { align-items: stretch; }
+.guest-card { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
+.guest-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); color: var(--fg-2); }
+.guest-card-head b { color: var(--warn); font-weight: 600; }
