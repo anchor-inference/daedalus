@@ -298,7 +298,10 @@ func (p *Model) TabEvent(t *browser.Tab, e cdp.Event) {
 			FrameID string `json:"frameId"`
 			Name    string `json:"name"`
 		}
-		if json.Unmarshal(e.Params, &l) != nil || l.FrameID != t.TargetID || l.Name != "load" {
+		// At the document's end as well as at load: a challenge frame that never finishes holds load
+		// back for good, and with load alone only a check left running from the page before could
+		// find it, which it did or did not by the machine's speed. needsYou raises it once.
+		if json.Unmarshal(e.Params, &l) != nil || l.FrameID != t.TargetID || (l.Name != "load" && l.Name != "DOMContentLoaded") {
 			return
 		}
 		go p.checkCaptcha(t)
