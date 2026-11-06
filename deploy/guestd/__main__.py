@@ -52,9 +52,15 @@ class Server(uvicorn.Server):
         yield
 
 
+GRACE_SECONDS = 2
+"""How long a stop waits for requests in hand. Without a bound a held read or the host's feed keeps this
+process alive for half a minute after it was told to end, and natively a launcher that starts again in that
+time finds this one still here, removing the new door's sockets as it leaves."""
+
+
 def public_config(app: PublicDoor) -> uvicorn.Config:
     """The access log stays off: every invite is in a path."""
-    return uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off", proxy_headers=False, forwarded_allow_ips="")
+    return uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off", proxy_headers=False, forwarded_allow_ips="", timeout_graceful_shutdown=GRACE_SECONDS)
 
 
 def host_token(token_dir: Path, *, wait: bool = True) -> str:
@@ -143,7 +149,7 @@ async def main() -> None:
     stand_in = StandIn(store, mailbox, KeyProxyCaller(model_socket, endpoint=model_endpoint))
     stand_in.recover()
     public = Server(public_config(PublicDoor(mailbox)))
-    control = Server(uvicorn.Config(ControlDoor(store, mailbox, token), log_level="warning", access_log=False, lifespan="off"))
+    control = Server(uvicorn.Config(ControlDoor(store, mailbox, token), log_level="warning", access_log=False, lifespan="off", timeout_graceful_shutdown=GRACE_SECONDS))
     loop = asyncio.get_running_loop()
 
     def stop() -> None:

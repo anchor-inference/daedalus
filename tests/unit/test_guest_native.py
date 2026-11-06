@@ -193,6 +193,12 @@ print(",".join(results))
     assert done.stdout.strip() == "refused,refused", done.stderr
 
 
+def test_a_door_told_to_stop_does_not_wait_for_a_held_read() -> None:
+    from guestd.__main__ import GRACE_SECONDS, public_config
+
+    assert public_config(object()).timeout_graceful_shutdown == GRACE_SECONDS  # type: ignore[arg-type]
+
+
 def test_the_compose_door_is_told_none_of_this() -> None:
     """The container's form stays what it was: a socket, and a wall better than any of this."""
     import yaml
