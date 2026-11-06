@@ -204,7 +204,7 @@ RUN python3 /opt/launcher/dependencies.py /opt/dependency-recipe/local.json
 COPY deploy/keyproxy /opt/keyproxy
 # The guest door runs from this image as a package of its own, baked in: it is what strangers talk to,
 # so it does not run from the checkout the agent can write. It needs nothing else of Daedalus.
-COPY daedalus/guestd /opt/guestd/guestd
+COPY deploy/guestd /opt/guestd/guestd
 
 WORKDIR /srv/daedalus
 # The virtualenv lives outside the mounted checkout so host and container never share one.

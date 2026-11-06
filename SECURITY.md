@@ -23,7 +23,7 @@ a hole in it.
 - **The sandbox fails closed.** With `tools.exec.sandbox = "workspace"`, a container that cannot create
   namespaces refuses commands instead of running them bare.
 
-A link to another person's agent (the guest door, `daedalus/guestd`) is the one place a stranger talks to
+A link to another person's agent (the guest door, `deploy/guestd`) is the one place a stranger talks to
 this installation. It is a process of its own with its own port and database, and it has no route to the app:
 the app dials it over a unix socket. A stand-in link answers from a tools-free model call that holds only a
 briefing the operator approved, so private data is absent rather than filtered. A direct link is the

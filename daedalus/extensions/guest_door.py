@@ -1,6 +1,6 @@
 """The host's end of the guest door: working the door, and running a direct link's turns.
 
-The door (:mod:`daedalus.guestd`) is a process with nothing in it, and this is the only code that talks
+The door (``deploy/guestd``) is a process with nothing in it, and this is the only code that talks
 to it, always by dialling its unix socket. For a stand-in link nothing passes through here but the
 operator's own actions: the stand-in's conversation happens entirely on the other side.
 

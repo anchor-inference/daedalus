@@ -7,7 +7,7 @@ reader asks here, or reads the field at the moment it needs it, and none of them
 Three addresses, because they must not be one. The app's address holds the operator's signed-in session;
 the services address is where pages an agent wrote run, and it has to be another origin (see
 ``daedalus.extensions.api_services_door``); the guest address is where strangers' agents arrive, and it
-leads to a process with nothing behind it (:mod:`daedalus.guestd`).
+leads to a process with nothing behind it (``deploy/guestd``).
 """
 
 from __future__ import annotations

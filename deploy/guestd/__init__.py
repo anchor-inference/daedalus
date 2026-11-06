@@ -6,8 +6,8 @@ second party this installation has ever had lives here, in a process that was ne
 worth asking for. It has its own port and its own database, no state volume, no secrets, no tools, and
 no way to call the host: the host dials this process over a unix socket, never the other way round.
 
-Everything in this package imports only itself, the standard library and the web pieces (starlette,
-uvicorn, httpx). In a container it runs as a top-level package with the rest of Daedalus not even on
-the disk, which is what turns that rule from a convention into a fact; ``tests/unit/test_guest_door``
-keeps it true for the code that also runs under ``daedalus.guestd``.
+It lives beside the key proxy rather than in the ``daedalus`` package because it is another program, not
+a part of the host: everything here imports only itself, the standard library and the web pieces
+(starlette, uvicorn, httpx), and the host never imports it. In a container it runs with the rest of
+Daedalus not even on the disk, which turns that rule from a convention into a fact.
 """

@@ -377,7 +377,7 @@ services:
       - browser-user-run:/run/daedalus-browser-user
       - browser-user-state:/var/lib/browserd-user
 
-  # The guest door: where other people's agents arrive (daedalus/guestd). The least privileged thing in
+  # The guest door: where other people's agents arrive (deploy/guestd). The least privileged thing in
   # this file, because it is the one service strangers talk to: its own uid, no capabilities, a read-only
   # filesystem, its code baked into the image rather than mounted from the checkout the agent can write,
   # and two volumes that hold nothing else. It has no network route to the agent: the agent reaches

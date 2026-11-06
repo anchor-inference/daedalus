@@ -15,6 +15,11 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from guestd.control import ControlDoor
+from guestd.mailbox import Mailbox
+from guestd.public import PublicDoor
+from guestd.standin import ModelReply, StandIn
+from guestd.store import Store
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits
 from protocore.contracts.types import Message, MessageRole, TextBlock
 from starlette.testclient import TestClient
@@ -24,11 +29,6 @@ from daedalus.config import STAFF_BLOCKED_TOOLS, Settings
 from daedalus.extensions import api_guest
 from daedalus.extensions import guest_door as guest_door_extension
 from daedalus.extensions.guest_door import Delivery, DoorClient, GuestBridge, model_options
-from daedalus.guestd.control import ControlDoor
-from daedalus.guestd.mailbox import Mailbox
-from daedalus.guestd.public import PublicDoor
-from daedalus.guestd.standin import ModelReply, StandIn
-from daedalus.guestd.store import Store
 from daedalus.host import guest_turns
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy

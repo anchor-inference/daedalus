@@ -297,7 +297,7 @@ class Settings(BaseSettings):
     """The address that listener is reached at when it is not this host's own port: the name a reverse
     proxy gives it, or later a tunnel. Must be another origin than ``miniapp_public_url``."""
     guest_door_port: int = 8764
-    """The port of the guest door (:mod:`daedalus.guestd`), a process of its own. Only addresses are built
+    """The port of the guest door (``deploy/guestd``), a process of its own. Only addresses are built
     from it here: this process never connects to it, it talks to the door over ``guest_run_dir``."""
     guest_public_url: str = ""
     """The address the guest door is reached at: the name a reverse proxy gives it, or later a tunnel.

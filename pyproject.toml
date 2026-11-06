@@ -75,6 +75,7 @@ packages = ["daedalus"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["deploy"]  # the guest door is a program of its own, importable by its tests as ``guestd``
 
 [tool.ruff]
 line-length = 120

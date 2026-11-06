@@ -13,18 +13,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import guestd
 import httpx
 import pytest
-from starlette.testclient import TestClient
-
-from daedalus import guestd
-from daedalus.guestd.__main__ import public_config
-from daedalus.guestd.control import ControlDoor, link_fields
-from daedalus.guestd.limits import Failures, Rate
-from daedalus.guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STAND_IN_REPLY_SECONDS, Mailbox
-from daedalus.guestd.pages import LOST_TOKEN, SPENT_PAGE
-from daedalus.guestd.public import HEADERS, PublicDoor
-from daedalus.guestd.standin import (
+from guestd.__main__ import public_config
+from guestd.control import ControlDoor, link_fields
+from guestd.limits import Failures, Rate
+from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STAND_IN_REPLY_SECONDS, Mailbox
+from guestd.pages import LOST_TOKEN, SPENT_PAGE
+from guestd.public import HEADERS, PublicDoor
+from guestd.standin import (
     MAX_OUTPUT_TOKENS,
     SYSTEM,
     KeyProxyCaller,
@@ -33,8 +31,9 @@ from daedalus.guestd.standin import (
     StandIn,
     request_for,
 )
-from daedalus.guestd.store import FIRST_CONTACT_HOURS, Store
-from daedalus.guestd.text import inert
+from guestd.store import FIRST_CONTACT_HOURS, Store
+from guestd.text import inert
+from starlette.testclient import TestClient
 
 CONTROL = {"authorization": "Bearer control-token"}
 PACKAGE = Path(guestd.__file__).parent
