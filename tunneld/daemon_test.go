@@ -218,6 +218,18 @@ func TestARefusedTokenIsAFailureAndNotAReconnect(t *testing.T) {
 	}
 }
 
+func TestAClientsPortIsReportedAndForgotten(t *testing.T) {
+	d, dir := newTestDaemon(t, &fakeProvider{})
+	d.tunnel("").Port("40123")
+	if ports := readStatus(t, dir).Ports; len(ports) != 1 || ports[0] != 40123 {
+		t.Fatalf("%v", ports)
+	}
+	d.dropChildren()
+	if ports := readStatus(t, dir).Ports; len(ports) != 0 {
+		t.Fatalf("%v", ports)
+	}
+}
+
 func TestChildrenAreReportedAndForgotten(t *testing.T) {
 	d, dir := newTestDaemon(t, &fakeProvider{})
 	tunnel := d.tunnel("")
@@ -248,7 +260,7 @@ func fakeTunnel(t *testing.T, dir string) (*Tunnel, chan string, *[]int) {
 	t.Helper()
 	up := make(chan string, 4)
 	pids := &[]int{}
-	return &Tunnel{Router: "http://127.0.0.1:1", Dir: dir, Logf: t.Logf, Up: func(a string) { up <- a }, SignIn: func(string) {}, Child: func(p int) { *pids = append(*pids, p) }}, up, pids
+	return &Tunnel{Router: "http://127.0.0.1:1", Dir: dir, Logf: t.Logf, Up: func(a string) { up <- a }, SignIn: func(string) {}, Child: func(p int) { *pids = append(*pids, p) }, Port: func(string) {}}, up, pids
 }
 
 func TestAMissingClientWaitsForAPerson(t *testing.T) {
@@ -290,12 +302,14 @@ exec sleep 30
 	}
 }
 
-func TestNgrokIsNeverToldItsTokenOnACommandLine(t *testing.T) {
+func TestNgrokIsNeverToldItsTokenOnACommandLineAndOpensNoLocalAPI(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "args")
 	script := writeScript(t, "ngrok", `echo "$@" > `+marker+`
+cp "$5" `+marker+`.config 2>/dev/null
 env >> `+marker+`
-echo '{"lvl":"eror","err":"authentication failed: ERR_NGROK_107"}'
+echo '{"lvl":"crit","msg":"command failed","err":"authentication failed: The authtoken you specified does not look like a proper ngrok authtoken."}'
+echo 'ERROR:  ERR_NGROK_105'
 exit 1
 `)
 	tunnel, _, _ := fakeTunnel(t, dir)
@@ -307,8 +321,12 @@ exit 1
 	if strings.Contains(string(seen), "the-secret-token") {
 		t.Fatalf("in its arguments or environment:\n%s", seen)
 	}
-	if !strings.Contains(string(seen), "--config") {
+	if !strings.Contains(string(seen), "--config") || !strings.Contains(string(seen), "--inspect=false") {
 		t.Fatalf("%s", seen)
+	}
+	config, _ := os.ReadFile(marker + ".config")
+	if !strings.Contains(string(config), "web_addr: false") {
+		t.Fatalf("an open local API takes orders from anyone on this machine:\n%s", config)
 	}
 	if entries, _ := filepath.Glob(filepath.Join(dir, "ngrok", "*.yml")); len(entries) != 0 {
 		t.Fatalf("the config outlived the run: %v", entries)
@@ -324,29 +342,30 @@ func TestNgrokWithNoTokenAsksForOne(t *testing.T) {
 }
 
 func TestNgrokConfigQuotesTheToken(t *testing.T) {
-	config := (&ngrok{token: `a"b`}).config("4040")
-	if !strings.Contains(config, `authtoken: "a\"b"`) || !strings.Contains(config, "web_addr: 127.0.0.1:4040") {
+	config := (&ngrok{token: `a"b`}).config()
+	if !strings.Contains(config, `authtoken: "a\"b"`) || !strings.Contains(config, "web_addr: false") {
 		t.Fatal(config)
 	}
 }
 
-func TestNgrokReadsItsAddressFromItsOwnAPI(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+func TestNgrokReadsEverythingFromItsLog(t *testing.T) {
+	up := make(chan string, 2)
+	tunnel := &Tunnel{Up: func(a string) { up <- a }}
+	n := &ngrok{}
+	n.read(`{"lvl":"info","msg":"client session established","obj":"tunnels.session"}`, tunnel)
+	if !n.Connected(context.Background()) {
+		t.Fatal("a session is up")
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"tunnels":[{"public_url":"http://x.ngrok-free.dev"},{"public_url":"https://x.ngrok-free.dev"}]}`))
-	})}
-	go server.Serve(listener)
-	defer server.Close()
-	n := &ngrok{web: listener.Addr().String()}
-	if got := n.address(context.Background()); got != "https://x.ngrok-free.dev" {
+	n.read(`{"lvl":"info","msg":"started tunnel","obj":"tunnels","name":"command_line","addr":"http://127.0.0.1:1","url":"http://x.ngrok-free.dev"}`, tunnel)
+	n.read(`{"lvl":"info","msg":"started tunnel","obj":"tunnels","name":"command_line","addr":"http://127.0.0.1:1","url":"https://x.ngrok-free.dev"}`, tunnel)
+	if got := <-up; got != "https://x.ngrok-free.dev" {
 		t.Fatal(got)
 	}
-	if !n.Connected(context.Background()) {
-		t.Fatal("a client that lists its tunnel holds it")
+	n.read(`{"lvl":"eror","msg":"session closing","obj":"tunnels.session","err":"reconnecting"}`, tunnel)
+	if n.Connected(context.Background()) {
+		t.Fatal("the session went")
 	}
+	n.read(`not json at all`, tunnel)
 }
 
 func TestFrpWritesItsClientAConfigAndNamesItsAddress(t *testing.T) {
@@ -354,6 +373,7 @@ func TestFrpWritesItsClientAConfigAndNamesItsAddress(t *testing.T) {
 	marker := filepath.Join(dir, "seen")
 	script := writeScript(t, "frpc", `cp "$2" `+marker+`
 echo "$@" >> `+marker+`.args
+echo '[I] [client/control.go:174] [abc] [daedalus] start proxy success'
 exec sleep 30
 `)
 	tunnel, up, _ := fakeTunnel(t, dir)
@@ -375,6 +395,9 @@ exec sleep 30
 			t.Fatalf("no %q in\n%s", want, config)
 		}
 	}
+	if strings.Contains(string(config), "webServer") {
+		t.Fatalf("an admin server gives this token, and the tunnel, to anyone on this machine:\n%s", config)
+	}
 	args, _ := os.ReadFile(marker + ".args")
 	if strings.Contains(string(args), "the-secret-token") {
 		t.Fatal("the token is on a command line")
@@ -391,25 +414,35 @@ func TestFrpNeedsAllThree(t *testing.T) {
 	}
 }
 
-func TestFrpReadsItsStateFromItsAdminAPI(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+func TestFrpFollowsItsClientsOwnWords(t *testing.T) {
+	up := make(chan string, 2)
+	f := &frp{domain: "agent.example"}
+	tunnel := &Tunnel{Up: func(a string) { up <- a }}
+	// Lines as frpc 0.72 wrote them, against a frps that was stopped and started again.
+	f.read(`2026-11-07 01:27:19.928 [I] [client/control.go:174] [7d3e] [daedalus] start proxy success`, tunnel, nil)
+	if !f.Connected(context.Background()) || <-up != "https://agent.example" {
+		t.Fatal("up")
 	}
-	var status atomic.Value
-	status.Store("running")
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string][]map[string]string{"http": {{"name": "daedalus", "status": status.Load().(string)}}})
-	})}
-	go server.Serve(listener)
-	defer server.Close()
-	f := &frp{admin: listener.Addr().String()}
-	if !f.Connected(context.Background()) {
-		t.Fatal("running")
-	}
-	status.Store("wait start")
+	f.read(`2026-11-07 01:27:21.829 [I] [client/service.go:369] [7d3e] try to connect to server...`, tunnel, nil)
 	if f.Connected(context.Background()) {
-		t.Fatal("not running")
+		t.Fatal("it lost the server")
+	}
+	refused := false
+	f.read(`[W] [client/service.go:380] connect to server error: dial tcp: connection refused`, tunnel, func() { refused = true })
+	if refused {
+		t.Fatal("a server that is down is not a server that said no")
+	}
+	f.read(`[W] [client/service.go:380] connect to server error: token in login doesn't match token from configuration`, tunnel, func() { refused = true })
+	if !refused {
+		t.Fatal("a token the server turned down waits for a person")
+	}
+}
+
+func TestAQuickTunnelsHostnameMustBeOne(t *testing.T) {
+	for name, want := range map[string]bool{"some-words.trycloudflare.com": true, "evil.example/.trycloudflare.com": false, "a.b.trycloudflare.com": false, "x@.trycloudflare.com": false} {
+		if quickHost.MatchString(name) != want {
+			t.Errorf("%s", name)
+		}
 	}
 }
 

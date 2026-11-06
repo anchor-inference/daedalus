@@ -6,10 +6,13 @@ server has an address of its own and is told so with ``native: false``, so the s
 A QR for a service works on any installation. Same Wi-Fi comes first, because it costs nothing and goes
 nowhere: a door opens on the home network for an hour and the code is spent there. Otherwise it goes
 through the address. Either way a private service stays private: the code opens it for that one phone.
+A service with a key gets a code too and never its key, which lasts and which a QR would show on plain http.
 """
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlsplit
@@ -24,6 +27,7 @@ from daedalus.host import launcher_bridge
 from daedalus.host.reveal import is_local_client
 from daedalus.security.two_factor import qr_rows
 from daedalus.stores import pairing
+from daedalus.tools.shell import bwrap_status
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -39,6 +43,7 @@ class AddressBody(BaseModel):
     frp_server: str | None = Field(default=None, max_length=256)
     frp_domain: str | None = Field(default=None, max_length=256)
     sign_out: bool = False
+    trust_ngrok: bool = False
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, door_config: Callable[[Any], Any]) -> None:
@@ -62,20 +67,24 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, door_c
             return {"native": False}
         return await drawn(await address().refresh())
 
+    async def tokens_hidden() -> bool:
+        """Whether a command the agent runs cannot reach the file a token is in, which the form has to say
+        when it is not so. Only the Linux sandbox hides it: the policy reads a command's words, no more."""
+        if not sys.platform.startswith("linux") or getattr(app.config.tools.exec, "sandbox", "off") != "workspace":
+            return False
+        return await asyncio.to_thread(bwrap_status) == "ok"
+
     async def drawn(view: dict[str, Any]) -> dict[str, Any]:
         """What the settings need beyond the launcher's view. The QR is drawn here, as the two-factor one is."""
         reachable = view.get("address") if view.get("enabled") and view.get("state") in ("up", "reconnecting") else ""
-        return {"native": True, **view, "exposed": await exposed(), "qr": qr_rows(str(reachable)) if reachable else []}
+        return {"native": True, **view, "exposed": await exposed(), "qr": qr_rows(str(reachable)) if reachable else [], "tokens_hidden": await tokens_hidden()}
 
     async def way(kind: str, base: str, slug: str, row: dict[str, Any]) -> dict[str, Any]:
-        """One way for a phone to reach a service. A private service needs a code; one that is already
-        shared has a link that works as it is."""
+        """One way for a phone to reach a service. A public one has a link that works as it is; anything
+        else gets a code for this one door."""
         url = f"{base}/s/{slug}/"
-        mode = row.get("share_mode") or "local"
-        if mode == "local":
-            url += "?phone=" + quote(await pairing.mint_phone(app.db, slug), safe="")
-        elif mode == "key" and row.get("share_key"):
-            url += "?key=" + quote(str(row["share_key"]), safe="")
+        if (row.get("share_mode") or "local") != "public":
+            url += "?phone=" + quote(await pairing.mint_phone(app.db, slug, lan=kind == "wifi"), safe="")
         return {"kind": kind, "url": url, "qr": qr_rows(url)}
 
     @api.post("/api/sessions/{session_id}/services/{name}/phone")

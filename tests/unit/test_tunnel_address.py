@@ -210,6 +210,44 @@ async def test_a_server_has_nothing_to_say_here(tmp_path: Path, monkeypatch: pyt
     address, app = rig(tmp_path, monkeypatch, {}, native=False)
     assert await doctor._public_address(doctor.DoctorContext(settings=app.settings, config=app.config, extensions={tunnel_address.EXTENSION_KEY: address})) == []
     assert await tunnel_address.install(app) == [], "a server follows no tunnel"
+    assert tunnel_address.EXTENSION_KEY not in app.extensions
+
+
+async def test_a_planted_launcher_file_on_a_server_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent writing ``launcher.json`` beside the state folder rewrote the public addresses, told the door,
+    and hid its own tunnel from the watch, because the watch asked with no thought for where it was."""
+    evil = {"enabled": True, "state": "up", "address": "https://evil.example.test", "pids": [4242]}
+    address, app = rig(tmp_path, monkeypatch, evil, native=False, services_public_url="https://services.example.test", guest_public_url="https://guests.example.test")
+    await tunnel_address.install(app)
+    app.notifications = None
+    monkeypatch.setattr(tunnels, "running", lambda: [running(4242)])
+    found = await tunnel_watch.TunnelWatch(app).check()
+    assert [r.pid for r in found] == [4242], "the agent's tunnel is still a stranger"
+    await address.refresh()  # and should anything ever call this here, it does nothing
+    assert public_address.services_base(app.settings) == "https://services.example.test"
+    assert public_address.guest_base(app.settings) == "https://guests.example.test"
+    assert app.extensions["guest_door"].told == 0 and not address.own_pids
+
+
+def test_the_handover_file_is_sealed_in_a_container_too(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, telegram_bot_token="123:abc", owner_user_id=1, state_dir=tmp_path / "state", native=False)  # type: ignore[call-arg]
+    assert tmp_path / "launcher.json" in settings.sealed_paths
+
+
+def test_a_clients_own_port_is_sealed_as_the_launcher_states_it(tmp_path: Path) -> None:
+    assert launcher_bridge.tunnel_ports(None) == ()
+    assert launcher_bridge.tunnel_ports(tmp_path) == (), "no tunnel, no file"
+    (tmp_path / "tunnel").mkdir()
+    (tmp_path / "tunnel" / "status.json").write_text('{"ports": [40123, "x", 0, 70000]}')
+    assert launcher_bridge.tunnel_ports(tmp_path) == (40123,)
+    (tmp_path / "tunnel" / "status.json").write_text("not json")
+    assert launcher_bridge.tunnel_ports(tmp_path) == ()
+
+
+async def test_the_doctor_says_when_a_provider_names_no_visitor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    address, app = rig(tmp_path, monkeypatch, {"enabled": True, "state": "up", "address": ADDRESS, "provider": "tailscale", "confirmed": True, "visitor_unknown": True})
+    checks = await doctor._public_address(doctor.DoctorContext(settings=app.settings, config=app.config, extensions={tunnel_address.EXTENSION_KEY: address}))
+    assert any("one address" in c.message and not c.ok for c in checks)
 
 
 # -- the routes ----------------------------------------------------------------------------------------
@@ -224,7 +262,7 @@ def routes(address: TunnelAddress, app: Any) -> TestClient:
     app.db = Db()
     app.extensions[tunnel_address.EXTENSION_KEY] = address
     api = FastAPI()
-    api_public_address.register(api, app, lambda: {})
+    api_public_address.register(api, app, lambda: {}, door_config=lambda _: None)
     return TestClient(api)
 
 
@@ -241,7 +279,21 @@ def test_the_settings_read_and_change_it_and_see_what_is_exposed(tmp_path: Path,
     state = client.get("/api/public-address").json()
     assert state["native"] and state["available"] and state["exposed"] == {"links": 2, "services": 1}
     client.put("/api/public-address", json={"enabled": True, "provider": "ngrok", "ngrok_token": "2abc"})
-    assert address.answers["changes"] == [{"enabled": True, "provider": "ngrok", "ngrok_token": "2abc", "sign_out": False}]  # type: ignore[attr-defined]
+    assert address.answers["changes"] == [{"enabled": True, "provider": "ngrok", "ngrok_token": "2abc", "sign_out": False, "trust_ngrok": False}]  # type: ignore[attr-defined]
+
+
+def test_the_form_is_told_when_a_command_could_read_a_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    address, app = rig(tmp_path, monkeypatch, {"enabled": False, "state": "off"})
+    client = routes(address, app)
+    monkeypatch.setattr(api_public_address, "bwrap_status", lambda: "ok")
+    monkeypatch.setattr(api_public_address.sys, "platform", "linux")
+    app.config.tools.exec.sandbox = "workspace"
+    assert client.get("/api/public-address").json()["tokens_hidden"] is True
+    app.config.tools.exec.sandbox = "off"
+    assert client.get("/api/public-address").json()["tokens_hidden"] is False
+    app.config.tools.exec.sandbox = "workspace"
+    monkeypatch.setattr(api_public_address.sys, "platform", "darwin")
+    assert client.get("/api/public-address").json()["tokens_hidden"] is False
 
 
 def test_a_refused_change_is_said_in_the_launchers_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

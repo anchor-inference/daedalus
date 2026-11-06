@@ -3,7 +3,9 @@ package main
 // A Cloudflare quick tunnel: no account, and a new address each time the client starts. Run through
 // cloudflared, which is a program of its own and has no library worth embedding. The address comes from
 // the client's metrics listener; /ready there says how many connections it holds to the edge, which
-// after a sleep is the honest answer. The output is read only as a fallback for the address.
+// after a sleep is the honest answer. The output is read only as a fallback for the address. That
+// listener takes no orders, unlike ngrok's and frpc's, and quick tunnels have no credential to read in it,
+// but it does serve profiles of the process, so its port is sealed from the agent with the others.
 //
 // Its visitor's address is in Cf-Connecting-Ip, and the edge is why that can be believed: tried on a live
 // tunnel, a request that forged the header was turned away there with a 403 and never arrived.
@@ -15,12 +17,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 )
 
-var quickAddress = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
+var (
+	quickAddress = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
+	quickHost    = regexp.MustCompile(`^[a-z0-9-]+\.trycloudflare\.com$`)
+)
 
 type cloudflare struct {
 	binary string
@@ -41,6 +45,7 @@ func (c *cloudflare) Run(ctx context.Context, t *Tunnel) error {
 	c.mu.Lock()
 	c.metrics = "127.0.0.1:" + port
 	c.mu.Unlock()
+	t.Port(port)
 	home := filepath.Join(c.dir, "cloudflared")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return err
@@ -78,7 +83,7 @@ func (c *cloudflare) askAddress(ctx context.Context, found chan<- string) {
 				}
 				decoded := json.NewDecoder(answer.Body).Decode(&body)
 				answer.Body.Close()
-				if decoded == nil && strings.HasSuffix(body.Hostname, ".trycloudflare.com") {
+				if decoded == nil && quickHost.MatchString(body.Hostname) {
 					select {
 					case found <- "https://" + body.Hostname:
 					default:

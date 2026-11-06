@@ -40,6 +40,8 @@ type Tunnel struct {
 	SignIn func(url string)
 	// Child records a client process, so it can be told from a stranger's.
 	Child func(pid int)
+	// Port records a loopback port a client opened for itself, which the host seals from the agent.
+	Port func(port string)
 	// Dir is this daemon's private folder.
 	Dir string
 	// Logf logs. Nothing passed here may hold a path, a token or a whole line of a client's output.

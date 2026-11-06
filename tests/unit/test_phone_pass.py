@@ -39,6 +39,25 @@ async def test_a_code_is_spent_once_and_becomes_a_pass_for_that_service_alone(db
     assert not await pairing.phone_admitted(db, SLUG, None)
 
 
+async def test_a_code_is_spent_by_one_request_however_many_arrive(db: Database) -> None:
+    for _ in range(50):
+        code = await pairing.mint_phone(db, SLUG)
+        won = [p for p in await asyncio.gather(*(pairing.redeem_phone(db, code, SLUG) for _ in range(4))) if p]
+        assert len(won) == 1
+
+
+async def test_a_pass_from_the_wifi_is_no_good_through_the_public_address(db: Database) -> None:
+    """Plain http on a home network can be read by anyone on it. What was read there must stay there."""
+    code = await pairing.mint_phone(db, SLUG, lan=True)
+    assert await pairing.redeem_phone(db, code, SLUG) is None, "a home network's code is spent there"
+    issued = await pairing.redeem_phone(db, code, SLUG, lan=True)
+    assert issued and await pairing.phone_admitted(db, SLUG, issued, lan=True)
+    assert not await pairing.phone_admitted(db, SLUG, issued), "sniffed on the Wi-Fi, it opens nothing from outside"
+    code = await pairing.mint_phone(db, SLUG)
+    issued = await pairing.redeem_phone(db, code, SLUG)
+    assert not await pairing.phone_admitted(db, SLUG, issued, lan=True)
+
+
 async def test_nothing_readable_is_kept(db: Database) -> None:
     code = await pairing.mint_phone(db, SLUG)
     issued = await pairing.redeem_phone(db, code, SLUG)
@@ -91,14 +110,15 @@ def phone_pairing(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """The door's side, with the store's own behaviour tested above."""
     state = {"code": "the-code", "pass": "the-pass", "spent": ""}
 
-    async def redeem(_db: Any, code: str, slug: str) -> str | None:
+    async def redeem(_db: Any, code: str, slug: str, *, lan: bool = False) -> str | None:
         if code != state["code"] or state["spent"]:
             return None
         state["spent"] = slug
+        state["lan"] = lan  # type: ignore[assignment]
         return state["pass"]
 
-    async def admitted(_db: Any, slug: str, issued: str | None) -> bool:
-        return issued == state["pass"] and state["spent"] == slug
+    async def admitted(_db: Any, slug: str, issued: str | None, *, lan: bool = False) -> bool:
+        return issued == state["pass"] and state["spent"] == slug and state.get("lan") == lan
 
     monkeypatch.setattr(pairing, "redeem_phone", redeem)
     monkeypatch.setattr(pairing, "phone_admitted", admitted)
@@ -142,6 +162,17 @@ def test_on_the_home_network_the_cookie_cannot_ask_for_https(upstream: HTTPServe
     client = door(upstream, base="http://192.0.2.10:8766", wrap=LanDoor)
     answer = client.get(f"/s/{SLUG}/?phone=the-code")
     assert answer.status_code == 303 and "Secure" not in answer.headers["set-cookie"]
+
+
+def test_the_door_tells_a_code_which_door_it_came_by(upstream: HTTPServer, phone_pairing: dict[str, str]) -> None:
+    client = door(upstream, base="http://192.0.2.10:8766", wrap=LanDoor)
+    client.get(f"/s/{SLUG}/?phone=the-code")
+    assert phone_pairing["lan"] is True
+    assert client.get(f"/s/{SLUG}/").status_code == 200
+    # The same cookie carried to the other door: a pass sniffed on the Wi-Fi, tried through the tunnel.
+    outside = door(upstream)
+    outside.cookies.set(PHONE_COOKIE_PREFIX + SLUG, "the-pass")
+    assert outside.get(f"/s/{SLUG}/").status_code == 404
 
 
 def test_a_code_is_no_good_on_the_apps_own_address(upstream: HTTPServer, phone_pairing: dict[str, str]) -> None:
@@ -195,6 +226,28 @@ def test_the_address_read_for_a_phone_is_a_home_address_or_nothing(monkeypatch: 
     assert api_services_door.lan_address() == "", "a machine with a public address has no home network to speak of"
 
 
+async def test_closing_the_lan_door_ends_the_connections_it_holds() -> None:
+    """A cancelled server stops accepting and goes on serving what it has: a phone's keep-alive outlived the door."""
+    async def inner(_scope: Any, _receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    settings = type("S", (), {"services_door_port": 0})()
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        settings.services_door_port = probe.getsockname()[1]
+    lan = Lan(lambda door: uvicorn.Config(door, log_level="critical", lifespan="off"), inner)
+    lan.base(settings, "127.0.0.1")  # type: ignore[arg-type]
+    await asyncio.sleep(0.3)
+    reader, writer = await asyncio.open_connection("127.0.0.1", lan.port)
+    writer.write(b"GET /s/x/ HTTP/1.1\r\nHost: x\r\n\r\n")
+    await writer.drain()
+    assert b"204" in await asyncio.wait_for(reader.read(200), 3)
+    lan.close()
+    assert await asyncio.wait_for(reader.read(), 3) == b"", "the door closed it"
+    writer.close()
+
+
 async def test_the_lan_door_opens_on_one_address_and_closes_by_itself(monkeypatch: pytest.MonkeyPatch) -> None:
     """On loopback here, since the tests may not reach anything else: what is proved is the opening and closing."""
     served: list[int] = []
@@ -241,6 +294,9 @@ class Services:
         return SLUG
 
 
+minted: list[bool] = []
+
+
 def phone_route(monkeypatch: pytest.MonkeyPatch, *, native: bool, lan: str = "", mode: str = "local", url: str = "") -> TestClient:
     app = FakeApp(1, native=native, services_public_url=url, miniapp_public_url="")
     app.extensions["services"] = Services(mode)
@@ -248,7 +304,8 @@ def phone_route(monkeypatch: pytest.MonkeyPatch, *, native: bool, lan: str = "",
     monkeypatch.setattr(api_services_door, "lan_address", lambda: lan)
     monkeypatch.setattr(api_services_door.Lan, "base", lambda self, _settings, host: f"http://{host}:8766")
 
-    async def mint(_db: Any, _slug: str) -> str:
+    async def mint(_db: Any, _slug: str, *, lan: bool = False) -> str:
+        minted.append(lan)
         return "code/1"
 
     monkeypatch.setattr(pairing, "mint_phone", mint)
@@ -270,11 +327,23 @@ def test_a_private_service_gets_a_code_on_each_way_the_home_network_first(monkey
     assert answer.json()["ways"][0]["qr"], "drawn by the host"
 
 
-def test_a_shared_service_needs_no_code(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_public_service_needs_no_code(monkeypatch: pytest.MonkeyPatch) -> None:
     client = phone_route(monkeypatch, native=True, lan="192.0.2.10", url="https://x.example.test", mode="public")
     assert kinds(client.post("/api/sessions/s/services/web/phone"))["tunnel"] == f"https://x.example.test/s/{SLUG}/"
+
+
+def test_a_key_never_goes_into_a_qr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """It lasts, and on the Wi-Fi it would travel as plain http. A code does neither."""
     client = phone_route(monkeypatch, native=True, lan="192.0.2.10", url="https://x.example.test", mode="key")
-    assert kinds(client.post("/api/sessions/s/services/web/phone"))["tunnel"] == f"https://x.example.test/s/{SLUG}/?key=k"
+    ways = kinds(client.post("/api/sessions/s/services/web/phone"))
+    assert all("key=" not in url and "phone=" in url for url in ways.values())
+
+
+def test_each_way_gets_a_code_for_its_own_door(monkeypatch: pytest.MonkeyPatch) -> None:
+    minted.clear()
+    client = phone_route(monkeypatch, native=True, lan="192.0.2.10", url="https://x.example.test")
+    client.post("/api/sessions/s/services/web/phone")
+    assert minted == [True, False]
 
 
 def test_no_tunnel_means_the_home_network_alone_and_this_machines_own_name_is_no_way(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -298,3 +367,35 @@ def test_the_address_is_published_for_qr_too(monkeypatch: pytest.MonkeyPatch) ->
     app = FakeApp(1, native=True)
     public_address.publish(app.settings, services="https://x.example.test")
     assert public_address.services_base(app.settings) == "https://x.example.test"
+
+
+async def test_changing_a_services_terms_ends_what_phones_held(db: Database, tmp_path: Any) -> None:
+    from types import SimpleNamespace
+
+    from daedalus.extensions.services import Services as Real
+
+    real = Real.__new__(Real)
+    real.app = SimpleNamespace(db=db, settings=SimpleNamespace())
+    rows = {"share_mode": "key", "share_slug": SLUG, "share_key": "k", "port": 3000, "status": "running"}
+
+    async def get(_session: str, _name: str) -> dict[str, Any]:
+        return dict(rows)
+
+    real.get = get  # type: ignore[method-assign]
+    real.view = lambda row: row  # type: ignore[method-assign]
+    original = db.execute
+
+    async def only_passes(sql: str, params: Any = ()) -> None:
+        if "phone_passes" in sql:
+            await original(sql, params)
+
+    db.execute = only_passes  # type: ignore[method-assign]
+    for mode, rotate in (("public", False), ("key", True), ("local", False)):
+        issued = await pairing.redeem_phone(db, await pairing.mint_phone(db, SLUG), SLUG)
+        await real.share("s", "web", mode, rotate_key=rotate)
+        assert not await pairing.phone_admitted(db, SLUG, issued), mode
+        rows["share_mode"] = "key"
+    issued = await pairing.redeem_phone(db, await pairing.mint_phone(db, SLUG), SLUG)
+    await real.share("s", "web", "key")
+    assert await pairing.phone_admitted(db, SLUG, issued), "the same terms again change nothing"
+    db.execute = original  # type: ignore[method-assign]

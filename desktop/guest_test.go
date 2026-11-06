@@ -52,7 +52,7 @@ func TestADoorComesWithItsFront(t *testing.T) {
 		t.Fatalf("the token's folder is this user's alone: %v %v", info, err)
 	}
 	env := strings.Join(front.(*Process).Env, "\n")
-	for _, want := range []string{"GUEST_HOST=127.0.0.1", "GUEST_DOOR_PORT=9101", "GUEST_TRUSTED_PROXIES=127.0.0.1"} {
+	for _, want := range []string{"GUEST_HOST=127.0.0.1", "GUEST_DOOR_PORT=9101", "GUEST_TRUSTED_PROXIES=127.0.0.1", "GUEST_LISTEN="} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("front env lacks %s:\n%s", want, env)
 		}
@@ -112,15 +112,68 @@ func TestANamespaceWallHoldsOnlyTheDoorsOwnFolders(t *testing.T) {
 			t.Fatalf("%q reached the wall", sealed)
 		}
 	}
-	command := guestDoorCommand(guestWall{name: "namespaces", argv: argv}, p, []string{"A=1"}, []string{"python", "-m", "guestd"})
+	command := guestDoorCommand("namespaces", argv, p, []string{"A=1"}, []string{"python", "-m", "guestd"})
 	if command[len(command)-4] != "--" || command[len(command)-3] != "python" {
 		t.Fatalf("the door's own command comes last: %v", command[len(command)-5:])
 	}
 }
 
-func TestASeatbeltDeniesHomeBeforeGivingBackTheDoorsFolders(t *testing.T) {
+func TestTheFrontsWallHoldsTheNetworkAndNothingElse(t *testing.T) {
 	p := guestPaths(t)
-	profile := seatbeltProfile(p, "/Users/someone")
+	joined := strings.Join(bwrapFrontWall("/usr/bin/bwrap", p), " ")
+	if strings.Contains(joined, "--unshare-net") {
+		t.Fatal("a port on loopback is the front's whole job")
+	}
+	for _, kept := range []string{guestStateDir(p), guestTokenDir(p), guestRunDir(p), guestModelDir(p)} {
+		if strings.Contains(joined, kept) {
+			t.Fatalf("the front parses strangers' bytes first, and %s is none of its business", kept)
+		}
+	}
+	if !strings.Contains(joined, "--ro-bind "+guestFrontDir(p)) {
+		t.Fatalf("it dials the door there: %s", joined)
+	}
+	wall := guestWall{name: "namespaces", argv: bwrapWall("/usr/bin/bwrap", p), front: bwrapFrontWall("/usr/bin/bwrap", p)}
+	command := guestFrontCommand(wall, p, []string{"A=1"}, "python")
+	if command[0] != "/usr/bin/bwrap" || command[len(command)-1] != "guestd.front" {
+		t.Fatalf("%v", command)
+	}
+	if plain := guestFrontCommand(guestWall{}, p, nil, "python"); plain[0] != "python" {
+		t.Fatalf("%v", plain)
+	}
+}
+
+func TestTheDoorIsInASessionOfItsOwn(t *testing.T) {
+	p := guestPaths(t)
+	code := filepath.Join(p.Bot, "deploy", "guestd")
+	if err := os.MkdirAll(code, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(code, "confine.py"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	door, front, _ := NewNative(p, func(string, ...any) {}).newGuestDoor(context.Background(), nil)
+	if !door.(*Process).NewSession || !front.(*Process).NewSession {
+		t.Fatal("no terminal of the launcher's is theirs to type into")
+	}
+}
+
+func TestAStrictSeatbeltStartsFromNothing(t *testing.T) {
+	p := guestPaths(t)
+	profile := strictSeatbelt(p, "/x/python")
+	if !strings.Contains(profile, "(deny default)") || strings.Contains(profile, "(allow default)") {
+		t.Fatalf("%s", profile)
+	}
+	if strings.Contains(profile, "remote ip") {
+		t.Fatalf("it opens no network:\n%s", profile)
+	}
+	if !strings.Contains(profile, `(allow process-exec (literal "/x/python"))`) {
+		t.Fatalf("%s", profile)
+	}
+}
+
+func TestAHygieneSeatbeltDeniesHomeBeforeGivingBackTheDoorsFolders(t *testing.T) {
+	p := guestPaths(t)
+	profile := hygieneSeatbelt(p, "/Users/someone")
 	deny := strings.Index(profile, `(deny file-read* file-write* (subpath "/Users/someone"))`)
 	allow := strings.Index(profile, guestStateDir(p))
 	if deny < 0 || allow < deny {
@@ -190,8 +243,8 @@ func TestARealWallHoldsARealDoor(t *testing.T) {
 		t.Fatalf("no wall here: %+v", wall)
 	}
 	env := guestDoorEnv(p, "unix")
-	argv := guestDoorCommand(wall, p, env, []string{python, "-m", "guestd"})
-	door := &Process{Name: "door", Argv: argv, Dir: filepath.Join(repo, "deploy"), Env: env, LogPath: filepath.Join(p.Local, "door.log"), Log: t.Logf}
+	argv := guestDoorCommand(wall.name, wall.argv, p, env, []string{python, "-m", "guestd"})
+	door := &Process{Name: "door", Argv: argv, Dir: filepath.Join(repo, "deploy"), Env: env, LogPath: filepath.Join(p.Local, "door.log"), Log: t.Logf, NewSession: true}
 	ctx := context.Background()
 	door.Start(ctx)
 	defer door.Stop(ctx)

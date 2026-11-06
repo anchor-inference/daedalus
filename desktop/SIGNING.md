@@ -40,8 +40,9 @@ the release. `update`, and the last step of every upgrade, fetch the tip of `mai
 archive service (`repos.go`) over TLS, and nothing signs that: it is exactly as trustworthy as
 GitHub and TLS. The release signature covers the launcher, `ptyd`, `browserd`, `deskd`, `tunneld` and the app's build,
 and nothing the launcher downloads afterwards. That includes the clients of the public address:
-`cloudflared` and `frpc` are fetched only when their provider is chosen and checked against the hash pinned
-in `desktop/tunnel_tools.go`, which is the signature's reach by one step; ngrok is the operator's own install.
+`cloudflared` and `frpc` are fetched only when their provider is chosen, and both the archive and the program
+in it are checked against the hashes pinned in `desktop/tunnel_tools.go`, at the download and at every start,
+which is the signature's reach by one step; ngrok is the operator's own install, which they accept by its path.
 
 **Windows and tunnels.** `tunneld` is a separate file so that an antivirus verdict on it costs only the public
 address. Unsigned programs that open tunnels are what SmartScreen and Defender look at hardest. `tunneld` holds

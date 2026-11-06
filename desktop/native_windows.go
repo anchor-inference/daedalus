@@ -22,6 +22,9 @@ func setProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole, HideWindow: true}
 }
 
+// ownSession has nothing to add: each child already has a console of its own.
+func ownSession(*exec.Cmd) {}
+
 // terminateGroup asks the isolated console to end politely with CTRL_BREAK. `taskkill` without /F was what this used to send, and it posts
 // WM_CLOSE to top-level windows: a console-less Python has none, so nothing arrived, the forty
 // second wait always expired and the bot was hard-killed with no chance to drain a run. A break

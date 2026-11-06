@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -21,6 +23,7 @@ func tunnelRig(t *testing.T) (*tunnels, Paths) {
 	tn := newTunnels(p, t.Logf)
 	tn.find = func() string { return "" }
 	tn.fetch = func(context.Context, download) error { t.Fatal("nothing should be fetched"); return nil }
+	tn.pin = func(string) (download, string, bool) { return download{}, "", false }
 	t.Setenv("PATH", filepath.Join(root, "no-tools-here"))
 	return tn, p
 }
@@ -192,17 +195,30 @@ func TestAStatusFileOutlivingItsProcessIsNotBelieved(t *testing.T) {
 	}
 }
 
-func TestAClientIsFetchedOnlyForTheProviderThatNeedsIt(t *testing.T) {
+func pinnedRig(t *testing.T, body string) (*tunnels, Paths, chan string) {
+	t.Helper()
 	tn, p := tunnelRig(t)
-	fetched := make(chan string, 2)
+	want := sha256.Sum256([]byte(body))
+	tn.pin = func(provider string) (download, string, bool) {
+		if provider != tunnelCloudflare {
+			return download{}, "", false
+		}
+		return download{name: "cloudflared"}, hex.EncodeToString(want[:]), true
+	}
+	fetched := make(chan string, 4)
 	tn.fetch = func(_ context.Context, d download) error {
 		fetched <- d.name
 		dir := tunnelToolsDir(p)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(dir, exeName(d.name)), nil, 0o755)
+		return os.WriteFile(filepath.Join(dir, exeName(d.name)), []byte(body), 0o755)
 	}
+	return tn, p, fetched
+}
+
+func TestAClientIsFetchedOnlyForTheProviderThatNeedsIt(t *testing.T) {
+	tn, _, fetched := pinnedRig(t, "the pinned client")
 	tn.find = func() string { return fakeTunneld(t, `{"state":"starting"}`) }
 	ctx := context.Background()
 	if err := tn.Change(ctx, tunnelChange{Enabled: on(), Provider: text(tunnelCloudflare)}); err != nil {
@@ -215,23 +231,147 @@ func TestAClientIsFetchedOnlyForTheProviderThatNeedsIt(t *testing.T) {
 	tn.Stop(ctx)
 }
 
-func TestNgrokIsNeverFetched(t *testing.T) {
-	if _, ok := tunnelDownloadFor(tunnelNgrok); ok {
-		t.Fatal("its terms ask written consent before its client is handed out")
+func TestAProgramOnThePathIsNotAClient(t *testing.T) {
+	tn, p := tunnelRig(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	for _, name := range []string{"cloudflared", "frpc"} {
+		if err := os.WriteFile(filepath.Join(dir, exeName(name)), []byte("planted"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if tunnelClient(Paths{}, "nothing") != "" {
-		t.Fatal("no such client")
+	for _, provider := range []string{tunnelCloudflare, tunnelFrp} {
+		if got := tunnelClient(p, provider); strings.HasPrefix(got, dir) {
+			t.Fatalf("a planted %s would run with the token and all the traffic: %s", provider, got)
+		}
+	}
+	if view := tn.View(); view.Providers[tunnelCloudflare].Client {
+		t.Fatal("no client of ours is there yet")
+	}
+}
+
+func TestAReplacedClientIsReplacedBack(t *testing.T) {
+	tn, p, fetched := pinnedRig(t, "the pinned client")
+	ctx := context.Background()
+	if err := tn.ensureClient(ctx, tunnelCloudflare); err != nil {
+		t.Fatal(err)
+	}
+	<-fetched
+	if err := tn.ensureClient(ctx, tunnelCloudflare); err != nil {
+		t.Fatal(err)
+	}
+	if len(fetched) != 0 {
+		t.Fatal("a client that is what it should be stays")
+	}
+	path := tunnelClient(p, tunnelCloudflare)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat secrets.json\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.writeStamp(download{name: "cloudflared", version: "x", sha256: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.ensureClient(ctx, tunnelCloudflare); err != nil {
+		t.Fatal(err)
+	}
+	<-fetched
+	if body, _ := os.ReadFile(path); string(body) != "the pinned client" {
+		t.Fatalf("%q ran as trusted", body)
+	}
+	if exists(p.stamp("cloudflared")) {
+		t.Fatal("a stamp must not stop the fetch that replaces the file")
+	}
+}
+
+func TestARaisedPinMovesAnInstalledClient(t *testing.T) {
+	tn, p, fetched := pinnedRig(t, "the new client")
+	path := tunnelClient(p, tunnelCloudflare)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("the old client"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.ensureClient(context.Background(), tunnelCloudflare); err != nil {
+		t.Fatal(err)
+	}
+	if len(fetched) != 1 {
+		t.Fatal("an old client must not survive a raised pin for ever")
+	}
+}
+
+func TestADownloadThatComesOutWrongIsNotRun(t *testing.T) {
+	tn, _, _ := pinnedRig(t, "the pinned client")
+	tn.pin = func(string) (download, string, bool) {
+		return download{name: "cloudflared"}, strings.Repeat("0", 64), true
+	}
+	if err := tn.ensureClient(context.Background(), tunnelCloudflare); err == nil {
+		t.Fatal("what came out is not what was pinned")
+	}
+}
+
+func TestNgrokRunsOnlyOnceAcceptedAndOnlyWhileItIsThatFile(t *testing.T) {
+	tn, p := tunnelRig(t)
+	if view := tn.View().Providers[tunnelNgrok]; view.Trusted || view.Client {
+		t.Fatalf("%+v", view)
+	}
+	dir := t.TempDir()
+	ngrokBin := filepath.Join(dir, exeName("ngrok"))
+	if err := os.WriteFile(ngrokBin, []byte("the operator's ngrok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	tn.find = func() string { return "tunneld" }
+	ctx := context.Background()
+	if err := tn.Change(ctx, tunnelChange{Enabled: on(), Provider: text(tunnelNgrok)}); err != nil {
+		t.Fatal(err)
+	}
+	view := tn.View()
+	if view.State != "failed" || view.Code != "client_unconfirmed" || view.Providers[tunnelNgrok].Found != ngrokBin {
+		t.Fatalf("the operator is shown the path before anything runs: %+v", view)
+	}
+	if tn.process != nil {
+		t.Fatal("it ran")
+	}
+	tn.find = func() string { return fakeTunneld(t, `{"state":"up"}`) }
+	if err := tn.Change(ctx, tunnelChange{TrustNgrok: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !tn.View().Providers[tunnelNgrok].Trusted {
+		t.Fatal("accepted")
+	}
+	tn.Stop(ctx)
+	if err := os.WriteFile(ngrokBin, []byte("a planted ngrok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := ngrokFailure(readTunnelChoice(p)); got != "client_changed" {
+		t.Fatalf("%q", got)
+	}
+	tn.Start(ctx)
+	if view := tn.View(); view.Code != "client_changed" {
+		t.Fatalf("%+v", view)
 	}
 }
 
 func TestEveryPinnedClientIsWholeAndHasAHash(t *testing.T) {
-	for _, table := range []map[string]download{cloudflaredDownloads, frpDownloads} {
+	for provider, table := range map[string]map[string]download{tunnelCloudflare: cloudflaredDownloads, tunnelFrp: frpDownloads} {
 		for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64"} {
 			d, ok := table[platform]
 			if !ok || len(d.sha256) != 64 || d.size == 0 || len(d.only) != 1 || !strings.HasPrefix(d.url, "https://github.com/") {
 				t.Fatalf("%s: %+v", platform, d)
 			}
+			if exe := clientHashes[provider][platform]; len(exe) != 64 {
+				t.Fatalf("%s %s: no hash of the program", provider, platform)
+			}
+			if d.kind == "binary" && d.sha256 != clientHashes[provider][platform] {
+				t.Fatalf("%s: a plain binary is its own archive", platform)
+			}
+			if d.kind != "binary" && d.sha256 == clientHashes[provider][platform] {
+				t.Fatalf("%s: an archive is not the program inside it, which is the slip the release notes make", platform)
+			}
 		}
+	}
+	if _, _, ok := clientPin(tunnelNgrok); ok {
+		t.Fatal("its terms ask written consent before its client is handed out")
 	}
 }
 

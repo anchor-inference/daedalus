@@ -189,8 +189,8 @@ class Services:
         if mode == "key" and (not key or rotate_key):
             key = secrets.token_urlsafe(18)
         await self.app.db.execute("UPDATE services SET share_mode = ?, share_slug = ?, share_key = ? WHERE session_id = ? AND name = ?", (mode, slug, key, session_id, name))
-        if mode == "local":
-            # Back to private means private: what was shared and with whom ends here, phones included.
+        if rotate_key or mode != (row.get("share_mode") or "local"):
+            # Whoever was let in was let in on the terms that just changed, phones included.
             await pairing.forget_phones(self.app.db, slug)
         return self.view(await self.get(session_id, name) or {})
 

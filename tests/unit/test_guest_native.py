@@ -53,10 +53,10 @@ async def test_the_door_runs_on_loopback_ports_with_no_container_and_no_unix_soc
         await appears(run / "control.endpoint")
         await appears(front_dir / "public.endpoint")
         assert not (run / "control.sock").exists() and not (front_dir / "public.sock").exists()
-        client = DoorClient(run, token_dir=token_dir, door_uid=-1)
+        client = DoorClient(run, token_dir=token_dir, door_uid=-1, listen="tcp")
         await client.call("PUT", "/control/settings", json={"public_base": "https://door.example.test"})
         invite = (await client.call("POST", "/control/links", json=FIELDS))["invite"]
-        front = Front(str(front_dir / "public.sock"), "127.0.0.1")
+        front = Front(str(front_dir / "public.sock"), "127.0.0.1", tcp=True)
         outer = await asyncio.start_server(front.handle, "127.0.0.1", 0, limit=16 * 1024)
         port = outer.sockets[0].getsockname()[1]
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False) as public:
@@ -87,7 +87,7 @@ async def test_the_host_reads_the_doors_port_again_when_the_door_comes_back_on_a
         (tmp_path / "control.endpoint").write_text(f"tcp:127.0.0.1:{runner.addresses[0][1]}\n")
         return runner
 
-    client = DoorClient(tmp_path, token_dir=tmp_path, door_uid=-1)
+    client = DoorClient(tmp_path, token_dir=tmp_path, door_uid=-1, listen="tcp")
     first = await serve()
     assert (await client.call("GET", "/control/health"))["ok"] is True
     await first.cleanup()
@@ -97,6 +97,63 @@ async def test_the_host_reads_the_doors_port_again_when_the_door_comes_back_on_a
     assert (await client.call("GET", "/control/health"))["ok"] is True
     await second.cleanup()
     await client.aclose()
+
+
+async def test_a_door_cannot_send_the_host_to_another_port_with_a_file(tmp_path: Path) -> None:
+    """The door's folder is the door's to write. In the socket form its file used to win, and the host went
+    to whatever port it named, with the token in hand."""
+    (tmp_path / "control.token").write_text("t")
+    seen: list[str] = []
+
+    async def thief(request: web.Request) -> web.Response:
+        seen.append(request.headers.get("authorization", ""))
+        return web.json_response({"ok": True})
+
+    door = web.Application()
+    door.router.add_get("/control/health", thief)
+    runner = web.AppRunner(door)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 0).start()
+    (tmp_path / "control.endpoint").write_text(f"tcp:127.0.0.1:{runner.addresses[0][1]}\n")
+    client = DoorClient(tmp_path, token_dir=tmp_path, door_uid=-1)
+    with pytest.raises(DoorUnavailable):
+        await client.call("GET", "/control/health")
+    await client.aclose()
+    await runner.cleanup()
+    assert not seen
+
+
+async def test_a_link_in_the_doors_folder_does_not_lead_the_host_to_another_socket() -> None:
+    """A link to another of this user's sockets, and the swap that beats a check of the name: what decides is
+    the path the socket on the other end was bound as."""
+    root = Path(tempfile.mkdtemp(prefix="gn", dir="/tmp"))
+    seen: list[str] = []
+
+    async def thief(request: web.Request) -> web.Response:
+        seen.append(request.headers.get("authorization", ""))
+        return web.json_response({"ok": True})
+
+    daemon = web.Application()
+    daemon.router.add_get("/control/health", thief)
+    runner = web.AppRunner(daemon)
+    await runner.setup()
+    await web.UnixSite(runner, str(root / "daemon.sock")).start()
+    (root / "control.token").write_text("t")
+    (root / "run").mkdir()
+    (root / "run" / "control.sock").symlink_to(root / "daemon.sock")
+    client = DoorClient(root / "run", token_dir=root, door_uid=-1)
+    with pytest.raises(DoorUnavailable):
+        await client.call("GET", "/control/health")
+    await client.aclose()
+    (root / "run" / "control.sock").unlink()
+    os.rename(root / "daemon.sock", root / "run" / "control.sock")  # the name is right now, the socket is not
+    client = DoorClient(root / "run", token_dir=root, door_uid=-1)
+    with pytest.raises(DoorUnavailable):
+        await client.call("GET", "/control/health")
+    await client.aclose()
+    await runner.cleanup()
+    shutil.rmtree(root, ignore_errors=True)
+    assert not seen
 
 
 def test_a_token_is_made_with_no_other_user_to_give_it_to(tmp_path: Path) -> None:
@@ -226,7 +283,7 @@ async def test_a_stand_in_answers_from_a_confined_process_in_either_form(listen:
     try:
         await appears(root / "run" / ("control.endpoint" if listen == "tcp" else "control.sock"))
         await appears(root / "front" / ("public.endpoint" if listen == "tcp" else "public.sock"))
-        client = DoorClient(root / "run", token_dir=root / "token", door_uid=-1)
+        client = DoorClient(root / "run", token_dir=root / "token", door_uid=-1, listen=listen)
         await client.call("PUT", "/control/settings", json={"public_base": "https://door.example.test"})
         fields = {**FIELDS, "mode": "stand_in", "briefing": "a briefing", "model_path": "acme/v1", "model_name": "m", "turns_per_day": 5, "turns_total": 5}
         invite = (await client.call("POST", "/control/links", json=fields))["invite"]

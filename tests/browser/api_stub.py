@@ -445,6 +445,7 @@ class PublicAddressStub:
         self.view: dict[str, object] = {
             "native": True, "available": True, "tunneld": True, "enabled": False, "provider": "cloudflare", "state": "off",
             "address": "", "confirmed": False, "wakes": 0, "exposed": {"links": 2, "services": 1}, "qr": [],
+            "tokens_hidden": True,
             "providers": {"ngrok": {"client": True, "token": False}, "tailscale": {"client": True, "signed_in": False},
                           "cloudflare": {"client": True, "token": False}, "frp": {"client": True, "token": False, "server": "", "domain": ""}},
         }

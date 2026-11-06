@@ -22,6 +22,7 @@ function render(node: React.ReactNode): { box: HTMLDivElement; done: () => void 
 const TUNNEL: { native: true; available: true } & Tunnel = {
   native: true, available: true, tunneld: true, enabled: false, provider: "cloudflare", state: "off", address: "", confirmed: false, wakes: 0,
   exposed: { links: 2, services: 1 }, qr: [],
+  tokens_hidden: true,
   providers: { ngrok: { client: true, token: false }, tailscale: { client: true }, cloudflare: { client: true, token: false }, frp: { client: true, token: false } },
 };
 
@@ -132,6 +133,32 @@ describe("PublicAddressPanel", () => {
     expect(box.querySelector("[data-address-status]")!.textContent).toBe(t("address.state.answering"));
     expect((box.querySelector("[data-address-shown] input") as HTMLInputElement).value).toBe("https://a.example");
     expect(box.querySelector("[data-address-shown] svg")).not.toBeNull();
+    done();
+  });
+
+  it("shows the operator the ngrok it found before anything runs it, and sends no path back", async () => {
+    const providers = { ...TUNNEL.providers, ngrok: { client: false, token: false, found: "/opt/homebrew/bin/ngrok" } };
+    const { box, done, sent } = await show({ ...TUNNEL, provider: "ngrok", providers });
+    expect(box.textContent).toContain("/opt/homebrew/bin/ngrok");
+    expect(box.querySelector("[data-address-get]")).toBeNull();
+    await act(async () => box.querySelector<HTMLButtonElement>("[data-setting='address.ngrok.trust'] button")!.click());
+    expect(sent).toEqual([{ method: "PUT", body: { trust_ngrok: true } }]);
+    done();
+  });
+
+  it("says when a command could read a token, and only then", async () => {
+    const providers = { ...TUNNEL.providers, ngrok: { client: true, token: true } };
+    const hidden = await show({ ...TUNNEL, provider: "ngrok", providers, tokens_hidden: true });
+    expect(hidden.box.querySelector("[data-address-readable]")).toBeNull();
+    hidden.done();
+    const open = await show({ ...TUNNEL, provider: "ngrok", providers, tokens_hidden: false });
+    expect(open.box.querySelector("[data-address-readable]")).not.toBeNull();
+    open.done();
+  });
+
+  it("says that frpc does not verify the server", async () => {
+    const { box, done } = await show({ ...TUNNEL, provider: "frp", tokens_hidden: true });
+    expect(box.querySelector("[data-address-frp-tls]")).not.toBeNull();
     done();
   });
 

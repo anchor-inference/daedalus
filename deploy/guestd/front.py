@@ -19,8 +19,9 @@ one cannot be smuggled past this process.
 
 Natively this stands on loopback, and what arrives there from outside comes through the local router of
 a tunnel (``tunneld``). That router is the peer ``GUEST_TRUSTED_PROXIES`` names there, and it writes the
-visitor's address itself, whatever the visitor sent. The door's socket may be a loopback port, in which
-case ``public.endpoint`` beside the socket's name says which.
+visitor's address itself, whatever the visitor sent. With ``GUEST_LISTEN=tcp`` the door's socket is a loopback
+port and ``public.endpoint`` beside the socket's name says which. Only then: that folder is the door's to
+write, and a door taken over behind its wall must not be able to send strangers to any daemon on this machine.
 """
 
 from __future__ import annotations
@@ -108,7 +109,9 @@ def rewrite(head: bytes, peer: str, trusted: tuple[ipaddress.IPv4Network | ipadd
         lower = name.lower().replace("_", "-")
         if lower == "transfer-encoding":
             raise Refused(400, "send a Content-Length")
-        if lower == "x-forwarded-for":
+        # The exact name alone: a proxy writes that one. ``X_Forwarded_For`` folds to the same word, and a
+        # visitor's sorted after the real line, so it won and named any address it liked.
+        if name.lower() == "x-forwarded-for":
             forwarded = value
         if lower in HOP_BY_HOP:
             continue
@@ -149,14 +152,17 @@ def door_port(socket_path: str) -> int | None:
     return None
 
 
-async def dial_door(socket_path: str) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    port = door_port(socket_path)
-    return await (asyncio.open_connection("127.0.0.1", port) if port is not None else asyncio.open_unix_connection(socket_path))
+async def dial_door(socket_path: str, *, tcp: bool) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    port = door_port(socket_path) if tcp else None
+    if tcp and port is None:
+        raise OSError("the door has not said where it is yet")
+    return await (asyncio.open_connection("127.0.0.1", port) if tcp else asyncio.open_unix_connection(socket_path))
 
 
 class Front:
-    def __init__(self, socket_path: str, trusted: str = "", *, per_address: int = PER_ADDRESS, overall: int = OVERALL, head_seconds: float = HEAD_SECONDS, life_seconds: float = LIFE_SECONDS) -> None:
+    def __init__(self, socket_path: str, trusted: str = "", *, tcp: bool = False, per_address: int = PER_ADDRESS, overall: int = OVERALL, head_seconds: float = HEAD_SECONDS, life_seconds: float = LIFE_SECONDS) -> None:
         self.socket_path = socket_path
+        self.tcp = tcp
         self.trusted = parse_trusted(trusted)
         self.per_address = per_address
         self.overall = overall
@@ -220,7 +226,7 @@ class Front:
 
     async def pass_on(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, head: bytes, length: int) -> None:
         try:
-            door_reader, door_writer = await dial_door(self.socket_path)
+            door_reader, door_writer = await dial_door(self.socket_path, tcp=self.tcp)
         except OSError:
             writer.write(refusal(502, "This door is closed for the moment. Try again in a minute.", 60))
             await writer.drain()
@@ -242,10 +248,11 @@ class Front:
 async def main() -> None:
     front = Front(
         os.path.join(os.environ.get("GUEST_FRONT_DIR", "/run/daedalus-guest-front"), "public.sock"), os.environ.get("GUEST_TRUSTED_PROXIES", ""),
+        tcp=os.environ.get("GUEST_LISTEN") == "tcp",
     )
     server = await asyncio.start_server(front.handle, os.environ.get("GUEST_HOST", "0.0.0.0"), int(os.environ.get("GUEST_DOOR_PORT", "8764")), limit=MAX_HEAD)
     if os.environ.get("GUEST_CONFINE"):
-        confine(lambda address: address == front.socket_path or (is_loopback(address) and address[1] == door_port(front.socket_path)))
+        confine(lambda address: address == front.socket_path or (front.tcp and is_loopback(address) and address[1] == door_port(front.socket_path)))
     async with server:
         await server.serve_forever()
 

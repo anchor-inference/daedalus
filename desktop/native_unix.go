@@ -16,6 +16,12 @@ func setProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+// ownSession makes the child the leader of a new session, and so of a new group with its own pid as the id,
+// which is what terminateGroup signals.
+func ownSession(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+}
+
 // terminateGroup asks the whole group to end. SIGTERM is what the supervisor handles: it drains the
 // bot, which is the difference between stopping an installation and interrupting it.
 func terminateGroup(cmd *exec.Cmd) {

@@ -136,8 +136,11 @@ class DoorSocket(httpcore.AnyIOBackend):
     and this process would connect as root and write to it. Checked on the connection itself, after
     the name has been resolved, where it cannot be swapped.
 
-    Only in a container: natively the door is the same user as this process, there is no other uid to
-    compare, and ``SO_PEERCRED`` does not exist on a Mac. The directory there is private to that user.
+    Two checks, each on the connection and so past any swap of the name. The peer's user, in a container:
+    natively the door is the same user as this process, and ``SO_PEERCRED`` does not exist on a Mac. And
+    everywhere, the path the peer bound: the door, behind its wall, can leave a link in its folder to any
+    other socket of this user, and this process would hand that daemon the door's token. A socket says what
+    it was bound as, and the door cannot bind another daemon's path from where it stands.
     """
 
     def __init__(self, door_uid: int) -> None:
@@ -147,8 +150,10 @@ class DoorSocket(httpcore.AnyIOBackend):
         if not stat.S_ISSOCK(os.lstat(path).st_mode):
             raise httpcore.ConnectError("the door's socket is not a socket")
         stream = await super().connect_unix_socket(path, timeout=timeout, socket_options=socket_options)
-        peer = stream.get_extra_info("socket").getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-        if struct.unpack("3i", peer)[1] != self.door_uid:
+        sock = stream.get_extra_info("socket")
+        same_path = sock.getpeername() == path
+        same_user = self.door_uid < 0 or struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1] == self.door_uid
+        if not same_path or not same_user:
             await stream.aclose()
             raise httpcore.ConnectError("something other than the door answered on its socket")
         return stream
@@ -157,8 +162,12 @@ class DoorSocket(httpcore.AnyIOBackend):
 class DoorClient:
     """HTTP over the door's unix socket, with a token this side owns."""
 
-    def __init__(self, run_dir: Path | None, *, token_dir: Path | None = None, door_uid: int = -1, transport: httpx.AsyncBaseTransport | None = None, token: str = "") -> None:
+    def __init__(self, run_dir: Path | None, *, token_dir: Path | None = None, door_uid: int = -1, transport: httpx.AsyncBaseTransport | None = None, token: str = "", listen: str = "unix") -> None:
         self.run_dir = run_dir
+        self.listen = listen
+        """``tcp`` where the door has a port in place of a socket, as the launcher decided. The door's own
+        folder can say which port, and is believed only in that form: otherwise a door taken over behind its
+        wall could write a file there and send this process, with the token, to any port on this machine."""
         self.token_dir = token_dir
         self.door_uid = door_uid
         self.transport = transport
@@ -179,7 +188,7 @@ class DoorClient:
 
     def _address(self) -> str:
         """The door's own loopback port where it has one in place of a socket (see ``deploy/guestd``)."""
-        if self.transport is None and self.run_dir is not None:
+        if self.listen == "tcp" and self.transport is None and self.run_dir is not None:
             with suppress(OSError):
                 kind, _, rest = (self.run_dir / ENDPOINT_NAME).read_text().strip().partition(":")
                 if kind == "tcp" and rest.startswith("127.0.0.1:"):
@@ -192,8 +201,7 @@ class DoorClient:
             return None
         path = str(self.run_dir / SOCKET_NAME)
         dialled = httpx.AsyncHTTPTransport(uds=path)
-        if self.door_uid >= 0:
-            dialled._pool = httpcore.AsyncConnectionPool(uds=path, network_backend=DoorSocket(self.door_uid))
+        dialled._pool = httpcore.AsyncConnectionPool(uds=path, network_backend=DoorSocket(self.door_uid))
         return dialled
 
     async def _token(self) -> str:
@@ -264,7 +272,7 @@ def _whole(value: Any) -> int:
 class GuestBridge:
     def __init__(self, app: Application | Any, client: DoorClient | None = None) -> None:
         self.app = app
-        self.client = client or DoorClient(app.settings.guest_run_dir, token_dir=app.settings.guest_token_dir, door_uid=app.settings.guest_door_uid)
+        self.client = client or DoorClient(app.settings.guest_run_dir, token_dir=app.settings.guest_token_dir, door_uid=app.settings.guest_door_uid, listen=app.settings.guest_listen)
         self.lines: dict[str, ChatLine] = {}
         self.turns: dict[str, Delivery] = {}
         """Run id to the delivery it answers, for the turns of this process."""

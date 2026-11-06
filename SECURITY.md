@@ -75,14 +75,22 @@ operator can still reach the door's token with a path built at run time: the sea
 
 On a native install the same door runs as the operator, on the operator's machine, and a tunnel can lead to it.
 What the launcher puts around it depends on the system (`desktop/README.md`, "What the door gives up here"):
-bubblewrap on Linux, a seatbelt on a Mac, and on Windows nothing but the door's own refusal to dial out or start a
-program, which is a promise, not a wall: code running inside it could undo it. What a tunnel reaches is decided by a router that
-knows two ports, so the app and its API are not behind it however a request is written. A visitor there
-counts as local nowhere: a request needs a loopback peer, no sign of having been forwarded, and a name only
-this machine answers to. Agent-written pages under `/s/` share an origin with `/a/` on a tunnel's one hostname;
-the door keeps nothing a browser could give away, and refuses requests made by a page. A phone's code travels
-over plain http on a home network: it opens one service for one phone, is spent once within ten minutes, and has
-a table of its own so that it cannot be taken for a way into the app.
+bubblewrap on Linux, a seatbelt on a Mac that may be only hygiene, and on Windows nothing but the door's own refusal
+to dial out or start a program, which is a promise, not a wall: code running inside it could undo it. What a tunnel
+reaches is decided by a router that knows two ports, so the app and its API are not behind it however a request is
+written, and no tunnel client opens a control port on this machine. A visitor there counts as local nowhere: a
+request needs a loopback peer, no sign of having been forwarded, and a name only this machine answers to.
+Agent-written pages under `/s/` share an origin with `/a/` on a tunnel's one hostname; the door keeps nothing a
+browser could give away, and refuses requests made by a page. Shared services share that origin with each other,
+so a public service's page can use a visitor's phone pass or key cookie for another. A phone's code travels over
+plain http on a home network: it opens one service for one phone by that door only, is spent once within ten
+minutes, and has a table of its own so that it cannot be taken for a way into the app.
+
+**Tokens of the public address.** A provider's token and the launcher's token are files of this user. The
+policy refuses a command that names them, by matching words. On Linux with the sandbox on, a command's filesystem
+does not hold them; on a Mac, on Windows, or with the sandbox off, a command that builds the path reads them, and so
+does a team member's CLI anywhere. The agent with such a token could raise a tunnel of its own, which the watch would
+report. Provider keys in `keyproxy.env` stay readable the same way, sandbox or not.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.

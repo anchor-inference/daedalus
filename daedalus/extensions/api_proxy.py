@@ -46,11 +46,27 @@ one thing it must never carry, and ``allow-popups-to-escape-sandbox`` is left ou
 open a window that runs on the app's origin."""
 
 
+OWN_COOKIE_PREFIXES = ("dshare-", "dphone-")
+"""Cookies this door sets for itself, under any service's name: a service hears none of them, its own key
+included. A list of names let a neighbour's through."""
+FOLDED_FORWARDING = frozenset({"x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-prefix", "x-real-ip"})
+"""With underscores these reach a service that folds them, and WSGI does: ``X_Forwarded_For`` was the same
+variable there as the header set here."""
+
+
 def without_cookies(header: str, names: Iterable[str]) -> str:
-    """A ``Cookie`` header with the named cookies taken out."""
+    """A ``Cookie`` header with the named cookies, and all of this door's own, taken out."""
     drop = set(names)
-    kept = [part for part in (p.strip() for p in header.split(";")) if part and part.split("=", 1)[0].strip() not in drop]
+    kept = []
+    for part in (p.strip() for p in header.split(";")):
+        name = part.split("=", 1)[0].strip()
+        if part and name not in drop and not name.startswith(OWN_COOKIE_PREFIXES):
+            kept.append(part)
     return "; ".join(kept)
+
+
+def forged_forwarding(name: str) -> bool:
+    return "_" in name and name.lower().replace("_", "-") in FOLDED_FORWARDING
 
 
 def scoped_set_cookie(value: str, prefix: str) -> str:
@@ -105,7 +121,7 @@ async def forward_http(
     In every case the server's root cookies are scoped under the prefix, and what it says about the
     whole origin is dropped.
     """
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS and not forged_forwarding(k)}
     drop = list(strip_cookies)
     if drop and "cookie" in headers:
         remaining = without_cookies(headers.pop("cookie"), drop)
@@ -225,4 +241,4 @@ async def forward_websocket(
             await websocket.close()
 
 
-__all__ = ["HOP_HEADERS", "ORIGIN_WIDE_HEADERS", "SANDBOX_POLICY", "forward_http", "forward_websocket", "frameable_policy", "scoped_set_cookie", "without_cookies"]
+__all__ = ["HOP_HEADERS", "ORIGIN_WIDE_HEADERS", "OWN_COOKIE_PREFIXES", "SANDBOX_POLICY", "forward_http", "forward_websocket", "frameable_policy", "scoped_set_cookie", "without_cookies"]

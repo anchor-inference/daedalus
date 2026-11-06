@@ -4874,7 +4874,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         code = request.query_params.get("phone")
         if row is not None and at_door and code:
             # A phone's QR. Spent here, moved into a cookie, and off the address, as a key is.
-            issued = await pairing.redeem_phone(app.db, code, slug)
+            issued = await pairing.redeem_phone(app.db, code, slug, lan=bool(request.scope.get(api_services_door.LAN_KEY)))
             if issued is None:
                 raise HTTPException(403, "this code was used already or has run out: show the QR again")
             rest = [(k, v) for k, v in request.query_params.multi_items() if k != "phone"]
@@ -4882,7 +4882,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             moved.set_cookie(PHONE_COOKIE_PREFIX + slug, issued, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=pairing.PHONE_PASS_HOURS * 3600, secure=_cookie_is_secure(request.scope, request.headers, door))
             return moved
         held = request.cookies.get(PHONE_COOKIE_PREFIX + slug)
-        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held))
+        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held, lan=bool(request.scope.get(api_services_door.LAN_KEY))))
         if row is None or ((row.get("share_mode") or "local") not in SHARE_MODES[1:] and not phone):
             raise HTTPException(404, "nothing is shared here")
         cookie_name = SHARE_COOKIE_PREFIX + slug
@@ -4939,7 +4939,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         services = app.extensions.get("services")
         row = await services.by_slug(slug) if allowed and services is not None else None  # type: ignore[attr-defined]
         held = websocket.cookies.get(PHONE_COOKIE_PREFIX + slug)
-        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held))
+        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held, lan=bool(websocket.scope.get(api_services_door.LAN_KEY))))
         if row is None or ((row.get("share_mode") or "local") not in SHARE_MODES[1:] and not phone):
             await websocket.close(code=1008)
             return

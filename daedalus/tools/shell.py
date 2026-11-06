@@ -98,9 +98,10 @@ def native_sandbox_note() -> str:
     if status != "ok":
         return f"native mode: no container boundary, and no sandbox for Exec on this machine ({status}); the policy asks before leaving the project, and the approval gates are what stands behind it."
     # What the sandbox is and is not: it binds / read-only, so it confines what a command writes and
-    # not what it reads. Every file on the machine, the sealed set included, is readable inside it —
-    # what refuses those is the policy, and saying otherwise here would offer a wall that is not there.
-    return "native mode: no container boundary; the policy asks before leaving the project, and bubblewrap confines what Exec writes while tools.exec.sandbox = workspace (the default here). It binds the filesystem read-only rather than hiding it, so it is a wall against writing, not against reading."
+    # not what it reads. The launcher's local state and its handover file are hidden; every other file on
+    # the machine, the rest of the sealed set included, is readable inside it. What refuses those is the
+    # policy, and saying otherwise here would offer a wall that is not there.
+    return "native mode: no container boundary; the policy asks before leaving the project, and bubblewrap confines what Exec writes while tools.exec.sandbox = workspace (the default here). It binds the filesystem read-only rather than hiding it, so it is a wall against writing, not against reading, apart from the launcher's own folder and token, which it hides."
 
 
 BWRAP_LOCATIONS = ("/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap", "/usr/sbin/bwrap", "/run/current-system/sw/bin/bwrap")
@@ -344,6 +345,20 @@ def guest_limits_status() -> str:
     return _guest_limits_state
 
 
+def hidden_installation() -> list[str]:
+    """What covers the launcher's private files in a command's sandbox. Natively only: in a container they
+    are not on this filesystem, and nothing here may fail a command over a path that is not there."""
+    argv: list[str] = []
+    local = os.environ.get("DAEDALUS_LOCAL", "").strip()
+    if local and Path(local).is_dir():
+        argv += ["--tmpfs", local]
+    state = os.environ.get("STATE_DIR", "").strip() or os.environ.get("DAEDALUS_STATE", "").strip()
+    handover = Path(state).parent / "launcher.json" if state else None
+    if _native() and handover is not None and handover.is_file():
+        argv += ["--ro-bind", "/dev/null", str(handover)]
+    return argv
+
+
 async def sandbox_argv(
     command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None, session_id: str | None = None, readable: Sequence[Path] = (),
 ) -> tuple[list[str], bool]:
@@ -367,6 +382,11 @@ async def sandbox_argv(
     The folder of the operator's secrets' files is hidden behind an empty one, and only the scopes
     ``session_id`` draws from are bound back, read-only: the read-only root bind would otherwise show a
     session every other chat's and project's secrets.
+
+    The launcher's local state goes the same way, and its handover file is covered: the first holds the
+    tokens of the public address and of the daemons, the second a token that runs the installation. The
+    policy refuses a command that names them, by matching words, and a command that builds the path is
+    not one it can read. Here there is simply nothing at that path.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
@@ -413,7 +433,7 @@ async def sandbox_argv(
         for scope in store.scope_dirs(session_id or ""):
             if scope.is_dir():
                 argv += ["--ro-bind", str(scope), str(scope)]
-    return argv + shell_argv(command), True
+    return argv + hidden_installation() + shell_argv(command), True
 
 
 # Environment names a tool's subprocess may inherit. Everything else —

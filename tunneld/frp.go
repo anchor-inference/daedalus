@@ -7,16 +7,24 @@ package main
 //
 // HTTPS ends at the operator's server (Caddy in the documented setup), so the address is always https
 // and the visitor's address arrives in X-Forwarded-For, written by the proxies there.
+//
+// frpc's admin server is not configured. With it on, anyone on this machine could read this file's token
+// with GET /api/config, and PUT a new one with GET /api/reload to aim localPort at the app. Nothing here
+// needs it: the client's log says all of it, and these are its words, read from frpc 0.72 against a real
+// frps that was stopped and started again.
+//
+// The link to the server is TLS, and frpc does not verify the server's certificate unless it is given a CA
+// (transport.tls.trustedCaFile). The token is not sent in the clear, but someone on the path could stand
+// in for the server and read the traffic. The settings say so; a CA of one's own is the operator's to set up.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -27,25 +35,30 @@ type frp struct {
 	token  string
 	dir    string
 
-	mu    sync.Mutex
-	admin string
+	mu        sync.Mutex
+	connected bool
 }
+
+const (
+	frpProxyUp      = "start proxy success"
+	frpTrying       = "try to connect to server"
+	frpLoginRefused = "token in login doesn't match"
+)
 
 func (f *frp) Visitor() VisitorOf    { return lastPublicForwarded }
 func (f *frp) NeedsRouterPort() bool { return true }
 
 // config writes a client that keeps trying: after a sleep, or while the server restarts, frpc reconnects
 // by itself rather than exiting, and a login that fails at first is one of those moments.
-func (f *frp) config(host, port, admin, routerPort string) string {
+func (f *frp) config(host, port, routerPort string) string {
 	return fmt.Sprintf(`serverAddr = %s
 serverPort = %s
 loginFailExit = false
 auth.method = "token"
 auth.token = %s
-webServer.addr = "127.0.0.1"
-webServer.port = %s
 log.to = "console"
 log.level = "info"
+log.disablePrintColor = true
 
 [[proxies]]
 name = "daedalus"
@@ -53,7 +66,27 @@ type = "http"
 localIP = "127.0.0.1"
 localPort = %s
 customDomains = [%s]
-`, strconv.Quote(host), port, strconv.Quote(f.token), admin, routerPort, strconv.Quote(f.domain))
+`, strconv.Quote(host), port, strconv.Quote(f.token), routerPort, strconv.Quote(f.domain))
+}
+
+// read follows the client's own account of its connection. A token the server turns down is said here
+// and is not going to change by trying again, while frpc would try for ever.
+func (f *frp) read(line string, t *Tunnel, refuse func()) {
+	switch {
+	case strings.Contains(line, frpProxyUp):
+		f.setConnected(true)
+		t.Up("https://" + f.domain)
+	case strings.Contains(line, frpTrying):
+		f.setConnected(false)
+	case strings.Contains(line, frpLoginRefused):
+		refuse()
+	}
+}
+
+func (f *frp) setConnected(up bool) {
+	f.mu.Lock()
+	f.connected = up
+	f.mu.Unlock()
 }
 
 func (f *frp) Run(ctx context.Context, t *Tunnel) error {
@@ -64,10 +97,6 @@ func (f *frp) Run(ctx context.Context, t *Tunnel) error {
 	if host == "" || f.domain == "" || f.token == "" {
 		return fatal(CodeNotConfigured, "the server, its domain and its token are all needed")
 	}
-	admin, err := freeLoopbackPort()
-	if err != nil {
-		return err
-	}
 	_, routerPort, err := net.SplitHostPort(trimScheme(t.Router))
 	if err != nil {
 		return err
@@ -77,15 +106,25 @@ func (f *frp) Run(ctx context.Context, t *Tunnel) error {
 		return err
 	}
 	file := filepath.Join(home, "frpc.toml")
-	if err := os.WriteFile(file, []byte(f.config(host, port, admin, routerPort)), 0o600); err != nil {
+	if err := os.WriteFile(file, []byte(f.config(host, port, routerPort)), 0o600); err != nil {
 		return err
 	}
 	defer os.Remove(file)
-	f.mu.Lock()
-	f.admin = "127.0.0.1:" + admin
-	f.mu.Unlock()
-	t.Up("https://" + f.domain)
-	return runClient(ctx, t, f.binary, []string{"-c", file}, clientEnv(home), nil)
+	f.setConnected(false)
+	running, stop := context.WithCancel(ctx)
+	defer stop()
+	refused := false
+	err = runClient(running, t, f.binary, []string{"-c", file}, clientEnv(home), func(line string) {
+		f.read(line, t, func() {
+			refused = true
+			stop()
+		})
+	})
+	f.setConnected(false)
+	if refused {
+		return fatal(CodeServerRefused, "the server turned down this token")
+	}
+	return err
 }
 
 func trimScheme(url string) string {
@@ -95,35 +134,8 @@ func trimScheme(url string) string {
 	return url
 }
 
-func (f *frp) Connected(ctx context.Context) bool {
+func (f *frp) Connected(context.Context) bool {
 	f.mu.Lock()
-	admin := f.admin
-	f.mu.Unlock()
-	if admin == "" {
-		return false
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+admin+"/api/status", nil)
-	if err != nil {
-		return false
-	}
-	answer, err := localAPI.Do(request)
-	if err != nil {
-		return false
-	}
-	defer answer.Body.Close()
-	var body map[string][]struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
-	}
-	if json.NewDecoder(answer.Body).Decode(&body) != nil {
-		return false
-	}
-	for _, proxies := range body {
-		for _, proxy := range proxies {
-			if proxy.Status == "running" {
-				return true
-			}
-		}
-	}
-	return false
+	defer f.mu.Unlock()
+	return f.connected
 }

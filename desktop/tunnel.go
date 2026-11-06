@@ -4,9 +4,14 @@ package main
 //
 // The operator opens one from the app's settings, and only from there: the agent may not raise a tunnel,
 // and the host's rule says so. The request reaches this file over the launcher's bridge. What the
-// operator chose is kept here, in the local state folder the agent's policy seals whole, and a token goes
-// in through the bridge once and never comes back: nothing here returns one, logs one or puts one in an
-// environment or on a command line. tunneld reads it from a file of 0600.
+// operator chose is kept here, and a token goes in through the bridge once and never comes back: nothing
+// here returns one, logs one or puts one in an environment or on a command line. tunneld reads it from a
+// file of 0600 in the local state folder.
+//
+// What guards that file from the agent is not one thing. The policy refuses a command that names the
+// folder, and that matches words, so a command building the path gets past it. On Linux with the sandbox on
+// (the default) the folder is not in a command's filesystem at all. On a Mac, on Windows, or with the
+// sandbox off, nothing stops a command that builds the path: the agent is the same user. The settings say so.
 //
 // tunneld is started only while the address is on, it stands apart from the rest (a missing tunneld takes
 // the address away and nothing else), and it holds a pipe from this process, so a launcher that dies
@@ -14,9 +19,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -42,6 +50,9 @@ type tunnelChoice struct {
 	Provider  string `json:"provider,omitempty"`
 	FrpServer string `json:"frp_server,omitempty"`
 	FrpDomain string `json:"frp_domain,omitempty"`
+	// NgrokPath and NgrokHash are the program the operator said is theirs, and what it was when they did.
+	NgrokPath string `json:"ngrok_path,omitempty"`
+	NgrokHash string `json:"ngrok_hash,omitempty"`
 }
 
 // tunnelSecrets is the file tunneld reads, and only tunneld and this file ever read it.
@@ -60,6 +71,8 @@ type tunnelChange struct {
 	FrpDomain  *string `json:"frp_domain"`
 	// SignOut forgets the Tailscale node, so the next start asks for a sign-in again.
 	SignOut bool `json:"sign_out"`
+	// TrustNgrok is the operator looking at the path the view shows and saying that is their ngrok.
+	TrustNgrok bool `json:"trust_ngrok"`
 }
 
 // tunnelStatus is tunneld's status.json, the fields read here.
@@ -72,14 +85,20 @@ type tunnelStatus struct {
 	Confirmed bool      `json:"confirmed"`
 	Since     time.Time `json:"since"`
 	PIDs      []int     `json:"pids"`
+	Ports     []int     `json:"ports"`
 	Wakes     int       `json:"wakes"`
+	// VisitorUnknown says this provider named no visitor, so all of them are one address to every limit.
+	VisitorUnknown bool `json:"visitor_unknown"`
 }
 
 // tunnelProviderView is what the settings need of one provider. It says whether a token is kept, and
 // nothing about the token.
 type tunnelProviderView struct {
-	Client   bool   `json:"client"`
-	Token    bool   `json:"token"`
+	Client bool `json:"client"`
+	Token  bool `json:"token"`
+	// Found is the program a provider would run, shown to the operator; Trusted says they accepted it.
+	Found    string `json:"found,omitempty"`
+	Trusted  bool   `json:"trusted,omitempty"`
 	SignedIn bool   `json:"signed_in,omitempty"`
 	Server   string `json:"server,omitempty"`
 	Domain   string `json:"domain,omitempty"`
@@ -88,19 +107,22 @@ type tunnelProviderView struct {
 // tunnelView is the answer to GET /api/tunnel.
 type tunnelView struct {
 	// Tunneld says this build carries the program at all.
-	Tunneld   bool                          `json:"tunneld"`
-	Enabled   bool                          `json:"enabled"`
-	Provider  string                        `json:"provider"`
-	State     string                        `json:"state"`
-	Address   string                        `json:"address"`
-	Confirmed bool                          `json:"confirmed"`
-	SignIn    string                        `json:"sign_in,omitempty"`
-	Code      string                        `json:"code,omitempty"`
-	Detail    string                        `json:"detail,omitempty"`
-	Since     *time.Time                    `json:"since,omitempty"`
-	PIDs      []int                         `json:"pids"`
-	Wakes     int                           `json:"wakes"`
-	Providers map[string]tunnelProviderView `json:"providers"`
+	Tunneld   bool       `json:"tunneld"`
+	Enabled   bool       `json:"enabled"`
+	Provider  string     `json:"provider"`
+	State     string     `json:"state"`
+	Address   string     `json:"address"`
+	Confirmed bool       `json:"confirmed"`
+	SignIn    string     `json:"sign_in,omitempty"`
+	Code      string     `json:"code,omitempty"`
+	Detail    string     `json:"detail,omitempty"`
+	Since     *time.Time `json:"since,omitempty"`
+	PIDs      []int      `json:"pids"`
+	Ports     []int      `json:"ports"`
+	Wakes     int        `json:"wakes"`
+	// VisitorUnknown: see tunnelStatus.
+	VisitorUnknown bool                          `json:"visitor_unknown"`
+	Providers      map[string]tunnelProviderView `json:"providers"`
 }
 
 func tunnelDir(p Paths) string      { return filepath.Join(p.Local, "tunnel") }
@@ -171,7 +193,7 @@ func ngrokPlaces(goos string, getenv func(string) string) []string {
 		}
 		return nil
 	}
-	return []string{"/usr/local/bin/ngrok", "/snap/bin/ngrok"}
+	return []string{"/usr/local/bin/ngrok", "/usr/bin/ngrok", "/snap/bin/ngrok"}
 }
 
 func exeName(name string) string {
@@ -181,31 +203,54 @@ func exeName(name string) string {
 	return name
 }
 
-// tunnelClient is the program a provider runs: the operator's own if they have one, then the copy
-// fetched for them. "" when neither exists yet.
-func tunnelClient(p Paths, provider string) string {
-	program := map[string]string{tunnelNgrok: "ngrok", tunnelCloudflare: "cloudflared", tunnelFrp: "frpc"}[provider]
-	if program == "" {
-		return ""
-	}
-	if found, err := exec.LookPath(program); err == nil {
-		return found
-	}
-	if provider == tunnelNgrok {
-		for _, place := range ngrokPlaces(runtime.GOOS, os.Getenv) {
-			if exists(place) {
-				return place
-			}
+// ngrokFound is the ngrok program there is to offer the operator, or "". ngrok cannot be pinned, since it
+// is theirs and updates itself, and on a Mac and on Windows the usual installs land in folders this user
+// can write. So nothing here decides it is safe: the view shows this path, the operator accepts it once,
+// and from then on it runs only while it is that same file.
+func ngrokFound() string {
+	for _, place := range ngrokPlaces(runtime.GOOS, os.Getenv) {
+		if exists(place) {
+			return place
 		}
-		return ""
 	}
-	if fetched := filepath.Join(tunnelToolsDir(p), exeName(program)); exists(fetched) {
-		return fetched
+	if found, err := exec.LookPath("ngrok"); err == nil {
+		if resolved, err := filepath.Abs(found); err == nil {
+			return resolved
+		}
 	}
 	return ""
 }
 
-func tunnelDownloadFor(provider string) (download, bool) {
+func hashFile(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+// tunnelClient is the program a provider runs: for cloudflared and frpc the copy fetched into this
+// installation's own folder and nothing else, and for ngrok the file the operator accepted. Whether it is
+// still what it should be is checked before it runs (ensureClient).
+func tunnelClient(p Paths, provider string) string {
+	switch provider {
+	case tunnelCloudflare:
+		return filepath.Join(tunnelToolsDir(p), exeName("cloudflared"))
+	case tunnelFrp:
+		return filepath.Join(tunnelToolsDir(p), exeName("frpc"))
+	case tunnelNgrok:
+		return readTunnelChoice(p).NgrokPath
+	}
+	return ""
+}
+
+// clientPin is what a fetched client's download and program should be.
+func clientPin(provider string) (download, string, bool) {
 	var table map[string]download
 	switch provider {
 	case tunnelCloudflare:
@@ -213,10 +258,13 @@ func tunnelDownloadFor(provider string) (download, bool) {
 	case tunnelFrp:
 		table = frpDownloads
 	default:
-		return download{}, false
+		return download{}, "", false
 	}
 	d, err := pick(table, runtime.GOOS, runtime.GOARCH)
-	return d, err == nil
+	if err != nil {
+		return download{}, "", false
+	}
+	return d, clientHashes[provider][platformKey(runtime.GOOS, runtime.GOARCH)], true
 }
 
 // tunnelEnv is tunneld's whole environment, built from nothing like the guest door's: nothing it runs
@@ -245,9 +293,10 @@ type tunnelConfig struct {
 type tunnels struct {
 	paths Paths
 	log   func(string, ...any)
-	// find and fetch are variables so the tests can run with no tunneld and no network.
+	// find, fetch and pin are variables so the tests can run with no tunneld and no network.
 	find  func() string
 	fetch func(ctx context.Context, d download) error
+	pin   func(provider string) (download, string, bool)
 
 	mu         sync.Mutex
 	ctx        context.Context
@@ -258,7 +307,7 @@ type tunnels struct {
 }
 
 func newTunnels(p Paths, log func(string, ...any)) *tunnels {
-	t := &tunnels{paths: p, log: log}
+	t := &tunnels{paths: p, log: log, pin: clientPin}
 	t.find = func() string {
 		exe, _ := os.Executable()
 		return tunneldBinary(exe, os.Getenv, exists)
@@ -312,10 +361,18 @@ func (t *tunnels) raise() {
 		t.failure = "no_tunneld"
 		return
 	}
-	t.installing = choice.Provider != tunnelTailscale && choice.Provider != tunnelNgrok && tunnelClient(t.paths, choice.Provider) == ""
+	if choice.Provider == tunnelNgrok {
+		// Said at once, and nothing is started: a program the operator has not accepted does not run.
+		if failure := ngrokFailure(choice); failure != "" {
+			t.failure = failure
+			return
+		}
+	}
+	_, _, pinned := t.pin(choice.Provider)
+	t.installing = pinned
 	go func() {
 		if err := t.ensureClient(ctx, choice.Provider); err != nil {
-			t.log("the tunnel's client could not be fetched: %v", err)
+			t.log("the tunnel's client could not be had: %v", err)
 			t.mu.Lock()
 			if generation == t.generation {
 				t.installing, t.failure = false, "download_failed"
@@ -336,16 +393,43 @@ func (t *tunnels) raise() {
 	}()
 }
 
+// ngrokFailure is what stands between an accepted ngrok and running it: nothing accepted, or a file that is
+// no longer the one accepted. A real update of ngrok asks again, which is the price of that check.
+func ngrokFailure(choice tunnelChoice) string {
+	if choice.NgrokPath == "" {
+		return "client_unconfirmed"
+	}
+	if hashFile(choice.NgrokPath) != choice.NgrokHash {
+		return "client_changed"
+	}
+	return ""
+}
+
+// ensureClient leaves a fetched client exactly as pinned, whatever was there. An exists() here ran a replaced
+// frpc as trusted, and kept an old one through a raised pin for ever. Hashed at each start: 40 MB takes a
+// fraction of a second, and this is the file that holds the token and all the public traffic.
 func (t *tunnels) ensureClient(ctx context.Context, provider string) error {
-	if provider == tunnelTailscale || provider == tunnelNgrok || tunnelClient(t.paths, provider) != "" {
+	d, want, pinned := t.pin(provider)
+	if !pinned {
+		if provider == tunnelCloudflare || provider == tunnelFrp {
+			return fmt.Errorf("no pinned build of %s for this machine", provider)
+		}
 		return nil
 	}
-	d, ok := tunnelDownloadFor(provider)
-	if !ok {
-		return fmt.Errorf("no pinned build of %s for this machine", provider)
+	path := tunnelClient(t.paths, provider)
+	if hashFile(path) == want {
+		return nil
 	}
+	if exists(path) {
+		t.log("%s is not the pinned program; replacing it", d.name)
+	}
+	// The stamp says the archive was unpacked, which is no longer the question.
+	_ = os.Remove(t.paths.stamp(d.name))
 	if err := t.fetch(ctx, d); err != nil {
 		return err
+	}
+	if got := hashFile(path); got != want {
+		return fmt.Errorf("%s came out as %s, not the pinned %s", d.name, got, want)
 	}
 	return nil
 }
@@ -443,6 +527,13 @@ func (t *tunnels) Change(ctx context.Context, change tunnelChange) error {
 	if change.SignOut {
 		_ = os.RemoveAll(filepath.Join(tunnelDir(t.paths), "tailscale"))
 	}
+	if change.TrustNgrok {
+		// The path is found here and now, never taken from the request: this is the one the operator was
+		// shown a moment ago, and the app has no say in which program gets the token.
+		if found := ngrokFound(); found != "" {
+			choice.NgrokPath, choice.NgrokHash = found, hashFile(found)
+		}
+	}
 	if err := writeTunnelJSON(filepath.Join(tunnelDir(t.paths), "secrets.json"), secrets); err != nil {
 		return err
 	}
@@ -461,12 +552,12 @@ func (t *tunnels) View() tunnelView {
 	choice := readTunnelChoice(t.paths)
 	secrets := readTunnelSecrets(t.paths)
 	view := tunnelView{
-		Tunneld: t.find() != "", Enabled: choice.Enabled, Provider: choice.Provider, State: "off", PIDs: []int{},
+		Tunneld: t.find() != "", Enabled: choice.Enabled, Provider: choice.Provider, State: "off", PIDs: []int{}, Ports: []int{},
 		Providers: map[string]tunnelProviderView{
-			tunnelNgrok:      {Client: tunnelClient(t.paths, tunnelNgrok) != "", Token: secrets.NgrokToken != ""},
+			tunnelNgrok:      {Client: ngrokFailure(choice) == "", Found: ngrokFound(), Trusted: ngrokFailure(choice) == "", Token: secrets.NgrokToken != ""},
 			tunnelTailscale:  {Client: true, SignedIn: exists(filepath.Join(tunnelDir(t.paths), "tailscale", "tailscaled.state"))},
-			tunnelCloudflare: {Client: tunnelClient(t.paths, tunnelCloudflare) != ""},
-			tunnelFrp:        {Client: tunnelClient(t.paths, tunnelFrp) != "", Token: secrets.FrpToken != "", Server: choice.FrpServer, Domain: choice.FrpDomain},
+			tunnelCloudflare: {Client: exists(tunnelClient(t.paths, tunnelCloudflare))},
+			tunnelFrp:        {Client: exists(tunnelClient(t.paths, tunnelFrp)), Token: secrets.FrpToken != "", Server: choice.FrpServer, Domain: choice.FrpDomain},
 		},
 	}
 	if !choice.Enabled {
@@ -497,7 +588,7 @@ func (t *tunnels) View() tunnelView {
 		return view
 	}
 	view.State, view.Address, view.Confirmed, view.SignIn, view.Code, view.Detail, view.Wakes = status.State, status.Address, status.Confirmed, status.SignIn, status.Code, status.Detail, status.Wakes
-	view.PIDs = status.PIDs
+	view.PIDs, view.Ports, view.VisitorUnknown = status.PIDs, status.Ports, status.VisitorUnknown
 	if !status.Since.IsZero() {
 		view.Since = &status.Since
 	}

@@ -552,14 +552,28 @@ Nothing here is hosted by this project. Each option is your own account or your 
 
 | | You do | Address | Good to know |
 |---|---|---|---|
-| **Cloudflare quick tunnel** | nothing; `cloudflared` is fetched the first time, unless you have one | new at each start | no account. Cloudflare says it is for testing and development, with no uptime promise and up to 200 requests at once. Suits one conversation |
+| **Cloudflare quick tunnel** | nothing; a pinned `cloudflared` is fetched the first time | new at each start | no account. Cloudflare says it is for testing and development, with no uptime promise and up to 200 requests at once. Suits one conversation |
 | **Tailscale Funnel** | sign in once with a button, and turn on HTTPS for your tailnet if it asks | stable, `daedalus.<tailnet>.ts.net` | nothing to install, a node inside the app. Beta, with unpublished bandwidth limits. The free plan is for non-commercial use. Traffic is decrypted only on your machine |
-| **ngrok** | install ngrok from ngrok.com, paste your token | one stable free domain | 1 GB and 20,000 requests a month on the free plan, and a warning page for browsers in front of HTML, so a shared page shows it once. Agents are not affected. The free tier can show your agent's IP address in headers: see ngrok's terms |
+| **ngrok** | install ngrok from ngrok.com, accept the path the settings show, paste your token | one stable free domain | 1 GB and 20,000 requests a month on the free plan, and a warning page for browsers in front of HTML, so a shared page shows it once. Agents are not affected. The free tier can show your agent's IP address in headers: see ngrok's terms |
 | **Your own VPS with frp** | run `frps` and Caddy on your server, then fill in server, domain, token | yours | no third party reads the traffic. Below |
 
 ngrok is not fetched or bundled: its terms ask for written consent before its client is handed to people
-with their own accounts, so you get it from ngrok. Tokens stay in the local state folder, in a `0600` file.
-They are never logged, and they never reach the agent or any answer of the API.
+with their own accounts, so you get it from ngrok. The settings show the path they found and run nothing
+until you accept it. It then runs only while it is that same file, so an update of ngrok asks again.
+`cloudflared` and `frpc` are the pinned copies in the installation's own folder, hashed at every start and
+replaced if they differ; a copy on your `PATH` is not used, because `PATH` holds folders the agent can write.
+
+Tokens stay in the local state folder, in `0600` files. They are never logged and no answer of the API
+carries one. Whether the agent can read them depends on the machine: the policy refuses a command that names
+the file, which is a match on words, so what really stands in the way is the sandbox. On Linux with
+`tools.exec.sandbox = workspace` (the default), the folder and `launcher.json` are not in a command's
+filesystem at all. On a Mac, on Windows, or with the sandbox off, a command that builds the path can read
+them, and the settings say so beside the token field. A team member in a terminal (Claude Code, Codex) runs
+outside the sandbox everywhere. The provider keys in `keyproxy.env` are not hidden by this, on any system.
+
+None of the clients opens a local control port. ngrok runs with `web_addr: false` and `--inspect=false`, and
+`frpc` with no admin server: open, either would take orders from any program on this machine. Their state
+comes from their logs. `cloudflared`'s metrics port takes no orders, and it is sealed from the agent too.
 
 ### Your own VPS
 
@@ -579,9 +593,13 @@ agent.example.com {
 }
 ```
 
-In Settings: server `agent.example.com:7000`, domain `agent.example.com`, the same token. The app uses an
-`frpc` already on your PATH, which is best kept at your server's version, or fetches a pinned one. On
-Windows, Defender may flag `frpc` as a hack tool: that is about frp, and it stops only this option.
+In Settings: server `agent.example.com:7000`, domain `agent.example.com`, the same token. The app fetches a
+pinned `frpc` (0.72.0). On Windows, Defender may flag it as a hack tool: that is about frp, and it stops only
+this option.
+
+The link from `frpc` to your server is TLS, but `frpc` does not verify the server's certificate unless it
+has a CA of yours (`transport.tls.trustedCaFile`), which this form does not set. The token is not sent in the
+clear, but someone on the path could stand in for your server and read the traffic.
 
 ### One address, two doors
 
@@ -590,15 +608,20 @@ one. `/s/` pages are written by agents and run as scripts on that origin. The do
 holds: no cookies, tokens only in agents' hands, invites only in links, and answers that are never HTML and
 carry a sandbox. The router adds what is left: a request to `/a/` made by a web page is refused by its fetch
 metadata, cookies are dropped on the way to it, and a request's path is refused if it could be read as
-another further on. All shared services share that origin with one another, as they do at the services door.
+another further on. All shared services share that origin with one another, as they do at the services door:
+a page of a public service can use a visitor's phone pass or key cookie for another service, with `fetch` or a
+WebSocket, because a cookie's path is no wall inside one origin. So do not make public a service you do not
+trust on an address your phone uses.
 
 ### From a phone
 
 A service's share sheet has **Open on a phone**. On the same Wi-Fi the QR is for this machine's home address,
 and a door opens there for an hour. Your firewall may ask about it the first time. Otherwise the QR goes through the public address.
 Either way a private service stays private: the code works once within ten minutes and opens that service
-in that phone's browser for twelve hours. **Forget phones** ends that, and so does making the service
-private again. Sharing a service with everyone is the same switch it always was.
+in that phone's browser for twelve hours, by that door only, so a pass read off the Wi-Fi (it is plain http
+there) does not work through the public address. A service with a key gets a code as well, never its key.
+**Forget phones** ends all of it, and so does changing how the service is shared or replacing its key.
+Sharing a service with everyone is the same switch it always was.
 
 ### After a sleep
 
@@ -617,10 +640,16 @@ frozen process is not a real laptop lid, and the other clients have not been mea
 On a server the door runs with no network at all, as its own user, in a container. Natively it runs as you.
 What the launcher can put back depends on the system, and the Health screen says which you got:
 
-- **Linux with bubblewrap:** no network namespace, a root holding only its own folders. Nearly the same.
-- **macOS:** a seatbelt denying IP and your home folder, used only after a probe inside it passes.
+- **Linux with bubblewrap:** no network at all, a root holding only its own folders. Nearly the same. The front,
+  which reads strangers' bytes first, gets the same root with the loopback network left in.
+- **macOS:** a seatbelt that starts from denying everything, used only after a probe inside it passes. If that
+  fails, one that takes away only IP and your home folder, which is hygiene and not a wall: a door taken over
+  there can still start programs and write outside your home. Neither has been run on a real Mac yet. The front
+  stands outside either.
 - **Windows, or a folder too deep for sockets:** nothing is a wall. The door's own process refuses to start
-  programs or dial out, which stops a mistake and not code running inside it.
+  programs or dial out, which stops a mistake and not code running inside it. In this form the door also names
+  its own ports in files the front and the host read, so a taken door could send them to another port; the door
+  already holds the token, so that gives it nothing new.
 
 What holds everywhere is that its environment is built from nothing, and it has no keys, no tools and no
 code that reaches for anything. `all` stays unavailable to a guest where no sandbox exists.

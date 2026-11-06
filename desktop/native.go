@@ -106,6 +106,8 @@ type Process struct {
 	// HoldStdin gives the child a pipe this process holds the other end of. A child that reads it to its
 	// end learns that this process has gone, however it went, which no signal can promise.
 	HoldStdin bool
+	// NewSession puts the child in a session of its own, away from any terminal the launcher has.
+	NewSession bool
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -189,6 +191,9 @@ func (pr *Process) runOnce(ctx context.Context) error {
 		cmd.Stdout, cmd.Stderr = file, file
 	}
 	setProcessGroup(cmd)
+	if pr.NewSession {
+		ownSession(cmd)
+	}
 	var held *os.File
 	if pr.HoldStdin {
 		read, write, err := os.Pipe()

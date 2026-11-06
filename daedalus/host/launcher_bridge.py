@@ -280,6 +280,19 @@ class DesktopRefused(RuntimeError):
         self.data = data
 
 
+def tunnel_ports(local_dir: Path | None) -> tuple[int, ...]:
+    """The loopback ports a tunnel's client holds open for itself, as ``tunneld`` wrote them. Read from the
+    file and not over the bridge, because the policy asks for these in the middle of a tool call."""
+    if local_dir is None:
+        return ()
+    try:
+        body = json.loads((Path(local_dir) / "tunnel" / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    ports = body.get("ports") if isinstance(body, dict) else None
+    return tuple(port for port in ports if isinstance(port, int) and 0 < port < 65536) if isinstance(ports, list) else ()
+
+
 async def tunnel(launcher: Launcher, change: dict[str, Any] | None = None) -> dict[str, Any]:
     """The launcher's public address (``desktop/tunnel.go``): how it stands, or a change of it.
 
@@ -417,5 +430,6 @@ __all__ = [
     "read",
     "status",
     "tunnel",
+    "tunnel_ports",
     "user_browser",
 ]

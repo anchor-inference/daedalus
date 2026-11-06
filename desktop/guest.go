@@ -8,12 +8,14 @@ package main
 //
 // What is lost, and what is kept. The door runs as the operator, so the wall a container gave it has to
 // be built again here, and how much of it can be depends on the system (guestWall). On Linux with a
-// working bubblewrap it comes back nearly whole: no network namespace to speak of, and a root holding
-// the door's own folders. On a Mac the seatbelt that sandbox-exec loads denies IP and the home folder.
-// On Windows nothing here is a wall: the door is an ordinary program of the operator's, kept from
-// dialling out and from starting programs only by its own audit hook (deploy/guestd/confine.py), and
-// what holds there is that there is nothing in it worth taking and no code in it that reaches for
-// anything. SECURITY.md says the same to the operator.
+// working bubblewrap it comes back nearly whole: no network at all, and a root holding the door's own
+// folders. The front parses strangers' bytes first and needs the loopback network, so it gets the same
+// root with the network left in. On a Mac a seatbelt that starts from denying everything is tried first,
+// and if it does not hold one that allows everything but IP and the home folder, which is hygiene
+// rather than a wall, and the Health screen says which. On Windows nothing here is a wall: the door is an
+// ordinary program of the operator's, kept from dialling out and from starting programs only by its own
+// audit hook (deploy/guestd/confine.py), and what holds there is that there is nothing in it worth
+// taking and no code in it that reaches for anything. SECURITY.md says the same to the operator.
 //
 // The checkouts move apart from this binary (UPDATES.md), so a launcher can meet a checkout whose door
 // is older than the native start, or has none. guestDoorPresent is what decides: no door then, and the
@@ -101,6 +103,7 @@ func guestFrontEnv(p Paths, settings map[string]string) []string {
 		"GUEST_DOOR_PORT="+parsePort(settings["GUEST_DOOR_PORT"], portDefaults["GUEST_DOOR_PORT"]),
 		"GUEST_FRONT_DIR="+guestFrontDir(p),
 		"GUEST_TRUSTED_PROXIES=127.0.0.1",
+		"GUEST_LISTEN="+guestListen(runtime.GOOS, p),
 	)
 }
 
@@ -117,6 +120,8 @@ func guestUpstreams(settings map[string]string) string {
 type guestWall struct {
 	name string
 	argv []string
+	// front is the front's own wall where it needs another; empty leaves it to run as it is.
+	front []string
 }
 
 // bwrapLocations are the fixed places bubblewrap is looked for, as the agent's sandbox looks for it: a
@@ -128,12 +133,13 @@ func guestDoorCode(p Paths) string { return filepath.Join(p.Bot, "deploy", "gues
 // bwrapWall is an empty root with the system's libraries, the interpreter, the door's code and its own
 // folders, and no network at all. Without --die-with-parent: that follows the launcher's thread and not
 // its process, and the Go runtime retires threads; the door's end is the launcher's business anyway.
+//
+// Without --new-session too, on purpose: inside the wall it would move the door out of the process group
+// the launcher signals, so a stop would end bwrap and leave the door running. What that flag is for, keeping
+// a program from a terminal it could type into, comes from the launcher starting these in a session of
+// their own (Process.NewSession), where the group and the signal still reach them.
 func bwrapWall(binary string, p Paths) []string {
-	argv := []string{binary, "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--cap-drop", "ALL", "--clearenv",
-		"--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
-	for _, dir := range []string{"/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin", "/etc/ld.so.cache", "/etc/localtime"} {
-		argv = append(argv, "--ro-bind-try", dir, dir)
-	}
+	argv := append(bwrapBase(binary), "--unshare-net")
 	for _, dir := range []string{p.RuntimePython, p.RuntimeVenv, guestDoorCode(p), guestTokenDir(p), guestModelDir(p)} {
 		argv = append(argv, "--ro-bind", dir, dir)
 	}
@@ -143,22 +149,66 @@ func bwrapWall(binary string, p Paths) []string {
 	return argv
 }
 
-// seatbeltProfile denies IP and the operator's home, then gives back what the door needs. The last
-// matching rule wins in this language, which is why the order reads backwards.
-func seatbeltProfile(p Paths, home string) string {
-	quoted := func(path string) string { return strconv.Quote(path) }
+// bwrapFrontWall is the root the front gets. It holds no state and no token, and the network stays
+// because a port on loopback is the front's whole job.
+func bwrapFrontWall(binary string, p Paths) []string {
+	argv := bwrapBase(binary)
+	for _, dir := range []string{p.RuntimePython, p.RuntimeVenv, guestDoorCode(p), guestFrontDir(p)} {
+		argv = append(argv, "--ro-bind", dir, dir)
+	}
+	return argv
+}
+
+func bwrapBase(binary string) []string {
+	argv := []string{binary, "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--cap-drop", "ALL", "--clearenv",
+		"--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
+	for _, dir := range []string{"/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin", "/etc/ld.so.cache", "/etc/localtime"} {
+		argv = append(argv, "--ro-bind-try", dir, dir)
+	}
+	return argv
+}
+
+func sbpl(path string) string { return strconv.Quote(path) }
+
+func seatbeltDirs(b *strings.Builder, p Paths) {
+	for _, dir := range []string{p.RuntimePython, p.RuntimeVenv, guestDoorCode(p), guestTokenDir(p), guestModelDir(p)} {
+		fmt.Fprintf(b, "(allow file-read* (subpath %s))\n", sbpl(dir))
+	}
+	for _, dir := range []string{guestStateDir(p), guestRunDir(p), guestFrontDir(p)} {
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %s))\n", sbpl(dir))
+	}
+}
+
+// strictSeatbelt starts from nothing: no program to start, no mach service but what the system's own base
+// profile opens, no socket but the door's own and the proxy's. Nobody has run it on a Mac from here, which is
+// why it is one candidate and proves itself by the probe rather than being assumed.
+func strictSeatbelt(p Paths, python string) string {
+	var b strings.Builder
+	b.WriteString("(version 1)\n(deny default)\n(import \"system.sb\")\n")
+	b.WriteString("(allow process-fork)\n(allow signal (target self))\n(allow sysctl-read)\n(allow file-read-metadata)\n")
+	fmt.Fprintf(&b, "(allow process-exec (literal %s))\n", sbpl(python))
+	for _, dir := range []string{"/usr/lib", "/usr/share", "/System", "/Library/Preferences", "/dev", "/private/var/db/timezone", "/etc", "/private/etc", "/var"} {
+		fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbpl(dir))
+	}
+	seatbeltDirs(&b, p)
+	for _, dir := range []string{guestRunDir(p), guestFrontDir(p), guestModelDir(p)} {
+		fmt.Fprintf(&b, "(allow network* (local unix-socket (subpath %s)))\n(allow network* (remote unix-socket (subpath %s)))\n", sbpl(dir), sbpl(dir))
+	}
+	return b.String()
+}
+
+// hygieneSeatbelt allows everything and takes away IP and the home folder. A door taken over here keeps
+// starting programs, mach services, and unix sockets and writes outside the home folder, so this is
+// hygiene and not a wall, and the Health screen calls it that. The last matching rule wins in this language,
+// which is why the order reads backwards.
+func hygieneSeatbelt(p Paths, home string) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
 	b.WriteString("(deny network-outbound (remote ip \"*:*\"))\n(deny network-inbound (local ip \"*:*\"))\n(deny network-bind (local ip \"*:*\"))\n")
 	if home != "" {
-		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", quoted(home))
+		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", sbpl(home))
 	}
-	for _, dir := range []string{p.RuntimePython, p.RuntimeVenv, guestDoorCode(p), guestTokenDir(p), guestModelDir(p)} {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", quoted(dir))
-	}
-	for _, dir := range []string{guestStateDir(p), guestRunDir(p), guestFrontDir(p)} {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %s))\n", quoted(dir))
-	}
+	seatbeltDirs(&b, p)
 	return b.String()
 }
 
@@ -168,7 +218,13 @@ func seatbeltProfile(p Paths, home string) string {
 // because on a Mac or a distribution nobody here has run, the check is all there is.
 const guestProbe = `
 import socket, sys, os
+import asyncio, sqlite3
 import guestd.confine, uvicorn, starlette, httpx
+connection = sqlite3.connect(os.path.join(sys.argv[4], "probe.sqlite"))
+connection.execute("CREATE TABLE IF NOT EXISTS t (x)")
+connection.close()
+os.unlink(os.path.join(sys.argv[4], "probe.sqlite"))
+asyncio.run(asyncio.sleep(0))
 path = os.path.join(sys.argv[1], "probe.sock")
 if sys.argv[3] == "unix":
     a = socket.socket(socket.AF_UNIX)
@@ -192,29 +248,32 @@ func chooseGuestWall(ctx context.Context, goos, listen string, p Paths, python s
 	if listen != "unix" {
 		return guestWall{}
 	}
-	var candidate guestWall
+	var candidates []guestWall
 	switch goos {
 	case "linux":
 		for _, binary := range bwrapLocations {
 			if exists(binary) {
-				candidate = guestWall{name: "namespaces", argv: bwrapWall(binary, p)}
+				candidates = append(candidates, guestWall{name: "namespaces", argv: bwrapWall(binary, p), front: bwrapFrontWall(binary, p)})
 				break
 			}
 		}
 	case "darwin":
 		if exists("/usr/bin/sandbox-exec") {
 			home, _ := os.UserHomeDir()
-			candidate = guestWall{name: "seatbelt", argv: []string{"/usr/bin/sandbox-exec", "-p", seatbeltProfile(p, home)}}
+			candidates = append(candidates,
+				guestWall{name: "seatbelt", argv: []string{"/usr/bin/sandbox-exec", "-p", strictSeatbelt(p, python)}},
+				guestWall{name: "seatbelt-hygiene", argv: []string{"/usr/bin/sandbox-exec", "-p", hygieneSeatbelt(p, home)}},
+			)
 		}
 	}
-	if candidate.name == "" {
-		return guestWall{}
+	for _, candidate := range candidates {
+		err := proveGuestWall(ctx, candidate, p, python)
+		if err == nil {
+			return candidate
+		}
+		log("the guest door's wall: %s would not hold (%v)", candidate.name, err)
 	}
-	if err := proveGuestWall(ctx, candidate, p, python); err != nil {
-		log("the guest door runs without a wall around it: %s would not hold (%v)", candidate.name, err)
-		return guestWall{}
-	}
-	return candidate
+	return guestWall{}
 }
 
 func proveGuestWall(ctx context.Context, wall guestWall, p Paths, python string) error {
@@ -226,7 +285,7 @@ func proveGuestWall(ctx context.Context, wall guestWall, p Paths, python string)
 	port := strconv.Itoa(held.Addr().(*net.TCPAddr).Port)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	argv := guestDoorCommand(wall, p, guestPlainEnv(p), []string{python, "-c", guestProbe, guestRunDir(p), port, "unix"})
+	argv := guestDoorCommand(wall.name, wall.argv, p, guestPlainEnv(p), []string{python, "-c", guestProbe, guestRunDir(p), port, "unix", guestStateDir(p)})
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = guestPlainEnv(p)
 	cmd.Dir = filepath.Join(p.Bot, "deploy")
@@ -242,9 +301,9 @@ func proveGuestWall(ctx context.Context, wall guestWall, p Paths, python string)
 
 // guestDoorCommand puts the door's command behind its wall. A namespace wall clears the environment, so
 // the door's is handed over in its own words; a seatbelt keeps the one it was started with.
-func guestDoorCommand(wall guestWall, p Paths, env, command []string) []string {
-	argv := append([]string(nil), wall.argv...)
-	if wall.name == "namespaces" {
+func guestDoorCommand(name string, wall []string, p Paths, env, command []string) []string {
+	argv := append([]string(nil), wall...)
+	if name == "namespaces" {
 		argv = append(argv, "--chdir", filepath.Join(p.Bot, "deploy"))
 		for _, kv := range env {
 			key, value, _ := strings.Cut(kv, "=")
@@ -253,6 +312,17 @@ func guestDoorCommand(wall guestWall, p Paths, env, command []string) []string {
 		argv = append(argv, "--")
 	}
 	return append(argv, command...)
+}
+
+// guestFrontCommand walls the front where the door's wall has a form for it. A seatbelt's would have to allow
+// the listening socket and the network it just denied, so on a Mac the front stands outside: it holds
+// nothing, and its own audit hook is what is left there.
+func guestFrontCommand(wall guestWall, p Paths, env []string, python string) []string {
+	command := []string{python, "-m", "guestd.front"}
+	if len(wall.front) == 0 {
+		return command
+	}
+	return guestDoorCommand(wall.name, wall.front, p, env, command)
 }
 
 // ensureGuestDirs makes the door's folders, private to this user. The model folder is the key proxy's
@@ -283,22 +353,25 @@ func (n *Native) newGuestDoor(ctx context.Context, settings map[string]string) (
 	env := guestDoorEnv(n.paths, listen)
 	code := filepath.Join(n.paths.Bot, "deploy")
 	door = &Process{
-		Name:    "guest door",
-		Argv:    guestDoorCommand(wall, n.paths, env, []string{python, "-m", "guestd"}),
-		Dir:     code,
-		Env:     env,
-		LogPath: filepath.Join(n.paths.RuntimeLogs, "guestd.log"),
-		Log:     n.log,
-		PidFile: filepath.Join(pidsDir(n.paths), "guestd.json"),
+		Name:       "guest door",
+		Argv:       guestDoorCommand(wall.name, wall.argv, n.paths, env, []string{python, "-m", "guestd"}),
+		Dir:        code,
+		Env:        env,
+		LogPath:    filepath.Join(n.paths.RuntimeLogs, "guestd.log"),
+		Log:        n.log,
+		PidFile:    filepath.Join(pidsDir(n.paths), "guestd.json"),
+		NewSession: true,
 	}
+	frontEnv := guestFrontEnv(n.paths, settings)
 	front = &Process{
-		Name:    "guest front",
-		Argv:    []string{python, "-m", "guestd.front"},
-		Dir:     code,
-		Env:     guestFrontEnv(n.paths, settings),
-		LogPath: filepath.Join(n.paths.RuntimeLogs, "guest-front.log"),
-		Log:     n.log,
-		PidFile: filepath.Join(pidsDir(n.paths), "guest-front.json"),
+		Name:       "guest front",
+		Argv:       guestFrontCommand(wall, n.paths, frontEnv, python),
+		Dir:        code,
+		Env:        frontEnv,
+		LogPath:    filepath.Join(n.paths.RuntimeLogs, "guest-front.log"),
+		Log:        n.log,
+		PidFile:    filepath.Join(pidsDir(n.paths), "guest-front.json"),
+		NewSession: true,
 	}
 	return door, front, wall
 }
@@ -319,6 +392,7 @@ func guestHostEnv(p Paths, env []string, settings map[string]string, present boo
 		"GUEST_RUN_DIR="+guestRunDir(p),
 		"GUEST_TOKEN_DIR="+guestTokenDir(p),
 		"GUEST_DOOR_UID=-1",
+		"GUEST_LISTEN="+guestListen(runtime.GOOS, p),
 		"GUEST_MODEL_UPSTREAMS="+guestUpstreams(settings),
 		"GUEST_DOOR_WALL="+wall,
 	)

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -237,6 +238,11 @@ func (d *Daemon) tunnel(router string) *Tunnel {
 			d.mu.Unlock()
 			d.status.update(func(s *Status) { s.PIDs = pids })
 		},
+		Port: func(port string) {
+			if number, err := strconv.Atoi(port); err == nil {
+				d.status.update(func(s *Status) { s.Ports = []int{number} })
+			}
+		},
 	}
 }
 
@@ -261,7 +267,7 @@ func (d *Daemon) dropChildren() {
 	d.children = map[int]bool{}
 	pids := d.pids()
 	d.mu.Unlock()
-	d.status.update(func(s *Status) { s.PIDs = pids })
+	d.status.update(func(s *Status) { s.PIDs, s.Ports = pids, nil })
 }
 
 // startProof sends a request out through the public address and waits for it to come back to the router,
@@ -330,6 +336,10 @@ func (d *Daemon) watch(ctx context.Context) {
 				d.status.update(func(s *Status) { s.Wakes, s.Confirmed = s.Wakes+1, false })
 			}
 			d.look(ctx, slept || moved)
+			if d.router.nameless.Load() && !d.status.read().VisitorUnknown {
+				d.logf("the provider names no visitor: everyone through it counts as one address")
+				d.status.update(func(s *Status) { s.VisitorUnknown = true })
+			}
 		}
 	}
 }

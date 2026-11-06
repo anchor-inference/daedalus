@@ -109,12 +109,12 @@ class Lan:
         self.api = api
         self.host = ""
         self.port = 0
-        self.task: asyncio.Task[None] | None = None
+        self.server: QuietServer | None = None
         self.closer: asyncio.TimerHandle | None = None
 
     def base(self, settings: Settings, address: str) -> str:
         """The door's address on ``address``, opening it if need be; empty when no port can be had."""
-        if self.task is None or self.task.done() or self.host != address:
+        if self.server is None or self.host != address:
             self.close()
             port = settings.services_door_port or 8766
             try:
@@ -123,19 +123,23 @@ class Lan:
                 logger.warning("no port on the home network could be had for the services door")
                 return ""
             self.host, self.port = address, int(sock.getsockname()[1])
-            self.task = asyncio.create_task(_serve(QuietServer(self.make(LanDoor(self.api))), sock), name="lan-door")
+            self.server = QuietServer(self.make(LanDoor(self.api)))
+            asyncio.create_task(_serve(self.server, sock), name="lan-door")  # noqa: RUF006 — close() ends it, and it holds no result
         if self.closer is not None:
             self.closer.cancel()
         self.closer = asyncio.get_running_loop().call_later(LAN_MINUTES * 60, self.close)
         return f"http://{self.host}:{self.port}"
 
     def close(self) -> None:
+        """Told to end, not cancelled. A cancelled server stops accepting and leaves every connection it
+        holds serving: a keep-alive or a WebSocket from the Wi-Fi would have outlived the door."""
         if self.closer is not None:
             self.closer.cancel()
             self.closer = None
-        if self.task is not None:
-            self.task.cancel()
-            self.task = None
+        if self.server is not None:
+            self.server.should_exit = True
+            self.server.force_exit = True
+            self.server = None
 
 
 def open_door(settings: Settings, config: uvicorn.Config) -> tuple[QuietServer, asyncio.Task[None]] | None:

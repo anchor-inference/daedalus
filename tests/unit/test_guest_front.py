@@ -135,3 +135,36 @@ async def test_its_own_answers_are_json_with_nosniff_and_a_closed_door_says_so(t
     outer.close()
     head, _, body = answer.partition(b"\r\n\r\n")
     assert head.startswith(b"HTTP/1.1 502") and b"application/json" in head and b"nosniff" in head and json.loads(body)["status"] == "refused"
+
+
+@pytest.mark.parametrize("name", ["X_Forwarded_For", "x_forwarded_for", "X-Forwarded_For", "X_Forwarded-For"])
+def test_an_underscored_forwarded_header_names_nobody(name: str) -> None:
+    """Go writes headers sorted, so ``X_`` follows ``X-``: the forged line came last and won."""
+    head = f"GET /a/x HTTP/1.1\r\nHost: a\r\nX-Forwarded-For: 203.0.113.9\r\n{name}: 198.51.100.99\r\n\r\n".encode()
+    out, client, _ = rewrite(head, "127.0.0.1", parse_trusted("127.0.0.1"))
+    assert client == "203.0.113.9"
+    assert b"198.51.100.99" not in out
+
+
+def test_an_underscored_header_alone_leaves_the_peer() -> None:
+    head = b"GET /a/x HTTP/1.1\r\nHost: a\r\nX_Forwarded_For: 198.51.100.99\r\n\r\n"
+    assert rewrite(head, "127.0.0.1", parse_trusted("127.0.0.1"))[1] == "127.0.0.1"
+
+
+async def test_a_door_cannot_steer_the_front_with_a_file_in_unix_form(tmp_path: Path) -> None:
+    """The folder is the door's to write. In the socket form a file there used to win, and a stranger's
+    request went to whatever daemon on this machine the door named."""
+    other: list[bytes] = []
+
+    async def daemon(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        other.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.write(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\nconnection: close\r\n\r\nSECRET")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(daemon, "127.0.0.1", 0)
+    (tmp_path / "public.endpoint").write_text(f"tcp:127.0.0.1:{server.sockets[0].getsockname()[1]}\n")
+    async with stack(tmp_path, trusted="127.0.0.1") as (port, seen):
+        answer = await ask(port, b"GET /a/x HTTP/1.1\r\nHost: a\r\nAuthorization: Bearer x\r\n\r\n")
+    server.close()
+    assert b"SECRET" not in answer and not other and len(seen) == 1

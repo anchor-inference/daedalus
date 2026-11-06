@@ -671,7 +671,8 @@ PUBLIC_ADDRESS_STATES = {
 }
 DOOR_WALLS = {
     "namespaces": "the guest door runs with no network and a root of its own",
-    "seatbelt": "the guest door runs in a seatbelt with no network and no home folder",
+    "seatbelt": "the guest door runs in a seatbelt that starts from denying everything",
+    "seatbelt-hygiene": "the guest door runs in a seatbelt that takes away the network and the home folder and nothing else: hygiene, not a wall",
 }
 
 
@@ -693,6 +694,8 @@ async def _public_address(ctx: DoctorContext) -> list[Check]:
         checks.append(Check("public address", False, f"{view.get('provider')} failed: {view.get('detail') or view.get('code')}", "warn", "open Settings, Public address"))
     else:
         checks.append(Check("public address", True, PUBLIC_ADDRESS_STATES.get(state, state), "ok" if state == "off" else "info"))
+    if view.get("visitor_unknown"):
+        checks.append(Check("public address visitors", False, f"{view.get('provider')} names no visitor, so everyone through it counts as one address to every limit", "warn", "report this: the provider's way of naming a visitor has changed"))
     if ctx.settings.guest_run_dir is not None:
         wall = DOOR_WALLS.get(ctx.settings.guest_door_wall)
         checks.append(Check("guest door wall", wall is not None, wall or "the guest door runs as you with the network of this machine: it holds no secrets and starts nothing, and that is all that stands there", "ok" if wall else "info"))

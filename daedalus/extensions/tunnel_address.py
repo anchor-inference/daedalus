@@ -9,9 +9,13 @@ its pages. A tunnel going away takes the address away with it, and links go back
 While it is reconnecting the address is kept: it comes back, and a link made in that moment should carry
 it, rather than a loopback address nobody outside can use.
 
-The agent has no way in here. There is no tool for this, the app's API port is sealed from it and the
-launcher's token is in a file it may not read, and a tunnel it raises itself is
-refused and reported.
+The agent has no tool for this, and the app's API port is sealed from it. The launcher's token and the
+providers' tokens are in files the policy refuses by name, which a command that builds the path gets past.
+On Linux with the sandbox on they are not in a command's filesystem at all; elsewhere they can be read, and
+``desktop/README.md`` says so. A tunnel it raises itself is refused, or reported.
+
+A server has an address of its own and no launcher, so this does not run there at all. If it did, a
+``launcher.json`` planted beside the state folder would rewrite the addresses and hide tunnels from the watch.
 """
 
 from __future__ import annotations
@@ -59,6 +63,8 @@ class TunnelAddress:
             return {"available": False, "reason": "no_launcher", "unavailable": str(exc)}
 
     async def refresh(self) -> dict[str, Any]:
+        if not self.app.settings.native:
+            return {"available": False, "reason": "not_native"}
         view = await self.read()
         self.own_pids = frozenset(pid for pid in view.get("pids") or () if isinstance(pid, int) and pid > 1)
         await self.publish(view)
@@ -98,9 +104,11 @@ class TunnelAddress:
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
+    if not app.settings.native:
+        return []
     address = TunnelAddress(app)
     app.extensions[EXTENSION_KEY] = address
-    return [asyncio.create_task(address.run(), name="tunnel-address")] if app.settings.native else []
+    return [asyncio.create_task(address.run(), name="tunnel-address")]
 
 
 __all__ = ["EXTENSION_KEY", "TunnelAddress", "install"]

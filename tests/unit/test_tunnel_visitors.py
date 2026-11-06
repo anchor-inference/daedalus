@@ -20,7 +20,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from daedalus.extensions import api_reveal
 from daedalus.extensions.api import build_app, server_config
+from daedalus.extensions.api_proxy import OWN_COOKIE_PREFIXES
 from daedalus.extensions.api_services_door import SCOPE_KEY, ServicesDoor
+from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFIX
 from daedalus.host.reveal import THROUGH_HEADER, came_through, is_local_client, is_local_request
 from tests.unit.test_services_origin import FakeApp, Upstream, operator_cookie
 
@@ -192,7 +194,40 @@ def test_the_key_and_the_operators_cookie_stop_at_the_door(alive: None) -> None:
             socket.send_text("a")
             socket.receive_text()
     assert server.seen["path"] == "/hmr?x=1"
-    assert "daedalus_session" not in server.seen["headers"].get("cookie", "")
+    assert "cookie" not in server.seen["headers"], "the query's key stops here, and the operator's cookie with it"
+
+
+def test_a_socket_hears_none_of_this_doors_cookies_and_keeps_the_services_own(alive: None) -> None:
+    with SocketServer() as server:
+        app, door = door_client(server.port)
+        door.cookies.update(operator_cookie(app))
+        door.cookies.set("dshare-vault-cd34", "s3cret")
+        door.cookies.set("dphone-other", "a-pass")
+        door.cookies.set("theirs", "b")
+        with door.websocket_connect("/s/vault-cd34/hmr") as socket:
+            socket.send_text("a")
+            socket.receive_text()
+    assert server.seen["headers"]["cookie"] == "theirs=b"
+
+
+def test_a_page_hears_none_of_this_doors_cookies_either(upstream: HTTPServer) -> None:
+    app = FakeApp(upstream.server_port, services_public_url="https://s.example.test")
+    door = TestClient(ServicesDoor(build_app(app, "tok")), base_url="https://s.example.test")  # type: ignore[arg-type]
+    door.cookies.set("dshare-vault-cd34", "s3cret")
+    door.cookies.set("theirs", "b")
+    assert door.get("/s/vault-cd34/").status_code == 200
+    assert Upstream.seen[-1]["cookie"] == "theirs=b"
+
+
+def test_this_doors_cookie_names_are_the_ones_it_sets() -> None:
+    assert (SHARE_COOKIE_PREFIX, PHONE_COOKIE_PREFIX) == OWN_COOKIE_PREFIXES
+
+
+def test_an_underscored_header_does_not_reach_a_service(upstream: HTTPServer) -> None:
+    """WSGI folds ``_`` and ``-`` to one variable, so this would be a forged address in a service's hands."""
+    door = TestClient(ServicesDoor(build_app(FakeApp(upstream.server_port, services_public_url="https://s.example.test"), "tok")), base_url="https://s.example.test")  # type: ignore[arg-type]
+    assert door.get("/s/demo-ab12/", headers={"x_forwarded_for": "198.51.100.99", "x_real_ip": "127.0.0.1"}).status_code == 200
+    assert not {"x_forwarded_for", "x_real_ip"} & set(Upstream.seen[-1])
 
 
 def test_a_service_that_is_down_or_unshared_closes_the_socket(alive: None, monkeypatch: pytest.MonkeyPatch) -> None:

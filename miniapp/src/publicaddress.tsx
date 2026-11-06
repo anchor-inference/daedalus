@@ -41,10 +41,12 @@ export type Tunnel = {
   code?: string;
   detail?: string;
   wakes: number;
+  /** Whether a command the agent runs is kept from the file a token is in: true only in the Linux sandbox. */
+  tokens_hidden: boolean;
   exposed: { links: number; services: number };
   qr: string[];
   providers: {
-    ngrok: { client: boolean; token: boolean };
+    ngrok: { client: boolean; token: boolean; found?: string };
     tailscale: { client: boolean; signed_in?: boolean };
     cloudflare: { client: boolean; token: boolean };
     frp: { client: boolean; token: boolean; server?: string; domain?: string };
@@ -56,10 +58,10 @@ export type PublicAddress =
   | { native: true; available: false; reason?: string }
   | ({ native: true; available: true; reason?: undefined } & Tunnel);
 
-type AddressChange = Partial<{ enabled: boolean; provider: AddressProvider; ngrok_token: string; frp_token: string; frp_server: string; frp_domain: string; sign_out: boolean }>;
+type AddressChange = Partial<{ enabled: boolean; provider: AddressProvider; trust_ngrok: boolean; ngrok_token: string; frp_token: string; frp_server: string; frp_domain: string; sign_out: boolean }>;
 
 /** The failures the launcher and its program can name. Anything else is worded as `other`, never shown raw. */
-const CODES = ["no_client", "token_rejected", "blocked", "https_off", "funnel_off", "server_refused", "not_configured", "no_tunneld", "download_failed", "other"];
+const CODES = ["no_client", "client_unconfirmed", "client_changed", "token_rejected", "blocked", "https_off", "funnel_off", "server_refused", "not_configured", "no_tunneld", "download_failed", "other"];
 
 /** The state in the operator's words. `detail` is English for support and is never this line. */
 export function addressStatus(view: Pick<Tunnel, "state" | "confirmed" | "code">): { text: string; tone: "" | "ok" | "attn" | "bad" } {
@@ -142,7 +144,13 @@ function Setup({ view, busy, change, windows }: { view: Tunnel; busy: boolean; c
     case "ngrok":
       return (
         <>
-          {!ngrok.client && <div className="sub" data-address-get="ngrok">{t("address.ngrok.missing")} <ExternalLink href={NGROK_DOWNLOAD} text={t("address.ngrok.get")} /></div>}
+          {!view.tokens_hidden && <div className="sub" data-address-readable="">{t("address.token.readable")}</div>}
+          {ngrok.found && !ngrok.client && (
+            <Row title={t("address.ngrok.found")} desc={<span className="mono">{ngrok.found}</span>} data-setting="address.ngrok.trust">
+              <button type="button" className="btn small" disabled={busy} onClick={() => void change({ trust_ngrok: true })}>{t("address.ngrok.trust")}</button>
+            </Row>
+          )}
+          {!ngrok.found && !ngrok.client && <div className="sub" data-address-get="ngrok">{t("address.ngrok.missing")} <ExternalLink href={NGROK_DOWNLOAD} text={t("address.ngrok.get")} /></div>}
           <TokenField id="address-ngrok-token" label={t("address.ngrok.token")} saved={ngrok.token} busy={busy} setting="address.ngrok.token" onSave={(token) => change({ ngrok_token: token })} />
         </>
       );
@@ -160,6 +168,8 @@ function Setup({ view, busy, change, windows }: { view: Tunnel; busy: boolean; c
           <TextBlock key={`domain-${frp.domain ?? ""}`} id="address-frp-domain" label={t("address.frp.domain")} value={frp.domain ?? ""} placeholder="tunnel.example.com" setting="address.frp.domain" onSave={(value) => void change({ frp_domain: value })} />
           <TokenField id="address-frp-token" label={t("address.frp.token")} saved={frp.token} busy={busy} setting="address.frp.token" onSave={(token) => change({ frp_token: token })} />
           <div className="sub"><ExternalLink href={FRP_DOCS} text={t("address.frp.docs")} /></div>
+          <div className="sub" data-address-frp-tls="">{t("address.frp.tls")}</div>
+          {!view.tokens_hidden && <div className="sub" data-address-readable="">{t("address.token.readable")}</div>}
           {windows && <div className="sub" data-address-defender="">{t("address.frp.defender")}</div>}
         </>
       );

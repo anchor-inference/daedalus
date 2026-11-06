@@ -311,7 +311,9 @@ class Settings(BaseSettings):
     """The user the door runs as. The socket is held to it: a path in a directory the door writes can be
     made to point at any other daemon's socket here."""
     guest_door_wall: str = ""
-    """What the launcher got the door to run inside, natively: ``namespaces``, ``seatbelt``, or nothing at all."""
+    """What the launcher got the door to run inside, natively: ``namespaces``, ``seatbelt``, ``seatbelt-hygiene``, or nothing at all."""
+    guest_listen: str = "unix"
+    """How the door's sockets are reached: ``tcp`` natively where unix sockets cannot be had."""
     guest_model_upstreams: str = ""
     """The key proxy's upstreams a stand-in may use, comma separated, as ``KEYPROXY_GUEST_UPSTREAMS`` tells the proxy."""
     miniapp_public_url: str = ""
@@ -435,9 +437,10 @@ class Settings(BaseSettings):
         # The launcher's handover file. It carries the token that authorises start, stop, update,
         # apply and the runtime extras — the whole installation — and it sits beside the state
         # directory rather than inside it, so sealing the state directory does not cover it. The app
-        # reads it to ask the launcher for a component; the agent asks the app.
+        # reads it to ask the launcher for a component; the agent asks the app. Sealed in a container too,
+        # where no launcher runs: one planted there would be believed by whatever asks for a launcher.
+        paths.append(self.state_dir.parent / "launcher.json")
         if self.native:
-            paths.append(self.state_dir.parent / "launcher.json")
             # What the launcher keeps to put the data back after an update: the verified backups and
             # the upgrade's own folder inside the data folder, and beside it the control folder of the
             # fenced switch, whose kept copies are whole copies of the data folder — the provider keys,

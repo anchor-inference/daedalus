@@ -47,8 +47,13 @@ type Status struct {
 	Updated   time.Time `json:"updated"`
 	// PIDs are this process and any client it runs. The host keeps them out of its tunnel watch: they
 	// come by way of the launcher, so nothing the agent raises can name itself the app's own.
-	PIDs  []int `json:"pids"`
+	PIDs []int `json:"pids"`
+	// Ports are the loopback ports a client opened for itself, which the host seals from the agent.
+	Ports []int `json:"ports,omitempty"`
 	Wakes int   `json:"wakes"`
+	// VisitorUnknown says the provider did not name a visitor: everyone through it then counts as one
+	// address to every limit.
+	VisitorUnknown bool `json:"visitor_unknown,omitempty"`
 }
 
 type statusFile struct {

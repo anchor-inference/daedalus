@@ -7134,6 +7134,9 @@ class SessionManager:
         # TCP endpoint (Windows) and its hook listener (natively). Whatever reaches either holds a
         # shell or speaks for a running CLI, so it is asked through the app as the rest is.
         ports.extend(terminal_endpoint.sealed_ports(self.settings))
+        # A tunnel's client's own port: it reads the same process the tunnel runs in, and nothing an agent wants
+        # there is a thing it should have.
+        ports.extend(launcher_bridge.tunnel_ports(self.settings.local_dir))
         return tuple(ports)
 
     def protected_paths(self) -> tuple[Path, ...]:

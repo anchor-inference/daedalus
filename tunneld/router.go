@@ -38,6 +38,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,18 +52,28 @@ const (
 	// doorBodySeconds is how long a door's short JSON body may take to arrive.
 	doorBodySeconds = 30
 	// inFlightLimit and perVisitorLimit are what one router will hold open at once, past which it says
-	// so. The front has its own bounds for /a/; a service is usually a dev server and has none.
-	inFlightLimit   = 512
+	// so, for each prefix on its own: half-sent bodies at the door must not close the services, and the
+	// other way round. The front has its own bounds for /a/; a service is usually a dev server and has none.
+	inFlightLimit   = 256
 	perVisitorLimit = 64
 
 	notHere = "Nothing here. This address serves agent links and shared services.\n"
 )
 
-// strippedHeaders never reach a door. The X-Forwarded family and Forwarded go by themselves, because
-// ReverseProxy's Rewrite removes them, and they are listed for the reader and for a change of mechanism.
-var strippedHeaders = []string{
-	"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Forwarded-Prefix", "X-Real-Ip", "True-Client-Ip", "X-Client-Ip",
-	"Cdn-Loop", "X-Daedalus-Token", "X-Guest-Client", "X-Share-Key-Internal", "Tailscale-Ingress-Target",
+// strippedHeaders never reach a door, by their name with underscores read as dashes. The two are one name
+// to anything that folds them: the front did, a WSGI service does, and a visitor's X_Forwarded_For sorts
+// after the real one, so the forged line was the one that won.
+var strippedHeaders = map[string]bool{
+	"forwarded": true, "x-forwarded-for": true, "x-forwarded-host": true, "x-forwarded-proto": true, "x-forwarded-port": true, "x-forwarded-prefix": true,
+	"x-real-ip": true, "true-client-ip": true, "x-client-ip": true, "cdn-loop": true, "x-daedalus-token": true, "x-daedalus-through": true, "x-guest-client": true,
+	"tailscale-ingress-target": true,
+}
+
+// strippedHeader reads a header's name as the rule above does. A cf- name is the edge's own note, and those
+// change without notice.
+func strippedHeader(name string) bool {
+	folded := strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	return strippedHeaders[folded] || strings.HasPrefix(folded, "cf-")
 }
 
 type visitorKey struct{}
@@ -82,7 +93,10 @@ type Router struct {
 	services *httputil.ReverseProxy
 	mu       sync.Mutex
 	open     map[string]int
-	total    int
+	total    map[string]int
+	// nameless is set once a request arrives with no visitor named: every such visitor then shares one
+	// slot, and the door's limits one address, which the status says rather than hides.
+	nameless atomic.Bool
 }
 
 // NewRouter is a router for the front on one loopback port and the services door on another.
@@ -93,6 +107,7 @@ func NewRouter(doorPort, servicesPort, probe string, visitor VisitorOf) *Router 
 		Probe:    probe,
 		Visitor:  visitor,
 		open:     map[string]int{},
+		total:    map[string]int{},
 	}
 	rt.door = rt.proxy(rt.Door)
 	rt.services = rt.proxy(rt.Services)
@@ -112,15 +127,11 @@ func (rt *Router) proxy(target *url.URL) *httputil.ReverseProxy {
 			visitor, _ := pr.In.Context().Value(visitorKey{}).(string)
 			pr.SetURL(target)
 			pr.Out.Host = pr.In.Host // the name the visitor used, which a service builds its links from
-			for _, name := range strippedHeaders {
-				pr.Out.Header.Del(name)
-			}
 			for name := range pr.Out.Header {
-				if strings.HasPrefix(name, "Cf-") { // the edge's own notes, which change without notice
-					pr.Out.Header.Del(name)
+				if strippedHeader(name) {
+					delete(pr.Out.Header, name)
 				}
 			}
-			pr.Out.Header.Del(ThroughHeader)
 			pr.Out.Header.Set(ThroughHeader, "tunnel")
 			pr.Out.Header.Set("X-Forwarded-Proto", "https")
 			if visitor != "" {
@@ -185,23 +196,39 @@ func refuse(w http.ResponseWriter, status int, text string) {
 	io.WriteString(w, text)
 }
 
-func (rt *Router) hold(visitor string) bool {
+// slotOf is who a connection is counted against. One household or one rented server holds a whole /64,
+// so an IPv6 visitor is that /64: 512 addresses of one prefix were one attacker holding every slot.
+func slotOf(visitor string) string {
+	address, err := netip.ParseAddr(visitor)
+	if err != nil || !address.Is6() || address.Is4In6() {
+		return visitor
+	}
+	prefix, err := address.Prefix(64)
+	if err != nil {
+		return visitor
+	}
+	return prefix.String()
+}
+
+func (rt *Router) hold(route, visitor string) bool {
+	slot := route + slotOf(visitor)
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	if rt.total >= inFlightLimit || rt.open[visitor] >= perVisitorLimit {
+	if rt.total[route] >= inFlightLimit || rt.open[slot] >= perVisitorLimit {
 		return false
 	}
-	rt.total++
-	rt.open[visitor]++
+	rt.total[route]++
+	rt.open[slot]++
 	return true
 }
 
-func (rt *Router) release(visitor string) {
+func (rt *Router) release(route, visitor string) {
+	slot := route + slotOf(visitor)
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	rt.total--
-	if rt.open[visitor]--; rt.open[visitor] <= 0 {
-		delete(rt.open, visitor)
+	rt.total[route]--
+	if rt.open[slot]--; rt.open[slot] <= 0 {
+		delete(rt.open, slot)
 	}
 }
 
@@ -225,12 +252,16 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rt.Visitor != nil {
 		visitor = rt.Visitor(r)
 	}
-	if !rt.hold(visitor) {
+	if visitor == "" {
+		rt.nameless.Store(true)
+	}
+	route := path[:3]
+	if !rt.hold(route, visitor) {
 		w.Header().Set("Retry-After", "10")
 		refuse(w, http.StatusServiceUnavailable, "Too many connections.\n")
 		return
 	}
-	defer rt.release(visitor)
+	defer rt.release(route, visitor)
 	r = r.WithContext(context.WithValue(r.Context(), visitorKey{}, visitor))
 	if toServices {
 		rt.services.ServeHTTP(w, r)

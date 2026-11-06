@@ -18,6 +18,9 @@ own so that it cannot be taken for the other kind by a bug. Such a code travels 
 http on a home network, or through a tunnel, and a way into the app must never be one mistake away from
 that. It lasts ten minutes, is spent once, and turns into a pass for that service in that phone's
 browser, for twelve hours. Spending one leaves other codes alone: two phones are two phones.
+
+A code and its pass belong to the door they were made for. One on the home network travels as plain http,
+so anyone on that Wi-Fi can read it, and it must not also work through the public address from anywhere.
 """
 
 from __future__ import annotations
@@ -86,37 +89,39 @@ async def redeem(db: Database, code: str, *, state_dir: Path | None = None) -> R
     return Redeemed(for_window=bool(row["for_window"]))
 
 
-async def mint_phone(db: Database, slug: str) -> str:
-    """A code for one phone to reach one service, returned once."""
+async def mint_phone(db: Database, slug: str, *, lan: bool = False) -> str:
+    """A code for one phone to reach one service by one door, returned once."""
     now = datetime.now(UTC)
     await db.execute("DELETE FROM phone_passes WHERE COALESCE(expires_at, code_expires_at) < ?", (now.isoformat(),))
     code = secrets.token_urlsafe(24)
     await db.execute(
-        "INSERT INTO phone_passes(code_hash, slug, created_at, code_expires_at) VALUES (?, ?, ?, ?)",
-        (_digest(code), slug, now.isoformat(), (now + timedelta(minutes=PHONE_CODE_MINUTES)).isoformat()),
+        "INSERT INTO phone_passes(code_hash, slug, lan, created_at, code_expires_at) VALUES (?, ?, ?, ?, ?)",
+        (_digest(code), slug, int(lan), now.isoformat(), (now + timedelta(minutes=PHONE_CODE_MINUTES)).isoformat()),
     )
     return code
 
 
-async def redeem_phone(db: Database, code: str, slug: str) -> str | None:
-    """Spend a code for this service: the pass it became, once, and None for anything else.
+async def redeem_phone(db: Database, code: str, slug: str, *, lan: bool = False) -> str | None:
+    """Spend a code for this service at this door: the pass it became, once, and None for anything else.
 
-    The slug is compared because a code from one service's QR must not open another.
+    The slug is compared because a code from one service's QR must not open another. The spending is one
+    statement that only an unspent row can satisfy: read and then written, two requests at once both won.
     """
-    row = await db.fetchone("SELECT id, slug, code_expires_at, used_at FROM phone_passes WHERE code_hash = ?", (_digest(code or ""),))
     now = datetime.now(UTC)
-    if row is None or row["used_at"] is not None or not secrets.compare_digest(str(row["slug"]), slug) or datetime.fromisoformat(row["code_expires_at"]) <= now:
-        return None
     issued = secrets.token_urlsafe(32)
-    await db.execute("UPDATE phone_passes SET used_at = ?, pass_hash = ?, expires_at = ? WHERE id = ?", (now.isoformat(), _digest(issued), (now + timedelta(hours=PHONE_PASS_HOURS)).isoformat(), row["id"]))
-    return issued
+    won = await db.fetchall(
+        "UPDATE phone_passes SET used_at = ?, pass_hash = ?, expires_at = ?"
+        " WHERE code_hash = ? AND slug = ? AND lan = ? AND used_at IS NULL AND code_expires_at > ? RETURNING id",
+        (now.isoformat(), _digest(issued), (now + timedelta(hours=PHONE_PASS_HOURS)).isoformat(), _digest(code or ""), slug, int(lan), now.isoformat()),
+    )
+    return issued if won else None
 
 
-async def phone_admitted(db: Database, slug: str, issued: str | None) -> bool:
-    """Whether a pass from a phone's cookie still opens this service."""
+async def phone_admitted(db: Database, slug: str, issued: str | None, *, lan: bool = False) -> bool:
+    """Whether a pass from a phone's cookie still opens this service at this door."""
     if not issued:
         return False
-    row = await db.fetchone("SELECT expires_at FROM phone_passes WHERE pass_hash = ? AND slug = ?", (_digest(issued), slug))
+    row = await db.fetchone("SELECT expires_at FROM phone_passes WHERE pass_hash = ? AND slug = ? AND lan = ?", (_digest(issued), slug, int(lan)))
     return row is not None and row["expires_at"] is not None and datetime.fromisoformat(row["expires_at"]) > datetime.now(UTC)
 
 

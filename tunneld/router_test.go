@@ -328,19 +328,83 @@ func TestAWebSocketPassesUnderS(t *testing.T) {
 func TestOneVisitorCannotHoldEveryConnection(t *testing.T) {
 	rt := NewRouter("1", "2", "", func(*http.Request) string { return "203.0.113.9" })
 	for i := 0; i < perVisitorLimit; i++ {
-		if !rt.hold("203.0.113.9") {
+		if !rt.hold("/a/", "203.0.113.9") {
 			t.Fatalf("refused at %d", i)
 		}
 	}
-	if rt.hold("203.0.113.9") {
+	if rt.hold("/a/", "203.0.113.9") {
 		t.Fatal("past the limit")
 	}
-	if !rt.hold("203.0.113.10") {
+	if !rt.hold("/a/", "203.0.113.10") {
 		t.Fatal("another visitor must not feel it")
 	}
-	rt.release("203.0.113.9")
-	if !rt.hold("203.0.113.9") {
+	if !rt.hold("/s/", "203.0.113.9") {
+		t.Fatal("what is held at the door is not held at the services")
+	}
+	rt.release("/a/", "203.0.113.9")
+	if !rt.hold("/a/", "203.0.113.9") {
 		t.Fatal("a released connection counts no more")
+	}
+}
+
+func TestOneIPv6HouseholdIsOneVisitor(t *testing.T) {
+	rt := NewRouter("1", "2", "", nil)
+	for i := 1; i <= perVisitorLimit; i++ {
+		if !rt.hold("/a/", fmt.Sprintf("2001:db8:1:2::%x", i)) {
+			t.Fatalf("refused at %d", i)
+		}
+	}
+	if rt.hold("/a/", "2001:db8:1:2::ffff") {
+		t.Fatal("the whole /64 is one household, and it took every address in it to hold every slot")
+	}
+	if !rt.hold("/a/", "2001:db8:1:3::1") {
+		t.Fatal("the next /64 is someone else")
+	}
+	rt.release("/a/", "2001:db8:1:2::1")
+	if !rt.hold("/a/", "2001:db8:1:2::ffff") {
+		t.Fatal("a slot given back is the household's again")
+	}
+}
+
+func TestHalfSentBodiesAtTheDoorLeaveTheServicesOpen(t *testing.T) {
+	rt := NewRouter("1", "2", "", nil)
+	for i := 0; i < inFlightLimit; i++ {
+		if !rt.hold("/a/", fmt.Sprintf("192.0.2.%d", i)) {
+			t.Fatalf("refused at %d", i)
+		}
+	}
+	if rt.hold("/a/", "198.51.100.1") {
+		t.Fatal("the door's budget is spent")
+	}
+	if !rt.hold("/s/", "198.51.100.1") {
+		t.Fatal("the services have a budget of their own")
+	}
+}
+
+func TestAnUnderscoredHeaderIsTheSameHeader(t *testing.T) {
+	r := newRig(t, func(*http.Request) string { return "203.0.113.9" })
+	forged := http.Header{"X_Forwarded_For": {"198.51.100.99"}, "X_forwarded_for": {"127.0.0.1"}, "X-Forwarded_For": {"127.0.0.1"}, "Cf_Connecting_Ip": {"127.0.0.1"}, "X_Real_Ip": {"127.0.0.1"}, "Forwarded_": {"kept"}, "X_Guest_Client": {"127.0.0.1"}, "Cf_Worker": {"x"}}
+	r.ask(t, http.MethodGet, "/a/x", forged, nil)
+	got := r.door.last()
+	if v := got.Header.Values("X-Forwarded-For"); len(v) != 1 || v[0] != "203.0.113.9" {
+		t.Fatalf("X-Forwarded-For: %v", v)
+	}
+	for name := range got.Header {
+		if strings.Contains(name, "_") && name != "Forwarded_" {
+			t.Errorf("%s reached the door", name)
+		}
+	}
+}
+
+func TestAProviderThatNamesNoVisitorIsNoticed(t *testing.T) {
+	rt := NewRouter("1", "2", "", func(*http.Request) string { return "" })
+	rt.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/app/", nil))
+	if rt.nameless.Load() {
+		t.Fatal("a 404 proves nothing about who came")
+	}
+	rt.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/a/x", nil))
+	if !rt.nameless.Load() {
+		t.Fatal("the status has to be able to say everyone is one address")
 	}
 }
 
