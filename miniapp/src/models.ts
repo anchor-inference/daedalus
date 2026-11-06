@@ -99,6 +99,49 @@ export function onDemandGroups(preset: Pick<Preset, "on_demand_tool_groups">, by
 /** The three positions of the switch, in the order they are offered: the model's own first. */
 export const ON_DEMAND_CHOICES: readonly (boolean | null)[] = [null, true, false];
 
+/** One endpoint of a model on OpenRouter, as `/api/providers/{id}/model-providers` reports it. */
+export type RouteRow = {
+  slug: string;
+  name: string;
+  quantization: string | null;
+  tier: string | null;
+  /** Per million tokens, the provider's dearest hour when `varies`. */
+  input: number;
+  output: number;
+  cache_hit: number | null;
+  varies: boolean;
+  context_length: number | null;
+  max_output_tokens: number | null;
+  tools: boolean;
+  tool_choice: "full" | "partial" | "none";
+  reasoning: boolean;
+  caching: boolean;
+  uptime: number | null;
+  /** On OpenRouter's zero-retention list; null when that list could not be read. */
+  zdr: boolean | null;
+  /** What ticking this row alone records, with the variants its slug also reaches. */
+  bill: { input: number; output: number; cache_hit: number | null };
+};
+
+export type RouteListing = { model: string; images: boolean; rows: RouteRow[]; unavailable?: boolean };
+
+/**
+ * What a choice of providers records: the highest of each rate, since only OpenRouter knows which of
+ * them will take a call and only the bill says afterwards. The host works this out again from the
+ * listing when it saves; this is what the screen shows until then. No cached rate at all when any of
+ * them publishes none, so a cached token is counted at the full price rather than at a discount it may not get.
+ */
+export function routeBill(rows: RouteRow[], chosen: string[]): RouteRow["bill"] | null {
+  const bills = rows.filter((row) => chosen.includes(row.slug)).map((row) => row.bill);
+  if (!bills.length) return null;
+  const hits = bills.map((bill) => bill.cache_hit);
+  return {
+    input: Math.max(...bills.map((bill) => bill.input)),
+    output: Math.max(...bills.map((bill) => bill.output)),
+    cache_hit: hits.some((hit) => hit === null) ? null : Math.max(...(hits as number[])),
+  };
+}
+
 /** A model id turned into a preset id: the same rule the server accepts (letters, digits, . _ -). */
 export function presetIdFor(provider: string, model: string): string {
   const slug = model.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "");

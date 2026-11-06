@@ -13,9 +13,10 @@ later runs as the operator, on words a guest chose. A tool added tomorrow is off
 So ``all`` means the tools that work on this chat's folder and end with the turn. Secrets never reach a
 guest's turn at any setting, and neither does anything else the installation holds: commands run in a
 sandbox of their own (:func:`daedalus.tools.shell.guest_sandbox_args`) that holds the system binaries and
-this chat's folder, has no network and starts from an empty environment. A policy that reads the words of a
-command is no wall against a command that builds its path, and this answer goes straight to the person
-asking. A turn that cannot have that sandbox does not get ``all``.
+this chat's folder, has no network and starts from an empty environment, and they are held to limits on
+what they can use (:mod:`daedalus.tools.guest_box`). A policy that reads the words of a command is no wall
+against a command that builds its path, and this answer goes straight to the person asking. A turn that
+cannot have that sandbox and those limits does not get ``all``.
 """
 
 from __future__ import annotations

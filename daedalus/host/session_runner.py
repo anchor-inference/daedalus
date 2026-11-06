@@ -189,7 +189,7 @@ from daedalus.terminals.bridge import HostBridge
 from daedalus.terminals.model import device_env
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
-from daedalus.tools.shell import RemoteJob, guest_sandbox_status, stop_job
+from daedalus.tools.shell import RemoteJob, guest_limits_status, guest_sandbox_status, stop_job
 from daedalus.tools.shell import outcome as shell_outcome
 from daedalus.tools.shell import title as shell_title
 
@@ -4163,13 +4163,15 @@ class SessionManager:
         return "" if tools != "all" else await self.guest_full_tools(state)
 
     async def guest_full_tools(self, state: SessionState) -> str:
-        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, ``project_folder``, or empty when it can."""
+        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``no_limits``, ``host_folder``, ``project_folder``, or empty when it can."""
         if self.host_folder_of(state.session.id, state.metadata, state.project) is not None or (state.services is not None and state.services.exec_backend is not None):
             return "host_folder"
         if state.project is not None and not state.project.settings.ephemeral:
             # Other chats of the project read this folder with the operator's tools and know nothing of the guest.
             return "project_folder"
-        return "" if await asyncio.to_thread(guest_sandbox_status) == "ok" else "no_sandbox"
+        if await asyncio.to_thread(guest_sandbox_status) != "ok":
+            return "no_sandbox"
+        return "" if await asyncio.to_thread(guest_limits_status) == "ok" else "no_limits"
 
     async def guest_price(self, session_id: str) -> tuple[float, float] | None:
         """What this chat's model costs per million tokens in and out; ``(0, 0)`` on a plan or a local

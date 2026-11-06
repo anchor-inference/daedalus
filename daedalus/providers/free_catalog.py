@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
 
 from daedalus.config import is_keyproxy_url, keyproxy_upstream
+from daedalus.providers.openrouter_routes import routing_body
 
 SOURCES = (
     ("kilo", "Kilo Gateway", "https://api.kilo.ai/api/gateway/models", "https://api.kilo.ai/api/gateway", "https://kilo.ai/docs/gateway/authentication", False),
@@ -177,8 +179,10 @@ class FreeCatalog:
             return self.view()
 
 
-async def probe_agent_cycle(base_url: str, model: str, api_key: str = "", *, client: httpx.AsyncClient | None = None) -> bool:
-    """Require a tool call and an answer after its result before offering a model to an agent."""
+async def probe_agent_cycle(base_url: str, model: str, api_key: str = "", *, client: httpx.AsyncClient | None = None, route: Sequence[str] = ()) -> bool:
+    """Require a tool call and an answer after its result before offering a model to an agent.
+
+    ``route`` is the OpenRouter providers the model is limited to: a test run elsewhere proves nothing about them."""
     own_client = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=5.0), follow_redirects=False)
@@ -189,10 +193,11 @@ async def probe_agent_cycle(base_url: str, model: str, api_key: str = "", *, cli
     tools = [{"type": "function", "function": {"name": "add_numbers", "description": "Add two integers",
               "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
                              "required": ["a", "b"]}}}]
+    routing = {"provider": routing_body(route)} if route else {}
     try:
         response = await client.post(base_url.rstrip("/") + "/chat/completions", headers=headers,
                                      json={"model": model, "messages": messages, "tools": tools,
-                                           "tool_choice": "required", "max_tokens": 512})
+                                           "tool_choice": "required", "max_tokens": 512, **routing})
         response.raise_for_status()
         answer = response.json()["choices"][0]["message"]
         calls = answer.get("tool_calls") or []
@@ -202,7 +207,7 @@ async def probe_agent_cycle(base_url: str, model: str, api_key: str = "", *, cli
             return False
         messages.extend([answer, {"role": "tool", "tool_call_id": calls[0]["id"], "content": "5"}])
         followup = await client.post(base_url.rstrip("/") + "/chat/completions", headers=headers,
-                                     json={"model": model, "messages": messages, "max_tokens": 128})
+                                     json={"model": model, "messages": messages, "max_tokens": 128, **routing})
         followup.raise_for_status()
         final = followup.json()["choices"][0]["message"]
         return "5" in str(final.get("content") or "")

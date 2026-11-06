@@ -55,7 +55,12 @@ def request_for(link: Any, history: Sequence[Any]) -> dict[str, Any]:
     spoken = [m for m in history if m["role"] in (GUEST, AGENT)]
     for message in spoken[-HISTORY_MESSAGES:]:
         messages.append({"role": "user" if message["role"] == GUEST else "assistant", "content": message["text"]})
-    return {"model": link["model_name"], "messages": messages, "max_tokens": MAX_OUTPUT_TOKENS, "stream": False}
+    request: dict[str, Any] = {"model": link["model_name"], "messages": messages, "max_tokens": MAX_OUTPUT_TOKENS, "stream": False}
+    if "provider_only" in link.keys():
+        # Which of OpenRouter's providers may serve the model, from the host's table (Store.routed).
+        # The one thing here that is not the conversation, and it says nothing to the model.
+        request["provider"] = {"only": list(link["provider_only"]), "allow_fallbacks": False}
+    return request
 
 
 def worst_case_usd(link: Any, request: dict[str, Any]) -> float:
@@ -169,6 +174,7 @@ class StandIn:
             assert conversation is not None
             link = self.store.link(conversation["link_id"])
             assert link is not None
+            link = self.store.routed(link)
             request = request_for(link, self.store.transcript(conversation["id"]))
             estimate = worst_case_usd(link, request)
             refusal = self.store.reserve(message["id"], link, estimate)

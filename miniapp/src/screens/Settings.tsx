@@ -17,7 +17,8 @@ import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
 import { FreeModels } from "./FreeModels";
-import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPreset } from "../models";
+import { OpenRouterProviders } from "./OpenRouterProviders";
+import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
@@ -163,10 +164,51 @@ function WindowSource({ source, sources, onAuto, onRefresh }: { source: ContextW
   );
 }
 
+/** Which OpenRouter providers a model is limited to, and the table to change it, read when opened. */
+function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Preset>) => void }) {
+  const [open, setOpen] = useState(false);
+  const [listing, setListing] = useState<RouteListing | null>(null);
+  const [failed, setFailed] = useState(false);
+  const saved = p.openrouter_providers ?? [];
+  const [chosen, setChosen] = useState(saved);
+  const gone = p.openrouter_providers_gone ?? [];
+  useEffect(() => setChosen(p.openrouter_providers ?? []), [p.openrouter_providers]);
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    setListing(null);
+    setFailed(false);
+    api.get<RouteListing>(`/api/providers/${encodeURIComponent(p.provider)}/model-providers?model=${encodeURIComponent(p.model)}`)
+      .then((found) => { if (!current) return; if (found.rows.length) setListing(found); else setFailed(true); })
+      .catch(() => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, [open, p.provider, p.model]);
+  const changed = chosen.join("\n") !== saved.join("\n");
+  return (
+    <>
+      <Row title={t("settings.preset.routes")} desc={saved.length ? t("settings.preset.routes.only", { slugs: saved.join(", ") }) : t("settings.preset.routes.auto")}>
+        <button className="btn small" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{t(open ? "common.close" : "settings.preset.routes.choose")}</button>
+      </Row>
+      {gone.length > 0 && <p className="result-warning" role="alert">{t("settings.preset.routes.gone", { slugs: gone.join(", ") })}</p>}
+      {open && !listing && !failed && <div className="sub faint">{t("settings.preset.routes.asking")}</div>}
+      {open && failed && <p className="sub">{t("settings.preset.routes.unavailable")}</p>}
+      {open && listing && <OpenRouterProviders listing={listing} chosen={chosen} saved={saved} onChange={setChosen} />}
+      {open && (listing ? changed : failed && saved.length > 0) && (
+        <div className="btnrow">
+          {listing ? <button className="btn small primary" onClick={() => onPatch({ openrouter_providers: chosen })}>{t("common.save")}</button>
+            : <button className="btn small" onClick={() => onPatch({ openrouter_providers: [] })}>{t("settings.preset.routes.clear")}</button>}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, onDemandByModel, windowSources, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
+function PresetRow({ id, p, routed, onDemandByModel, windowSources, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
+  /** Its endpoint is OpenRouter, which alone routes between providers. */
+  routed: boolean;
   onDemandByModel?: boolean;
   windowSources?: ContextWindowSources;
   isDefault: boolean;
@@ -201,6 +243,7 @@ function PresetRow({ id, p, onDemandByModel, windowSources, isDefault, inChain, 
           {!isDefault && inChain && <span className="pill">{t("settings.preset.fallback")}</span>}
           <span className="pill">{p.thinking ? t("settings.preset.think", { effort: t(`add.effort.${p.reasoning_effort}`) }) : t("settings.preset.nothink")}</span>
           {p.images && <span className="pill">{t("settings.preset.images")}</span>}
+          {(p.openrouter_providers_gone?.length ?? 0) > 0 && <span className="pill failed">{t("settings.preset.routes.gone.pill")}</span>}
           {!onDemandGroups(p, onDemandByModel) && <span className="pill" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand.offpill")}</span>}
           <span className="pill">{Math.round(p.context_window / 1000)}k</span>
         </div>
@@ -275,6 +318,7 @@ function PresetRow({ id, p, onDemandByModel, windowSources, isDefault, inChain, 
                 ))}
               </span>
             </Row>
+            {routed && <PresetRoutes p={p} onPatch={onPatch} />}
             {!isDefault && (
               <Row title={t("settings.preset.usefallback")} desc={t("settings.preset.fallback.title")}>
                 <Switch checked={inChain} onChange={() => onChain()} label={t("settings.preset.usefallback")} />
@@ -1261,6 +1305,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                     key={id}
                     id={id}
                     p={p}
+                    routed={s.providers[p.provider]?.kind === "openrouter"}
                     onDemandByModel={s.on_demand_defaults?.[id]}
                     windowSources={s.context_window_sources?.[id]}
                     onRefreshWindow={() => void refreshWindow(id)}

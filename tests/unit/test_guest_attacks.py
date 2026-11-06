@@ -46,6 +46,8 @@ BASE: dict[str, Any] = {
 STAND_IN = {"mode": "stand_in", "briefing": "b", "model_path": "p", "model_name": "m", "price_in": 1.0, "price_out": 1.0, "usd_limit": 1.0}
 
 
+pytestmark = pytest.mark.usefixtures("bare_sandbox")
+
 def door(tmp_path: Path, name: str = "g.sqlite") -> tuple[Store, Mailbox]:
     store = Store(tmp_path / name)
     return store, Mailbox(store, public_base=lambda: "http://x")
@@ -148,11 +150,12 @@ def test_as_root_in_a_container_the_empty_network_is_made_around_the_sandbox(mon
     assert "--unshare-net" in shell.guest_sandbox_argv("/usr/bin/bwrap")
 
 
-def test_a_guests_command_is_limited_in_what_it_can_take_of_the_machine() -> None:
-    """Neither the sandbox nor the container bounds memory or a file: one allocating loop reaches the server."""
+def test_each_process_of_a_guests_command_is_limited_and_address_space_is_not_what_limits_it() -> None:
+    """The limits on memory and on the command as a whole are its cgroup's. An address space limit at 8 GiB stopped
+    ``vite build`` dead, measured in the image: V8 reserves more than that, unused, for one WebAssembly instance."""
     argv = shell.guest_sandbox_argv("/usr/bin/bwrap")
     limits = argv[argv.index(next(a for a in argv if a.endswith("prlimit"))) + 1:argv.index("/usr/bin/bwrap")]
-    assert {a.split("=")[0] for a in limits} == {"--as", "--fsize", "--cpu", "--core"}
+    assert {a.split("=")[0] for a in limits} == {"--fsize", "--cpu", "--core"}
 
 
 async def test_no_sandbox_refuses_the_command_instead_of_running_it_plain(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

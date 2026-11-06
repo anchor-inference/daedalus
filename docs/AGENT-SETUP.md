@@ -322,8 +322,29 @@ A model that is left out has a stated reason in `/api/guest/door` (`left_out`): 
 metered with no known price.
 
 A direct link's turn reads the chat's messages and nothing the host added to them: memory, the folder's notes, the board,
-the project's facts and side questions are taken out of what its model is sent, in that turn only. A chat's `All tools`
-setting needs the namespaces the agent's container already has for the sandbox; the app says so where it cannot have them.
+the project's facts and side questions are taken out of what its model is sent, in that turn only.
+
+A chat's `All tools` setting needs what the agent's container already has: the namespaces for the sandbox, and a private
+cgroup namespace on cgroup v2, which is Docker's default, for the limits. Nothing is added to the compose file. The app
+says so where a chat cannot have it, and it never offers it on a native install. The first time a form or a guest's
+command asks, the agent moves the container's own processes into a child cgroup, `agent`, and makes `guests` beside it;
+`/proc/1/cgroup` then reads `0::/agent`, a new container starts clean and does this again, and `docker exec` and
+`docker stats` work as before.
+
+| Bound on a guest's command | Number | When it is reached |
+|---|---|---|
+| Threads, one command | 1,024 | starting another fails with `EAGAIN` |
+| Memory, one command, no swap | 8 GiB | killed whole; what it wrote counts while it runs |
+| Writable space, one command, folder and `/tmp` together | 4 GiB, 500,000 files | `No space left on device` |
+| The folder afterwards | 8 GiB, 1,000,000 files | nothing the command wrote is kept |
+| Free on the folder's disk afterwards | 10 GiB, 1,000,000 inodes | nothing the command wrote is kept |
+| All guests at once | 2,048 threads, 12 GiB, half the processors | as above; processors slow down |
+| One process | 2 GiB file, 600 s of processor | the kernel's signal |
+
+Memory numbers shrink to half of the machine's memory on a smaller machine. The numbers are in
+`daedalus/tools/guest_box.py`. A command sees its writes at once, and they reach the real folder when it ends, so a
+command that is stopped keeps nothing, and two commands of one turn at the same moment do not see each other's. It has
+no loopback either, as it never had, so a test runner that talks to itself on `localhost` does not run there.
 
 ### Shared services: the services door
 

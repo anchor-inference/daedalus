@@ -1210,7 +1210,7 @@ class FakeGuests:
         self.chat = chat
         self.available = available
         self.public_base = public_base
-        # Why this chat cannot be given the sandboxed tools ("no_sandbox", "host_folder"); empty when it can.
+        # Why this chat cannot be given the sandboxed tools ("no_sandbox", "no_limits", "host_folder"); empty when it can.
         self.full_tools_why = full_tools_why
         # The chat each read of the door was asked about (``?session_id=``), for a check to say the sheet asked.
         self.door_asked: list[str] = []
@@ -1485,6 +1485,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return answered[0], "application/json", json.dumps(answered[1])
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
+    if method.upper() == "GET" and path.startswith("/api/providers/") and path.endswith("/model-providers"):
+        # No listing, which is the flow without its provider step: the pictures of Add a model stay
+        # what they are. check_openrouter_providers.py keeps a host with a table of its own.
+        return 200, "application/json", json.dumps({"model": "", "images": False, "rows": [], "unavailable": True})
     if method.upper() == "GET" and path.startswith("/api/pages/"):
         # One page, as a card for an agent's PageShow asks for it: the shared host knows ``orders`` and
         # answers 404 for any other, which the card draws as a removed page. The navigation's list

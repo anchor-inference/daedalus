@@ -49,7 +49,8 @@ WORDS = {
         "state_waiting": "Not opened yet", "readonly": "Read-only", "save": "Save", "daily": "Daily limit for all guests", "cancel": "Cancel",
         "who": "Who it is for", "topic": "What to talk about", "briefing": "Briefing", "stand_in_role": "Stand-in", "guest_role": "Guest", "door_role": "System",
         "newlink": "New link", "all": "All tools",
-        "all_note": "This chat's folder only; commands run sandboxed, with no network or secrets.",
+        "all_note": "This chat's folder only; commands run sandboxed, with no network or secrets, and with limits on processes, memory and disk.",
+        "why_no_limits": "Commands cannot be limited here, so the guest cannot have all tools.",
         "why_no_sandbox": "There is no sandbox here, so the guest cannot have all tools.",
         "why_host_folder": "This chat works in a folder on the host, so the guest cannot have all tools.",
         "retention": "Keep the record for", "retention_direct": "The link's own record is kept for", "more": "More settings",
@@ -65,7 +66,8 @@ WORDS = {
         "state_waiting": "Ещё не открыта", "readonly": "Только чтение", "save": "Сохранить", "daily": "Дневной лимит для всех гостей", "cancel": "Отмена",
         "who": "Для кого", "topic": "О чём говорить", "briefing": "Брифинг", "stand_in_role": "Дублёр", "guest_role": "Гость", "door_role": "Система",
         "newlink": "Новая ссылка", "all": "Все инструменты",
-        "all_note": "Только папка чата; команды в песочнице, без сети и секретов.",
+        "all_note": "Только папка чата; команды в песочнице, без сети и секретов, с лимитами на процессы, память и диск.",
+        "why_no_limits": "Здесь нельзя ограничить команды, поэтому все инструменты гостю недоступны.",
         "why_no_sandbox": "Здесь нет песочницы, поэтому все инструменты гостю недоступны.",
         "why_host_folder": "Этот диалог работает в папке на хосте, поэтому все инструменты гостю недоступны.",
         "retention": "Хранить запись", "retention_direct": "Собственная запись ссылки хранится", "more": "Ещё настройки",
@@ -403,7 +405,7 @@ def main() -> None:
                 check_fit(page, width)
                 page.keyboard.press("Escape")
                 context.close()
-            for why in ("no_sandbox", "host_folder"):
+            for why in ("no_sandbox", "no_limits", "host_folder"):
                 for width in (1280, 390):
                     check_no_full_tools(browser, words, lang, why, width)
             check_off(browser, words, FakeGuests(available=False), words["off"], "off")

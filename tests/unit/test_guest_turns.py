@@ -69,6 +69,8 @@ HOSTILE = [
 ]
 
 
+pytestmark = pytest.mark.usefixtures("bare_sandbox")
+
 class EchoModel:
     """A stand-in's model that hands back all it was given: the worst a prompt injection could achieve."""
 

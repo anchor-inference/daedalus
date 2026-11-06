@@ -75,6 +75,7 @@ EXTENSIONS = (
     "daedalus.extensions.calendar_reminders",
     "daedalus.extensions.calendar_hooks",
     "daedalus.extensions.context_windows",
+    "daedalus.extensions.openrouter_routes",
     "daedalus.extensions.meetings",
     "daedalus.extensions.prompt_coach",
     "daedalus.extensions.btw",

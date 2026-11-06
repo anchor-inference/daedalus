@@ -1005,7 +1005,7 @@ export type GuestDefaults = {
   retention_days: number;
 };
 /** Why a direct link cannot be given every tool this chat could be: it has no sandbox to run commands in, or its folder is on the host. */
-export type GuestToolsWhy = "" | "no_sandbox" | "host_folder" | "project_folder";
+export type GuestToolsWhy = "" | "no_sandbox" | "no_limits" | "host_folder" | "project_folder";
 /** `full_tools` and `full_tools_why` are about the chat the door was asked about (`?session_id=`). */
 export type GuestDoor = {
   available: boolean;
@@ -2014,6 +2014,10 @@ export type Preset = {
   max_output_tokens: number;
   /** Tool groups on demand held back for this model; absent or null follows what the model is known for. */
   on_demand_tool_groups?: boolean | null;
+  /** OpenRouter's endpoint slugs the model is limited to; empty leaves the routing to OpenRouter. */
+  openrouter_providers?: string[];
+  /** Which of those OpenRouter no longer lists. */
+  openrouter_providers_gone?: string[];
 };
 
 /** The operator's levels for what the agent does in the world (`[action_rules]`). */
