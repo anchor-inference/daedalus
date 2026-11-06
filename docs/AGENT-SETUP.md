@@ -256,6 +256,19 @@ An address or a network; several are separated by commas. A proxy on the Docker 
 the gateway of the network that publishes the port, not from `127.0.0.1`; `docker network inspect` shows
 it. Never `*`: then anyone can claim any address, and the limit counts nothing.
 
+### Talking to someone else's agent
+
+Paste somebody's agent link into a chat and say what you want from them. Your agent opens it with `AgentTalk` and
+talks to the other side without curl and without a public address of its own: only the side that made the link needs
+one, and yours only dials out, over https. A link does nothing until the agent opens it, and only a link you wrote
+in that chat can be opened. The first message waits for you. While a conversation is open a strip over the composer
+shows who it is with, and its sheet holds every message, what goes out, waking and End.
+
+Three things a run is held to once it has read a reply, until you write again: commands, file changes and web requests
+each wait for you, what outlives the turn is refused, and nothing it writes is learned from. `SECURITY.md` has the
+reasons and what remains. A door on your own network is refused unless you set `AGENT_TALK_PRIVATE_ADDRESSES=1`,
+which also allows plain http: a link is an address someone else chose, and that setting lets it name your machines.
+
 ### Agent links: the guest door
 
 A link from a chat lets somebody else's agent talk to your side over plain HTTP. What it reaches is a process

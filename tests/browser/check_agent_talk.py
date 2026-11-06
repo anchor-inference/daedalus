@@ -97,7 +97,7 @@ def check(browser, lang: str, width: int, height: int) -> None:  # type: ignore[
     fits(page, width)
 
     sheet.get_by_role("button", name=words["end"], exact=True).click()
-    page.locator(".confirm-actions button, [role='dialog'] button").get_by_text(words["end"], exact=True).last.click()
+    page.locator("[role='alertdialog']").get_by_role("button", name=words["end"], exact=True).click()
     expect(sheet.locator("[data-talk-end]")).to_have_count(0)
     expect(sheet.locator(".talk-who-line")).to_contain_text(words["over"])
     page.keyboard.press("Escape")

@@ -1,7 +1,7 @@
 /* A chat's conversations with other agents (agenttalk.tsx). What the other side wrote is laid out as
    pre-wrapped plain text and given nothing else: these rules only decide where lines break. */
 
-.talk-bar { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: var(--chat-column, 100%); margin: 0 auto var(--space-1); padding: 0 var(--space-3); box-sizing: border-box; min-width: 0; }
+.talk-bar { display: flex; flex-direction: column; gap: 2px; width: min(100%, var(--chat-w)); margin-inline: auto; min-width: 0; }
 .talk-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; min-height: 28px; padding: 2px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
 .talk-row:hover { background: var(--surface-2); }
 .talk-row[data-tone="attn"] { border-left: 3px solid var(--warn); }
@@ -43,3 +43,6 @@
 .talk-wake-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .talk-wake-fields label { display: flex; flex-direction: column; gap: 2px; flex: 1 1 120px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
 .talk-end { align-self: flex-start; }
+
+/* A phone's strip says who and what; the counts are one press away, and they were pushing the name out. */
+@media (max-width: 1023px) { .talk-counts { display: none; } }

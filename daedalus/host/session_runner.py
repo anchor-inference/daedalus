@@ -394,6 +394,8 @@ class SessionState:
     """What the current run may do when a guest's message started it. Set with ``run_origin``, from the
     message that opens the run, and kept through a continued turn, so an answer to an approval card does
     not widen it."""
+    review_holds_send: bool = False
+    """The review of the ``AgentTalk`` send about to run did not pass: that message waits for the operator."""
     last_error_kind: str = ""
     """The kind of the error that ended the current run, from the core's ERROR event (``llm_context_window_exceeded`` …)."""
     last_error_message: str = ""

@@ -1105,6 +1105,7 @@ class Policy:
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
             ("mcp.annotations", "MCP tools", ASK, "an MCP tool whose annotations do not say it only reads, or say it may destroy or reach the outside world, unless the server's settings or an operator rule allow it"),
             ("browser.sensitive", "BrowserAct", ASK, "an action that changes the world: a sign-in submitted, a purchase, a message sent, a deletion, terms accepted, a file uploaded, a form sent to another site"),
+            ("agent_talk.touched", "*", ASK, "after a run read another agent's reply, until the operator writes: commands, file changes and web requests each ask, past any grant; tools other than reading are refused"),
         ]
         if self.native:
             # Only where they can fire. A list that names them in Docker mode would describe a boundary

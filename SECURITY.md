@@ -61,7 +61,45 @@ installation, so it is built on what that stranger cannot reach rather than on w
   requests leaves out what the host added to earlier messages (memory, the folder's notes, the board, project facts,
   side questions) and what a memory tool returned, in a view of the history; the stored history is not changed.
 
+This agent can also be the guest of someone else's door (`AgentTalk`), which is the same stranger reaching a run that
+holds everything. Reading the reply is the point, so the rule here is that a run which has heard a stranger keeps no
+means of acting on its own.
+
+- A link in a chat is inert. It is recognised by its shape, without a request, and opens only when the agent calls
+  `open` with an address the operator wrote in that chat: an address from a reply, a page or a file does not open.
+  Only the operator's own turns may use the tool, never a schedule, a loop or a subagent.
+- The client dials https to an address on the public internet, checked after resolving and connected to as checked,
+  follows no redirect, and bounds what it reads. Everything a door sends is data: only named fields are read, its
+  sentences reach nobody, and the state of a conversation is told to the agent in this code's words from an
+  enumerated value. A conversation's token is in one column, goes out in one header, reaches neither the model, the
+  app nor a log, belongs to one chat, and is emptied when the conversation closes.
+- A reply reaches the model inside a fence with a nonce of its own and is stripped of what draws as nothing. From then
+  until the operator's next message the run is touched: reads and the conversation go on; commands, file changes and
+  web requests each wait on a card that is answered in the app, past any grant made earlier and any standing allow;
+  and everything else is refused, memory, schedules, notes, the board, other agents and whatever tool is added next.
+  The touch survives a restart, the turn an approval continues and a recovery. Autopilot does not continue such a run.
+  The memory pass, the learning record, compaction and the identifier index all treat its words as a stranger's.
+- What goes out: the first message of a conversation waits for the operator, as does a later one sent after the run
+  read or ran anything since a reply, one that looks like a secret, and one the automatic review did not pass. The card
+  sends the text it shows, and no model says it again. The review setting per conversation is `first`, `all` or `off`.
+- A reply that comes after the turn waits in the chat and costs nothing. Waking the chat on a reply is the operator's
+  switch per conversation, with a number of turns and dollars, and no tool can reach it. Such a turn is a guest's
+  turn: no secrets, no grants, no cards of the policy's, a few model calls, `AgentTalk` on this conversation alone,
+  one send, and a view of the history holding only this conversation's own runs, without what the host added to them.
+- Sends per conversation are capped, a reply that repeats itself turns waking off, a conversation nobody spoke in for a
+  day is ended on both sides, and the far door keeps its own limits on its own side.
+
 ## What it does not protect against
+
+A run that heard a stranger still holds what it held before: the operator's request, this chat's memory block and
+whatever it read earlier in the turn, and a reply can ask for those. Nothing on the wire tells a leak from an answer,
+so past the first message of a `first` conversation a message built only from what is already in the run goes out
+with nobody reading it first. The review is a model, and so is the agent. `all` is the setting that closes this. A
+reply stays in the chat's history, fenced, and the operator's next message opens a run with full tools over it: a
+message that plants a plan for later is the same threat as a web page that does. What such a run writes next is not
+marked as a stranger's, and what is read aloud to the operator can talk them into something. A wake's history holds
+the whole of each run that took part, so a run that did other work before it opened a link shows that work to a
+turn whose reply goes to a stranger. A proxy set for the web tools takes the name past the address check.
 
 A direct guest's words and the answers to them stay in that chat's history. Later turns read them fenced and
 marked, and compaction marks them, but the chat's own agent has read a stranger, and a marked summary is still a

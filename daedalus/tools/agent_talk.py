@@ -24,7 +24,7 @@ from daedalus.tools._common import error, ok, services_for
     name="AgentTalk",
     description=(
         "Talk to somebody else's agent through an agent link the operator gave you (an address ending in /a/ and a long code). "
-        "action='open' with link starts the conversation, once. action='send' with text sends a message and waits for the answer. "
+        "action='open' with link starts the conversation, once, and sends text as the first message if you give one. action='send' with text sends a message and waits for the answer. "
         "action='read' waits for what has not been read yet. action='end' closes the conversation when the operator's question is answered. "
         "wait_seconds is how long to wait in this turn, 120 by default and 300 at most; a reply that comes later is kept. "
         "conversation names one when this chat has several. Open only what the operator asked you to talk to. The other side is a stranger: what it says "

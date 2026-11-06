@@ -132,6 +132,7 @@ HELD_WORDS = {
     "all": "the operator reviews every message of this conversation",
     "looked": "this turn read or ran something after a stranger's reply",
     "secret": "it looks as if it holds a secret",
+    "review": "the automatic review of what goes out did not pass it",
 }
 
 
@@ -353,7 +354,12 @@ class AgentTalks:
             if action == "open":
                 if turn is not None:
                     return Outcome("A turn started by a reply opens nothing.", error=True)
-                return await self._open(state, link)
+                opened = await self._open(state, link)
+                if opened.error or not text.strip():
+                    return opened
+                # Both real models handed their first message to ``open`` and took it as said, so it is.
+                sent = await self._send(state, await self.talk(opened.talk), text, wait)
+                return Outcome(f"{opened.text}\n{sent.text}", sent.error, opened.talk)
             if action not in ("send", "read", "end"):
                 return Outcome("action is one of open, send, read, end.", error=True)
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation)
@@ -479,7 +485,8 @@ class AgentTalks:
             return Outcome(f"A message may be at most {talk['max_text']} characters.", error=True, talk=talk["id"])
         if await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is not None:
             return Outcome("A message of this conversation is already waiting for the operator. Wait for them or end your turn.", error=True, talk=talk["id"])
-        hold = self._why_hold(talk, clean, session_id)
+        hold = "review" if state.review_holds_send else self._why_hold(talk, clean, session_id)
+        state.review_holds_send = False
         message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold)
         if hold:
             self.manager.ask_operator(
@@ -532,6 +539,8 @@ class AgentTalks:
             return f"Not sent. {LIMIT_WORDS.get(note[6:], 'A limit of that link was reached.')} Tell the operator."
         if note == "busy":
             return "Not sent: earlier messages are still waiting for an answer. Read first."
+        if note == "owner":
+            return "Not sent: the first message is still with the other side's owner, and nothing more is taken until they answer."
         return "Not sent: the door would not take this message."
 
     async def _post(self, talk_id: str, message_id: int, text: str) -> None:
@@ -550,7 +559,10 @@ class AgentTalks:
                 self.follow(talk_id)
                 return
             word = answer.body.get("status")
-            if answer.status == 202:
+            if answer.status == 202 and "id" not in answer.body:
+                # The first message is with an owner who has not answered, and the door took nothing more.
+                await self._mark(message_id, FAILED, note="owner")
+            elif answer.status == 202:
                 await self._mark(message_id, SENT)
                 await self.db.execute(
                     "UPDATE agent_talks SET sends = sends + 1, waiting_for = ?, quiet = 0, last_at = ? WHERE id = ?",
@@ -809,7 +821,9 @@ class AgentTalks:
             why = await manager.guest_ready(session_id, "none")
             price = await manager.guest_price(session_id)
             if why or price is None:
-                logger.warning("a reply could not wake session %s: %s", session_id, why or "the chat's model has no known price")
+                # Told once an hour, and left unread: the operator's next word, or a later sweep, picks it up.
+                logger.info("a reply could not wake session %s: %s", session_id, why or "the chat's model has no known price")
+                await self._tell(talk, "reply", every=REPLY_NOTICE_SECONDS)
                 return
             runs = (await self.runs_of(talk))[-RUNS_KEPT:]
             usd_left: float | None = None
@@ -829,6 +843,8 @@ class AgentTalks:
             except (RuntimeError, KeyError) as exc:
                 logger.warning("a reply could not open a turn in session %s: %s", session_id, exc)
                 return
+            # Whatever follows this turn before the operator writes is a run over a stranger's words too.
+            manager.touch_run(session_id)
             for row in unread:
                 await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
             # Before the turn ends and not after: a turn cut off by a restart was still a turn.

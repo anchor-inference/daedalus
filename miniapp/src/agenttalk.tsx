@@ -120,7 +120,7 @@ function TalkDetail({ id, toast, onBack }: { id: string; toast: (text: string) =
         <b className="talk-host">{data.host}</b>
         <span className="sub">{data.state === "closed" ? t(`talk.reason.${data.reason || "ended"}`) : t(`talk.state.${state.key}`)}</span>
       </div>
-      <div className="sub">{data.mode ? `${t(`talk.mode.${data.mode}`)} · ` : ""}{counts(data)}</div>
+      <div className="sub" title={t("talk.spend.note")}>{data.mode ? `${t(`talk.mode.${data.mode}`)} · ` : ""}{counts(data)}</div>
       {data.topic && <blockquote className="talk-topic"><span className="sub">{t("talk.topic")}</span><div className="talk-text">{data.topic}</div></blockquote>}
       <div className="talk-messages" data-talk-messages="">
         {data.messages.map((message) => <TalkLine key={message.id} message={message} busy={busy} onDecide={(send) => act(() => api.post(`${path}/messages/${message.id}/${send ? "send" : "refuse"}`))} />)}

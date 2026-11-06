@@ -133,6 +133,7 @@ services:
       SERVICES_PUBLIC_URL: ${SERVICES_PUBLIC_URL:-}
       GUEST_DOOR_PORT: ${GUEST_DOOR_PORT:-8764}
       GUEST_PUBLIC_URL: ${GUEST_PUBLIC_URL:-}
+      AGENT_TALK_PRIVATE_ADDRESSES: ${AGENT_TALK_PRIVATE_ADDRESSES:-false}
       # The guest door's socket, and the token for it this process writes.
       GUEST_RUN_DIR: /run/daedalus-guest
       GUEST_TOKEN_DIR: /run/daedalus-guest-token

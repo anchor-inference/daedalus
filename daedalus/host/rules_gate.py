@@ -126,6 +126,15 @@ class RulesGate:
         if verdict.verdict == "block":
             await self._notice(state, session_id, tool, self.manager.redactor.redact(canonical(tool, arguments))[:300], ruled, verdict, key)
             return HookResult(action=HookActionKind.DENY, reason=rules.block_text(ruled.category, verdict.reason))
+        if tool == "AgentTalk" and state is not None:
+            # This tool holds a message for the operator by itself, with the exact text on one card that
+            # sends it. A refusal here would mean a second card and the agent saying it all over again.
+            state.review_holds_send = True
+            return None
+        if state is not None and state.guest_turn is not None:
+            # Never a card, for the reason the gate gives: an Allow starts a run with the operator's tools
+            # over words a stranger chose, and nothing on the card would say so.
+            return HookResult(action=HookActionKind.DENY, reason=f"refused: the review of this call did not pass, and a guest's turn asks nobody for anything ({verdict.reason})")
         asked = Decision(ASK, f"the auto-review asks: {verdict.reason}", f"review.{ruled.category}", key=key)
         if state is not None:
             self.manager.record_question(state, asked, tool, arguments)
