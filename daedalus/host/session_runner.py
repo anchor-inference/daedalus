@@ -4141,6 +4141,9 @@ class SessionManager:
                 # The last message and no other: text written on the way, between two tool calls, is the
                 # agent thinking aloud, and it was not written for this reader.
                 text = "".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip()
+                # The trailing headline is a note to this system, and its anchors are the turn's facts. A
+                # real turn held a value back in its answer and then named it there, on the way out.
+                text = prompts.split_headline(text)[0]
                 return redact.redact(self.redactor.conceal_named(text)) if text else ""
         return ""
 
@@ -4157,12 +4160,19 @@ class SessionManager:
             return "a loop runs in this chat, and it would read the guest's words with nobody watching"
         if await self.db.fetchone("SELECT 1 FROM schedules WHERE enabled = 1 AND target_session = ?", (session_id,)) is not None:
             return "a schedule runs in this chat, and it would read the guest's words with nobody watching"
+        if not privacy.is_private(state):
+            # An ordinary chat carries the memory block in its first operator message, and that history
+            # is what a guest's turn reads: everything memory holds, one polite model from a stranger.
+            return "not_private"
         return "" if tools != "all" else await self.guest_full_tools(state)
 
     async def guest_full_tools(self, state: SessionState) -> str:
-        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, or empty when it can."""
+        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, ``project_folder``, or empty when it can."""
         if self.host_folder_of(state.session.id, state.metadata, state.project) is not None or (state.services is not None and state.services.exec_backend is not None):
             return "host_folder"
+        if state.project is not None and not state.project.settings.ephemeral:
+            # Other chats of the project read this folder with the operator's tools and know nothing of the guest.
+            return "project_folder"
         return "" if await asyncio.to_thread(guest_sandbox_status) == "ok" else "no_sandbox"
 
     async def guest_price(self, session_id: str) -> tuple[float, float] | None:
@@ -5167,6 +5177,10 @@ class SessionManager:
             if state.guest_turn is not None and not state.metadata.get(guest_turns.SEEN_KEY):
                 state.metadata[guest_turns.SEEN_KEY] = True
                 state.session.metadata[guest_turns.SEEN_KEY] = True
+            if state.guest_turn is not None and state.guest_turn.tools == "all":
+                # Before the turn runs and for good: a turn cut short may have written all the same.
+                state.metadata[guest_turns.WROTE_KEY] = True
+                state.session.metadata[guest_turns.WROTE_KEY] = True
                 await self.sessions.update_metadata(state.session.id, state.session.metadata)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
@@ -5287,6 +5301,8 @@ class SessionManager:
             nested_rules.forget(state.services)
         if at is None:
             return message
+        if state.guest_turn is not None:
+            return self._with_guest_context(state.guest_turn, message, at)
         notes: str | None = None
         for hook in self.turn_notes_hooks:
             try:
@@ -5345,10 +5361,10 @@ class SessionManager:
             # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
             # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
             volatile.append("\n\n" + style)
-        if state.guest_turn is not None:
-            volatile.append("\n" + guest_turns.turn_note(state.guest_turn))
-        elif state.metadata.get(guest_turns.SEEN_KEY):
+        if state.metadata.get(guest_turns.SEEN_KEY):
             volatile.append("\n" + guest_turns.LATER_TURN_NOTE)
+        if state.metadata.get(guest_turns.WROTE_KEY):
+            volatile.append("\n" + guest_turns.WROTE_NOTE)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.
@@ -5370,6 +5386,19 @@ class SessionManager:
         if memory.snapshot is not None:
             await self._keep_memory_snapshot(state, memory, self.sessions.transcript_key(opened))
         return opened
+
+    def _with_guest_context(self, turn: guest_turns.GuestTurn, message: Message, at: int) -> Message:
+        """A guest's opening message: the clock and what this turn is, and nothing else of the operator's.
+
+        Everything else in a turn context is written for the operator's own agent: the folder's notes, the
+        board, the project's facts, which of the operator's machines is connected. It reached a turn set
+        to no tools, where the model was then all that stood between those lines and the guest.
+        """
+        blocks = list(message.content_blocks)
+        said = blocks[at].text  # type: ignore[union-attr]
+        blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{prompts.turn_context(notes=guest_turns.turn_note(turn))}")
+        words = operator_words_metadata(str(message.metadata.get("daedalus.origin") or "operator"), prompts.without_turn_context(said))
+        return message.model_copy(update={"content_blocks": blocks, "metadata": {**message.metadata, **words}})
 
     async def _working_history(self, state: SessionState) -> Sequence[Message]:
         """The history the next run starts from: the engine's while one is kept, else the stored one."""
@@ -7006,7 +7035,13 @@ class SessionManager:
         """The text of a notes file in the workspace root, or ``None`` when it is not there to read.
 
         A session working in a host folder keeps its notes there, not in the directory it runs from,
-        so its file is read through its tools' own filesystem."""
+        so its file is read through its tools' own filesystem.
+
+        A folder a guest could write in has no notes. These files are obeyed as the operator's own rules, in
+        runs with the operator's tools and secrets: a guest's ``AGENTS.md`` came back in the next operator
+        turn as "your project memory", and with ``Exec`` in the turn no gate on ``Write`` can stop that."""
+        if state.metadata.get(guest_turns.WROTE_KEY):
+            return None
         services = state.services
         try:
             if services is not None and foreign_paths(services.exec_backend):

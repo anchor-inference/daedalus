@@ -136,16 +136,26 @@ async def test_a_guests_command_sees_the_system_and_this_chats_folder_and_no_mor
     await manager.close()
 
 
+PRIVATE = {"private": True}
+
+
 def test_as_root_in_a_container_the_empty_network_is_made_around_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     """bwrap's own --unshare-net needs NET_ADMIN, and --unshare-all a user namespace, in which Docker
     refuses to mount /proc: either alone meant no guest sandbox in the real container, measured in the image."""
     monkeypatch.setattr(shell.os, "geteuid", lambda: 0)
     argv = shell.guest_sandbox_argv("/usr/bin/bwrap")
-    assert argv[0].endswith("unshare") and argv[1] == "--net" and argv[2] == "/usr/bin/bwrap"
+    assert argv[0].endswith("unshare") and argv[1] == "--net" and "/usr/bin/bwrap" in argv
     assert "--unshare-net" not in argv and "--unshare-all" not in argv and "--unshare-user" not in argv
     assert argv[argv.index("--cap-drop") + 1] == "ALL"
     monkeypatch.setattr(shell.os, "geteuid", lambda: 1000)
-    assert shell.guest_sandbox_argv("/usr/bin/bwrap")[1] == "--unshare-net"
+    assert "--unshare-net" in shell.guest_sandbox_argv("/usr/bin/bwrap")
+
+
+def test_a_guests_command_is_limited_in_what_it_can_take_of_the_machine() -> None:
+    """Neither the sandbox nor the container bounds memory or a file: one allocating loop reaches the server."""
+    argv = shell.guest_sandbox_argv("/usr/bin/bwrap")
+    limits = argv[argv.index(next(a for a in argv if a.endswith("prlimit"))) + 1:argv.index("/usr/bin/bwrap")]
+    assert {a.split("=")[0] for a in limits} == {"--as", "--fsize", "--cpu", "--core"}
 
 
 async def test_no_sandbox_refuses_the_command_instead_of_running_it_plain(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -166,7 +176,7 @@ async def test_all_is_not_offered_where_the_sandbox_cannot_be_made(settings: Set
     from daedalus.host import session_runner
 
     manager = await manager_with(settings, db, ScriptedProvider([]))
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata=PRIVATE)
     monkeypatch.setattr(session_runner, "guest_sandbox_status", lambda: "no namespaces here")
     assert await manager.guest_full_tools(state) == "no_sandbox"
     assert await manager.guest_ready(state.session.id, "all") == "no_sandbox"
@@ -509,7 +519,7 @@ async def test_a_later_turn_and_the_summariser_are_told_what_was_said_to_a_guest
 @pytest.mark.parametrize("table", ["loop", "schedule"])
 async def test_a_chat_a_loop_or_a_schedule_reads_takes_no_direct_guest(settings: Settings, db: Database, table: str) -> None:
     manager = await manager_with(settings, db, ScriptedProvider([]))
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata=PRIVATE)
     sid = state.session.id
     assert await manager.guest_ready(sid, "read") == ""
     real = manager.db.fetchone
@@ -628,7 +638,7 @@ def test_a_feed_lost_on_the_wire_does_not_wedge_a_direct_conversation(tmp_path: 
 async def test_a_message_offered_twice_runs_once(settings: Settings, db: Database) -> None:
     provider = ScriptedProvider([{"text": "x"}])
     manager = await manager_with(settings, db, provider)
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata=PRIVATE)
     calls: list[str] = []
 
     class Door:
@@ -740,7 +750,7 @@ async def test_a_door_cannot_page_the_operator_about_links_nobody_made_or_withou
 async def test_an_allowance_from_the_door_is_only_a_request(settings: Settings, db: Database) -> None:
     provider = ScriptedProvider([{"text": "ok"}])
     manager = await manager_with(settings, db, provider)
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata=PRIVATE)
     manager.guest_price = _priced  # type: ignore[assignment,method-assign]
     bridge = GuestBridge(Host(settings, db, manager), Script([]))  # type: ignore[arg-type]
     manager.on_finished(bridge.on_run_finished)

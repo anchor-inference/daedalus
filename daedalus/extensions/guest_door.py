@@ -547,8 +547,10 @@ class GuestBridge:
 def model_options(app: Application | Any) -> list[dict[str, Any]]:
     """The models the door can reach: those the key proxy's guest listener serves, cheapest first.
 
-    Priced, or costing nothing by their plan. One with no known price is left out rather than guessed
-    at, because a limit in dollars cannot be checked before the spending on a model nobody can price.
+    Priced, or free outright. One with no known price is left out rather than guessed at, because a limit
+    in dollars cannot be checked before the spending on a model nobody can price. A prepaid plan is left
+    out as well, whichever upstream it hides behind: it costs no dollars, so no limit of the link would
+    ever stop a stranger from spending the operator's allowance on it.
     """
     base = keyproxy_base()
     allowed = {name.strip().lower() for name in app.settings.guest_model_upstreams.split(",") if name.strip()}
@@ -562,8 +564,10 @@ def model_options(app: Application | Any) -> list[dict[str, Any]]:
             endpoint = manager.providers.get(preset.provider).endpoint
         except KeyError:
             continue
+        if endpoint.subscription:
+            continue
         pricing = endpoint.pricing_for(preset.model)
-        free = bool(endpoint.subscription) or endpoint.kind == "llamacpp" or preset.model.endswith((":free", "-free"))
+        free = endpoint.kind == "llamacpp" or preset.model.endswith((":free", "-free"))
         if not free and (pricing is None or pricing.input is None or pricing.output is None):
             continue
         free = free or not (pricing.input or pricing.output)  # type: ignore[union-attr]

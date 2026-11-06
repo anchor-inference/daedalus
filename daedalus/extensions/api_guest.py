@@ -24,6 +24,7 @@ from daedalus import public_address
 from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable, GuestBridge, bridge_of, model_options
 from daedalus.host import guest_turns
 from daedalus.host.engine_factory import TENANT
+from daedalus.memory import privacy
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -44,6 +45,12 @@ DRAFT_PROMPT = (
     "passwords, keys, paths and anything private. Plain short paragraphs, in the language of the conversation, nothing else.\n\n"
 )
 PRIVATE_KINDS = ("subagent_of", "staff_id", "unattended", "heartbeat")
+REFUSED_WORDS = {
+    "host_folder": "this chat works in a folder on the host, where a guest's command cannot be sandboxed",
+    "no_sandbox": "the sandbox a guest's commands need cannot be made here",
+    "project_folder": "this chat works in a project's folder, which other chats read as the operator's",
+    "not_private": "a direct link needs a private chat: an ordinary one carries your memory in its history",
+}
 
 
 class LinkBody(BaseModel):
@@ -98,7 +105,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         why = await app.manager.guest_full_tools(state) if state is not None else "no_sandbox"
         out: dict[str, Any] = {
             "available": False, "public_base": public_address.guest_base(app.settings), "defaults": DEFAULTS, "models": models, "usd_per_day": 0.0, "spent_today": 0.0,
-            "full_tools": not why, "full_tools_why": why,
+            "full_tools": not why, "full_tools_why": why, "direct": bool(state is not None and privacy.is_private(state)),
         }
         try:
             health = await bridge().client.call("GET", "/control/health")
@@ -137,7 +144,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 raise HTTPException(409, "a direct link needs an ordinary chat")
             refused = await manager.guest_ready(session_id, body.tools)
             if refused:
-                raise HTTPException(409, {"host_folder": "this chat works in a folder on the host, where a guest's command cannot be sandboxed", "no_sandbox": "the sandbox a guest's commands need cannot be made here"}.get(refused, refused))
+                raise HTTPException(409, REFUSED_WORDS.get(refused, refused))
             if await manager.guest_price(session_id) is None:
                 raise HTTPException(409, "this chat's model has no known price, so a dollar limit could not hold")
             fields.update(model_path="", model_name="", price_in=0.0, price_out=0.0, briefing="", guest_tools=body.tools)

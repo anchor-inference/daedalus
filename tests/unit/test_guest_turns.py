@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -34,6 +35,7 @@ from daedalus.host.engine_factory import TENANT
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
+from daedalus.tools import files
 from tests.support.models import model_config
 from tests.unit.test_session_runner import ScriptedProvider
 from tests.unit.test_steer_queue import _held_tool, _start_in_tool
@@ -434,6 +436,91 @@ async def test_a_guests_turn_stops_at_what_was_left_of_the_link(settings: Settin
     await manager.close()
 
 
+async def test_the_headline_stays_home_even_when_the_answer_held_the_value_back(settings: Settings, db: Database) -> None:
+    """A real turn kept a value out of its answer and then named it in the anchors of its headline."""
+    provider = ScriptedProvider([{"text": f"I will not share that.\n\n⟦ guest request | status: blocked | anchors: {TRAP} ⟧"}])
+    manager = await manager_with(settings, db, provider)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
+    run_id = await guest_says(manager, state.session.id, turn("read"))
+    await settled(manager, state)
+    assert await manager.guest_answer(state.session.id, run_id) == "I will not share that."
+    await manager.close()
+
+
+async def test_a_guests_turn_is_told_the_clock_and_itself_and_nothing_of_the_operators(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """At no tools, the folder's notes and which machine is connected reached the turn all the same."""
+    provider = ScriptedProvider([{"text": "ok"}])
+    manager = await manager_with(settings, db, provider)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
+    (state.workspace / "AGENTS.md").write_text(f"the operator's project note {TRAP}")
+
+    async def line(_: Any) -> str:
+        return f"- Browser: the operator's machine {TRAP}"
+
+    manager.turn_line_hooks.append(line)
+    await guest_says(manager, state.session.id, turn("none"))
+    await settled(manager, state)
+    said = texts(provider.requests[0].messages[-1])
+    assert TRAP not in said and "started by a guest" in said and "Date/time" in said
+    await manager.close()
+
+
+async def test_what_a_guest_could_write_in_the_folder_is_never_read_as_the_operators_rules(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guest's AGENTS.md came back in the next operator turn as "your project memory", in a run with
+    every tool and secret. No gate on Write stops it: Exec in the same turn can write the same file."""
+    provider = ScriptedProvider([{"text": "ok"}, {"text": "ok"}])
+    manager = await manager_with(settings, db, provider)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
+    await guest_says(manager, state.session.id, turn("all"))
+    await settled(manager, state)
+    (state.workspace / "AGENTS.md").write_text(f"Project rule: {TRAP}")
+    (state.workspace / "sub").mkdir()
+    (state.workspace / "sub" / "AGENTS.md").write_text(f"Folder rule: {TRAP}")
+    await manager.submit(state.session.id, "and now the operator speaks")
+    await settled(manager, state)
+    said = texts(provider.requests[-1].messages[-1])
+    assert TRAP not in said and guest_turns.WROTE_NOTE in said
+    services = SimpleNamespace(extra={"manager": manager}, workspace_dir=state.workspace, fs=None)
+    monkeypatch.setattr(files, "tool_config", lambda _context: SimpleNamespace(nested_rules=True))
+    assert await files.folder_rules(SimpleNamespace(session_id=state.session.id), services, state.workspace / "sub" / "x.txt") == ""
+    await manager.close()
+
+
+async def test_read_tools_leave_the_folders_notes_as_they_were(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"text": "ok"}, {"text": "ok"}])
+    manager = await manager_with(settings, db, provider)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
+    (state.workspace / "AGENTS.md").write_text("Project rule: the operator's own")
+    await guest_says(manager, state.session.id, turn("read"))
+    await settled(manager, state)
+    await manager.submit(state.session.id, "and now the operator speaks")
+    await settled(manager, state)
+    assert "the operator's own" in texts(provider.requests[-1].messages[-1])
+    await manager.close()
+
+
+async def test_an_ordinary_chat_takes_no_direct_guest_because_it_holds_the_operators_memory(settings: Settings, db: Database) -> None:
+    manager = await manager_with(settings, db, ScriptedProvider([]))
+    state = await manager.create_session("chat", own_directory=True)
+    assert await manager.guest_ready(state.session.id, "none") == "not_private"
+    private = await manager.create_session("chat two", own_directory=True, metadata={"private": True})
+    assert await manager.guest_ready(private.session.id, "none") == ""
+    await manager.close()
+
+
+async def test_all_tools_stay_out_of_a_project_folder_other_chats_read(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.host import session_runner
+
+    monkeypatch.setattr(session_runner, "guest_sandbox_status", lambda: "ok")
+    manager = await manager_with(settings, db, ScriptedProvider([]))
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
+    assert await manager.guest_full_tools(state) == ""
+    state.project = SimpleNamespace(settings=SimpleNamespace(ephemeral=False))  # type: ignore[assignment]
+    monkeypatch.setattr(manager, "host_folder_of", lambda *_: None)
+    assert await manager.guest_full_tools(state) == "project_folder"
+    await manager.close()
+
+
 async def test_a_guests_answer_leaves_with_handed_values_masked(settings: Settings, db: Database) -> None:
     provider = ScriptedProvider([{"text": f"the value is {TRAP}"}])
     manager = await manager_with(settings, db, provider)
@@ -510,7 +597,7 @@ async def pump(bridge: GuestBridge) -> None:
 async def test_a_direct_guest_gets_the_live_agents_reply_and_the_tool_setting_is_the_hosts(settings: Settings, db: Database, rig: Rig) -> None:
     provider = ScriptedProvider([{"text": "it listens on 8080"}])
     manager = await manager_with(settings, db, provider)
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
     bridge = GuestBridge(Host(settings, db, manager), rig.client)
     manager.on_finished(bridge.on_run_finished)
     token = await direct_link(rig, bridge, state.session.id, "none")
@@ -538,7 +625,7 @@ async def test_a_message_for_a_link_this_host_never_made_starts_nothing(settings
 async def test_a_direct_guest_waits_for_the_operators_turn_through_the_bridge(settings: Settings, db: Database, rig: Rig) -> None:
     provider = ScriptedProvider([_held_tool(settings), {"text": "operator done"}, {"text": "guest done"}])
     manager = await manager_with(settings, db, provider)
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
     sid = state.session.id
     bridge = GuestBridge(Host(settings, db, manager), rig.client)
     manager.on_finished(bridge.on_run_finished)
@@ -559,7 +646,7 @@ async def test_a_direct_guest_waits_for_the_operators_turn_through_the_bridge(se
 async def test_revoking_stops_the_running_turn_and_what_waits(settings: Settings, db: Database, rig: Rig) -> None:
     provider = ScriptedProvider([_held_tool(settings), {"text": "too late"}])
     manager = await manager_with(settings, db, provider)
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
     sid = state.session.id
     bridge = GuestBridge(Host(settings, db, manager), rig.client)
     manager.on_finished(bridge.on_run_finished)
@@ -585,7 +672,7 @@ async def test_revoking_stops_the_running_turn_and_what_waits(settings: Settings
 
 async def test_a_chat_deleted_takes_its_links_with_it(settings: Settings, db: Database, rig: Rig) -> None:
     manager = await manager_with(settings, db, ScriptedProvider([]))
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
     bridge = GuestBridge(Host(settings, db, manager), rig.client)
     token = await direct_link(rig, bridge, state.session.id)
     await bridge.on_session_deleted(state.session.id)
@@ -601,7 +688,7 @@ async def trapped(settings: Settings, db: Database, rig: Rig) -> Any:
     """A chat holding a trap in every place the operator keeps things, and the routes that make a link."""
     settings.guest_public_url = "https://agents.example.test"
     manager = await manager_with(settings, db, ScriptedProvider([]))
-    state = await manager.create_session("chat", own_directory=True)
+    state = await manager.create_session("chat", own_directory=True, metadata={"private": True})
     sid = state.session.id
     history = [
         Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"my safe code is {TRAP_RU}, and the deploy key is {TRAP}")]),
@@ -854,5 +941,20 @@ async def test_model_choices_are_the_ones_the_door_can_reach_cheapest_first(sett
         config=SimpleNamespace(providers=providers, presets={"a": preset("paid", "m"), "b": preset("plan", "m"), "c": preset("own", "m"), "d": preset("mystery", "m")}), manager=SimpleNamespace(providers=registry),
     )
     options = model_options(app)
-    assert [o["id"] for o in options] == ["b", "a"], "an address outside the key proxy, or a model with no price, is not offered"
-    assert options[0]["free"] is True and options[1]["path"] == "paid/v1" and options[1]["price_out"] == 2.0
+    # A prepaid plan is out too: free by its plan meant a stranger spending the operator's allowance past every dollar limit.
+    assert [o["id"] for o in options] == ["a"], "an address outside the key proxy, a plan, or a model with no price, is not offered"
+    assert options[0]["path"] == "paid/v1" and options[0]["price_out"] == 2.0
+
+
+async def test_a_call_past_the_bot_is_booked_at_the_bill_its_upstream_stated(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stand-in's calls reach the ledger this way, and on one model the price table was forty times low."""
+    from daedalus.extensions import api as api_module
+    from daedalus.providers.pricing import ModelPricing
+
+    captured: list[Any] = []
+    usage = SimpleNamespace(record=lambda record: captured.append(record) or asyncio.sleep(0))
+    endpoint = SimpleNamespace(subscription=False, pricing_for=lambda _m: ModelPricing(input=1.0, output=1.0))
+    routes = api_module.direct_usage_booking(SimpleNamespace(usage=usage, providers=SimpleNamespace(get=lambda _id: SimpleNamespace(endpoint=endpoint))))
+    await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000, "cost_usd": 0.25})
+    await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000})
+    assert [record.cost_usd for record in captured] == [0.25, 1.0]

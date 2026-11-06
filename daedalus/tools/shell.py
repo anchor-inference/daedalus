@@ -213,6 +213,10 @@ GUEST_SYSTEM_PATHS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc
 """What a guest's command sees of the machine, read-only. A list of what is there, not of what is hidden: the
 ordinary sandbox binds the whole disk and hides what it knows of, and anything it does not know of (a state
 file, a token beside a socket, an SSH key) was one built path away."""
+GUEST_LIMITS = ("--as=8589934592", "--fsize=2147483648", "--cpu=600", "--core=0")
+"""What one guest command may take of the machine: 8 GiB of address space, a 2 GiB file, ten minutes of processor.
+The sandbox walls off what a command can see, not what it can use, and neither it nor the container has a
+limit of its own: a loop allocating memory would have taken the server down with it, as an experiment once did."""
 GUEST_ENVIRONMENT = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "TERM": "dumb"}
 """A guest's command starts from these and nothing else, so no credential of the bot's can be inherited."""
 _guest_sandbox_state: str | None = None
@@ -269,7 +273,9 @@ def _guest_network_outside() -> bool:
 def guest_sandbox_argv(bwrap: str, *, writable: Sequence[Path] = (), readable: Sequence[Path] = ()) -> list[str]:
     """The command prefix of a guest's sandbox."""
     prefix = [shutil.which("unshare") or "/usr/bin/unshare", "--net"] if _guest_network_outside() else []
-    return [*prefix, bwrap, *guest_sandbox_args(writable=writable, readable=readable)]
+    # Around bwrap and not inside: the limits are inherited, and a binary the sandbox does not hold cannot fail here.
+    limits = [shutil.which("prlimit") or "/usr/bin/prlimit", *GUEST_LIMITS]
+    return [*prefix, *limits, bwrap, *guest_sandbox_args(writable=writable, readable=readable)]
 
 
 def guest_sandbox_status() -> str:
