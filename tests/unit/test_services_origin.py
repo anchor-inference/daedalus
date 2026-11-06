@@ -166,6 +166,19 @@ def test_with_neither_header_it_is_not_a_browser() -> None:
 # -- the guard in front of the app ------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("fetch", [
+    {"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe"},
+    {"sec-fetch-site": "cross-site", "sec-fetch-mode": "same-origin", "sec-fetch-dest": "empty"},
+    {"sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "iframe"},
+])
+def test_the_built_app_can_be_read_however_it_is_fetched_and_nothing_else_is(upstream: HTTPServer, fetch: dict[str, str]) -> None:
+    client = signed_in(FakeApp(upstream.server_port))
+    assert client.get("/app/panel", headers=fetch).status_code != 403
+    assert client.get("/pages/some-page/", headers=fetch).status_code == 403
+    assert client.get("/api/auth/me", headers=fetch).status_code == 403
+    assert client.post("/app/panel", headers=fetch).status_code == 403
+
+
 def test_a_neighbours_post_is_refused_before_the_route_runs(upstream: HTTPServer) -> None:
     app = FakeApp(upstream.server_port)
     client = signed_in(app)

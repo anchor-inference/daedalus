@@ -71,8 +71,8 @@ def cookie_may_act(*, method: str, origin: str | None, fetch_site: str | None, f
     not from a browser, and there is no ambient cookie to worry about: whoever sent it put the cookie
     there on purpose.
 
-    Following a link in from elsewhere stays possible, as a top-level GET; the app framed by a
-    neighbour does not, or a page on the same site could lay itself over a signed-in app.
+    Following a link in from elsewhere stays possible, as a top-level GET; a frame does not, or a page
+    on the same site could lay itself over a signed-in screen.
     """
     if fetch_site in ("same-origin", "none"):
         return True
