@@ -128,7 +128,8 @@ async def folder_rules(context: ToolContext, services: Any, target: Path, *, fol
     if not tool_config(context).nested_rules:
         return ""
     manager = services.extra.get("manager")
-    state = manager.live_state(context.session_id) if manager is not None and context.session_id else None
+    live_state = getattr(manager, "live_state", None)
+    state = live_state(context.session_id) if live_state is not None and context.session_id else None
     if state is not None and state.metadata.get(WROTE_KEY):
         return ""  # a guest could have written them (see SessionManager._workspace_note)
     redactor = getattr(manager, "redactor", None)
