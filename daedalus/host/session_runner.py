@@ -59,6 +59,7 @@ from protocore.runtime.soft_stop import CAUSE_MODEL_NO_PROGRESS, CAUSE_PROVIDER_
 from protocore.runtime.tool_registry import ToolRegistry
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
+from daedalus import public_address
 from daedalus.browser import cookies as cookie_files
 from daedalus.computer import agent as computer_agent
 from daedalus.computer import awareness as computer_awareness
@@ -6939,6 +6940,7 @@ class SessionManager:
             sealed_paths=(*self.settings.sealed_paths, *terminal_endpoint.sealed_state_dirs(self.settings)),
             sealed_everywhere=self.settings.sealed_everywhere,
             sealed_ports=self._sealed_ports(),
+            own_doors=lambda: public_address.own_doors(self.settings),
             # Where a relative path is resolved from, so that `../../daedalus-secrets/keyproxy.env`
             # is read as the file it names rather than as a word with no slash at the front.
             base_dir=base_dir,

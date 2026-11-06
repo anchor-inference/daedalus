@@ -20,11 +20,13 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from daedalus.public_address import OwnDoors
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 HANDOFF = "handoff"
@@ -448,13 +450,19 @@ def hosts_in(segments: list[list[str]]) -> list[str]:
     return hosts
 
 
-_LOOPBACK_TARGET = re.compile(r"\b(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::(\d{1,5}))?", re.IGNORECASE)
+# A space as well as a colon before the port, for ``nc localhost 8765``; 0.0.0.0 and [::] connect to this
+# machine on Linux and macOS, which is why they count as loopback here though they name no such thing.
+_LOOPBACK_TARGET = re.compile(r"(?<![\w.-])(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1?\])(?:(?::|\s+)(\d{1,5})\b)?", re.IGNORECASE)
+_SEALED_REASON = "is this installation's own door — the launcher and the app's own API are asked through the app, which holds their keys"
+PUBLIC_PATHS = ("/s/", "/c/")
+"""What the app's public address serves to anyone: a shared service and a shared dialog. An agent may
+check the link it just handed out, and these hold nothing the link does not already give."""
 
 
 def is_loopback(host: str) -> bool:
     """Whether this hostname names the machine the agent itself is running on."""
     host = host.strip().strip("[]").lower()
-    return host in ("localhost", "::1") or host.startswith("127.")
+    return host in ("localhost", "::1", "::", "0.0.0.0") or host.startswith("127.")  # noqa: S104 — compared, not bound
 
 
 def loopback_targets(text: str) -> list[tuple[str, int]]:
@@ -465,6 +473,24 @@ def loopback_targets(text: str) -> list[tuple[str, int]]:
     all of them arrive at the same door.
     """
     return [(m.group(1).lower(), int(m.group(2) or 0)) for m in _LOOPBACK_TARGET.finditer(text)]
+
+
+def named_targets(text: str, hosts: Iterable[str], *, app_port: int) -> list[tuple[str, int, str]]:
+    """Every mention of one of ``hosts`` that reaches a port: ``(host, port, path)``.
+
+    The port is the one written, or the one the scheme implies. A bare name is no connection (``dig
+    example.com``, a sentence in a commit message), unless a path follows it, which is how an address
+    with no scheme is written: that one is taken to mean the app's port.
+    """
+    names = "|".join(re.escape(h) for h in sorted(hosts, key=len, reverse=True))
+    if not names:
+        return []
+    found = []
+    for m in re.finditer(rf"(?:(https?)://)?(?<![\w.-])({names})(?![\w-]|\.\w)(?:(?::|\s+)(\d{{1,5}})\b)?(/[^\s'\"]*)?", text, re.IGNORECASE):
+        scheme, host, port, path = m.group(1), m.group(2).lower(), m.group(3), m.group(4) or ""
+        implied = {"http": 80, "https": 443}.get((scheme or "").lower(), app_port if path else 0)
+        found.append((host, int(port) if port else implied, path))
+    return found
 
 
 def host_allowed(host: str, allow: Iterable[str]) -> bool:
@@ -782,13 +808,15 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
-    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None) -> None:
+    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), own_doors: Callable[[], OwnDoors] | None = None, base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None) -> None:
         self.protected = [str(p) for p in protected_paths]
         self.egress_allow = [e for e in egress_allow if e.strip()]
         # The installation's own doors on the loopback interface: the app's API and the launcher's
         # action page. Refused by port rather than by hostname, so that a server the agent starts in
         # its own workspace and then checks with curl is untouched — which is work, and this is not.
         self.sealed_ports = {int(p) for p in sealed_ports if int(p) > 0}
+        # A callable, because a tunnel's address changes while a policy lives.
+        self.own_doors = own_doors or (lambda: OwnDoors(frozenset(), None))
         self.rules = list(rules)
         self.workspace_roots = [str(p) for p in workspace_roots]
         self.operator_checkouts = [str(p) for p in operator_checkouts] or list(CONTAINER_CHECKOUTS)
@@ -932,7 +960,11 @@ class Policy:
                         escalate(DENY, f"pushing from the operator's checkout; {PUSH_REASON.get(self.selfdev_mode, PUSH_REASON["server"])}", "git.operator_push")
         for host, port in loopback_targets(command):
             if port in self.sealed_ports:
-                escalate(DENY, f"{host}:{port} is this installation's own door — the launcher and the app's own API are asked through the app, which holds their keys", "egress.sealed_port")
+                escalate(DENY, f"{host}:{port} {_SEALED_REASON}", "egress.sealed_port")
+        doors = self.own_doors()
+        for host, port, path in named_targets(command, doors.hosts, app_port=doors.app[1] if doors.app else 0):
+            if self._own_door(doors, host, port, path):
+                escalate(DENY, f"{host}:{port} {_SEALED_REASON}", "egress.sealed_port")
         if self.egress_allow:
             blocked = [h for h in hosts if not host_allowed(h, self.egress_allow)]
             if blocked:
@@ -948,10 +980,27 @@ class Policy:
         except ValueError:
             port = 0  # a URL whose port is not a number reaches nothing; nothing to refuse
         if port in self.sealed_ports and is_loopback(host):
-            return Decision(DENY, f"{host}:{port} is this installation's own door — the launcher and the app's own API are asked through the app, which holds their keys", "egress.sealed_port", hosts=hosts)
+            return Decision(DENY, f"{host}:{port} {_SEALED_REASON}", "egress.sealed_port", hosts=hosts)
+        if host in (doors := self.own_doors()).hosts:
+            port = port or {"http": 80, "https": 443}.get(parts.scheme.lower(), 0)
+            if self._own_door(doors, host, port, parts.path):
+                return Decision(DENY, f"{host}:{port} {_SEALED_REASON}", "egress.sealed_port", hosts=hosts)
         if self.egress_allow and host and not host_allowed(host, self.egress_allow):
             return Decision(ASK, f"fetching {host} is outside the egress allowlist", "egress.allowlist", hosts=hosts)
         return Decision(ALLOW, hosts=hosts)
+
+    def _own_door(self, doors: OwnDoors, host: str, port: int, path: str) -> bool:
+        """Whether a connection to this name for this machine comes back in by a door that is closed.
+
+        A closed port stays closed under a public name, and the app's public address is the API's
+        door by another route whatever its port: a fetch of it reaches the same routes as a fetch of
+        loopback. The path is read after ``..`` is resolved, as a client does before it sends it.
+        """
+        if port in self.sealed_ports:
+            return True
+        if doors.app != (host, port):
+            return False
+        return not (posixpath.normpath("/" + path.lstrip("/")) + "/").startswith(PUBLIC_PATHS)
 
     def _browser_url(self, url: str) -> Decision:
         """Where an agent may point the browser. Only web pages: ``file:`` reads the machine, ``data:``

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from protocore.contracts.hooks import HookActionKind
@@ -24,6 +25,7 @@ from daedalus.host.policy import (
     similar_covers,
     similar_grant,
 )
+from daedalus.public_address import OwnDoors, own_doors
 from daedalus.security.redact import Redactor
 
 
@@ -64,6 +66,65 @@ def test_this_installations_own_doors_are_refused_and_a_local_server_is_not() ->
     assert policy.evaluate("WebFetch", {"url": "https://example.com:8765/"}).action == "allow"
     # And a policy that was told no ports refuses none of it.
     assert Policy().evaluate("WebFetch", {"url": "http://127.0.0.1:8770/"}).action == "allow"
+
+
+def test_the_other_spellings_of_this_machine_are_this_machine() -> None:
+    policy = Policy(sealed_ports=[8765])
+    assert policy.evaluate("Exec", {"command": "nc localhost 8765 < payload"}).action == DENY
+    assert policy.evaluate("Exec", {"command": "curl http://0.0.0.0:8765/api/components"}).action == DENY
+    assert policy.evaluate("WebFetch", {"url": "http://0.0.0.0:8765/"}).action == DENY
+    assert policy.evaluate("WebFetch", {"url": "http://[::]:8765/"}).action == DENY
+    assert policy.evaluate("Exec", {"command": "seq 1 8765"}).action == "allow"
+    assert policy.evaluate("Exec", {"command": "curl http://10.127.0.0.1:8765/"}).action == "allow"
+
+
+def public_doors() -> OwnDoors:
+    return OwnDoors(frozenset({"agent.example.test", "192.0.2.1", "door.example.test"}), ("agent.example.test", 443))
+
+
+def test_a_closed_port_is_closed_under_the_installations_public_names_too() -> None:
+    """The rule is about a door, not about the word loopback: the same API answers from outside."""
+    policy = Policy(sealed_ports=[8765, 8770], own_doors=public_doors)
+    assert policy.evaluate("WebFetch", {"url": "http://192.0.2.1:8770/api/action/restart"}).action == DENY
+    assert policy.evaluate("WebFetch", {"url": "http://AGENT.example.test:8765/"}).action == DENY
+    assert policy.evaluate("Exec", {"command": "curl -X POST http://192.0.2.1:8770/api/action/restart"}).action == DENY
+    assert policy.evaluate("Exec", {"command": "nc door.example.test 8765"}).action == DENY
+
+
+@pytest.mark.parametrize("url", ["https://agent.example.test/api/auth/me", "https://agent.example.test/app/", "https://agent.example.test/", "https://agent.example.test", "https://agent.example.test/pages/x/", "https://agent.example.test/s/../api/auth/me", "https://agent.example.test/services"])
+def test_the_apps_public_address_is_the_same_door_under_another_port(url: str) -> None:
+    policy = Policy(sealed_ports=[8765], own_doors=public_doors)
+    assert policy.evaluate("WebFetch", {"url": url}).action == DENY
+    assert policy.evaluate("Exec", {"command": f"curl -s {url}"}).action == DENY
+
+
+@pytest.mark.parametrize("url", ["https://agent.example.test/s/demo-ab12/", "https://agent.example.test/s/demo-ab12/?key=k", "https://agent.example.test/c/abc", "https://door.example.test/s/demo-ab12/", "https://sub.agent.example.test/api", "https://agent.example.test.evil.test/api", "https://agent.example.test:8443/api"])
+def test_a_link_the_agent_handed_out_and_other_peoples_addresses_stay_open(url: str) -> None:
+    policy = Policy(sealed_ports=[8765], own_doors=public_doors)
+    assert policy.evaluate("WebFetch", {"url": url}).action == "allow"
+    assert policy.evaluate("Exec", {"command": f"curl -s {url}"}).action == "allow"
+
+
+def test_naming_the_installation_is_not_calling_it() -> None:
+    policy = Policy(sealed_ports=[8765], own_doors=public_doors)
+    assert policy.evaluate("Exec", {"command": "dig agent.example.test"}).action == "allow"
+    assert policy.evaluate("Exec", {"command": "echo 'open agent.example.test to see it'"}).action == "allow"
+
+
+def test_a_door_that_moved_is_read_at_the_moment_of_the_call() -> None:
+    doors = {"now": OwnDoors(frozenset(), None)}
+    policy = Policy(sealed_ports=[8765], own_doors=lambda: doors["now"])
+    assert policy.evaluate("WebFetch", {"url": "https://agent.example.test/api"}).action == "allow"
+    doors["now"] = public_doors()
+    assert policy.evaluate("WebFetch", {"url": "https://agent.example.test/api"}).action == DENY
+
+
+def test_own_doors_reads_the_settings_as_they_are_now() -> None:
+    settings = SimpleNamespace(miniapp_public_url="https://Agent.example.test/app/", services_public_url="", services_public_host="192.0.2.1", services_door_port=8766)
+    doors = own_doors(settings)  # type: ignore[arg-type]
+    assert doors.app == ("agent.example.test", 443) and doors.hosts == {"agent.example.test", "192.0.2.1"}
+    settings.miniapp_public_url = "http://192.0.2.1:8080"
+    assert own_doors(settings).app == ("192.0.2.1", 8080)  # type: ignore[arg-type]
 
 
 def test_builtin_rules_deny_the_machine_and_the_operators_paths() -> None:
