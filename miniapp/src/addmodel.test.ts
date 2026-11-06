@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Preset } from "./api";
-import { BLANK, ON_DEMAND_CHOICES, onDemandGroups, orchestratorPreset, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "./models";
+import { BLANK, ON_DEMAND_CHOICES, RouteRow, onDemandGroups, orchestratorPreset, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped, routeBill } from "./models";
 
 const OPUS: Preset = {
   provider: "openrouter",
@@ -116,5 +116,35 @@ describe("tool groups on demand for a preset", () => {
 
   it("offers the model's own behaviour first, then the two explicit answers", () => {
     expect(ON_DEMAND_CHOICES).toEqual([null, true, false]);
+  });
+});
+
+describe("the price of a choice of OpenRouter providers", () => {
+  const row = (slug: string, input: number, output: number, cache_hit: number | null): RouteRow => ({
+    slug, name: slug, quantization: null, tier: null, input, output, cache_hit, varies: false, context_length: null, max_output_tokens: null,
+    tools: true, tool_choice: "full", reasoning: true, caching: cache_hit !== null, uptime: null, zdr: null, bill: { input, output, cache_hit },
+  });
+  const rows = [row("wafer/us", 0.038, 0.5, 0.01), row("alibaba", 0.15, 0.3, 0.015), row("mancer/fp8", 0.15, 0.5, null)];
+
+  it("is that provider's price with one ticked", () => {
+    expect(routeBill(rows, ["wafer/us"])).toEqual({ input: 0.038, output: 0.5, cache_hit: 0.01 });
+  });
+
+  it("is the highest of each rate with several, never a mix that one provider charges", () => {
+    expect(routeBill(rows, ["wafer/us", "alibaba"])).toEqual({ input: 0.15, output: 0.5, cache_hit: 0.015 });
+  });
+
+  it("has no cached rate when any of them publishes none", () => {
+    expect(routeBill(rows, ["wafer/us", "mancer/fp8"])?.cache_hit).toBeNull();
+  });
+
+  it("uses the bill of a row, which covers the variants its slug reaches", () => {
+    const fireworks = { ...row("fireworks", 0.3, 1.2, 0.006), bill: { input: 0.45, output: 1.8, cache_hit: 0.009 } };
+    expect(routeBill([fireworks], ["fireworks"])?.input).toBe(0.45);
+  });
+
+  it("is nothing with nothing ticked, or only a provider the listing no longer has", () => {
+    expect(routeBill(rows, [])).toBeNull();
+    expect(routeBill(rows, ["vanished"])).toBeNull();
   });
 });

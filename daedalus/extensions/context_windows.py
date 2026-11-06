@@ -30,6 +30,7 @@ from daedalus.providers.context_window import (
     provider_window,
     table_window,
 )
+from daedalus.providers.openrouter_routes import route_window
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -81,7 +82,10 @@ class ContextWindows:
         except (KeyError, AttributeError):
             return None  # not configured, or no key: nothing to ask
         try:
-            found = await provider_window(endpoint.base_url, model, kind=endpoint.kind, api_key=endpoint.api_key)
+            # A model limited to some providers holds what the smallest of them holds, not what the
+            # catalogue's largest does, or the first long run finds out from a refusal.
+            only = self.app.config.openrouter_route(provider_id, model)
+            found = await route_window(endpoint.base_url, endpoint.api_key, model, only) if only else await provider_window(endpoint.base_url, model, kind=endpoint.kind, api_key=endpoint.api_key)
         except Exception:  # noqa: BLE001 — a listing that cannot be read is a source that knows nothing
             logger.warning("could not ask %s for the context window of %s", provider_id, model, exc_info=True)
             found = None

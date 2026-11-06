@@ -15,8 +15,9 @@ import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
 import { LangPicker, Switch, useMedia } from "../ui/index";
 import { errorText, numInput } from "../ui";
-import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
+import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, RouteListing, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped, routeBill } from "../models";
 import { FreeModels } from "./FreeModels";
+import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ProviderMark } from "../ui/provider-mark";
 import { Billing, OPENCODE_KEY_URL, OPENCODE_PLANS, OpencodePlan, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 
@@ -411,6 +412,9 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"regular" | "free">("regular");
+  const [routes, setRoutes] = useState<RouteListing | null>(null);
+  const [routesAsked, setRoutesAsked] = useState(false);
+  const [chosenRoutes, setChosenRoutes] = useState<string[]>([]);
 
   useEffect(() => {
     api.get<OnboardingState>("/api/onboarding").then(setState).catch((e) => toast(errorText(e)));
@@ -511,6 +515,36 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const hasSpendCap = !!settings && (settings.limits.usd_per_run > 0 || settings.limits.usd_total > 0
     || (settings.limits.usd_total_per_provider?.[provider] ?? 0) > 0);
   const visibleDraft = priceDraft?.model === model ? priceDraft : null;
+  const onRouter = providerKind === "openrouter";
+
+  // A short wait, because a model id can also be typed: asking on every keystroke would ask about
+  // every prefix of it. Nothing here can stop the flow: no list, an empty one or a failure all leave
+  // the step out and the model is added as it always was, on OpenRouter's own routing.
+  useEffect(() => {
+    setRoutes(null);
+    setChosenRoutes([]);
+    if (!onRouter || !model.includes("/")) {
+      setRoutesAsked(false);
+      return;
+    }
+    let current = true;
+    setRoutesAsked(true);
+    const timer = setTimeout(() => {
+      api.get<RouteListing>(`/api/providers/${encodeURIComponent(provider)}/model-providers?model=${encodeURIComponent(model)}`)
+        .then((listing) => { if (current) setRoutes(listing.rows.length ? listing : null); })
+        .catch(() => { if (current) setRoutes(null); })
+        .finally(() => { if (current) setRoutesAsked(false); });
+    }, 300);
+    return () => { current = false; clearTimeout(timer); };
+  }, [onRouter, provider, model]);
+
+  /** A choice of providers is a price: the form shows the one that will be recorded. */
+  function chooseRoutes(next: string[]) {
+    setChosenRoutes(next);
+    const bill = routeBill(routes?.rows ?? [], next) ?? pricing;
+    const written = (value: number | null | undefined) => (value === undefined || value === null ? "" : String(value));
+    setPriceDraft((current) => ({ model, input: written(bill?.input), output: written(bill?.output), cache_hit: written(bill?.cache_hit), input_limit: current?.input_limit ?? "", limit_source: current?.limit_source ?? "" }));
+  }
 
   function editPrice(field: Exclude<keyof PricingDraft, "model">, value: string) {
     if (!model) return;
@@ -540,7 +574,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
         const priorEntry = previous && typeof previous === "object" && !Array.isArray(previous) ? previous as Record<string, unknown> : {};
         await api.put<Settings>(`/api/providers/${encodeURIComponent(provider)}`, { pricing: { ...current, [model]: { ...priorEntry, ...price } } });
       }
-      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, { ...preset, provider, model, context_window_source: windowTyped ? "manual" : "auto" });
+      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, { ...preset, provider, model, context_window_source: windowTyped ? "manual" : "auto", ...(onRouter ? { openrouter_providers: chosenRoutes } : {}) });
       onSaved(id, next);
     } catch (e) {
       toast(errorText(e));
@@ -571,7 +605,13 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
         )}
       </Step>
 
-      <Step n={3} title={t("add.step3")} sub={t("add.step3.sub")} active={ready} done={ready}>
+      {(routes || routesAsked) && (
+        <Step n={3} title={t("add.routes")} sub={t("add.routes.sub")} active={ready} done={chosenRoutes.length > 0}>
+          {routes ? <OpenRouterProviders listing={routes} chosen={chosenRoutes} onChange={chooseRoutes} /> : <div className="sub faint">{t("add.routes.asking")}</div>}
+        </Step>
+      )}
+
+      <Step n={routes || routesAsked ? 4 : 3} title={t("add.step3")} sub={t("add.step3.sub")} active={ready} done={ready}>
         <div className="mfields">
           <label className="mfield">
             <span>{t("add.label")}</span>
@@ -618,11 +658,11 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
             <p className="sub">{t("add.pricing.help")}</p>
             <div className="mfields">
               <label className="mfield"><span>{t("add.pricing.input")}</span>
-                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.input ?? ""} onChange={(e) => editPrice("input", e.target.value)} /></label>
+                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.input ?? ""} onChange={(e) => editPrice("input", e.target.value)} /></label>
               <label className="mfield"><span>{t("add.pricing.output")}</span>
-                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.output ?? ""} onChange={(e) => editPrice("output", e.target.value)} /></label>
+                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.output ?? ""} onChange={(e) => editPrice("output", e.target.value)} /></label>
               <label className="mfield"><span>{t("add.pricing.cache")}</span>
-                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.cache_hit ?? ""} onChange={(e) => editPrice("cache_hit", e.target.value)} /></label>
+                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.cache_hit ?? ""} onChange={(e) => editPrice("cache_hit", e.target.value)} /></label>
               <label className="mfield"><span>{t("add.pricing.ceiling")}</span>
                 <input className="field num" type="number" min={1} step={1} value={visibleDraft?.input_limit ?? ""} onChange={(e) => editPrice("input_limit", e.target.value)} /></label>
               <label className="mfield wide"><span>{t("add.pricing.source")}</span>

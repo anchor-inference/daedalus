@@ -303,6 +303,7 @@ class GuestBridge:
             try:
                 if not self.connected:
                     await self.publish_address()
+                    await self.publish_routes()
                     await self.tell_door_of_revocations()
                     if not started:
                         # Once per process, not per connection: a door that restarted leaves this
@@ -329,6 +330,22 @@ class GuestBridge:
 
     async def publish_address(self) -> None:
         await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings)})
+
+    async def publish_routes(self) -> None:
+        """Tell the door which providers its models are limited to. A call of its own, apart from the address:
+        a table the door refuses must not take the connection down with it, and it is only ever one model's
+        trouble. A door out of reach hears at its next connection, which this marks as owed. With no agent
+        in this process there is nothing to say, and an empty table would lift every limit the door holds.
+        """
+        if self.app.manager is None or self.app.config is None:
+            return
+        try:
+            await self.client.call("PUT", "/control/settings", json={"model_routes": model_routes(self.app)})
+        except DoorUnavailable as exc:
+            self.connected = False
+            logger.debug("the guest door did not take the model routes: %s", exc)
+        except DoorRefused as exc:
+            logger.warning("the guest door refused the model routes and keeps its old table: %s", exc)
 
     async def absorb(self, feed: dict[str, Any]) -> None:
         for event in _items(feed.get("events")):
@@ -623,6 +640,41 @@ def model_choices(app: Application | Any) -> tuple[list[dict[str, Any]], list[di
     return options, left_out
 
 
+def model_routes(app: Application | Any) -> list[dict[str, Any]]:
+    """The OpenRouter providers each key-proxy model is limited to, with what that makes it cost.
+
+    A table the door holds rather than fields on a link. A link is made once and lives for weeks; had it
+    kept the choice of the day it was made, a model limited afterwards would go on being routed anywhere for its
+    links, and the price would go on being reserved at the old provider's rate. Every preset is in it,
+    offered to new links or not, because a link already made does not stop running when its model stops being offered.
+    A model with no price stays in with ``None`` for it: left out, its limit would be lifted for want of a number.
+    """
+    base = keyproxy_base()
+    routes: dict[tuple[str, str], dict[str, Any]] = {}
+    for preset in app.config.presets.values():
+        provider = app.config.providers.get(preset.provider)
+        if not preset.openrouter_providers or provider is None or not is_keyproxy_url(provider.base_url):
+            continue
+        try:
+            pricing = app.manager.providers.get(preset.provider).endpoint.pricing_for(preset.model)
+        except KeyError:
+            pricing = None
+        priced = pricing is not None and pricing.input is not None and pricing.output is not None
+        path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
+        routes[(path, preset.model)] = {
+            "path": path, "model": preset.model, "only": list(preset.openrouter_providers),
+            "price_in": float(pricing.input) if priced else None, "price_out": float(pricing.output) if priced else None,  # type: ignore[union-attr, arg-type]
+        }
+    return list(routes.values())
+
+
+async def routes_changed(app: Application | Any) -> None:
+    """A model's providers or their price moved: the door's table follows."""
+    bridge = bridge_of(app)
+    if bridge is not None and bridge.client.configured:
+        await bridge.publish_routes()
+
+
 def model_options(app: Application | Any) -> list[dict[str, Any]]:
     """The models a stand-in can be given, cheapest first."""
     return model_choices(app)[0]
@@ -645,4 +697,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(bridge.serve(), name="guest-door")]
 
 
-__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options"]
+__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options", "model_routes", "routes_changed"]

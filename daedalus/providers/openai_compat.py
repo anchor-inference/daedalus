@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -51,6 +51,7 @@ from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
 from daedalus.providers.image_fit import FittedImages, limits_for
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
+from daedalus.providers.openrouter_routes import refused_route, routing_body
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.providers.wire import (
     InlineFitter,
@@ -505,6 +506,8 @@ class OpenAICompatibleProvider(ILLMProvider):
         admission: InferenceAdmission | None = None,
         context_refusal: Callable[[str, str, int], None] | None = None,
         fitted_images: FittedImages | None = None,
+        routing_for: Callable[[str], Sequence[str]] | None = None,
+        route_refusal: Callable[[str, str], None] | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
 
@@ -512,9 +515,15 @@ class OpenAICompatibleProvider(ILLMProvider):
         keeps (see :mod:`daedalus.providers.image_fit`); without it pictures go out as stored.
 
         ``context_refusal(endpoint id, model, window)`` hears every refusal that states the model's real
-        context window, so the window the presets run with can be corrected from it."""
+        context window, so the window the presets run with can be corrected from it.
+
+        ``routing_for(model)`` names the OpenRouter providers that model is limited to, asked on every
+        request so a change reaches a run already under way. ``route_refusal(endpoint id, model)`` hears that
+        none of them could serve it."""
         self.endpoint = endpoint
         self._context_refusal = context_refusal
+        self._routing_for = routing_for or (lambda _model: ())
+        self._route_refusal = route_refusal
         self._images_for = images_for or (lambda _model: False)
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0)
@@ -893,6 +902,12 @@ class OpenAICompatibleProvider(ILLMProvider):
             # field is deliberately confined to llama.cpp because generic OpenAI servers may reject
             # extension parameters they do not know.
             body["cache_prompt"] = True
+        if self.endpoint.kind == "openrouter":
+            # Here and not in the callers: every model call of the host, a run's or a side call's, is built by
+            # this one method, so nothing can forget it and reach a provider the operator ruled out.
+            route = self._routing_for(model)
+            if route:
+                body["provider"] = routing_body(route)
         return body
 
     def accepts_images(self, model: str) -> bool:
@@ -986,6 +1001,10 @@ class OpenAICompatibleProvider(ILLMProvider):
         if status in (400, 413, 422) and any(m in lowered for m in _CONTEXT_ERROR_MARKERS):
             raise LLMContextWindowExceeded(f"{self.endpoint.id}: {text[:300]}", **context_overflow_sizes(text))
         verdict = classify_failure(status, text)
+        if self.endpoint.kind == "openrouter" and status == 404:
+            route_gone = refused_route(text)
+            if route_gone is not None:
+                raise LLMProviderError(f"{self.endpoint.id}: {route_gone}", classified=verdict)
         wait = _retry_after_seconds(headers, text)
         if wait is not None:
             verdict = verdict.model_copy(update={"retry_after_seconds": wait})
@@ -1018,6 +1037,11 @@ class OpenAICompatibleProvider(ILLMProvider):
                     self._context_refusal(self.endpoint.id, request.model, window)
                 except Exception:  # noqa: BLE001 — learning the window is a side effect; the refusal is the error
                     logger.exception("could not record the context window %s stated for %s", window, request.model)
+        if self._route_refusal is not None and self.endpoint.kind == "openrouter" and status == 404 and refused_route(text):
+            try:
+                self._route_refusal(self.endpoint.id, request.model)
+            except Exception:  # noqa: BLE001 — marking the model is a side effect; the refusal is the error
+                logger.exception("could not record the refused route of %s", request.model)
         if self._admission is not None and hasattr(self._admission, "failure"):
             try:
                 await self._admission.failure(self.endpoint, request, reservation, evidence)

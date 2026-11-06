@@ -534,6 +534,13 @@ class ModelPresetConfig(BaseModel):
     group itself; ``None`` takes the model's known behaviour (:func:`on_demand_tool_groups_for`). Some
     models load a held-back group when a task needs it; others never look, and do the job with a shell,
     git or another server's tools instead, which costs more than the definitions saved."""
+    openrouter_providers: list[str] = Field(default_factory=list)
+    """OpenRouter's endpoint slugs (``deepinfra/fp8``) this model is limited to; empty leaves the routing to
+    OpenRouter. One choice per endpoint and model, like the price it decides: the adapter sees only those two, so
+    the API writes it to every preset of the pair. See :mod:`daedalus.providers.openrouter_routes`."""
+    openrouter_providers_gone: list[str] = Field(default_factory=list)
+    """Which of those the listing no longer offers, for the model's settings to say. Written by the daily check
+    and after a refusal; the choice itself stays, because a provider that comes back should be used again."""
 
     def display(self, preset_id: str = "") -> str:
         if self.label:
@@ -2476,6 +2483,13 @@ class RuntimeConfig(BaseModel):
     def has_model(self) -> bool:
         """Whether anything can run at all. False on a fresh install until the operator adds a model."""
         return bool(self.presets)
+
+    def openrouter_route(self, provider_id: str, model: str) -> tuple[str, ...]:
+        """The OpenRouter providers a call of ``model`` on this endpoint is limited to; empty for no limit."""
+        for preset in self.presets.values():
+            if preset.provider == provider_id and preset.model == model and preset.openrouter_providers:
+                return tuple(preset.openrouter_providers)
+        return ()
 
     def default_preset(self, preset_id: str | None = None) -> tuple[str, ModelPresetConfig] | None:
         """The named preset, the default one, or None when the table is empty.

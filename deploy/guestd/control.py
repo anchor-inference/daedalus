@@ -50,6 +50,8 @@ NUMBERS = {
     "price_in": (0.0, 10_000.0), "price_out": (0.0, 10_000.0), "usd_limit": (0.0, 10_000.0), "turns_per_day": (1, 100_000), "turns_total": (1, 1_000_000),
     "invite_hours": (0.1, 24.0 * 365), "conversation_hours": (0.1, 24.0 * 365), "idle_hours": (0.1, 24.0 * 365), "retention_days": (0.0, 3650.0),
 }
+ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
+ROUTE_MAX_SLUGS = 32
 
 
 class Invalid(ValueError):
@@ -104,6 +106,27 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
         out["events"] = [{"id": e["id"], "kind": e["kind"], "at": e["at"]} for e in store.events_of(link["id"])]
         out["messages"] = [{"id": m["id"], "role": m["role"], "text": m["text"], "at": m["at"], "state": m["state"], "cost_usd": m["cost_usd"]} for m in store.transcript(conversation["id"])] if conversation is not None else []
     return out
+
+
+def model_routes(body: Any) -> list[dict[str, Any]]:
+    """The table of which providers a model is limited to, whole or refused: half a table would let the
+    models missing from it be routed anywhere. Checked here too because it ends up in a call the key proxy
+    judges by the same rule, and a refusal there would only read as a model that stopped answering."""
+    if not isinstance(body, list):
+        raise Invalid("model_routes is a list")
+    routes: list[dict[str, Any]] = []
+    for route in body:
+        if not isinstance(route, dict) or not isinstance(route.get("path"), str) or not isinstance(route.get("model"), str):
+            raise Invalid("a model route names a path and a model")
+        only = route.get("only")
+        if not isinstance(only, list) or not 0 < len(only) <= ROUTE_MAX_SLUGS or not all(isinstance(slug, str) and ROUTE_SLUG.fullmatch(slug) for slug in only):
+            raise Invalid("a model route lists provider slugs")
+        prices = [route.get("price_in"), route.get("price_out")]
+        # None is a model the host cannot price today: the limit holds and the link's own price stands.
+        if not all(price is None or (not isinstance(price, bool) and isinstance(price, int | float) and 0 <= price <= 10_000) for price in prices):
+            raise Invalid("a model route has its prices")
+        routes.append({"path": route["path"], "model": route["model"], "only": only, "price_in": prices[0], "price_out": prices[1]})
+    return routes
 
 
 class ControlDoor:
@@ -179,6 +202,8 @@ class ControlDoor:
             self.store.set_setting("usd_per_day", str(float(value)))
         if "public_base" in body:
             self.store.set_setting("public_base", str(body["public_base"]).rstrip("/"))
+        if "model_routes" in body:
+            self.store.set_setting("model_routes", json.dumps(model_routes(body["model_routes"])))
         return 200, {"ok": True, "usd_per_day": self.store.usd_per_day(), "public_base": self.store.setting("public_base")}
 
     def one_link(self, method: str, link_id: str, action: str | None) -> tuple[int, dict[str, Any]]:
