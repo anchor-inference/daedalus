@@ -145,5 +145,8 @@ func (ts *tailscale) Connected(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	return status.BackendState == ipn.Running.String() && status.Self != nil && status.Self.Online
+	// Not Self.Online: nothing promises a node hears that about itself, and a tunnel called down on a
+	// field that stays unset would be restarted for nothing. Whether the address answers is proved
+	// from outside after any sleep, whatever this says.
+	return status.BackendState == ipn.Running.String()
 }
