@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -191,6 +193,61 @@ print(",".join(results))
 """
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=20, env={"PATH": "/usr/bin"}, check=False)
     assert done.stdout.strip() == "refused,refused", done.stderr
+
+
+@pytest.mark.parametrize("listen", ["unix", "tcp"])
+async def test_a_stand_in_answers_from_a_confined_process_in_either_form(listen: str) -> None:
+    """The one call a confined door makes, for real: its hook must let this through and nothing else, and
+    a hook that was too strict would only have shown as a stand-in that never answers."""
+    root = Path(tempfile.mkdtemp(prefix="gn", dir="/tmp"))
+    seen: list[str] = []
+
+    async def complete(request: web.Request) -> web.Response:
+        seen.append(request.path)
+        return web.json_response({"choices": [{"message": {"content": "an answer"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 2}})
+
+    proxy = web.Application()
+    proxy.router.add_post("/{tail:.*}", complete)
+    runner = web.AppRunner(proxy)
+    await runner.setup()
+    env = {"PATH": "/usr/bin", "PYTHONPATH": str(PACKAGE.parent), "GUEST_CONFINE": "1", "GUEST_LISTEN": listen}
+    for name in ("state", "run", "front", "token"):
+        (root / name).mkdir()
+        env[f"GUEST_{name.upper()}_DIR"] = str(root / name)
+    (root / "token" / "control.token").write_text("host-token")
+    if listen == "tcp":
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        (root / "guest.endpoint").write_text(f"tcp:127.0.0.1:{runner.addresses[0][1]}\n")
+        env["GUEST_MODEL_ENDPOINT"] = str(root / "guest.endpoint")
+    else:
+        await web.UnixSite(runner, str(root / "guest.sock")).start()
+        env["GUEST_MODEL_SOCKET"] = str(root / "guest.sock")
+    door = subprocess.Popen([sys.executable, "-m", "guestd"], cwd=PACKAGE.parent, env=env, stderr=subprocess.PIPE, text=True)
+    try:
+        await appears(root / "run" / ("control.endpoint" if listen == "tcp" else "control.sock"))
+        await appears(root / "front" / ("public.endpoint" if listen == "tcp" else "public.sock"))
+        client = DoorClient(root / "run", token_dir=root / "token", door_uid=-1)
+        await client.call("PUT", "/control/settings", json={"public_base": "https://door.example.test"})
+        fields = {**FIELDS, "mode": "stand_in", "briefing": "a briefing", "model_path": "acme/v1", "model_name": "m", "turns_per_day": 5, "turns_total": 5}
+        invite = (await client.call("POST", "/control/links", json=fields))["invite"]
+        if listen == "tcp":
+            base, transport = f"http://127.0.0.1:{door_port(str(root / 'front' / 'public.sock'))}", None
+        else:
+            base, transport = "http://door", httpx.AsyncHTTPTransport(uds=str(root / "front" / "public.sock"))
+        async with httpx.AsyncClient(base_url=base, transport=transport, trust_env=False, timeout=20) as public:
+            token = (await public.post(f"/a/{invite}/redeem", headers={"x-guest-client": "192.0.2.5"})).json()["token"]
+            bearer = {"authorization": f"Bearer {token}", "x-guest-client": "192.0.2.5"}
+            await public.post("/a/messages", json={"text": "hello"}, headers=bearer)
+            read = (await public.get("/a/messages?after=0&wait=10", headers=bearer)).json()
+        assert [m["text"] for m in read["messages"]] == ["an answer"]
+        assert seen == ["/acme/v1/chat/completions"]
+        await client.aclose()
+    finally:
+        door.terminate()
+        _, errors = door.communicate(timeout=10)
+        await runner.cleanup()
+        shutil.rmtree(root, ignore_errors=True)
+    assert "Confined" not in errors, errors
 
 
 def test_a_door_told_to_stop_does_not_wait_for_a_held_read() -> None:

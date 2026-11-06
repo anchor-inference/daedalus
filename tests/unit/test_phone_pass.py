@@ -171,7 +171,7 @@ async def test_the_lan_door_marks_what_it_lets_in() -> None:
 
 def test_the_address_read_for_a_phone_is_a_home_address_or_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     class Probe:
-        address = "192.168.1.5"
+        address = "192.0.2.5"
 
         def __enter__(self) -> Probe:
             return self
@@ -186,7 +186,7 @@ def test_the_address_read_for_a_phone_is_a_home_address_or_nothing(monkeypatch: 
             return (Probe.address, 1)
 
     monkeypatch.setattr(api_services_door.socket, "socket", lambda *_: Probe())
-    assert api_services_door.lan_address() == "192.168.1.5"
+    assert api_services_door.lan_address() == "192.0.2.5"
     Probe.address = "127.0.0.1"
     assert api_services_door.lan_address() == ""
     Probe.address = "169.254.1.1"
