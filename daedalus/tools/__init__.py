@@ -119,6 +119,12 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "independent agent with its own chat and workspace (SpawnAgent), a question to a named peer session (AskPeer)",
         "auto",
     ),
+    "agent_talk": ToolGroupSpec(
+        "Talk to somebody else's agent through an agent link someone gave the operator (an address ending in /a/ and a "
+        "long code): open it, send, read the reply, end (AgentTalk). Not curl or WebFetch, which would put the "
+        "conversation's token in your hands",
+        "lazy",
+    ),
     "board": ToolGroupSpec(
         "The session's task board, the plan of record for work with more than a few steps: tasks with acceptance "
         "criteria and checklists that survive compaction and restarts",

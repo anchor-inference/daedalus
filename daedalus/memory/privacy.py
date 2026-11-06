@@ -31,6 +31,8 @@ PARENT_KEYS = ("subagent_of", "btw_of", "prompt_coach_of")
 """Metadata naming the chat a session was made from, whose privacy it inherits (with ``forked_from``)."""
 
 MEMORY_TOOLS = frozenset({"Remember", "Recall", "Forget"})
+TALK_TOOL = "AgentTalk"
+"""The tool that talks to another agent. Named here because the memory pass has to know what ran under a stranger's words."""
 
 REFUSAL = (
     "This chat is private: it does not read, add to or change long-term memory. Nothing was {verb}. "

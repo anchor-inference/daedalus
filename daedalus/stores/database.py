@@ -3666,6 +3666,51 @@ CREATE TABLE IF NOT EXISTS phone_passes (
 CREATE INDEX IF NOT EXISTS phone_passes_by_slug ON phone_passes(slug);
 """)
 
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS agent_talks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    base_url TEXT NOT NULL,
+    host TEXT NOT NULL,
+    invite_hash TEXT NOT NULL,
+    token TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    topic TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT '',
+    approval INTEGER NOT NULL DEFAULT 0,
+    retention_days REAL NOT NULL DEFAULT 0,
+    max_text INTEGER NOT NULL DEFAULT 8000,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    waiting_for TEXT NOT NULL DEFAULT '',
+    quiet INTEGER NOT NULL DEFAULT 0,
+    review TEXT NOT NULL DEFAULT 'first',
+    sends INTEGER NOT NULL DEFAULT 0,
+    wake_turns INTEGER NOT NULL DEFAULT 0,
+    wake_usd REAL NOT NULL DEFAULT 0,
+    repeats INTEGER NOT NULL DEFAULT 0,
+    opened_run TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    closed_at TEXT,
+    UNIQUE(session_id, invite_hash)
+);
+CREATE INDEX IF NOT EXISTS agent_talks_open ON agent_talks(state);
+CREATE TABLE IF NOT EXISTS agent_talk_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    talk_id TEXT NOT NULL REFERENCES agent_talks(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    state TEXT NOT NULL,
+    door_id INTEGER,
+    run_id TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(talk_id, door_id)
+);
+CREATE INDEX IF NOT EXISTS agent_talk_messages_by_talk ON agent_talk_messages(talk_id, id);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

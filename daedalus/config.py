@@ -314,6 +314,9 @@ class Settings(BaseSettings):
     """What the launcher got the door to run inside, natively: ``namespaces``, ``seatbelt``, ``seatbelt-hygiene``, or nothing at all."""
     guest_listen: str = "unix"
     """How the door's sockets are reached: ``tcp`` natively where unix sockets cannot be had."""
+    agent_talk_private_addresses: bool = False
+    """Whether AgentTalk may dial plain http and addresses that are not on the public internet. Off, because the
+    address comes from a link, and a link that names this machine's own ports is how a stranger reaches them."""
     guest_model_upstreams: str = ""
     """The key proxy's upstreams a stand-in may use, comma separated, as ``KEYPROXY_GUEST_UPSTREAMS`` tells the proxy."""
     miniapp_public_url: str = ""

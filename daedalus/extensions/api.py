@@ -70,6 +70,7 @@ from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_action_rules,
     api_agent_messages,
+    api_agent_talk,
     api_attempt_diagnostics,
     api_autopilot,
     api_board,
@@ -1742,6 +1743,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # A chat's side question (/btw): asked from the composer, answered in a window beside the chat.
     api_btw.register(api, app, auth)
     api_guest.register(api, app, auth)
+    api_agent_talk.register(api, app, auth)
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)

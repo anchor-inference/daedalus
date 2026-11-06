@@ -27,7 +27,7 @@ from typing import Any
 from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.host import user_style
-from daedalus.host.guest_turns import METADATA_KEY, guest_runs, is_guest
+from daedalus.host.guest_turns import METADATA_KEY, guest_runs, is_guest, talk_runs
 from daedalus.host.prompts import without_turn_context
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ async def conversation_lines(manager: Any, session_id: str, *, tail: int = TAIL_
     messages = await manager.sessions.list_transcript(session_id, limit=tail * 3)
     redact = manager.redactor.redact
     strangers = guest_runs(messages)
+    talks = talk_runs(messages)
     lines: list[str] = []
     for message in messages:
         if message.role not in (MessageRole.user, MessageRole.assistant) or message.metadata.get("daedalus.origin") == "core":
@@ -113,7 +114,8 @@ async def conversation_lines(manager: Any, session_id: str, *, tail: int = TAIL_
         if not text:
             continue
         if message.role is MessageRole.assistant:
-            who = "Agent, to a guest" if message.metadata.get("daedalus.run_id") in strangers else "Agent"
+            run = message.metadata.get("daedalus.run_id")
+            who = "Agent, to a guest" if run in strangers else "Agent, after another agent's reply" if run in talks else "Agent"
             lines.append(f"{who}: {redact(text[-AGENT_CHARS:])}")
         else:
             origin = str(message.metadata.get("daedalus.origin") or "")

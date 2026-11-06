@@ -66,6 +66,7 @@ from daedalus.memory.entries import (
     slugify,
     topic_title,
 )
+from daedalus.memory.privacy import TALK_TOOL
 from daedalus.memory.similarity import Judge, Match, Note, record_note, stems, surely_same
 from daedalus.memory.taxonomy import SENSITIVE, guess_category, infer_topics, sensitive_subjects
 from daedalus.search.chats import PLAIN_PROJECT_SQL, SEARCHABLE_SQL
@@ -1746,7 +1747,12 @@ class Synthesizer:
             except ValueError:
                 continue
             metadata = message.get("metadata") or {}
-            text = "".join(str(b.get("text") or "") for b in message.get("content_blocks") or [] if isinstance(b, dict) and b.get("kind") == "text")
+            blocks = [b for b in message.get("content_blocks") or [] if isinstance(b, dict)]
+            if any(b.get("kind") == "tool_use" and b.get("name") == TALK_TOOL for b in blocks):
+                # From here on the run wrote with another agent's reply in front of it, and the reply
+                # itself is kept from this pass only by tool results being out of its reach.
+                guest_runs.add(str(metadata.get("daedalus.run_id") or ""))
+            text = "".join(str(b.get("text") or "") for b in blocks if b.get("kind") == "text")
             if message.get("role") == "user":
                 origin = str(metadata.get("daedalus.origin") or "")
                 if origin.startswith("guest:"):

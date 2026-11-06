@@ -208,6 +208,10 @@ class Autopilot:
             return
         if state.run_origin not in JUDGED_ORIGINS or state.last_outcome is not None or state.run_cause is not None:
             return
+        if self.manager.touched(session_id) is not None:
+            # A stranger's reply was read in this run. A judge that sends the next goal by itself would be
+            # an approval nobody gave, and it would be judging words written for it to read.
+            return
         task = asyncio.create_task(self.judge(session_id, run_id), name=f"autopilot:{session_id}")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

@@ -555,7 +555,7 @@ class GuestBridge:
         if delivery is None:
             manager = self.app.manager
             state = manager._states.get(session_id) if manager is not None else None
-            if state is not None and state.guest_turn is not None and state.run_id == run_id:
+            if state is not None and state.guest_turn is not None and state.guest_turn.kind == "guest" and state.run_id == run_id:
                 self._ended_early[run_id] = status
             return
         if delivery.done is not None and not delivery.done.done():

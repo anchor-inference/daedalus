@@ -1,0 +1,1006 @@
+"""This installation's agent as the guest of somebody else's door.
+
+A client of the door's ``/a/*`` and nothing more: the same redeem, the same send, the same read a curl agent
+makes. What a Daedalus adds is only that it is still running when the answer comes. So one task per conversation
+holds the door's long read while something is owed, stores what arrives, and everything else reads from that
+store: the tool in a turn, the app, and a turn opened by a reply. Nothing is lost to a restart on either side,
+because the cursor and the unread replies are rows.
+
+**Everything from the far side is data.** A door is a stranger's server. Only the fields named here are read, each
+checked for what it should be; its ``detail`` sentences are never shown to anyone, because a sentence chosen by
+that server would reach the model outside a fence. What the agent is told about the state of a conversation is
+written here from an enumerated code. A reply reaches a model only through :func:`agent_talk.fence_reply`, and
+the moment it does the run is touched (:mod:`daedalus.host.agent_talk`).
+
+**What starts a conversation.** A link in a chat does nothing. The agent has to call ``open``, in a run of the
+operator's, with a link the operator wrote in this chat: an address that came in a reply, a page or a file
+does not open, so a stranger cannot point the agent at a door of their choosing. The first GET asks only
+what the door says it is; the redeem is the agent's deliberate step.
+
+**The token.** It lives in one column, goes out in one header, and leaves no other way: not to the model, the app
+or the log. It belongs to the chat that opened the link, so a conversation is only ever found through its
+session, and the column is emptied when the conversation closes.
+
+**What goes out.** ``first`` by default: the first message of a conversation waits for the operator, who then
+sees who this is and how the agent means to speak to it, and the rest flow so that a dialogue stays one. A later
+message waits too when the run went and looked at something after reading a reply, or when it looks like a
+secret: that is the shape of the leak a stranger would ask for. ``all`` and ``off`` are the operator's to choose,
+per conversation. Approved text is what is sent, byte for byte, by this code and not by a retried tool call.
+
+**Money.** By default a reply is waited for inside a turn, for a limited time, and after that it waits here and
+costs nothing. Waking the chat on a reply is switched on per conversation by the operator, from the app, with a
+number of turns and a number of dollars; the agent has no way to do it. Such a turn is bounded as a guest's is.
+
+**Loops.** Sends per conversation are capped, a reply that repeats itself turns waking off, a conversation
+nobody spoke in for a day is ended, and the door keeps its own limits on its own side.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import ipaddress
+import json as jsonlib
+import logging
+import secrets
+import socket
+import time
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
+
+import httpx
+
+from daedalus.extensions.guest_door import chat_link
+from daedalus.extensions.notifications import Draft
+from daedalus.host import agent_talk, guest_turns
+from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
+from daedalus.host.notify_text import render
+from daedalus.security.untrusted import inert
+
+if TYPE_CHECKING:
+    from daedalus.app import Application
+    from daedalus.host.session_runner import SessionState
+
+logger = logging.getLogger(__name__)
+
+EXTENSION_KEY = "agent_talk"
+ASK_HOOK = "agent_talk.send"
+CLIENT_KIND = "daedalus"
+"""What the door is told this client is: for its owner's list, and it opens nothing there."""
+
+MAX_ANSWER_BYTES = 256 * 1024
+"""A door's whole answer. A message is at most 8,000 characters on an honest one, a few of them in one read."""
+MAX_TEXT = 8000
+MAX_TOPIC = 240
+MAX_PER_READ = 20
+MAX_MESSAGES = 300
+"""Everything kept of a conversation. A door that talks without end must not fill this database."""
+MAX_SENDS = 30
+"""Messages this side sends in one conversation. Past it the operator starts a new one, with a new link."""
+DOOR_WAIT_SECONDS = 25
+"""How long one read is held at the door, under the door's own limit of 30."""
+CALL_SECONDS = 15.0
+MIN_CYCLE_SECONDS = 5.0
+"""The least a read takes, whatever the door does: one that answers at once must not get a tight loop out of this."""
+QUIET_POLL_SECONDS = 300.0
+"""How often to look once the door has said it is no use waiting: a reply can still come, it costs a request."""
+FAILURE_BACKOFF_MAX = 300.0
+SWEEP_SECONDS = 60.0
+IDLE_SECONDS = 24 * 3600.0
+WAIT_DEFAULT = 120
+WAIT_MAX = 300
+CHAT_FREE_SECONDS = 900.0
+REPLY_NOTICE_SECONDS = 3600.0
+REPEATS_ALLOWED = 2
+TURN_USD = guest_turns.TURN_USD
+WAKE_TURNS_MAX = 20
+WAKE_USD_MAX = 5.0
+RUNS_KEPT = 12
+"""Runs of a conversation a turn opened by a reply reads: the most recent, each a few messages."""
+
+ORIGINS = frozenset({"operator", "core", "events", "autopilot"})
+"""Whose runs may use the tool: the operator's and those that continue one. A schedule or a loop reads with nobody there."""
+
+REVIEWS = ("first", "all", "off")
+OPENING, PENDING, OPEN, CLOSED = "opening", "pending", "open", "closed"
+US, THEM, DOOR = "us", "them", "door"
+HELD, SENDING, SENT, REFUSED, FAILED, UNSURE, UNREAD, READ = "held", "sending", "sent", "refused", "failed", "unsure", "unread", "read"
+REASONS = ("ended", "expired", "idle", "refused", "approval_timeout", "revoked")
+"""The door's reasons this code has words for. Anything else reads as plain ``ended``."""
+
+CLOSED_WORDS = {
+    "ended": "The conversation has ended.",
+    "expired": "The conversation reached the end of its lifetime.",
+    "idle": "The conversation was closed because nobody spoke for too long.",
+    "refused": "The owner of that link declined this conversation.",
+    "approval_timeout": "The owner of that link did not admit this conversation in time.",
+    "revoked": "The owner of that link revoked it.",
+    "token": "The door no longer takes this conversation's token.",
+    "too_long": "The conversation grew past what is kept here, so it was closed.",
+}
+LIMIT_WORDS = {
+    "usd_per_link": "That link's budget is used up.",
+    "usd_per_day": "Its owner's budget for guests is used up for today.",
+    "turns_per_day": "That link's messages are used up for today.",
+    "turns_total": "That link's messages are used up.",
+}
+HELD_WORDS = {
+    "first": "the first message of a conversation",
+    "all": "the operator reviews every message of this conversation",
+    "looked": "this turn read or ran something after a stranger's reply",
+    "secret": "it looks as if it holds a secret",
+}
+
+
+class NotReachable(Exception):
+    """The address is one this client will not dial, whatever is there. Says why, in this code's words."""
+
+
+class DoorGone(Exception):
+    """The door did not answer. Nothing can be said about what it did with what it was sent."""
+
+
+@dataclass(frozen=True, slots=True)
+class DoorAnswer:
+    status: int
+    body: dict[str, Any]
+    retry_after: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    text: str
+    error: bool = False
+    talk: str = ""
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _seconds(value: Any) -> float | None:
+    """A wait a door asked for, within what this side will honour."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return min(max(float(value), 0.0), QUIET_POLL_SECONDS)
+
+
+def _hash(invite: str) -> str:
+    return hashlib.sha256(invite.encode()).hexdigest()
+
+
+def ask_key(message_id: int) -> str:
+    return hashlib.sha256(f"agent-talk:{message_id}".encode()).hexdigest()[:12]
+
+
+def _same(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+class HideDoorPaths(logging.Filter):
+    """``httpx`` logs every address it calls at INFO, and a door's address before the redeem is a credential."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/a/" not in record.getMessage()
+
+
+async def public_addresses(host: str, port: int) -> list[str]:
+    """Where ``host`` resolves to, refused unless all of it is on the public internet.
+
+    All and not any: a name with one public and one private address is exactly how a stranger aims a client
+    at the inside of its own network, and the choice among them is the resolver's.
+    """
+    try:
+        found = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise DoorGone(f"{host} does not resolve") from exc
+    addresses = list(dict.fromkeys(str(info[4][0]) for info in found))
+    for address in addresses:
+        parsed = ipaddress.ip_address(address.split("%", 1)[0])
+        mapped = getattr(parsed, "ipv4_mapped", None)
+        if not (mapped or parsed).is_global:
+            raise NotReachable(f"{host} is not on the public internet")
+    if not addresses:
+        raise DoorGone(f"{host} does not resolve")
+    return addresses
+
+
+class Dialer:
+    """One call to a stranger's address, and nothing in it trusted.
+
+    The name is resolved here and the connection is made to the address that was checked, with the name kept
+    for TLS: resolved twice, the second answer is the attacker's to choose. Redirects are not followed, the
+    answer is read only up to :data:`MAX_ANSWER_BYTES`, and the environment's proxy settings are not read. A
+    proxy the operator set for web tools is used, and then the name goes to it unchecked past the first look.
+    """
+
+    def __init__(self, *, private: bool = False, proxy: str = "", transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self.private = private
+        self.proxy = proxy
+        self.transport = transport
+
+    async def _pinned(self, url: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if parts.scheme != "https" and not self.private:
+            raise NotReachable("a door is reached over https")
+        if not host or self.private or self.transport is not None:
+            return url, {}, {}
+        try:
+            port = parts.port or 443
+        except ValueError as exc:
+            raise NotReachable("that address has no valid port") from exc
+        address = (await public_addresses(host, port))[0]
+        if self.proxy:
+            return url, {}, {}
+        place = f"[{address}]" if ":" in address else address
+        target = parts._replace(netloc=f"{place}:{port}").geturl()
+        return target, {"host": parts.netloc}, {"sni_hostname": host}
+
+    async def call(self, method: str, url: str, *, token: str = "", body: Any = None, data: bool = True, timeout: float = CALL_SECONDS, extra: dict[str, str] | None = None) -> DoorAnswer:
+        target, headers, extensions = await self._pinned(url)
+        headers = {**headers, "user-agent": "daedalus-agent-talk", **(extra or {})}
+        if data:
+            headers["accept"] = "application/json"
+        if token:
+            headers["authorization"] = f"Bearer {token}"
+        try:
+            async with httpx.AsyncClient(transport=self.transport, proxy=self.proxy or None, timeout=timeout, follow_redirects=False, trust_env=False) as client:
+                async with client.stream(method, target, json=body, headers=headers, extensions=extensions) as response:
+                    raw = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw.extend(chunk)
+                        if len(raw) > MAX_ANSWER_BYTES:
+                            break
+        except (httpx.HTTPError, OSError) as exc:
+            raise DoorGone(type(exc).__name__) from exc
+        try:
+            parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else {}
+        except ValueError:
+            parsed = {}
+        parsed = parsed if isinstance(parsed, dict) else {}
+        try:
+            retry = float(response.headers.get("retry-after", ""))
+        except ValueError:
+            retry = None
+        return DoorAnswer(response.status_code, parsed, _seconds(retry if retry is not None else parsed.get("retry_after")))
+
+
+class AgentTalks:
+    def __init__(self, app: Application | Any, dialer: Dialer | None = None) -> None:
+        self.app = app
+        web = app.config.tools.web if getattr(app, "config", None) is not None else None
+        self.dialer = dialer or Dialer(private=bool(getattr(app.settings, "agent_talk_private_addresses", False)), proxy=getattr(web, "proxy", "") or "")
+        self._followers: dict[str, asyncio.Task[None]] = {}
+        self._wakers: dict[str, asyncio.Task[None]] = {}
+        self._news: dict[str, asyncio.Event] = {}
+        self._readers: dict[str, int] = {}
+        self._wakes: dict[str, str] = {}
+        """Run id to the conversation it answers."""
+        self._told: dict[tuple[str, str], float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._background: set[asyncio.Task[None]] = set()
+
+    @property
+    def manager(self) -> Any:
+        return self.app.manager
+
+    @property
+    def db(self) -> Any:
+        return self.app.db
+
+    # -- rows ---------------------------------------------------------------------------
+
+    async def talk(self, talk_id: str) -> Any:
+        return await self.db.fetchone("SELECT * FROM agent_talks WHERE id = ?", (talk_id,))
+
+    async def talks_of(self, session_id: str) -> list[Any]:
+        return list(await self.db.fetchall("SELECT * FROM agent_talks WHERE session_id = ? ORDER BY created_at DESC", (session_id,)))
+
+    async def messages(self, talk_id: str) -> list[Any]:
+        return list(await self.db.fetchall("SELECT * FROM agent_talk_messages WHERE talk_id = ? ORDER BY id", (talk_id,)))
+
+    async def _update(self, talk_id: str, **fields: Any) -> None:
+        names = ", ".join(f"{name} = ?" for name in fields)
+        await self.db.execute(f"UPDATE agent_talks SET {names} WHERE id = ?", (*fields.values(), talk_id))
+
+    async def _unread(self, talk_id: str) -> list[Any]:
+        return list(await self.db.fetchall("SELECT * FROM agent_talk_messages WHERE talk_id = ? AND state = ? ORDER BY id", (talk_id, UNREAD)))
+
+    async def runs_of(self, talk: Any) -> list[str]:
+        """The runs that took part, newest last: what a turn opened by a reply reads, and what the spend adds up."""
+        rows = await self.db.fetchall("SELECT run_id, max(id) AS last FROM agent_talk_messages WHERE talk_id = ? AND run_id != '' GROUP BY run_id ORDER BY last", (talk["id"],))
+        return [run for run in dict.fromkeys([str(talk["opened_run"]), *(str(row["run_id"]) for row in rows)]) if run]
+
+    async def spent(self, talk: Any) -> float:
+        runs = await self.runs_of(talk)
+        if not runs:
+            return 0.0
+        marks = ",".join("?" * len(runs))
+        row = await self.db.fetchone(f"SELECT coalesce(sum(cost_usd), 0) AS usd FROM usage_events WHERE run_id IN ({marks})", tuple(runs))
+        return float(row["usd"] or 0.0) if row is not None else 0.0
+
+    async def describe(self, talk: Any, *, messages: bool = False) -> dict[str, Any]:
+        """A conversation for the app. Named field by field so that nothing added to the row reaches it by accident:
+        the token and the invite's hash are not fields of this."""
+        rows = await self.messages(talk["id"])
+        out: dict[str, Any] = {
+            "id": talk["id"], "session_id": talk["session_id"], "host": talk["host"], "topic": talk["topic"], "mode": talk["mode"], "state": talk["state"], "reason": talk["reason"],
+            "waiting_for": talk["waiting_for"], "quiet": bool(talk["quiet"]), "review": talk["review"], "sends": talk["sends"], "sends_limit": MAX_SENDS, "wake_turns": talk["wake_turns"],
+            "wake_usd": round(float(talk["wake_usd"]), 6), "created_at": talk["created_at"], "last_at": talk["last_at"], "closed_at": talk["closed_at"], "spent_usd": round(await self.spent(talk), 6),
+            "replies": sum(1 for row in rows if row["role"] == THEM), "unread": sum(1 for row in rows if row["state"] == UNREAD), "held": sum(1 for row in rows if row["state"] == HELD),
+        }
+        if messages:
+            out["messages"] = [{"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"]} for row in rows]
+        return out
+
+    # -- the tool -----------------------------------------------------------------------
+
+    async def tool(self, session_id: str, action: str, *, link: str = "", conversation: str = "", text: str = "", wait_seconds: int | None = None) -> Outcome:
+        state = self.manager.live_state(session_id)
+        if state is None or not self.manager.ordinary_chat(state):
+            return Outcome("Agent links belong to an ordinary chat.", error=True)
+        turn = state.guest_turn
+        if turn is not None and turn.kind != "reply":
+            return Outcome("A guest's turn does not talk to other agents.", error=True)
+        if turn is None and state.run_origin not in ORIGINS:
+            return Outcome("Talking to another agent is for the operator's own turns, with somebody there to see it.", error=True)
+        wait = 0 if turn is not None else max(0, min(WAIT_DEFAULT if wait_seconds is None else int(wait_seconds), WAIT_MAX))
+        try:
+            if action == "open":
+                if turn is not None:
+                    return Outcome("A turn started by a reply opens nothing.", error=True)
+                return await self._open(state, link)
+            if action not in ("send", "read", "end"):
+                return Outcome("action is one of open, send, read, end.", error=True)
+            talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation)
+            if isinstance(talk, Outcome):
+                return talk
+            if action == "send":
+                return await self._send(state, talk, text, wait)
+            if action == "read":
+                return await self._read(state, talk, wait)
+            await self.end(talk["id"], reason="ended")
+            return Outcome(f"The conversation with {talk['host']} is ended.", talk=talk["id"])
+        except NotReachable as exc:
+            return Outcome(str(exc), error=True)
+
+    async def _chosen(self, session_id: str, conversation: str) -> Any:
+        talks = await self.talks_of(session_id)
+        if conversation:
+            found = next((talk for talk in talks if talk["id"] == conversation), None)
+            return found if found is not None else Outcome("This chat has no such conversation.", error=True)
+        live = [talk for talk in talks if talk["state"] != CLOSED]
+        if len(live) == 1:
+            return live[0]
+        if not live:
+            return Outcome("This chat has no open conversation. Open one with the link the operator gave you.", error=True)
+        return Outcome("Several conversations are open; say which: " + ", ".join(f"{talk['id']} ({talk['host']})" for talk in live), error=True)
+
+    async def _in_operators_words(self, session_id: str, invite: str) -> bool:
+        """Whether the operator wrote this address in this chat. Asked of the stored transcript and of nothing a model
+        could have put there: an address in a reply, a page or a tool's output is not a thing the operator handed over."""
+        return await self.db.fetchone(
+            "SELECT 1 FROM transcript WHERE session_id = ? AND json_extract(message, '$.role') = 'user' "
+            "AND json_extract(message, '$.metadata.\"daedalus.origin\"') = 'operator' AND instr(message, ?) > 0 LIMIT 1",
+            (session_id, invite),
+        ) is not None
+
+    async def _open(self, state: SessionState, link: str) -> Outcome:
+        session_id = state.session.id
+        found = agent_talk.find_links(link)
+        if len(found) != 1:
+            return Outcome("That is not an agent link: an address ending in /a/ and a long code.", error=True)
+        door = found[0]
+        if not await self._in_operators_words(session_id, door.invite):
+            return Outcome(
+                "That link did not come from the operator in this chat, so it stays closed: a link from a reply, a page or a file is not theirs to have given. Show it to them; if they write it here you can open it.",
+                error=True,
+            )
+        invite_hash = _hash(door.invite)
+        row = await self.db.fetchone("SELECT * FROM agent_talks WHERE session_id = ? AND invite_hash = ?", (session_id, invite_hash))
+        if row is not None:
+            return Outcome(self._state_line(row, "This chat has already opened this link." if row["state"] != CLOSED else ""), talk=row["id"], error=row["state"] == CLOSED)
+        url = f"{door.base}/a/{door.invite}"
+        try:
+            card = await self.dialer.call("GET", url)
+        except DoorGone:
+            return Outcome(f"{door.host} did not answer. Nothing was spent; try again later.", error=True)
+        if card.body.get("door") != agent_talk.DOOR_MARK:
+            return Outcome(f"{door.host} does not answer as an agent link. Nothing was spent.", error=True)
+        if card.status == 410 or card.body.get("status") != "waiting":
+            words = "has been used already" if card.body.get("status") == "used" else "is closed"
+            return Outcome(f"That link {words}. Ask the operator for a new one.", error=True)
+        topic = " ".join(inert(str(card.body.get("topic") or "")).split())[:MAX_TOPIC]
+        mode = card.body.get("mode") if card.body.get("mode") in ("stand_in", "direct") else ""
+        retention = _seconds(card.body.get("retention_days"))
+        limit = card.body.get("max_text")
+        talk_id = secrets.token_hex(6)
+        now = _now()
+        await self.db.execute(
+            "INSERT INTO agent_talks(id, session_id, base_url, host, invite_hash, state, topic, mode, approval, retention_days, max_text, opened_run, created_at, last_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (talk_id, session_id, door.base, door.host, invite_hash, OPENING, topic, mode, int(card.body.get("approval") is True), retention or 0.0,
+             min(limit, MAX_TEXT) if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else MAX_TEXT, state.run_id or "", now, now),
+        )
+        try:
+            answer = await self.dialer.call("POST", f"{url}/redeem", extra={"x-agent-client": CLIENT_KIND})
+        except DoorGone:
+            await self.db.execute("DELETE FROM agent_talks WHERE id = ?", (talk_id,))
+            return Outcome(f"{door.host} did not answer the redeem. The link may or may not be spent: opening it again will show which.", error=True)
+        token = answer.body.get("token")
+        if answer.status != 201 or not isinstance(token, str) or not token or len(token) > 512:
+            await self.db.execute("DELETE FROM agent_talks WHERE id = ?", (talk_id,))
+            return Outcome("The door would not open this link. Ask the operator for a new one.", error=True)
+        conversation_state = PENDING if answer.body.get("status") == PENDING else OPEN
+        await self._update(talk_id, token=token, state=conversation_state, waiting_for="")
+        talk = await self.talk(talk_id)
+        parts = [self._state_line(talk, f"Opened a conversation with the agent at {door.host}, as {talk_id}.")]
+        if mode:
+            parts.append("Its door says this is a stand-in that knows only what its owner wrote down." if mode == "stand_in" else "Its door says this is its owner's own agent.")
+        if conversation_state == PENDING:
+            parts.append("Its owner admits a first contact by hand, so the first answer may take a while.")
+        if topic:
+            parts.append(agent_talk.fence_topic(topic, door.host))
+            self.manager.touch_run(session_id)
+            parts.append(agent_talk.TOUCHED_NOTE)
+        return Outcome("\n".join(parts), talk=talk_id)
+
+    def _state_line(self, talk: Any, lead: str = "") -> str:
+        state = talk["state"]
+        if state == CLOSED:
+            said = CLOSED_WORDS.get(str(talk["reason"]), CLOSED_WORDS["ended"])
+        elif talk["waiting_for"] == "owner":
+            said = "Its owner has not admitted this conversation yet."
+        elif talk["waiting_for"] == "reply":
+            said = "The door says it is no use waiting for now: tell the operator, and read again later." if talk["quiet"] else "A reply is owed."
+        else:
+            said = "Nothing is owed."
+        sent = f"{talk['sends']} of {MAX_SENDS} messages sent."
+        return " ".join(part for part in (lead, said, sent, f"[conversation {talk['id']}]") if part)
+
+    async def _send(self, state: SessionState, talk: Any, text: str, wait: int) -> Outcome:
+        session_id = state.session.id
+        if talk["state"] in (CLOSED, OPENING):
+            return Outcome(self._state_line(talk), error=True, talk=talk["id"])
+        if talk["sends"] >= MAX_SENDS:
+            return Outcome(f"This conversation has used its {MAX_SENDS} messages. Tell the operator; talking on needs a new link.", error=True, talk=talk["id"])
+        run_id = state.run_id or ""
+        turn = state.guest_turn
+        if turn is not None and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND role = ? AND run_id = ?", (talk["id"], US, run_id)) is not None:
+            return Outcome("A turn started by a reply sends once. End the turn; the next reply starts another.", error=True, talk=talk["id"])
+        clean = self.manager.redactor.conceal_named(text).strip()
+        if not clean:
+            return Outcome("text is the message to send.", error=True, talk=talk["id"])
+        if len(clean) > talk["max_text"]:
+            return Outcome(f"A message may be at most {talk['max_text']} characters.", error=True, talk=talk["id"])
+        if await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is not None:
+            return Outcome("A message of this conversation is already waiting for the operator. Wait for them or end your turn.", error=True, talk=talk["id"])
+        hold = self._why_hold(talk, clean, session_id)
+        message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold)
+        if hold:
+            self.manager.ask_operator(
+                session_id, key=ask_key(message_id), tool=agent_talk.TOOL, text=f"To {talk['host']}: {clean}", on_answer=ASK_HOOK, extra={"talk": talk["id"], "message": message_id},
+            )
+            settled = await self._await_decision(talk["id"], message_id, wait)
+            if settled == HELD:
+                return Outcome(f"Not sent: {HELD_WORDS[hold]}, so it is with the operator. End your turn unless you have other work; nothing goes until they let it.", talk=talk["id"])
+            if settled == REFUSED:
+                return Outcome("The operator did not let this message go. Nothing was sent.", talk=talk["id"])
+        else:
+            await self._post(talk["id"], message_id, clean)
+            settled = (await self._message(message_id))["state"]
+        fresh = await self.talk(talk["id"])
+        if settled != SENT:
+            return Outcome(self._send_failure(fresh, await self._message(message_id)), error=True, talk=talk["id"])
+        return await self._reply_or_status(state, fresh, wait, "Sent.")
+
+    def _why_hold(self, talk: Any, text: str, session_id: str) -> str:
+        if self.manager.redactor.contains_secret(text):
+            return "secret"
+        touch = self.manager.touched(session_id)
+        if touch is not None and touch.get("looked"):
+            return "looked"
+        if talk["review"] == "all":
+            return "all"
+        return "first" if talk["review"] == "first" and talk["sends"] == 0 else ""
+
+    async def _insert_message(self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "") -> int:
+        now = _now()
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (talk_id, role, text, state, run_id, note, now),
+            )
+            message_id = int(cursor.lastrowid or 0)
+            await cursor.close()
+        return message_id
+
+    async def _message(self, message_id: int) -> Any:
+        return await self.db.fetchone("SELECT * FROM agent_talk_messages WHERE id = ?", (message_id,))
+
+    def _send_failure(self, talk: Any, message: Any) -> str:
+        note = str(message["note"])
+        if talk["state"] == CLOSED:
+            return self._state_line(talk)
+        if message["state"] == UNSURE:
+            return "The door did not answer, so this message may or may not have arrived. Read before you send it again."
+        if note.startswith("limit:"):
+            return f"Not sent. {LIMIT_WORDS.get(note[6:], 'A limit of that link was reached.')} Tell the operator."
+        if note == "busy":
+            return "Not sent: earlier messages are still waiting for an answer. Read first."
+        return "Not sent: the door would not take this message."
+
+    async def _post(self, talk_id: str, message_id: int, text: str) -> None:
+        """Send one message and record what became of it. The only caller of ``POST /a/messages``."""
+        async with self._locks.setdefault(talk_id, asyncio.Lock()):
+            talk = await self.talk(talk_id)
+            if talk is None or talk["state"] == CLOSED or not talk["token"]:
+                await self._mark(message_id, FAILED)
+                return
+            await self._mark(message_id, SENDING)
+            try:
+                answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body={"text": text})
+            except (DoorGone, NotReachable):
+                await self._mark(message_id, UNSURE)
+                await self._update(talk_id, waiting_for="reply", quiet=0, last_at=_now())
+                self.follow(talk_id)
+                return
+            word = answer.body.get("status")
+            if answer.status == 202:
+                await self._mark(message_id, SENT)
+                await self.db.execute(
+                    "UPDATE agent_talks SET sends = sends + 1, waiting_for = ?, quiet = 0, last_at = ? WHERE id = ?",
+                    ("owner" if word == PENDING else "reply", _now(), talk_id),
+                )
+                self.follow(talk_id)
+            elif answer.status in (401, 410):
+                await self._mark(message_id, FAILED)
+                await self._close(talk_id, "token" if answer.status == 401 else self._reason(answer.body))
+            elif word == "limit":
+                limit = answer.body.get("limit")
+                await self._mark(message_id, FAILED, note=f"limit:{limit}" if limit in LIMIT_WORDS else "limit:")
+            else:
+                await self._mark(message_id, FAILED, note="busy" if word == "busy" else "refused")
+
+    async def _mark(self, message_id: int, state: str, *, note: str | None = None) -> None:
+        if note is None:
+            await self.db.execute("UPDATE agent_talk_messages SET state = ? WHERE id = ?", (state, message_id))
+        else:
+            await self.db.execute("UPDATE agent_talk_messages SET state = ?, note = ? WHERE id = ?", (state, note, message_id))
+
+    async def _await_decision(self, talk_id: str, message_id: int, wait: int) -> str:
+        deadline = time.monotonic() + wait
+        while True:
+            news = self._news.setdefault(talk_id, asyncio.Event())
+            row = await self._message(message_id)
+            state = str(row["state"]) if row is not None else REFUSED
+            left = deadline - time.monotonic()
+            if state != HELD or left <= 0:
+                return state
+            with suppress(TimeoutError):
+                await asyncio.wait_for(news.wait(), left)
+
+    async def _read(self, state: SessionState, talk: Any, wait: int) -> Outcome:
+        return await self._reply_or_status(state, talk, wait, "")
+
+    async def _reply_or_status(self, state: SessionState, talk: Any, wait: int, lead: str) -> Outcome:
+        talk_id = talk["id"]
+        self._readers[talk_id] = self._readers.get(talk_id, 0) + 1
+        try:
+            deadline = time.monotonic() + wait
+            self.follow(talk_id)
+            while True:
+                news = self._news.setdefault(talk_id, asyncio.Event())
+                unread = await self._unread(talk_id)
+                talk = await self.talk(talk_id)
+                left = deadline - time.monotonic()
+                if unread or talk is None or talk["state"] == CLOSED or left <= 0 or talk["quiet"] or not talk["waiting_for"]:
+                    break
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(news.wait(), left)
+        finally:
+            self._readers[talk_id] -= 1
+            if not self._readers[talk_id]:
+                del self._readers[talk_id]
+        if talk is None:
+            return Outcome("This conversation is gone.", error=True)
+        if not unread:
+            return Outcome(self._state_line(talk, lead), talk=talk_id)
+        return Outcome("\n".join([self._state_line(talk, lead), *await self._fenced(unread, talk, state.run_id or ""), agent_talk.TOUCHED_NOTE]), talk=talk_id)
+
+    async def _fenced(self, rows: list[Any], talk: Any, run_id: str) -> list[str]:
+        """Hand unread replies to a run: fenced, marked read by that run, and the run touched. In that order of
+        thought and the reverse in code: the run is touched first, so nothing can go wrong between its reading
+        a stranger and its being treated as having done so."""
+        self.manager.touch_run(talk["session_id"])
+        rules = getattr(self.manager, "action_rules", None)
+        out: list[str] = []
+        for row in rows:
+            signs: list[str] = []
+            if rules is not None and hasattr(rules, "injection_check"):
+                with suppress(Exception):  # a check that cannot run must not cost the reply: the fence is what holds
+                    signs = await rules.injection_check(f"the door at {talk['host']}", row["text"])
+            out.append(agent_talk.fence_reply(row["text"], talk["host"], signs=signs))
+            await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
+        return out
+
+    # -- following a door ---------------------------------------------------------------
+
+    def _spawn(self, work: Any, name: str) -> asyncio.Task[Any]:
+        task = asyncio.create_task(work, name=name)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
+
+    def follow(self, talk_id: str) -> None:
+        """Hold the door's read for this conversation, once. Nothing to follow ends the task at once."""
+        running = self._followers.get(talk_id)
+        if running is None or running.done():
+            self._followers[talk_id] = self._spawn(self._follow(talk_id), f"agent-talk:{talk_id}")
+
+    async def _follow(self, talk_id: str) -> None:
+        failures = 0
+        while True:
+            talk = await self.talk(talk_id)
+            if talk is None or talk["state"] == CLOSED or not talk["token"] or not talk["waiting_for"]:
+                return
+            started = time.monotonic()
+            try:
+                answer = await self.dialer.call(
+                    "GET", f"{talk['base_url']}/a/messages?after={talk['cursor']}&wait={DOOR_WAIT_SECONDS}", token=talk["token"], timeout=DOOR_WAIT_SECONDS + CALL_SECONDS,
+                )
+            except (DoorGone, NotReachable) as exc:
+                failures += 1
+                logger.debug("the door of conversation %s did not answer: %s", talk_id, exc)
+                await asyncio.sleep(min(FAILURE_BACKOFF_MAX, MIN_CYCLE_SECONDS * 2**failures))
+                continue
+            failures = 0
+            try:
+                pause = await self._took(talk, answer)
+            except Exception:  # noqa: BLE001 — nothing a door sends may stop what follows it silently
+                logger.exception("could not read what the door of conversation %s sent", talk_id)
+                pause = QUIET_POLL_SECONDS
+            if pause is None:
+                return
+            await asyncio.sleep(max(pause, MIN_CYCLE_SECONDS - (time.monotonic() - started)))
+
+    async def _took(self, talk: Any, answer: DoorAnswer) -> float | None:
+        """Take in one read. How long to wait before the next, or ``None`` when there is nothing more to look for."""
+        talk_id = talk["id"]
+        if answer.status == 401:
+            await self._close(talk_id, "token")
+            return None
+        if answer.status == 410:
+            await self._close(talk_id, self._reason(answer.body))
+            return None
+        if answer.status == 429:
+            return answer.retry_after if answer.retry_after is not None else 15.0
+        if answer.status not in (200, 202):
+            return QUIET_POLL_SECONDS
+        taken = await self._store(talk, answer.body.get("messages"), answer.body.get("cursor"))
+        word = answer.body.get("status")
+        if word == CLOSED:
+            await self._close(talk_id, self._reason(answer.body))
+            return None
+        if word in (OPEN, PENDING) and word != talk["state"]:
+            await self._update(talk_id, state=word)
+        stop = answer.body.get("stop_polling") is True
+        waiting = answer.body.get("waiting_for")
+        if stop and (taken or waiting == "nothing"):
+            await self._update(talk_id, waiting_for="", quiet=0)
+            return None
+        if stop:
+            await self._update(talk_id, waiting_for="owner" if waiting == "owner" else "reply", quiet=1)
+            self._wake_readers(talk_id)
+            return max(QUIET_POLL_SECONDS, answer.retry_after or 0.0)
+        await self._update(talk_id, waiting_for="owner" if waiting == "owner" else "reply", quiet=0)
+        return 0.0
+
+    def _reason(self, body: dict[str, Any]) -> str:
+        reason = body.get("reason")
+        return reason if reason in REASONS else "ended"
+
+    async def _store(self, talk: Any, items: Any, cursor: Any) -> int:
+        """Keep what a read brought, each message once, with the new cursor in the same breath."""
+        if not isinstance(items, list):
+            return 0
+        talk_id = talk["id"]
+        last = int(talk["cursor"])
+        kept: list[tuple[str, str]] = []
+        room = MAX_MESSAGES - int((await self.db.fetchone("SELECT count(*) AS n FROM agent_talk_messages WHERE talk_id = ?", (talk_id,)))["n"])
+        async with self.db.transaction() as conn:
+            for item in items[:MAX_PER_READ]:
+                if not isinstance(item, dict) or room <= 0:
+                    continue
+                door_id, sender, text = item.get("id"), item.get("from"), item.get("text")
+                if isinstance(door_id, bool) or not isinstance(door_id, int) or door_id <= last or sender not in ("agent", "door") or not isinstance(text, str):
+                    continue
+                clean = inert(text)[:MAX_TEXT]
+                if not clean:
+                    continue
+                role = THEM if sender == "agent" else DOOR
+                await conn.execute(
+                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (talk_id, role, clean, UNREAD, door_id, _now()),
+                )
+                last = door_id
+                room -= 1
+                kept.append((role, clean))
+            await conn.execute("UPDATE agent_talks SET cursor = ?, last_at = ? WHERE id = ?", (last, _now() if kept else talk["last_at"], talk_id))
+        if room <= 0:
+            await self._close(talk_id, "too_long")
+        if kept:
+            await self._arrived(talk, kept)
+        return len(kept)
+
+    def _wake_readers(self, talk_id: str) -> None:
+        news = self._news.pop(talk_id, None)
+        if news is not None:
+            news.set()
+
+    async def _arrived(self, talk: Any, kept: list[tuple[str, str]]) -> None:
+        talk_id = talk["id"]
+        self._wake_readers(talk_id)
+        spoken = [text for role, text in kept if role == THEM]
+        if spoken:
+            await self._count_repeats(talk, spoken)
+        fresh = await self.talk(talk_id)
+        if fresh is None or self._readers.get(talk_id):
+            return
+        if fresh["wake_turns"] > 0 and spoken:
+            self.wake(talk_id)
+        elif spoken:
+            await self._tell(fresh, "reply", every=REPLY_NOTICE_SECONDS)
+
+    async def _count_repeats(self, talk: Any, spoken: list[str]) -> None:
+        rows = await self.db.fetchall("SELECT text FROM agent_talk_messages WHERE talk_id = ? AND role = ? ORDER BY id DESC LIMIT ?", (talk["id"], THEM, len(spoken) + 1))
+        texts = [_same(str(row["text"])) for row in rows]
+        repeats = int(talk["repeats"]) + 1 if len(texts) >= 2 and len(set(texts)) == 1 else 0
+        await self._update(talk["id"], repeats=repeats)
+        if repeats >= REPEATS_ALLOWED and talk["wake_turns"] > 0:
+            # The surest sign of two agents politely stuck, and each turn of it is paid for on both sides.
+            await self._update(talk["id"], wake_turns=0)
+            await self._tell(talk, "repeats")
+
+    async def _tell(self, talk: Any, key: str, *, every: float = 0.0) -> None:
+        """A notice in this code's words and the host's name. Never a word of the reply: this text travels to
+        Telegram, where a link in a stranger's message would be fetched by a preview."""
+        notifications = getattr(self.app, "notifications", None)
+        if notifications is None:
+            return
+        now = time.monotonic()
+        mark = (talk["id"], key)
+        if every and now - self._told.get(mark, -every) < every:
+            return
+        self._told[mark] = now
+        lang = notifications.language()
+        session_id = str(talk["session_id"])
+        await notifications.post(Draft(
+            "system", render(f"talk.{key}", lang, host=talk["host"]), render(f"talk.{key}.body", lang), kind=f"agent_talk_{key}", session_id=session_id, link=chat_link(session_id),
+            source="agent_talk", dedupe_key=f"agent-talk-{key}:{talk['id']}:{int(time.time() // 3600)}",
+        ))
+
+    # -- a reply that opens a turn ------------------------------------------------------
+
+    def wake(self, talk_id: str) -> None:
+        running = self._wakers.get(talk_id)
+        if running is None or running.done():
+            self._wakers[talk_id] = self._spawn(self._wake(talk_id), f"agent-talk-wake:{talk_id}")
+
+    async def _wake(self, talk_id: str) -> None:
+        """Open a turn on the unread replies once the chat is free. Not at all once something has read them."""
+        deadline = time.monotonic() + CHAT_FREE_SECONDS
+        while time.monotonic() < deadline:
+            talk = await self.talk(talk_id)
+            if talk is None or talk["state"] == CLOSED or talk["wake_turns"] <= 0:
+                return
+            unread = await self._unread(talk_id)
+            if not unread:
+                return
+            if self._readers.get(talk_id):
+                await asyncio.sleep(1.0)
+                continue
+            session_id = str(talk["session_id"])
+            manager = self.manager
+            why = await manager.guest_ready(session_id, "none")
+            price = await manager.guest_price(session_id)
+            if why or price is None:
+                logger.warning("a reply could not wake session %s: %s", session_id, why or "the chat's model has no known price")
+                return
+            runs = (await self.runs_of(talk))[-RUNS_KEPT:]
+            usd_left: float | None = None
+            if any(price):
+                usd_left = min(float(talk["wake_usd"]), TURN_USD)
+                if usd_left <= 0 or await manager.guest_first_call_usd(session_id, price, runs=runs) > usd_left:
+                    await self._wake_spent(talk)
+                    return
+            said = "\n\n".join(str(row["text"]) for row in unread)
+            body = "\n".join(agent_talk.fence_reply(str(row["text"]), talk["host"]) for row in unread)
+            turn = GuestTurn(talk_id, str(talk["host"]), "none", usd_left, said, "reply", tuple(runs))
+            try:
+                run_id = await manager.submit(session_id, body, as_answer=False, origin=turn.origin, via="agent_talk", guest=turn)
+            except GuestTurnBusy:
+                await asyncio.sleep(1.0)
+                continue
+            except (RuntimeError, KeyError) as exc:
+                logger.warning("a reply could not open a turn in session %s: %s", session_id, exc)
+                return
+            for row in unread:
+                await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
+            # Before the turn ends and not after: a turn cut off by a restart was still a turn.
+            await self.db.execute("UPDATE agent_talks SET wake_turns = wake_turns - 1 WHERE id = ?", (talk_id,))
+            self._wakes[run_id] = talk_id
+            if not manager.is_running(session_id):
+                await self.on_run_finished(session_id, run_id, "completed")
+            return
+
+    async def _wake_spent(self, talk: Any) -> None:
+        await self._update(talk["id"], wake_turns=0)
+        await self._tell(talk, "wake_spent")
+
+    async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
+        if status == "awaiting":
+            return
+        talk_id = self._wakes.pop(run_id, None)
+        if talk_id is None:
+            return
+        spent, _ = await self.manager.spend(run_id=run_id)
+        await self.db.execute("UPDATE agent_talks SET wake_usd = max(0, wake_usd - ?) WHERE id = ?", (float(spent), talk_id))
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] == CLOSED:
+            return
+        price = await self.manager.guest_price(session_id)
+        if talk["wake_turns"] <= 0 or (price is not None and any(price) and talk["wake_usd"] <= 0):
+            await self._wake_spent(talk)
+        elif await self._unread(talk_id):
+            self.wake(talk_id)
+
+    # -- what the operator does ---------------------------------------------------------
+
+    async def decided(self, session_id: str, request: dict[str, Any], allowed: bool) -> None:
+        """The answer on a message's card."""
+        talk_id, message_id = str(request.get("talk") or ""), request.get("message")
+        if isinstance(message_id, int):
+            await self.decide(talk_id, message_id, allowed)
+
+    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "") -> bool:
+        """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again."""
+        talk = await self.talk(talk_id)
+        message = await self._message(message_id)
+        if talk is None or message is None or message["talk_id"] != talk_id or message["state"] != HELD:
+            return False
+        if allowed:
+            await self._post(talk_id, message_id, str(message["text"]))
+            self.manager.touch_sent(talk["session_id"])
+        else:
+            await self._mark(message_id, REFUSED)
+        if via:
+            await self.manager.settle_ask(talk["session_id"], ask_key(message_id), "allow" if allowed else "deny", via=via)
+        self._wake_readers(talk_id)
+        return True
+
+    async def configure(self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None) -> None:
+        if review is not None:
+            await self._update(talk_id, review=review)
+        if wake_turns is not None:
+            await self._update(talk_id, wake_turns=wake_turns, wake_usd=wake_usd or 0.0)
+            if wake_turns > 0:
+                self.wake(talk_id)
+
+    async def end(self, talk_id: str, *, reason: str = "ended") -> None:
+        """Close a conversation on both sides. The far side's part is a courtesy: this side is closed either way."""
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] == CLOSED:
+            return
+        if talk["token"]:
+            with suppress(DoorGone, NotReachable):
+                await self.dialer.call("POST", f"{talk['base_url']}/a/end", token=talk["token"])
+        await self._close(talk_id, reason, quiet=True)
+
+    async def _close(self, talk_id: str, reason: str, *, quiet: bool = False) -> None:
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] == CLOSED:
+            return
+        await self._update(talk_id, state=CLOSED, reason=reason, token="", waiting_for="", quiet=0, wake_turns=0, closed_at=_now())
+        held = await self.db.fetchall("SELECT id FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk_id, HELD))
+        for row in held:
+            await self._mark(int(row["id"]), REFUSED)
+            await self.manager.settle_ask(talk["session_id"], ask_key(int(row["id"])), "deny", via="app")
+        self._wake_readers(talk_id)
+        if not quiet:
+            await self._tell(talk, "closed")
+
+    async def on_session_deleted(self, session_id: str) -> None:
+        for talk in await self.talks_of(session_id):
+            await self.end(talk["id"])
+            follower = self._followers.pop(talk["id"], None)
+            if follower is not None:
+                follower.cancel()
+
+    # -- what the agent is told at the start of a turn ------------------------------------
+
+    async def turn_notes(self, state: SessionState) -> str:
+        """The conversations of this chat, for a turn of the operator's. In the turn context and not the prompt, for
+        the prompt's cache, and written here: nothing in it is a word of the other side's but the host's name."""
+        talks = await self.talks_of(state.session.id)
+        if not talks or state.run_origin != "operator":
+            return ""
+        lines: list[str] = []
+        for talk in talks:
+            if talk["state"] == CLOSED:
+                continue
+            unread = len(await self._unread(talk["id"]))
+            lines.append(f"- An open conversation with the agent at {talk['host']} ({talk['id']}): {talk['sends']} sent, {unread} replies unread. Use AgentTalk for it if the operator's message is about it.")
+        if await self.db.fetchone(
+            f"SELECT 1 FROM agent_talk_messages WHERE role = ? AND state = ? AND talk_id IN ({','.join('?' * len(talks))}) LIMIT 1",
+            (THEM, READ, *(talk["id"] for talk in talks)),
+        ) is not None:
+            lines.append(agent_talk.LATER_NOTE)
+        return "\n".join(lines)
+
+    # -- the long run -------------------------------------------------------------------
+
+    async def _sweep(self) -> None:
+        cutoff = (datetime.now(UTC) - timedelta(seconds=IDLE_SECONDS)).isoformat()
+        for talk in await self.db.fetchall("SELECT * FROM agent_talks WHERE state != ?", (CLOSED,)):
+            if talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
+                await self.end(talk["id"], reason="idle")
+                await self._tell(talk, "closed")
+                continue
+            if talk["waiting_for"]:
+                self.follow(talk["id"])
+            if talk["wake_turns"] > 0:
+                self.wake(talk["id"])
+
+    async def serve(self) -> None:
+        """Pick up what a restart left, then keep the slow clock: idle ends, and anything that fell off.
+
+        A message caught on its way out is left as sent-or-not: sending it again could be saying it twice.
+        """
+        await self.db.execute("UPDATE agent_talk_messages SET state = ? WHERE state = ?", (UNSURE, SENDING))
+        await self.db.execute("DELETE FROM agent_talks WHERE state = ? AND token = ''", (OPENING,))
+        try:
+            while True:
+                try:
+                    await self._sweep()
+                except Exception:  # noqa: BLE001 — the next sweep may do better; nothing here may end the task
+                    logger.exception("the sweep of agent talks failed")
+                await asyncio.sleep(SWEEP_SECONDS)
+        finally:
+            for task in list(self._background):
+                task.cancel()
+
+
+def talks_of(app: Application | Any) -> AgentTalks | None:
+    return (getattr(app, "extensions", None) or {}).get(EXTENSION_KEY)
+
+
+_filter_installed: list[bool] = []
+
+
+def install_log_filter() -> None:
+    if not _filter_installed:
+        logging.getLogger("httpx").addFilter(HideDoorPaths())
+        _filter_installed.append(True)
+
+
+async def install(app: Application) -> list[asyncio.Task[None]]:
+    talks = AgentTalks(app)
+    app.extensions[EXTENSION_KEY] = talks
+    install_log_filter()
+    manager = app.manager
+    if manager is None:
+        return []
+    manager.service_hooks["agent_talk"] = talks.tool
+    manager.service_hooks["agent_talk_notes"] = talks.turn_notes
+    manager.answer_hooks[ASK_HOOK] = talks.decided
+    manager.on_finished(talks.on_run_finished)
+    manager.delete_hooks.append(talks.on_session_deleted)
+    return [asyncio.create_task(talks.serve(), name="agent-talks")]
+
+
+__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]

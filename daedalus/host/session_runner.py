@@ -88,6 +88,7 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.host import (
+    agent_talk,
     attached_files,
     capabilities,
     guest_turns,
@@ -116,7 +117,7 @@ from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
-from daedalus.host.policy import ASK, Decision, Policy, Rule, canonical, similar_covers, similar_grant
+from daedalus.host.policy import ASK, Decision, Policy, Rule, approval_key, canonical, similar_covers, similar_grant
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.rules_gate import RulesGate
@@ -4147,6 +4148,59 @@ class SessionManager:
                 return redact.redact(self.redactor.conceal_named(text)) if text else ""
         return ""
 
+    def touch_run(self, session_id: str) -> None:
+        """A stranger's words reached this chat's run: it is touched until the operator writes (:mod:`daedalus.host.agent_talk`)."""
+        state = self._states.get(session_id)
+        if state is None or agent_talk.touch_of(state.metadata) is not None:
+            return
+        for meta in (state.metadata, state.session.metadata):
+            meta[agent_talk.TOUCHED_KEY] = {"at": time.time(), "looked": False}
+        self._spawn_background(self.sessions.update_metadata(session_id, state.session.metadata), f"agent-talk-touch:{session_id}")
+
+    def touched(self, session_id: str) -> dict[str, Any] | None:
+        state = self._states.get(session_id)
+        return agent_talk.touch_of(state.metadata) if state is not None else None
+
+    def _touch_looked(self, state: SessionState) -> None:
+        """The touched run went and read or ran something: its next message out may carry what it found."""
+        touch = agent_talk.touch_of(state.metadata)
+        if touch is None or touch.get("looked"):
+            return
+        for meta in (state.metadata, state.session.metadata):
+            meta[agent_talk.TOUCHED_KEY] = {**touch, "looked": True}
+        self._spawn_background(self.sessions.update_metadata(state.session.id, state.session.metadata), f"agent-talk-looked:{state.session.id}")
+
+    async def settle_ask(self, session_id: str, key: str, decision: str, *, via: str) -> None:
+        """Close a request of :meth:`ask_operator` that was answered some other way, as every front showing it hears."""
+        state = self._states.get(session_id)
+        if state is None or key not in (state.metadata.get("policy_pending") or {}):
+            return
+        self._drop_pending(state, key)
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": decision, "via": via})
+
+    def touch_sent(self, session_id: str) -> None:
+        """A person let a message of the touched run out: what it had looked at has been seen."""
+        state = self._states.get(session_id)
+        touch = agent_talk.touch_of(state.metadata) if state is not None else None
+        if state is None or touch is None or not touch.get("looked"):
+            return
+        for meta in (state.metadata, state.session.metadata):
+            meta[agent_talk.TOUCHED_KEY] = {**touch, "looked": False}
+        self._spawn_background(self.sessions.update_metadata(session_id, state.session.metadata), f"agent-talk-looked:{session_id}")
+
+    async def _clear_touch(self, state: SessionState) -> None:
+        if agent_talk.TOUCHED_KEY not in state.metadata:
+            return
+        for meta in (state.metadata, state.session.metadata):
+            meta.pop(agent_talk.TOUCHED_KEY, None)
+        await self.sessions.update_metadata(state.session.id, state.session.metadata)
+
+    def ordinary_chat(self, state: SessionState) -> bool:
+        """A chat of the operator's: not a project's orchestrator, a subagent, a side question or anything else
+        that runs with nobody reading it as a conversation."""
+        return not (any(state.metadata.get(key) for key in NOT_OPERATOR_FACING) or self.is_dispatcher(state) or self.is_orchestrator(state) or self.is_companion(state))
+
     async def guest_ready(self, session_id: str, tools: str) -> str:
         """Why a guest's turn with ``tools`` cannot run in this chat now; empty when it can.
 
@@ -4188,16 +4242,18 @@ class SessionManager:
             return None
         return float(pricing.input), float(pricing.output)
 
-    async def guest_first_call_usd(self, session_id: str, price: tuple[float, float]) -> float:
+    async def guest_first_call_usd(self, session_id: str, price: tuple[float, float], *, runs: Sequence[str] | None = None) -> float:
         """A guess at the first model call of a turn in this chat, before anything is spent on it.
 
         The cap on a run is read after each call, so a single call on a long chat could pass it whole.
-        This is the fresh-input price of the whole history: what a cold cache costs.
+        This is the fresh-input price of the whole history: what a cold cache costs. ``runs`` limits it to what
+        a turn opened by a reply will be sent, which on a long chat is a small part of it.
         """
         state = await self.get_state(session_id)
         if state is None:
             return 0.0
-        chars = sum(len(message.model_dump_json()) for message in await self._working_history(state))
+        history = await self._working_history(state)
+        chars = sum(len(message.model_dump_json()) for message in (history if runs is None else agent_talk.for_reply(history, "", runs)))
         return (chars / 3 * price[0] + GUEST_ESTIMATED_OUTPUT_TOKENS * price[1]) / 1_000_000
 
     def file_scope(self, state: SessionState) -> str | None:
@@ -4586,7 +4642,8 @@ class SessionManager:
         turn starts, but only a turn that stops can be held to what was left of them.
         """
         if state.guest_turn is not None:
-            return RunBounds(guest_turns.MAX_ITERATIONS, state.guest_turn.usd_left, "guest.usd_per_turn")
+            limit = agent_talk.WAKE_ITERATIONS if state.guest_turn.kind == "reply" else guest_turns.MAX_ITERATIONS
+            return RunBounds(limit, state.guest_turn.usd_left, "guest.usd_per_turn")
         if self.is_orchestrator(state):
             limits = self.config.orchestrator
             return RunBounds(limits.max_iterations, limits.usd_per_run, "orchestrator.usd_per_run")
@@ -4856,8 +4913,9 @@ class SessionManager:
         build = engine.context_manager.build_context
 
         def build_context(*args: Any, **options: Any) -> Any:
-            if state.guest_turn is not None and "history" in options:
-                options["history"] = guest_turns.for_guest(options["history"], state.run_id or "")
+            turn = state.guest_turn
+            if turn is not None and "history" in options:
+                options["history"] = agent_talk.for_reply(options["history"], state.run_id or "", turn.runs) if turn.kind == "reply" else guest_turns.for_guest(options["history"], state.run_id or "")
             return build(*args, **options)
 
         engine.context_manager.build_context = build_context  # type: ignore[method-assign]
@@ -5189,7 +5247,9 @@ class SessionManager:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
             state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
             self.secrets.hold_back(state.session.id, state.guest_turn is not None)
-            if state.guest_turn is not None and not state.metadata.get(guest_turns.SEEN_KEY):
+            if state.run_origin == "operator" and not continue_turn:
+                await self._clear_touch(state)
+            if state.guest_turn is not None and state.guest_turn.kind == "guest" and not state.metadata.get(guest_turns.SEEN_KEY):
                 state.metadata[guest_turns.SEEN_KEY] = True
                 state.session.metadata[guest_turns.SEEN_KEY] = True
             if state.guest_turn is not None and state.guest_turn.tools == "all":
@@ -5376,6 +5436,16 @@ class SessionManager:
             # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
             # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
             volatile.append("\n\n" + style)
+        if str(message.metadata.get("daedalus.origin") or "operator") == "operator" and (links := agent_talk.find_links("".join(b.text for b in message.content_blocks if isinstance(b, TextBlock)))):
+            # Read from the words alone: nothing is fetched, and the group is only put within reach.
+            volatile.append("\n" + agent_talk.LINK_NOTE.format(hosts=", ".join(dict.fromkeys(link.host for link in links))))
+            await self._queue_group_load(state, agent_talk.GROUP)
+        if (talks := self.service_hooks.get("agent_talk_notes")) is not None:
+            try:
+                if said_of_talks := await talks(state):
+                    volatile.append("\n" + said_of_talks)
+            except Exception:  # noqa: BLE001 — a turn starts without this note rather than not at all
+                logger.exception("the notes on agent talks failed for session %s", state.session.id)
         if state.metadata.get(guest_turns.SEEN_KEY):
             volatile.append("\n" + guest_turns.LATER_TURN_NOTE)
         if state.metadata.get(guest_turns.WROTE_KEY):
@@ -5411,7 +5481,8 @@ class SessionManager:
         """
         blocks = list(message.content_blocks)
         said = blocks[at].text  # type: ignore[union-attr]
-        blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{prompts.turn_context(notes=guest_turns.turn_note(turn))}")
+        note = agent_talk.reply_note(turn.label) if turn.kind == "reply" else guest_turns.turn_note(turn)
+        blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{prompts.turn_context(notes=note)}")
         words = operator_words_metadata(str(message.metadata.get("daedalus.origin") or "operator"), prompts.without_turn_context(said))
         return message.model_copy(update={"content_blocks": blocks, "metadata": {**message.metadata, **words}})
 
@@ -6755,6 +6826,11 @@ class SessionManager:
         queued = [str(g) for g in (state.metadata.get(tool_groups.LOAD_NOW_KEY) or ()) if str(g) in TOOL_GROUPS]
         return tuple(g for g in dict.fromkeys(carried + queued) if admitted.get(g) and loads.get(g) != "eager")
 
+    async def _queue_group_load(self, state: SessionState, group: str) -> None:
+        for meta in (state.metadata, state.session.metadata):
+            meta[tool_groups.LOAD_NOW_KEY] = list(dict.fromkeys([*(meta.get(tool_groups.LOAD_NOW_KEY) or ()), group]))
+        await self.sessions.update_metadata(state.session.id, state.session.metadata)
+
     async def _clear_queued_group_loads(self, state: SessionState) -> None:
         if tool_groups.LOAD_NOW_KEY not in state.metadata:
             return
@@ -7199,6 +7275,10 @@ class SessionManager:
             turn = state.guest_turn if state is not None else None
             if turn is not None and (refused := self._guest_refused(state, turn, tool, arguments)) is not None:
                 return refused
+            touch = agent_talk.touch_of(state.metadata) if state is not None and turn is None else None
+            standing = agent_talk.standing_of(tool) if touch is not None else "free"
+            if standing == "refused":
+                return Decision("deny", agent_talk.REFUSED_WHY, agent_talk.RULE)
             if state is not None and tool == "AskUser" and (asked := self._asks_about_pending(state, arguments)):
                 return asked
             policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
@@ -7206,10 +7286,20 @@ class SessionManager:
             # What the operator allowed for their own work is theirs: a guest neither spends nor inherits it.
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None and turn is None else set()
             similar = list(state.metadata.get("policy_similar") or []) if state is not None and turn is None else []
+            if touch is not None:
+                # Only what the operator allowed knowing about the reply: a grant a touched turn could
+                # spend from before would answer a question nobody was shown, and so would a standing one.
+                grants = {k for k in grants if float(state.metadata["policy_grants"][k]) - GRANT_TTL_SECONDS >= float(touch.get("at") or 0)}
+                similar = []
             decision = policy.evaluate(tool, arguments, grants=grants, similar=similar)
             # The operator's action rules, on top: they turn an allowed call into a question, a
             # handoff or a call a review stands before, and never loosen what the policy said.
             decision = self.action_rules.apply(state, tool, arguments, decision, grants, similar)
+            if standing == "held" and decision.action == "allow" and not decision.key:
+                key = approval_key(tool, arguments)
+                decision = Decision("allow", f"granted by the operator ({key})", agent_talk.RULE, key=key, hosts=decision.hosts) if key in grants else Decision("ask", agent_talk.HELD_WHY, agent_talk.RULE, key=key, hosts=decision.hosts)
+            if touch is not None and decision.action == "allow" and tool not in agent_talk.QUIET_TOOLS:
+                self._touch_looked(state)
             if turn is not None and decision.action != "allow":
                 # Never a card. An allowed card starts a run with the operator's origin and tools, over
                 # what a guest asked for, and nothing on it says so; and the turn would wait on a person.
@@ -7271,7 +7361,8 @@ class SessionManager:
         pending[decision.key] = {"tool": tool, "text": self.redactor.redact(canonical(tool, arguments))[:300], "at": datetime.now(UTC).isoformat()}
         # The family "Allow similar" would grant, worked out now: the arguments are gone by the
         # time the operator answers, and the pending entry keeps only a redacted preview.
-        family = similar_grant(tool, arguments, decision.rule)
+        # A touched run's questions have no family: "allow the like" is exactly what a stranger would ask for.
+        family = similar_grant(tool, arguments, decision.rule) if decision.rule != agent_talk.RULE else None
         if family is not None:
             pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
         for meta in (state.metadata, state.session.metadata):
@@ -7440,7 +7531,7 @@ class SessionManager:
     def _permission_payload(self, state: SessionState, decision: Decision, refused: dict[str, Any]) -> dict[str, Any]:
         # A rule about the machine itself (the operator's home, the installation) is answered in the
         # app, never from a lock screen: whoever holds the phone should not be the whole check.
-        elevated = decision.rule.startswith("host.")
+        elevated = decision.rule.startswith(("host.", "agent_talk."))
         return {
             "request_id": decision.key,
             "request_ref": f"policy:{state.session.id}:{decision.key}",
@@ -8203,7 +8294,7 @@ def identifier_index(history: Sequence[Message], *, limit: int = IDENTIFIER_INDE
     """
     seen: dict[str, None] = {}
     # What a guest's turn named is a stranger's to name: this list is read later as the work's own.
-    strangers = guest_turns.guest_runs(history)
+    strangers = guest_turns.stranger_runs(history)
     for m in history:
         if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) or m.metadata.get("daedalus.run_id") in strangers:
             continue

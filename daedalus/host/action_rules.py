@@ -168,6 +168,8 @@ def categories_of(tool: str, arguments: dict[str, Any]) -> list[str]:
         return shell_categories(str(arguments.get("command") or ""))
     if tool in TOOL_CATEGORIES:
         return [TOOL_CATEGORIES[tool]]
+    if tool == "AgentTalk":
+        return ["message"] if arguments.get("action") == "send" else []  # opening, reading and ending say nothing to anyone
     return mcp_categories(tool)
 
 
