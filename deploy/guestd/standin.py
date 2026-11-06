@@ -67,6 +67,8 @@ class ModelReply:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cost_usd: float | None = None
+    """What the upstream says this call cost, when it says. Past the link's price table, which is typed by hand."""
 
 
 class ModelFailed(Exception):
@@ -113,7 +115,9 @@ class KeyProxyCaller:
         except (ValueError, AttributeError, IndexError) as exc:
             raise ModelFailed("an unreadable answer") from exc
         usage = data.get("usage") or {}
-        return ModelReply(text, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
+        stated = usage.get("cost")
+        cost = float(stated) if isinstance(stated, int | float) and not isinstance(stated, bool) and stated >= 0 else None
+        return ModelReply(text, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0), cost)
 
 
 class StandIn:
@@ -179,11 +183,12 @@ class StandIn:
             logger.exception("the stand-in of link %s failed", link["id"])
             self._failed(message["id"], conversation_id, spent=True, estimate=estimate)
             return
-        cost = (reply.input_tokens * float(link["price_in"]) + reply.output_tokens * float(link["price_out"])) / 1_000_000 if reply.input_tokens or reply.output_tokens else estimate
-        self.store.settle(message["id"], cost=cost)
+        priced = (reply.input_tokens * float(link["price_in"]) + reply.output_tokens * float(link["price_out"])) / 1_000_000 if reply.input_tokens or reply.output_tokens else estimate
+        self.store.settle(message["id"], cost=priced if reply.cost_usd is None else reply.cost_usd)
         text = inert(reply.text)
-        if text:
-            self._say(conversation_id, AGENT, text)
+        # Nothing to say is a failure to the guest, not silence: a model that thought its whole allowance
+        # away, or a plan's route that answered with an error in a 200, would leave them polling for nothing.
+        self._say(conversation_id, AGENT if text else DOOR, text or FAILED_TEXT)
         self.mailbox.notify()
         self.mailbox.wake(conversation_id)
 

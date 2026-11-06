@@ -136,7 +136,7 @@ services:
       # The guest door's socket, and the token for it this process writes.
       GUEST_RUN_DIR: /run/daedalus-guest
       GUEST_TOKEN_DIR: /run/daedalus-guest-token
-      GUEST_MODEL_UPSTREAMS: ${KEYPROXY_GUEST_UPSTREAMS:-deepseek,openrouter,openai,anthropic,opencode,opencode_zen}
+      GUEST_MODEL_UPSTREAMS: ${KEYPROXY_GUEST_UPSTREAMS:-*}
       # The terminals service's run directory (the terminal-run volume) and the ports it publishes.
       TERMINALS_CONTAINER_DIR: /run/daedalus-terminals
       # The host terminal's run directory: empty until the systemd user unit is installed on the host.
@@ -543,7 +543,7 @@ services:
       KEYPROXY_KEYS_FILE: /run/keyproxy/keyproxy.env
       # A listener of its own for the guest door: a chat completion on these upstreams and nothing else.
       KEYPROXY_GUEST_SOCKET: /run/keyproxy-guest/guest.sock
-      KEYPROXY_GUEST_UPSTREAMS: ${KEYPROXY_GUEST_UPSTREAMS:-deepseek,openrouter,openai,anthropic,opencode,opencode_zen}
+      KEYPROXY_GUEST_UPSTREAMS: ${KEYPROXY_GUEST_UPSTREAMS:-*}
     volumes:
       - daedalus-state:/srv/state:ro
       - ${DAEDALUS_SECRETS_FILE:-../../daedalus-secrets/keyproxy.env}:/run/keyproxy/keyproxy.env

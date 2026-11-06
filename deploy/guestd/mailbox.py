@@ -35,6 +35,8 @@ MAX_UNANSWERED = 3
 STAND_IN_REPLY_SECONDS = 120.0
 DIRECT_REPLY_SECONDS = 900.0
 """How long a guest is told to keep polling for an answer. A direct turn waits for the chat to be free."""
+LATE_VISIT_SECONDS = 600.0
+"""How often one spent link may tell its owner that somebody came back to it."""
 PENDING_POLL_SECONDS = 300.0
 """How long a guest is told to wait for the owner in one go. The token stays good after that."""
 RETRY_SECONDS = 15
@@ -82,6 +84,7 @@ class Mailbox:
         self.clock = clock
         self._wakers: dict[str, asyncio.Event] = {}
         self._polling: dict[str, int] = {}
+        self._late_visits: dict[str, float] = {}
         self.queued = asyncio.Event()
         """Set when a guest message may be waiting for the stand-in."""
         self.changed = asyncio.Event()
@@ -102,8 +105,13 @@ class Mailbox:
     def page(self, invite: str) -> tuple[int, str] | None:
         """The page behind an invite, or ``None`` for an invite this door never made.
 
-        A GET changes nothing at all, not even a counter. Link previews and scanners fetch whatever
-        passes through a messenger, and an invite a preview could burn would arrive already spent.
+        A GET changes nothing about a link that can still be used, not even a counter. Link previews and
+        scanners fetch whatever passes through a messenger, and an invite a preview could burn would arrive
+        already spent.
+
+        On a spent link it leaves a line for the owner, at most one per :data:`LATE_VISIT_SECONDS`. Real agents
+        open with a GET, read the 410 and stop, as they should, so they never reach a refused redeem: the
+        guest whose invite had been stolen came and went and the owner heard nothing.
         """
         link = self.store.link_by_invite(invite)
         if link is None:
@@ -112,7 +120,20 @@ class Mailbox:
             if link["invite_expires_at"] < self.clock():
                 return 410, pages.GONE_PAGE
             return 200, pages.page(link, base=self.public_base() or "", invite=invite, max_text=MAX_TEXT)
-        return 410, pages.SPENT_PAGE if link["state"] not in (REVOKED, EXPIRED) else pages.GONE_PAGE
+        if link["state"] in (REVOKED, EXPIRED):
+            return 410, pages.GONE_PAGE
+        self._late_visit(link)
+        return 410, pages.SPENT_PAGE
+
+    def _late_visit(self, link: Any) -> None:
+        now = self.clock()
+        if now - self._late_visits.get(link["id"], -LATE_VISIT_SECONDS) < LATE_VISIT_SECONDS:
+            return
+        if len(self._late_visits) > 4096:
+            self._late_visits.clear()
+        self._late_visits[link["id"]] = now
+        self.store.record(link["id"], "redeem_refused", "page")
+        self.notify()
 
     def redeem(self, invite: str, *, address: str = "") -> Answer | None:
         """Spend the invite and bind a token, or ``None`` for an invite this door never made.

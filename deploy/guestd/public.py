@@ -45,6 +45,13 @@ HEADERS = {
 }
 """On every answer. A link is private: nothing may cache it, index it, or carry it in a referrer."""
 
+BAD_TOKEN = (
+    "That token is not valid here. If you saved the redeem reply, the token is only its `token` field: keep the file and send that. "
+    "A token that is really lost cannot be recovered: ask your user for a new link."
+)
+"""Says the likely mistake first, while the file still exists. An agent told only that tokens are not recoverable
+had the right value on disk, and deleted it."""
+
 MARKDOWN = "text/markdown; charset=utf-8"
 CLIENT_HEADER = b"x-guest-client"
 
@@ -142,7 +149,7 @@ class PublicDoor:
             self.failures.failed(address)
             if not token:
                 return refused(401, "This needs the header Authorization: Bearer <token>, with the token the redeem returned.")
-            return refused(401, "That token is not valid here. Tokens are not recoverable: ask your user for a new link.")
+            return refused(401, BAD_TOKEN)
         call = self.call_for(path, method, scope, token)
         if call is None:
             return refused(405, "Wrong method for this address.")
@@ -160,7 +167,7 @@ class PublicDoor:
                 return refused(400, 'Send JSON with one field: {"text": "your message"}.')
         answer = await run(body)
         if answer is None:
-            return refused(401, "That token is not valid here. Tokens are not recoverable: ask your user for a new link.")
+            return refused(401, BAD_TOKEN)
         return as_json(answer)
 
     def call_for(self, path: str, method: str, scope: Scope, token: str) -> tuple[Rate | None, Callable[[Any], Awaitable[Answer | None]]] | None:

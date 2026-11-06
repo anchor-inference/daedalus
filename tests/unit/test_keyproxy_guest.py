@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -80,7 +81,7 @@ async def test_the_metered_header_cannot_hide_a_call_from_the_ledger(guest: Any)
 
 @pytest.mark.parametrize(("method", "path"), [
     ("GET", "/acme/v1/models"), ("POST", "/acme/v1/embeddings"), ("POST", "/other/v1/chat/completions"), ("GET", "/acme/v1/chat/completions"), ("PUT", "/acme/v1/chat/completions"),
-    ("GET", "/subscriptions/usage"), ("GET", "/keys"), ("POST", "/grok/v1/chat/completions"), ("POST", "/claude/v1/chat/completions"), ("POST", "/acme/../other/v1/chat/completions"),
+    ("GET", "/subscriptions/usage"), ("GET", "/keys"), ("POST", "/codex/v1/chat/completions"), ("POST", "/acme/../other/v1/chat/completions"),
     ("POST", "/acme/v1/chat/completions/extra"),
 ])
 async def test_anything_else_is_refused_and_reaches_no_upstream(guest: Any, method: str, path: str) -> None:
@@ -100,6 +101,79 @@ async def test_nothing_is_served_with_no_upstreams_named(monkeypatch: pytest.Mon
     assert load().guest_upstreams() == frozenset()
 
 
+def test_the_star_is_every_model_upstream_the_logins_included_and_never_a_search_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Perplexity answers on the same path as a model, so a search key must not become a stand-in's reach."""
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "*")
+    monkeypatch.setenv("KEYPROXY_KEY_PERPLEXITY", "the-key")
+    monkeypatch.setenv("OPENCODE_API_KEY", "the-key")
+    monkeypatch.setenv("KEYPROXY_UPSTREAM_ACME", "https://upstream.example.test/v1")
+    monkeypatch.setenv("KEYPROXY_KEY_ACME", "the-key")
+    served = load().guest_upstreams()
+    assert {"codex", "grok", "claude", "opencode", "acme"} <= served and "perplexity" not in served
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "acme,perplexity")
+    assert load().guest_upstreams() == {"acme"}
+
+
+@pytest.mark.parametrize("field", [{"tools": [{"type": "function", "function": {"name": "x"}}]}, {"functions": [{"name": "x"}]}, {"tool_choice": "auto"}, {"stream": True}, {"n": 2}, {"reasoning_effort": "high"}, {"max_tokens": 5000}])
+@pytest.mark.parametrize("path", ["/claude/v1/chat/completions", "/codex/v1/chat/completions", "/grok/v1/chat/completions", "/opencode/chat/completions"])
+def test_a_plan_route_is_held_as_narrowly_as_any_other(monkeypatch: pytest.MonkeyPatch, path: str, field: dict[str, Any]) -> None:
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "claude,codex,grok,opencode")
+    proxy = load()
+    assert proxy.guest_refusal(path, "POST", json.dumps(GOOD).encode()) == ""
+    assert proxy.guest_refusal(path, "POST", json.dumps({**GOOD, **field}).encode())
+    assert proxy.guest_refusal(path.replace("/chat/completions", "/models"), "GET", b"")
+    assert proxy.guest_refusal(path.replace("chat/completions", "../chat/completions"), "POST", json.dumps(GOOD).encode())
+
+
+@pytest.mark.parametrize("name", ["claude", "codex"])
+async def test_a_login_route_is_booked_though_it_answers_outside_the_generic_path(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", name)
+    proxy = load()
+    reported: list[tuple[str, str, bytes]] = []
+    answer = {"model": "m", "choices": [{"message": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+    async def answered(_request: web.Request, _rest: str) -> web.Response:
+        return web.json_response(answer)
+
+    async def noted(_client: Any, provider: str, model: str, body: bytes, *_: Any) -> None:
+        reported.append((provider, model, body))
+
+    monkeypatch.setattr(proxy, f"handle_{name}", answered)
+    monkeypatch.setattr(proxy, "report_direct_usage", noted)
+    app = web.Application()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(lambda _r: httpx.Response(500)))
+    app.router.add_route("*", "/{upstream}/{rest:.*}", proxy.handle_guest)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    response = await client.post(f"/{name}/v1/chat/completions", json=GOOD, headers={"x-daedalus-metered": "1"})
+    assert (await response.json())["choices"][0]["message"]["content"] == "hi"
+    await asyncio.sleep(0)
+    await client.close()
+    assert [(p, m) for p, m, _ in reported] == [(name, "m")] and json.loads(reported[0][2]) == answer
+
+
+async def test_opencode_is_given_the_session_header_it_insists_on_and_the_door_cannot_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without it the real route answers 400 MissingSessionID, and the listener passes no header of the door's."""
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "opencode")
+    monkeypatch.setenv("OPENCODE_API_KEY", "the-key")
+    proxy = load()
+    proxy.AGENT_API = ""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"model": "m", "choices": [{"message": {"content": "hi"}}]})
+
+    app = web.Application()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    app.router.add_route("*", "/{upstream}/{rest:.*}", proxy.handle_guest)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    assert (await client.post("/opencode/chat/completions", json=GOOD)).status == 200
+    await client.close()
+    assert seen[0].headers["x-opencode-session"].startswith("guest-")
+
+
 async def test_the_listener_opens_only_when_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     proxy = load()
     monkeypatch.delenv("KEYPROXY_GUEST_SOCKET", raising=False)
@@ -112,3 +186,23 @@ async def test_the_listener_opens_only_when_named(tmp_path: Path, monkeypatch: p
     await proxy.start_guest_listener(app)
     assert path.is_socket() and path.stat().st_mode & 0o777 == 0o666
     await proxy.stop_guest_listener(app)
+
+
+@pytest.mark.parametrize("path", ["/acme/../other/chat/completions", "/acme/./chat/completions", "/acme/v1/../../chat/completions", "/acme/.hidden/chat/completions"])
+def test_a_dot_segment_is_refused_because_it_would_leave_the_upstreams_root(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """``request.path`` is decoded, so ``%2e%2e`` arrives here as ``..``. On the real socket the first
+    version sent that on with the key attached; a client library normalises it away before a mock sees it."""
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "acme")
+    assert load().guest_refusal(path, "POST", json.dumps(GOOD).encode())
+
+
+def test_a_segment_may_still_hold_a_dot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KEYPROXY_GUEST_UPSTREAMS", "acme")
+    assert load().guest_refusal("/acme/v4.1/chat/completions", "POST", json.dumps(GOOD).encode()) == ""
+
+
+def test_the_bill_an_upstream_states_is_reported_and_an_absent_one_is_not_invented() -> None:
+    proxy = load()
+    usage = {"prompt_tokens": 2, "completion_tokens": 1}
+    assert proxy.parse_usage(json.dumps({"model": "m", "usage": {**usage, "cost": 0.25}}).encode(), "application/json")[1]["cost_usd"] == 0.25
+    assert "cost_usd" not in proxy.parse_usage(json.dumps({"model": "m", "usage": usage}).encode(), "application/json")[1]

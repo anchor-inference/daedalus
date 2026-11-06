@@ -30,7 +30,7 @@ from protocore.contracts.tool_registry import policy_admits
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 from starlette.testclient import TestClient
 
-from daedalus.config import Settings
+from daedalus.config import Settings, keyproxy_base
 from daedalus.extensions.guest_door import ChatLine, Delivery, DoorClient, GuestBridge
 from daedalus.host import guest_turns, predict
 from daedalus.host.engine_factory import TENANT
@@ -141,11 +141,18 @@ def test_as_root_in_a_container_the_empty_network_is_made_around_the_sandbox(mon
     refuses to mount /proc: either alone meant no guest sandbox in the real container, measured in the image."""
     monkeypatch.setattr(shell.os, "geteuid", lambda: 0)
     argv = shell.guest_sandbox_argv("/usr/bin/bwrap")
-    assert argv[0].endswith("unshare") and argv[1] == "--net" and argv[2] == "/usr/bin/bwrap"
+    assert argv[0].endswith("unshare") and argv[1] == "--net" and "/usr/bin/bwrap" in argv
     assert "--unshare-net" not in argv and "--unshare-all" not in argv and "--unshare-user" not in argv
     assert argv[argv.index("--cap-drop") + 1] == "ALL"
     monkeypatch.setattr(shell.os, "geteuid", lambda: 1000)
-    assert shell.guest_sandbox_argv("/usr/bin/bwrap")[1] == "--unshare-net"
+    assert "--unshare-net" in shell.guest_sandbox_argv("/usr/bin/bwrap")
+
+
+def test_a_guests_command_is_limited_in_what_it_can_take_of_the_machine() -> None:
+    """Neither the sandbox nor the container bounds memory or a file: one allocating loop reaches the server."""
+    argv = shell.guest_sandbox_argv("/usr/bin/bwrap")
+    limits = argv[argv.index(next(a for a in argv if a.endswith("prlimit"))) + 1:argv.index("/usr/bin/bwrap")]
+    assert {a.split("=")[0] for a in limits} == {"--as", "--fsize", "--cpu", "--core"}
 
 
 async def test_no_sandbox_refuses_the_command_instead_of_running_it_plain(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -438,6 +445,9 @@ async def test_a_chat_on_a_model_with_no_price_gets_no_paid_turn(settings: Setti
     assert await manager.guest_price(state.session.id) is None
     provider.endpoint = SimpleNamespace(subscription=False, kind="openai", pricing_for=lambda _m: ModelPricing(input=1.0, output=2.0))  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) == (1.0, 2.0)
+    # A CLI login has no price anyone typed, and is a plan all the same, not a model nobody can price.
+    provider.endpoint = SimpleNamespace(subscription=False, kind="openai", base_url=f"{keyproxy_base()}/claude/v1", pricing_for=lambda _m: None)  # type: ignore[assignment]
+    assert await manager.guest_price(state.session.id) == (0.0, 0.0)
     provider.endpoint = SimpleNamespace(subscription=True, kind="openai", pricing_for=lambda _m: None)  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) == (0.0, 0.0)
     await manager.close()

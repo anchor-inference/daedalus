@@ -1440,6 +1440,35 @@ class PetReactionBody(BaseModel):
     lang: Literal["en", "ru"] = "ru"
 
 
+def direct_usage_booking(manager: Any) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
+    """Booking of a call that bypassed the bot: at the bill its upstream stated, else at the price table."""
+
+    async def book(body: dict[str, Any]) -> dict[str, Any]:
+        provider_id = str(body.get("provider_id") or "")
+        model = str(body.get("model") or "")
+        if not provider_id or not model:
+            raise HTTPException(422, "provider_id and model are required")
+        tokens = {k: int(body.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens")}
+        cost: float | None = None
+        try:
+            endpoint = manager.providers.get(provider_id).endpoint
+            pricing = endpoint.pricing_for(model)
+            # A prepaid plan's call spends its allowance, not money, however it reached the plan.
+            cost = 0.0 if endpoint.subscription else pricing.cost(tokens) if pricing is not None else None
+            stated = body.get("cost_usd")
+            if not endpoint.subscription and isinstance(stated, int | float) and not isinstance(stated, bool) and stated >= 0:
+                # What was really charged, as a run's own calls are booked. The table is typed by hand.
+                cost = float(stated)
+        except KeyError:
+            cost = None
+        await manager.usage.record(
+            UsageRecord(provider_id=provider_id, model=model, purpose="direct", raw=dict(body), normalized={**tokens, "cost_usd": cost}, cost_usd=cost, duration_ms=int(body.get("duration_ms") or 0), run_id=None, session_id=None)
+        )
+        return {"recorded": True, "cost_usd": cost}
+
+    return book
+
+
 def build_app(app: Application, api_token: str) -> FastAPI:
     dependency_planner = DependencyPlanner(app)
     prompt_change_planner = PromptChangePlanner(app)
@@ -5830,23 +5859,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/usage/direct")
     async def record_direct_usage(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """A model call that bypassed the bot (curl against the key proxy) is booked like any other, at the provider's prices."""
-        provider_id = str(body.get("provider_id") or "")
-        model = str(body.get("model") or "")
-        if not provider_id or not model:
-            raise HTTPException(422, "provider_id and model are required")
-        tokens = {k: int(body.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens")}
-        cost: float | None = None
-        try:
-            endpoint = manager.providers.get(provider_id).endpoint
-            pricing = endpoint.pricing_for(model)
-            # A prepaid plan's call spends its allowance, not money, however it reached the plan.
-            cost = 0.0 if endpoint.subscription else pricing.cost(tokens) if pricing is not None else None
-        except KeyError:
-            cost = None
-        await manager.usage.record(
-            UsageRecord(provider_id=provider_id, model=model, purpose="direct", raw=dict(body), normalized={**tokens, "cost_usd": cost}, cost_usd=cost, duration_ms=int(body.get("duration_ms") or 0), run_id=None, session_id=None)
-        )
-        return {"recorded": True, "cost_usd": cost}
+        return await direct_usage_booking(manager)(body)
 
     @api.get("/api/usage")
     async def usage(days: int = 7, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

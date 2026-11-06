@@ -7,6 +7,7 @@ claims here are about the door itself; what a direct turn may do inside a chat i
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STA
 from guestd.pages import LOST_TOKEN, SPENT_PAGE
 from guestd.public import HEADERS, PublicDoor
 from guestd.standin import (
+    FAILED_TEXT,
     MAX_OUTPUT_TOKENS,
     SYSTEM,
     KeyProxyCaller,
@@ -130,7 +132,7 @@ def test_the_page_is_markdown_and_says_what_the_trial_found_it_has_to(rig: Rig) 
         assert page.headers[name] == value
     text = page.text
     for needed in (
-        "asks for no secrets", "installs nothing", "sets up no schedule", "Save the token to a file straight away", "there is no way to recover it",
+        "asks for no secrets", "installs nothing", "sets up no schedule", "Save the reply to a file straight away", "there is no way to recover it",
         "tell your user and ask them for a new link", "at most 30", "kept for 30 days", "owner of this link can read them", "stand-in", "The agent answers questions about its service.",
         f"https://agents.example.test/a/{invite}/redeem", "stop_polling",
     ):
@@ -203,6 +205,83 @@ def test_a_repeated_redeem_never_returns_the_token_even_from_the_same_client(rig
     assert first.status_code == 201 and second.status_code == 410
     assert "token" not in second.json()
     assert rig.public.get(f"/a/{invite}").text == SPENT_PAGE
+
+
+def test_a_visit_to_a_spent_link_reaches_the_owner_once_in_a_while(rig: Rig) -> None:
+    """Real agents open with a GET, read the 410 and stop. A guest whose invite was stolen first came and
+    went, and with only the POST counted, the owner never heard."""
+    link_id, invite = rig.link()
+    rig.public.get(f"/a/{invite}")
+    assert "redeem_refused" not in rig.events(link_id), "a link still to be used is not touched by being read"
+    rig.redeem(invite)
+    rig.public.get(f"/a/{invite}")
+    rig.public.get(f"/a/{invite}")
+    assert rig.events(link_id).count("redeem_refused") == 1
+    rig.clock.now += 601
+    rig.public.get(f"/a/{invite}")
+    assert rig.events(link_id).count("redeem_refused") == 2
+
+
+def test_the_page_counts_its_days(rig: Rig) -> None:
+    _, invite = rig.link(retention_days=1)
+    assert "kept for 1 day and" in rig.public.get(f"/a/{invite}").text
+
+
+async def test_a_reply_with_no_text_is_a_failure_the_guest_is_told_of(rig: Rig) -> None:
+    """A reasoning model at its bound, or a plan's route with an error in a 200: left silent, a guest polls on."""
+    _, invite = rig.link(price_in=0.0, price_out=0.0)
+    token = rig.redeem(invite)
+    rig.say(token, "hello")
+    rig.stand_in.caller = lambda _link, _request: asyncio.sleep(0, ModelReply("", 10, 10))
+    assert await rig.turn() is True
+    assert [m["text"] for m in rig.read(token).json()["messages"]] == [FAILED_TEXT]
+
+
+async def test_a_plan_is_bounded_by_its_turns_whatever_the_dollars_say(rig: Rig) -> None:
+    link_id, invite = rig.link(price_in=0.0, price_out=0.0, usd_limit=0.0, turns_total=2)
+    token = rig.redeem(invite)
+    assert rig.control.get(f"/control/links/{link_id}", headers=CONTROL).json()["link"]["priced"] is False
+    for _ in range(2):
+        assert rig.say(token, "hello").status_code == 202
+        assert await rig.turn() is True
+    refused = rig.say(token, "and again")
+    assert refused.status_code == 403 and refused.json()["limit"] == "turns_total"
+
+
+def test_the_pages_example_takes_the_token_out_of_the_reply(rig: Rig, tmp_path: Path) -> None:
+    """A real agent ran the example as written, with the whole JSON as its bearer, and lost the link."""
+    _, invite = rig.link()
+    page = rig.public.get(f"/a/{invite}").text
+    reply = rig.public.post(f"/a/{invite}/redeem")
+    (tmp_path / ".agentlink-token").write_text(reply.text)
+    line = next(line for line in page.splitlines() if line.startswith("TOKEN="))
+    done = subprocess.run(["bash", "-c", f'{line}\nprintf %s "$TOKEN"'], cwd=tmp_path, capture_output=True, text=True, check=True)
+    assert done.stdout == reply.json()["token"]
+
+
+def test_a_refused_token_points_at_the_saved_reply_before_saying_it_is_gone(rig: Rig) -> None:
+    answer = rig.public.get("/a/messages", headers={"Authorization": 'Bearer {"token":"gt_x","status":"open"}'})
+    assert answer.status_code == 401
+    detail = answer.json()["detail"]
+    assert detail.index("`token` field") < detail.index("cannot be recovered")
+
+
+async def test_a_stated_bill_settles_a_turn_rather_than_the_price_table(rig: Rig) -> None:
+    """The table said $0.006 a million and the upstream billed $0.25: the link's limit is in real dollars."""
+    link_id, invite = rig.link(price_in=0.006, price_out=0.5, usd_limit=1.0)
+    token = rig.redeem(invite)
+    rig.say(token, "hello")
+    rig.stand_in.caller = lambda _link, _request: asyncio.sleep(0, ModelReply("hi", 1000, 10, 0.25))
+    assert await rig.turn() is True
+    assert rig.control.get(f"/control/links/{link_id}", headers=CONTROL).json()["link"]["spent_usd"] == pytest.approx(0.25)
+
+
+async def test_the_caller_reads_the_bill_when_the_upstream_states_one() -> None:
+    usage = {"prompt_tokens": 10, "completion_tokens": 3, "cost": 0.5}
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}], "usage": usage}))
+    caller = KeyProxyCaller("guest.sock", httpx.AsyncClient(transport=transport))
+    reply = await caller({"model_path": "deepseek/v1"}, {"model": "m", "messages": [], "max_tokens": 5})
+    assert reply == ModelReply("hi", 10, 3, 0.5)
 
 
 def test_an_unknown_invite_counts_against_the_address_and_a_good_guest_is_not_held(tmp_path: Path) -> None:

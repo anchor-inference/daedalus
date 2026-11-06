@@ -3,7 +3,7 @@
 // that says whose it is, and nothing here turns it into markdown, a link or a picture.
 
 import { useEffect, useRef, useState } from "react";
-import { api, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestMode, GuestTools } from "./api";
+import { api, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestBilling, GuestMode, GuestTools } from "./api";
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
@@ -20,10 +20,12 @@ const POLL_MS = 5000;
 const ms = (seconds: number) => seconds * 1000;
 
 /** What the Copy button puts on the clipboard: one line of intent, then the address. A bare address
- *  does not start a conversation: the guest's agent has to be told what the address is for. */
+ *  does not start a conversation: the guest's agent has to be told what the address is for. The intro
+ *  stays when there is a topic: with the topic alone, four of five real runs took the address for the
+ *  service being asked about instead of a way to talk to anyone. */
 export function inviteText(topic: string, url: string): string {
   const said = topic.trim().replace(/[\s:.,;!?]+$/, "");
-  return `${said || t("guest.intro")}: ${url}`;
+  return `${t("guest.intro")}${said ? `. ${said}` : ""}: ${url}`;
 }
 
 /** The word and tone a link is shown with: its own state until it is spent, then its conversation's. */
@@ -143,7 +145,7 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead }: {
   const meta = [
     t(`guest.mode.${link.mode}`),
     link.mode === "stand_in" ? link.model_name : t(`guest.tools.${link.guest_tools}`),
-    `${usd(link.spent_usd)} / ${usd(link.usd_limit)}`,
+    link.priced ? `${usd(link.spent_usd)} / ${usd(link.usd_limit)}` : "",
     plural("guest.turns", link.turns_used),
     link.state === "waiting" ? t("guest.expires", { when: relTimeLong(ms(link.invite_expires_at)) }) : "",
   ].filter(Boolean).join(" · ");
@@ -304,6 +306,7 @@ function NumberRow({ name, title, unit, value, onChange }: { name: NumberName; t
 }
 
 function priceHint(model: GuestDoor["models"][number]): string {
+  if (model.billing === "plan") return t("guest.model.plan");
   if (model.free) return t("fmt.free");
   const price = (n: number) => `$${Number(n.toFixed(2))}`;
   return t("guest.model.price", { input: price(model.price_in), output: price(model.price_out) });
@@ -342,7 +345,10 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
 
   const set = (name: NumberName) => (next: string) => setNumbers((current) => ({ ...current, [name]: next }));
   const standIn = mode === "stand_in";
-  const parsed = (Object.keys(numbers) as NumberName[]).map((name) => numberOf(name, numbers[name]));
+  // What bounds this link: dollars only where the model counts them, so no field stands there doing nothing.
+  const billing: GuestBilling = standIn ? door.models.find((model) => model.id === modelId)?.billing ?? "metered" : door.chat_priced ? "metered" : "plan";
+  const priced = billing === "metered";
+  const parsed = (Object.keys(numbers) as NumberName[]).filter((name) => priced || name !== "usd_limit").map((name) => numberOf(name, numbers[name]));
   const valid = parsed.every((value) => value !== null)
     && (!standIn || (!!modelId && briefing.trim() !== "" && (!drafted || read)));
 
@@ -388,7 +394,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
       briefing_approved: true,
       tools: chosenTools,
       approval,
-      usd_limit: numberOf("usd_limit", numbers.usd_limit)!,
+      usd_limit: numberOf("usd_limit", numbers.usd_limit) ?? defaults.usd_limit,
       turns_per_day: numberOf("turns_per_day", numbers.turns_per_day)!,
       turns_total: numberOf("turns_total", numbers.turns_total)!,
       invite_hours: numberOf("invite_hours", numbers.invite_hours)!,
@@ -461,13 +467,15 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
         <>
           <label className="field">{t("guest.field.tools")}</label>
           <Segmented value={chosenTools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
-          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
+          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" || door.full_tools_why === "project_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
           {chosenTools === "all" && <div className="sub" data-guest-tools-all="">{t("guest.tools.all.note")}</div>}
         </>
       )}
 
       <NumberRow name="invite_hours" title={t("guest.field.lifetime")} unit={t("guest.unit.hours")} value={numbers.invite_hours} onChange={set("invite_hours")} />
-      <NumberRow name="usd_limit" title={t("guest.field.usd")} unit="$" value={numbers.usd_limit} onChange={set("usd_limit")} />
+      {priced
+        ? <NumberRow name="usd_limit" title={t("guest.field.usd")} unit="$" value={numbers.usd_limit} onChange={set("usd_limit")} />
+        : <div className="sub" data-guest-bound={billing}>{t(`guest.bound.${billing}`)}</div>}
       <NumberRow name="turns_per_day" title={t("guest.field.turnsday")} value={numbers.turns_per_day} onChange={set("turns_per_day")} />
       <div className="settings-row">
         <span className="settings-row-text"><span className="settings-row-title">{t("guest.field.approval")}</span></span>

@@ -4141,6 +4141,9 @@ class SessionManager:
                 # The last message and no other: text written on the way, between two tool calls, is the
                 # agent thinking aloud, and it was not written for this reader.
                 text = "".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip()
+                # The trailing headline is a note to this system, and its anchors are the turn's facts. A
+                # real turn held a value back in its answer and then named it there, on the way out.
+                text = prompts.split_headline(text)[0]
                 return redact.redact(self.redactor.conceal_named(text)) if text else ""
         return ""
 
@@ -4160,9 +4163,12 @@ class SessionManager:
         return "" if tools != "all" else await self.guest_full_tools(state)
 
     async def guest_full_tools(self, state: SessionState) -> str:
-        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, or empty when it can."""
+        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, ``project_folder``, or empty when it can."""
         if self.host_folder_of(state.session.id, state.metadata, state.project) is not None or (state.services is not None and state.services.exec_backend is not None):
             return "host_folder"
+        if state.project is not None and not state.project.settings.ephemeral:
+            # Other chats of the project read this folder with the operator's tools and know nothing of the guest.
+            return "project_folder"
         return "" if await asyncio.to_thread(guest_sandbox_status) == "ok" else "no_sandbox"
 
     async def guest_price(self, session_id: str) -> tuple[float, float] | None:
@@ -4173,7 +4179,7 @@ class SessionManager:
             return None
         provider, model = rungs[0]
         endpoint = provider.endpoint
-        if getattr(endpoint, "subscription", False) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
+        if getattr(endpoint, "subscription", False) or guest_turns.login_route(str(getattr(endpoint, "base_url", ""))) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
             return 0.0, 0.0
         pricing = endpoint.pricing_for(model) if hasattr(endpoint, "pricing_for") else endpoint.pricing.get(model)
         if pricing is None or pricing.input is None or pricing.output is None:
@@ -4831,11 +4837,28 @@ class SessionManager:
         rows = await self.db.fetchall("SELECT DISTINCT tool_call_id FROM tool_calls WHERE session_id = ?", (state.session.id,))
         engine.reserve_tool_call_ids(str(row["tool_call_id"]) for row in rows)
         self._attach_hooks(engine, state)
+        self._guard_guest_view(engine, state)
         self._stamp_memory(state, engine)
         if chain is not None:
             # The fit check reads the prompt size the engine last saw; before the first call it is zero and every rung fits.
             chain.bind_prompt_size(lambda: int(getattr(engine, "last_observed_prompt_tokens", 0) or 0))
         return engine
+
+    def _guard_guest_view(self, engine: QueryEngine, state: SessionState) -> None:
+        """Every request of a guest's turn reads :func:`guest_turns.for_guest` of the history.
+
+        At the context builder, because it is the one place every request passes, and it comes before the
+        request manifest: what is recorded as sent is what was sent. Asked of ``state`` per request, as the
+        same engine serves the operator's turns, which get the history as it is, byte for byte.
+        """
+        build = engine.context_manager.build_context
+
+        def build_context(*args: Any, **options: Any) -> Any:
+            if state.guest_turn is not None and "history" in options:
+                options["history"] = guest_turns.for_guest(options["history"], state.run_id or "")
+            return build(*args, **options)
+
+        engine.context_manager.build_context = build_context  # type: ignore[method-assign]
 
     def _attach_hooks(self, engine: QueryEngine, state: SessionState) -> None:
         session_id = state.session.id
@@ -5167,6 +5190,10 @@ class SessionManager:
             if state.guest_turn is not None and not state.metadata.get(guest_turns.SEEN_KEY):
                 state.metadata[guest_turns.SEEN_KEY] = True
                 state.session.metadata[guest_turns.SEEN_KEY] = True
+            if state.guest_turn is not None and state.guest_turn.tools == "all":
+                # Before the turn runs and for good: a turn cut short may have written all the same.
+                state.metadata[guest_turns.WROTE_KEY] = True
+                state.session.metadata[guest_turns.WROTE_KEY] = True
                 await self.sessions.update_metadata(state.session.id, state.session.metadata)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
@@ -5287,6 +5314,8 @@ class SessionManager:
             nested_rules.forget(state.services)
         if at is None:
             return message
+        if state.guest_turn is not None:
+            return self._with_guest_context(state.guest_turn, message, at)
         notes: str | None = None
         for hook in self.turn_notes_hooks:
             try:
@@ -5345,10 +5374,10 @@ class SessionManager:
             # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
             # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
             volatile.append("\n\n" + style)
-        if state.guest_turn is not None:
-            volatile.append("\n" + guest_turns.turn_note(state.guest_turn))
-        elif state.metadata.get(guest_turns.SEEN_KEY):
+        if state.metadata.get(guest_turns.SEEN_KEY):
             volatile.append("\n" + guest_turns.LATER_TURN_NOTE)
+        if state.metadata.get(guest_turns.WROTE_KEY):
+            volatile.append("\n" + guest_turns.WROTE_NOTE)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.
@@ -5370,6 +5399,19 @@ class SessionManager:
         if memory.snapshot is not None:
             await self._keep_memory_snapshot(state, memory, self.sessions.transcript_key(opened))
         return opened
+
+    def _with_guest_context(self, turn: guest_turns.GuestTurn, message: Message, at: int) -> Message:
+        """A guest's opening message: the clock and what this turn is, and nothing else of the operator's.
+
+        Everything else in a turn context is written for the operator's own agent: the folder's notes, the
+        board, the project's facts, which of the operator's machines is connected. It reached a turn set
+        to no tools, where the model was then all that stood between those lines and the guest.
+        """
+        blocks = list(message.content_blocks)
+        said = blocks[at].text  # type: ignore[union-attr]
+        blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{prompts.turn_context(notes=guest_turns.turn_note(turn))}")
+        words = operator_words_metadata(str(message.metadata.get("daedalus.origin") or "operator"), prompts.without_turn_context(said))
+        return message.model_copy(update={"content_blocks": blocks, "metadata": {**message.metadata, **words}})
 
     async def _working_history(self, state: SessionState) -> Sequence[Message]:
         """The history the next run starts from: the engine's while one is kept, else the stored one."""
@@ -7006,7 +7048,13 @@ class SessionManager:
         """The text of a notes file in the workspace root, or ``None`` when it is not there to read.
 
         A session working in a host folder keeps its notes there, not in the directory it runs from,
-        so its file is read through its tools' own filesystem."""
+        so its file is read through its tools' own filesystem.
+
+        A folder a guest could write in has no notes. These files are obeyed as the operator's own rules, in
+        runs with the operator's tools and secrets: a guest's ``AGENTS.md`` came back in the next operator
+        turn as "your project memory", and with ``Exec`` in the turn no gate on ``Write`` can stop that."""
+        if state.metadata.get(guest_turns.WROTE_KEY):
+            return None
         services = state.services
         try:
             if services is not None and foreign_paths(services.exec_backend):
@@ -7160,7 +7208,8 @@ class SessionManager:
             if turn is not None and decision.action != "allow":
                 # Never a card. An allowed card starts a run with the operator's origin and tools, over
                 # what a guest asked for, and nothing on it says so; and the turn would wait on a person.
-                return Decision("deny", decision.reason or "a guest's turn asks nobody for anything", "guest.no_questions")
+                # A refusal keeps its own rule: the name is only true of what would have asked.
+                return Decision("deny", decision.reason or "a guest's turn asks nobody for anything", decision.rule if decision.action == "deny" and decision.rule else "guest.no_questions")
             if decision.key and decision.action == "allow" and state is not None:
                 self._consume_grant(state, decision.key)
             elif decision.key and decision.action == "ask" and state is not None:

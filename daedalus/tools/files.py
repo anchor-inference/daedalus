@@ -16,6 +16,7 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.host.filesystem import FileTooLarge, NotRegularFile
+from daedalus.host.guest_turns import WROTE_KEY
 from daedalus.host.nested_rules import rules_note
 from daedalus.host.services import PathOutsideProject
 from daedalus.processes import end_tree
@@ -127,6 +128,10 @@ async def folder_rules(context: ToolContext, services: Any, target: Path, *, fol
     if not tool_config(context).nested_rules:
         return ""
     manager = services.extra.get("manager")
+    live_state = getattr(manager, "live_state", None)
+    state = live_state(context.session_id) if live_state is not None and context.session_id else None
+    if state is not None and state.metadata.get(WROTE_KEY):
+        return ""  # a guest could have written them (see SessionManager._workspace_note)
     redactor = getattr(manager, "redactor", None)
     try:
         return await rules_note(services, target, folder=folder, redact=redactor.redact if redactor is not None else None)
