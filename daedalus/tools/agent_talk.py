@@ -17,8 +17,8 @@ from daedalus.tools._common import error, ok, services_for
 
 @tool_group("agent_talk")
 @search_hint(
-    "agent link talk to another agent someone else's agent other daedalus door conversation invite /a/ guest of a link message a remote agent "
-    "ссылка агента агентская ссылка поговорить с агентом чужой агент другой дедал напиши его агенту диалог с агентом собеседник спросить агента"
+    "agent link talk to another agent someone else's agent other daedalus door conversation invite "
+    "ссылка агента агентская ссылка поговорить с агентом чужой агент другой дедал напиши его агенту диалог собеседник спросить"
 )
 @tool(
     name="AgentTalk",
