@@ -146,7 +146,9 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
     """McpAdd and McpRemove: the agent's own way to change the servers, applied at once.
 
     The agent can already run any command on the host, so a stdio server it adds is no power it
-    lacked; what it gains is not having to ask the operator to edit config.toml and restart."""
+    lacked; what it gains is not having to ask the operator to edit config.toml and restart. The
+    one exception is a tunnel, which the policy refuses for the server's command as it does for
+    ``Exec`` (it judges the ``McpAdd`` call before it gets here)."""
     if op == "remove":
         if not await remove(app, name):
             raise McpAdminError(f"no MCP server {name!r}; configured: {', '.join(sorted(app.config.mcp.servers)) or 'none'}")
