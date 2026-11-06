@@ -40,6 +40,8 @@ LATE_VISIT_SECONDS = 600.0
 PENDING_POLL_SECONDS = 300.0
 """How long a guest is told to wait for the owner in one go. The token stays good after that."""
 RETRY_SECONDS = 15
+DOOR_MARK = "agent-link"
+KNOWN_CLIENTS = frozenset({"daedalus"})
 MAX_POLLS = 2
 """Reads one token may hold open at once. Each one is a connection a stranger gets to keep for 30 s."""
 
@@ -102,6 +104,27 @@ class Mailbox:
 
     # -- before a conversation exists --------------------------------------------------
 
+    def card(self, invite: str) -> Answer | None:
+        """The page's facts as data, for a client that reads fields rather than prose; ``None`` as :meth:`page`.
+
+        The same address and the same rules as the page: a GET that spends nothing, on a spent link the same
+        line for the owner. It exists because a Daedalus on the other side shows its operator who is at the door
+        before anything is redeemed, and doing that from prose would mean parsing a stranger's sentences. Any
+        client may ask for it. ``door`` is what tells a door from any other page that answers 200.
+        """
+        found = self.page(invite)
+        if found is None:
+            return None
+        status, _ = found
+        link = self.store.link_by_invite(invite)
+        assert link is not None
+        if status != 200:
+            return Answer(status, {"door": DOOR_MARK, "status": "closed" if link["state"] in (REVOKED, EXPIRED, WAITING) else "used", "stop_polling": True})
+        return Answer(200, {
+            "door": DOOR_MARK, "status": "waiting", "topic": link["topic"], "mode": link["mode"], "approval": bool(link["approval"]),
+            "retention_days": float(link["retention_days"]), "max_text": MAX_TEXT,
+        })
+
     def page(self, invite: str) -> tuple[int, str] | None:
         """The page behind an invite, or ``None`` for an invite this door never made.
 
@@ -135,8 +158,12 @@ class Mailbox:
         self.store.record(link["id"], "redeem_refused", "page")
         self.notify()
 
-    def redeem(self, invite: str, *, address: str = "") -> Answer | None:
+    def redeem(self, invite: str, *, address: str = "", client: str = "") -> Answer | None:
         """Spend the invite and bind a token, or ``None`` for an invite this door never made.
+
+        ``client`` is what the caller says it is. Kept for the owner to read and nothing else: it opens nothing,
+        changes no limit and no answer, because any stranger can type it. Only a known word is kept, so a header
+        cannot put a stranger's words into the owner's list.
 
         A second redeem always gets a refusal, even from the same client seconds later: there is no
         window in which it would return the token. The kind reply would be welcome to an agent that
@@ -158,6 +185,8 @@ class Mailbox:
             self.notify()
             return Answer(410, {"status": "already_redeemed", "stop_polling": True, "detail": pages.LOST_TOKEN})
         token, conversation = spent
+        if client in KNOWN_CLIENTS:
+            self.store.record(link["id"], "client", client)
         self.notify()
         body: dict[str, Any] = {
             "token": token,
@@ -308,6 +337,6 @@ class Mailbox:
 
 
 __all__ = [
-    "AGENT", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "HELD", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "STAND_IN_REPLY_SECONDS",
+    "AGENT", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "DOOR_MARK", "HELD", "KNOWN_CLIENTS", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "STAND_IN_REPLY_SECONDS",
     "Answer", "Mailbox", "limit_answer",
 ]

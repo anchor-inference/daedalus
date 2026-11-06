@@ -97,6 +97,7 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
         out["conversation"] = {
             "id": conversation["id"], "state": conversation["state"], "reason": conversation["reason"], "created_at": conversation["created_at"],
             "decide_by": conversation["decide_by"], "expires_at": conversation["expires_at"], "last_guest_at": conversation["last_guest_at"],
+            "client": store.client_of(link["id"]),
         }
         if conversation["state"] == PENDING:
             held = [m for m in store.transcript(conversation["id"], 5) if m["state"] == HELD]

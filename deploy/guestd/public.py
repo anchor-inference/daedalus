@@ -56,6 +56,8 @@ had the right value on disk, and deleted it."""
 
 MARKDOWN = "text/markdown; charset=utf-8"
 CLIENT_HEADER = b"x-guest-client"
+CLIENT_KIND_HEADER = b"x-agent-client"
+"""What the caller says it is, as opposed to :data:`CLIENT_HEADER`, which is who the front saw connect."""
 
 
 def as_json(answer: Answer) -> JSONResponse:
@@ -114,14 +116,16 @@ class PublicDoor:
         # visitor's knocking must not close it to the one it was given to.
         key = invite if known else address
         if redeem:
-            return self.redeem(invite, method, address, key)
-        return self.page(invite, method, address, key)
+            return self.redeem(invite, method, address, key, header(scope, CLIENT_KIND_HEADER))
+        return self.page(invite, method, address, key, "application/json" in header(scope, b"accept"))
 
-    def page(self, invite: str, method: str, address: str, key: str) -> Response:
+    def page(self, invite: str, method: str, address: str, key: str, as_data: bool = False) -> Response:
         if method not in ("GET", "HEAD"):
             return refused(405, "This address is read with GET. Redeeming is POST to /redeem under it.")
         if not self.pages.allow(key):
             return refused(429, "Too many requests.", 60)
+        if as_data and (card := self.mailbox.card(invite)) is not None:
+            return as_json(card)
         found = self.mailbox.page(invite)
         if found is None:
             self.failures.failed(address)
@@ -129,13 +133,13 @@ class PublicDoor:
         status, text = found
         return Response(text, status_code=status, media_type=MARKDOWN, headers=HEADERS)
 
-    def redeem(self, invite: str, method: str, address: str, key: str) -> Response:
+    def redeem(self, invite: str, method: str, address: str, key: str, client: str = "") -> Response:
         if method != "POST":
             return refused(405, "Redeeming is a POST. A GET here spends nothing.")
         if not self.pages.allow(key):
             # Each refused redeem leaves a line for the owner: a loop must not be able to fill the record.
             return refused(429, "Too many requests.", 60)
-        answer = self.mailbox.redeem(invite, address=address)
+        answer = self.mailbox.redeem(invite, address=address, client=client)
         if answer is None:
             self.failures.failed(address)
             return refused(404, "No such link.")
@@ -197,6 +201,13 @@ class PublicDoor:
         if path == "/a/status" and method == "GET":
             return self.reads, status
         return None
+
+
+def header(scope: Scope, name: bytes) -> str:
+    for key, value in scope.get("headers", ()):
+        if key == name:
+            return value.decode("latin-1").lower()
+    return ""
 
 
 def visitor(scope: Scope) -> str:

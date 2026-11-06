@@ -505,6 +505,11 @@ class Store:
         row = self._one("SELECT max(id) m FROM events")
         return int(row["m"] or 0) if row else 0
 
+    def client_of(self, link_id: str) -> str:
+        """What the guest said it is at the redeem, or nothing. A claim, never a fact: see ``Mailbox.redeem``."""
+        row = self._one("SELECT detail FROM events WHERE link_id = ? AND kind = 'client' ORDER BY id DESC LIMIT 1", link_id)
+        return str(row["detail"]) if row is not None else ""
+
     def refused_redeems(self, link_id: str) -> int:
         row = self._one("SELECT count(*) c FROM events WHERE link_id = ? AND kind = 'redeem_refused'", link_id)
         return int(row["c"]) if row else 0
