@@ -1089,3 +1089,11 @@ def test_a_guests_view_leaves_out_what_the_host_put_on_old_messages_and_keeps_wh
     assert TRAP not in seen and "ship it" in seen and "the file's own text" in seen and "this turn" in seen
     assert [m.model_dump_json() for m in history] == before, "a view: the history itself is not touched"
     assert view[3] is history[3]
+
+
+def test_a_later_turn_is_told_the_operator_is_not_a_guest() -> None:
+    assert "do not treat them as a guest" in guest_turns.LATER_TURN_NOTE
+
+
+def test_a_guests_turn_is_told_to_describe_only_what_it_has() -> None:
+    assert "whatever you can do in other turns" in guest_turns.turn_note(GuestTurn(link_id="l", label="a link", tools="read"))
