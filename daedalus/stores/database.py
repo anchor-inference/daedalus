@@ -3594,7 +3594,7 @@ async def _repeated_media(conn: aiosqlite.Connection) -> None:
     staged item was bound, and the app printed their raw Markdown. They take the file now, as the
     same repeat does when it is written (``MediaStore.bind_message``); dropping the view has it built
     again from the message on the next read."""
-    from daedalus.stores.media import MEDIA_REF_RE, presentation_views  # media imports this module
+    from daedalus.stores.media import MEDIA_REF_RE, presentation_views  # Lazy: media imports this module.
 
     rows = await (await conn.execute("SELECT seq, session_id, message FROM transcript WHERE message LIKE '%](daedalus-media:%' AND key LIKE 'assistant:%'")).fetchall()
     repaired = 0
