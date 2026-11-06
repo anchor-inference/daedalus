@@ -38,8 +38,15 @@ signing is out of scope for the preview.
 **What it does not cover: the checkouts.** The code the stack runs — the two checkouts — is not in
 the release. `update`, and the last step of every upgrade, fetch the tip of `main` from GitHub's
 archive service (`repos.go`) over TLS, and nothing signs that: it is exactly as trustworthy as
-GitHub and TLS. The release signature covers the launcher, `ptyd`, `browserd`, `deskd` and the app's build,
-and nothing the launcher downloads afterwards.
+GitHub and TLS. The release signature covers the launcher, `ptyd`, `browserd`, `deskd`, `tunneld` and the app's build,
+and nothing the launcher downloads afterwards. That includes the clients of the public address:
+`cloudflared` and `frpc` are fetched only when their provider is chosen and checked against the hash pinned
+in `desktop/tunnel_tools.go`, which is the signature's reach by one step; ngrok is the operator's own install.
+
+**Windows and tunnels.** `tunneld` is a separate file so that an antivirus verdict on it costs only the public
+address. Unsigned programs that open tunnels are what SmartScreen and Defender look at hardest. `tunneld` holds
+no frp code, so it should not draw the detections `frpc` does, but no such scan has been run: put a release
+build through VirusTotal and Defender before calling it fine. Authenticode is not bought for this project yet.
 
 ## Format
 

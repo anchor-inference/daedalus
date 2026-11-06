@@ -19,7 +19,7 @@ promise it yet and is refused by all three.
 
 | What | Version | Moved by |
 |---|---|---|
-| the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, `deskd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
+| the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, `deskd`, `tunneld`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
 | the code the stack runs (the two checkouts, and in Docker mode the images) | on the first start, the release's own commit from the seed it carries (`seed.go`) — the tip of `main` for a launcher without one; afterwards the tip of `main` and `:latest` when fetched (`repos.go`, `docker.go`) | the first start; `daedalus-desktop update`; the last step of an upgrade |
 
 A release pins only where a first run starts: the seed in every package holds both checkouts at
@@ -30,6 +30,22 @@ the checkouts `update` fetches are fetched over TLS and signed by nobody.
 
 The app's database migrations run on the start that follows a change of the checkouts. They are
 treated as irreversible: the only way back is the data as it was before.
+
+### The guest door and the public address across versions
+
+The door is Python in the checkout and starts under a launcher that moves apart from it, and `tunneld`
+ships with the launcher while the host that follows it moves with the checkout. Each pair has to meet any
+age of the other:
+
+| Launcher | Checkout | What happens |
+|---|---|---|
+| new | new | the door runs, the settings section works |
+| new | older than the native door | the launcher sees no `deploy/guestd/confine.py` and starts no door; the app says the door is off, as before |
+| old | new | no `GUEST_RUN_DIR`, so no door; `/api/tunnel` answers 404 and the section says to update the desktop app |
+| a build with no `tunneld` | any | the section says so; nothing else notices |
+
+An address left on is brought back by the next start. `upgrade` stops it with the rest, so a public address
+goes dark for the length of an upgrade.
 
 ## Finding out
 

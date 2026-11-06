@@ -11,5 +11,6 @@ ptyd/.cache
 ptyd/ptyd
 ptyd/*.test
 browserd/browserd
+tunneld/
 browserd/**/*.test
 browserd/.cache

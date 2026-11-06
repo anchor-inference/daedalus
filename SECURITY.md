@@ -15,7 +15,7 @@ a hole in it.
   machine, the operator's paths or the operator's checkouts are refused; a forced push, deleting a
   workspace or a host outside the egress allowlist wait for the operator's approval key. The built-in
   rules change only through a pull request; the operator's rules can tighten them, never loosen them.
-  Raising a public tunnel (`ngrok`, `cloudflared`, `tailscale funnel`, `ssh -R` and the like) is refused
+  Raising a public tunnel (`ngrok`, `cloudflared`, `tailscale funnel`, `tunneld`, `ssh -R` and the like) is refused
   outright: the operator opens tunnels from settings, and the doctor and the Inbox report a process
   that looks like one ([docs/POLICY.md](docs/POLICY.md)).
 - **A shared page holds nothing of the app's.** A shared service runs on an origin of its own, or with
@@ -61,6 +61,17 @@ summary. Every message of the chat, what the agent wrote included, is open to a 
 judgement is all that stands between those messages and the guest: an answer that quoted memory or a note in the chat's
 own words is a chat message like any other. `all` has no bound on processes or on total disk. An agent run by the
 operator can still reach the door's token with a path built at run time: the sealed set reads the words of a command.
+
+On a native install the same door runs as the operator, on the operator's machine, and a tunnel can lead to it.
+What the launcher puts around it depends on the system (`desktop/README.md`, "What the door gives up here"):
+bubblewrap on Linux, a seatbelt on a Mac, and on Windows nothing but the door's own refusal to dial out or start a
+program, which is a promise, not a wall: code running inside it could undo it. What a tunnel reaches is decided by a router that
+knows two ports, so the app and its API are not behind it however a request is written. A visitor there
+counts as local nowhere: a request needs a loopback peer, no sign of having been forwarded, and a name only
+this machine answers to. Agent-written pages under `/s/` share an origin with `/a/` on a tunnel's one hostname;
+the door keeps nothing a browser could give away, and refuses requests made by a page. A phone's code travels
+over plain http on a home network: it opens one service for one phone, is spent once within ten minutes, and has
+a table of its own so that it cannot be taken for a way into the app.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.

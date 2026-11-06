@@ -113,7 +113,7 @@ mac:
   # The launcher, its daemons and agent-desktop with its helper are one universal binary each
   # already (lipo in the workflow), so the two halves of the application carry the same file and
   # nothing is merged.
-  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd,deskd,agent-desktop,agent-desktop-macos-helper}"
+  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd,deskd,tunneld,agent-desktop,agent-desktop-macos-helper}"
 
 linux:
   icon: build/icon.png

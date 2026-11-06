@@ -537,6 +537,92 @@ the token the app minted for itself, which the launcher reads out of the state d
 memory only. An installation where that token cannot be read gets no notifications and says so;
 nothing else changes.
 
+## Public address
+
+A home install behind NAT can hand out agent links and open agent-run services from a phone, while the
+app is open. You turn this on in **Settings → Public address**, and nothing else does: the agent may not
+raise a tunnel, and a tunnel it starts is refused and reported. Off by default. When the tunnel is down
+or the app is closed, the address does not answer.
+
+Only two things are behind it: `/a/`, agent links, and `/s/`, services you shared. The app, its API and
+terminals cannot be reached through it, because the router in `tunneld` knows two ports and neither of
+them is the app's. If you want the whole app on a phone, run the server install.
+
+Nothing here is hosted by this project. Each option is your own account or your own server:
+
+| | You do | Address | Good to know |
+|---|---|---|---|
+| **Cloudflare quick tunnel** | nothing; `cloudflared` is fetched the first time, unless you have one | new at each start | no account. Cloudflare says it is for testing and development, with no uptime promise and up to 200 requests at once. Suits one conversation |
+| **Tailscale Funnel** | sign in once with a button, and turn on HTTPS for your tailnet if it asks | stable, `daedalus.<tailnet>.ts.net` | nothing to install, a node inside the app. Beta, with unpublished bandwidth limits. The free plan is for non-commercial use. Traffic is decrypted only on your machine |
+| **ngrok** | install ngrok from ngrok.com, paste your token | one stable free domain | 1 GB and 20,000 requests a month on the free plan, and a warning page for browsers in front of HTML, so a shared page shows it once. Agents are not affected. The free tier can show your agent's IP address in headers: see ngrok's terms |
+| **Your own VPS with frp** | run `frps` and Caddy on your server, then fill in server, domain, token | yours | no third party reads the traffic. Below |
+
+ngrok is not fetched or bundled: its terms ask for written consent before its client is handed to people
+with their own accounts, so you get it from ngrok. Tokens stay in the local state folder, in a `0600` file.
+They are never logged, and they never reach the agent or any answer of the API.
+
+### Your own VPS
+
+Point a domain at the server, open ports 80, 443 and 7000, choose a long token, and run `frps` and Caddy:
+
+```toml
+# frps.toml
+bindPort = 7000
+vhostHTTPPort = 8080
+auth.token = "<your token>"
+```
+
+```
+# Caddyfile
+agent.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+In Settings: server `agent.example.com:7000`, domain `agent.example.com`, the same token. The app uses an
+`frpc` already on your PATH, which is best kept at your server's version, or fetches a pinned one. On
+Windows, Defender may flag `frpc` as a hack tool: that is about frp, and it stops only this option.
+
+### One address, two doors
+
+The two things behind an address have different risks and usually share a hostname, because a tunnel maps
+one. `/s/` pages are written by agents and run as scripts on that origin. The door has nothing a browser
+holds: no cookies, tokens only in agents' hands, invites only in links, and answers that are never HTML and
+carry a sandbox. The router adds what is left: a request to `/a/` made by a web page is refused by its fetch
+metadata, cookies are dropped on the way to it, and a request's path is refused if it could be read as
+another further on. All shared services share that origin with one another, as they do at the services door.
+
+### From a phone
+
+A service's share sheet has **Open on a phone**. On the same Wi-Fi the QR is for this machine's home address,
+and a door opens there for an hour. Your firewall may ask about it the first time. Otherwise the QR goes through the public address.
+Either way a private service stays private: the code works once within ten minutes and opens that service
+in that phone's browser for twelve hours. **Forget phones** ends that, and so does making the service
+private again. Sharing a service with everyone is the same switch it always was.
+
+### After a sleep
+
+`tunneld` looks at its client every five seconds, and notices a sleep as a gap in the wall clock and a new
+network as a change of this machine's addresses. It says `reconnecting` when the client has lost its
+connection, and it calls an address answering only when a request sent out through it has come back.
+A client that has not recovered in 45 seconds is started again, which on a quick tunnel means a new address,
+so it gets that chance first. Measured on `cloudflared` 2026.10.7, freezing it and `tunneld` to stand in for
+a sleep: the address came back by itself, unchanged, 7 s after 130 s and 10 s after 7 min. That is a frozen
+process and not a real laptop lid, and the other clients have not been measured.
+
+### What the door gives up here
+
+On a server the door runs with no network at all, as its own user, in a container. Natively it runs as you.
+What the launcher can put back depends on the system, and the Health screen says which you got:
+
+- **Linux with bubblewrap:** no network namespace, a root holding only its own folders. Nearly the same.
+- **macOS:** a seatbelt denying IP and your home folder, used only after a probe inside it passes.
+- **Windows, or a folder too deep for sockets:** nothing is a wall. The door's own process refuses to start
+  programs or dial out, which stops a mistake and not code running inside it.
+
+What holds everywhere is that its environment is built from nothing, and it has no keys, no tools and no
+code that reaches for anything. `all` stays unavailable to a guest where no sandbox exists.
+
 ## Commands
 
 | Command | What it does |

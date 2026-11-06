@@ -50,9 +50,9 @@ on:
   push:
     tags: ["desktop-v*"]
     branches: [main]
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "tunneld/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "tunneld/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -220,6 +220,60 @@ jobs:
         with:
           name: browserd
           path: browserd-dist
+          retention-days: 3
+
+  # The public address: its tests on each system it ships for, because this module has platform files
+  # and the other two systems are otherwise only cross-compiled, and its release builds. A module of its
+  # own with a Go of its own: tsnet's floor is newer than the launcher's.
+  tunneld-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: tunneld
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tunneld/go.mod
+          cache-dependency-path: tunneld/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  tunneld:
+    needs: [tunneld-test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: tunneld
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tunneld/go.mod
+          cache-dependency-path: tunneld/go.sum
+      - name: Build
+        run: |
+          test -z "$(gofmt -l .)"
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+          mkdir -p ../tunneld-dist
+          for t in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+            goos=${t%/*} goarch=${t#*/}
+            out="$PWD/../tunneld-dist/tunneld-$goos-$goarch"
+            case "$goos" in windows) out="$out.exe";; esac
+            ./release.sh "$goos" "$goarch" "$out"
+          done
+          ls -l ../tunneld-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tunneld
+          path: tunneld-dist
           retention-days: 3
 
   # The desktop daemon: its tests and its release builds, on the system each build is for where it
@@ -398,7 +452,7 @@ jobs:
   # operator would, silently: installed, started until the window shows the launcher's page,
   # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
   app-windows:
-    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, tunneld, agent-desktop, miniapp, seed]
     runs-on: windows-latest
     defaults:
       run:
@@ -411,6 +465,8 @@ jobs:
         with: { name: ptyd-Linux, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: tunneld, path: dl/tunneld }
       - uses: actions/download-artifact@v4
         with: { name: deskd-Linux, path: dl/deskd }
       - uses: actions/download-artifact@v4
@@ -438,6 +494,7 @@ jobs:
           cp ../../dl/engine/daedalus-desktop-windows-amd64.exe stage/win-x64/daedalus-desktop.exe
           cp ../../dl/ptyd/ptyd-windows-amd64.exe stage/win-x64/ptyd.exe
           cp ../../dl/browserd/browserd-windows-amd64.exe stage/win-x64/browserd.exe
+          cp ../../dl/tunneld/tunneld-windows-amd64.exe stage/win-x64/tunneld.exe
           cp ../../dl/deskd/deskd-windows-amd64.exe stage/win-x64/deskd.exe
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
@@ -475,7 +532,7 @@ jobs:
   # x86-64 .deb is then installed on this runner, started under a virtual display until its window
   # shows the launcher's page, closed, and removed — the user's data staying.
   app-linux:
-    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, tunneld, agent-desktop, miniapp, seed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -485,6 +542,8 @@ jobs:
         with: { name: ptyd-Linux, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: tunneld, path: dl/tunneld }
       - uses: actions/download-artifact@v4
         with: { name: deskd-Linux, path: dl/deskd }
       - uses: actions/download-artifact@v4
@@ -512,6 +571,7 @@ jobs:
             cp "../../dl/engine/daedalus-desktop-linux-$goarch" "stage/linux-$arch/daedalus-desktop"
             cp "../../dl/ptyd/ptyd-linux-$goarch" "stage/linux-$arch/ptyd"
             cp "../../dl/browserd/browserd-linux-$goarch" "stage/linux-$arch/browserd"
+            cp "../../dl/tunneld/tunneld-linux-$goarch" "stage/linux-$arch/tunneld"
             cp "../../dl/deskd/deskd-linux-$goarch" "stage/linux-$arch/deskd"
             # agent-desktop and the clipboard helper it starts from beside itself.
             cp "../../dl/agent-desktop/linux-$goarch"/* "stage/linux-$arch/"
@@ -577,7 +637,7 @@ jobs:
   # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
   # installs from. The .dmg is then mounted and its application checked and started.
   app-macos:
-    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, tunneld, agent-desktop, miniapp, seed]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -587,6 +647,8 @@ jobs:
         with: { name: ptyd-macOS, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: tunneld, path: dl/tunneld }
       - uses: actions/download-artifact@v4
         with: { name: deskd-macOS, path: dl/deskd }
       - uses: actions/download-artifact@v4
@@ -616,6 +678,7 @@ jobs:
           lipo -create ../../dl/engine/daedalus-desktop-darwin-amd64 ../../dl/engine/daedalus-desktop-darwin-arm64 -output stage/mac-universal/daedalus-desktop
           lipo -create ../../dl/ptyd/ptyd-darwin-amd64 ../../dl/ptyd/ptyd-darwin-arm64 -output stage/mac-universal/ptyd
           lipo -create ../../dl/browserd/browserd-darwin-amd64 ../../dl/browserd/browserd-darwin-arm64 -output stage/mac-universal/browserd
+          lipo -create ../../dl/tunneld/tunneld-darwin-amd64 ../../dl/tunneld/tunneld-darwin-arm64 -output stage/mac-universal/tunneld
           lipo -create ../../dl/deskd/deskd-darwin-amd64 ../../dl/deskd/deskd-darwin-arm64 -output stage/mac-universal/deskd
           # agent-desktop and its helper the same way, from the files the agent-desktop job checked.
           # It looks for the helper beside itself, so both go to Contents/MacOS, where the signing

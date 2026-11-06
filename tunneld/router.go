@@ -62,7 +62,7 @@ const (
 // ReverseProxy's Rewrite removes them, and they are listed for the reader and for a change of mechanism.
 var strippedHeaders = []string{
 	"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Forwarded-Prefix", "X-Real-Ip", "True-Client-Ip", "X-Client-Ip",
-	"Cf-Connecting-Ip", "Cf-Ipcountry", "Cf-Ray", "Cf-Visitor", "Cdn-Loop", "X-Daedalus-Token", "X-Guest-Client", "X-Share-Key-Internal", "Tailscale-Ingress-Target",
+	"Cdn-Loop", "X-Daedalus-Token", "X-Guest-Client", "X-Share-Key-Internal", "Tailscale-Ingress-Target",
 }
 
 type visitorKey struct{}
@@ -114,6 +114,11 @@ func (rt *Router) proxy(target *url.URL) *httputil.ReverseProxy {
 			pr.Out.Host = pr.In.Host // the name the visitor used, which a service builds its links from
 			for _, name := range strippedHeaders {
 				pr.Out.Header.Del(name)
+			}
+			for name := range pr.Out.Header {
+				if strings.HasPrefix(name, "Cf-") { // the edge's own notes, which change without notice
+					pr.Out.Header.Del(name)
+				}
 			}
 			pr.Out.Header.Del(ThroughHeader)
 			pr.Out.Header.Set(ThroughHeader, "tunnel")

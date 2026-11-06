@@ -46,6 +46,7 @@ ptyd/*.test
 
 # the browser daemon, when built in place, and its module cache
 browserd/browserd
+tunneld/tunneld
 browserd/.cache/
 browserd/*.test
 # the desktop daemon, the same

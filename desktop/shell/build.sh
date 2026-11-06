@@ -34,6 +34,7 @@ if [ -n "${SEED:-}" ]; then
 fi
 (cd "$root/desktop" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=desktop-v$version" -o "$stage/daedalus-desktop$exe" .)
 (cd "$root/browserd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/browserd$exe" ./cmd/browserd)
+(cd "$root/tunneld" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/tunneld$exe" .)
 (cd "$root/deskd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/deskd$exe" ./cmd/deskd)
 if [ -n "${PTYD:-}" ]; then
   cp "$PTYD" "$stage/ptyd$exe"

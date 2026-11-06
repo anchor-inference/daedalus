@@ -5,8 +5,8 @@ package main
 // the client's metrics listener; /ready there says how many connections it holds to the edge, which
 // after a sleep is the honest answer. The output is read only as a fallback for the address.
 //
-// Its visitor's address is in Cf-Connecting-Ip, which the edge writes over anything a visitor sent:
-// tried on a live tunnel, a forged one did not survive.
+// Its visitor's address is in Cf-Connecting-Ip, and the edge is why that can be believed: tried on a live
+// tunnel, a request that forged the header was turned away there with a 403 and never arrived.
 
 import (
 	"context"
