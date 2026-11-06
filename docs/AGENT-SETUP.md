@@ -279,13 +279,22 @@ docker compose -f deploy/compose.yaml --env-file .env up -d --no-deps daedalus k
 ```
 
 A reverse proxy gives the name to the door's port and to nothing else, and only `/a/` needs to pass. Keep its access
-log off: every invite is in a path.
+log off on both ports: every invite is in a path, and a name with no block of its own on port 80 falls to a catch-all
+that logs it. HSTS keeps a mistyped `http://` from sending the invite in the clear a second time.
 
 ```nginx
+server {
+    listen 80;
+    server_name agents.example.test;
+    access_log off;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl;
     server_name agents.example.test;
     access_log off;
+    add_header Strict-Transport-Security "max-age=63072000" always;
     location /a/ {
         proxy_pass http://127.0.0.1:8764;
         proxy_set_header Host $host;

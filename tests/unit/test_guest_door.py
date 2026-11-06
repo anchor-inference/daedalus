@@ -21,7 +21,7 @@ from guestd.control import ControlDoor, link_fields
 from guestd.limits import Failures, Rate
 from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STAND_IN_REPLY_SECONDS, Mailbox
 from guestd.pages import LOST_TOKEN, SPENT_PAGE
-from guestd.public import HEADERS, PublicDoor
+from guestd.public import HEADERS, MAX_BODY, PublicDoor
 from guestd.standin import (
     FAILED_TEXT,
     MAX_OUTPUT_TOKENS,
@@ -220,6 +220,18 @@ def test_a_visit_to_a_spent_link_reaches_the_owner_once_in_a_while(rig: Rig) -> 
     rig.clock.now += 601
     rig.public.get(f"/a/{invite}")
     assert rig.events(link_id).count("redeem_refused") == 2
+
+
+def test_a_message_at_its_limit_passes_however_json_escaped_it(rig: Rig) -> None:
+    """``json.dumps`` writes Cyrillic at six bytes a character unless told otherwise, and that is what an agent's
+    Python sends. A message within the limit was refused, in words that said it was over it."""
+    _, invite = rig.link()
+    token = rig.redeem(invite)
+    body = json.dumps({"text": "Я" * MAX_TEXT})
+    assert len(body) > MAX_TEXT * 4 + 256
+    sent = rig.public.post("/a/messages", content=body, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    assert sent.status_code == 202, sent.text
+    assert MAX_BODY < 64 * 1024, "the front and nginx refuse above that, so the door's bound must be the one a guest meets"
 
 
 def test_the_page_counts_its_days(rig: Rig) -> None:

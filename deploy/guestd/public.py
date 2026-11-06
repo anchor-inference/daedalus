@@ -29,8 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MAX_BODY = MAX_TEXT * 4 + 256
-"""A message at its limit in the worst JSON escaping. Past this a body is not read at all."""
+MAX_BODY = MAX_TEXT * 6 + 256
+"""A message at its limit as JSON escapes it: ``\\uXXXX``, six bytes a character, is what ``json.dumps`` writes by
+default for anything past ASCII. At four, a Russian message of 6,000 characters was refused for being over 8,000.
+Past this a body is not read at all, and it stays under the front's and nginx's own bounds of 64 KiB."""
 INVITE = re.compile(r"^/a/([A-Za-z0-9_-]{32,64})(/redeem)?/?$")
 SENDS_PER_MINUTE = 6
 READS_PER_MINUTE = 30
