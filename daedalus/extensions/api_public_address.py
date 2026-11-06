@@ -1,19 +1,29 @@
-"""The routes of Settings, Public address, on a native installation.
+"""The routes of Settings, Public address, on a native installation, and of a phone's QR.
 
 The app says what the operator wants and the launcher does it (``daedalus.extensions.tunnel_address``). A
 server has an address of its own and is told so with ``native: false``, so the section is not drawn.
+
+A QR for a service works on any installation. Same Wi-Fi comes first, because it costs nothing and goes
+nowhere: a door opens on the home network for an hour and the code is spent there. Otherwise it goes
+through the address. Either way a private service stays private: the code opens it for that one phone.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from daedalus import public_address
+from daedalus.extensions import api_services_door
 from daedalus.extensions.tunnel_address import EXTENSION_KEY
 from daedalus.host import launcher_bridge
+from daedalus.host.reveal import is_local_client
+from daedalus.security.two_factor import qr_rows
+from daedalus.stores import pairing
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -31,7 +41,9 @@ class AddressBody(BaseModel):
     sign_out: bool = False
 
 
-def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
+def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, door_config: Callable[[Any], Any]) -> None:
+    lan = api_services_door.Lan(door_config, api)
+
     def address() -> Any:
         found = app.extensions.get(EXTENSION_KEY)
         if found is None:
@@ -48,8 +60,51 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def public_address_state(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         if not app.settings.native:
             return {"native": False}
-        view = await address().refresh()
-        return {"native": True, **view, "exposed": await exposed()}
+        return await drawn(await address().refresh())
+
+    async def drawn(view: dict[str, Any]) -> dict[str, Any]:
+        """What the settings need beyond the launcher's view. The QR is drawn here, as the two-factor one is."""
+        reachable = view.get("address") if view.get("enabled") and view.get("state") in ("up", "reconnecting") else ""
+        return {"native": True, **view, "exposed": await exposed(), "qr": qr_rows(str(reachable)) if reachable else []}
+
+    async def way(kind: str, base: str, slug: str, row: dict[str, Any]) -> dict[str, Any]:
+        """One way for a phone to reach a service. A private service needs a code; one that is already
+        shared has a link that works as it is."""
+        url = f"{base}/s/{slug}/"
+        mode = row.get("share_mode") or "local"
+        if mode == "local":
+            url += "?phone=" + quote(await pairing.mint_phone(app.db, slug), safe="")
+        elif mode == "key" and row.get("share_key"):
+            url += "?key=" + quote(str(row["share_key"]), safe="")
+        return {"kind": kind, "url": url, "qr": qr_rows(url)}
+
+    @api.post("/api/sessions/{session_id}/services/{name}/phone")
+    async def service_on_a_phone(session_id: str, name: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        services = app.extensions.get("services")
+        row = await services.get(session_id, name) if services is not None else None  # type: ignore[attr-defined]
+        if row is None or not row.get("port"):
+            raise HTTPException(404, "no such service with a port")
+        slug = await services.ensure_slug(session_id, name)  # type: ignore[union-attr]
+        row = await services.get(session_id, name) or row  # type: ignore[union-attr]
+        ways = []
+        host = api_services_door.lan_address() if app.settings.native else ""
+        base = lan.base(app.settings, host) if host else ""
+        if base:
+            ways.append(await way("wifi", base, slug, row))
+        public = public_address.services_base(app.settings)
+        if public and not is_local_client(urlsplit(public).hostname):
+            ways.append(await way("tunnel" if app.settings.native else "address", public, slug, row))
+        return {"ways": ways, "mode": row.get("share_mode") or "local", "code_minutes": pairing.PHONE_CODE_MINUTES, "pass_hours": pairing.PHONE_PASS_HOURS}
+
+    @api.delete("/api/sessions/{session_id}/services/{name}/phone")
+    async def service_off_phones(session_id: str, name: str, _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        services = app.extensions.get("services")
+        row = await services.get(session_id, name) if services is not None else None  # type: ignore[attr-defined]
+        if row is None:
+            raise HTTPException(404, "no such service")
+        if row.get("share_slug"):
+            await pairing.forget_phones(app.db, str(row["share_slug"]))
+        return {"ok": True}
 
     @api.put("/api/public-address")
     async def public_address_change(body: AddressBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -61,7 +116,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(400, str(exc)) from exc
         except launcher_bridge.LauncherUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
-        return {"native": True, **view, "exposed": await exposed()}
+        return await drawn(view)
 
 
 __all__ = ["AddressBody", "register"]

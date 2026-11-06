@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from daedalus import public_address
 from daedalus.extensions.notifications import Draft
 from daedalus.processes import end_tree, pid_alive
+from daedalus.stores import pairing
 from daedalus.tools.shell import sandbox_argv, shell_environment
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ START_GRACE_SECONDS = 1.5
 """How long a fresh service has to stay up to count as started rather than as a broken command."""
 SHARE_MODES = ("local", "public", "key")
 SHARE_COOKIE_PREFIX = "dshare-"
+PHONE_COOKIE_PREFIX = "dphone-"
 
 
 def _now() -> str:
@@ -187,7 +189,22 @@ class Services:
         if mode == "key" and (not key or rotate_key):
             key = secrets.token_urlsafe(18)
         await self.app.db.execute("UPDATE services SET share_mode = ?, share_slug = ?, share_key = ? WHERE session_id = ? AND name = ?", (mode, slug, key, session_id, name))
+        if mode == "local":
+            # Back to private means private: what was shared and with whom ends here, phones included.
+            await pairing.forget_phones(self.app.db, slug)
         return self.view(await self.get(session_id, name) or {})
+
+    async def ensure_slug(self, session_id: str, name: str) -> str:
+        """The service's address under ``/s/``, minted if it has none. An address is not a share: a
+        private service has a slug too once a phone is sent to it, and it stays closed to anyone without a pass."""
+        row = await self.get(session_id, name)
+        if row is None:
+            raise ValueError(f"no service named {name!r}")
+        slug = row.get("share_slug")
+        if not slug:
+            slug = f"{name}-{secrets.token_hex(12)}"
+            await self.app.db.execute("UPDATE services SET share_slug = ? WHERE session_id = ? AND name = ?", (slug, session_id, name))
+        return str(slug)
 
     def share_allows(self, row: dict[str, Any], presented_key: str | None) -> bool:
         """Whether a request from outside may reach the service: public, or key mode with the right key."""

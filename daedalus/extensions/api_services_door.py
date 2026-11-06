@@ -21,8 +21,10 @@ a POST from another port of the same host carried it and was obeyed. What stops 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import socket
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -40,6 +42,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SCOPE_KEY = "daedalus.api_services_door"
+LAN_KEY = "daedalus.lan_door"
+"""Set on a request that came in by the door on this machine's home network: plain http, whatever the
+door's address says, so a cookie set there cannot be marked for https."""
+LAN_MINUTES = 60
+"""How long the home network's door stays open after the last QR that named it."""
 
 
 class ServicesDoor:
@@ -65,6 +72,70 @@ class ServicesDoor:
             await PlainTextResponse("User-agent: *\nDisallow: /\n")(scope, receive, send)
         else:
             await PlainTextResponse("nothing here", status_code=404)(scope, receive, send)
+
+
+class LanDoor(ServicesDoor):
+    """The services door on the machine's home network, for a phone beside it.
+
+    Natively the door stands on loopback and a phone cannot reach it. So this opens on the one address the
+    machine has on that network, when a QR asks for it, and closes itself an hour later: the operator asked
+    for a phone to reach one thing, and a port that stays open on someone's Wi-Fi was not part of that. It
+    serves what the door serves: nothing but a service that is shared or has a pass.
+    """
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope[LAN_KEY] = True
+        await super().__call__(scope, receive, send)
+
+
+def lan_address() -> str:
+    """This machine's address on its home network, or empty. No packet is sent: connecting a datagram
+    socket only asks the system which interface it would use."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+            address = str(probe.getsockname()[0])
+        except OSError:
+            return ""
+    parsed = ipaddress.ip_address(address)
+    return address if parsed.is_private and not parsed.is_loopback and not parsed.is_link_local else ""
+
+
+class Lan:
+    """The one open home-network door, with its clock."""
+
+    def __init__(self, make: Callable[[ASGIApp], uvicorn.Config], api: ASGIApp) -> None:
+        self.make = make
+        self.api = api
+        self.host = ""
+        self.port = 0
+        self.task: asyncio.Task[None] | None = None
+        self.closer: asyncio.TimerHandle | None = None
+
+    def base(self, settings: Settings, address: str) -> str:
+        """The door's address on ``address``, opening it if need be; empty when no port can be had."""
+        if self.task is None or self.task.done() or self.host != address:
+            self.close()
+            port = settings.services_door_port or 8766
+            try:
+                sock = bind_free(port, port + 16, address, set())
+            except PageError:
+                logger.warning("no port on the home network could be had for the services door")
+                return ""
+            self.host, self.port = address, int(sock.getsockname()[1])
+            self.task = asyncio.create_task(_serve(QuietServer(self.make(LanDoor(self.api))), sock), name="lan-door")
+        if self.closer is not None:
+            self.closer.cancel()
+        self.closer = asyncio.get_running_loop().call_later(LAN_MINUTES * 60, self.close)
+        return f"http://{self.host}:{self.port}"
+
+    def close(self) -> None:
+        if self.closer is not None:
+            self.closer.cancel()
+            self.closer = None
+        if self.task is not None:
+            self.task.cancel()
+            self.task = None
 
 
 def open_door(settings: Settings, config: uvicorn.Config) -> tuple[QuietServer, asyncio.Task[None]] | None:
@@ -101,4 +172,4 @@ async def _serve(server: QuietServer, sock: socket.socket) -> None:
         sock.close()
 
 
-__all__ = ["SCOPE_KEY", "ServicesDoor", "open_door"]
+__all__ = ["LAN_KEY", "LAN_MINUTES", "SCOPE_KEY", "Lan", "LanDoor", "ServicesDoor", "lan_address", "open_door"]

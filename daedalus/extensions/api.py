@@ -154,7 +154,7 @@ from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.quota_sampler import fetch_subscriptions
 from daedalus.extensions.review import ReviewRefused
-from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
+from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
@@ -172,7 +172,7 @@ from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
-from daedalus.host.reveal import platform_family
+from daedalus.host.reveal import came_through, platform_family
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_import import imported_view
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
@@ -1799,7 +1799,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_widgets.register(api, app, auth)
     # The operator's own file manager on a folder or a file of the agent's, natively and on this machine only.
     api_reveal.register(api, app, auth)
-    api_public_address.register(api, app, auth)
+    api_public_address.register(api, app, auth, door_config=lambda door: server_config(door, lifespan="off"))
     if isinstance(getattr(app, "db", None), Database):
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
@@ -4883,7 +4883,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         prefix = f"/s/{slug}~{carried}" if carried else f"/s/{slug}"
         services = app.extensions.get("services")
         row = await services.by_slug(slug) if services is not None else None  # type: ignore[attr-defined]
-        if row is None or (row.get("share_mode") or "local") not in SHARE_MODES[1:]:
+        code = request.query_params.get("phone")
+        if row is not None and at_door and code:
+            # A phone's QR. Spent here, moved into a cookie, and off the address, as a key is.
+            issued = await pairing.redeem_phone(app.db, code, slug)
+            if issued is None:
+                raise HTTPException(403, "this code was used already or has run out: show the QR again")
+            rest = [(k, v) for k, v in request.query_params.multi_items() if k != "phone"]
+            moved: Any = RedirectResponse(f"/s/{slug}/{path}" + (f"?{urlencode(rest)}" if rest else ""), status_code=303)
+            moved.set_cookie(PHONE_COOKIE_PREFIX + slug, issued, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=pairing.PHONE_PASS_HOURS * 3600, secure=_cookie_is_secure(request.scope, request.headers, door))
+            return moved
+        held = request.cookies.get(PHONE_COOKIE_PREFIX + slug)
+        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held))
+        if row is None or ((row.get("share_mode") or "local") not in SHARE_MODES[1:] and not phone):
             raise HTTPException(404, "nothing is shared here")
         cookie_name = SHARE_COOKIE_PREFIX + slug
         presented = request.query_params.get("key")
@@ -4896,9 +4908,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 return RedirectResponse(f"/s/{slug}~{quote(presented, safe='')}/{path}{query}", status_code=303)
             # The key moves from the address into a cookie, so the link people copy afterwards does not carry it.
             response: Any = RedirectResponse(f"/s/{slug}/{path}{query}", status_code=303)
-            response.set_cookie(cookie_name, presented, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=30 * 86400, secure=door.lower().startswith("https://"))
+            response.set_cookie(cookie_name, presented, httponly=True, samesite="lax", path=f"/s/{slug}", max_age=30 * 86400, secure=_cookie_is_secure(request.scope, request.headers, door))
             return response
-        if not services.share_allows(row, carried or request.cookies.get(cookie_name) or request.headers.get("x-share-key")):  # type: ignore[attr-defined]
+        if not phone and not services.share_allows(row, carried or request.cookies.get(cookie_name) or request.headers.get("x-share-key")):  # type: ignore[attr-defined]
             raise HTTPException(403, "this service needs its key: open the link that carries ?key=…")
         if row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):
             raise HTTPException(503, "the service is not running")
@@ -4913,7 +4925,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 allowed = {"Access-Control-Allow-Methods": "*", "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*")}
                 return Response(status_code=204, headers={**answer, **allowed})
         upstream = f"http://127.0.0.1:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
-        response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE), sandbox=not at_door, extra_headers=answer)
+        response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug), sandbox=not at_door, extra_headers=answer)
         # A page must not outlive the share in a browser cache: switching a service back to LAN-only takes
         # effect on the next reload, not when the cached copy expires.
         if response.headers.get("content-type", "").startswith("text/html"):
@@ -4938,16 +4950,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         slug, _, carried = slug.partition("~")
         services = app.extensions.get("services")
         row = await services.by_slug(slug) if allowed and services is not None else None  # type: ignore[attr-defined]
-        if row is None or (row.get("share_mode") or "local") not in SHARE_MODES[1:]:
+        held = websocket.cookies.get(PHONE_COOKIE_PREFIX + slug)
+        phone = bool(at_door and row is not None and held and await pairing.phone_admitted(app.db, slug, held))
+        if row is None or ((row.get("share_mode") or "local") not in SHARE_MODES[1:] and not phone):
             await websocket.close(code=1008)
             return
         presented = carried or websocket.query_params.get("key") or websocket.cookies.get(SHARE_COOKIE_PREFIX + slug) or websocket.headers.get("x-share-key")
-        if not services.share_allows(row, presented) or row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):  # type: ignore[attr-defined]
+        if not (phone or services.share_allows(row, presented)) or row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):  # type: ignore[attr-defined]
             await websocket.close(code=1008)
             return
         rest = [(k, v) for k, v in websocket.query_params.multi_items() if k != "key"]
         upstream = f"ws://127.0.0.1:{row['port']}/{path}" + (f"?{urlencode(rest)}" if rest else "")
-        await forward_websocket(websocket, upstream, f"/s/{slug}~{carried}" if carried else f"/s/{slug}", strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE))
+        await forward_websocket(websocket, upstream, f"/s/{slug}~{carried}" if carried else f"/s/{slug}", strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug))
 
     @api.post("/api/sessions/{session_id}/loop")
     async def set_session_loop(session_id: str, body: LoopBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -7008,6 +7022,14 @@ class _AppServer(uvicorn.Server):
     def handle_exit(self, sig: int, frame: Any) -> None:
         super().handle_exit(sig, frame)
         self._on_exit()
+
+
+def _cookie_is_secure(scope: Any, headers: Any, door: str) -> bool:
+    """Whether a cookie set at the door may ask for https: true of a tunnel, and of a door with an https
+    name, except on the home network's door, which is plain http whatever else the installation has."""
+    if scope.get(api_services_door.LAN_KEY):
+        return False
+    return came_through(headers) or door.lower().startswith("https://")
 
 
 def server_config(api: Any, *, trusted_proxies: str = "", **options: Any) -> uvicorn.Config:

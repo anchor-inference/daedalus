@@ -12,6 +12,12 @@ minting one takes running a command inside the installation, which is more than 
 A code is stored as its SHA-256 only: whoever reads the database reads no usable link. It lives for
 half an hour, is spent the first time it is opened, and spending one revokes every other code that is
 still outstanding — a link that did its job leaves no second copy working in a log or a paste buffer.
+
+A phone gets the same kind of code for one thing less: one service, not the app. It has a table of its
+own so that it cannot be taken for the other kind by a bug. Such a code travels in a QR over plain
+http on a home network, or through a tunnel, and a way into the app must never be one mistake away from
+that. It lasts ten minutes, is spent once, and turns into a pass for that service in that phone's
+browser, for twelve hours. Spending one leaves other codes alone: two phones are two phones.
 """
 
 from __future__ import annotations
@@ -29,6 +35,10 @@ TTL_MINUTES = 30
 WINDOW_TTL_MINUTES = 2
 """A launcher's link for its window is opened the moment it is printed; nothing else should find it alive."""
 URL_FILE = "pairing-url"
+PHONE_CODE_MINUTES = 10
+"""A QR on a screen: long enough to find the phone, and no longer."""
+PHONE_PASS_HOURS = 12
+"""A working day away from the desk. Past it the phone asks again, as the desk can be asked."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +84,45 @@ async def redeem(db: Database, code: str, *, state_dir: Path | None = None) -> R
     if state_dir is not None:
         (state_dir / URL_FILE).unlink(missing_ok=True)
     return Redeemed(for_window=bool(row["for_window"]))
+
+
+async def mint_phone(db: Database, slug: str) -> str:
+    """A code for one phone to reach one service, returned once."""
+    now = datetime.now(UTC)
+    await db.execute("DELETE FROM phone_passes WHERE COALESCE(expires_at, code_expires_at) < ?", (now.isoformat(),))
+    code = secrets.token_urlsafe(24)
+    await db.execute(
+        "INSERT INTO phone_passes(code_hash, slug, created_at, code_expires_at) VALUES (?, ?, ?, ?)",
+        (_digest(code), slug, now.isoformat(), (now + timedelta(minutes=PHONE_CODE_MINUTES)).isoformat()),
+    )
+    return code
+
+
+async def redeem_phone(db: Database, code: str, slug: str) -> str | None:
+    """Spend a code for this service: the pass it became, once, and None for anything else.
+
+    The slug is compared because a code from one service's QR must not open another.
+    """
+    row = await db.fetchone("SELECT id, slug, code_expires_at, used_at FROM phone_passes WHERE code_hash = ?", (_digest(code or ""),))
+    now = datetime.now(UTC)
+    if row is None or row["used_at"] is not None or not secrets.compare_digest(str(row["slug"]), slug) or datetime.fromisoformat(row["code_expires_at"]) <= now:
+        return None
+    issued = secrets.token_urlsafe(32)
+    await db.execute("UPDATE phone_passes SET used_at = ?, pass_hash = ?, expires_at = ? WHERE id = ?", (now.isoformat(), _digest(issued), (now + timedelta(hours=PHONE_PASS_HOURS)).isoformat(), row["id"]))
+    return issued
+
+
+async def phone_admitted(db: Database, slug: str, issued: str | None) -> bool:
+    """Whether a pass from a phone's cookie still opens this service."""
+    if not issued:
+        return False
+    row = await db.fetchone("SELECT expires_at FROM phone_passes WHERE pass_hash = ? AND slug = ?", (_digest(issued), slug))
+    return row is not None and row["expires_at"] is not None and datetime.fromisoformat(row["expires_at"]) > datetime.now(UTC)
+
+
+async def forget_phones(db: Database, slug: str) -> None:
+    """Every phone's way into this service, and every code not used yet."""
+    await db.execute("DELETE FROM phone_passes WHERE slug = ?", (slug,))
 
 
 async def outstanding(db: Database) -> int:
