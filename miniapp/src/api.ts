@@ -947,6 +947,37 @@ export type ShareView = { mode: ShareMode; slug: string | null; key: string | nu
 
 /** The agent link: a door another person's agent talks through. A stand-in is a separate toolless model
  *  that knows only the briefing the operator approved; a direct link reaches the chat's own agent. */
+export type AgentTalkReview = "first" | "all" | "off";
+/** A conversation of this chat's agent with somebody else's, as `GET /api/sessions/{id}/agent-talks` lists it.
+ *  `topic` is the other side's words. Neither a token nor an invite is ever in this. */
+export type AgentTalk = {
+  id: string;
+  session_id: string;
+  host: string;
+  topic: string;
+  mode: "" | "stand_in" | "direct";
+  state: "opening" | "pending" | "open" | "closed";
+  reason: string;
+  waiting_for: "" | "reply" | "owner";
+  quiet: boolean;
+  review: AgentTalkReview;
+  sends: number;
+  sends_limit: number;
+  wake_turns: number;
+  wake_usd: number;
+  created_at: string;
+  last_at: string;
+  closed_at: string | null;
+  spent_usd: number;
+  replies: number;
+  unread: number;
+  held: number;
+};
+/** `role`: `us` is this side's agent, `them` the other's, `door` the other door's own words. Text is never markup. */
+export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string };
+export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[] };
+export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number };
+
 export type GuestMode = "stand_in" | "direct";
 export type GuestTools = "none" | "read" | "all";
 export type GuestLinkState = "waiting" | "spent" | "revoked" | "expired";
@@ -960,6 +991,8 @@ export type GuestConversation = {
   last_guest_at: number | null;
   /** The guest's own words, present only while the first contact waits for an answer. Untrusted text. */
   first_message?: string;
+  /** What the guest said it is at the redeem: a claim, for the owner to read, and nothing more. */
+  client?: string;
 };
 /** One link as the door describes it. Times are epoch seconds. */
 export type GuestLink = {
@@ -1208,7 +1241,7 @@ export type MessageView = {
   silent?: boolean;
   /** A message that came over an agent link (origin `guest:<link>`): who the link was made for and what
    *  the turn it started could do. The text is the guest's words, never the operator's. */
-  guest?: { label: string; tools: string } | null;
+  guest?: { label: string; tools: string; kind?: "reply" } | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

@@ -73,6 +73,7 @@ import { worktreeFolders } from "../project/worktreefolders";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
+import { AgentTalkBar, AgentTalkSheet, useAgentTalks } from "../agenttalk";
 import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
 import { ApprovalChip } from "../browser/approvals";
@@ -199,6 +200,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [promoting, setPromoting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [guesting, setGuesting] = useState(false);
+  const [talking, setTalking] = useState<{ first: string | null } | null>(null);
+  const agentTalks = useAgentTalks(id);
   const composer = useRef<ComposerHandle>(null);
   // The right panel: the route carries the open tab and the previewed file for the pane the URL
   // names; the second pane of a dual view keeps its panel to itself. Phones host it in a sheet.
@@ -1627,6 +1630,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(onSplit ? [{ icon: "split" as IconName, label: t("session.split"), onSelect: onSplit }] : []),
     { icon: "share", label: t("session.share"), value: detail?.share && detail.share.mode !== "local" ? t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key") : undefined, onSelect: () => setSharing(true) },
     ...(guestable ? [{ icon: "link" as IconName, label: t("session.guest"), onSelect: () => setGuesting(true) }] : []),
+    ...(agentTalks.length ? [{ icon: "link" as IconName, label: t("session.talks"), onSelect: () => setTalking({ first: null }) }] : []),
     { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
     ...(revealer && hasDetails ? [{ icon: "external" as IconName, label: revealer.label, onSelect: revealWorkspace }] : []),
     { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
@@ -1783,6 +1787,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               "-",
               { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
               ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
+              ...(agentTalks.length ? [{ label: t("session.talks"), icon: "link" as IconName, onSelect: () => setTalking({ first: null }) }] : []),
               { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
               { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
               ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
@@ -1881,6 +1886,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </div>
           )}
           <ComputerBanner sessionId={id} />
+          <AgentTalkBar talks={agentTalks} onOpen={(first) => setTalking({ first })} />
           <SettingNoticeLines sessionId={id} />
           {staffId && <StaffMessages staffId={staffId} />}
           {/* A draft written before the first session read would bind to an empty model and workspace,
@@ -2034,6 +2040,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {moving && detail && <MoveSessionSheet sessionId={id} current={detail.project.id} currentOwn={!!detail.workspace_own} onClose={() => setMoving(false)} onMoved={() => load(true)} toast={toast} />}
 
       {guesting && <GuestLinksSheet sessionId={id} toast={toast} onClose={() => setGuesting(false)} />}
+      {talking && <AgentTalkSheet sessionId={id} first={talking.first} toast={toast} onClose={() => setTalking(null)} />}
       {sharing && <ShareSheet sessionId={id} share={detail?.share} onClose={() => setSharing(false)} onChanged={(share) => setDetail((current) => (current ? { ...current, share } : current))} toast={toast} />}
 
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}

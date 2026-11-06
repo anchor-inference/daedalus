@@ -1,0 +1,45 @@
+/* A chat's conversations with other agents (agenttalk.tsx). What the other side wrote is laid out as
+   pre-wrapped plain text and given nothing else: these rules only decide where lines break. */
+
+.talk-bar { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: var(--chat-column, 100%); margin: 0 auto var(--space-1); padding: 0 var(--space-3); box-sizing: border-box; min-width: 0; }
+.talk-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; min-height: 28px; padding: 2px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.talk-row:hover { background: var(--surface-2); }
+.talk-row[data-tone="attn"] { border-left: 3px solid var(--warn); }
+.talk-row[data-tone="attn"] .talk-word { color: var(--warn); }
+.talk-row[data-tone="ok"] .talk-word { color: var(--ok); }
+.talk-who { min-width: 0; color: var(--fg-1); font-weight: 600; }
+.talk-word { flex: none; }
+.talk-counts { min-width: 0; margin-left: auto; }
+
+.talk-sheet { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.talk-sheet > .sub { margin: 0; }
+.talk-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.talk-item { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.talk-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.talk-item-head b { min-width: 0; }
+
+.talk-detail { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.talk-back { align-self: flex-start; }
+.talk-who-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.talk-host { overflow-wrap: anywhere; }
+.talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-2); }
+.talk-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-14); line-height: 1.45; }
+
+.talk-messages { display: flex; flex-direction: column; gap: var(--space-2); }
+.talk-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
+.talk-msg[data-role="them"] { border-left: 3px solid var(--warn); }
+.talk-msg[data-role="us"] { background: var(--surface-2); }
+.talk-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
+.talk-msg-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
+.talk-msg-word { color: var(--warn); }
+.talk-held { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.talk-held-actions { display: flex; gap: var(--space-2); }
+
+.talk-controls { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.talk-control { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.talk-control .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
+.talk-control .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.talk-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.talk-wake-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.talk-wake-fields label { display: flex; flex-direction: column; gap: 2px; flex: 1 1 120px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.talk-end { align-self: flex-start; }

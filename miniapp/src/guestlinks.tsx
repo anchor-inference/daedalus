@@ -152,6 +152,7 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead }: {
     link.priced ? `${usd(link.spent_usd)} / ${usd(link.usd_limit)}` : "",
     plural("guest.turns", link.turns_used),
     link.state === "waiting" ? t("guest.expires", { when: relTimeLong(ms(link.invite_expires_at)) }) : "",
+    link.conversation?.client === "daedalus" ? t("guest.client.daedalus") : "",
   ].filter(Boolean).join(" · ");
   return (
     <div className="guest-link" data-guest-link={link.id} data-state={state.key}>
@@ -530,14 +531,15 @@ function MadeLink({ url, topic, toast, onDone }: { url: string; topic: string; t
 
 /** A guest's message in the conversation: a card with their mark and what their turn could do. Plain
  *  text only: it is a stranger's, and it is drawn on the answer's side, never as the operator's bubble. */
-export function GuestCard({ guest, text }: { guest?: { label: string; tools: string } | null; text: string }) {
+export function GuestCard({ guest, text }: { guest?: { label: string; tools: string; kind?: "reply" } | null; text: string }) {
   const label = guest?.label ?? "";
-  const tools = guest?.tools === "none" || guest?.tools === "read" || guest?.tools === "all" ? t(`guest.tools.${guest.tools}`) : "";
+  const reply = guest?.kind === "reply";
+  const tools = reply ? t("talk.card.woke") : guest?.tools === "none" || guest?.tools === "read" || guest?.tools === "all" ? t(`guest.tools.${guest.tools}`) : "";
   return (
-    <div className="guest-card" data-from-guest={label || "guest"}>
+    <div className="guest-card" data-from-guest={label || "guest"} data-reply={reply || undefined}>
       <div className="guest-card-head">
         <Icon name="link" size={13} />
-        <b>{label ? t("guest.from", { label }) : t("guest.from.none")}</b>
+        <b>{reply ? t("talk.card.from", { host: label }) : label ? t("guest.from", { label }) : t("guest.from.none")}</b>
         {tools && <span>{tools}</span>}
       </div>
       <div className="guest-card-text">{text}</div>
