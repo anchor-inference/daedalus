@@ -34,7 +34,7 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 from daedalus.config import RuntimeConfig, Settings  # noqa: E402
 from daedalus.extensions.api import SESSION_COOKIE, build_app, server_config, session_cookie_value  # noqa: E402
-from daedalus.extensions.services_door import ServicesDoor  # noqa: E402
+from daedalus.extensions.api_services_door import ServicesDoor  # noqa: E402
 
 ATTACK = """<!doctype html><title>start</title>
 <script type="module" src="module.js"></script>

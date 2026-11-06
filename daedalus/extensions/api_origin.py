@@ -9,7 +9,7 @@ from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from daedalus import public_address
-from daedalus.extensions.services_door import SCOPE_KEY
+from daedalus.extensions.api_services_door import SCOPE_KEY
 from daedalus.gateway.origin import cookie_may_act
 
 if TYPE_CHECKING:

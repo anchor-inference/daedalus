@@ -6,7 +6,7 @@ never read into memory) and an answer of any length (streamed as it comes, so se
 long downloads work), and both tell the server where it is mounted with ``X-Forwarded-Prefix``.
 A page also forwards WebSocket connections, so an existing web app with live updates works inside it.
 
-A shared service normally reaches this code through its own listener (``services_door``). When no
+A shared service normally reaches this code through its own listener (``api_services_door``). When no
 separate origin is available it arrives on the app's address instead, and ``sandbox`` is what keeps
 that safe: the answer gets an opaque origin, so the page holds nothing of the app's.
 """

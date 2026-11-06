@@ -12,7 +12,7 @@ marked ``restart``, and reported otherwise.
 Sharing: a service is reachable on the LAN at ``SERVICES_PUBLIC_HOST:<port>``; the operator can
 also open it under ``/s/<slug>/`` — to anyone (``public``) or to whoever presents its key (``key``).
 Those requests are proxied to the service's port by a listener of their own, on another origin than
-the app (``daedalus.extensions.services_door``); ``public_address.services_base`` says where it is.
+the app (``daedalus.extensions.api_services_door``); ``public_address.services_base`` says where it is.
 
 Natively a service is told to listen on loopback, through ``$HOST``. In a container it has to listen
 on every interface of the container, because a published port arrives at the container's own address

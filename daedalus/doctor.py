@@ -70,7 +70,7 @@ class DoctorContext:
 
 async def run_checks(ctx: DoctorContext) -> list[Check]:
     checks: list[Check] = []
-    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
+    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _shared_services, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
         try:
             checks.extend(await probe(ctx))
         except Exception as exc:  # noqa: BLE001 — one broken probe must not hide the others
@@ -640,12 +640,14 @@ async def _terminals(ctx: DoctorContext) -> list[Check]:
         # A terminal's socket is refused unless it comes from the app's own origin, and Telegram's
         # webview connects from the Mini App's address, which nothing but this setting names.
         out.append(Check("terminals in Telegram", False, "MINIAPP_PUBLIC_URL is empty, so a terminal opened inside Telegram is refused", "warn", "set MINIAPP_PUBLIC_URL to the address the bot's menu button opens"))
+    return out
+
+
+async def _shared_services(ctx: DoctorContext) -> list[Check]:
     door = public_address.services_base(ctx.settings)
     if door:
-        out.append(Check("shared services", True, f"served from {door}, an origin of their own", "ok"))
-    else:
-        out.append(Check("shared services", False, "no separate origin: a shared page runs in a sandbox, without local storage or cookies", "info", "give the services door a name in your reverse proxy and set SERVICES_PUBLIC_URL"))
-    return out
+        return [Check("shared services", True, f"served from {door}, an origin of their own", "ok")]
+    return [Check("shared services", False, "no separate origin: a shared page runs in a sandbox, without local storage or cookies", "info", "give the services door a name in your reverse proxy and set SERVICES_PUBLIC_URL")]
 
 
 BROWSER_FIXES = {

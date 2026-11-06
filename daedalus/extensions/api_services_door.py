@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+import socket
+from typing import TYPE_CHECKING
 
 import uvicorn
 from starlette.responses import PlainTextResponse
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SCOPE_KEY = "daedalus.services_door"
+SCOPE_KEY = "daedalus.api_services_door"
 
 
 class ServicesDoor:
@@ -79,8 +80,21 @@ def open_door(settings: Settings, config: uvicorn.Config) -> tuple[QuietServer, 
         settings.services_door_port = 0
         return None
     server = QuietServer(config)
-    task: asyncio.Task[Any] = asyncio.create_task(server.serve(sockets=[sock]), name="services-door")
-    return server, task
+    return server, asyncio.create_task(_serve(server, sock), name="services-door")
+
+
+async def _serve(server: QuietServer, sock: socket.socket) -> None:
+    """Serve until cancelled, which is how the application stops this task, and then stop listening.
+
+    A cancelled uvicorn never reaches its own shutdown, and a socket it was handed goes on accepting:
+    the door would keep answering into an application that has closed its database.
+    """
+    try:
+        await server.serve(sockets=[sock])
+    finally:
+        for listener in server.servers:
+            listener.close()
+        sock.close()
 
 
 __all__ = ["SCOPE_KEY", "ServicesDoor", "open_door"]

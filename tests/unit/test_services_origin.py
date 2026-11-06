@@ -23,11 +23,12 @@ from fastapi.testclient import TestClient
 
 from daedalus import public_address
 from daedalus.config import RuntimeConfig, Settings
+from daedalus.doctor import _shared_services
 from daedalus.extensions.api import SESSION_COOKIE, build_app, server_config, session_cookie_value
 from daedalus.extensions.api_proxy import ORIGIN_WIDE_HEADERS, SANDBOX_POLICY, scoped_set_cookie
+from daedalus.extensions.api_services_door import SCOPE_KEY, ServicesDoor, open_door
 from daedalus.extensions.dialog_share import DialogShares
 from daedalus.extensions.services import Services
-from daedalus.extensions.services_door import SCOPE_KEY, ServicesDoor, open_door
 from daedalus.gateway.origin import cookie_may_act
 
 APP_HOST = "app.example.test"
@@ -398,6 +399,13 @@ async def test_the_door_serves_on_its_port_and_goes_when_it_is_cancelled() -> No
     await asyncio.gather(task, return_exceptions=True)
     with pytest.raises(httpx.ConnectError):
         await httpx.AsyncClient().get(address)
+
+
+async def test_the_doctor_says_which_of_the_two_this_installation_has() -> None:
+    sandboxed = await _shared_services(SimpleNamespace(settings=settings_for(miniapp_public_url="https://a.example.test")))  # type: ignore[arg-type]
+    assert not sandboxed[0].ok and "sandbox" in sandboxed[0].message
+    door = await _shared_services(SimpleNamespace(settings=settings_for(miniapp_public_url="https://a.example.test", services_public_url="https://s.example.test")))  # type: ignore[arg-type]
+    assert door[0].ok and "https://s.example.test" in door[0].message
 
 
 def test_a_new_address_reaches_links_without_a_restart() -> None:

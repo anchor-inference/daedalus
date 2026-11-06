@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
+from daedalus.extensions.api_services_door import ServicesDoor
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX
-from daedalus.extensions.services_door import ServicesDoor
 
 
 class Upstream(BaseHTTPRequestHandler):

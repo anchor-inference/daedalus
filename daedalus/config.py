@@ -292,7 +292,7 @@ class Settings(BaseSettings):
     cookies ignore ports: on the same name, opening a service sends it the operator's session cookie."""
     services_door_port: int = 8766
     """The port of the listener that serves shared services and nothing else, on the same interface as
-    the API; 0 turns it off. ``daedalus.extensions.services_door`` says why it exists."""
+    the API; 0 turns it off. ``daedalus.extensions.api_services_door`` says why it exists."""
     services_public_url: str = ""
     """The address that listener is reached at when it is not this host's own port: the name a reverse
     proxy gives it, or later a tunnel. Must be another origin than ``miniapp_public_url``."""

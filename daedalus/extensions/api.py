@@ -117,6 +117,7 @@ from daedalus.extensions import (
     api_runtime,
     api_runtime_handoff,
     api_secrets,
+    api_services_door,
     api_session_import,
     api_settings_changes,
     api_skill_quality,
@@ -131,7 +132,6 @@ from daedalus.extensions import (
     api_worktrees,
     keyproxy_clients,
     launcher_updates,
-    services_door,
 )
 from daedalus.extensions import commands as slash
 from daedalus.extensions.api_host_pane import HostPane
@@ -4815,7 +4815,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # -- shared services: /s/<slug>/… is proxied to the service's port ---------------------
     # A shared service runs pages an agent wrote, so it never runs as itself on the app's origin: it is
-    # served by the door, a listener of its own (``services_door``), and a request that arrives here
+    # served by the door, a listener of its own (``api_services_door``), and a request that arrives here
     # is sent there. Only when no door can be reached (an https app with no name for one yet) is the
     # page served here, in a sandbox that takes its origin away.
     # No auth dependency: public mode is open to anyone, key mode to whoever presents the key.
@@ -4831,7 +4831,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.api_route("/s/{slug}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
     async def shared_proxy(slug: str, path: str, request: Request) -> Any:
-        at_door = bool(request.scope.get(services_door.SCOPE_KEY))
+        at_door = bool(request.scope.get(api_services_door.SCOPE_KEY))
         door = public_address.services_base(settings)
         if not at_door and door:
             # 307 keeps the method and the body. The raw path, because the decoded one is not an address.
@@ -7013,7 +7013,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         app.front.command_hooks["doctor"] = cmd_doctor
     tasks = [asyncio.create_task(server.serve(), name="api-server")]
     # lifespan off: the API server runs the app's start and stop, and they run once.
-    door = services_door.open_door(app.settings, server_config(services_door.ServicesDoor(api), trusted_proxies=app.settings.api_trusted_proxies, lifespan="off"))
+    door = api_services_door.open_door(app.settings, server_config(api_services_door.ServicesDoor(api), trusted_proxies=app.settings.api_trusted_proxies, lifespan="off"))
     if door is not None:
         tasks.append(door[1])
     return tasks
