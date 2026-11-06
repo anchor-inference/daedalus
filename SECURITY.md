@@ -35,6 +35,11 @@ installation, so it is built on what that stranger cannot reach rather than on w
   completion on chosen upstreams and nothing else: no streaming, no tools, a small output bound, no dot segments in
   the path, and no header of the door's own, so a call cannot hide from the ledger. The door holds no credential;
   the proxy adds it, for a key, a prepaid plan or a CLI login alike. Search backends are never among the upstreams.
+- That listener serves only the models the app lists, on the upstream it lists them for, by a table the app writes
+  into its state folder, which the door does not mount. A model the operator limited to some OpenRouter providers is
+  served only within them, and one with no such choice takes no provider object. A change holds from the next call
+  with nothing restarted, and with no table the listener serves nothing. So a taken door can still spend on a listed
+  model and cannot pick a dearer one, and a link whose preset was removed stops being answered.
 - A stand-in link answers from a tools-free model call that holds only a briefing the operator approved, so private
   data is absent rather than filtered. The Codex route cannot carry an output bound: its backend refuses the field,
   so a reply there is bounded by the plan and not by the request.

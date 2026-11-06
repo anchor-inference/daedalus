@@ -27,6 +27,23 @@ def load() -> Any:
 
 
 GOOD = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100, "stream": False}
+SELECTION = ["deepinfra/fp8/flex", "wafer/us"]
+LISTED = [
+    {"path": path, "model": "m", "only": []}
+    for path in ("acme/v1", "acme/v4.1", "acme", "openrouter", "claude/v1", "codex/v1", "grok/v1", "opencode", "opencode_zen")
+] + [{"path": "openrouter", "model": "limited", "only": SELECTION}, {"path": "acme/v1", "model": "limited", "only": SELECTION}]
+
+
+def write_table(folder: Path, models: Any) -> None:
+    (folder / "guest-models.json").write_text(json.dumps({"models": models}), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The folder of the table the host writes, found from the database's path as the proxy finds it."""
+    monkeypatch.setenv("KEYPROXY_BUDGET_DB", str(tmp_path / "daedalus.sqlite"))
+    write_table(tmp_path, LISTED)
+    return tmp_path
 
 
 @pytest.fixture
@@ -219,7 +236,7 @@ def test_the_bill_an_upstream_states_is_reported_and_an_absent_one_is_not_invent
 # -- a stand-in limited to some of OpenRouter's providers --------------------------------------------
 
 
-ROUTED = {**GOOD, "provider": {"only": ["deepinfra/fp8/flex", "wafer/us"], "allow_fallbacks": False}}
+ROUTED = {**GOOD, "model": "limited", "provider": {"only": SELECTION, "allow_fallbacks": False}}
 
 
 @pytest.fixture
@@ -257,10 +274,142 @@ async def test_a_limited_call_reaches_openrouter_with_the_field_untouched(router
     assert json.loads(upstream[0].content)["provider"] == ROUTED["provider"]
 
 
-async def test_a_call_with_no_provider_object_is_as_it_was(router: Any) -> None:
+async def test_a_model_nobody_limited_goes_as_it_was(router: Any) -> None:
     client, upstream, _proxy = router
     assert (await client.post("/openrouter/chat/completions", json=GOOD)).status == 200
     assert "provider" not in json.loads(upstream[0].content)
+
+
+async def test_a_limited_call_may_narrow_what_the_operator_chose(router: Any) -> None:
+    client, upstream, _proxy = router
+    narrowed = {**ROUTED, "provider": {"only": ["wafer/us"], "allow_fallbacks": False}}
+    assert (await client.post("/openrouter/chat/completions", json=narrowed)).status == 200
+    assert json.loads(upstream[0].content)["provider"]["only"] == ["wafer/us"]
+
+
+@pytest.mark.parametrize("only", [
+    ["deepinfra"],  # the provider a selected endpoint belongs to reaches all of its endpoints
+    ["deepinfra/fp8"],
+    ["wafer"],
+    ["baseten"],
+    ["wafer/us", "baseten"],
+    [*SELECTION, "baseten"],
+])
+async def test_a_provider_outside_the_operators_choice_is_refused(router: Any, only: list[str]) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", json={**ROUTED, "provider": {"only": only, "allow_fallbacks": False}})
+    assert answer.status == 403 and upstream == []
+
+
+async def test_a_limited_model_cannot_be_called_with_the_limit_left_out(router: Any) -> None:
+    """Left out, OpenRouter routes it anywhere, so dropping the object would be the way around everything above."""
+    client, upstream, _proxy = router
+    limited = {k: v for k, v in ROUTED.items() if k != "provider"}
+    answer = await client.post("/openrouter/chat/completions", json=limited)
+    assert answer.status == 403 and upstream == []
+
+
+async def test_a_model_with_nothing_chosen_takes_no_provider_object(router: Any) -> None:
+    """It would otherwise pin a call to a provider the operator never looked at, at that provider's price."""
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", json={**GOOD, "provider": {"only": ["baseten"], "allow_fallbacks": False}})
+    assert answer.status == 403 and upstream == []
+
+
+@pytest.mark.parametrize("model", ["anthropic/claude-a-dear-one", "M", "m:nitro", "m:online", "openrouter/auto", "", 7, None, ["m"], {"m": 1}])
+async def test_a_model_the_app_does_not_list_is_refused(router: Any, model: Any) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", json={**GOOD, "model": model})
+    assert answer.status == 403 and upstream == []
+
+
+async def test_a_call_that_names_no_model_is_refused(router: Any) -> None:
+    client, upstream, _proxy = router
+    body = {k: v for k, v in GOOD.items() if k != "model"}
+    assert (await client.post("/openrouter/chat/completions", json=body)).status == 403 and upstream == []
+
+
+async def test_a_model_listed_on_one_upstream_names_nothing_on_another(router: Any, table: Path) -> None:
+    client, upstream, _proxy = router
+    write_table(table, [{"path": "acme/v1", "model": "only-here", "only": []}])
+    answer = await client.post("/openrouter/chat/completions", json={**GOOD, "model": "only-here"})
+    assert answer.status == 403 and upstream == []
+    assert (await client.post("/acme/chat/completions", json={**GOOD, "model": "only-here"})).status == 403 and upstream == []
+    assert (await client.post("/acme/v1/chat/completions", json={**GOOD, "model": "only-here"})).status == 200
+
+
+@pytest.mark.parametrize("raw", [
+    b'{"model": "dear", "model": "m", "messages": [], "max_tokens": 10}',
+    b'{"model": "m", "model": "dear", "messages": [], "max_tokens": 10}',
+    b'{"model": "limited", "messages": [], "max_tokens": 10, "provider": {"only": ["baseten"], "only": ["wafer/us"], "allow_fallbacks": false}}',
+    b'{"model": "limited", "messages": [], "max_tokens": 10, "provider": {"only": ["baseten"], "allow_fallbacks": false}, "provider": {"only": ["wafer/us"], "allow_fallbacks": false}}',
+])
+async def test_a_name_said_twice_is_refused_because_the_upstream_may_read_the_other_one(router: Any, raw: bytes) -> None:
+    client, upstream, _proxy = router
+    answer = await client.post("/openrouter/chat/completions", data=raw, headers={"content-type": "application/json"})
+    assert answer.status == 403 and upstream == []
+
+
+async def test_a_change_of_the_table_holds_from_the_next_call_in_both_directions(router: Any, table: Path) -> None:
+    client, upstream, _proxy = router
+    assert (await client.post("/openrouter/chat/completions", json={**GOOD, "model": "new"})).status == 403
+    # Listed: served, with nothing restarted.
+    write_table(table, [*LISTED, {"path": "openrouter", "model": "new", "only": []}])
+    assert (await client.post("/openrouter/chat/completions", json={**GOOD, "model": "new"})).status == 200
+    # Limited: the same call is refused, and the one inside the choice is served.
+    write_table(table, [{"path": "openrouter", "model": "new", "only": ["wafer/us"]}])
+    assert (await client.post("/openrouter/chat/completions", json={**GOOD, "model": "new"})).status == 403
+    limited = {**GOOD, "model": "new", "provider": {"only": ["wafer/us"], "allow_fallbacks": False}}
+    assert (await client.post("/openrouter/chat/completions", json=limited)).status == 200
+    # The choice widened and then narrowed again.
+    write_table(table, [{"path": "openrouter", "model": "new", "only": ["baseten"]}])
+    assert (await client.post("/openrouter/chat/completions", json=limited)).status == 403
+    # Taken off the list.
+    write_table(table, [])
+    assert (await client.post("/openrouter/chat/completions", json=limited)).status == 403
+    assert len(upstream) == 2
+
+
+@pytest.mark.parametrize("contents", [None, "", "not json", "[]", "{}", '{"models": 7}', '{"models": [{"path": "openrouter"}]}', '{"models": [7]}', b"\xff\xfe"])
+async def test_with_no_whole_table_nothing_is_served_and_the_refusal_says_why(router: Any, table: Path, contents: Any) -> None:
+    client, upstream, proxy = router
+    file = table / "guest-models.json"
+    file.unlink()
+    if isinstance(contents, str):
+        file.write_text(contents, encoding="utf-8")
+    elif contents is not None:
+        file.write_bytes(contents)
+    answer = await client.post("/openrouter/chat/completions", json=GOOD)
+    assert answer.status == 403 and upstream == []
+    assert "no table" in (await answer.json())["error"]["message"]
+    assert proxy.guest_models() is None
+
+
+async def test_an_empty_table_is_a_table_and_serves_nothing(router: Any, table: Path) -> None:
+    client, upstream, _proxy = router
+    write_table(table, [])
+    answer = await client.post("/openrouter/chat/completions", json=GOOD)
+    assert answer.status == 403 and upstream == [] and "not one the app lists" in (await answer.json())["error"]["message"]
+
+
+def test_a_missing_table_is_said_once_in_the_log_and_again_after_it_came_back(router: Any, table: Path, caplog: pytest.LogCaptureFixture) -> None:
+    _client, _upstream, proxy = router
+    (table / "guest-models.json").unlink()
+    assert proxy.guest_models() is None and proxy.guest_models() is None
+    write_table(table, [])
+    assert proxy.guest_models() == {}
+    (table / "guest-models.json").unlink()
+    assert proxy.guest_models() is None
+    assert len([r for r in caplog.records if "no table of guest models" in r.message]) == 2
+
+
+def test_the_table_lies_beside_the_database_in_both_ways_of_starting(table: Path) -> None:
+    """Named from the database's path, which compose and the launcher both give, and from nothing of the door's."""
+    assert load().GUEST_MODELS == table / "guest-models.json"
+    compose = (Path(__file__).resolve().parents[2] / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+    assert "KEYPROXY_BUDGET_DB: /srv/state/daedalus.sqlite" in compose and "- daedalus-state:/srv/state:ro" in compose
+    door = compose.split("\n  guest:\n", 1)[1].split("\n  guest-front:", 1)[0]
+    assert "volumes:" in door and "daedalus-state" not in door
 
 
 @pytest.mark.parametrize("route", [
@@ -288,14 +437,16 @@ async def test_a_call_with_no_provider_object_is_as_it_was(router: Any) -> None:
 ])
 async def test_any_other_shape_of_the_field_is_refused_before_it_is_sent(router: Any, route: Any) -> None:
     client, upstream, _proxy = router
-    answer = await client.post("/openrouter/chat/completions", json={**GOOD, "provider": route})
+    answer = await client.post("/openrouter/chat/completions", json={**ROUTED, "provider": route})
     assert answer.status == 403 and upstream == []
+    assert "provider object" in (await answer.json())["error"]["message"], "refused for its shape, not for something else"
 
 
 async def test_only_openrouter_may_be_sent_the_field(router: Any) -> None:
     client, upstream, _proxy = router
     answer = await client.post("/acme/v1/chat/completions", json=ROUTED)
     assert answer.status == 403 and upstream == []
+    assert "only OpenRouter" in (await answer.json())["error"]["message"]
 
 
 def test_an_upstream_with_another_name_on_openrouters_host_is_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:

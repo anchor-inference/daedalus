@@ -541,7 +541,8 @@ services:
       KEYPROXY_CLAUDE_AUTH: /home/keyproxy/.claude/.credentials.json
       # The same file as env_file, so a key saved in Settings is written where the next start reads it.
       KEYPROXY_KEYS_FILE: /run/keyproxy/keyproxy.env
-      # A listener of its own for the guest door: a chat completion on these upstreams and nothing else.
+      # A listener of its own for the guest door: a chat completion on these upstreams and nothing else,
+      # of the models the agent lists in guest-models.json beside the database above.
       KEYPROXY_GUEST_SOCKET: /run/keyproxy-guest/guest.sock
       KEYPROXY_GUEST_UPSTREAMS: ${KEYPROXY_GUEST_UPSTREAMS:-*}
     volumes:
