@@ -2429,10 +2429,13 @@ class BrowserAgent:
                 opening.discard(tid)
                 if not opening:
                     self.opening.pop(gid, None)
+            await self._page_load(group, caller, created, result, url)
             reached = str(result.get("url") or url)
             await self._site_notes(caller, reached)
             failed = f"; the page did not load: {result['error']}" if result.get("error") else ""
             said = [f"Opened tab {tid} on {reached}{failed}."]
+            if result.get("loading"):
+                said.append(UNFINISHED)
             if download := _downloaded(result):
                 said = [f"Opened tab {tid}. {download}"]
         if closed:

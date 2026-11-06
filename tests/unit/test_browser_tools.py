@@ -582,9 +582,11 @@ async def test_a_page_that_has_not_finished_is_told_as_there_to_read_and_its_tim
     # The page is there, so "did not load" would be wrong as well as alarming.
     assert not failed and UNFINISHED in went and "did not load" not in went
     assert "ads.test" not in went
+    tab, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.test/cart")
+    assert not failed and UNFINISHED in tab
     rows = await rig.manager.db.fetchall("SELECT detail_json FROM browser_audit WHERE action = 'page_load' ORDER BY seq")
     kept = [json.loads(r["detail_json"]) for r in rows]
-    assert [k["url"] for k in kept] == ["https://shop.test/search", "https://shop.test/shoes"]
+    assert [k["url"] for k in kept] == ["https://shop.test/search", "https://shop.test/shoes", "https://shop.test/cart"]
     assert all(k["timing"] == timing and k["loading"] and k["waiting_on"][0]["host"] == "ads.test" for k in kept)
     # What the page cost is for answering a complaint, not a thing the agent did.
     assert "page_load" not in ACTION_LOG
