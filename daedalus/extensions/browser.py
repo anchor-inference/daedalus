@@ -26,13 +26,12 @@ from daedalus.browser.agent import SWITCH_ASK, WEBGL_ASK, WEBGL_MODES, WEBGL_WOR
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
 from daedalus.browser.control import EVENTS as CONTROL_EVENTS
 from daedalus.browser.control import ChromeControl
-from daedalus.browser.model import USER, BrowserError, Owner, group_id
+from daedalus.browser.model import USER, BrowserError, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
 from daedalus.browser.panel import (
     CHROME_CHAT_LINE,
-    NATIVE_DEVICE,
     PANEL_LINE,
     PANEL_SESSION_KEY,
     ChromeChannel,
@@ -146,8 +145,8 @@ async def chrome_answered(app: Application, service: Browsers, session_id: str, 
     state = await app.manager.get_state(session_id)
     staff_id = str(state.metadata.get("staff_id") or "") if state is not None else ""
     owner = Owner("session", session_id, session_id=session_id, staff_id=staff_id or None)
-    _, name, _ = service.user_connection()
-    name = name or "Chrome"
+    live = service.user_chromes()
+    name = ", ".join(str(c.get("profile_name") or "Chrome") for c in live) or "Chrome"
     if allowed:
         try:
             await service.switch_conversation(session_id, USER, consent=True)
@@ -157,6 +156,7 @@ async def chrome_answered(app: Application, service: Browsers, session_id: str, 
             text = (
                 f"[browser] The operator switched this conversation to their own Chrome «{name}». BrowserOpen now opens your tabs there, "
                 "signed in as them; every new site still asks them first."
+                + (" Several are connected: name one with BrowserOpen(chrome=…); chrome='?' lists them." if len(live) > 1 else "")
             )
     else:
         text = "[browser] The operator declined to let you work in their Chrome. Use your own browser (BrowserOpen) for the task, or stop and tell them what it needs."
@@ -203,10 +203,13 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
         return ""
     if manager.registry_for(state).get("BrowserOpen") is None or "BrowserOpen" in manager.blocked_tools_for(state):
         return ""
-    connected, name, _ = service.user_connection()
-    name = name or "Chrome"
-    if await service.choices.env(state.session.id) == USER:
-        line = f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+    session_id = state.session.id
+    if await service.choices.env(session_id) == USER:
+        connected, name = await service.conversation_chrome(session_id)
+        live = [c for c in service.user_chromes() if c.get("connected")]
+        line = f"- Browser: the operator gave this conversation their own Chrome «{name or 'Chrome'}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+        if not await service.choices.chrome_of(session_id) and len(live) > 1:
+            line = f"- Browser: the operator gave this conversation their own Chrome, and several are connected: «{name}». Name one with BrowserOpen(chrome=…) before you work there."
         # Said up front because an agent refused on the developer console told the operator nothing
         # could be done, when its own browser opens the store: the limit is Chrome's, not the task's.
         line += " Chrome keeps every extension off the Chrome Web Store and its developer console: for those, ask the operator to switch to «Agent's browser», which opens them."
@@ -215,21 +218,14 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
         if state.metadata.get(PANEL_SESSION_KEY):
             return line + "\n" + PANEL_LINE
         return line + ("\n" + CHROME_CHAT_LINE if getattr(state, "kind", "chat") == "chrome" else "")
+    connected, name, _ = service.user_connection()
+    name = name or "Chrome"
     if connected:
         return (
             f"- Browser: the operator's Chrome «{name}» is connected, but this conversation uses your own browser, not theirs. "
             "Only the operator moves it there: when they ask for their browser, call BrowserAskOperatorChrome(reason)."
         )
     return "- Browser: the operator's Chrome is offered here but not connected now; this conversation uses your own browser."
-
-
-def panel_device(service: Browsers, desk: RelayDesk | None) -> str:
-    """The Chrome a side panel token is for now: the paired device whose relay this server carries,
-    or, natively, the one Chrome of this computer while its daemon answers. Empty when none is."""
-    if desk is not None:
-        return desk.connected_device()
-    link = service.links.get(USER)
-    return NATIVE_DEVICE if link is not None and link.available else ""
 
 
 def panel_base(settings: Any) -> str:
@@ -242,10 +238,10 @@ def panel_base(settings: Any) -> str:
     return f"{public.scheme}://{public.netloc}" if public.scheme in ("http", "https") and public.netloc else ""
 
 
-async def relay_changed(herald: PanelHerald, kind: str) -> None:
-    """A Chrome that connects is handed its side panel's credential at once."""
+async def relay_changed(herald: PanelHerald, kind: str, data: dict[str, Any]) -> None:
+    """A Chrome that connects is handed its side panel's credential at once, down its own relay."""
     if kind == "relay.connected":
-        await herald.grant()
+        await herald.grant(str(data.get("chrome") or ""))
 
 
 async def turn_ended(manager: Any, service: Browsers, session_id: str, status: str) -> None:
@@ -271,11 +267,8 @@ async def close_turn_tabs(service: Browsers, session_id: str) -> bool:
     closed anything."""
     if not service.config().user.close_tabs:
         return False
-    try:
-        row = await service.get_row(group_id(Owner("session", session_id), env=USER))
-    except BrowserError:
-        return False
-    if row["status"] != "open" or row["control_owner"] != "agent" or row.get("needs_json"):
+    row = await service.find_user(Owner("session", session_id))
+    if row is None or row["control_owner"] != "agent" or row.get("needs_json"):
         return False
     try:
         await service.close_group(row["id"], actor="system", reason="turn_end")
@@ -371,19 +364,17 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     if settings.browser_user_dir is not None:
         pairing = Pairing(app.db)
         app.extensions["browser_pairing"] = pairing
-        desk: RelayDesk | None = None
         if not settings.native:
             # A server's door for a paired Chrome; natively Chrome comes through the bridge instead.
-            desk = RelayDesk(pairing, lambda: settings.browser_user_dir)
-            app.extensions["browser_relays"] = desk
+            app.extensions["browser_relays"] = RelayDesk(pairing, lambda: settings.browser_user_dir)
         grants = PanelGrants(app.db)
         app.extensions["browser_panel"] = grants
-        herald = PanelHerald(grants, call=service.call_extension, device=lambda: panel_device(service, desk), base=lambda: panel_base(settings))
+        herald = PanelHerald(grants, call=service.call_extension, chromes=service.connected_chromes, base=lambda: panel_base(settings))
         app.extensions["browser_panel_herald"] = herald
-        service.relay_hooks.append(lambda kind, data: relay_changed(herald, kind))
+        service.relay_hooks.append(lambda kind, data: relay_changed(herald, kind, data))
         notifications = getattr(app, "notifications", None)
         if notifications is not None:
-            notifications.register_channel(ChromeChannel(herald, manager=manager, using=service.choices.using_user, offered=service.user_offered))
+            notifications.register_channel(ChromeChannel(herald, manager=manager, using=service.choices.using_user, bound=service.choices.chrome_of, offered=service.user_offered))
     manager.on_finished(lambda session_id, run_id, status: turn_ended(manager, service, session_id, status))
     control: ChromeControl | None = None
     if settings.browser_user_dir is not None:

@@ -274,8 +274,8 @@ class FakeBrowserd:
         self.extension_files: dict[str, dict[str, bytes]] = {}
         """Extension id → the files its last install unpacked."""
         self.extension_logs: dict[str, list[dict[str, Any]]] = {}
-        self.relay_status: dict[str, Any] = {"connected": False, "since": None, "last_seen": None}
-        """The ``user`` daemon's ``relay.status``: what the test says the operator's Chrome is."""
+        self.relay_status: dict[str, Any] = {"connected": False, "last_error": "", "chromes": []}
+        """The ``user`` daemon's ``relay.status``: what the test says the operator's Chromes are (:meth:`chrome_connected`)."""
         self.relays: list[ViewChannel] = []
         """The relays opened with ``relay.open`` (a WebSocket the host proxies), newest last."""
         self.relay_opens: list[dict[str, Any]] = []
@@ -496,6 +496,48 @@ class FakeBrowserd:
             # its close reach the host before the channel is known there, as the real daemon never does.
             self.attached.put_nowait(self.channels[int(reply["result"]["channel"])])
 
+    def _relay_report(self) -> dict[str, Any]:
+        """``relay.status`` with what the fake's groups hold in each Chrome, as ``Manager.RelayReport`` fills it in."""
+        report = {**self.relay_status, "chromes": [dict(c) for c in self.relay_status["chromes"]]}
+        for entry in report["chromes"]:
+            mine = [g for g in self.groups.values() if g.profile == f"user-{entry['chrome']}"]
+            entry["groups"] = entry["groups"] or len(mine)
+            entry["tabs"] = entry["tabs"] or sum(len(g.tabs) for g in mine)
+        return report
+
+    def chrome_connected(self, chrome: str = "c1", name: str = "Chrome", **fields: Any) -> dict[str, Any]:
+        """A Chrome connects, as ``relay.status`` then reports it; its entry, for a test to change."""
+        self.chrome_left(chrome)
+        entry = {"chrome": chrome, "connected": True, "profile_id": chrome, "profile_name": name, "ext_version": "0.1.3", "chrome_version": "141.0", "platform": "linux",
+                 "transport": "server", "since": stamp(), "last_seen": stamp(), "groups": 0, "tabs": 0, **fields}
+        self.relay_status["chromes"].append(entry)
+        self.relay_status["connected"] = True
+        return entry
+
+    def chrome_left(self, chrome: str = "c1", *, reconnecting: bool = False) -> None:
+        """A Chrome goes away; ``reconnecting`` keeps it listed, as for the moment after a drop."""
+        chromes = self.relay_status["chromes"]
+        for entry in [c for c in chromes if c["chrome"] == chrome]:
+            if reconnecting:
+                entry.update(connected=False, reconnecting=True)
+            else:
+                chromes.remove(entry)
+        self.relay_status["connected"] = any(c["connected"] for c in chromes)
+
+    def _chrome_named(self, params: dict[str, Any]) -> str:
+        """The Chrome a call names, refused as the daemon refuses (``browserd`` ``attach.pick``)."""
+        chromes = self.relay_status["chromes"]
+        named = str(params.get("chrome") or "")
+        if not named:
+            if len(chromes) > 1:
+                raise _Fail(1007, "several of the operator's Chromes are connected; the call must name one", {"reason": "chrome_choice", "chromes": [c["chrome"] for c in chromes]})
+            if not chromes:
+                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            named = str(chromes[0]["chrome"])
+        if not any(c["chrome"] == named for c in chromes):
+            raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected", "chrome": named})
+        return named
+
     def _relay_open(self, writer: asyncio.StreamWriter, params: dict[str, Any]) -> dict[str, Any]:
         """``relay.open``: the connection carries a relay on a channel of its own, as on the user daemon."""
         if self.env != "user":
@@ -660,24 +702,23 @@ class FakeBrowserd:
             code, text, data = self.fail.pop(method)
             raise _Fail(code, text, data)
         if method == "daemon.info" and self.env == "user":
+            first = next(iter(self.relay_status["chromes"]), {})
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "os": "linux", "arch": "amd64", "pid": 1, "started_at": stamp(), "uptime_s": 1,
-                    "chromium": {"path": "", "version": self.relay_status.get("chrome_version"), "kind": "relay"}, "capabilities": {"sandbox": "unknown", "headed": False, "screencast": True},
+                    "chromium": {"path": "", "version": first.get("chrome_version"), "kind": "relay"}, "capabilities": {"sandbox": "unknown", "headed": False, "screencast": True},
                     "limits": {}, "counts": {"browsers": len(self.browsers), "groups": len(self.groups), "tabs": 0, "viewers": 0}, "machine": self.machine,
-                    "backend": "attach", "relay": dict(self.relay_status)}
+                    "backend": "attach", "relay": self._relay_report()}
         if method == "relay.status":
             if self.env != "user":
                 raise _Fail(1007, "this daemon takes no relay", {"reason": "launch_backend"})
-            return dict(self.relay_status)
+            return self._relay_report()
         if method == "relay.notify":
-            if not self.relay_status.get("connected"):
-                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            self._chrome_named(params)
             self.notified.append(dict(params))
             return {"rtt_ms": 12}
         if method == "relay.call":
             if params.get("op") not in ("panel.grant", "panel.event"):
                 raise _Fail(1002, "relay.call carries the side panel's operations only")
-            if not self.relay_status.get("connected"):
-                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            self._chrome_named(params)
             self.extension_calls.append(dict(params))
             return {}
         if method == "daemon.info":
@@ -1152,8 +1193,7 @@ class FakeBrowserd:
             # The user daemon's refusals (docs/architecture/browser.md, The operator's Chrome).
             if profile == "ephemeral":
                 raise _Fail(1004, "a throwaway context is refused in the operator's Chrome", {"reason": "user_browser"})
-            if not self.relay_status.get("connected"):
-                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            self._chrome_named(params)
         if gid in self.groups:
             group = self.groups[gid]
             return {"group": group.view(), "tab": self.tab_of(gid).view(True), "created": False}

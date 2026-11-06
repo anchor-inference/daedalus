@@ -43,6 +43,8 @@ from daedalus.browser.model import (
     USER,
     BrowserError,
     BrowserGone,
+    ChromeChoice,
+    ChromeElsewhere,
     Detached,
     EnvUnavailable,
     Forbidden,
@@ -53,6 +55,7 @@ from daedalus.browser.model import (
     OverCap,
     Owner,
     Unsupported,
+    chrome_of_profile,
     detached,
     group_id,
     profile_id,
@@ -60,7 +63,16 @@ from daedalus.browser.model import (
     valid_id,
 )
 from daedalus.browser.owners import BrowserOwners
-from daedalus.browser.user import ANTI_BOT_WORDS, UserChoices, anti_bot, not_connected
+from daedalus.browser.user import (
+    ANTI_BOT_WORDS,
+    UserChoices,
+    anti_bot,
+    chrome_away,
+    chrome_list,
+    live_chromes,
+    named_chrome,
+    not_connected,
+)
 from daedalus.host.policy import ASK, Decision, approval_mode_lifts
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.service import iso, now_iso
@@ -526,14 +538,81 @@ class Browsers:
         return self.agent_env()
 
     def user_connection(self) -> tuple[bool, str, str]:
-        """``(connected, name, why not)`` of the operator's Chrome, from the user daemon's last report:
-        whether a Chrome is connected now, the name its popup gives it, and the reason the last
+        """``(connected, names, why not)`` of the operator's Chromes, from the user daemon's last report:
+        whether any is connected now, the names their popups give them, and the reason the last
         connection ended. Read from memory, so a turn's context and a tool's answer ask nobody."""
         link = self.links.get(USER)
         relay = link.info.get("relay") if link is not None and link.available else None
         if not isinstance(relay, dict):
             return False, "", link.detail if link is not None and link.run_dir is not None else ""
-        return bool(relay.get("connected")), str(relay.get("profile_name") or "")[:80], str(relay.get("last_error") or "")[:200]
+        names = ", ".join(str(c.get("profile_name") or "Chrome")[:80] for c in live_chromes(relay) if c.get("connected"))
+        return bool(relay.get("connected")), names, str(relay.get("last_error") or "")[:200]
+
+    def user_chromes(self) -> builtins.list[dict[str, Any]]:
+        """The Chromes connected or reconnecting, from the user daemon's last report."""
+        link = self.links.get(USER)
+        return live_chromes(link.info.get("relay")) if link is not None and link.available else []
+
+    def connected_chromes(self) -> builtins.list[str]:
+        """The ids of the Chromes connected now, from the user daemon's last report."""
+        return [str(c["chrome"]) for c in self.user_chromes() if c.get("connected")]
+
+    async def chromes_now(self) -> builtins.list[dict[str, Any]]:
+        """What the daemon says this moment, for the decision of where a browser opens: the report in
+        memory is one event behind, and that is the wrong moment to be behind."""
+        return live_chromes(await self._call(USER, "relay.status", {}, what="asking about your Chrome"))
+
+    async def conversation_chrome(self, session_id: str) -> tuple[bool, str]:
+        """``(connected, name)`` of the Chrome a conversation given the operator's Chrome works in: its
+        own when it has one, else whichever are there."""
+        choice = await self.choices.get(session_id)
+        if not choice["chrome"]:
+            connected, names, _ = self.user_connection()
+            return connected, names
+        here = next((c for c in self.user_chromes() if c["chrome"] == choice["chrome"]), None)
+        name = str((here or {}).get("profile_name") or choice["chrome_name"] or "Chrome")[:80]
+        return bool(here and here.get("connected")), name
+
+    async def choose_chrome(self, owner: Owner, wanted: str = "") -> dict[str, Any]:
+        """Which of the operator's Chromes a conversation's browser opens in, ``{chrome, profile_name}``.
+
+        In order: where its tabs are open now, which nothing moves; the one named, unless a side panel
+        of another holds the conversation; the one it belongs to, and if that is not connected it is
+        told so, because going on in another by itself is acting on the wrong computer; the only one
+        there is. Several with nothing to say which is refused with the list."""
+        session_id = owner.session_id or ""
+        choice = await self.choices.get(session_id)
+        bound, label = str(choice["chrome"]), str(choice["chrome_name"])
+        live = await self.chromes_now()
+        asked = named_chrome(live, wanted) if wanted else None
+        row = await self.find_user(owner)
+        if row is not None:
+            here = chrome_of_profile(str(row["profile"]))
+            if asked is not None and asked["chrome"] != here:
+                raise ChromeElsewhere(f"your tabs are open in the operator's Chrome «{label or here}»; close them with BrowserClose first, then name the other one", reason="tabs_open", chrome=here)
+            return next((c for c in live if c["chrome"] == here), {"chrome": here, "profile_name": label})
+        if asked is not None:
+            if bound and choice["held"] and asked["chrome"] != bound:
+                raise ChromeElsewhere(f"the operator holds this conversation from the side panel of their Chrome «{label or bound}», so it stays there", reason="held_by_panel", chrome=bound)
+            return asked
+        if bound:
+            found = next((c for c in live if c["chrome"] == bound), None)
+            if found is None:
+                # Held from that Chrome's panel it cannot be named away, so nothing else is offered.
+                raise chrome_away(label, [] if choice["held"] else live)
+            return found
+        if len(live) == 1:
+            return live[0]
+        if not live:
+            raise not_connected(self.user_connection()[2])
+        raise ChromeChoice(f"several of the operator's Chromes are connected; say which with BrowserOpen(chrome=…), by name or id:\n{chrome_list(live)}", reason="chrome_choice")
+
+    async def find_user(self, owner: Owner) -> dict[str, Any] | None:
+        """The owner's open group in the operator's Chrome, whichever Chrome that is."""
+        row = await self.db.fetchone(
+            "SELECT * FROM browser_groups WHERE owner_kind = ? AND owner_id = ? AND env = ? AND status = 'open' ORDER BY last_activity_at DESC LIMIT 1", (owner.kind, owner.id, USER),
+        )
+        return dict(row) if row is not None else None
 
     async def switch_conversation(self, session_id: str, env: str, *, consent: bool) -> dict[str, Any]:
         """Move a conversation between the agent's browser and the operator's Chrome, as the operator
@@ -547,15 +626,15 @@ class Browsers:
                 await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)
         return choice
 
-    async def call_extension(self, op: str, args: dict[str, Any]) -> None:
-        """One of the side panel's operations on the connected Chrome, through the user daemon, which
-        carries those two and refuses anything else (``browserd`` ``relay.call``)."""
-        await self._call(USER, "relay.call", {"op": op, "args": args}, what="telling your Chrome's side panel", timeout=10.0)
+    async def call_extension(self, op: str, args: dict[str, Any], chrome: str) -> None:
+        """One of the side panel's operations on one Chrome, down its own relay, through the user
+        daemon, which carries those two and refuses anything else (``browserd`` ``relay.call``)."""
+        await self._call(USER, "relay.call", {"op": op, "args": args, "chrome": chrome}, what="telling your Chrome's side panel", timeout=10.0)
 
     async def user_status(self) -> dict[str, Any]:
-        """The ``user`` daemon and the Chrome connected to it, as the app's card reads it: whether the
-        daemon answers, and the relay's own report (connected, profile, versions, transport, since,
-        last heard of, and why the last one ended)."""
+        """The ``user`` daemon and the Chromes connected to it, as the app's card reads it: whether the
+        daemon answers, and its report on each Chrome (connected, name, versions, transport, since,
+        last heard of, what the agent has open there, and why its last connection ended)."""
         link = self.links[USER]
         out: dict[str, Any] = {"configured": link.run_dir is not None, "enabled": self.config().user.enabled, "daemon": link.available,
                                "reason": "" if link.available else link.reason, "detail": "" if link.available else link.detail, "relay": None}
@@ -568,13 +647,13 @@ class Browsers:
                 out["relay"] = relay if isinstance(relay, dict) else None
         return out
 
-    async def check_user(self) -> dict[str, Any]:
-        """The app's "Check connection": host to daemon to the extension and back, with the round trip.
-        The extension flashes "Daedalus checked the connection" as it answers."""
+    async def check_user(self, chrome: str = "") -> dict[str, Any]:
+        """The app's "Check connection" on one Chrome: host to daemon to its extension and back, with
+        the round trip. The extension flashes "Daedalus checked the connection" as it answers."""
         if not self.configured(USER):
             raise EnvUnavailable("this installation has no browser for your Chrome", env=USER, reason="not_configured")
         started = time.monotonic()
-        result = await self._call(USER, "relay.notify", {}, what="checking the connection to your Chrome", timeout=10.0)
+        result = await self._call(USER, "relay.notify", {"chrome": chrome} if chrome else {}, what="checking the connection to your Chrome", timeout=10.0)
         took = int((time.monotonic() - started) * 1000)
         rtt = result.get("rtt_ms") if isinstance(result, dict) else None
         return {"ok": True, "rtt_ms": int(rtt) if isinstance(rtt, int | float) else took, "host_ms": took}
@@ -825,7 +904,7 @@ class Browsers:
             self._freed.set()
             self._freed = asyncio.Event()
 
-    async def open(self, owner: Owner, *, url: str | None = None, fresh: bool = False, actor: str, viewport: dict[str, int] | None = None, wait: float | None = None) -> dict[str, Any]:
+    async def open(self, owner: Owner, *, url: str | None = None, fresh: bool = False, actor: str, viewport: dict[str, int] | None = None, wait: float | None = None, chrome: str = "") -> dict[str, Any]:
         """Open the owner's group (starting its profile's browser when it is not running) and return
         ``{group, tab, created}``; an open group is returned as it is, with its active tab.
 
@@ -835,9 +914,13 @@ class Browsers:
 
         The environment is the owner's conversation's (:meth:`env_for`). In the operator's Chrome a
         throwaway context is refused: it is the agent's own browser's, and quietly opening one
-        there instead would move the work out of the browser the operator chose.
+        there instead would move the work out of the browser the operator chose. ``chrome`` names which
+        of the operator's Chromes, and :meth:`choose_chrome` decides when it is empty; the conversation
+        belongs to that Chrome from here on.
         """
         env = await self.env_for(owner)
+        if chrome and env != USER:
+            raise Forbidden("this conversation uses your own browser, not the operator's Chrome; only they move it there (BrowserAskOperatorChrome)", reason="not_user_browser")
         if env == USER and fresh:
             raise Forbidden("a throwaway browser (fresh=true) is the agent's own browser's; the operator gave this conversation their own Chrome, which keeps its own cookies", reason="user_browser")
         if env == USER and not self.links[USER].available:
@@ -845,14 +928,18 @@ class Browsers:
         self._client(env)
         if not await self.owners.exists(owner):
             raise NotFound(f"no {owner.kind} {owner.id}")
-        group = group_id(owner, fresh=fresh, env=env)
-        profile = profile_id(owner, fresh=fresh, env=env)
+        target = await self.choose_chrome(owner, chrome) if env == USER else {}
+        where = str(target.get("chrome") or "")
+        group = group_id(owner, fresh=fresh, env=env, chrome=where)
+        profile = profile_id(owner, fresh=fresh, env=env, chrome=where)
         agent = actor != "operator"
         deadline = time.monotonic() + (self.config().agent_wait_seconds if wait is None else wait)
         params: dict[str, Any] = {"group_id": group, "profile": profile, "labels": owner.labels()}
         if env == USER and owner.kind == "session":
             # The tab group in the operator's Chrome says whose it is, and the side panel names it.
             params["labels"]["title"] = (await self.owners.label(owner))[:80]
+        if where:
+            params["chrome"] = where
         if url:
             params["url"] = url
         if viewport:
@@ -867,8 +954,7 @@ class Browsers:
                 except Unsupported as exc:
                     if exc.details.get("reason") != "chrome_not_connected":
                         raise
-                    relay = self.links[USER].info.get("relay") if isinstance(self.links[USER].info.get("relay"), dict) else {}
-                    raise not_connected(str(relay.get("last_error") or "")) from None
+                    raise chrome_away(str(target.get("profile_name") or ""), [c for c in await self.chromes_now() if c["chrome"] != where]) from None
                 except OverCap as exc:
                     if not agent:
                         raise
@@ -918,6 +1004,9 @@ class Browsers:
                 (profile, env, EPHEMERAL if fresh else ("project" if owner.project_id else owner.kind), owner.project_id, owner.session_id, owner.staff_id, now, now),
             )
         row = await self._row(group)
+        moved = False
+        if env == USER and owner.session_id:
+            moved = await self.choices.bind(owner.session_id, where, str(target.get("profile_name") or ""))
         if env == USER and owner.session_id and (created or revived):
             await self.sync_site_grants(group, owner.session_id)
         if created and self.config().record_frames:
@@ -929,7 +1018,7 @@ class Browsers:
         if created or revived:
             await self.audit(group, env, actor, "open", {"profile": profile, "fresh": fresh, "url": url or "", "browser_id": row["browser_id"]})
             await self._publish("browser.opened", {"group_id": group, "env": env, "profile": profile, "owner_kind": owner.kind, "owner_id": owner.id, "url": row["url"], "fresh": fresh}, row)
-        return {"group": self._view(row, await self.owners.label(owner)), "tab": tab, "created": created}
+        return {"group": self._view(row, await self.owners.label(owner)), "tab": tab, "created": created, "chrome": target, "moved": moved}
 
     @staticmethod
     def _control_owner(group_info: dict[str, Any]) -> str:
@@ -938,6 +1027,8 @@ class Browsers:
 
     async def find(self, owner: Owner, *, fresh: bool = False, env: str = "") -> dict[str, Any] | None:
         """The owner's open group, or ``None`` when it has none open now."""
+        if env == USER:
+            return await self.find_user(owner)
         row = await self.db.fetchone("SELECT * FROM browser_groups WHERE id = ? AND status = 'open'", (group_id(owner, fresh=fresh, env=env),))
         return dict(row) if row is not None else None
 
@@ -963,7 +1054,7 @@ class Browsers:
                 detail = str(exc.details.get("reason") or "").strip()
                 reason = f"chrome disconnected ({detail})"[:80] if detail and not detail.startswith("chrome disconnected") else (detail or "chrome disconnected")[:80]
                 await self._mark_closed(row, reason, status="closed")
-                raise BrowserGone(self._gone_text({**row, "close_reason": reason}), reason="chrome_disconnected") from None
+                raise BrowserGone(await self._named_gone({**row, "close_reason": reason}), reason="chrome_disconnected") from None
             await self._mark_closed(row, "closed", status="closed")
             raise
         except NotFound:
@@ -981,6 +1072,13 @@ class Browsers:
             raise Detached(exc.message, **{**exc.details, "tab_id": tab, "group_id": group, "reason": "detached"}) from None
         await self.db.execute("UPDATE browser_groups SET last_activity_at = ? WHERE id = ?", (now_iso(), group))
         return result
+
+    async def _named_gone(self, row: dict[str, Any]) -> str:
+        """Why a group of the operator's Chrome is gone, naming the Chrome that left: with two computers
+        "their Chrome disconnected" does not say which, and the agent should not guess."""
+        text = self._gone_text(row)
+        name = (await self.choices.get(str(row.get("session_id") or "")))["chrome_name"] if row.get("session_id") else ""
+        return text.replace("the operator's Chrome disconnected", f"the operator's Chrome «{name}» disconnected") if name else text
 
     async def _still_listed(self, row: dict[str, Any]) -> bool:
         """Whether the daemon still has the group: a "not found" is then about something in it (a
@@ -1230,7 +1328,7 @@ class Browsers:
         env = await self.env_for(owner)
         if env == USER:
             raise Forbidden("the operator's own Chrome draws as they set it up; WebGL is chosen for the agent's own browser", reason="user_browser")
-        params: dict[str, Any] = {"profile": profile_id(owner, env=env)}
+        params: dict[str, Any] = {"profile": profile_id(owner, env=env)}  # never USER: refused above
         if mode is not None:
             params["mode"] = mode
         # A relaunch reopens every page of the profile's groups, each within the daemon's own 30 s.
@@ -1490,7 +1588,7 @@ class Browsers:
             self._tasks.append(asyncio.create_task(hook(kind, data)))
         if self.bus is None:
             return
-        payload: dict[str, Any] = {"kind": kind.removeprefix("relay."), "profile_name": str(data.get("profile_name") or "")[:80]}
+        payload: dict[str, Any] = {"kind": kind.removeprefix("relay."), "chrome": str(data.get("chrome") or ""), "profile_name": str(data.get("profile_name") or "")[:80]}
         if data.get("reason"):
             payload["reason"] = str(data["reason"])[:80]
         try:

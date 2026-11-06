@@ -54,8 +54,12 @@ extension posts `{code, profile_id, profile_name, ext_version, chrome_version}` 
 kept in `chrome.storage.local` and sent in the first `hello` frame, because the browser's WebSocket
 cannot set a header. Only HTTPS is accepted, except for a loopback address. Besides a `bye` frame the
 host may close the socket with code `4401` (the token is unknown, expired or revoked: the extension
-stops retrying and asks to pair again) or `4409` (another Chrome holds the relay; the close reason is
-its name). "Disconnect" forgets the token.
+stops retrying and asks to pair again). "Disconnect" forgets the token.
+
+**Several Chromes.** Any number stay connected at once, each with its relay: a second computer, or a
+second profile of one. The relay protocol does not change for this, so the extension needs no release:
+it neither knows nor needs to know of the others. It keeps `4409` and the `bye` reason `another_relay`
+from when a daemon held one relay at a time, which nothing sends any more, and a release may drop them.
 
 ## The relay protocol
 
@@ -65,7 +69,7 @@ file is the only copy: the extension's tests compare their own frames with it by
 `DAEDALUS_FRAMES` points at it, and fail when the two differ. What the extension does with them, beyond the bare list:
 
 - **`bye`** ends the relay and the side panel explains its `reason` in its own words: `shutdown`,
-  `replaced`, `another_relay` (the other Chrome's name is the end of `message`), `proto` (with the
+  `replaced`, `proto` (with the
   daemon's `proto`: lower than the extension's means "update Daedalus", higher "update the
   extension"), `lost`, `bad_frame`; from the bridge `not_running` and `unavailable` (a daemon that
   takes no relay); from the host `unauthorized` (the pairing expired or was revoked). Each but the
@@ -196,12 +200,13 @@ of the operator given to the new conversation's group before its first message),
 agent's pending actions inline (Enter allows once, Ctrl+Enter allows the like for the conversation,
 Esc refuses).
 
-- **The credential**: a panel token the host mints for the connected Chrome and hands over the relay
+- **The credential**: a panel token the host mints for one Chrome and hands over that Chrome's relay
   (`panel.grant`), kept in `chrome.storage.session`, passed to the frame in the handshake only, never
   in an address. The host keeps its SHA-256, lets it lapse after twelve hours unused, and revokes it
   when the device is unpaired or every browser session is ended. It opens `/api/panel/*` alone: the
-  conversations switched to the operator's Chrome, and nothing else of the installation (a
-  conversation outside them answers 404, every other route 401).
+  conversations switched to the operator's Chrome that belong to this Chrome or to no Chrome yet, and
+  nothing else of the installation (a conversation outside them, another Chrome's included, answers
+  404, every other route 401).
 - **What a conversation carries**: the pictures, clips and files drawn in it come through the same
   door, each by the conversation and the item or call that holds it: attached media, what the
   operator sent, what the agent sent with SendFile, a picture a tool returned. A conversation's own

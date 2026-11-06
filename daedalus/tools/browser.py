@@ -255,7 +255,8 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
         "your project's logins between sessions. url opens a page at once; fresh=true gives a throwaway browser whose "
         "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. It opens the operator's "
         "own Chrome only when they switched this conversation there; when they ask for their browser and have not, call "
-        "BrowserAskOperatorChrome instead. Chrome lets no extension open the Chrome Web Store (its developer console "
+        "BrowserAskOperatorChrome instead. When several of their Chromes are connected, chrome names one, by name or id, "
+        "and the conversation stays in it; chrome='?' lists them and opens nothing. Chrome lets no extension open the Chrome Web Store (its developer console "
         "included) or the browser's own pages, so their Chrome never shows you those; your own browser opens the store. "
         + NETWORK_ASK + " Your browser has no WebGL unless turned on: webgl='software' "
         "(drawn on the CPU, works everywhere) or 'gpu' (the machine's GPU, where one is passed in) asks the operator — say "
@@ -263,8 +264,8 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
         "tabs. webgl='off' turns it off again without asking."
     ),
 )
-async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None, webgl: str | None = None) -> ToolResult:
-    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why, "webgl": webgl})
+async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None, webgl: str | None = None, chrome: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why, "webgl": webgl, "chrome": chrome})
 
 
 @tool_group("browser")

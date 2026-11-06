@@ -117,7 +117,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 
 | Method | Params → result |
 |---|---|
-| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none" \| "relay", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true, webgl{modes, gpu, gpu_reason}}, limits{…}, counts{browsers, groups, tabs, viewers}, machine, backend: "launch" \| "attach", relay: Relay \| null}`; `Relay` and the `relay.*` methods are in The operator's Chrome |
+| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none" \| "relay", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true, webgl{modes, gpu, gpu_reason}}, limits{…}, counts{browsers, groups, tabs, viewers}, machine, backend: "launch" \| "attach", relay: Relays \| null}`; `Relays` and the `relay.*` methods are in The operator's Chrome |
 | `browser.open` | `{group_id, profile, labels?, viewport?{w, h}, url?}` → `{group: Group, tab: Tab, created}` |
 | `browser.list` | → `{browsers: [Browser]}` |
 | `browser.close` | `{browser_id}` → `{groups}`: ends the browser and forgets its groups |
@@ -613,9 +613,9 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `workflow.started` | `{group_id, workflow: Workflow}` without its steps |
 | `workflow.step` | `{group_id, id, step: Step, steps, replaces?}` — `replaces` is the number of a step it takes the place of (a click folded into the typing after it, a press counted again) |
 | `workflow.stopped` | `{group_id, workflow: Workflow}`, whole: what the host keeps |
-| `relay.connected` | `{profile_id, profile_name, ext_version, chrome_version, platform, transport, proto}` — the operator's Chrome connected (The operator's Chrome) |
-| `relay.lost` | `{reason: "closed" \| "no_pong" \| "replaced" \| "shutdown" \| "bad_frame", profile_id, profile_name}` |
-| `relay.check` | `{n, profile_id, profile_name}` — the operator pressed "Check connection" in the extension's side panel |
+| `relay.connected` | `{chrome, profile_id, profile_name, ext_version, chrome_version, platform, transport, proto}` — one of the operator's Chromes connected (The operator's Chrome) |
+| `relay.lost` | `{chrome, reason: "closed" \| "no_pong" \| "replaced" \| "shutdown" \| "bad_frame", profile_id, profile_name}` |
+| `relay.check` | `{n, chrome, profile_id, profile_name}` — the operator pressed "Check connection" in that Chrome's side panel |
 
 `action.text_len` is the length of the typed text; the text itself is never in an event, a log or the
 daemon's memory past the call. The one exception is a recording of a person's steps whose operator
@@ -940,19 +940,21 @@ convention, and `internal/browser/attach_test.go` holds each one:
 - `cookies.list` asks the extension (`cookies.names`): the cookies Chrome would send to the site,
   without their values, which never leave the extension. Without a `domain` it is the active tab's
   site.
-- One browser stands for every profile the host names: `browser.list` shows it as profile `user`,
-  `pid` 0, `chromium_version` `Chrome/<version>`, and `daemon.info.chromium` is `{kind: "relay",
-  version: <the connected Chrome's>, path: ""}`.
-- With no Chrome connected, `browser.open` is `1007 {reason: "chrome_not_connected"}`. When the relay
-  ends, the browser waits 45 s for the same `profile_id` to connect again and is bound to that relay
+- One browser stands for each Chrome, whatever profile the host names: `browser.list` shows it as
+  profile `user:<chrome>`, `pid` 0, `chromium_version` `Chrome/<version>`, and `daemon.info.chromium`
+  is `{kind: "relay", version: <the first connected Chrome's>, path: ""}`.
+- With no Chrome connected, `browser.open` is `1007 {reason: "chrome_not_connected"}`. When a relay
+  ends, the browser waits 45 s for the same Chrome to connect again and is bound to that relay
   before its `welcome`: the same browser, groups and grants, and the tabs the extension replays are
   taken as the ones it has. A call waiting on the old relay fails with why; a `tab.*`, `page.*` or
   `browser.open` call made while the relay is expected back waits up to 20 s for it, and a command
-  sent meanwhile is `1007 {reason: "chrome_reconnecting"}`. Past the 45 s the browser ends:
+  sent meanwhile is `1007 {reason: "chrome_reconnecting"}`. All of this is one Chrome's: another
+  connected meanwhile carries on and its calls wait for nothing. Past the 45 s the browser ends:
   `browser.exited {reason: "chrome disconnected (<relay.lost reason>, and it did not connect again
   within 45s)"}` and its groups answer `1108`. A group opened again after that takes up the tabs its
   Chrome tab group still holds (`window.ensure` lists them).
-- A tab is named by Chrome's own tab id (`t<tabId>`), so a tab set up again keeps its id.
+- A tab is named by Chrome's own tab id (`t<tabId>`), so a tab set up again keeps its id; two Chromes
+  with the same tab id share nothing, and the second tab takes the next free number instead.
 - The operator's grants are kept by group, not by browser (`net.grant` and `net.revoke` take the
   group as ever), and a grant covers its registrable site on any port; `host: "*"` covers every site,
   which the host sends while the conversation's approval mode answers site questions itself. A
@@ -980,16 +982,42 @@ convention, and `internal/browser/attach_test.go` holds each one:
 | Method | Params → result |
 |---|---|
 | `relay.open` | `{transport: "native" \| "server", install_name?}` → `{channel, proto}`: the connection becomes a relay; channel `channel` carries its frames (The relay channel). `install_name` replaces `--install-name` for this relay (the host's proxy names its installation). On a daemon of the launch backend `1007 {reason: "launch_backend"}` |
-| `relay.status` | → `Relay` |
-| `relay.notify` | `{text? ≤ 200 bytes}` → `{rtt_ms}`: the app's "Check connection". The extension flashes its badge and shows `text`, or its own "Daedalus checked the connection" when empty; `1007 {reason: "chrome_not_connected"}` with no Chrome |
-| `relay.call` | `{op, args}` → `{}`: the host's message to the extension's side panel, carried as a `call`. `op` is `panel.grant` or `panel.event` and nothing else (`1002` for any other: the host cannot drive tabs around the daemon's own rules this way); `1007 {reason: "chrome_not_connected"}` with no Chrome |
+| `relay.status` | → `Relays` |
+| `relay.notify` | `{text? ≤ 200 bytes, chrome?}` → `{rtt_ms}`: the app's "Check connection" on that Chrome. The extension flashes its badge and shows `text`, or its own "Daedalus checked the connection" when empty; `1007 {reason: "chrome_not_connected"}` with no such Chrome, `1007 {reason: "chrome_choice", chromes}` naming none while several are there |
+| `relay.call` | `{op, args, chrome?}` → `{}`: the host's message to one Chrome's side panel, carried as a `call` down that Chrome's relay. `op` is `panel.grant` or `panel.event` and nothing else (`1002` for any other: the host cannot drive tabs around the daemon's own rules this way); `1007` as for `relay.notify` |
 
-`Relay` is `{connected, profile_id?, profile_name?, ext_version?, chrome_version?, platform?, transport?,
-since, last_seen, last_error?}`: the connected Chrome, or the last one with `connected: false`.
-`last_seen` is the last frame the relay sent; `last_error` is why the daemon last refused or lost
-one, in words the app shows under "Not connected" ("Chrome closed the connection", "Chrome stopped
-answering", "versions differ: …", "another Chrome tried to connect (…) while … was connected"). The
-events are `relay.connected`, `relay.lost` and `relay.check` (Events, above).
+`Relays` is `{connected, last_error?, chromes: [Chrome]}`: `connected` says any Chrome is, and `chromes`
+lists each one heard from since the daemon started, connected ones first. `Chrome` is `{chrome,
+connected, reconnecting?, profile_id?, profile_name?, ext_version?, chrome_version?, platform?,
+transport?, since, last_seen, last_error?, groups, tabs}`. `chrome` is its id (below). `last_seen` is
+the last frame its relay sent; `reconnecting` says its relay ended moments ago and it is expected
+back; `groups` and `tabs` are what agents have open in it; `last_error` is why its relay was last
+lost, in words the app shows under "Not connected" ("Chrome closed the connection", "Chrome stopped
+answering"). The `last_error` of `Relays` is also a refusal that belongs to no Chrome ("versions
+differ: …"). The events are `relay.connected`, `relay.lost` and `relay.check` (Events, above).
+
+**Any number of Chromes stay connected at once.** One daemon holds a relay for each: it launches no
+browser, so a relay costs a few goroutines, and a server's compose stack has one `browser-user`
+service and nothing that could start another. Each Chrome is a browser of the daemon's own, under
+the key `user:<chrome>`, with its groups, tabs, recordings, downloads and input all reached through
+that browser; a browser ends when its own relay is gone for good, and no Chrome connecting or leaving
+touches another's. The cap `max_browsers` does not count them: they are Chromes the operator runs.
+
+A Chrome's id comes from the hello's `profile_id`: taken as it stands when it is up to sixteen of
+`0-9a-z` (what a server's host puts there, below), else the first twelve hex digits of its SHA-256 (a
+profile's UUID, natively). A hello with no `profile_id` gets a random id and no reconnect.
+
+Chrome numbers its tabs per process, so `x412` names a different tab on each computer. The manager's
+tables by session are keyed by browser as well (`Browser.sessionKey`): the session alone once could
+have found the other computer's tab. A tab's daemon id is `t<Chrome's id>` where that is free, and
+otherwise the next free number.
+
+`browser.open` takes `chrome`, which the host always names. Named with nothing to be found: `1007
+{reason: "chrome_not_connected", chrome}`. Unnamed: the only Chrome connected or expected back, or
+`1007 {reason: "chrome_choice", chromes}`, because a Chrome reconnecting for a moment must not leave
+the other to be taken for the only one. A group is never moved: asked for in another Chrome than its
+own it answers `1004 {reason: "chrome_other"}`. A call that drives a browser waits only for its own
+Chrome: `Manager.AwaitRelay` reads the `chrome`, `group_id` or `tab_id` of the call.
 
 ### The relay channel
 
@@ -1024,12 +1052,14 @@ a side does not know is ignored.
 | extension | `pong` | `{n}` |
 | extension | `check` | `{n}`: the side panel's "Check connection" |
 | daemon | `check_ok` | `{n, host_seen}`: `host_seen` says the host is listening to the daemon's events, so the app shows its toast ("Chrome «name» checked the connection") at the same moment the side panel shows "Daedalus confirmed" |
-| daemon | `bye` | `{reason, message?, proto?}`, the relay's last frame: `shutdown`, `replaced` (the same `profile_id` connected again: the stale relay goes), `another_relay` (another Chrome is connected: "another Chrome is already connected: <name>"), `proto` (versions differ; `proto` is the daemon's, so the extension can say which side to update), `lost`, `bad_frame`. The bridge sends two of its own: `not_running` (no daemon: "Daedalus is not running on this computer") and `unavailable` (the daemon refused `relay.open`; `message` says why) |
+| daemon | `bye` | `{reason, message?, proto?}`, the relay's last frame: `shutdown`, `replaced` (the same Chrome connected again: the stale relay goes), `proto` (versions differ; `proto` is the daemon's, so the extension can say which side to update), `lost`, `bad_frame`. The bridge sends two of its own: `not_running` (no daemon: "Daedalus is not running on this computer") and `unavailable` (the daemon refused `relay.open`; `message` says why) |
 
-One relay at a time per daemon. A second `hello` with another `profile_id` is refused with
-`another_relay` and the first keeps working; the same `profile_id` replaces the first, which is how
-an extension whose worker restarted gets its relay back before the old bridge has noticed. The first
-frame must be `hello`; anything else, or a frame that is not JSON, ends the relay with `bad_frame`.
+One relay for each Chrome. A `hello` of a Chrome already connected replaces that Chrome's relay,
+which is how an extension whose worker restarted gets its relay back before the old bridge has
+noticed; a `hello` of another Chrome touches nothing. The extension still understands the
+`another_relay` reason and close code 4409 of the time when a daemon held one relay; nothing sends
+them. The first frame must be `hello`; anything else, or a frame that is not JSON, ends the relay
+with `bad_frame`.
 
 The calls:
 
@@ -1129,7 +1159,7 @@ browser to make room.
 
 ### The agent's tools
 
-`BrowserOpen(url?, fresh?, webgl?: off|software|gpu)`, `BrowserNavigate(url? | go: back|forward|reload, tab?)`,
+`BrowserOpen(url?, fresh?, webgl?: off|software|gpu, chrome?)`, `BrowserNavigate(url? | go: back|forward|reload, tab?)`,
 `BrowserSnapshot(tab?, scope?, view?: page|viewport)`, `BrowserText(tab?, ref?, max_chars?, find?,
 regex?, query?, schema?)`, `BrowserLook(question, tab?, ref?, full_page?)`, `BrowserAct(action?,
 element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|left|right, paths?, x?,
@@ -1702,10 +1732,42 @@ from the agent's commands like the other daemons' directories.
 in the browser panel's header ("Agent's browser | Your Chrome · <name>"), and the first switch in a
 conversation carries their yes to the consent summary. The choice, the consent and the sites granted
 in the conversation are kept per session (`kv` `browser.user.sessions`) and dropped with it. No tool
-takes an environment; an agent's group there is `s-<session>-u` on the one profile `user`. A switched
+takes an environment; an agent's group there is `s-<session>-u-<chrome>` on the profile
+`user-<chrome>`, one for each of the operator's Chromes, so what is kept by group (the recording, the
+action log, the daemon's site grants) stays with the computer it happened on. A switched
 conversation keeps its group in the other browser open, and the agent's calls reach only the
 browser it uses now. With Chrome not connected, `BrowserOpen` says so; it never falls back to the
 agent's browser.
+
+**Which Chrome.** The operator may have several connected, and the agent chooses among them; each
+conversation belongs to one (`chrome` and `chrome_name` in the same `kv` entry), which it joins by
+opening there. `BrowserOpen(chrome=…)` names one by its name or its id, and `chrome='?'` lists what is
+connected and opens nothing: name, id, platform, `active` while agents have tabs there or `idle`
+while they have none, `reconnecting` for the moment after a drop, last heard from, versions. The
+extension reports nothing of what the operator is doing in their browser, so that is all "active"
+says. The other browser tools take no Chrome: they follow the conversation's group. What `BrowserOpen`
+opens in, in this order (`Browsers.choose_chrome`):
+
+1. Where the conversation's tabs are open now. Naming another is refused (`chrome_elsewhere`,
+   `reason: tabs_open`): `BrowserClose` first.
+2. The one named. A name nothing has, or two have, is refused with the list; the default name is
+   "Chrome", so two computers named alike are ordinary, and the id tells them apart. A conversation
+   the operator holds from a side panel stays in that panel's Chrome (`reason: held_by_panel`):
+   what it talks about is the page beside it, and moving it would pull it out of the panel mid-reply.
+3. The one it belongs to. Not connected, the agent is told that, by name, with the others listed:
+   only naming one moves it. Going on in another by itself would be acting on the wrong computer.
+4. The only one connected, or expected back: with one Chrome nothing changes and nothing is asked.
+5. Several and nothing to say which: refused with the list (`chrome_choice`). One reconnecting counts,
+   so a moment's drop never leaves the other to be taken for the only one.
+
+A conversation started from a side panel or *Ask Daedalus about this page* belongs to that panel's
+Chrome from its first moment; so does one written to from a panel while it belonged to none. Moving
+to another Chrome forgets the sites granted and the approval mode, each of which was the operator's
+yes about one computer's accounts; the consent stays, and the result says so. The operator's own
+switch of the conversation, or unpairing that Chrome, lets a held conversation go, so one whose panel
+will not come back can be named elsewhere; it still belongs to its Chrome until it is. A Chrome going away ends
+its own groups alone (the conversation's next call is told which Chrome left, and its group's row
+closes), and every result in a Chrome conversation is headed with that Chrome's name.
 
 **The agent may ask.** The turn context carries one line on the operator's Chrome while it is
 offered — connected or not, and whether this conversation is in it — worded the same until that
@@ -1779,14 +1841,14 @@ connected, so a model that opened the wrong one can see it.
 |---|---|
 | `GET /api/browser/user` | `{configured, enabled, daemon, reason, detail, relay, native, launcher, launcher_error, devices, server_url, consent}`. `relay` is the daemon's `relay.status`; `launcher` (natively) the desktop launcher's report on Chrome, the connector and the extension folder |
 | `POST /api/browser/user/register`, `/unregister` | natively, through the launcher (`daedalus.host.launcher_bridge.user_browser`): `{launcher, error}`; 501 on a server |
-| `POST /api/browser/user/check` | host → `relay.notify` → the extension: `{ok, rtt_ms, host_ms}` |
+| `POST /api/browser/user/check` | `{chrome?}`: host → `relay.notify` → that Chrome's extension: `{ok, rtt_ms, host_ms}` |
 | `POST /api/browser/user/pairing` | a server's one-time code: `{code: "ABCD-EFGH", expires_at, server_url}`, 10 minutes |
 | `GET /api/browser/user/devices`, `DELETE …/devices/{id}` | paired Chromes `{id, name, last_seen, connected, …}`; a revoke ends a live relay with 4401 |
-| `GET`, `PUT /api/browser/user/sessions/{session}` | `{env: "agent" \| "user", consented, sites, offered, consent}`; `PUT {env, consent}`, 409 `consent_needed` with `consent` on a first switch without it |
+| `GET`, `PUT /api/browser/user/sessions/{session}` | `{env: "agent" \| "user", consented, sites, approvals, chrome, chrome_name, held, offered, consent}`; `PUT {env, consent}`, 409 `consent_needed` with `consent` on a first switch without it |
 
 `GET /api/browsers?session=<id>` carries `user: {env, consented, connected, name}` where the
 installation offers the operator's Chrome. The events `browser.user {kind: connected | lost | check |
-switched, profile_name, reason?}` follow the relay and a conversation's switch.
+switched, chrome, profile_name, reason?}` follow the relays and a conversation's switch.
 
 **The public doors on a server.** `POST /api/browser/pair {code, profile_id, profile_name,
 ext_version, chrome_version}` → `{token}` spends a code (single use; spending one voids the others)
@@ -1794,8 +1856,10 @@ for a device token. `wss /api/browser/relay` takes the token in its first frame,
 `hello`; a socket from a web page (an `http(s)` `Origin`) is refused before anything is read. The
 host opens `relay.open {transport: "server"}` on a connection of its own to the user daemon and
 copies frames both ways, split into pieces and joined as the bridge does, with the token taken out
-of the hello. One relay at a time: another Chrome profile is refused with `bye {reason:
-"another_relay"}` and close 4409 naming the connected one (the same profile replaces its own); a
-wrong, revoked or 90-days-unused token gets `bye {reason: "unauthorized"}` and 4401. Codes and
+of the hello and the paired device's id put in its `profile_id`: a Chrome is what its token proves, so
+one paired Chrome cannot take another's place by what its hello says. Every paired Chrome stays
+connected at once (the same one again replaces its own relay), and pairing the same profile again
+keeps its device id, so a conversation in it stays in it. A wrong, revoked or 90-days-unused token
+gets `bye {reason: "unauthorized"}` and 4401. Codes and
 tokens are kept as SHA-256 only and compared in constant time; failed attempts at both doors share
 a limit (5 per address and 30 overall in 10 minutes); nothing presented is logged.

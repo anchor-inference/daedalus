@@ -13,6 +13,9 @@ What a person would check by hand, in order:
 - cookie values never leave Chrome, and writing or clearing cookies is refused;
 - the same again over a server's door: the host's relay WebSocket on loopback, paired with a one-time
   code typed into the side panel's settings;
+- two Chromes paired with that door at once, each with the extension as released: both stay
+  connected, the agent chooses, each keeps to its own tabs and credential, one reloading its
+  extension comes back to its own tabs, and one quitting ends its own work and no other's;
 - the side panel against the whole host: the credential handed over the relay, a new conversation
   started from the panel on the operator's current tab, a scripted model reading that very tab, and
   the agent's request for a new site approved inline from the keyboard.
@@ -45,6 +48,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from daedalus.browser.model import USER, BrowserError, Owner
@@ -157,14 +161,7 @@ async def daemon(scratch: Path) -> AsyncIterator[Path]:
             print((scratch / "daemon.log").read_text(errors="replace"))
 
 
-@pytest.fixture
-async def chrome(scratch: Path, daemon: Path) -> AsyncIterator[Any]:
-    """Chromium with the built extension, and the real bridge registered as its native messaging host
-    in the profile's own NativeMessagingHosts folder (where Chromium looks for a user-level host when
-    it runs with --user-data-dir), exactly as the launcher's wrapper starts it."""
-    from playwright.async_api import async_playwright  # noqa: PLC0415 — only this opt-in run needs it
-
-    profile = scratch / "chrome"
+def register_bridge(profile: Path, scratch: Path, daemon: Path) -> None:
     hosts = profile / "NativeMessagingHosts"
     hosts.mkdir(parents=True)
     wrapper = scratch / "daedalus-bridge"
@@ -177,6 +174,17 @@ async def chrome(scratch: Path, daemon: Path) -> AsyncIterator[Any]:
         "type": "stdio",
         "allowed_origins": [f"chrome-extension://{EXTENSION_ID}/"],
     }))
+
+
+@pytest.fixture
+async def chrome(scratch: Path, daemon: Path) -> AsyncIterator[Any]:
+    """Chromium with the built extension, and the real bridge registered as its native messaging host
+    in the profile's own NativeMessagingHosts folder (where Chromium looks for a user-level host when
+    it runs with --user-data-dir), exactly as the launcher's wrapper starts it."""
+    from playwright.async_api import async_playwright  # noqa: PLC0415 — only this opt-in run needs it
+
+    profile = scratch / "chrome"
+    register_bridge(profile, scratch, daemon)
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
             str(profile), executable_path=CHROMIUM, headless=True,
@@ -190,14 +198,13 @@ async def chrome(scratch: Path, daemon: Path) -> AsyncIterator[Any]:
             await context.close()
 
 
-async def relay(service: Browsers) -> dict[str, Any]:
+async def chromes(service: Browsers) -> list[dict[str, Any]]:
     status = await service.user_status()
-    return status.get("relay") or {}
+    return [c for c in (status.get("relay") or {}).get("chromes") or [] if c.get("connected")]
 
 
 async def connected(service: Browsers, transport: str) -> dict[str, Any] | None:
-    found = await relay(service)
-    return found if found.get("connected") and found.get("transport") == transport else None
+    return next((c for c in await chromes(service) if c.get("transport") == transport), None)
 
 
 async def check_both_ways(service: Browsers, bus: Bus, panel: Any) -> None:
@@ -208,14 +215,14 @@ async def check_both_ways(service: Browsers, bus: Bus, panel: Any) -> None:
     assert "✓" in await panel.inner_text("#check-result")
     await until(lambda: len(bus.user("check")) > before, "the panel's check reaching the host")
     # The host's check: relay.notify answers with a round trip and flashes in the panel.
-    checked = await service.check_user()
+    checked = await service.check_user((await chromes(service))[0]["chrome"])
     assert checked["ok"] and checked["rtt_ms"] >= 0
     await panel.wait_for_selector("#notice:not([hidden])", timeout=8000)
 
 
-async def drive(service: Browsers, owner: Owner, site: str) -> tuple[str, str]:
+async def drive(service: Browsers, owner: Owner, site: str, chrome: str = "") -> tuple[str, str]:
     """Open the conversation's group in the operator's Chrome on the shop, read it, click a link."""
-    opened = await service.open(owner, url=f"{site}/shop/index.html", actor=f"agent:{owner.id}")
+    opened = await service.open(owner, url=f"{site}/shop/index.html", actor=f"agent:{owner.id}", chrome=chrome)
     group, tab = opened["group"]["id"], opened["tab"]["id"]
     assert opened["group"]["env"] == USER, opened["group"]
     snapshot = await service.call(group, "page.snapshot", {"tab_id": tab}, what="reading", timeout=30)
@@ -336,25 +343,29 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
         server_port = uvicorn_server.servers[0].sockets[0].getsockname()[1]
 
         code = (await pairing.mint())["code"]
+        # Connected, the panel shows the connection; the pairing form is behind this button.
+        if await panel.locator("#pair-again").is_visible():
+            await panel.click("#pair-again")
         await panel.fill("#server", f"http://127.0.0.1:{server_port}")
         await panel.fill("#code", code)
         await panel.click("#pair")
         served = await until(lambda: connected(service, "server"), "the relay through the host's WebSocket", timeout=30)
         assert served["profile_name"] == "Chrome", served
-        assert desk.connected_device(), "the desk holds no relay"
+        assert desk.connected_devices(), "the desk holds no relay"
         await panel.wait_for_selector("#phase[data-phase='connected']", timeout=10000)
         await until(lambda: panel.inner_text("#install"), "the panel to name the installation")
         assert await panel.inner_text("#install") == "E2E server"
         await check_both_ways(service, bus, panel)
-        # The relay through the bridge ended when the extension moved to the server, and the group
-        # with it; the conversation opens again in the same Chrome.
+        # The relay through the bridge ended when the extension moved to the server, and its group
+        # goes once that relay's grace has run out; the conversation then opens again in the same
+        # Chrome, which a server knows by another id.
         last: BrowserError | None = None
-        for _ in range(60):
+        for _ in range(120):
             try:
-                await drive(service, owner, site)
+                # Named, as the agent would name it: a conversation never slides to another by itself.
+                await drive(service, owner, site, chrome=served["chrome"])
                 break
             except BrowserError as exc:
-                # The group of the bridge's relay may still be closing as the server's relay arrives.
                 last = exc
                 await asyncio.sleep(0.5)
         else:
@@ -367,6 +378,181 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(server_task, 10)
         await service.close()
+
+
+async def launched(playwright: Any, profile: Path) -> Any:
+    """Another Chromium with the extension, with a profile of its own: another computer, as far as
+    the host can tell."""
+    context = await playwright.chromium.launch_persistent_context(
+        str(profile), executable_path=CHROMIUM, headless=True,
+        args=[f"--disable-extensions-except={EXTENSION}", f"--load-extension={EXTENSION}"],
+    )
+    worker = context.service_workers[0] if context.service_workers else await context.wait_for_event("serviceworker")
+    assert EXTENSION_ID in worker.url, worker.url
+    panel = context.pages[0]
+    await panel.goto(f"chrome-extension://{EXTENSION_ID}/panel.html")
+    return SimpleNamespace(context=context, worker=worker, panel=panel)
+
+
+async def pair(chrome: Any, pairing: Pairing, port: int, name: str) -> None:
+    """What the operator does in the panel's settings: the code from the app, and the browser's name."""
+    code = (await pairing.mint())["code"]
+    await chrome.panel.fill("#server", f"http://127.0.0.1:{port}")
+    await chrome.panel.fill("#code", code)
+    await chrome.panel.click("#pair")
+    await chrome.panel.wait_for_selector("#phase[data-phase='connected']", timeout=20000)
+    await chrome.panel.wait_for_selector("#toggle-settings:not([hidden])", timeout=20000)
+    if not await chrome.panel.locator("#name").is_visible():
+        await chrome.panel.click("#toggle-settings")
+    await chrome.panel.fill("#name", name)
+    await chrome.panel.locator("#name").blur()
+
+
+async def tab_ids(chrome: Any) -> list[dict[str, Any]]:
+    """The tabs in tab groups of this Chromium, by what its own extension API says."""
+    return await chrome.worker.evaluate(  # type: ignore[no-any-return]
+        """async () => {
+            const groups = Object.fromEntries((await chrome.tabGroups.query({})).map((g) => [g.id, g.title]));
+            return (await chrome.tabs.query({})).filter((t) => t.groupId !== -1).map((t) => ({ id: t.id, url: t.url, title: groups[t.groupId] }));
+        }"""
+    )
+
+
+async def test_two_chromes_stay_connected_and_keep_apart(db: Database, site: str, daemon: Path, scratch: Path) -> None:
+    """The operator's report: Chrome paired on one computer, and the other's panel says "Another Chrome
+    is already connected". Here both are the released extension in real Chromiums, through the real
+    door, against the real daemon."""
+    import uvicorn  # noqa: PLC0415
+    from fastapi import FastAPI  # noqa: PLC0415
+    from playwright.async_api import async_playwright  # noqa: PLC0415
+
+    from daedalus.browser.panel import PanelGrants, PanelHerald  # noqa: PLC0415
+    from daedalus.extensions import api_browser_user  # noqa: PLC0415
+
+    port = int(site.rsplit(":", 1)[1])
+    rules = {"sealed_ports": [], "services_ports": [[port, port]], "local_sites": "allow", "lan_allow": [], "egress_allow": ["127.0.0.1"]}
+    bus = Bus()
+    service = Browsers(db, run_dirs={"container": None, "host": None, USER: daemon}, config=lambda: BrowserConfig(), owners=Everyone(), bus=bus, wall=lambda env: rules)  # type: ignore[arg-type]
+    pairing = Pairing(db)
+    desk = RelayDesk(pairing, lambda: daemon, install_name=lambda: "E2E server")
+    grants = PanelGrants(db)
+    herald = PanelHerald(grants, call=service.call_extension, chromes=service.connected_chromes, base=lambda: "http://127.0.0.1")
+
+    async def handed(kind: str, data: dict[str, Any]) -> None:
+        if kind == "relay.connected":
+            await herald.grant(str(data.get("chrome") or ""))
+
+    service.relay_hooks.append(handed)
+    api = FastAPI()
+    app = SimpleNamespace(settings=SimpleNamespace(native=False, state_dir=Path("/nonexistent"), miniapp_public_url=""),
+                          extensions={"browser": service, "browser_pairing": pairing, "browser_relays": desk, "browser_panel": grants})
+
+    def auth() -> dict[str, Any]:
+        raise AssertionError("the public doors take no app session")
+
+    api_browser_user.register(api, app, auth)  # type: ignore[arg-type]
+    server = uvicorn.Server(uvicorn.Config(api, host="127.0.0.1", port=0, log_level="warning", lifespan="off"))
+    server_task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, "the test server")
+    server_port = server.servers[0].sockets[0].getsockname()[1]
+    await service.start()
+    try:
+        assert await service.wait_available(USER, timeout=20)
+        async with async_playwright() as p:
+            windows = await launched(p, scratch / "windows")
+            mac = await launched(p, scratch / "mac")
+            await pair(windows, pairing, server_port, "Windows")
+            await pair(mac, pairing, server_port, "MacBook")
+
+            # Both connected at once: this is what used to be refused.
+            both = await until(lambda: _two(service), "both Chromes connected", timeout=30)
+            assert await windows.panel.locator("#phase").get_attribute("data-phase") == "connected"
+            assert await mac.panel.locator("#phase").get_attribute("data-phase") == "connected"
+            ids = {c["profile_name"]: c["chrome"] for c in both}
+            assert set(ids) == {"Windows", "MacBook"}, both
+            assert desk.connected_devices() == set(ids.values())
+
+            # Each extension was handed its own token, down its own relay.
+            async def token_of(chrome: Any) -> str:
+                stored = await chrome.worker.evaluate("async () => (await chrome.storage.session.get('panelGrant')).panelGrant")
+                return str((stored or {}).get("token") or "")
+
+            first = await until(lambda: token_of(windows), "the panel token in the first Chrome")
+            second = await until(lambda: token_of(mac), "the panel token in the second Chrome")
+            assert first != second
+            assert await grants.check(first) == ids["Windows"] and await grants.check(second) == ids["MacBook"]
+
+            # A conversation that says nothing is told them; named, each opens on its own computer.
+            at_win, at_mac = Owner("session", "win", session_id="win"), Owner("session", "mac", session_id="mac")
+            for owner in (at_win, at_mac):
+                await service.choices.switch(owner.id, USER, consent=True)
+            with pytest.raises(BrowserError, match="several of the operator's Chromes"):
+                await service.open(at_win, actor="agent:win")
+            assert not await tab_ids(windows) and not await tab_ids(mac)
+            drove = await asyncio.gather(drive(service, at_win, site, chrome="Windows"), drive(service, at_mac, site, chrome="MacBook"))
+            (group_win, tab_win), (group_mac, tab_mac) = drove
+            assert group_win != group_mac and ids["Windows"] in group_win and ids["MacBook"] in group_mac
+            seen_win, seen_mac = await tab_ids(windows), await tab_ids(mac)
+            print(f"chrome tab ids: windows {[t['id'] for t in seen_win]}, mac {[t['id'] for t in seen_mac]}; daemon tabs {tab_win} {tab_mac}")
+            assert len(seen_win) == 1 and len(seen_mac) == 1, (seen_win, seen_mac)
+            # Each group's tab is in its own Chromium and nowhere else, and their pages are their own.
+            await service.call(group_win, "page.navigate", {"tab_id": tab_win, "url": f"{site}/steps.html"}, what="going", timeout=30)
+            seen_win, seen_mac = await tab_ids(windows), await tab_ids(mac)
+            assert seen_win[0]["url"] == f"{site}/steps.html" and "steps" not in seen_mac[0]["url"], (seen_win, seen_mac)
+
+            # Its worker stopping, as Chrome stops one, brings a Chrome back to its own tabs under the
+            # same id, with the other's relay and tab untouched.
+            current = await chromes(service)
+            connected_since = next(c for c in current if c["chrome"] == ids["MacBook"])["since"]
+            cdp = await windows.context.new_cdp_session(windows.panel)
+            await cdp.send("ServiceWorker.enable")
+            await cdp.send("ServiceWorker.stopAllWorkers")
+            await windows.panel.reload()
+            await until(lambda: _reconnected(service, ids["Windows"], current), "the first Chrome connecting again", timeout=30)
+            still = next(c for c in await chromes(service) if c["chrome"] == ids["MacBook"])
+            assert still["since"] == connected_since, "the other Chrome's relay was touched"
+            await service.call(group_mac, "page.text", {"tab_id": tab_mac}, what="reading", timeout=30)
+            reopened = await service.open(at_win, actor="agent:win")
+            assert reopened["group"]["id"] == group_win and not reopened["created"], reopened
+            await service.call(group_win, "page.text", {"tab_id": tab_win}, what="reading the tab after the restart", timeout=30)
+
+            # One quitting ends its own work; the conversation hears of it and does not slide over.
+            await windows.context.close()
+            await until(lambda: _lost(service, ids["Windows"]), "the first Chrome's relay to go", timeout=30)
+            await service.call(group_mac, "page.text", {"tab_id": tab_mac}, what="reading", timeout=30)
+
+            async def closed() -> bool:
+                return bool((await service.get_row(group_win))["status"] != "open")
+
+            await until(closed, "the group of the Chrome that quit to close", timeout=70)
+            with pytest.raises(BrowserError, match="«Windows», which is not connected"):
+                await service.open(at_win, actor="agent:win")
+            assert len(await tab_ids(mac)) == 1, "the conversation of the other computer opened here"
+            await service.call(group_mac, "page.text", {"tab_id": tab_mac}, what="reading", timeout=30)
+            await mac.context.close()
+    finally:
+        server.should_exit = True
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(server_task, 10)
+        await service.close()
+
+
+async def _two(service: Browsers) -> list[dict[str, Any]] | None:
+    found = await chromes(service)
+    return found if len(found) == 2 and all(c.get("profile_name") in ("Windows", "MacBook") for c in found) else None
+
+
+async def _two_connected(service: Browsers) -> bool:
+    return len(await chromes(service)) == 2
+
+
+async def _reconnected(service: Browsers, chrome: str, before: list[dict[str, Any]]) -> bool:
+    was = next(c for c in before if c["chrome"] == chrome)["since"]
+    return any(c["chrome"] == chrome and c["since"] != was for c in await chromes(service))
+
+
+async def _lost(service: Browsers, chrome: str) -> bool:
+    return not any(c["chrome"] == chrome for c in await chromes(service))
 
 
 class ScriptedModel:
@@ -418,7 +604,7 @@ class ScriptedModel:
 
 
 @pytest.mark.skipif(not (REPO / "miniapp" / "dist" / "index.html").is_file(), reason="build the app: cd miniapp && npm run build")
-async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str, daemon: Path, chrome: Any) -> None:
+async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str, daemon: Path, chrome: Any, scratch: Path) -> None:
     """The side panel against the whole host on this computer. The panel page is opened in a tab of
     the operator's window rather than as Chrome's own side panel, which only the operator's gesture
     opens; it is the same page, and the operator's page stays the window's active tab beside it."""
@@ -462,9 +648,9 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
         await until(lambda: server.started, "the host's server")
         service = app.extensions["browser"]
         assert await service.wait_available(USER, timeout=20)
-        await until(lambda: connected(service, "native"), "the relay through the bridge")
+        native = await until(lambda: connected(service, "native"), "the relay through the bridge")
         # The credential, over the relay: what the host does on every connection.
-        await browser_extension.relay_changed(app.extensions["browser_panel_herald"], "relay.connected")
+        await browser_extension.relay_changed(app.extensions["browser_panel_herald"], "relay.connected", {"chrome": native["chrome"]})
         grant = await until(lambda: worker.evaluate("async () => (await chrome.storage.session.get('panelGrant')).panelGrant"), "the panel's credential in the extension")
         assert grant["base"] == f"http://127.0.0.1:{api_port}" and grant["token"].startswith("pnl_"), grant
         assert grant["token"] not in json.dumps(await worker.evaluate("async () => chrome.storage.local.get(null)"))
@@ -506,6 +692,27 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
         await card.press("Enter")
         await until(lambda: "repeat the call now" in model.results(), "the grant resuming the agent", timeout=40)
         await until(lambda: _granted(service, sid, "localhost"), "the site granted for the conversation", timeout=40)
+        assert (await service.choices.get(sid))["chrome"] == native["chrome"], "a conversation started from a panel belongs to its Chrome"
+
+        # A second Chrome on the same computer, its own panel and its own token: it stays connected
+        # beside the first, and the first one's conversation does not exist for it.
+        from playwright.async_api import async_playwright  # noqa: PLC0415
+
+        register_bridge(scratch / "second", scratch, daemon)
+        async with async_playwright() as p:
+            second = await launched(p, scratch / "second")
+            await until(lambda: _two_connected(service), "the second Chrome beside the first", timeout=30)
+            theirs = await until(lambda: second.worker.evaluate("async () => (await chrome.storage.session.get('panelGrant')).panelGrant"), "the second Chrome's credential")
+            assert theirs["token"] != grant["token"]
+            await second.panel.frame_locator("#frame").locator(".sp-new .composer textarea").wait_for(timeout=20000)
+            async with httpx.AsyncClient(base_url=theirs["base"]) as client:
+                own = {"authorization": f"Panel {grant['token']}"}
+                other = {"authorization": f"Panel {theirs['token']}"}
+                assert (await client.get(f"/api/panel/sessions/{sid}", headers=own)).status_code == 200
+                assert (await client.get(f"/api/panel/sessions/{sid}", headers=other)).status_code == 404
+                assert sid in [s["id"] for s in (await client.get("/api/panel/sessions", headers=own)).json()["sessions"]]
+                assert sid not in [s["id"] for s in (await client.get("/api/panel/sessions", headers=other)).json()["sessions"]]
+            await second.context.close()
     finally:
         server.should_exit = True
         with contextlib.suppress(Exception):

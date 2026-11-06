@@ -5,14 +5,15 @@ The extension's side panel frames the host's app at ``/app/panel`` and signs in 
 generic authentication never accepts it, so every other route stays the operator's alone. What it
 does open is listed here and nowhere else:
 
-- the conversations given the operator's Chrome — read, streamed, written to, stopped, answered, their
+- the conversations given the operator's Chrome that belong to this Chrome or to no Chrome yet, never
+  another's — read, streamed, written to, stopped, answered, their
   model, effort and mode set, their pending actions allowed or refused, and the pictures, clips and
   files drawn in them. The list shows fewer: only
   this Chrome's own conversations (``daedalus.browser.panel.follows_in_chrome``), the ones made for it
   and any other while it controls it. The door stays wider than the list so that a conversation open
   in the panel does not answer 404 mid-reply the moment its control lapses;
-- a new conversation, born in the operator's Chrome (the operator pressed "new" in the panel, which
-  is their consent, asked once like the first switch);
+- a new conversation, born in this Chrome and belonging to it (the operator pressed "new" in the
+  panel, which is their consent, asked once like the first switch);
 - opening such a conversation's browser on the tab the operator just gave it;
 - the model list, without any provider's address or key.
 
@@ -35,7 +36,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.browser.model import USER, Owner, group_id
-from daedalus.browser.panel import follows_in_chrome, mark_panel_session, waits_for_operator
+from daedalus.browser.panel import follows_in_chrome, hold_in_chrome, mark_panel_session, waits_for_operator
 from daedalus.browser.user import CONSENT, ConsentNeeded
 
 if TYPE_CHECKING:
@@ -128,7 +129,7 @@ async def _answer(send: Callable[[dict[str, Any]], Awaitable[None]], status: int
 class PanelDoor:
     """ASGI middleware in front of the app: every ``/api/panel/*`` request passes here first."""
 
-    def __init__(self, asgi: Any, *, grants: Callable[[], PanelGrants | None], in_scope: Callable[[str], Awaitable[bool]]) -> None:
+    def __init__(self, asgi: Any, *, grants: Callable[[], PanelGrants | None], in_scope: Callable[[str, str], Awaitable[bool]]) -> None:
         self.asgi = asgi
         self.grants = grants
         self.in_scope = in_scope
@@ -154,7 +155,7 @@ class PanelDoor:
             await _answer(send, 404, "not a side panel route")
             return
         sid = match.groupdict().get("sid")
-        if sid and not await self.in_scope(sid):
+        if sid and not await self.in_scope(sid, device):
             await _answer(send, 404, "no such conversation in this Chrome")
             return
         if method == "POST" and _BODY_ROUTES.fullmatch(path):
@@ -207,9 +208,14 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
     def service() -> Browsers | None:
         return cast("Browsers | None", app.extensions.get("browser"))
 
-    async def in_scope(session_id: str) -> bool:
+    async def in_scope(session_id: str, device: str) -> bool:
+        """A conversation another Chrome's panel holds does not exist for this one: a token is minted
+        for one Chrome, and what it opens stops at that Chrome."""
         found = service()
-        return found is not None and found.user_offered() and await found.choices.env(session_id) == USER
+        if found is None or not found.user_offered():
+            return False
+        choice = await found.choices.get(session_id)
+        return choice["env"] == USER and choice["chrome"] in ("", device)
 
     api.add_middleware(PanelDoor, grants=lambda: cast("PanelGrants | None", app.extensions.get("browser_panel")), in_scope=in_scope)
 
@@ -233,10 +239,12 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         operator's Chrome, the ones made for it and any other while it controls it now. Every
         conversation ever given their Chrome used to be listed, for good, the main chat among them."""
         found = service()
-        ids = await found.choices.using_user() if found is not None and found.user_offered() else []
+        device = str(who["device"])
+        ids = await found.choices.using_user(device) if found is not None and found.user_offered() else []
         rows = await manager.list_sessions(limit=200, ids=ids) if ids else []
         rows.sort(key=lambda row: row["last_message_at"], reverse=True)
-        connected, name, _ = found.user_connection() if found is not None else (False, "", "")
+        here = next((c for c in found.user_chromes() if c["chrome"] == device), None) if found is not None else None
+        bound = {sid: await found.choices.chrome_of(sid) for sid in ids} if found is not None else {}
         return {
             "sessions": [
                 {
@@ -245,14 +253,14 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
                     "status": row["status"],
                     "last_message_at": row["last_message_at"],
                     "needs_you": row["status"] in ("waiting", "failed") or waits_for_operator(manager.live_state(row["id"])),
-                    "group": group_id(Owner("session", row["id"], session_id=row["id"]), env=USER),
+                    "group": group_id(Owner("session", row["id"], session_id=row["id"]), env=USER, chrome=device),
                 }
                 for row in rows
-                if not row["metadata"].get("archived") and follows_in_chrome(row["kind"], row["controlling"])
+                if not row["metadata"].get("archived") and follows_in_chrome(row["kind"], row["controlling"], bound=bound.get(row["id"], ""), chrome=device)
             ],
             "consented": bool(await app.db.kv_get(CONSENTED_KEY, False)),
             "consent": CONSENT,
-            "chrome": {"connected": connected, "name": name},
+            "chrome": {"connected": bool(here and here.get("connected")), "name": str((here or {}).get("profile_name") or "")},
         }
 
     @api.post("/api/panel/sessions")
@@ -273,8 +281,9 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         created = await new_session(body=new_body(title=title, autotitle=True, kind="chrome"), _=who)
         session_id = str(created["id"])
         await mark_panel_session(manager, session_id)
+        await hold_in_chrome(found, session_id, str(who["device"]))
         await app.db.kv_set(CONSENTED_KEY, True)
-        return {**created, "group": group_id(Owner("session", session_id, session_id=session_id), env=USER)}
+        return {**created, "group": group_id(Owner("session", session_id, session_id=session_id), env=USER, chrome=str(who["device"]))}
 
     @api.post("/api/panel/sessions/{session_id}/tab")
     async def panel_tab(session_id: str, who: dict[str, Any] = Depends(panel)) -> dict[str, Any]:
@@ -287,8 +296,10 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         state = await manager.get_state(session_id)
         staff = str(state.metadata.get("staff_id") or "") if state is not None else ""
         owner = Owner("session", session_id, project_id=state.project.id if state is not None and state.project is not None else None, session_id=session_id, staff_id=staff or None)
-        opened = await found.open(owner, actor="operator")
-        return {"group": group_id(owner, env=USER), "created": bool(opened.get("created"))}
+        device = str(who["device"])
+        await hold_in_chrome(found, session_id, device)
+        opened = await found.open(owner, actor="operator", chrome=device)
+        return {"group": group_id(owner, env=USER, chrome=device), "created": bool(opened.get("created"))}
 
     @api.get("/api/panel/settings")
     async def panel_settings(who: dict[str, Any] = Depends(panel)) -> dict[str, Any]:

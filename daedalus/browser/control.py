@@ -1,6 +1,6 @@
 """Which conversations are controlling the operator's Chrome now (:mod:`daedalus.host.control_marks`).
 
-A conversation controls it while its tab group in that Chrome is open, the Chrome is connected, the
+A conversation controls it while its tab group in one of their Chromes is open, that Chrome is connected, the
 conversation is still given that Chrome, and the rule of ``control_marks`` holds: it waits for the
 operator there (a hand-over), a run of it has used the group since it started, or the group was used
 within the last few minutes. The group's last use is ``browser_groups.last_activity_at``, which every
@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from daedalus.browser.model import USER
+from daedalus.browser.model import USER, chrome_of_profile
 from daedalus.host.control_marks import controlling
 
 if TYPE_CHECKING:
@@ -53,11 +53,12 @@ class ChromeControl:
         """The conversations controlling the operator's Chrome as of now."""
         if not self.service.user_offered() or not self.service.user_connection()[0]:
             return set()
+        connected = set(self.service.connected_chromes())
         given = set(await self.service.choices.using_user())
         if not given:
             return set()
         rows = await self.service.db.fetchall(
-            "SELECT session_id, last_activity_at, needs_json FROM browser_groups"
+            "SELECT session_id, profile, last_activity_at, needs_json FROM browser_groups"
             " WHERE status = 'open' AND env = ? AND owner_kind = 'session' AND session_id IS NOT NULL",
             (USER,),
         )
@@ -66,6 +67,7 @@ class ChromeControl:
             str(row["session_id"])
             for row in rows
             if str(row["session_id"]) in given
+            and chrome_of_profile(str(row["profile"])) in connected
             and controlling(used_at=_stamp(row["last_activity_at"]), now=now, run_since=self.manager.run_since(str(row["session_id"])), waits_here=bool(row["needs_json"]))
         }
 

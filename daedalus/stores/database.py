@@ -3620,6 +3620,37 @@ async def _repeated_media(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _repeated_media))
 
+async def _chromes_of_their_own(conn: aiosqlite.Connection) -> None:
+    """Conversations belong to one of the operator's Chromes now, and what was granted in one holds on
+    that computer alone. A conversation from before knows no Chrome, so a site it was granted, or a
+    "skip all approvals", would have opened on whichever computer it next landed on: those are asked
+    again. Side panel tokens were for one device called ``native`` on a desktop install; each Chrome
+    has its own now, and one left over would bind a conversation to a Chrome that never connects."""
+    saved = await (await conn.execute("SELECT value FROM kv WHERE key = 'browser.user.sessions'")).fetchone()
+    sessions = _json_value(saved)
+    if isinstance(sessions, dict):
+        for entry in sessions.values():
+            if isinstance(entry, dict) and not entry.get("chrome"):
+                entry.pop("sites", None)
+                entry.pop("approvals", None)
+        await conn.execute("UPDATE kv SET value = ? WHERE key = 'browser.user.sessions'", (json.dumps(sessions, ensure_ascii=False),))
+    saved = await (await conn.execute("SELECT value FROM kv WHERE key = 'browser.panel.grants'")).fetchone()
+    grants = _json_value(saved)
+    if isinstance(grants, list):
+        kept = [g for g in grants if not (isinstance(g, dict) and g.get("device") == "native")]
+        await conn.execute("UPDATE kv SET value = ? WHERE key = 'browser.panel.grants'", (json.dumps(kept, ensure_ascii=False),))
+
+
+def _json_value(row: Any) -> Any:
+    """A ``kv`` value read inside a migration; a malformed one decides nothing rather than failing the start."""
+    try:
+        return json.loads(row["value"]) if row is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _chromes_of_their_own))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

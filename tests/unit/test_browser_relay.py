@@ -1,8 +1,8 @@
 """A server's doors for the operator's Chrome: one-time codes spent for device tokens, and the relay
 WebSocket that takes a token in its first frame and carries the frames to the user daemon, split and
 joined as the bridge does. Wrong, revoked and long-unused tokens are refused with the code the
-extension reads as "pair again", a second Chrome with the one that names the first, and failures at
-either door are limited per address."""
+extension reads as "pair again", any number of Chromes stay connected at once, and failures at either
+door are limited per address."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from daedalus.browser.user import (
-    CLOSE_BUSY,
     CLOSE_UNAUTHORIZED,
     Attempts,
     Joiner,
@@ -219,10 +218,10 @@ async def test_a_paired_chrome_is_carried_to_the_daemon_both_ways_without_its_to
     sock.incoming.put_nowait(json.dumps(big))
     got = await daemon.relay_frame(relay, timeout=10)
     assert got == big
-    assert desk.connected_device() != ""
+    assert len(desk.connected_devices()) == 1
     sock.incoming.put_nowait(None)
     await asyncio.wait_for(task, 5)
-    assert desk.connected_device() == ""
+    assert not desk.connected_devices()
 
 
 @pytest.mark.parametrize("token", ["", "not-a-token"])
@@ -264,42 +263,70 @@ async def test_a_long_unused_pairing_has_expired(db: Database, daemon: FakeBrows
     assert await sock.close_code() == CLOSE_UNAUTHORIZED
 
 
-async def test_a_second_chrome_is_refused_naming_the_one_connected_and_the_same_one_replaces_itself(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
+async def test_two_paired_chromes_stay_connected_at_once_each_under_the_device_its_token_proves(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
     first_token = await paired(pairing, "p1", "Work")
     second_token = await paired(pairing, "p2", "Home")
-    first = FakeSocket()
-    task = start(desk, first, {**HELLO, "token": first_token})
+    first, second = FakeSocket(), FakeSocket()
+    tasks = [start(desk, first, {**HELLO, "token": first_token})]
     async with asyncio.timeout(5):
         while not daemon.relays:
             await asyncio.sleep(0.01)
-    second = FakeSocket()
-    await asyncio.wait_for(start(desk, second, {**HELLO, "profile_id": "p2", "profile_name": "Home", "token": second_token}), 5)
-    bye = await second.frame()
-    assert bye["reason"] == "another_relay" and "Work" in bye["message"]
-    assert await second.close_code() == CLOSE_BUSY
-    assert not first.closed.done()
-    # The same profile again (its worker restarted): the new socket is the live one.
-    again = FakeSocket()
-    replacing = start(desk, again, {**HELLO, "token": first_token})
-    assert await first.close_code() == 1000
+    # It claims the other's profile: what it is comes from its token, not from what it says.
+    tasks.append(start(desk, second, {**HELLO, "profile_id": "p1", "profile_name": "Home", "token": second_token}))
     async with asyncio.timeout(5):
         while len(daemon.relays) < 2:
             await asyncio.sleep(0.01)
-    again.incoming.put_nowait(None)
-    await asyncio.wait_for(asyncio.gather(task, replacing), 5)
+    devices = {d.name: d.id for d in await pairing.devices()}
+    assert (await daemon.relay_frame(daemon.relays[0]))["profile_id"] == devices["Work"]
+    assert (await daemon.relay_frame(daemon.relays[1]))["profile_id"] == devices["Home"]
+    assert desk.connected_devices() == set(devices.values())
+    assert not first.closed.done() and not second.closed.done()
+    # One leaving ends its own relay and nothing else.
+    second.incoming.put_nowait(None)
+    await asyncio.wait_for(tasks[1], 5)
+    assert desk.connected_devices() == {devices["Work"]} and not first.closed.done()
+    first.incoming.put_nowait(None)
+    await asyncio.wait_for(tasks[0], 5)
 
 
-async def test_the_daemons_own_refusal_of_a_second_relay_closes_with_the_busy_code(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
-    token = await paired(pairing)
-    sock = FakeSocket()
-    task = start(desk, sock, {**HELLO, "token": token})
+async def test_the_same_chrome_connecting_again_replaces_itself_and_leaves_the_other_alone(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
+    first_token = await paired(pairing, "p1", "Work")
+    second_token = await paired(pairing, "p2", "Home")
+    first, other = FakeSocket(), FakeSocket()
+    tasks = [start(desk, first, {**HELLO, "token": first_token}), start(desk, other, {**HELLO, "profile_id": "p2", "profile_name": "Home", "token": second_token})]
     async with asyncio.timeout(5):
-        while not daemon.relays:
+        while len(daemon.relays) < 2:
             await asyncio.sleep(0.01)
-    await daemon.relay_send(daemon.relays[-1], {"t": "bye", "reason": "another_relay", "message": "another Chrome is already connected: Laptop"})
-    assert (await sock.frame())["reason"] == "another_relay"
-    assert await sock.close_code() == CLOSE_BUSY
-    await asyncio.wait_for(task, 5)
+    again = FakeSocket()
+    tasks.append(start(desk, again, {**HELLO, "token": first_token}))
+    assert await first.close_code() == 1000
+    async with asyncio.timeout(5):
+        while len(daemon.relays) < 3:
+            await asyncio.sleep(0.01)
+    assert not other.closed.done()
+    other.incoming.put_nowait(None)
+    again.incoming.put_nowait(None)
+    await asyncio.wait_for(asyncio.gather(*tasks), 5)
+
+
+async def test_pairing_the_same_chrome_again_keeps_its_id_and_a_revocation_ends_only_that_one(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
+    first_token = await paired(pairing, "p1", "Work")
+    (before,) = await pairing.devices()
+    token = await paired(pairing, "p1", "Work")
+    (after,) = await pairing.devices()
+    assert after.id == before.id, "the conversations in this Chrome know it by its id"
+    assert await pairing.device_of(first_token, address="a") is None, "the old token goes"
+    other_token = await paired(pairing, "p2", "Home")
+    first, other = FakeSocket(), FakeSocket()
+    tasks = [start(desk, first, {**HELLO, "token": token}), start(desk, other, {**HELLO, "profile_id": "p2", "token": other_token})]
+    async with asyncio.timeout(5):
+        while len(daemon.relays) < 2:
+            await asyncio.sleep(0.01)
+    await desk.revoked(after.id)
+    assert await first.close_code() == CLOSE_UNAUTHORIZED
+    assert not other.closed.done()
+    other.incoming.put_nowait(None)
+    await asyncio.wait_for(asyncio.gather(*tasks), 5)
 
 
 async def test_a_first_frame_that_is_not_hello_is_refused(desk: RelayDesk) -> None:

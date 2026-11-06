@@ -19,11 +19,12 @@ import pytest
 from protocore.contracts.tools import ToolContext
 
 from daedalus.browser.agent import SensitiveAsk, Step, _address, named_sites
-from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
+from daedalus.browser.model import USER, BrowserError, InvalidRequest, Owner, group_id
 from daedalus.browser.user import (
     CONSENT,
     ConsentNeeded,
     SkipNeedsConfirm,
+    UserChoices,
     anti_bot,
     chrome_forbids,
     site_granted,
@@ -35,13 +36,12 @@ from daedalus.extensions.api import build_app
 from daedalus.host import prompts
 from daedalus.host.policy import ALLOW, ASK, Decision, browser_sensitive
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.database import Database
+from daedalus.stores.database import Database, _chromes_of_their_own
 from daedalus.tools.browser import BROWSER_TOOLS
 from tests.support.fake_browserd import Element, FakeBrowserd
 from tests.unit.test_browser_service import wait_until
 
-CONNECTED = {"connected": True, "profile_id": "p1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
-             "transport": "native", "since": "2026-10-20T10:00:00Z", "last_seen": "2026-10-20T10:00:05Z"}
+UNTOUCHED = {"sites": [], "approvals": "manual", "chrome": "", "chrome_name": "", "held": False}
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ async def agents_browser(base: Path) -> AsyncIterator[FakeBrowserd]:
 @pytest.fixture
 async def chrome(base: Path) -> AsyncIterator[FakeBrowserd]:
     fake = FakeBrowserd(base / "u", env="user")
-    fake.relay_status = dict(CONNECTED)
+    fake.chrome_connected("c1", "Work", ext_version="0.1.0", chrome_version="141.0.7390.54", transport="native")
     fake.page("https://mail.example.com/", title="Inbox", heading="Inbox", text="three new messages", elements={
         "e1": Element("e1", "button", "Send"),
         "e2": Element("e2", "button", "Archive"),
@@ -163,9 +163,9 @@ async def test_the_first_switch_asks_for_consent_once_and_the_result_names_the_o
     text, failed = await rig.call(sid, "BrowserOpen")
     assert not failed, text
     assert "operator's own Chrome «Work»" in text
-    assert group_id(Owner("session", sid), env=USER) in chrome.groups
-    row = await rig.service.get_row(group_id(Owner("session", sid), env=USER))
-    assert row["env"] == USER and row["profile"] == "user"
+    assert group_id(Owner("session", sid), env=USER, chrome="c1") in chrome.groups
+    row = await rig.service.get_row(group_id(Owner("session", sid), env=USER, chrome="c1"))
+    assert row["env"] == USER and row["profile"] == "user-c1"
     text, _ = await rig.call(sid, "BrowserTabs")
     assert text.startswith("[in the operator's own Chrome «Work»]")
     # The prompt says who switches, without the conversation's state in it (it stays cacheable).
@@ -175,7 +175,8 @@ async def test_the_first_switch_asks_for_consent_once_and_the_result_names_the_o
 async def test_a_closed_chrome_is_said_plainly_and_never_falls_back_to_the_agents_browser(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
     sid = await rig.session()
     await rig.switch(sid)
-    chrome.relay_status = {"connected": False, "last_error": "Chrome closed the connection", "since": None, "last_seen": None}
+    chrome.chrome_left("c1")
+    chrome.relay_status["last_error"] = "Chrome closed the connection"
     text, failed = await rig.call(sid, "BrowserOpen")
     assert failed and "not connected" in text.lower()
     assert not agents_browser.groups
@@ -190,7 +191,7 @@ async def test_a_new_site_asks_the_operator_and_a_yes_grants_that_site_for_the_c
     await rig.call(sid, "BrowserOpen")
     text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/", why="read the newest message")
     assert failed and "Approval key" in text
-    tab = chrome.tab_of(group_id(Owner("session", sid), env=USER))
+    tab = chrome.tab_of(group_id(Owner("session", sid), env=USER, chrome="c1"))
     assert tab.page.url == "about:blank", "nothing was opened before the yes"
     (key, asked), = rig.pending(sid).items()
     assert "example.com" in asked["text"] and "your own Chrome" in asked["text"]
@@ -307,7 +308,7 @@ async def test_a_sign_in_is_handed_to_the_operator_rather_than_typed_into_their_
     text, failed = await rig.call(sid, "BrowserLogin", url_or_domain="https://login.example.com/", reason="to read the inbox")
     assert not failed, text
     assert "Asked the operator" in text and "agent's window" in text
-    row = await rig.service.get_row(group_id(Owner("session", sid), env=USER))
+    row = await rig.service.get_row(group_id(Owner("session", sid), env=USER, chrome="c1"))
     assert row["control_owner"] == "paused"
 
 
@@ -374,7 +375,7 @@ async def test_the_switch_route_asks_for_consent_and_the_listing_carries_the_cho
         listing = (await client.get(f"/api/browsers?session={sid}", headers=headers)).json()
         assert listing["user"]["env"] == "user" and listing["user"]["consented"] is True
         status = (await client.get("/api/browser/user", headers=headers)).json()
-        assert status["daemon"] is True and status["relay"]["profile_name"] == "Work" and status["native"] is False
+        assert status["daemon"] is True and status["relay"]["chromes"][0]["profile_name"] == "Work" and status["native"] is False
         check = await client.post("/api/browser/user/check", headers=headers)
         assert check.status_code == 200 and check.json()["rtt_ms"] == 12 and chrome.notified
         # The connector is the desktop's: a server says so rather than pretending.
@@ -386,15 +387,15 @@ async def test_a_popup_check_and_the_relay_coming_and_going_reach_the_app(rig: R
     from daedalus.host.events import EventFilter  # noqa: PLC0415
 
     subscription = rig.manager.bus.subscribe(EventFilter(types=("browser.user",)), name="test")
-    chrome.emit("relay.check", {"n": 3, "profile_id": "p1", "profile_name": "Work"})
-    chrome.emit("relay.lost", {"reason": "closed", "profile_id": "p1", "profile_name": "Work"})
+    chrome.emit("relay.check", {"n": 3, "chrome": "c1", "profile_id": "p1", "profile_name": "Work"})
+    chrome.emit("relay.lost", {"reason": "closed", "chrome": "c1", "profile_id": "p1", "profile_name": "Work"})
     seen = []
     async with asyncio.timeout(5):
         async for event in subscription:
             seen.append(dict(event.payload))
             if len(seen) == 2:
                 break
-    assert seen == [{"kind": "check", "profile_name": "Work"}, {"kind": "lost", "profile_name": "Work", "reason": "closed"}]
+    assert seen == [{"kind": "check", "chrome": "c1", "profile_name": "Work"}, {"kind": "lost", "chrome": "c1", "profile_name": "Work", "reason": "closed"}]
 
 
 # -- the agent asks for the operator's Chrome --------------------------------------------------------
@@ -425,7 +426,7 @@ async def asked(rig: Rig, sid: str) -> str:
 async def test_the_agents_ask_switches_nothing_until_the_operator_says_yes(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
     sid = await rig.session()
     key = await asked(rig, sid)
-    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": [], "approvals": "manual"}
+    assert await rig.service.choices.get(sid) == {**UNTOUCHED, "env": "agent", "consented": False}
     # Asking again, or opening the browser meanwhile, moves nothing either; the result names the browser.
     await rig.call(sid, "BrowserAskOperatorChrome", reason="read the anchorinference page signed in as you")
     text, failed = await rig.call(sid, "BrowserOpen")
@@ -449,7 +450,7 @@ async def test_the_operators_yes_switches_the_conversation_as_the_panel_does(rig
     # The state the panel's switch writes, consent recorded with it.
     panel = await rig.session()
     await rig.service.switch_conversation(panel, USER, consent=True)
-    assert await rig.service.choices.get(sid) == await rig.service.choices.get(panel) == {"env": USER, "consented": True, "sites": [], "approvals": "manual"}
+    assert await rig.service.choices.get(sid) == await rig.service.choices.get(panel) == {**UNTOUCHED, "env": USER, "consented": True}
     async with asyncio.timeout(5):
         async for event in subscription:
             assert event.payload["kind"] == "switched" and event.session_id == sid
@@ -460,7 +461,7 @@ async def test_the_operators_yes_switches_the_conversation_as_the_panel_does(rig
     assert told and told[-1][0].session_id == sid and "switched this conversation to their own Chrome «Work»" in told[-1][1]
     text, failed = await rig.call(sid, "BrowserOpen")
     assert not failed, text
-    assert "operator's own Chrome «Work»" in text and group_id(Owner("session", sid), env=USER) in chrome.groups
+    assert "operator's own Chrome «Work»" in text and group_id(Owner("session", sid), env=USER, chrome="c1") in chrome.groups
 
 
 async def test_the_operators_no_leaves_the_conversation_in_the_agents_browser(rig: Rig, chrome: FakeBrowserd) -> None:
@@ -468,14 +469,15 @@ async def test_the_operators_no_leaves_the_conversation_in_the_agents_browser(ri
     sid = await rig.session()
     key = await asked(rig, sid)
     await rig.manager.refuse(sid, key, via="app")
-    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": [], "approvals": "manual"}
+    assert await rig.service.choices.get(sid) == {**UNTOUCHED, "env": "agent", "consented": False}
     assert not rig.pending(sid)
     assert "declined" in told[-1][1] and "your own browser" in told[-1][1]
 
 
 async def test_a_chrome_that_is_not_connected_is_said_plainly_and_nothing_is_asked(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
     sid = await rig.session()
-    chrome.relay_status = {"connected": False, "last_error": "Chrome closed the connection", "since": None, "last_seen": None}
+    chrome.chrome_left("c1")
+    chrome.relay_status["last_error"] = "Chrome closed the connection"
     chrome.emit("relay.lost", {"reason": "closed", "profile_id": "p1", "profile_name": "Work"})
     async with asyncio.timeout(5):
         while rig.service.user_connection()[0]:
@@ -585,7 +587,7 @@ async def test_automatic_grants_new_sites_and_routine_asks_but_still_asks_before
     assert not failed and "Done without asking (accept)" in text, text
     text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the Send button")
     assert failed and "Approval key" in text
-    audit = await rig.service.audit_log(group_id(Owner("session", sid), env=USER))
+    audit = await rig.service.audit_log(group_id(Owner("session", sid), env=USER, chrome="c1"))
     assert any(e["action"] == "sensitive" and e["detail"].get("by") == "auto" for e in audit)
     assert any(e["action"] == "act" and e["detail"].get("decision") == "allowed_auto" for e in audit)
 
@@ -717,7 +719,7 @@ async def opened(rig: Rig, chrome: FakeBrowserd, url: str = "https://tax.example
 
 
 def tabs_of(chrome: FakeBrowserd, sid: str) -> list[str]:
-    return [t.page.url for t in chrome.groups[group_id(Owner("session", sid), env=USER)].tabs]
+    return [t.page.url for t in chrome.groups[group_id(Owner("session", sid), env=USER, chrome="c1")].tabs]
 
 
 @pytest.mark.parametrize("runtime", [GRANTED])
@@ -735,7 +737,7 @@ async def test_a_new_tab_on_an_open_address_switches_to_it_and_the_result_marks_
     text, failed = await rig.call(sid, "BrowserOpen", url="https://tax.example.com/documents")
     assert not failed and "Tab t1 already shows" in text, text
     assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/"]
-    assert chrome.groups[group_id(Owner("session", sid), env=USER)].active == "t1"
+    assert chrome.groups[group_id(Owner("session", sid), env=USER, chrome="c1")].active == "t1"
     # Both switches were the host's own, which in the operator's window leaves their active tab alone;
     # a tab the agent names is brought forward.
     assert chrome.selects == [("t1", True), ("t1", True)]
@@ -793,7 +795,7 @@ async def test_three_tabs_are_the_most_kept_and_blank_ones_make_room_first(rig: 
 @pytest.mark.parametrize("runtime", [GRANTED])
 async def test_a_blank_tab_still_on_its_way_to_its_page_is_not_closed_to_make_room(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     await rig.call(sid, "BrowserTabs", action="new")
     await rig.call(sid, "BrowserTabs", action="select", tab="t1")
     await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/")
@@ -807,7 +809,7 @@ async def test_a_blank_tab_still_on_its_way_to_its_page_is_not_closed_to_make_ro
 @pytest.mark.parametrize("runtime", [GRANTED])
 async def test_a_tab_the_operator_gave_is_never_closed_to_make_room_nor_counted(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     given = chrome.give(gid, "https://mail.example.com/inbox")
     # Dead on a page the debugger cannot drive, and not active: what the cap used to close first.
     given.detached = True
@@ -824,7 +826,7 @@ async def test_a_tab_the_operator_gave_is_never_closed_to_make_room_nor_counted(
 @pytest.mark.parametrize("runtime", [GRANTED])
 async def test_closing_a_tab_the_operator_gave_hands_it_back(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     given = chrome.give(gid, "https://mail.example.com/inbox")
     text, failed = await rig.call(sid, "BrowserClose", tab=given.id)
     assert not failed and "handed back to them, still open, not closed" in text, text
@@ -842,7 +844,7 @@ async def test_closing_a_tab_the_operator_gave_hands_it_back(rig: Rig, chrome: F
 @pytest.mark.parametrize("runtime", [CLOSING])
 async def test_the_turn_end_hands_back_the_operators_tab_with_the_group(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     given = chrome.give(gid, "https://mail.example.com/inbox")
     assert await browser_extension.close_turn_tabs(rig.service, sid)
     assert chrome.released == [given.id]
@@ -862,7 +864,7 @@ async def test_a_click_that_kills_its_tab_is_said_at_once_and_held_back_once_whe
     await rig.call(sid, "BrowserTabs", action="new", url="https://tax.example.com/documents")
     text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the statement row again")
     assert failed and "earlier left its tab dead" in text and "send it again" in text, text
-    assert not chrome.tab_of(group_id(Owner("session", sid), env=USER)).detached
+    assert not chrome.tab_of(group_id(Owner("session", sid), env=USER, chrome="c1")).detached
     text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the statement row again")
     assert not failed and "stopped answering" in text
     # A dead tab is the first to go when room is needed.
@@ -913,7 +915,7 @@ async def test_with_read_only_off_a_posted_form_goes_through(rig: Rig, chrome: F
 @pytest.mark.parametrize("runtime", [CLOSING])
 async def test_the_tabs_close_when_the_turn_ends_unless_the_operator_holds_them(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     chrome.set_control(gid, "paused", reason="the operator took it")
     await wait_until(lambda: _control(rig, gid), "paused")
     assert not await browser_extension.close_turn_tabs(rig.service, sid)
@@ -931,13 +933,13 @@ async def test_the_tabs_close_when_the_turn_ends_unless_the_operator_holds_them(
 async def test_the_operator_may_keep_the_tabs_open_after_the_turn(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
     assert not await browser_extension.close_turn_tabs(rig.service, sid)
-    assert (await rig.service.get_row(group_id(Owner("session", sid), env=USER)))["status"] == "open"
+    assert (await rig.service.get_row(group_id(Owner("session", sid), env=USER, chrome="c1")))["status"] == "open"
 
 
 @pytest.mark.parametrize("runtime", [GRANTED])
 async def test_the_operator_closing_the_group_in_chrome_is_kept_as_theirs(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     group = chrome.groups.pop(gid)
     chrome.emit("group.closed", {"group_id": gid, "browser_id": group.browser_id, "profile": group.profile, "labels": group.labels, "reason": "closed_in_chrome"})
     await wait_until(lambda: _status(rig, gid), "closed")
@@ -1071,7 +1073,7 @@ async def test_browser_open_with_an_address_never_sends_the_operators_given_tab_
     """After the relay dropped, the group came back on the operator's own tab, active, and BrowserOpen(url)
     navigated it: their page was taken to a storefront's captcha."""
     sid = await opened(rig, chrome)
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     given = chrome.give(gid, "https://mail.example.com/inbox")
     chrome.groups[gid].active = given.id
     text, failed = await rig.call(sid, "BrowserOpen", url="https://news.example.com/")
@@ -1088,7 +1090,7 @@ async def test_the_conversations_sites_and_its_mode_reach_the_guard_that_judges_
     await rig.switch(sid)
     await rig.service.choices.grant_site(sid, "taobao.com")
     await rig.call(sid, "BrowserOpen")
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     browser = chrome.groups[gid].browser_id
     assert (browser, "taobao.com", 443) in chrome.grants and (browser, "*", 443) not in chrome.grants
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as http:  # type: ignore[arg-type]
@@ -1104,7 +1106,7 @@ async def test_a_blocked_redirect_names_daedalus_and_a_captcha_is_handed_to_the_
     sid = await rig.session()
     await rig.switch(sid)
     await rig.call(sid, "BrowserOpen")
-    gid = group_id(Owner("session", sid), env=USER)
+    gid = group_id(Owner("session", sid), env=USER, chrome="c1")
     chrome.block_navigation(gid, "https://login.taobao.com/member/punish?x5secdata=abc")
     await wait_until(lambda: asyncio.sleep(0, bool(rig.service._notices)), True, timeout=5)
     text, _ = await rig.call(sid, "BrowserSnapshot")
@@ -1130,6 +1132,232 @@ async def test_chrome_not_coming_back_within_the_grace_is_said_as_chrome_disconn
     reason = "chrome disconnected (closed, and it did not connect again within 45s)"
     chrome.fail["tab.list"] = (1108, f"the browser behind this group has exited ({reason}); open it again", {"reason": reason})
     text, failed = await rig.call(sid, "BrowserSnapshot")
-    assert failed and "Chrome disconnected from Daedalus (closed, and it did not connect again within 45s)" in text, text
+    assert failed and "Chrome «Work» disconnected from Daedalus (closed, and it did not connect again within 45s)" in text, text
     text, failed = await rig.call(sid, "BrowserTabs")
     assert failed and "Chrome disconnected from Daedalus" in text and "once it is connected" in text, text
+
+
+# -- several Chromes --------------------------------------------------------------------------------
+
+
+async def second_chrome(rig: Rig, chrome: FakeBrowserd, name: str = "MacBook", id_: str = "c2") -> None:
+    """Another Chrome connects, and the host hears of it as it would."""
+    chrome.chrome_connected(id_, name, platform="mac", chrome_version="142.0", ext_version="0.1.3")
+    chrome.emit("relay.connected", {"chrome": id_, "profile_id": id_, "profile_name": name})
+    async with asyncio.timeout(5):
+        while id_ not in rig.service.connected_chromes():
+            await asyncio.sleep(0.01)
+
+
+async def left(rig: Rig, chrome: FakeBrowserd, id_: str) -> None:
+    chrome.chrome_left(id_)
+    chrome.emit("relay.lost", {"chrome": id_, "reason": "closed", "profile_id": id_, "profile_name": ""})
+    async with asyncio.timeout(5):
+        while id_ in rig.service.connected_chromes():
+            await asyncio.sleep(0.01)
+
+
+async def test_with_one_chrome_nothing_is_asked_and_the_conversation_belongs_to_it(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed and "«Work»" in text, text
+    choice = await rig.service.choices.get(sid)
+    assert choice["chrome"] == "c1" and choice["chrome_name"] == "Work"
+
+
+async def test_with_several_and_no_choice_the_agent_is_told_them_and_nothing_opens(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen", url="https://mail.example.com/")
+    assert failed and "several of the operator's Chromes are connected" in text, text
+    assert "«Work» (id c1)" in text and "«MacBook» (id c2)" in text and "idle" in text and "extension 0.1.3" in text, text
+    assert not chrome.groups
+    assert not (await rig.service.choices.get(sid))["chrome"]
+    listed, failed = await rig.call(sid, "BrowserOpen", chrome="?")
+    assert not failed and "«Work»" in listed and "«MacBook»" in listed, listed
+    assert not chrome.groups, "the list opens nothing"
+
+
+async def test_the_agents_choice_opens_there_and_the_conversation_stays_after_it(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="macbook")
+    assert not failed and "«MacBook»" in text, text
+    assert list(chrome.groups) == [group_id(Owner("session", sid), env=USER, chrome="c2")]
+    assert chrome.groups[group_id(Owner("session", sid), env=USER, chrome="c2")].profile == "user-c2"
+    tabs, _ = await rig.call(sid, "BrowserTabs")
+    assert tabs.startswith("[in the operator's own Chrome «MacBook»]"), tabs
+    # Closed and opened again without a name, it goes back to the same computer.
+    await rig.call(sid, "BrowserClose")
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed and "«MacBook»" in text, text
+
+
+async def test_a_name_nothing_has_or_two_have_is_refused_with_the_list(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome, name="Work")
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="Work")
+    assert failed and "two connected Chromes are named «Work»" in text and "id c2" in text, text
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="Office")
+    assert failed and "no connected Chrome is named «Office»" in text and "id c1" in text, text
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="c2")
+    assert not failed, text
+    assert (await rig.service.choices.get(sid))["chrome"] == "c2"
+
+
+async def test_a_conversation_in_the_agents_own_browser_cannot_name_a_chrome(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="Work")
+    assert failed and "BrowserAskOperatorChrome" in text, text
+    assert not chrome.groups
+
+
+async def test_open_tabs_keep_going_on_their_chrome_and_naming_another_is_refused(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    await second_chrome(rig, chrome)
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed and "already open" in text and "«Work»" in text, text
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="MacBook")
+    assert failed and "your tabs are open in the operator's Chrome «Work»" in text and "BrowserClose" in text, text
+    assert len(chrome.groups) == 1
+
+
+async def test_a_move_starts_the_sites_and_the_approvals_over(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    await rig.service.choices.grant_site(sid, "mail.example.com")
+    await rig.service.choices.set_approvals(sid, "auto")
+    await second_chrome(rig, chrome)
+    await rig.call(sid, "BrowserClose")
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="MacBook")
+    assert not failed and "start over" in text, text
+    choice = await rig.service.choices.get(sid)
+    assert choice["chrome"] == "c2" and choice["sites"] == [] and choice["approvals"] == "manual"
+    fresh = chrome.groups[group_id(Owner("session", sid), env=USER, chrome="c2")]
+    assert not [g for g in chrome.grants if g[0] == fresh.browser_id], "a yes given for one computer opened a site on the other"
+
+
+async def test_a_conversation_held_from_a_side_panel_stays_in_that_chrome(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.service.choices.bind(sid, "c1", "Work", held=True)
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="MacBook")
+    assert failed and "side panel of their Chrome «Work»" in text, text
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed and "«Work»" in text, text
+    await rig.call(sid, "BrowserClose")
+    await left(rig, chrome, "c1")
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert failed and "«Work», which is not connected" in text and "BrowserOpen(chrome" not in text, text
+
+
+async def test_a_conversation_held_from_a_panel_that_will_not_come_back_is_let_go(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.service.choices.bind(sid, "c1", "Work", held=True)
+    await rig.service.choices.release("c1")
+    choice = await rig.service.choices.get(sid)
+    assert choice["chrome"] == "c1" and not choice["held"], "it still belongs there: nothing slides to the other computer"
+    await rig.service.choices.bind(sid, "c1", "Work", held=True)
+    await rig.service.choices.switch(sid, "agent", consent=False)
+    await rig.service.choices.switch(sid, USER, consent=False)
+    assert not (await rig.service.choices.get(sid))["held"], "the operator's own switch lets it go"
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="MacBook")
+    assert not failed and "«MacBook»" in text, text
+
+
+async def test_a_chrome_going_away_ends_only_its_own_work_and_the_conversation_never_slides_to_the_other(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    on_work = await rig.session()
+    on_mac = await rig.session()
+    for sid, name in ((on_work, "Work"), (on_mac, "MacBook")):
+        await rig.switch(sid)
+        await rig.call(sid, "BrowserOpen", chrome=name)
+    gid = group_id(Owner("session", on_work), env=USER, chrome="c1")
+    assert gid in chrome.groups and group_id(Owner("session", on_mac), env=USER, chrome="c2") in chrome.groups
+    await left(rig, chrome, "c1")
+    reason = "chrome disconnected (closed, and it did not connect again within 45s)"
+    chrome.groups.pop(gid)
+    chrome.emit("browser.exited", {"browser_id": "b1", "profile": "user:c1", "code": 0, "crashed": False, "reason": reason, "groups": [gid]})
+    async with asyncio.timeout(5):
+        while (await rig.service.get_row(gid))["status"] == "open":
+            await asyncio.sleep(0.01)
+    text, failed = await rig.call(on_mac, "BrowserTabs")
+    assert not failed and text.startswith("[in the operator's own Chrome «MacBook»]"), text
+    text, failed = await rig.call(on_work, "BrowserTabs")
+    assert failed and "Chrome disconnected from Daedalus" in text, text
+    text, failed = await rig.call(on_work, "BrowserOpen", url="https://mail.example.com/")
+    assert failed and "«Work», which is not connected to Daedalus now" in text and "BrowserOpen(chrome=…)" in text and "«MacBook»" in text, text
+    assert not [g for g in chrome.groups.values() if g.labels.get("session_id") == on_work], "it opened on the other computer"
+    # Named, it moves: that is the agent's word, not the host's guess.
+    text, failed = await rig.call(on_work, "BrowserOpen", chrome="MacBook")
+    assert not failed and "start over" in text, text
+
+
+async def test_a_chrome_reconnecting_keeps_the_choice_open_rather_than_leaving_the_other_as_the_only_one(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    chrome.chrome_left("c2", reconnecting=True)
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert failed and "reconnecting" in text and "«MacBook»" in text, text
+
+
+async def test_the_turn_line_says_which_chrome(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    await second_chrome(rig, chrome)
+    state = rig.manager.live_state(sid)
+    line = await browser_extension.chrome_line(rig.manager, rig.service, state)
+    assert "their own Chrome «Work»; the browser tools work there." in line
+    other = await rig.session()
+    await rig.switch(other)
+    line = await browser_extension.chrome_line(rig.manager, rig.service, rig.manager.live_state(other))
+    assert "several are connected: «Work, MacBook». Name one with BrowserOpen(chrome=…)" in line, line
+    await left(rig, chrome, "c1")
+    line = await browser_extension.chrome_line(rig.manager, rig.service, state)
+    assert "their own Chrome «Work»; the browser tools work there, which is not connected now." in line
+
+
+async def test_the_check_goes_to_the_chrome_it_names(rig: Rig, chrome: FakeBrowserd) -> None:
+    await second_chrome(rig, chrome)
+    await rig.service.check_user("c2")
+    assert chrome.notified[-1] == {"chrome": "c2"}
+    with pytest.raises(BrowserError):
+        await rig.service.check_user()
+
+
+async def test_the_doctor_lists_every_chrome(rig: Rig, chrome: FakeBrowserd) -> None:
+    from daedalus import doctor  # noqa: PLC0415
+
+    await second_chrome(rig, chrome)
+    check = await doctor._user_browser(SimpleNamespace(settings=rig.app.settings), rig.service)  # type: ignore[arg-type]
+    assert "«Work» connected" in check.message and "«MacBook» connected" in check.message, check
+
+
+async def test_a_conversation_from_before_loses_what_it_was_granted_and_a_native_token_goes(db: Database) -> None:
+    """A conversation from before knows no Chrome, so what was granted in it cannot be said to hold on
+    any computer; and a panel token for the device once called native would bind to a Chrome that
+    never connects."""
+    await db.kv_set("browser.user.sessions", {
+        "old": {"env": "user", "consented_at": "2026-11-01T00:00:00+00:00", "sites": ["bank.example"], "approvals": "skip"},
+        "bound": {"env": "user", "consented_at": "2026-11-01T00:00:00+00:00", "sites": ["mail.example"], "approvals": "auto", "chrome": "c1", "chrome_name": "Work"},
+    })
+    await db.kv_set("browser.panel.grants", [{"hash": "a", "device": "native"}, {"hash": "b", "device": "c1"}])
+    choices = UserChoices(db)
+    for _ in range(2):  # a second run changes nothing
+        await _chromes_of_their_own(db.conn)
+        old, bound = await choices.get("old"), await choices.get("bound")
+        assert old["env"] == USER and old["consented"] and old["sites"] == [] and old["approvals"] == "manual"
+        assert bound["sites"] == ["mail.example"] and bound["approvals"] == "auto", "one that knows its Chrome keeps them"
+        assert [g["device"] for g in await db.kv_get("browser.panel.grants", [])] == ["c1"]
