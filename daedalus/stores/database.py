@@ -3581,8 +3581,10 @@ CREATE TABLE IF NOT EXISTS guest_links (
     label TEXT NOT NULL,
     mode TEXT NOT NULL,
     tools TEXT NOT NULL,
+    usd_limit REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
-    revoked_at TEXT
+    revoked_at TEXT,
+    door_told INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS guest_links_by_session ON guest_links(session_id);
 """)

@@ -465,6 +465,10 @@ class OperatorSecrets:
         else:
             self._held_back.discard(session_id)
 
+    def is_held_back(self, session_id: str) -> bool:
+        """Whether this session's current turn is a guest's, which also changes how a command is run."""
+        return session_id in self._held_back
+
     def available(self, session_id: str, project_id: str | None = None) -> list[Secret]:
         """The secrets a session may use: its own, its project's, and — for a staff member's session — what its
         coordinator handed it. A chat's own secret wins over a project's of the same name: the operator said

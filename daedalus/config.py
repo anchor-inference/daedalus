@@ -303,7 +303,15 @@ class Settings(BaseSettings):
     """The address the guest door is reached at: the name a reverse proxy gives it, or later a tunnel.
     Must be another origin than ``miniapp_public_url``."""
     guest_run_dir: Path | None = None
-    """The guest door's run directory, with its control socket and token. ``None`` when no door was set up."""
+    """The guest door's run directory, with its control socket. ``None`` when no door was set up."""
+    guest_token_dir: Path | None = None
+    """Where this process writes the token that opens that socket, a directory the door can only read.
+    The door's own directory is the door's to fill, so nothing in it is ever opened from here."""
+    guest_door_uid: int = 1002
+    """The user the door runs as. The socket is held to it: a path in a directory the door writes can be
+    made to point at any other daemon's socket here."""
+    guest_model_upstreams: str = ""
+    """The key proxy's upstreams a stand-in may use, comma separated, as ``KEYPROXY_GUEST_UPSTREAMS`` tells the proxy."""
     miniapp_public_url: str = ""
 
     terminals_container_dir: Path | None = None
@@ -456,7 +464,7 @@ class Settings(BaseSettings):
         mounted into this container precisely so the app can reach the daemons. The guest door's token
         admits strangers and revokes links: an agent holding it could wave its own guest through.
         """
-        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir, self.computer_host_dir, self.guest_run_dir)
+        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir, self.computer_host_dir, self.guest_run_dir, self.guest_token_dir)
         return tuple(p for p in dirs if p is not None)
 
     @property

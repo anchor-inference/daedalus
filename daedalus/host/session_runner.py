@@ -189,7 +189,7 @@ from daedalus.terminals.bridge import HostBridge
 from daedalus.terminals.model import device_env
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
-from daedalus.tools.shell import RemoteJob, stop_job
+from daedalus.tools.shell import RemoteJob, guest_sandbox_status, stop_job
 from daedalus.tools.shell import outcome as shell_outcome
 from daedalus.tools.shell import title as shell_title
 
@@ -587,6 +587,8 @@ notice would point at a session no list shows."""
 SUMMARY_CHARS = 200
 """How much of the answer a finished-run event carries: enough for a notification's line, not the answer."""
 
+
+GUEST_ESTIMATED_OUTPUT_TOKENS = 1000
 
 HOME_KEY = "home"
 """Session metadata naming a directory of its own under the workspaces root, which it runs in
@@ -2722,7 +2724,7 @@ class SessionManager:
         cfg = self.config.compaction
         focus = f"\n\nThe operator asks to focus on: {instructions.strip()}" if instructions.strip() else ""
         words = summaries.summary_words(cfg.max_words, window)
-        rendered = summaries.summary_input(history)
+        rendered = summaries.summary_input(guest_turns.marked(history))
         base = rendered.previous
         parts = summaries.split_transcript(rendered.transcript, cfg.chunk_tokens)
         await report(parts_total=len(parts), parts_done=0, stage="summarising")
@@ -4136,10 +4138,59 @@ class SessionManager:
         """
         for message in reversed(await self.sessions.list_transcript(session_id, limit=400)):
             if message.role is MessageRole.assistant and message.metadata.get("daedalus.run_id") == run_id:
+                # The last message and no other: text written on the way, between two tool calls, is the
+                # agent thinking aloud, and it was not written for this reader.
                 text = "".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip()
-                if text:
-                    return redact.redact(self.redactor.conceal_named(text))
+                return redact.redact(self.redactor.conceal_named(text)) if text else ""
         return ""
+
+    async def guest_ready(self, session_id: str, tools: str) -> str:
+        """Why a guest's turn with ``tools`` cannot run in this chat now; empty when it can.
+
+        Answered here, for the turn, and not only when the link is made: a loop or a schedule can start
+        later, and the machine can lose its sandbox.
+        """
+        state = await self.get_state(session_id)
+        if state is None:
+            return "the chat is gone"
+        if await self.db.fetchone("SELECT 1 FROM loops WHERE session_id = ? AND status = 'active'", (session_id,)) is not None:
+            return "a loop runs in this chat, and it would read the guest's words with nobody watching"
+        if await self.db.fetchone("SELECT 1 FROM schedules WHERE enabled = 1 AND target_session = ?", (session_id,)) is not None:
+            return "a schedule runs in this chat, and it would read the guest's words with nobody watching"
+        return "" if tools != "all" else await self.guest_full_tools(state)
+
+    async def guest_full_tools(self, state: SessionState) -> str:
+        """Why ``all`` cannot be had in this chat: ``no_sandbox``, ``host_folder``, or empty when it can."""
+        if self.host_folder_of(state.session.id, state.metadata, state.project) is not None or (state.services is not None and state.services.exec_backend is not None):
+            return "host_folder"
+        return "" if await asyncio.to_thread(guest_sandbox_status) == "ok" else "no_sandbox"
+
+    async def guest_price(self, session_id: str) -> tuple[float, float] | None:
+        """What this chat's model costs per million tokens in and out; ``(0, 0)`` on a plan or a local
+        model, and ``None`` for a metered one with no known price, which no dollar limit could hold."""
+        rungs, _ = self.resolve_model(await self.live.load(session_id))
+        if not rungs:
+            return None
+        provider, model = rungs[0]
+        endpoint = provider.endpoint
+        if getattr(endpoint, "subscription", False) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
+            return 0.0, 0.0
+        pricing = endpoint.pricing_for(model) if hasattr(endpoint, "pricing_for") else endpoint.pricing.get(model)
+        if pricing is None or pricing.input is None or pricing.output is None:
+            return None
+        return float(pricing.input), float(pricing.output)
+
+    async def guest_first_call_usd(self, session_id: str, price: tuple[float, float]) -> float:
+        """A guess at the first model call of a turn in this chat, before anything is spent on it.
+
+        The cap on a run is read after each call, so a single call on a long chat could pass it whole.
+        This is the fresh-input price of the whole history: what a cold cache costs.
+        """
+        state = await self.get_state(session_id)
+        if state is None:
+            return 0.0
+        chars = sum(len(message.model_dump_json()) for message in await self._working_history(state))
+        return (chars / 3 * price[0] + GUEST_ESTIMATED_OUTPUT_TOKENS * price[1]) / 1_000_000
 
     def file_scope(self, state: SessionState) -> str | None:
         """Where an attachment of this session is kept by handle: the main orchestrator's ``main``, a
@@ -5113,6 +5164,10 @@ class SessionManager:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
             state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
             self.secrets.hold_back(state.session.id, state.guest_turn is not None)
+            if state.guest_turn is not None and not state.metadata.get(guest_turns.SEEN_KEY):
+                state.metadata[guest_turns.SEEN_KEY] = True
+                state.session.metadata[guest_turns.SEEN_KEY] = True
+                await self.sessions.update_metadata(state.session.id, state.session.metadata)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
         if state.engine is None or not continue_turn:
@@ -5292,6 +5347,8 @@ class SessionManager:
             volatile.append("\n\n" + style)
         if state.guest_turn is not None:
             volatile.append("\n" + guest_turns.turn_note(state.guest_turn))
+        elif state.metadata.get(guest_turns.SEEN_KEY):
+            volatile.append("\n" + guest_turns.LATER_TURN_NOTE)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.
@@ -7044,23 +7101,38 @@ class SessionManager:
         """
         return (self.governance_path, Path("/opt/launcher"), *self.settings.sealed_paths)
 
-    def _guest_read_refused(self, state: SessionState, tool: str, arguments: dict[str, Any]) -> Decision | None:
-        """A guest's read-only turn reads this chat's folder and nothing else.
+    def _guest_refused(self, state: SessionState, turn: guest_turns.GuestTurn, tool: str, arguments: dict[str, Any]) -> Decision | None:
+        """What a guest's turn may not do with a tool it has: it stays in this chat's folder and in this turn.
 
-        The file tools otherwise reach whatever the agent's user can open, and the sealed set names the
-        installation, not everything worth reading. A guest was given a chat, not this machine. Kept
-        files (``att:``) are out too: their handles are shared across the installation's chats.
+        The file tools run in this process and otherwise reach whatever the agent's user can open, the
+        environment of this very process in ``/proc`` among it, and the sealed set names the installation,
+        not everything worth reading. A guest was given a chat, not this machine. Kept files (``att:``)
+        are out too: their handles are shared across the installation's chats.
+
+        The folder is the one the tool really uses, and the path is expanded as the tool expands it. Joined
+        to the folder unexpanded, ``~/.ssh/id_ed25519`` looked like a file inside it and the tool then read
+        the real one.
         """
-        turn = state.guest_turn
-        if turn is None or turn.tools == "all" or tool not in guest_turns.READ_TOOLS:
+        if tool == "Exec":
+            if arguments.get("background") or arguments.get("service"):
+                return Decision("deny", "a guest's turn starts nothing that outlives it: run the command in the foreground", "guest.background")
+            if arguments.get("env"):
+                return Decision("deny", "a guest's command takes no environment of its own", "guest.environment")
+        elif tool not in guest_turns.FOLDER_TOOLS:
             return None
-        root = state.workspace.resolve()
-        for key in ("path", "root", "directory"):
+        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
+        for key in ("path", "cwd"):
             value = arguments.get(key)
             if not isinstance(value, str) or not value:
                 continue
-            target = (root / value).resolve() if not value.startswith("att:") else None
-            if target is None or not target.is_relative_to(root):
+            if value.startswith("att:"):
+                return Decision("deny", "a guest's turn reads this chat's folder and nothing else", "guest.read")
+            target = Path(value).expanduser()
+            if not Path(os.path.realpath(target if target.is_absolute() else root / target)).is_relative_to(root):
+                return Decision("deny", "a guest's turn reads this chat's folder and nothing else", "guest.read")
+        for key in ("pattern", "glob") if tool == "Find" else ("glob",):
+            value = arguments.get(key)
+            if isinstance(value, str) and (value.startswith(("/", "~")) or ".." in Path(value).parts):
                 return Decision("deny", "a guest's turn reads this chat's folder and nothing else", "guest.read")
         return None
 
@@ -7071,18 +7143,24 @@ class SessionManager:
             state = self._states.get(session_id)
             if state is not None and not policy_admits(self.tool_policy_for(state), tool):
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
-            if state is not None and (refused := self._guest_read_refused(state, tool, arguments)) is not None:
+            turn = state.guest_turn if state is not None else None
+            if turn is not None and (refused := self._guest_refused(state, turn, tool, arguments)) is not None:
                 return refused
             if state is not None and tool == "AskUser" and (asked := self._asks_about_pending(state, arguments)):
                 return asked
             policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
             now = time.time()
-            grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None else set()
-            similar = list(state.metadata.get("policy_similar") or []) if state is not None else []
+            # What the operator allowed for their own work is theirs: a guest neither spends nor inherits it.
+            grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None and turn is None else set()
+            similar = list(state.metadata.get("policy_similar") or []) if state is not None and turn is None else []
             decision = policy.evaluate(tool, arguments, grants=grants, similar=similar)
             # The operator's action rules, on top: they turn an allowed call into a question, a
             # handoff or a call a review stands before, and never loosen what the policy said.
             decision = self.action_rules.apply(state, tool, arguments, decision, grants, similar)
+            if turn is not None and decision.action != "allow":
+                # Never a card. An allowed card starts a run with the operator's origin and tools, over
+                # what a guest asked for, and nothing on it says so; and the turn would wait on a person.
+                return Decision("deny", decision.reason or "a guest's turn asks nobody for anything", "guest.no_questions")
             if decision.key and decision.action == "allow" and state is not None:
                 self._consume_grant(state, decision.key)
             elif decision.key and decision.action == "ask" and state is not None:
@@ -7553,6 +7631,11 @@ class SessionManager:
         role_cap = bounds.usd_per_run if bounds is not None else None
         run_cap = role_cap if role_cap is not None else self.config.limits.usd_per_run
         spent, unmetered = await self.spend(run_id=run_id)
+        if state.guest_turn is not None and role_cap is not None:
+            # The next call costs about what the dearest one so far did, and it is read only afterwards:
+            # a turn with less than that left does not get to make it.
+            dearest = await self.db.fetchone("SELECT max(cost_usd) m FROM usage_events WHERE run_id = ?", (run_id,))
+            spent += float(dearest["m"] or 0.0) if dearest else 0.0
         note: str | None = None
         kind = "run_cap"
         setting: SettingRef | None = None
@@ -8065,8 +8148,10 @@ def identifier_index(history: Sequence[Message], *, limit: int = IDENTIFIER_INDE
     carry directory listings and logs, which would bury the ones that matter.
     """
     seen: dict[str, None] = {}
+    # What a guest's turn named is a stranger's to name: this list is read later as the work's own.
+    strangers = guest_turns.guest_runs(history)
     for m in history:
-        if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY):
+        if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) or m.metadata.get("daedalus.run_id") in strangers:
             continue
         for b in m.content_blocks:
             if isinstance(b, TextBlock) and (m.role is MessageRole.assistant or m.metadata.get("daedalus.origin") == "operator"):

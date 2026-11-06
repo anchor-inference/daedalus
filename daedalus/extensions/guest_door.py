@@ -10,6 +10,12 @@ started. What that turn may do is decided here from this database, where the ses
 setting of a link were written when the operator made it. The door never held them, so a door that
 goes wrong can make up a guest's words but cannot aim them at another chat or widen the turn they start.
 
+The door is treated as what it faces: nothing that comes from it is believed. A feed is checked item by item
+and one bad item costs that item. The money a turn is given is clamped to what this side recorded for the link,
+and a notification is made of this side's words and label. The token lives in a directory only this side
+writes, so nothing in the door's own directory is ever opened from here; the socket there is only dialled,
+and the peer has to be the door's user.
+
 Each guest's message is a run of its own, started only when the chat is free. It waits here rather
 than in the session's queue, because that queue feeds whatever run comes next, and an operator's run
 must never pick up a guest's words as its input.
@@ -18,14 +24,24 @@ must never pick up a guest's words as its input.
 from __future__ import annotations
 
 import asyncio
+import json as jsonlib
 import logging
+import os
+import re
+import secrets
+import socket
+import stat
+import struct
 import time
-from collections import deque
+from collections import OrderedDict, deque
+from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpcore
 import httpx
 
 from daedalus import public_address
@@ -43,6 +59,12 @@ logger = logging.getLogger(__name__)
 EXTENSION_KEY = "guest_door"
 SOCKET_NAME = "control.sock"
 TOKEN_NAME = "control.token"
+TOKEN_MAX_BYTES = 256
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_GUEST_TEXT = 16_000
+SEEN_KEPT = 4096
+CONTACTS_PER_HOUR = 12
+"""First-contact notices in an hour, across all links, whatever a door claims happened."""
 REF = "guest"
 """``guest:<conversation id>`` is the first-contact request a notification answers."""
 FEED_KV = "guest_door_feed_cursor"
@@ -76,52 +98,112 @@ class DoorRefused(RuntimeError):
         self.detail = detail
 
 
-class DoorClient:
-    """HTTP over the door's unix socket, with the token from beside it."""
+def ensure_token(directory: Path, door_uid: int) -> str:
+    """This side's token for the door, made once in a directory only this side writes.
 
-    def __init__(self, run_dir: Path | None, *, transport: httpx.AsyncBaseTransport | None = None, token: str = "") -> None:
+    Opened as if the directory were hostile anyway: not following a link, not waiting on a pipe, only a
+    regular file of a token's size. This runs as root in the agent's container; a mistake about who
+    owns a volume must not turn into reading some other file out to a socket, or into a frozen loop.
+    """
+    path = directory / TOKEN_NAME
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        token = secrets.token_urlsafe(32)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o640)
+        with os.fdopen(descriptor, "w") as file:
+            with suppress(PermissionError):  # only root can give a group away; a test is not root
+                os.fchown(file.fileno(), -1, door_uid)
+            file.write(token)
+        return token
+    with os.fdopen(descriptor, "rb") as file:
+        found = os.fstat(file.fileno())
+        if not stat.S_ISREG(found.st_mode) or found.st_size > TOKEN_MAX_BYTES:
+            raise DoorUnavailable("the door's token is not a token")
+        return file.read(TOKEN_MAX_BYTES).decode("ascii", "replace").strip()
+
+
+class DoorSocket(httpcore.AnyIOBackend):
+    """A connection to the door's socket, refused unless the door is really what answered.
+
+    The directory is the door's, so the name in it could be a link to any other daemon's socket here,
+    and this process would connect as root and write to it. Checked on the connection itself, after
+    the name has been resolved, where it cannot be swapped.
+    """
+
+    def __init__(self, door_uid: int) -> None:
+        self.door_uid = door_uid
+
+    async def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options: Any = None) -> httpcore.AsyncNetworkStream:
+        if not stat.S_ISSOCK(os.lstat(path).st_mode):
+            raise httpcore.ConnectError("the door's socket is not a socket")
+        stream = await super().connect_unix_socket(path, timeout=timeout, socket_options=socket_options)
+        peer = stream.get_extra_info("socket").getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        if struct.unpack("3i", peer)[1] != self.door_uid:
+            await stream.aclose()
+            raise httpcore.ConnectError("something other than the door answered on its socket")
+        return stream
+
+
+class DoorClient:
+    """HTTP over the door's unix socket, with a token this side owns."""
+
+    def __init__(self, run_dir: Path | None, *, token_dir: Path | None = None, door_uid: int = -1, transport: httpx.AsyncBaseTransport | None = None, token: str = "") -> None:
         self.run_dir = run_dir
+        self.token_dir = token_dir
+        self.door_uid = door_uid
         self.transport = transport
         self.token = token
-        """Given by a caller with a transport of its own; otherwise read from the door's run directory."""
+        """Read once: the door cannot change the file, and a read per call is a read on the event loop."""
         self._client: httpx.AsyncClient | None = None
 
     @property
     def configured(self) -> bool:
-        return self.run_dir is not None or self.transport is not None
+        return (self.run_dir is not None and self.token_dir is not None) or self.transport is not None
 
     def _ready(self) -> httpx.AsyncClient:
-        if self.run_dir is None and self.transport is None:
+        if not self.configured:
             raise DoorUnavailable("no guest door is set up on this installation")
         if self._client is None:
             transport = self.transport
             if transport is None:
                 assert self.run_dir is not None
-                transport = httpx.AsyncHTTPTransport(uds=str(self.run_dir / SOCKET_NAME))
+                path = str(self.run_dir / SOCKET_NAME)
+                dialled = httpx.AsyncHTTPTransport(uds=path)
+                dialled._pool = httpcore.AsyncConnectionPool(uds=path, network_backend=DoorSocket(self.door_uid))
+                transport = dialled
             self._client = httpx.AsyncClient(transport=transport, base_url="http://guestd", timeout=CALL_SECONDS)
         return self._client
 
-    def _token(self) -> str:
-        if self.run_dir is None:
-            return self.token
-        try:
-            return (self.run_dir / TOKEN_NAME).read_text().strip()
-        except OSError as exc:
-            raise DoorUnavailable("the guest door is not running") from exc
+    async def _token(self) -> str:
+        if not self.token:
+            assert self.token_dir is not None
+            try:
+                self.token = await asyncio.to_thread(ensure_token, self.token_dir, self.door_uid)
+            except OSError as exc:
+                raise DoorUnavailable("the guest door's token cannot be read") from exc
+        return self.token
 
     async def call(self, method: str, path: str, *, json: Any = None, timeout: float = CALL_SECONDS) -> dict[str, Any]:
         client = self._ready()
+        headers = {"authorization": f"Bearer {await self._token()}"}
         try:
-            response = await client.request(method, path, json=json, headers={"authorization": f"Bearer {self._token()}"}, timeout=timeout)
+            async with client.stream(method, path, json=json, headers=headers, timeout=timeout) as response:
+                raw = bytearray()
+                async for chunk in response.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise DoorRefused(502, "the door's answer is too long")
         except (httpx.HTTPError, OSError) as exc:
             raise DoorUnavailable("the guest door is not running") from exc
         try:
-            body = response.json()
+            body = jsonlib.loads(raw)
         except ValueError:
             body = {}
+        body = body if isinstance(body, dict) else {}
         if response.status_code >= 400:
-            raise DoorRefused(response.status_code, str(body.get("detail") or f"the door answered {response.status_code}"))
-        return body if isinstance(body, dict) else {}
+            raise DoorRefused(response.status_code, str(body.get("detail") or f"the door answered {response.status_code}")[:300])
+        return body
 
     async def aclose(self) -> None:
         if self._client is not None:
@@ -136,7 +218,6 @@ class Delivery:
     conversation_id: str
     text: str
     allowance_usd: float
-    label: str
     done: asyncio.Future[str] | None = None
     run_id: str = ""
 
@@ -149,10 +230,18 @@ class ChatLine:
     worker: asyncio.Task[None] | None = None
 
 
+def _items(value: Any) -> Iterable[dict[str, Any]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _whole(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
 class GuestBridge:
     def __init__(self, app: Application | Any, client: DoorClient | None = None) -> None:
         self.app = app
-        self.client = client or DoorClient(app.settings.guest_run_dir)
+        self.client = client or DoorClient(app.settings.guest_run_dir, token_dir=app.settings.guest_token_dir, door_uid=app.settings.guest_door_uid)
         self.lines: dict[str, ChatLine] = {}
         self.turns: dict[str, Delivery] = {}
         """Run id to the delivery it answers, for the turns of this process."""
@@ -160,13 +249,16 @@ class GuestBridge:
         self._noticed: dict[tuple[str, str], float] = {}
         self._ended_early: dict[str, str] = {}
         """Guest runs that ended before ``submit`` returned their id: a turn that fails at once can."""
+        self._seen: OrderedDict[int, None] = OrderedDict()
+        """Messages already taken: the door offers one again until it hears it arrived."""
+        self._contacts: deque[float] = deque()
 
     # -- the links the host answers for -----------------------------------------------
 
-    async def remember_link(self, link_id: str, session_id: str, label: str, mode: str, tools: str) -> None:
+    async def remember_link(self, link_id: str, session_id: str, label: str, mode: str, tools: str, usd_limit: float = 0.0) -> None:
         await self.app.db.execute(
-            "INSERT INTO guest_links(id, session_id, label, mode, tools, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (link_id, session_id, label, mode, tools, datetime.now(UTC).isoformat()),
+            "INSERT INTO guest_links(id, session_id, label, mode, tools, usd_limit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (link_id, session_id, label, mode, tools, usd_limit, datetime.now(UTC).isoformat()),
         )
 
     async def known_link(self, link_id: str) -> Any:
@@ -179,9 +271,13 @@ class GuestBridge:
             rows = await self.app.db.fetchall("SELECT id FROM guest_links WHERE session_id = ?", (session_id,))
         return {str(row["id"]) for row in rows}
 
-    async def revoked(self, link_id: str) -> None:
-        """A revocation, on this side: the turn running stops and what is waiting goes."""
-        await self.app.db.execute("UPDATE guest_links SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", (datetime.now(UTC).isoformat(), link_id))
+    async def revoked(self, link_id: str, *, door_told: bool = True) -> None:
+        """A revocation, on this side: the turn running stops and what is waiting goes.
+
+        First, and not after the door has answered: with the door out of reach a revoked link must still
+        stop here. ``door_told`` is what the next connection reads to tell the door.
+        """
+        await self.app.db.execute("UPDATE guest_links SET revoked_at = coalesce(revoked_at, ?), door_told = ? WHERE id = ?", (datetime.now(UTC).isoformat(), int(door_told), link_id))
         row = await self.known_link(link_id)
         for line in self.lines.values():
             for delivery in [d for d in line.waiting if d.link_id == link_id and not d.run_id]:
@@ -190,6 +286,12 @@ class GuestBridge:
         for run_id, delivery in list(self.turns.items()):
             if delivery.link_id == link_id and manager is not None and row is not None:
                 await manager.stop_run(str(row["session_id"]), run_id)
+
+    async def tell_door_of_revocations(self) -> None:
+        for row in await self.app.db.fetchall("SELECT id FROM guest_links WHERE revoked_at IS NOT NULL AND door_told = 0"):
+            with suppress(DoorRefused):
+                await self.client.call("POST", f"/control/links/{row['id']}/revoke")
+            await self.app.db.execute("UPDATE guest_links SET door_told = 1 WHERE id = ?", (row["id"],))
 
     # -- the feed ---------------------------------------------------------------------
 
@@ -201,6 +303,7 @@ class GuestBridge:
             try:
                 if not self.connected:
                     await self.publish_address()
+                    await self.tell_door_of_revocations()
                     if not started:
                         # Once per process, not per connection: a door that restarted leaves this
                         # process's turns running, and they still answer.
@@ -213,10 +316,13 @@ class GuestBridge:
                 logger.debug("the guest door is out of reach: %s", exc)
                 await asyncio.sleep(RECONNECT_SECONDS)
                 continue
-            await self.absorb(feed)
+            try:
+                await self.absorb(feed)
+            except Exception:  # noqa: BLE001 — nothing a door sends may end the only thing following it
+                logger.exception("could not take in the guest door's feed")
             # A door whose volume was recreated counts from the start again, and a cursor from before
             # that would wait for ever for an event number it has not reached.
-            moved = int(feed.get("cursor") or 0) if int(feed.get("latest") or 0) >= cursor else int(feed.get("latest") or 0)
+            moved = _whole(feed.get("cursor")) if _whole(feed.get("latest")) >= cursor else _whole(feed.get("latest"))
             if moved != cursor:
                 cursor = moved
                 await self.app.db.kv_set(FEED_KV, cursor)
@@ -225,13 +331,32 @@ class GuestBridge:
         await self.client.call("PUT", "/control/settings", json={"public_base": public_address.guest_base(self.app.settings)})
 
     async def absorb(self, feed: dict[str, Any]) -> None:
-        for event in feed.get("events") or ():
+        for event in _items(feed.get("events")):
             try:
                 await self.on_event(event)
             except Exception:  # noqa: BLE001 — a notice lost is not a reason to stop following the door
                 logger.exception("could not act on a guest door event")
-        for item in feed.get("deliveries") or ():
-            await self.on_delivery(Delivery(int(item["message_id"]), str(item["link_id"]), str(item["conversation_id"]), str(item["text"]), float(item.get("allowance_usd") or 0.0), str(item.get("label") or "")))
+        for item in _items(feed.get("deliveries")):
+            try:
+                delivery = Delivery(int(item["message_id"]), str(item["link_id"]), str(item["conversation_id"]), str(item["text"])[:MAX_GUEST_TEXT], float(item.get("allowance_usd") or 0.0))
+            except (KeyError, TypeError, ValueError):
+                logger.warning("the guest door sent a delivery that makes no sense; left out")
+                continue
+            try:
+                await self.take(delivery)
+            except Exception:  # noqa: BLE001 — one message that cannot start must not cost the next
+                logger.exception("could not take message %s from the guest door", delivery.message_id)
+
+    async def take(self, delivery: Delivery) -> None:
+        """Say it arrived, then act on it once: the door offers what it has not heard about again."""
+        first = delivery.message_id not in self._seen
+        self._seen[delivery.message_id] = None
+        while len(self._seen) > SEEN_KEPT:
+            self._seen.popitem(last=False)
+        with suppress(DoorUnavailable, DoorRefused):
+            await self.client.call("POST", f"/control/deliveries/{delivery.message_id}/ack")
+        if first:
+            await self.on_delivery(delivery)
 
     async def on_event(self, event: dict[str, Any]) -> None:
         notifications = getattr(self.app, "notifications", None)
@@ -240,33 +365,43 @@ class GuestBridge:
         kind, link_id = str(event.get("kind")), str(event.get("link_id"))
         if kind not in ("first_contact", "redeem_refused", "limit"):
             return
+        row = await self.known_link(link_id)
+        if row is None or row["revoked_at"]:
+            return  # a link this side never made: an event about it is the door's invention
         now = time.monotonic()
-        if kind != "first_contact" and now - self._noticed.get((kind, link_id), -NOTIFY_EVERY_SECONDS) < NOTIFY_EVERY_SECONDS:
+        if kind == "first_contact":
+            while self._contacts and now - self._contacts[0] > NOTIFY_EVERY_SECONDS:
+                self._contacts.popleft()
+            if len(self._contacts) >= CONTACTS_PER_HOUR:
+                return  # the links stay in the app's list; what stops here is a door paging the operator
+            self._contacts.append(now)
+        elif now - self._noticed.get((kind, link_id), -NOTIFY_EVERY_SECONDS) < NOTIFY_EVERY_SECONDS:
             return
         self._noticed[(kind, link_id)] = now
-        known = await self.client.call("GET", f"/control/links/{link_id}")
-        link = known.get("link") or {}
-        label = str(link.get("label") or link_id)
-        row = await self.known_link(link_id)
-        session_id = str(row["session_id"]) if row is not None else None
-        # Words of this code and the operator's own label, never the guest's: this text travels to
-        # Telegram, where a link in a stranger's message would be fetched by a preview.
+        label = str(row["label"]) or link_id
+        session_id = str(row["session_id"])
+        link = chat_link(session_id)
+        # Words of this code and the operator's own label, never the door's or the guest's: this text
+        # travels to Telegram, where a link in a stranger's message would be fetched by a preview.
         lang = notifications.language()
         if kind == "first_contact":
-            conversation = link.get("conversation") or {}
-            ref = f"{REF}:{conversation.get('id')}"
+            known = await self.client.call("GET", f"/control/links/{link_id}")
+            conversation = str(((known.get("link") or {}).get("conversation") or {}).get("id") or "")
+            if not re.fullmatch(r"[0-9a-f]{16}", conversation):
+                return
+            ref = f"{REF}:{conversation}"
             await notifications.post(Draft(
-                "permission", render("guest.contact", lang, label=label), render("guest.contact.body", lang), kind="guest_contact", session_id=session_id, link=chat_link(session_id),
+                "permission", render("guest.contact", lang, label=label), render("guest.contact.body", lang), kind="guest_contact", session_id=session_id, link=link,
                 actions=(Action("admit", render("guest.admit", lang), "primary"), Action("refuse", render("guest.refuse", lang), "danger")), request_ref=ref, dedupe_key=ref, source="guest",
             ))
         elif kind == "redeem_refused":
             await notifications.post(Draft(
-                "system", render("guest.redeem", lang, label=label), render("guest.redeem.body", lang), kind="guest_redeem", tone="warning", session_id=session_id, link=chat_link(session_id),
+                "system", render("guest.redeem", lang, label=label), render("guest.redeem.body", lang), kind="guest_redeem", tone="warning", session_id=session_id, link=link,
                 source="guest", dedupe_key=f"{REF}-redeem:{link_id}:{int(now // NOTIFY_EVERY_SECONDS)}",
             ))
         else:
             await notifications.post(Draft(
-                "spend", render("guest.limit", lang, label=label), str(event.get("detail") or ""), kind="guest_limit", session_id=session_id, link=chat_link(session_id), source="guest",
+                "spend", render("guest.limit", lang, label=label), render("guest.limit.body", lang), kind="guest_limit", session_id=session_id, link=link, source="guest",
                 dedupe_key=f"{REF}-limit:{link_id}:{int(now // NOTIFY_EVERY_SECONDS)}",
             ))
 
@@ -277,7 +412,7 @@ class GuestBridge:
         if row is None or row["mode"] != "direct" or row["revoked_at"]:
             # Not a link this side made for a chat, whatever the door believes.
             logger.warning("the guest door offered a message for link %s, which has no live direct link here", delivery.link_id)
-            await self._answer(delivery, ok=False)
+            await self._answer(delivery, ok=False, ran=False)
             return
         session_id = str(row["session_id"])
         line = self.lines.setdefault(session_id, ChatLine())
@@ -299,17 +434,32 @@ class GuestBridge:
     async def _run_one(self, session_id: str, delivery: Delivery) -> None:
         row = await self.known_link(delivery.link_id)
         if row is None or row["revoked_at"]:
-            await self._answer(delivery, ok=False)
+            await self._answer(delivery, ok=False, ran=False)
             return
-        turn = GuestTurn(delivery.link_id, str(row["label"]), row["tools"] if row["tools"] in guest_turns.GUEST_TOOLS else "none", delivery.allowance_usd, delivery.text)
+        manager = self.app.manager
+        tools = row["tools"] if row["tools"] in guest_turns.GUEST_TOOLS else "none"
+        why = await manager.guest_ready(session_id, tools)
+        price = await manager.guest_price(session_id)
+        if why or price is None:
+            logger.warning("a guest's message could not start a turn in session %s: %s", session_id, why or "the chat's model has no known price")
+            await self._answer(delivery, ok=False, ran=False)
+            return
+        usd_left: float | None = None
+        if any(price):
+            # Clamped here: what the door says a turn may spend is only ever a request.
+            usd_left = max(0.0, min(delivery.allowance_usd, max(guest_turns.TURN_USD, float(row["usd_limit"]) / 4), float(row["usd_limit"])))
+            if await manager.guest_first_call_usd(session_id, price) > usd_left:
+                logger.warning("a guest's turn in session %s would pass its limit on its first call", session_id)
+                await self._answer(delivery, ok=False, ran=False)
+                return
+        turn = GuestTurn(delivery.link_id, str(row["label"]), tools, usd_left, delivery.text)
         run_id = await self._start(session_id, delivery, turn)
         if not run_id:
-            await self._answer(delivery, ok=False)
+            await self._answer(delivery, ok=False, ran=False)
             return
         assert delivery.done is not None
         status = await delivery.done
         self.turns.pop(run_id, None)
-        manager = self.app.manager
         spent, _ = await manager.spend(run_id=run_id)
         text = await manager.guest_answer(session_id, run_id) if status == "completed" else ""
         # A turn that ended without a word, on its model-call bound for one, has not answered.
@@ -335,6 +485,11 @@ class GuestBridge:
                 return ""
             delivery.run_id = run_id
             self.turns[run_id] = delivery
+            row = await self.known_link(delivery.link_id)
+            if row is None or row["revoked_at"]:
+                # Revoked while submit was running: too late for the check above, and ``revoked`` could
+                # not yet find this run to stop it.
+                await manager.stop_run(session_id, run_id)
             ended = self._ended_early.pop(run_id, None)
             if ended is not None and not delivery.done.done():
                 delivery.done.set_result(ended)
@@ -354,9 +509,9 @@ class GuestBridge:
         if delivery.done is not None and not delivery.done.done():
             delivery.done.set_result(status)
 
-    async def _answer(self, delivery: Delivery, *, ok: bool, text: str = "", cost: float = 0.0) -> None:
+    async def _answer(self, delivery: Delivery, *, ok: bool, text: str = "", cost: float = 0.0, ran: bool = True) -> None:
         try:
-            await self.client.call("POST", f"/control/deliveries/{delivery.message_id}/reply", json={"ok": ok, "text": text, "cost_usd": cost})
+            await self.client.call("POST", f"/control/deliveries/{delivery.message_id}/reply", json={"ok": ok, "text": text, "cost_usd": cost, "ran": ran})
         except DoorRefused as exc:
             logger.info("the door took no reply for message %s: %s", delivery.message_id, exc.detail)
         except DoorUnavailable:
@@ -390,12 +545,13 @@ class GuestBridge:
 
 
 def model_options(app: Application | Any) -> list[dict[str, Any]]:
-    """The models the door can reach: those served through the key proxy, cheapest first.
+    """The models the door can reach: those the key proxy's guest listener serves, cheapest first.
 
     Priced, or costing nothing by their plan. One with no known price is left out rather than guessed
     at, because a limit in dollars cannot be checked before the spending on a model nobody can price.
     """
     base = keyproxy_base()
+    allowed = {name.strip().lower() for name in app.settings.guest_model_upstreams.split(",") if name.strip()}
     options: list[dict[str, Any]] = []
     for preset_id, preset in app.config.presets.items():
         provider = app.config.providers.get(preset.provider)
@@ -411,8 +567,11 @@ def model_options(app: Application | Any) -> list[dict[str, Any]]:
         if not free and (pricing is None or pricing.input is None or pricing.output is None):
             continue
         free = free or not (pricing.input or pricing.output)  # type: ignore[union-attr]
+        path = provider.base_url.rstrip("/").removeprefix(base).strip("/")
+        if path.split("/", 1)[0] not in allowed:
+            continue  # the key proxy's guest listener would refuse it
         options.append({
-            "id": preset_id, "label": preset.display(preset_id), "path": provider.base_url.rstrip("/").removeprefix(base).strip("/"), "model": preset.model,
+            "id": preset_id, "label": preset.display(preset_id), "path": path, "model": preset.model,
             "price_in": 0.0 if free else float(pricing.input), "price_out": 0.0 if free else float(pricing.output), "free": free,  # type: ignore[union-attr]
         })
     options.sort(key=lambda o: (o["price_in"] + o["price_out"] * 4, str(o["label"]).lower()))
@@ -436,4 +595,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(bridge.serve(), name="guest-door")]
 
 
-__all__ = ["EXTENSION_KEY", "DoorClient", "DoorRefused", "DoorUnavailable", "GuestBridge", "bridge_of", "install", "model_options"]
+__all__ = ["EXTENSION_KEY", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_options"]

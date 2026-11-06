@@ -27,6 +27,7 @@ from typing import Any
 from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.host import user_style
+from daedalus.host.guest_turns import METADATA_KEY, guest_runs, is_guest
 from daedalus.host.prompts import without_turn_context
 
 logger = logging.getLogger(__name__)
@@ -95,11 +96,15 @@ async def spent_today(db: Any, purpose: str) -> float:
 
 
 async def conversation_lines(manager: Any, session_id: str, *, tail: int = TAIL_MESSAGES) -> list[str]:
-    """The end of a conversation as a helper reads it: ``Operator:``, ``Autopilot:`` and ``Agent:``
+    """The end of a conversation as a helper reads it: ``Operator:``, ``Autopilot:``, ``Guest:`` and ``Agent:``
     lines, each clipped, the host's notes and the core's own nudges left out, and anything secret-shaped
-    masked the way the logs mask it — a helper's request goes to a model like any other."""
+    masked the way the logs mask it — a helper's request goes to a model like any other.
+
+    A guest is named as one, and so is the answer: a judge reading ``Operator: ship it`` decides on the
+    authority of someone who never said it."""
     messages = await manager.sessions.list_transcript(session_id, limit=tail * 3)
     redact = manager.redactor.redact
+    strangers = guest_runs(messages)
     lines: list[str] = []
     for message in messages:
         if message.role not in (MessageRole.user, MessageRole.assistant) or message.metadata.get("daedalus.origin") == "core":
@@ -108,9 +113,15 @@ async def conversation_lines(manager: Any, session_id: str, *, tail: int = TAIL_
         if not text:
             continue
         if message.role is MessageRole.assistant:
-            lines.append(f"Agent: {redact(text[-AGENT_CHARS:])}")
+            who = "Agent, to a guest" if message.metadata.get("daedalus.run_id") in strangers else "Agent"
+            lines.append(f"{who}: {redact(text[-AGENT_CHARS:])}")
         else:
-            who = "Autopilot" if message.metadata.get("daedalus.origin") == AUTOPILOT_ORIGIN else "Operator"
+            origin = str(message.metadata.get("daedalus.origin") or "")
+            if is_guest(origin):
+                said = str((message.metadata.get(METADATA_KEY) or {}).get("said") or text)
+                lines.append(f"Guest: {redact(said[:OPERATOR_CHARS])}")
+                continue
+            who = "Autopilot" if origin == AUTOPILOT_ORIGIN else "Operator"
             lines.append(f"{who}: {redact(text[:OPERATOR_CHARS])}")
     return lines[-tail:]
 

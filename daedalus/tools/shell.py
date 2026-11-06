@@ -209,8 +209,89 @@ def operator_git_dirs(checkouts: Sequence[Path] | None = None) -> list[Path]:
     return [path for path in dict.fromkeys(found) if path.is_dir()]
 
 
+GUEST_SYSTEM_PATHS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc/alternatives", "/etc/ssl", "/etc/ca-certificates", "/etc/ld.so.cache", "/etc/passwd", "/etc/group")
+"""What a guest's command sees of the machine, read-only. A list of what is there, not of what is hidden: the
+ordinary sandbox binds the whole disk and hides what it knows of, and anything it does not know of (a state
+file, a token beside a socket, an SSH key) was one built path away."""
+GUEST_ENVIRONMENT = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "TERM": "dumb"}
+"""A guest's command starts from these and nothing else, so no credential of the bot's can be inherited."""
+_guest_sandbox_state: str | None = None
+
+
+def is_guest_turn(session_id: str | None) -> bool:
+    store = operator_secrets.shared()
+    return bool(session_id) and store is not None and store.is_held_back(session_id or "")
+
+
+def guest_sandbox_args(*, writable: Sequence[Path] = (), readable: Sequence[Path] = ()) -> list[str]:
+    """The sandbox of a guest's command: an empty root with the system binaries and this chat's folder.
+
+    No network namespace is shared, which is what takes the key proxy, the app's API, the door and the
+    LAN out of reach at once, by name or by address. The environment is cleared, and the process tree dies
+    with the command, so nothing a guest starts can still be running when the turn is over.
+    """
+    # Each namespace by name, and not ``--unshare-all``: that one asks for a user namespace too, and inside
+    # Docker the kernel will not mount /proc in one, because Docker masks parts of it. Measured in the image:
+    # the sandbox could not be made at all, where it matters most. As root, capabilities go by hand instead.
+    argv = [
+        "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--cap-drop", "ALL", "--die-with-parent", "--new-session", "--clearenv",
+        "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+    ]
+    if not _guest_network_outside():
+        argv.insert(0, "--unshare-net")
+    for path in (*GUEST_SYSTEM_PATHS, sys.prefix):
+        argv += ["--ro-bind-try", path, path]
+    for name, value in GUEST_ENVIRONMENT.items():
+        argv += ["--setenv", name, value]
+    bound: set[str] = set()
+    for path in writable:
+        if not path.is_symlink() and path.is_dir() and str(path) not in bound:
+            bound.add(str(path))
+            argv += ["--bind", str(path), str(path)]
+    for path in readable:
+        if not path.is_symlink() and path.is_dir() and str(path) not in bound:
+            bound.add(str(path))
+            argv += ["--ro-bind", str(path), str(path)]
+    return argv
+
+
+def _guest_network_outside() -> bool:
+    """Whether the empty network namespace is made around bubblewrap rather than by it.
+
+    As root in a container it has to be. Bubblewrap's own ``--unshare-net`` brings up loopback, which needs
+    ``NET_ADMIN``, and the agent's container has only ``SYS_ADMIN``, which is enough to make a namespace.
+    Giving the whole container ``NET_ADMIN`` for this would be the wrong trade: a namespace nobody set
+    up has no interface up at all, not even loopback, which is exactly what is wanted here.
+    """
+    return os.geteuid() == 0
+
+
+def guest_sandbox_argv(bwrap: str, *, writable: Sequence[Path] = (), readable: Sequence[Path] = ()) -> list[str]:
+    """The command prefix of a guest's sandbox."""
+    prefix = [shutil.which("unshare") or "/usr/bin/unshare", "--net"] if _guest_network_outside() else []
+    return [*prefix, bwrap, *guest_sandbox_args(writable=writable, readable=readable)]
+
+
+def guest_sandbox_status() -> str:
+    """``ok`` when that sandbox can really be made here, or why not. Stricter than :func:`bwrap_status`,
+    which does not ask for a network namespace. Blocking: call it through ``asyncio.to_thread``."""
+    global _guest_sandbox_state
+    if _guest_sandbox_state == "ok":
+        return _guest_sandbox_state
+    status = bwrap_status()
+    bwrap = bwrap_path()
+    if status != "ok" or bwrap is None:
+        return status
+    try:
+        probe = subprocess.run([*guest_sandbox_argv(bwrap), "/bin/sh", "-c", "true"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"bwrap probe failed: {type(exc).__name__}"
+    _guest_sandbox_state = "ok" if probe.returncode == 0 else f"the guest sandbox cannot be made here: {(probe.stderr or probe.stdout).strip()[:120]}"
+    return _guest_sandbox_state
+
+
 async def sandbox_argv(
-    command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None, session_id: str | None = None,
+    command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None, session_id: str | None = None, readable: Sequence[Path] = (),
 ) -> tuple[list[str], bool]:
     """The argv to run ``command`` with: plain bash, or bash inside bubblewrap when the sandbox is on.
 
@@ -235,6 +316,14 @@ async def sandbox_argv(
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
+    if is_guest_turn(session_id):
+        # Whatever the operator chose for their own commands: this one is a stranger's, and there is no
+        # plain path. A guest's turn never runs a command it cannot wall in.
+        status = await asyncio.to_thread(guest_sandbox_status)
+        bwrap = bwrap_path()
+        if status != "ok" or bwrap is None:
+            raise SandboxUnavailable(f"a guest's turn runs commands only in the sandbox, and it cannot be made here: {status}")
+        return [*guest_sandbox_argv(bwrap, writable=writable, readable=readable), *plain], True
     if getattr(exec_config, "sandbox", "off") != "workspace":
         return plain, False
     status = await asyncio.to_thread(bwrap_status)
@@ -334,6 +423,10 @@ def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, c
     project install into that virtualenv instead of the project's ``.venv``, which the sandbox
     mounts read-only: the agent saw "Read-only file system" and could not add a library at all.
     """
+    if is_guest_turn(session_id):
+        # Not the list below with some names taken out. That list keeps GH_TOKEN on purpose, for the
+        # operator's own commands, and a list of what to remove is short of the next credential.
+        return dict(GUEST_ENVIRONMENT)
     env = {k: v for k, v in os.environ.items() if (k in _SAFE_ENV_BASE or k.startswith(_SAFE_ENV_PREFIXES)) and not _SECRET_ENV.match(k)}
     if not _own_checkout(cwd):
         env.pop("UV_PROJECT_ENVIRONMENT", None)
@@ -479,7 +572,10 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     services = services_for(context)
     workdir = services.resolve(cwd)
     command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
+    guest = is_guest_turn(context.session_id)
     if services.exec_backend is not None:
+        if guest:
+            return error(context, "a guest's turn runs no command on the operator's machine")
         return await _run_elsewhere(context, services, command, workdir, timeout_seconds, env, kind=kind, label=label)
     if not workdir.exists():
         return error(context, f"working directory does not exist: {workdir}")
@@ -487,7 +583,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     started = time.monotonic()
     environment = shell_environment(context.session_id, env, cwd=workdir)
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
     except SandboxUnavailable as exc:
         return error(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
@@ -601,7 +697,8 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
             if spill_fh is not None:
                 spill_fh.close()
                 spill_fh = None
-            job = _keep_as_job(context, services, proc, command, workdir, sandboxed, _so_far(), started=started, kind=kind, label=label)
+            # Nothing of a guest's is left running: past its time the command ends, in the cleanup below.
+            job = None if guest else _keep_as_job(context, services, proc, command, workdir, sandboxed, _so_far(), started=started, kind=kind, label=label)
     finally:
         if not reading.done():
             reading.cancel()
@@ -1106,7 +1203,7 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
     log.parent.mkdir(parents=True, exist_ok=True)
     _prune_spills(log.parent)  # the same bound as the spill directory: the newest logs stay
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
     except SandboxUnavailable as exc:
         return error(context, str(exc))
     fh = log.open("wb")

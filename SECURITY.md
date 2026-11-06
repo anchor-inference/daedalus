@@ -26,14 +26,30 @@ a hole in it.
 - **The sandbox fails closed.** With `tools.exec.sandbox = "workspace"`, a container that cannot create
   namespaces refuses commands instead of running them bare.
 
-A link to another person's agent (the guest door, `deploy/guestd`) is the one place a stranger talks to
-this installation. It is a process of its own with its own port and database, and it has no route to the app:
-the app dials it over a unix socket. A stand-in link answers from a tools-free model call that holds only a
-briefing the operator approved, so private data is absent rather than filtered. A direct link is the
-operator's informed choice to let a guest reach a chat's live agent; its turn runs alone, marked as a guest's,
-with the link's tools, no secrets, and nothing that outlives the turn.
+A link to another person's agent (the guest door, `deploy/guestd`) is the one place a stranger talks to this
+installation, so it is built on what that stranger cannot reach rather than on what they are asked not to do.
+
+- The door is a process with no network. A small front holds the published port, bounds each connection and passes
+  requests down a unix socket. The app dials the door over another socket, with a token only the app can write, and
+  the door cannot call the app. A stand-in's model call goes to a listener of the key proxy that takes one chat
+  completion on chosen upstreams and nothing else. CLI subscription logins are never among them.
+- A stand-in link answers from a tools-free model call that holds only a briefing the operator approved, so private
+  data is absent rather than filtered.
+- A direct link is the operator's informed choice to let a guest reach a chat's live agent. Its turn runs alone,
+  marked as a guest's, and never as a queued or steered message. Every tool setting is a list of what is allowed.
+  `read` is the file reading tools held to the chat's folder. `all` adds writing there, web search and foreground
+  commands. A guest's command runs in a sandbox of its own whatever the operator chose for theirs: an empty root
+  with the system binaries and that folder, no network, a cleared environment, and nothing left running at its end.
+  Where that sandbox cannot be made, or the chat works in a folder on the host, `all` is not offered.
+- A guest's turn has no secrets at any setting, spends no grant the operator gave, raises no approval card (what
+  would ask is refused), starts nothing that outlives it, and is not resumed or retried after it stops.
 
 ## What it does not protect against
+
+A direct guest's words and the answers to them stay in that chat's history. Later turns read them fenced and
+marked, and compaction marks them, but the chat's own agent has read a stranger, and a marked summary is still a
+summary. Everything inside the chat's folder and history is open to a direct guest by design. An agent run by the
+operator can still reach the door's token with a path built at run time: the sealed set reads the words of a command.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.

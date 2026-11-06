@@ -91,10 +91,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return f"{public_address.guest_base(app.settings)}/a/{invite}"
 
     @api.get("/api/guest/door")
-    async def door_state(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def door_state(session_id: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Whether links can be made here, and everything the form needs to open."""
         models = model_options(app)
-        out: dict[str, Any] = {"available": False, "public_base": public_address.guest_base(app.settings), "defaults": DEFAULTS, "models": models, "usd_per_day": 0.0, "spent_today": 0.0}
+        state = await app.manager.get_state(session_id) if session_id and app.manager is not None else None
+        why = await app.manager.guest_full_tools(state) if state is not None else "no_sandbox"
+        out: dict[str, Any] = {
+            "available": False, "public_base": public_address.guest_base(app.settings), "defaults": DEFAULTS, "models": models, "usd_per_day": 0.0, "spent_today": 0.0,
+            "full_tools": not why, "full_tools_why": why,
+        }
         try:
             health = await bridge().client.call("GET", "/control/health")
         except (DoorUnavailable, DoorRefused):
@@ -130,6 +135,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if body.mode == "direct":
             if any(state.metadata.get(key) for key in PRIVATE_KINDS) or manager.is_dispatcher(state) or manager.is_orchestrator(state) or manager.is_companion(state) or manager.is_prompt_coach(state) or manager.is_btw(state):
                 raise HTTPException(409, "a direct link needs an ordinary chat")
+            refused = await manager.guest_ready(session_id, body.tools)
+            if refused:
+                raise HTTPException(409, {"host_folder": "this chat works in a folder on the host, where a guest's command cannot be sandboxed", "no_sandbox": "the sandbox a guest's commands need cannot be made here"}.get(refused, refused))
+            if await manager.guest_price(session_id) is None:
+                raise HTTPException(409, "this chat's model has no known price, so a dollar limit could not hold")
             fields.update(model_path="", model_name="", price_in=0.0, price_out=0.0, briefing="", guest_tools=body.tools)
         else:
             option = next((o for o in model_options(app) if o["id"] == body.model_id), None)
@@ -143,14 +153,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             fields.update(model_path=option["path"], model_name=option["model"], price_in=option["price_in"], price_out=option["price_out"], guest_tools="none")
         made = await door("POST", "/control/links", json=fields)
         link = made["link"]
-        await bridge().remember_link(link["id"], session_id, body.label.strip() or body.topic.strip()[:120], body.mode, body.tools if body.mode == "direct" else "none")
+        await bridge().remember_link(link["id"], session_id, body.label.strip() or body.topic.strip()[:120], body.mode, body.tools if body.mode == "direct" else "none", body.usd_limit)
         return {"link": link, "url": link_url(made["invite"])}
 
     @api.post("/api/guest/links/{link_id}/revoke")
     async def revoke_link(link_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         if await bridge().known_link(link_id) is None:
             raise HTTPException(404, "no such link")
-        # The door first: a guest must be shut out even if stopping the turn takes a moment.
+        # This side first, marked as not yet told: with the door out of reach the turn must still stop,
+        # the operator must still hear so, and the next connection finishes the job.
+        await bridge().revoked(link_id, door_told=False)
         out = await door("POST", f"/control/links/{link_id}/revoke")
         await bridge().revoked(link_id)
         return out
@@ -163,7 +175,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such link")
         made = await door("POST", f"/control/links/{link_id}/reissue")
         await bridge().revoked(link_id)
-        await bridge().remember_link(made["link"]["id"], str(known["session_id"]), str(known["label"]), str(known["mode"]), str(known["tools"]))
+        await bridge().remember_link(made["link"]["id"], str(known["session_id"]), str(known["label"]), str(known["mode"]), str(known["tools"]), float(known["usd_limit"]))
         return {"link": made["link"], "url": link_url(made["invite"])}
 
     @api.post("/api/guest/conversations/{conversation_id}/{decision}")
