@@ -424,9 +424,12 @@ export type BrowserList = { available: boolean; reason: string; groups: BrowserG
 /** A conversation's browser, where the installation offers the operator's own Chrome (`GET /api/browsers?session=`). */
 export type BrowserUserChoice = { env: "agent" | "user"; consented: boolean; connected: boolean; name: string };
 
-/** The relay of the operator's Chrome as the user daemon reports it (`relay.status`). */
-export type BrowserRelay = {
+/** One of the operator's Chromes as the user daemon reports it. `chrome` is its id; `groups` and
+ *  `tabs` are what agents have open there now, and `reconnecting` the moment after a drop. */
+export type BrowserChrome = {
+  chrome: string;
   connected: boolean;
+  reconnecting?: boolean;
   profile_id?: string;
   profile_name?: string;
   ext_version?: string;
@@ -436,6 +439,15 @@ export type BrowserRelay = {
   since?: string | null;
   last_seen?: string | null;
   last_error?: string;
+  groups?: number;
+  tabs?: number;
+};
+
+/** The relays of the user daemon (`relay.status`): every Chrome it has heard from, connected ones first. */
+export type BrowserRelay = {
+  connected: boolean;
+  last_error?: string;
+  chromes?: BrowserChrome[];
 };
 
 /** The desktop launcher's report on Chrome, the connector and the extension folder (native only). */

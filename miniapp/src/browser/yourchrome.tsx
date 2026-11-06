@@ -1,16 +1,16 @@
 // Settings → Environments → "Your Chrome": the operator's own Chrome as a browser the agent may be given.
 //
 // The connection is checked from both sides, so the card says what Daedalus sees — whether the
-// connector is registered (on this computer), whether the extension is connected and as which
-// Chrome, why it is not — and "Check connection" makes the extension flash at the same moment the
-// round trip comes back here. On a server there is no connector: a Chrome is paired with a one-time
-// code instead, and the paired ones are listed with a way to revoke each.
+// connector is registered (on this computer), which Chromes are connected, why none is — and "Check
+// connection" makes that Chrome's extension flash at the same moment the round trip comes back here.
+// On a server there is no connector: a Chrome is paired with a one-time code instead, and the paired
+// ones are listed with a way to revoke each. Any number stay connected at once.
 //
 // What the agent may do there is the host's `[browser.user]`; the per-conversation switch is in the
 // browser panel's header, never here.
 
 import { useEffect, useState } from "react";
-import type { BrowserUserChoice, BrowserUserDevice, BrowserUserSettings, BrowserUserStatus, ChromeLauncherReport } from "../api";
+import type { BrowserChrome, BrowserUserChoice, BrowserUserDevice, BrowserUserSettings, BrowserUserStatus, ChromeLauncherReport } from "../api";
 import { api } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
@@ -125,21 +125,6 @@ function Connector({ status, toast }: { status: BrowserUserStatus; toast: (text:
 }
 
 function Connection({ status, state, toast }: { status: BrowserUserStatus; state: ChromeState; toast: (text: string) => void }) {
-  const relay = status.relay;
-  const [rtt, setRtt] = useState<number | null>(null);
-  const [checking, setChecking] = useState(false);
-  useEffect(() => setRtt(null), [state]);
-  async function check() {
-    setChecking(true);
-    try {
-      const done = await api.post<{ rtt_ms: number }>(`${USER_STATUS}/check`, {});
-      setRtt(done.rtt_ms);
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setChecking(false);
-    }
-  }
   if (state === "down") {
     return (
       <div className="bs-chrome-conn" data-conn="down">
@@ -148,7 +133,8 @@ function Connection({ status, state, toast }: { status: BrowserUserStatus; state
       </div>
     );
   }
-  if (state !== "connected" || !relay) {
+  const connected = (status.relay?.chromes ?? []).filter((c) => c.connected || c.reconnecting);
+  if (state !== "connected" || connected.length === 0) {
     return (
       <div className="bs-chrome-conn" data-conn="waiting">
         <span className="dot error" aria-hidden="true" />
@@ -157,18 +143,42 @@ function Connection({ status, state, toast }: { status: BrowserUserStatus; state
     );
   }
   return (
-    <div className="bs-chrome-conn" data-conn="connected">
+    <div className="bs-chrome-list">
+      {connected.map((c) => <ChromeRow key={c.chrome} chrome={c} toast={toast} />)}
+    </div>
+  );
+}
+
+/** One connected Chrome: its name and versions, what agents have open there, and a check of its own,
+ *  since a round trip through one says nothing of the other. */
+function ChromeRow({ chrome, toast }: { chrome: BrowserChrome; toast: (text: string) => void }) {
+  const [rtt, setRtt] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
+  async function check() {
+    setChecking(true);
+    try {
+      const done = await api.post<{ rtt_ms: number }>(`${USER_STATUS}/check`, { chrome: chrome.chrome });
+      setRtt(done.rtt_ms);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+  return (
+    <div className="bs-chrome-conn" data-conn="connected" data-chrome={chrome.chrome}>
       <div className="bs-env-head">
-        <span className="dot ok" aria-hidden="true" />
-        <b>{t("uc.connected", { name: relay.profile_name || "Chrome" })}</b>
+        <span className={`dot ${chrome.connected ? "ok" : "waiting"}`} aria-hidden="true" />
+        <b>{t(chrome.connected ? "uc.connected" : "uc.reconnecting", { name: chrome.profile_name || "Chrome" })}</b>
       </div>
-      <div className="kv"><span>{t("uc.ext.version")}</span><b className="mono">{relay.ext_version || "?"}</b></div>
-      <div className="kv"><span>{t("uc.chrome.version")}</span><b className="mono">{relay.chrome_version || "?"}</b></div>
-      <div className="kv"><span>{t("uc.transport")}</span><b>{t(relay.transport === "server" ? "uc.transport.server" : "uc.transport.native")}</b></div>
-      <div className="kv"><span>{t("uc.since")}</span><b>{timeAgo(relay.since ?? null)}</b></div>
-      <div className="kv"><span>{t("uc.seen")}</span><b>{timeAgo(relay.last_seen ?? null)}</b></div>
+      <div className="kv"><span>{t("uc.ext.version")}</span><b className="mono">{chrome.ext_version || "?"}</b></div>
+      <div className="kv"><span>{t("uc.chrome.version")}</span><b className="mono">{chrome.chrome_version || "?"}</b></div>
+      <div className="kv"><span>{t("uc.transport")}</span><b>{t(chrome.transport === "server" ? "uc.transport.server" : "uc.transport.native")}</b></div>
+      <div className="kv"><span>{t("uc.since")}</span><b>{timeAgo(chrome.since ?? null)}</b></div>
+      <div className="kv"><span>{t("uc.seen")}</span><b>{timeAgo(chrome.last_seen ?? null)}</b></div>
+      <div className="kv"><span>{t("uc.agent.tabs")}</span><b>{chrome.tabs ? t("uc.agent.tabs.open", { count: chrome.tabs }) : t("uc.agent.tabs.none")}</b></div>
       <div className="btnrow">
-        <button type="button" className="btn small" disabled={checking} onClick={() => void check()}>{t("uc.check")}</button>
+        <button type="button" className="btn small" disabled={checking || !chrome.connected} onClick={() => void check()}>{t("uc.check")}</button>
         {rtt !== null && <span className="sub bs-chrome-rtt" data-rtt={rtt}>{t("uc.check.done", { ms: rtt })}</span>}
       </div>
     </div>

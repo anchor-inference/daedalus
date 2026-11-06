@@ -11,7 +11,8 @@ import { setLang } from "../i18n";
 import { prime } from "../store";
 import { BrowserSwitch, chromeState, connectorState, DEFAULT_USER, notConnectedReason, USER_STATUS, YourChrome } from "./yourchrome";
 
-const RELAY = { connected: true, profile_name: "Work", ext_version: "0.1.0", chrome_version: "141.0.7390.54", transport: "native", since: new Date().toISOString(), last_seen: new Date().toISOString() };
+const WORK = { chrome: "c1", connected: true, profile_name: "Work", ext_version: "0.1.0", chrome_version: "141.0.7390.54", transport: "native", since: new Date().toISOString(), last_seen: new Date().toISOString() };
+const RELAY = { connected: true, chromes: [WORK] };
 
 function status(extra: Partial<BrowserUserStatus> = {}): BrowserUserStatus {
   return {
@@ -83,6 +84,22 @@ describe("the card", () => {
     await act(async () => check.click());
     expect(fetched.some((f) => f.url.endsWith("/api/browser/user/check") && f.method === "POST")).toBe(true);
     expect(card.querySelector<HTMLElement>(".bs-chrome-rtt")?.textContent).toBe("Chrome answered in 14 ms");
+  });
+
+  it("lists every Chrome connected, each with its own check, and says which one is reconnecting", async () => {
+    const mac = { ...WORK, chrome: "c2", profile_name: "MacBook", tabs: 3, groups: 1 };
+    const away = { ...WORK, chrome: "c3", profile_name: "Office", connected: false, reconnecting: true };
+    const card = (await show(status({ relay: { connected: true, chromes: [WORK, mac, away] } })))!;
+    expect(card.textContent).toContain("Connected: Work");
+    expect(card.textContent).toContain("Connected: MacBook");
+    expect(card.textContent).toContain("Reconnecting: Office");
+    expect(card.querySelector("[data-chrome='c2']")?.textContent).toContain("3 open");
+    expect(card.querySelector("[data-chrome='c1']")?.textContent).toContain("none");
+    const buttons = [...card.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent === "Check connection");
+    expect(buttons).toHaveLength(3);
+    expect(buttons[2].disabled).toBe(true);
+    await act(async () => buttons[1].click());
+    expect(fetched.find((f) => f.url.endsWith("/api/browser/user/check"))?.body).toContain("c2");
   });
 
   it("offers read-only, on by default, and closing the agent's tabs at the end of its turn, off by default", async () => {
