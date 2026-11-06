@@ -284,5 +284,3 @@ def test_a_signal_is_handled_where_there_is_no_add_signal_handler(monkeypatch: p
     assert signal.SIGTERM in handlers and 21 in handlers
     handlers[21](21, None)  # type: ignore[operator]
     assert called == [stop]
-
-

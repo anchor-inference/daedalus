@@ -229,5 +229,3 @@ def test_nothing_of_the_app_answers_a_socket_at_the_door(alive: None) -> None:
         for path in ("/ws/anything", "/api/terminals/x/socket", "/pages/x/y", "/app/"):
             with pytest.raises(WebSocketDisconnect), door.websocket_connect(path):
                 pass
-
-
