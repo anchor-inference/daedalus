@@ -45,9 +45,17 @@ installation, so it is built on what that stranger cannot reach rather than on w
   `read` is the file reading tools held to the chat's folder. `all` adds writing there, web search and foreground
   commands. A guest's command runs in a sandbox of its own whatever the operator chose for theirs: an empty root
   with the system binaries and that folder, no network, a cleared environment, and nothing left running at its end.
-  It runs under limits on address space, file size and processor time. Where that sandbox cannot be made, or the
-  chat works in a folder on the host or a project's folder other chats read, `all` is not offered. Once a guest could
-  write in a folder, its notes are no longer read as the agent's rules.
+- What a guest's command can use is bounded as well as what it can see. Each one has a cgroup: 1,024 threads and
+  8 GiB of memory, all of it counted across its processes, with no swap, and all guests together hold 2,048 threads,
+  12 GiB and half the processors, so more links do not multiply the numbers. Its writes go to a tmpfs of 4 GiB and
+  500,000 files, shared by the folder and `/tmp`, that lies over the real folder: nothing reaches the disk while it
+  runs. When it has ended, its changes are copied in if the folder then holds no more than 8 GiB and 1,000,000 files
+  and the disk keeps 10 GiB and 1,000,000 inodes free, and are dropped whole if not. A command that is killed keeps
+  nothing. The copy runs as root over what a stranger made, so it follows no link and drops setuid. Each limit that
+  is reached is said in the command's output. A process is also limited to a 2 GiB file and ten minutes of processor.
+- Where that sandbox or those limits cannot be made, or the chat works in a folder on the host or a project's folder
+  other chats read, `all` is not offered. They need the agent's container: a native installation has no such limits,
+  so it has no `all`. Once a guest could write in a folder, its notes are no longer read as the agent's rules.
 - A guest's turn has no secrets at any setting, spends no grant the operator gave, raises no approval card (what
   would ask is refused), starts nothing that outlives it, and is not resumed or retried after it stops. Each of its
   requests leaves out what the host added to earlier messages (memory, the folder's notes, the board, project facts,
@@ -59,7 +67,10 @@ A direct guest's words and the answers to them stay in that chat's history. Late
 marked, and compaction marks them, but the chat's own agent has read a stranger, and a marked summary is still a
 summary. Every message of the chat, what the agent wrote included, is open to a direct guest by design, and one model's
 judgement is all that stands between those messages and the guest: an answer that quoted memory or a note in the chat's
-own words is a chat message like any other. `all` has no bound on processes or on total disk. An agent run by the
+own words is a chat message like any other. `all` bounds what a command holds, not how it spends that: inside its
+limits it can read the disk hard, and it runs as root without capabilities, so counters the kernel keeps per user
+(inotify instances, say) are shared with root's other processes for as long as it runs. `Write` and `Edit` work on the
+real folder and pass none of the quota; what they add is bounded by what a turn's model can send. An agent run by the
 operator can still reach the door's token with a path built at run time: the sealed set reads the words of a command.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub

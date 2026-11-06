@@ -119,6 +119,18 @@ def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
         Database.open = real_open  # type: ignore[method-assign]
 
 
+@pytest.fixture
+def bare_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guest's command in the sandbox alone, without the box around it, which takes root and a cgroup of its own.
+    For tests of what a command can see; what it can use has its own tests and a proof in the image."""
+    from daedalus.host import session_runner
+    from daedalus.tools import shell
+
+    for module in (shell, session_runner):
+        monkeypatch.setattr(module, "guest_limits_status", lambda: "ok")
+    monkeypatch.setattr(shell, "guest_box_argv", shell.guest_sandbox_argv)
+
+
 @pytest.fixture(autouse=True)
 def no_push_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """The doctor's push dry run is answered in place for every test, not sent to the remote.

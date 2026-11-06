@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
@@ -26,7 +27,7 @@ from protocore.tools.decorator import tool
 from daedalus.host.filesystem import machine_of
 from daedalus.processes import end_tree, read_until_exit
 from daedalus.security import operator_secrets
-from daedalus.tools import search_hint
+from daedalus.tools import guest_box, search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, plain_output, services_for, tool_config
 from daedalus.tools.job_guard import WAIT_TIMED_OUT, orphan_note, self_match_reason, wait_script
 
@@ -213,13 +214,15 @@ GUEST_SYSTEM_PATHS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc
 """What a guest's command sees of the machine, read-only. A list of what is there, not of what is hidden: the
 ordinary sandbox binds the whole disk and hides what it knows of, and anything it does not know of (a state
 file, a token beside a socket, an SSH key) was one built path away."""
-GUEST_LIMITS = ("--as=8589934592", "--fsize=2147483648", "--cpu=600", "--core=0")
-"""What one guest command may take of the machine: 8 GiB of address space, a 2 GiB file, ten minutes of processor.
-The sandbox walls off what a command can see, not what it can use, and neither it nor the container has a
-limit of its own: a loop allocating memory would have taken the server down with it, as an experiment once did."""
+GUEST_LIMITS = ("--fsize=2147483648", "--cpu=600", "--core=0")
+"""What each process of a guest's command may take: a 2 GiB file, ten minutes of processor. The bounds on the command
+as a whole, memory among them, are in :mod:`daedalus.tools.guest_box`. An address space limit stood here and is gone
+on purpose: it bounded one process only, and at 8 GiB it broke ``vite`` and ``vitest``, because V8 reserves about
+10 GiB of address space, not memory, for one WebAssembly instance. The cgroup counts what is really used."""
 GUEST_ENVIRONMENT = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "TERM": "dumb"}
 """A guest's command starts from these and nothing else, so no credential of the bot's can be inherited."""
 _guest_sandbox_state: str | None = None
+_guest_limits_state: str | None = None
 
 
 def is_guest_turn(session_id: str | None) -> bool:
@@ -227,19 +230,22 @@ def is_guest_turn(session_id: str | None) -> bool:
     return bool(session_id) and store is not None and store.is_held_back(session_id or "")
 
 
-def guest_sandbox_args(*, writable: Sequence[Path] = (), readable: Sequence[Path] = ()) -> list[str]:
+def guest_sandbox_args(*, writable: Sequence[Path] = (), readable: Sequence[Path] = (), layers: Sequence[str] = (), tmp: str = "") -> list[str]:
     """The sandbox of a guest's command: an empty root with the system binaries and this chat's folder.
 
     No network namespace is shared, which is what takes the key proxy, the app's API, the door and the
     LAN out of reach at once, by name or by address. The environment is cleared, and the process tree dies
     with the command, so nothing a guest starts can still be running when the turn is over.
+
+    ``layers`` and ``tmp`` are what :mod:`daedalus.tools.guest_box` made, one layer per real ``writable`` path in
+    order: the sandbox shows each at the folder's own path, and its ``/tmp`` comes from the same capped space.
     """
     # Each namespace by name, and not ``--unshare-all``: that one asks for a user namespace too, and inside
     # Docker the kernel will not mount /proc in one, because Docker masks parts of it. Measured in the image:
     # the sandbox could not be made at all, where it matters most. As root, capabilities go by hand instead.
     argv = [
         "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--cap-drop", "ALL", "--die-with-parent", "--new-session", "--clearenv",
-        "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+        "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", *(("--bind", tmp, "/tmp") if tmp else ("--tmpfs", "/tmp")),
     ]
     if not _guest_network_outside():
         argv.insert(0, "--unshare-net")
@@ -248,15 +254,19 @@ def guest_sandbox_args(*, writable: Sequence[Path] = (), readable: Sequence[Path
     for name, value in GUEST_ENVIRONMENT.items():
         argv += ["--setenv", name, value]
     bound: set[str] = set()
-    for path in writable:
-        if not path.is_symlink() and path.is_dir() and str(path) not in bound:
-            bound.add(str(path))
-            argv += ["--bind", str(path), str(path)]
+    for index, path in enumerate(_real_folders(writable)):
+        bound.add(str(path))
+        argv += ["--bind", layers[index] if layers else str(path), str(path)]
     for path in readable:
         if not path.is_symlink() and path.is_dir() and str(path) not in bound:
             bound.add(str(path))
             argv += ["--ro-bind", str(path), str(path)]
     return argv
+
+
+def _real_folders(paths: Sequence[Path]) -> list[Path]:
+    """The paths that can be bound, each once. A bind needs a real directory at both ends."""
+    return list({str(path): path for path in paths if not path.is_symlink() and path.is_dir()}.values())
 
 
 def _guest_network_outside() -> bool:
@@ -278,6 +288,20 @@ def guest_sandbox_argv(bwrap: str, *, writable: Sequence[Path] = (), readable: S
     return [*prefix, *limits, bwrap, *guest_sandbox_args(writable=writable, readable=readable)]
 
 
+def guest_box_argv(bwrap: str, *, writable: Sequence[Path] = (), readable: Sequence[Path] = (), limits: dict[str, int] | None = None) -> list[str]:
+    """The command prefix a guest's command really runs with: its limits as a whole around that sandbox.
+
+    ``--mount`` is what keeps the capped layers and the writable cgroup view away from everything else the agent
+    runs, and takes them down with the command. The sandbox is the box's child, so it holds the per-process limits
+    and the box, which still has work to do when the command ends, does not.
+    """
+    folders = _real_folders(writable)
+    layers = [guest_box.layer_paths(index)[2] for index in range(len(folders))]
+    sandbox = [shutil.which("prlimit") or "/usr/bin/prlimit", *GUEST_LIMITS, bwrap, *guest_sandbox_args(writable=folders, readable=readable, layers=layers, tmp=guest_box.TMP)]
+    spec = {"folders": [str(path) for path in folders], **({"limits": limits} if limits else {})}
+    return [shutil.which("unshare") or "/usr/bin/unshare", "--net", "--mount", sys.executable, "-I", "-S", guest_box.__file__, json.dumps(spec), *sandbox]
+
+
 def guest_sandbox_status() -> str:
     """``ok`` when that sandbox can really be made here, or why not. Stricter than :func:`bwrap_status`,
     which does not ask for a network namespace. Blocking: call it through ``asyncio.to_thread``."""
@@ -294,6 +318,30 @@ def guest_sandbox_status() -> str:
         return f"bwrap probe failed: {type(exc).__name__}"
     _guest_sandbox_state = "ok" if probe.returncode == 0 else f"the guest sandbox cannot be made here: {(probe.stderr or probe.stdout).strip()[:120]}"
     return _guest_sandbox_state
+
+
+def guest_limits_status() -> str:
+    """``ok`` when a command can really be held to the bounds of :mod:`daedalus.tools.guest_box` here, or why not.
+
+    The probe is the real thing, one empty command through it, so this answers for this kernel, this cgroup setup
+    and this container and not for a list of what ought to work. The first one, once per container, is also what
+    moves the container's processes aside. A native installation does not get that far: it has no cgroup to give
+    away and is not root, and nothing here takes root's place. Blocking: call it through ``asyncio.to_thread``.
+    """
+    global _guest_limits_state
+    if _guest_limits_state == "ok":
+        return _guest_limits_state
+    if _native() or not sys.platform.startswith("linux") or os.geteuid() != 0:
+        return "the limits on a guest's command need the agent's container: a cgroup of its own, and root in it"
+    bwrap = bwrap_path()
+    if bwrap is None:
+        return "no sandbox to put limits around"
+    try:
+        probe = subprocess.run([*guest_box_argv(bwrap), "/bin/sh", "-c", "true"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"limits probe failed: {type(exc).__name__}"
+    _guest_limits_state = "ok" if probe.returncode == 0 else f"the limits on a guest's command cannot be set here: {(probe.stderr or probe.stdout).strip()[:200]}"
+    return _guest_limits_state
 
 
 async def sandbox_argv(
@@ -329,7 +377,10 @@ async def sandbox_argv(
         bwrap = bwrap_path()
         if status != "ok" or bwrap is None:
             raise SandboxUnavailable(f"a guest's turn runs commands only in the sandbox, and it cannot be made here: {status}")
-        return [*guest_sandbox_argv(bwrap, writable=writable, readable=readable), *plain], True
+        limits = await asyncio.to_thread(guest_limits_status)
+        if limits != "ok":
+            raise SandboxUnavailable(f"a guest's turn runs commands only within its limits: {limits}")
+        return [*guest_box_argv(bwrap, writable=writable, readable=readable), *plain], True
     if getattr(exec_config, "sandbox", "off") != "workspace":
         return plain, False
     status = await asyncio.to_thread(bwrap_status)
@@ -573,6 +624,9 @@ def _moved_header(elapsed: float, workdir: Path, job: Job | RemoteJob, *, where:
     )
 
 
+GUEST_RAN_OUT_NOTE = "[this command ran past its {seconds:.0f} seconds and was stopped. A stopped command keeps nothing: what it wrote in the folder is gone. Give it a longer timeout_seconds.]"
+
+
 async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
     """One command in the foreground, to its end, or to its foreground time and on as a job of ``kind``."""
     services = services_for(context)
@@ -684,6 +738,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
 
     output_ended = True
     job: Job | None = None
+    ran_out = False
     pump = asyncio.create_task(_pump())
     reading = asyncio.ensure_future(read_until_exit(proc, pump))
     try:
@@ -704,6 +759,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
                 spill_fh.close()
                 spill_fh = None
             # Nothing of a guest's is left running: past its time the command ends, in the cleanup below.
+            ran_out = guest
             job = None if guest else _keep_as_job(context, services, proc, command, workdir, sandboxed, _so_far(), started=started, kind=kind, label=label)
     finally:
         if not reading.done():
@@ -747,6 +803,8 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     header = f"exit_code={proc.returncode} elapsed={elapsed:.1f}s cwd={workdir}" + (" sandbox=workspace" if sandboxed else "")
     if not output_ended:
         body = (body + "\n" if body else "") + BACKGROUND_HOLDER_NOTE.format(group=proc.pid)
+    if ran_out:
+        body = (body + "\n" if body else "") + GUEST_RAN_OUT_NOTE.format(seconds=after)
     text = f"{header}\n{body}" if body else header
     if (proc.returncode or 0) != 0:
         return error(context, text, exit_code=proc.returncode)

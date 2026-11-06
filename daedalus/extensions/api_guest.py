@@ -54,6 +54,7 @@ DRAFT_PROMPT = (
 PRIVATE_KINDS = ("subagent_of", "staff_id", "unattended", "heartbeat")
 REFUSED_WORDS = {
     "host_folder": "this chat works in a folder on the host, where a guest's command cannot be sandboxed",
+    "no_limits": "the limits a guest's commands need cannot be set here",
     "no_sandbox": "the sandbox a guest's commands need cannot be made here",
     "project_folder": "this chat works in a project's folder, which other chats read as the operator's",
 }
