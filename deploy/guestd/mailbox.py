@@ -38,6 +38,8 @@ DIRECT_REPLY_SECONDS = 900.0
 PENDING_POLL_SECONDS = 300.0
 """How long a guest is told to wait for the owner in one go. The token stays good after that."""
 RETRY_SECONDS = 15
+MAX_POLLS = 2
+"""Reads one token may hold open at once. Each one is a connection a stranger gets to keep for 30 s."""
 
 CLOSED_WORDS = {
     "ended": "This conversation has ended.",
@@ -79,6 +81,7 @@ class Mailbox:
         self.public_base = public_base
         self.clock = clock
         self._wakers: dict[str, asyncio.Event] = {}
+        self._polling: dict[str, int] = {}
         self.queued = asyncio.Event()
         """Set when a guest message may be waiting for the stand-in."""
         self.changed = asyncio.Event()
@@ -192,6 +195,18 @@ class Mailbox:
         conversation = self.store.conversation_by_token(token)
         if conversation is None:
             return None
+        conversation_id = conversation["id"]
+        if self._polling.get(conversation_id, 0) >= MAX_POLLS:
+            return Answer(429, {"status": "busy", "stop_polling": False, "detail": "Another read is already waiting on this conversation."}, RETRY_SECONDS)
+        self._polling[conversation_id] = self._polling.get(conversation_id, 0) + 1
+        try:
+            return await self._read(conversation, after, wait)
+        finally:
+            self._polling[conversation_id] -= 1
+            if not self._polling[conversation_id]:
+                del self._polling[conversation_id]
+
+    async def _read(self, conversation: Any, after: int, wait: int) -> Answer:
         link = self.store.link(conversation["link_id"])
         assert link is not None
         conversation_id = conversation["id"]
@@ -202,9 +217,11 @@ class Mailbox:
             conversation = self.store.conversation(conversation_id)
             if conversation is None:
                 return Answer(410, {"status": "closed", "stop_polling": True, "detail": STOP})
-            if conversation["reason"] == "revoked":
-                # Before any unread reply: a revocation takes effect at once, on what is unread as well.
-                return self._closed_answer(conversation)
+            fresh = self.store.link(conversation["link_id"])
+            if fresh is None or fresh["state"] == REVOKED:
+                # Asked of the link, not of the conversation, whose reason may already be "ended", and
+                # before any unread reply: a revocation takes effect at once, on what is unread as well.
+                return Answer(410, {"status": "closed", "reason": "revoked", "stop_polling": True, "detail": f"{CLOSED_WORDS['revoked']} {STOP}"})
             replies = self.store.replies_after(conversation_id, after)
             if replies:
                 return self._delivered(conversation, replies)

@@ -50,6 +50,7 @@ from typing import Any
 import clients
 import httpx
 from aiohttp import web
+from multidict import CIMultiDict, CIMultiDictProxy
 from claude import (
     CLAUDE_API,
     CLAUDE_FALLBACK_MODELS,
@@ -1240,12 +1241,86 @@ async def handle(request: web.Request) -> web.StreamResponse:
     return out
 
 
+GUEST_PATH = re.compile(r"/([a-z0-9_]+)((?:/[a-z0-9.]+)*)/chat/completions")
+GUEST_MAX_BYTES = 256 * 1024
+GUEST_MAX_TOKENS = 4096
+GUEST_HEADERS = ("content-type", "accept")
+"""What of a guest door's request reaches the handler. Above all not ``x-daedalus-metered``: a call that says
+the host books it itself is not reported, and a door that could say so would spend without appearing."""
+GUEST_REFUSED_BODY = ("tools", "functions", "tool_choice", "n")
+
+
+def guest_upstreams() -> frozenset[str]:
+    """The upstreams a stand-in may use. Never a CLI login: a subscription is the operator's own, and it
+    is not theirs to hand a stranger's conversation."""
+    named = {name.strip().lower() for name in os.environ.get("KEYPROXY_GUEST_UPSTREAMS", "").split(",") if name.strip()}
+    return frozenset(named - set(CLI_LOGINS))
+
+
+def guest_refusal(path: str, method: str, body: bytes) -> str:
+    """Why this is not one stand-in's chat completion; empty when it is."""
+    matched = GUEST_PATH.fullmatch(path)
+    if method != "POST" or matched is None or matched.group(1) not in guest_upstreams():
+        return "only POST <allowed path>/chat/completions is served here"
+    if len(body) > GUEST_MAX_BYTES:
+        return "too large"
+    try:
+        request = json.loads(body)
+    except ValueError:
+        return "not JSON"
+    if not isinstance(request, dict) or request.get("stream") or any(key in request for key in GUEST_REFUSED_BODY):
+        return "a stand-in's call has no tools and does not stream"
+    bound = request.get("max_tokens", request.get("max_completion_tokens"))
+    if not isinstance(bound, int) or isinstance(bound, bool) or not 0 < bound <= GUEST_MAX_TOKENS:
+        return "a stand-in's call names a small max_tokens"
+    return ""
+
+
+async def handle_guest(request: web.Request) -> web.StreamResponse:
+    """The guest door's whole view of this proxy, on a socket of its own: one kind of call and nothing else.
+
+    On the main listener the door would hold every upstream, method and path with the keys injected,
+    the subscription routes included, and could skip the usage report. Its container has no network
+    and so cannot reach that listener at all.
+    """
+    # Cloned before the body is read: the clone keeps what it reads, and ``handle`` reads it again.
+    forwarded = request.clone(headers=CIMultiDictProxy(CIMultiDict((name, value) for name, value in request.headers.items() if name.lower() in GUEST_HEADERS)))
+    refused = guest_refusal(request.path, request.method, await forwarded.read())
+    if refused:
+        return web.json_response({"error": {"message": refused, "type": "guest_refused"}}, status=403)
+    return await handle(forwarded)
+
+
+async def start_guest_listener(app: web.Application) -> None:
+    path = os.environ.get("KEYPROXY_GUEST_SOCKET", "").strip()
+    if not path:
+        return
+    guest = web.Application(client_max_size=GUEST_MAX_BYTES + 1)
+    guest["client"] = app["client"]
+    guest.router.add_route("*", "/{upstream}/{rest:.*}", handle_guest)
+    runner = web.AppRunner(guest, access_log=None)
+    await runner.setup()
+    Path(path).unlink(missing_ok=True)
+    await web.UnixSite(runner, path).start()
+    # Whoever mounts the directory may connect, and only the door's container does.
+    os.chmod(path, 0o666)
+    app["guest_runner"] = runner
+
+
+async def stop_guest_listener(app: web.Application) -> None:
+    runner = app.get("guest_runner")
+    if runner is not None:
+        await runner.cleanup()
+
+
 async def health(_: web.Request) -> web.Response:
     return web.json_response({"ok": True, "upstreams": sorted(upstreams()), "subscriptions": subscriptions_status(), "budget_exceeded": budget_exceeded(), "spent_today_usd": round(spent_today(), 4) if budget_usd_per_day() > 0 else None})
 
 
 def make_app() -> web.Application:
     app = web.Application(client_max_size=64 * 1024 * 1024)
+    app.on_startup.append(start_guest_listener)
+    app.on_cleanup.append(stop_guest_listener)
     app["client"] = httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=30.0, pool=10.0), limits=httpx.Limits(max_connections=64, max_keepalive_connections=16), follow_redirects=False)
     app.router.add_get("/healthz", health)
     app.router.add_get("/keys", handle_keys)

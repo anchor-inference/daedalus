@@ -3,6 +3,9 @@
 A table of a few routes under ``/a/`` and nothing behind it. It imports no application, so there is no
 router to confuse and no path that could lead to the operator's API: the API is not in this process.
 
+It listens on a unix socket behind ``front.py``, which holds the published port and has already bounded the
+connection. ``CLIENT_HEADER`` is that process's word for who connected, and only it can reach this socket.
+
 Every answer is markdown or JSON with ``nosniff``, never HTML, and that includes the errors. A door that
 never serves a page cannot host a phishing page on the operator's name, whatever a guest sends it.
 """
@@ -43,6 +46,7 @@ HEADERS = {
 """On every answer. A link is private: nothing may cache it, index it, or carry it in a referrer."""
 
 MARKDOWN = "text/markdown; charset=utf-8"
+CLIENT_HEADER = b"x-guest-client"
 
 
 def as_json(answer: Answer) -> JSONResponse:
@@ -83,8 +87,7 @@ class PublicDoor:
     async def route(self, scope: Scope, receive: Receive) -> Response:
         path = scope.get("path", "")
         method = scope.get("method", "GET")
-        client = scope.get("client")
-        address = str(client[0]) if client else ""
+        address = visitor(scope)
         if path == "/robots.txt":
             return PlainTextResponse("User-agent: *\nDisallow: /\n", headers=HEADERS)
         if not path.startswith("/a/"):
@@ -94,17 +97,21 @@ class PublicDoor:
         matched = INVITE.match(path)
         if matched is None:
             return refused(404, "Nothing here.")
-        if self.failures.blocked(address):
-            return refused(429, "Too many failed attempts from this address.", 600)
         invite, redeem = matched.groups()
+        known = self.mailbox.store.link_by_invite(invite) is not None
+        if not known and self.failures.blocked(address):
+            return refused(429, "Too many failed attempts from this address.", 600)
+        # A real link is counted by the link: behind a proxy many guests share an address, and one
+        # visitor's knocking must not close it to the one it was given to.
+        key = invite if known else address
         if redeem:
-            return self.redeem(invite, method, address)
-        return self.page(invite, method, address)
+            return self.redeem(invite, method, address, key)
+        return self.page(invite, method, address, key)
 
-    def page(self, invite: str, method: str, address: str) -> Response:
+    def page(self, invite: str, method: str, address: str, key: str) -> Response:
         if method not in ("GET", "HEAD"):
             return refused(405, "This address is read with GET. Redeeming is POST to /redeem under it.")
-        if not self.pages.allow(address):
+        if not self.pages.allow(key):
             return refused(429, "Too many requests.", 60)
         found = self.mailbox.page(invite)
         if found is None:
@@ -113,10 +120,10 @@ class PublicDoor:
         status, text = found
         return Response(text, status_code=status, media_type=MARKDOWN, headers=HEADERS)
 
-    def redeem(self, invite: str, method: str, address: str) -> Response:
+    def redeem(self, invite: str, method: str, address: str, key: str) -> Response:
         if method != "POST":
             return refused(405, "Redeeming is a POST. A GET here spends nothing.")
-        if not self.pages.allow(address):
+        if not self.pages.allow(key):
             # Each refused redeem leaves a line for the owner: a loop must not be able to fill the record.
             return refused(429, "Too many requests.", 60)
         answer = self.mailbox.redeem(invite, address=address)
@@ -126,12 +133,16 @@ class PublicDoor:
         return as_json(answer)
 
     async def conversation(self, scope: Scope, receive: Receive, path: str, method: str, address: str) -> Response:
-        if self.failures.blocked(address):
-            return refused(429, "Too many failed attempts from this address.", 600)
         token = bearer(scope)
-        if not token:
+        if self.mailbox.store.conversation_by_token(token) is None:
+            # Looked up before the failures are, so a guest with a good token is never locked out by
+            # somebody else's guessing from the same address.
+            if self.failures.blocked(address):
+                return refused(429, "Too many failed attempts from this address.", 600)
             self.failures.failed(address)
-            return refused(401, "This needs the header Authorization: Bearer <token>, with the token the redeem returned.")
+            if not token:
+                return refused(401, "This needs the header Authorization: Bearer <token>, with the token the redeem returned.")
+            return refused(401, "That token is not valid here. Tokens are not recoverable: ask your user for a new link.")
         call = self.call_for(path, method, scope, token)
         if call is None:
             return refused(405, "Wrong method for this address.")
@@ -149,7 +160,6 @@ class PublicDoor:
                 return refused(400, 'Send JSON with one field: {"text": "your message"}.')
         answer = await run(body)
         if answer is None:
-            self.failures.failed(address)
             return refused(401, "That token is not valid here. Tokens are not recoverable: ask your user for a new link.")
         return as_json(answer)
 
@@ -180,6 +190,15 @@ class PublicDoor:
         return None
 
 
+def visitor(scope: Scope) -> str:
+    """Who is asking: what the front says, or, for a client with no front (a test), the peer."""
+    for name, value in scope.get("headers", ()):
+        if name == CLIENT_HEADER:
+            return value.decode("latin-1")
+    client = scope.get("client")
+    return str(client[0]) if client else ""
+
+
 def bearer(scope: Scope) -> str:
     for name, value in scope.get("headers", ()):
         if name == b"authorization":
@@ -189,10 +208,12 @@ def bearer(scope: Scope) -> str:
 
 
 def number(values: list[str] | None, default: int) -> int:
+    """A query number. Past SQLite's 64 bits it is nobody's cursor, and treated as absent rather than a 500."""
     try:
-        return max(0, int(values[0])) if values else default
+        value = max(0, int(values[0])) if values else default
     except ValueError:
         return default
+    return value if value < 2**63 else default
 
 
 async def read_body(receive: Receive) -> bytes | None:
@@ -209,4 +230,4 @@ async def read_body(receive: Receive) -> bytes | None:
             return bytes(body)
 
 
-__all__ = ["HEADERS", "INVITE", "MAX_BODY", "PublicDoor"]
+__all__ = ["CLIENT_HEADER", "HEADERS", "INVITE", "MAX_BODY", "PublicDoor", "visitor"]

@@ -189,8 +189,14 @@ COPY --from=browserd /out/browserd /usr/local/bin/browserd
 # container comes first. Root in the agent's container reads it all the same. The same for the
 # daemon of the operator's Chrome (the browser-user service) and its state.
 RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-browser /run/daedalus-browser-user /var/lib/browserd-user
-# The guest door's two volumes, for the same reason: its service runs as that user and may be second.
-RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-guest /var/lib/guestd
+# The guest door's volumes, for the same reason. It runs as a user of its own, and so does the front:
+# the browser's uid is on another volume, and a socket's owner is how the agent tells who answers it.
+# The token's directory is root's and the door only reads it; the front reaches the door's public
+# socket, and the key proxy, under whatever uid the operator gives it, writes its guest socket.
+RUN install -d -m 0700 -o 1002 -g 1002 /run/daedalus-guest /var/lib/guestd \
+    && install -d -m 0755 -o 1002 -g 1002 /run/daedalus-guest-front \
+    && install -d -m 0750 -o 0 -g 1002 /run/daedalus-guest-token \
+    && install -d -m 0777 /run/keyproxy-guest
 # The bot and the core are mounted, not installed: pointing the interpreter at the mounted checkouts
 # is what an editable install would have written anyway, and it needs no sync at the first start.
 RUN printf '%s\n' /srv/daedalus /srv/protocore-exp > /srv/venv/lib/python3.12/site-packages/_daedalus_checkouts.pth

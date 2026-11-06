@@ -14,8 +14,9 @@ from collections.abc import Callable
 class Failures:
     """Failed attempts per address and overall, like the app's own public doors.
 
-    Past either bound every attempt is refused until the window moves on, the right one included.
-    Only failures count, so a guest with a good token is never held by another guest's guessing.
+    Past either bound an attempt with a bad credential is refused without being looked at any further.
+    A good invite or token is never held: the credential is looked up first, because behind a proxy many
+    guests can share one address, and a stranger's guessing must not lock out the guest the link is for.
     """
 
     def __init__(self, *, per_address: int = 10, overall: int = 200, window: float = 600.0, clock: Callable[[], float] = time.monotonic) -> None:

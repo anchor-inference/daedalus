@@ -16,7 +16,6 @@ from typing import Any
 import guestd
 import httpx
 import pytest
-from guestd.__main__ import public_config
 from guestd.control import ControlDoor, link_fields
 from guestd.limits import Failures, Rate
 from guestd.mailbox import DIRECT_REPLY_SECONDS, MAX_TEXT, MAX_WAIT_SECONDS, STAND_IN_REPLY_SECONDS, Mailbox
@@ -211,7 +210,7 @@ def test_an_unknown_invite_counts_against_the_address_and_a_good_guest_is_not_he
     _, invite = rig.link()
     for _ in range(3):
         assert rig.public.get("/a/" + "x" * 43).status_code == 404
-    assert rig.public.post(f"/a/{invite}/redeem").status_code == 429, "past the bound every attempt waits, the right one included"
+    assert rig.public.post(f"/a/{invite}/redeem").status_code == 201, "a stranger's guessing does not lock out the guest the link is for"
     assert rig.public.get("/a/" + "x" * 43).headers["retry-after"] == "600"
     rig.store.close()
 
@@ -222,32 +221,6 @@ def test_a_bad_token_counts_against_the_address(tmp_path: Path) -> None:
     assert rig.public.get("/a/messages?wait=0").status_code == 401
     assert rig.read("nope").status_code == 429
     rig.store.close()
-
-
-def test_the_per_address_limits_see_the_address_the_trusted_proxy_names() -> None:
-    """Through uvicorn's own wrapper, as the door is served: only the named peer may name a visitor."""
-    seen: list[Any] = []
-
-    async def app(scope: Any, receive: Any, send: Any) -> None:
-        seen.append(scope["client"][0])
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b""})
-
-    async def through(config: Any, peer: str) -> str:
-        config.load()
-        transport = httpx.ASGITransport(config.loaded_app, client=(peer, 40000))
-        async with httpx.AsyncClient(transport=transport, base_url="http://door") as client:
-            await client.get("/", headers={"X-Forwarded-For": "203.0.113.9"})
-        return seen[-1]
-
-    import asyncio
-
-    untrusted = public_config(app, host="127.0.0.1", port=1, trusted_proxies="")  # type: ignore[arg-type]
-    assert untrusted.proxy_headers is False and untrusted.access_log is False
-    assert asyncio.run(through(untrusted, "127.0.0.1")) == "127.0.0.1", "loopback is believed by uvicorn's default, and must not be here"
-    trusted = public_config(app, host="127.0.0.1", port=1, trusted_proxies="192.0.2.1")  # type: ignore[arg-type]
-    assert asyncio.run(through(trusted, "192.0.2.1")) == "203.0.113.9"
-    assert asyncio.run(through(public_config(app, host="127.0.0.1", port=1, trusted_proxies="192.0.2.1"), "198.51.100.7")) == "198.51.100.7"  # type: ignore[arg-type]
 
 
 # -- first contact --------------------------------------------------------------------------------
@@ -468,10 +441,10 @@ async def test_the_key_proxy_call_sends_no_credential_and_counts_tokens() -> Non
         seen.append(request)
         return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}], "usage": {"prompt_tokens": 10, "completion_tokens": 3}})
 
-    caller = KeyProxyCaller("http://keyproxy:3200", httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    caller = KeyProxyCaller("guest.sock", httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     reply = await caller({"model_path": "deepseek/v1"}, {"model": "m", "messages": [], "max_tokens": 5})
     assert reply == ModelReply("hi", 10, 3)
-    assert str(seen[0].url) == "http://keyproxy:3200/deepseek/v1/chat/completions"
+    assert str(seen[0].url) == "http://keyproxy/deepseek/v1/chat/completions"
     assert "authorization" not in seen[0].headers
 
 
@@ -484,15 +457,16 @@ async def test_a_model_that_wants_the_newer_bound_name_gets_it() -> None:
             return httpx.Response(400, text="use max_completion_tokens instead")
         return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
 
-    caller = KeyProxyCaller("http://keyproxy:3200", httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    caller = KeyProxyCaller("guest.sock", httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     assert (await caller({"model_path": "x"}, {"model": "m", "messages": [], "max_tokens": 5})).text == "hi"
     assert bodies[-1]["max_completion_tokens"] == 5 and "max_tokens" not in bodies[-1]
 
 
 async def test_a_refused_call_is_a_failure_not_an_answer() -> None:
-    caller = KeyProxyCaller("http://keyproxy:3200", httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(402, json={"error": {}}))))
-    with pytest.raises(ModelFailed):
+    caller = KeyProxyCaller("guest.sock", httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(402, json={"error": {}}))))
+    with pytest.raises(ModelFailed) as failed:
         await caller({"model_path": "x"}, {"model": "m", "messages": [], "max_tokens": 5})
+    assert failed.value.spent is False, "refused outright: nothing was billed"
 
 
 async def test_a_failed_turn_costs_nothing_and_the_guest_is_told(rig: Rig) -> None:
@@ -502,7 +476,7 @@ async def test_a_failed_turn_costs_nothing_and_the_guest_is_told(rig: Rig) -> No
     rig.say(token, "port?")
     await rig.turn()
     link = rig.store.link(link_id)
-    assert link["spent_usd"] == 0 and link["reserved_usd"] == 0 and link["turns_used"] == 0
+    assert link["spent_usd"] > 0 and link["reserved_usd"] == 0 and link["turns_used"] == 1, "a call that never came back may have been billed"
     message = rig.read(token).json()["messages"][0]
     assert message["from"] == "door" and "could not answer" in message["text"]
 
@@ -684,42 +658,34 @@ def test_the_door_imports_nothing_of_the_host() -> None:
     assert done.returncode == 0, done.stderr
 
 
-async def test_the_real_process_serves_both_listeners_and_a_conversation_crosses(tmp_path: Path) -> None:
-    """``python -m guestd`` as a container runs it: the package alone, a socket, a loopback port."""
+async def test_the_real_process_serves_both_sockets_and_a_conversation_crosses(tmp_path: Path) -> None:
+    """``python -m guestd`` as a container runs it: the package alone, and nothing but unix sockets."""
     import asyncio
     import os
-    import socket
 
-    state, run = tmp_path / "state", tmp_path / "run"
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    env = {"PATH": "/usr/bin", "PYTHONPATH": str(PACKAGE.parent), "GUEST_STATE_DIR": str(state), "GUEST_RUN_DIR": str(run), "GUEST_DOOR_PORT": str(port), "GUEST_HOST": "127.0.0.1"}
+    state, run, front, token_dir = tmp_path / "state", tmp_path / "run", tmp_path / "front", tmp_path / "token"
+    token_dir.mkdir()
+    (token_dir / "control.token").write_text("host-token")
+    env = {"PATH": "/usr/bin", "PYTHONPATH": str(PACKAGE.parent), "GUEST_STATE_DIR": str(state), "GUEST_RUN_DIR": str(run), "GUEST_FRONT_DIR": str(front), "GUEST_TOKEN_DIR": str(token_dir)}
     door = subprocess.Popen([sys.executable, "-m", "guestd"], cwd=PACKAGE.parent, env=env)
     try:
         for _ in range(200):
-            if (run / "control.sock").exists() and (run / "control.token").exists():
+            if (run / "control.sock").exists() and (front / "public.sock").exists():
                 break
             await asyncio.sleep(0.02)
-        token = (run / "control.token").read_text()
-        assert os.stat(run / "control.token").st_mode & 0o077 == 0 and os.stat(run / "control.sock").st_mode & 0o077 == 0
+        assert os.stat(run / "control.sock").st_mode & 0o077 == 0
         transport = httpx.AsyncHTTPTransport(uds=str(run / "control.sock"))
-        async with httpx.AsyncClient(transport=transport, base_url="http://door", headers={"authorization": f"Bearer {token}"}) as control:
-            await control.put("/control/settings", json={"public_base": f"http://127.0.0.1:{port}"})
+        async with httpx.AsyncClient(transport=transport, base_url="http://door", headers={"authorization": "Bearer host-token"}) as control:
+            await control.put("/control/settings", json={"public_base": "http://door.example.test"})
             fields = {
                 "label": "a", "topic": "b", "mode": "direct", "briefing": "", "model_path": "", "model_name": "", "guest_tools": "read", "price_in": 0, "price_out": 0, "approval": False,
                 "usd_limit": 1, "turns_per_day": 1, "turns_total": 1, "invite_hours": 1, "conversation_hours": 1, "idle_hours": 1, "retention_days": 1,
             }
             invite = (await control.post("/control/links", json=fields)).json()["invite"]
-            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as public:
-                for _ in range(100):
-                    try:
-                        page = await public.get(f"/a/{invite}")
-                        break
-                    except httpx.TransportError:
-                        await asyncio.sleep(0.05)
-                assert page.status_code == 200 and f"http://127.0.0.1:{port}/a/{invite}/redeem" in page.text
-                assert (await public.get("/control/health", headers={"authorization": f"Bearer {token}"})).status_code == 404
+            async with httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(uds=str(front / "public.sock")), base_url="http://door") as public:
+                page = await public.get(f"/a/{invite}", headers={"x-guest-client": "192.0.2.5"})
+                assert page.status_code == 200 and f"http://door.example.test/a/{invite}/redeem" in page.text
+                assert (await public.get("/control/health", headers={"authorization": "Bearer host-token"})).status_code == 404
                 guest = (await public.post(f"/a/{invite}/redeem")).json()["token"]
                 await public.post("/a/messages", json={"text": "hello"}, headers={"authorization": f"Bearer {guest}"})
                 feed = (await control.get("/control/feed?after=0&wait=2")).json()
@@ -735,6 +701,31 @@ async def test_the_real_process_serves_both_listeners_and_a_conversation_crosses
 def test_the_host_answers_for_everything_the_door_cannot_be_told() -> None:
     source = (PACKAGE / "control.py").read_text()
     assert "session_id" not in source, "the door does not know which chat a link belongs to"
+
+
+def test_the_door_stands_on_no_network_and_the_key_proxy_on_none_of_its() -> None:
+    """Read from the compose file: what the door can reach is decided there, and nowhere else."""
+    import yaml
+
+    compose = yaml.safe_load((PACKAGE.parents[1] / "deploy" / "compose.yaml").read_text())
+    services = compose["services"]
+    door, front = services["guest"], services["guest-front"]
+    assert door["network_mode"] == "none" and "ports" not in door and "networks" not in door
+    assert door["read_only"] is True and door["cap_drop"] == ["ALL"] and front["read_only"] is True and front["cap_drop"] == ["ALL"]
+    assert door["user"] != front["user"] and "1001" not in door["user"], "the socket's owner is how the host tells who answers it"
+    assert front["networks"] == ["guest"] and front["ports"]
+    assert services["keyproxy"]["networks"] == ["keys"] and "guest" not in services["daedalus"]["networks"]
+    assert not any(str(volume).startswith(("daedalus-state", "..", "/")) for volume in door["volumes"])
+    assert "guest-token:/run/daedalus-guest-token:ro" in door["volumes"], "the token is the host's: the door only reads it"
+    assert "guest-front:/run/daedalus-guest-front:ro" in front["volumes"]
+    assert "guest-model:/run/keyproxy-guest:ro" in door["volumes"]
+
+
+def test_the_public_listener_is_not_told_to_believe_anyones_forwarded_headers(rig: Rig) -> None:
+    from guestd.__main__ import public_config
+
+    config = public_config(PublicDoor(rig.mailbox))
+    assert config.proxy_headers is False and config.access_log is False and config.forwarded_allow_ips == ""
 
 
 # -- the control socket -------------------------------------------------------------------------------
@@ -766,10 +757,12 @@ def test_a_direct_guests_message_is_handed_out_once_and_only_its_reply_comes_bac
     rig.say(token, "port?")
     feed = rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()
     assert [d["text"] for d in feed["deliveries"]] == ["port?"]
-    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd", "label"}
-    assert feed["deliveries"][0]["allowance_usd"] == 1.0
-    assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == []
+    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd"}
+    assert feed["deliveries"][0]["allowance_usd"] == 0.25
     message = feed["deliveries"][0]["message_id"]
+    assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == feed["deliveries"], "offered again until it is acknowledged"
+    assert rig.control.post(f"/control/deliveries/{message}/ack", headers=CONTROL).status_code == 200
+    assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == []
     assert rig.control.post(f"/control/deliveries/{message}/reply", json={"ok": True, "text": "8080", "cost_usd": 0.25}, headers=CONTROL).status_code == 200
     assert rig.read(token).json()["messages"][0]["text"] == "8080"
     assert rig.store.link(link_id)["spent_usd"] == 0.25
@@ -783,6 +776,7 @@ def test_a_direct_guest_waits_in_line_one_turn_at_a_time(rig: Rig) -> None:
     rig.say(token, "two")
     first = rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"]
     assert [d["text"] for d in first] == ["one"]
+    rig.control.post(f"/control/deliveries/{first[0]['message_id']}/ack", headers=CONTROL)
     rig.control.post(f"/control/deliveries/{first[0]['message_id']}/reply", json={"ok": True, "text": "1"}, headers=CONTROL)
     assert [d["text"] for d in rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"]] == ["two"]
 
@@ -798,9 +792,9 @@ def test_a_direct_link_out_of_money_is_not_handed_to_the_host(rig: Rig) -> None:
 
 def test_the_allowance_of_a_direct_turn_is_what_is_left_of_both_limits(rig: Rig) -> None:
     link_id, invite = direct_link(rig, usd_limit=1.0)
-    rig.control.put("/control/settings", json={"usd_per_day": 0.25}, headers=CONTROL)
+    rig.control.put("/control/settings", json={"usd_per_day": 0.1}, headers=CONTROL)
     rig.say(rig.redeem(invite), "port?")
-    assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"][0]["allowance_usd"] == 0.25
+    assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"][0]["allowance_usd"] == 0.1
 
 
 def test_a_restart_of_the_host_fails_what_it_was_doing_and_does_not_run_it_twice(rig: Rig) -> None:
@@ -811,7 +805,8 @@ def test_a_restart_of_the_host_fails_what_it_was_doing_and_does_not_run_it_twice
     assert rig.control.post("/control/deliveries/reset", headers=CONTROL).json()["reset"] == 1
     assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == []
     assert rig.read(token).json()["messages"][0]["from"] == "door"
-    assert rig.store.link(link_id)["turns_used"] == 0
+    link = rig.store.link(link_id)
+    assert link["turns_used"] == 1 and link["reserved_usd"] == 0, "it may have run: it stays counted, at what was put aside"
 
 
 def test_a_turn_stopped_by_revocation_still_books_what_it_spent(rig: Rig) -> None:

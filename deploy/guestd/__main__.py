@@ -1,4 +1,9 @@
-"""``python -m guestd``: the two listeners, the stand-in and the clock, in one process."""
+"""``python -m guestd``: the two sockets, the stand-in and the clock, in one process with no network.
+
+Nothing here listens on a network. Strangers arrive through ``front.py`` over one unix socket, the host
+dials the other, and the key proxy's guest listener is a third. The container runs with no network
+at all, so what this process could reach if it were taken over is those three sockets.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +11,10 @@ import asyncio
 import contextlib
 import logging
 import os
-import secrets
 import signal
 import socket
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -24,8 +29,11 @@ from .store import Store
 logger = logging.getLogger("guestd")
 
 SWEEP_SECONDS = 60.0
-SOCKET_NAME = "control.sock"
+CONTROL_SOCKET = "control.sock"
+PUBLIC_SOCKET = "public.sock"
 TOKEN_NAME = "control.token"
+TOKEN_MAX_BYTES = 256
+TOKEN_POLL_SECONDS = 1.0
 
 
 class Server(uvicorn.Server):
@@ -36,40 +44,30 @@ class Server(uvicorn.Server):
         yield
 
 
-def public_config(app: PublicDoor, *, host: str, port: int, trusted_proxies: str) -> uvicorn.Config:
-    """The public server's settings. Who may name a visitor's address is spelled out, as on the API.
-
-    uvicorn's defaults believe ``X-Forwarded-For`` from loopback, which would let any visitor behind a
-    local tunnel client name their own address to the attempt limits, and would believe nobody behind
-    a proxy reached through Docker's gateway, putting every visitor in one bucket. ``forwarded_allow_ips``
-    is passed even when off, or uvicorn reads it from the environment. The access log stays off:
-    every invite is in a path.
-    """
-    trusted = trusted_proxies.strip()
-    return uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False, lifespan="off", proxy_headers=bool(trusted), forwarded_allow_ips=trusted, limit_concurrency=64)
+def public_config(app: PublicDoor) -> uvicorn.Config:
+    """The access log stays off: every invite is in a path."""
+    return uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off", proxy_headers=False, forwarded_allow_ips="")
 
 
-def control_token(run_dir: Path) -> str:
-    """The token the host reads from the shared run directory; made once, readable by no one else."""
-    path = run_dir / TOKEN_NAME
-    with contextlib.suppress(FileNotFoundError):
-        existing = path.read_text().strip()
-        if existing:
-            return existing
-    token = secrets.token_urlsafe(32)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w") as file:
-        file.write(token)
-    return token
+def host_token(token_dir: Path, *, wait: bool = True) -> str:
+    """The token the host wrote. This process only reads it, and may start before the host has."""
+    path = token_dir / TOKEN_NAME
+    while True:
+        with contextlib.suppress(FileNotFoundError):
+            token = path.read_bytes()[:TOKEN_MAX_BYTES].decode("ascii", "replace").strip()
+            if token:
+                return token
+        if not wait:
+            raise FileNotFoundError(path)
+        time.sleep(TOKEN_POLL_SECONDS)
 
 
-def control_socket(run_dir: Path) -> socket.socket:
-    path = run_dir / SOCKET_NAME
+def listener(path: Path, mode: int) -> socket.socket:
     path.unlink(missing_ok=True)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.bind(str(path))
-    os.chmod(path, 0o600)
-    sock.listen(16)
+    os.chmod(path, mode)
+    sock.listen(64)
     return sock
 
 
@@ -86,16 +84,17 @@ async def sweep(store: Store, mailbox: Mailbox) -> None:
 async def main() -> None:
     state_dir = Path(os.environ.get("GUEST_STATE_DIR", "/var/lib/guestd"))
     run_dir = Path(os.environ.get("GUEST_RUN_DIR", "/run/daedalus-guest"))
-    state_dir.mkdir(parents=True, exist_ok=True)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    front_dir = Path(os.environ.get("GUEST_FRONT_DIR", "/run/daedalus-guest-front"))
+    token_dir = Path(os.environ.get("GUEST_TOKEN_DIR", "/run/daedalus-guest-token"))
+    for directory in (state_dir, run_dir, front_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    token = await asyncio.to_thread(host_token, token_dir)
     store = Store(state_dir / "guest.sqlite")
     mailbox = Mailbox(store, public_base=lambda: store.setting("public_base"))
-    stand_in = StandIn(store, mailbox, KeyProxyCaller(os.environ.get("GUEST_MODEL_BASE", "")))
-    public = Server(public_config(
-        PublicDoor(mailbox), host=os.environ.get("GUEST_HOST", "0.0.0.0"), port=int(os.environ.get("GUEST_DOOR_PORT", "8764")),
-        trusted_proxies=os.environ.get("GUEST_TRUSTED_PROXIES", ""),
-    ))
-    control = Server(uvicorn.Config(ControlDoor(store, mailbox, control_token(run_dir)), log_level="warning", access_log=False, lifespan="off"))
+    stand_in = StandIn(store, mailbox, KeyProxyCaller(os.environ.get("GUEST_MODEL_SOCKET", "")))
+    stand_in.recover()
+    public = Server(public_config(PublicDoor(mailbox)))
+    control = Server(uvicorn.Config(ControlDoor(store, mailbox, token), log_level="warning", access_log=False, lifespan="off"))
     loop = asyncio.get_running_loop()
 
     def stop() -> None:
@@ -106,14 +105,17 @@ async def main() -> None:
         loop.add_signal_handler(signum, stop)
     background = [asyncio.create_task(stand_in.serve(), name="stand-in"), asyncio.create_task(sweep(store, mailbox), name="sweep")]
     try:
-        await asyncio.gather(public.serve(), control.serve(sockets=[control_socket(run_dir)]))
+        # The socket the front reaches is open to anyone who can see it, and only the front can: no other
+        # container mounts its volume. The control socket needs the host's token as well.
+        await asyncio.gather(public.serve(sockets=[listener(front_dir / PUBLIC_SOCKET, 0o666)]), control.serve(sockets=[listener(run_dir / CONTROL_SOCKET, 0o600)]))
     finally:
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
         store.close()
-        with contextlib.suppress(OSError):
-            (run_dir / SOCKET_NAME).unlink()
+        for path in (run_dir / CONTROL_SOCKET, front_dir / PUBLIC_SOCKET):
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 if __name__ == "__main__":

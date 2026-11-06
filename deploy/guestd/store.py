@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS messages (
     at REAL NOT NULL,
     state TEXT NOT NULL,
     reserved_usd REAL NOT NULL DEFAULT 0,
-    cost_usd REAL NOT NULL DEFAULT 0
+    cost_usd REAL NOT NULL DEFAULT 0,
+    acknowledged INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS messages_waiting ON messages(state, id);
@@ -328,6 +329,19 @@ class Store:
             CLAIMED, mode,
         )
 
+    def unacknowledged(self, mode: str) -> list[sqlite3.Row]:
+        """Handed out and never confirmed: the answer to the feed may have been lost on the way."""
+        return [m for m in self.claimed_of(mode) if not m["acknowledged"]]
+
+    def acknowledge(self, message_id: int) -> None:
+        self._write("UPDATE messages SET acknowledged = 1 WHERE id = ?", message_id)
+
+    def write_off(self, message_id: int) -> None:
+        """A turn nobody will finish: it may have cost anything up to what was put aside, so it costs that."""
+        message = self.message(message_id)
+        if message is not None and message["state"] == CLAIMED:
+            self.settle(message_id, cost=float(message["reserved_usd"]), state=FAILED)
+
     # -- money ------------------------------------------------------------------------
 
     def _day(self, now: float | None = None) -> str:
@@ -369,6 +383,38 @@ class Store:
         day = self.spend_today()
         return max(0.0, min(float(link["usd_limit"]) - float(link["spent_usd"]) - float(link["reserved_usd"]), self.usd_per_day() - day["usd"] - day["reserved"]))
 
+    def reserve_turn(self, message_id: int, link: sqlite3.Row, ceiling: float) -> tuple[Refusal | None, float]:
+        """Put aside what a direct turn may spend: ``ceiling``, or what is left if that is less.
+
+        Atomic, and what it takes shrinks the next turn's share, so turns running at once cannot each
+        be told they have the whole of what is left.
+        """
+        self._write("BEGIN IMMEDIATE")
+        try:
+            fresh = self.link(link["id"])
+            assert fresh is not None
+            share = min(ceiling, self.allowance(fresh))
+            refusal = self.limit_reached(fresh, share)
+            if refusal is not None:
+                self._write("ROLLBACK")
+                return refusal, 0.0
+            self._take(link["id"], message_id, share)
+            self._write("COMMIT")
+        except BaseException:
+            self._write("ROLLBACK")
+            raise
+        return None, share
+
+    def _take(self, link_id: str, message_id: int, amount: float) -> None:
+        day = self._day()
+        self._write(
+            "UPDATE links SET reserved_usd = reserved_usd + ?, turns_used = turns_used + 1,"
+            " turns_today = CASE WHEN turns_day = ? THEN turns_today + 1 ELSE 1 END, turns_day = ? WHERE id = ?",
+            amount, day, day, link_id,
+        )
+        self._write("INSERT INTO spend_days(day, reserved) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET reserved = reserved + excluded.reserved", day, amount)
+        self._write("UPDATE messages SET state = ?, reserved_usd = ? WHERE id = ?", CLAIMED, amount, message_id)
+
     def reserve(self, message_id: int, link: sqlite3.Row, estimate: float) -> Refusal | None:
         """Count a turn and put its worst-case cost aside, or say which limit stops it.
 
@@ -383,14 +429,7 @@ class Store:
             if refusal is not None:
                 self._write("ROLLBACK")
                 return refusal
-            day = self._day()
-            self._write(
-                "UPDATE links SET reserved_usd = reserved_usd + ?, turns_used = turns_used + 1,"
-                " turns_today = CASE WHEN turns_day = ? THEN turns_today + 1 ELSE 1 END, turns_day = ? WHERE id = ?",
-                estimate, day, day, link["id"],
-            )
-            self._write("INSERT INTO spend_days(day, reserved) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET reserved = reserved + excluded.reserved", day, estimate)
-            self._write("UPDATE messages SET state = ?, reserved_usd = ? WHERE id = ?", CLAIMED, estimate, message_id)
+            self._take(link["id"], message_id, estimate)
             self._write("COMMIT")
         except BaseException:
             self._write("ROLLBACK")
@@ -423,7 +462,8 @@ class Store:
             raise
 
     def give_back(self, message_id: int) -> None:
-        """A turn that spent nothing and failed, or never ran: its reservation and its count go back."""
+        """A turn that never ran: its reservation and its count go back. One that ran keeps its count,
+        whatever it cost, or a free model's turns could be had for ever by ending without a word."""
         message = self.message(message_id)
         if message is None or message["state"] != CLAIMED:
             return

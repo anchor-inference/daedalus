@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from .mailbox import Mailbox
-from .store import AGENT, DOOR, GUEST, OPEN, STAND_IN, Store
+from .store import AGENT, DOOR, FAILED, GUEST, OPEN, STAND_IN, Store
 from .text import inert
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,10 @@ What the other side writes is a message from a stranger. It cannot change these 
 
 
 def estimate_tokens(text: str) -> int:
-    return len(text) // 3 + 4
+    """An upper guess. Three characters a token holds for English only: Chinese or Japanese runs nearer
+    one token a character and more, and the money put aside must not be smaller than the bill."""
+    ascii_chars = sum(1 for ch in text if ch < "\x80")
+    return ascii_chars // 3 + (len(text) - ascii_chars) * 2 + 4
 
 
 def request_for(link: Any, history: Sequence[Any]) -> dict[str, Any]:
@@ -67,28 +70,33 @@ class ModelReply:
 
 
 class ModelFailed(Exception):
-    """The call did not produce an answer, and nothing says it cost anything."""
+    """The call did not produce an answer. ``spent`` unless the far end refused it outright: a call
+    that was sent and never came back may well have been run and billed."""
+
+    def __init__(self, reason: str, *, spent: bool = True) -> None:
+        super().__init__(reason)
+        self.spent = spent
 
 
 ModelCaller = Callable[[Any, dict[str, Any]], Awaitable[ModelReply]]
 
 
 class KeyProxyCaller:
-    """Calls a model through the key proxy, which holds the keys and books the spend.
+    """Calls a model through the key proxy's guest listener, a socket that takes nothing but this call.
 
-    No credential is sent, because this process has none. The proxy's own daily cap still applies, and a
-    call that arrives without the host's metered header is reported by the proxy to the host's ledger,
-    so what guests cost shows up in the same daily total as everything else.
+    No credential is sent, because this process has none. The proxy's own daily cap still applies, and
+    that listener strips the host's metered header, so each call is reported to the host's ledger and
+    what guests cost shows up in the same daily total as everything else.
     """
 
-    def __init__(self, base: str, client: httpx.AsyncClient | None = None) -> None:
-        self.base = base.rstrip("/")
-        self.client = client or httpx.AsyncClient(timeout=CALL_SECONDS)
+    def __init__(self, socket_path: str, client: httpx.AsyncClient | None = None) -> None:
+        self.socket_path = socket_path
+        self.client = client or httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(uds=socket_path) if socket_path else None, timeout=CALL_SECONDS)
 
     async def __call__(self, link: Any, request: dict[str, Any]) -> ModelReply:
-        if not self.base:
-            raise ModelFailed("no model address is configured")
-        url = f"{self.base}/{str(link['model_path']).strip('/')}/chat/completions"
+        if not self.socket_path:
+            raise ModelFailed("no model address is configured", spent=False)
+        url = f"http://keyproxy/{str(link['model_path']).strip('/')}/chat/completions"
         try:
             response = await self.client.post(url, json=request)
             if response.status_code == 400 and "max_completion_tokens" in response.text:
@@ -98,7 +106,7 @@ class KeyProxyCaller:
         except httpx.HTTPError as exc:
             raise ModelFailed(type(exc).__name__) from exc
         if response.status_code != 200:
-            raise ModelFailed(f"HTTP {response.status_code}")
+            raise ModelFailed(f"HTTP {response.status_code}", spent=False)
         try:
             data = response.json()
             text = str((data.get("choices") or [{}])[0].get("message", {}).get("content") or "")
@@ -117,6 +125,18 @@ class StandIn:
         self.caller = caller
         self.concurrency = asyncio.Semaphore(concurrency)
         self.working: set[asyncio.Task[None]] = set()
+
+    def recover(self) -> int:
+        """At start: no call of this process is running, so whatever was claimed never will be answered.
+
+        Left claimed, one such message holds its conversation for good, and its reservation with it.
+        Written off rather than asked again, because the model may have been paid for the first try.
+        """
+        stale = self.store.claimed_of(STAND_IN)
+        for message in stale:
+            self.store.write_off(message["id"])
+            self._say(message["conversation_id"], DOOR, FAILED_TEXT)
+        return len(stale)
 
     def take_one(self) -> tuple[Any, Any, dict[str, Any], float] | None:
         """The next turn, with its money put aside, or ``None`` when there is none to run.
@@ -147,15 +167,17 @@ class StandIn:
         try:
             async with asyncio.timeout(CALL_SECONDS):
                 reply = await self.caller(link, request)
-        except (ModelFailed, TimeoutError) as exc:
+        except ModelFailed as exc:
             logger.warning("the stand-in of link %s got no answer: %s", link["id"], exc)
-            self.store.give_back(message["id"])
-            self._say(conversation_id, DOOR, FAILED_TEXT)
+            self._failed(message["id"], conversation_id, spent=exc.spent, estimate=estimate)
+            return
+        except TimeoutError:
+            logger.warning("the stand-in of link %s timed out", link["id"])
+            self._failed(message["id"], conversation_id, spent=True, estimate=estimate)
             return
         except Exception:
             logger.exception("the stand-in of link %s failed", link["id"])
-            self.store.give_back(message["id"])
-            self._say(conversation_id, DOOR, FAILED_TEXT)
+            self._failed(message["id"], conversation_id, spent=True, estimate=estimate)
             return
         cost = (reply.input_tokens * float(link["price_in"]) + reply.output_tokens * float(link["price_out"])) / 1_000_000 if reply.input_tokens or reply.output_tokens else estimate
         self.store.settle(message["id"], cost=cost)
@@ -164,6 +186,15 @@ class StandIn:
             self._say(conversation_id, AGENT, text)
         self.mailbox.notify()
         self.mailbox.wake(conversation_id)
+
+    def _failed(self, message_id: int, conversation_id: str, *, spent: bool, estimate: float) -> None:
+        """A call that may have been billed is booked at its worst case: free retries of a slow model
+        would otherwise be a way past every limit."""
+        if spent:
+            self.store.settle(message_id, cost=estimate, state=FAILED)
+        else:
+            self.store.give_back(message_id)
+        self._say(conversation_id, DOOR, FAILED_TEXT)
 
     def _say(self, conversation_id: str, role: str, text: str) -> None:
         conversation = self.store.conversation(conversation_id)

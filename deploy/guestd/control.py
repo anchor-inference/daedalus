@@ -6,6 +6,9 @@ for a direct link is one thing in each direction: a guest's words out through ``
 words back through ``reply``. The session a link belongs to and the tools a turn may use are not here
 to be changed; they are in the host's database and this process never hears them.
 
+The token that opens this socket is the host's: the host writes it into a directory this process can only
+read, so nothing here can turn the host's own reading of it against the host.
+
 On a listener of its own and in an application of its own, so no request to the public port can name a
 route here: there is no such route over there.
 """
@@ -26,7 +29,7 @@ from starlette.responses import JSONResponse
 from .mailbox import Mailbox
 from .public import read_body
 from .standin import FAILED_TEXT
-from .store import AGENT, CLOSED, DIRECT, DOOR, HELD, OPEN, PENDING, QUEUED, Refusal, Store
+from .store import AGENT, ANSWERED, CLOSED, DIRECT, DOOR, FAILED, HELD, OPEN, PENDING, QUEUED, Store
 from .text import inert, one_line
 
 if TYPE_CHECKING:
@@ -38,6 +41,9 @@ FEED_WAIT_SECONDS = 25
 REPLY_MAX_CHARS = 16_000
 """A direct turn can write far more than anyone's agent wants to read through a poll."""
 INTERRUPTED_TEXT = "The other agent was interrupted and did not answer this message. You can send it again."
+DIRECT_TURN_USD = 0.25
+"""What one direct turn may spend at most, and what is put aside for it. A share, so that turns running at
+once on several links cannot each be handed everything that is left of the day."""
 
 REQUIRED = {"label": str, "topic": str, "mode": str, "briefing": str, "model_path": str, "model_name": str, "guest_tools": str}
 NUMBERS = {
@@ -156,9 +162,12 @@ class ControlDoor:
             if method != "POST":
                 return 405, {"detail": "POST"}
             return self.decide(*matched.groups())
-        if matched := re.fullmatch(r"/control/deliveries/([0-9]+)/reply", path):
+        if matched := re.fullmatch(r"/control/deliveries/([0-9]+)/(reply|ack)", path):
             if method != "POST":
                 return 405, {"detail": "POST"}
+            if matched.group(2) == "ack":
+                self.store.acknowledge(int(matched.group(1)))
+                return 200, {"ok": True}
             return self.reply(int(matched.group(1)), body)
         return 404, {"detail": "no such route"}
 
@@ -234,23 +243,33 @@ class ControlDoor:
                 pass
 
     def claim(self) -> list[dict[str, Any]]:
-        """Hand out what is waiting on direct links. Limits are checked here, before the host spends."""
+        """Hand out what waits on direct links, with the money for it put aside first.
+
+        What was handed out before and never acknowledged goes out again, reservation and all: the
+        answer to a feed can be lost, and one lost claim must not hold its conversation for ever. The
+        host keeps the ids it has seen, so a message offered twice is run once.
+        """
         store = self.store
-        out: list[dict[str, Any]] = []
+        out = [self._offer(message, float(message["reserved_usd"])) for message in store.unacknowledged(DIRECT)]
         while (message := store.next_queued(DIRECT)) is not None:
             conversation = store.conversation(message["conversation_id"])
             assert conversation is not None
             link = store.link(conversation["link_id"])
             assert link is not None
-            refusal: Refusal | None = store.reserve(message["id"], link, 0.0)
+            refusal, share = store.reserve_turn(message["id"], link, max(DIRECT_TURN_USD, float(link["usd_limit"]) / 4))
             if refusal is not None:
                 store.drop(message["id"])
                 store.record(link["id"], "limit", refusal.limit)
                 store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.")
                 self.mailbox.wake(conversation["id"])
                 continue
-            out.append({"message_id": message["id"], "link_id": link["id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": store.allowance(link), "label": link["label"]})
+            out.append(self._offer(message, share))
         return out
+
+    def _offer(self, message: Any, share: float) -> dict[str, Any]:
+        conversation = self.store.conversation(message["conversation_id"])
+        assert conversation is not None
+        return {"message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share}
 
     def reply(self, message_id: int, body: Any) -> tuple[int, dict[str, Any]]:
         """The one way a word of the host's reaches a guest: the answer to the message that was claimed."""
@@ -261,11 +280,12 @@ class ControlDoor:
         conversation = store.conversation(message["conversation_id"])
         assert conversation is not None
         cost = max(0.0, float(body.get("cost_usd") or 0.0))
-        spent_nothing = not body.get("ok", True) and not cost
-        if spent_nothing:
+        if body.get("ran") is False:
             store.give_back(message_id)
         else:
-            store.settle(message_id, cost=cost)
+            # A turn that ran counts as a turn, whatever it cost and however it ended. Only the host's
+            # plain word that it never started gives the count back.
+            store.settle(message_id, cost=cost, state=ANSWERED if body.get("ok", True) else FAILED)
         # What was revoked or closed meanwhile stays closed: the reply goes nowhere.
         if conversation["state"] == OPEN and store.conversation(conversation["id"])["state"] == OPEN:
             if body.get("ok", True):
@@ -280,13 +300,14 @@ class ControlDoor:
     def reset(self) -> int:
         """The host has started: it remembers no turn it claimed before, so none of them will be answered.
 
-        Failed rather than handed out again. A turn that was cut off may have run tools, and running
-        the same guest message a second time would do what it did twice.
+        Failed rather than handed out again: a turn that was cut off may have run tools, and running the
+        same guest message twice would do what it did twice. It costs what was put aside, since nobody
+        can say any more what it really cost.
         """
         store = self.store
         stale = store.claimed_of(DIRECT)
         for message in stale:
-            store.give_back(message["id"])
+            store.write_off(message["id"])
             conversation = store.conversation(message["conversation_id"])
             if conversation is not None and conversation["state"] == OPEN:
                 store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT)

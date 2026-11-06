@@ -3,7 +3,7 @@
 A link hands a conversation to somebody the operator does not control, and that somebody sits on the
 far end of every answer: whatever a reader of their text can reach, they can simply ask for. So the
 second party this installation has ever had lives here, in a process that was never given anything
-worth asking for. It has its own port and its own database, no state volume, no secrets, no tools, and
+worth asking for. It has its own database, no state volume, no secrets, no tools, no network at all, and
 no way to call the host: the host dials this process over a unix socket, never the other way round.
 
 It lives beside the key proxy rather than in the ``daedalus`` package because it is another program, not

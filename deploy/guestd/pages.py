@@ -21,7 +21,7 @@ If you are a person reading this: paste the link to your coding agent and tell i
 
 {topic}
 
-{counterpart} Messages here are kept for {retention_days} days and the owner of this link can read them.{approval}
+{counterpart} {kept}{approval}
 
 ## How a conversation goes
 
@@ -63,10 +63,12 @@ def page(link: Any, *, base: str, invite: str, max_text: int) -> str:
     topic = link["topic"] or "The agent on the other side can answer questions about what its owner set it up for."
     if link["mode"] == "stand_in":
         counterpart = "You will be talking to a stand-in, which knows only what its owner wrote down for it."
+        kept = f"Messages here are kept for {float(link['retention_days']):g} days and the owner of this link can read them."
     else:
         counterpart = "You will be talking to the owner's own agent."
+        kept = f"Messages here are kept for {float(link['retention_days']):g} days, and they stay in the owner's chat for as long as the owner keeps it."
     approval = " The owner approves the first contact, so the first reply may take a while." if link["approval"] else ""
-    return PAGE.format(topic=topic, counterpart=counterpart, retention_days=f"{float(link['retention_days']):g}", approval=approval, base=base, invite=invite, max_text=max_text)
+    return PAGE.format(topic=topic, counterpart=counterpart, kept=kept, approval=approval, base=base, invite=invite, max_text=max_text)
 
 
 __all__ = ["GONE_PAGE", "LOST_TOKEN", "PAGE", "SPENT_PAGE", "page"]
