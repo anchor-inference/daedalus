@@ -1102,7 +1102,7 @@ class FakeGuests:
         self.chat = chat
         self.available = available
         self.public_base = public_base
-        # Why this chat cannot be given the sandboxed tools ("no_sandbox", "host_folder"); empty when it can.
+        # Why this chat cannot be given the sandboxed tools ("no_sandbox", "no_limits", "host_folder"); empty when it can.
         self.full_tools_why = full_tools_why
         # The chat each read of the door was asked about (``?session_id=``), for a check to say the sheet asked.
         self.door_asked: list[str] = []

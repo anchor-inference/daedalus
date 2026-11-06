@@ -323,7 +323,7 @@ describe("making a direct link", () => {
     expect(document.querySelector('[data-guest-bound="plan"]')!.textContent).toBe(t("guest.bound.plan"));
   });
 
-  it.each(["no_sandbox", "host_folder", "project_folder"] as const)("does not offer all tools to a chat that cannot have them (%s), and says why once", async (why) => {
+  it.each(["no_sandbox", "no_limits", "host_folder", "project_folder"] as const)("does not offer all tools to a chat that cannot have them (%s), and says why once", async (why) => {
     world.door = { ...DOOR, full_tools: false, full_tools_why: why };
     await direct();
     expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent === t("guest.tools.all"))).toBe(false);

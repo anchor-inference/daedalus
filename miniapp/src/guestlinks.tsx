@@ -467,7 +467,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
         <>
           <label className="field">{t("guest.field.tools")}</label>
           <Segmented value={chosenTools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
-          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "host_folder" || door.full_tools_why === "project_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
+          {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "no_limits" || door.full_tools_why === "host_folder" || door.full_tools_why === "project_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
           {chosenTools === "all" && <div className="sub" data-guest-tools-all="">{t("guest.tools.all.note")}</div>}
         </>
       )}

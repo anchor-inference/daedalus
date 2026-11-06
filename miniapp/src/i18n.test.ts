@@ -231,7 +231,7 @@ describe("the keys the code asks for", () => {
       ["guest.state.", ["waiting", "used", "pending", "open", "closed", "revoked", "expired"]],
       ["guest.mode.", ["stand_in", "direct"]],
       ["guest.tools.", ["none", "read", "all"]],
-      ["guest.tools.why.", ["no_sandbox", "host_folder", "other"]],
+      ["guest.tools.why.", ["no_sandbox", "no_limits", "host_folder", "other"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
       ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about", "memory"]],
