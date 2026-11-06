@@ -43,6 +43,12 @@
       "synonyms": ["daedalus-cli", "CLI", "terminal", "pairing", "pair", "laptop", "remote", "терминал", "подключение", "ноутбук", "удалённо", "сопряжение"]
     },
     {
+      "id": "address", "group": "you", "icon": "share",
+      "title": { "en": "Public address", "ru": "Публичный адрес" },
+      "about": { "en": "Only in the desktop app: a tunnel that opens agent links and shared services to the internet, never the app itself.", "ru": "Только в настольном приложении: туннель, который открывает в интернет ссылки для агентов и общие сервисы, но не само приложение." },
+      "synonyms": ["tunnel", "ngrok", "tailscale", "funnel", "cloudflare", "cloudflared", "frp", "public url", "port forwarding", "туннель", "публичная ссылка", "проброс портов", "белый адрес"]
+    },
+    {
       "id": "models", "group": "work", "icon": "model",
       "title": { "en": "Models & providers", "ru": "Модели и клиенты" },
       "about": { "en": "The models sessions use, the default and the fallbacks, the image model, and the provider endpoints with their keys.", "ru": "Модели сессий, модель по умолчанию и запасные, модель для картинок, клиенты провайдеров и их ключи." },
@@ -110,6 +116,18 @@
     }
   ],
   "fields": [
+    {
+      "section": "address", "anchor": "address.enabled", "config": null,
+      "title": { "en": "Open a public address", "ru": "Открыть публичный адрес" },
+      "about": { "en": "Turns the tunnel on or off and says whether the address really answers from outside. Only in the desktop app.", "ru": "Включает и выключает туннель и говорит, отвечает ли адрес снаружи на самом деле. Только в настольном приложении." },
+      "synonyms": ["tunnel", "public url", "туннель", "публичная ссылка"]
+    },
+    {
+      "section": "address", "anchor": "address.provider", "config": null,
+      "title": { "en": "Tunnel provider", "ru": "Провайдер туннеля" },
+      "about": { "en": "How the address is opened: ngrok, Tailscale Funnel, a Cloudflare quick tunnel, or your own VPS with frp.", "ru": "Чем открывается адрес: ngrok, Tailscale Funnel, быстрый туннель Cloudflare или свой VPS с frp." },
+      "synonyms": ["ngrok", "tailscale", "funnel", "cloudflare", "cloudflared", "frp", "frpc", "vps"]
+    },
     {
       "section": "devices", "anchor": "devices.pair", "config": null,
       "title": { "en": "Pair a computer", "ru": "Подключить компьютер" },

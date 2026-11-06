@@ -28,6 +28,9 @@ function listed(file: string, name: string): string[] {
 // Words that are the same in both languages: names, brands and the ids of tools and config fields.
 // Everything else being identical means a row was copied and never translated.
 const SAME_IN_BOTH = [
+  // Two of the tunnels of the public address, by their own names.
+  "address.provider.ngrok",
+  "address.provider.tailscale",
   // The kind under an attached file's name: a PDF is called a PDF in Russian too.
   "attach.kind.pdf",
   // The agent's name on its browser cursor is the product's name in both languages.

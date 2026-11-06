@@ -26,6 +26,7 @@ import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/in
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
+import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
 import { AppearancePanel } from "./Appearance";
 import { NavigationSettings } from "./NavigationSettings";
 import { MemorySettings } from "./MemorySettings";
@@ -1010,7 +1011,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "desktop" | "devices" | "navigation" | "models" | "rules" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "desktop" | "devices" | "address" | "navigation" | "models" | "rules" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1041,7 +1042,10 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
   const moved = section ? MOVED[section] : undefined;
-  const current: Section | null = moved ? moved.to : SECTIONS.some((x) => x.id === section) ? (section as Section) : null;
+  // The public address is the native installation's alone, and whether this is one only the host knows.
+  const native = useQuery<PublicAddress>(ADDRESS, { staleMs: 20000 }).data?.native;
+  const named: Section | null = moved ? moved.to : SECTIONS.some((x) => x.id === section) ? (section as Section) : null;
+  const current = named === "address" && native === false ? null : named;
   useEffect(() => {
     if (!moved) return;
     navigate(pathFor("settings", moved.to) + window.location.search + window.location.hash, { replace: true });
@@ -1189,8 +1193,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         </div>
       )}
       {GROUPS.map((group) => {
-        // The desktop application's own settings are listed only in its window.
-        const items = group.sections.filter((sec) => matches(sec.id) && (sec.id !== "desktop" || !!window.daedalus?.desk));
+        // The desktop application's own settings are listed only in its window, and the public address
+        // only by an installation that says it is native, which a browser on a phone can be looking at too.
+        const items = group.sections.filter((sec) => matches(sec.id) && (sec.id !== "desktop" || !!window.daedalus?.desk) && (sec.id !== "address" || !!native));
         if (!items.length) return null;
         return (
           <div key={group.id}>
@@ -1229,6 +1234,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     if (sec === "appearance") return <AppearancePanel />;
     if (sec === "desktop") return <DesktopPanel />;
     if (sec === "devices") return <DevicesPanel toast={toast} />;
+    if (sec === "address") return <PublicAddressPanel />;
     if (!s) return <div className="empty">{t("common.loading")}</div>;
     const kinds = s.provider_kinds ?? DEFAULT_KINDS;
     const providerIds = Object.keys(s.providers ?? {});

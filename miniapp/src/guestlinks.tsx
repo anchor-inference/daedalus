@@ -7,6 +7,7 @@ import { api, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail,
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
+import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
 import { Sheet } from "./ui/dialogs";
@@ -54,7 +55,10 @@ export function GuestLinksSheet({ sessionId, toast, onClose }: { sessionId: stri
         ) : !data.available ? (
           <div className="sub" data-guest-off="off">{t("guest.off")}</div>
         ) : !data.public_base ? (
-          <div className="sub" data-guest-off="address">{t("guest.noaddress")}</div>
+          <>
+            <div className="sub" data-guest-off="address">{t("guest.noaddress")}</div>
+            <AddressNote />
+          </>
         ) : view.kind === "form" ? (
           <GuestForm sessionId={sessionId} door={data} onCancel={() => setView({ kind: "list" })} onMade={(url, topic) => setView({ kind: "made", url, topic })} />
         ) : view.kind === "made" ? (
@@ -427,6 +431,7 @@ function GuestForm({ sessionId, door, onCancel, onMade }: { sessionId: string; d
   const chosenTools: GuestTools = tools === "all" && !door.full_tools ? "read" : tools;
   return (
     <form className="guest-form" data-guest-form="" onSubmit={(e) => { e.preventDefault(); void create(); }}>
+      <AddressNote text={t("address.guest.local")} />
       <label className="field">{t("guest.field.mode")}</label>
       <Segmented value={mode} options={modeOptions} onChange={(next) => { setMode(next); setProblem(""); }} label={t("guest.field.mode")} />
       {standIn

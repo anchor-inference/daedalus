@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { int, relTime, usd } from "../format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "../api";
@@ -6,8 +6,13 @@ import { Icon } from "../icons";
 import { OverflowMenu, Sheet } from "./dialogs";
 import { confirmAsync, errorText } from "../ui";
 import { LANGS, t, useLang } from "../i18n";
+import { retried } from "../chunks";
 
 export type Status = "idle" | "running" | "waiting" | "failed" | "done" | "compacting";
+
+// Loaded with the Access sheet. It reaches the router and the two-factor card, and this file sits under
+// modules that run with no router, so a static import here failed them at load.
+const ServicePhone = lazy(retried(() => import("../servicephone"), (module) => ({ default: module.ServicePhone })));
 
 /** Two words, one chosen: the language every screen of the app is written in. */
 export function LangPicker() {
@@ -599,6 +604,8 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
               <div className="sub" style={{ marginTop: 8 }}>{t("svc.prefix", { slug: s.share.slug ?? "" })}</div>
             </>
           )}
+          {/* Keyed by the mode: a link taken for one mode is the wrong one once the mode has changed. */}
+          <Suspense fallback={null}><ServicePhone key={mode} sessionId={sessionId} name={s.name} port={s.port} toast={toast} /></Suspense>
         </Sheet>
       )}
     </div>
