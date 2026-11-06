@@ -270,17 +270,32 @@ type NavResult struct {
 	URL   string `json:"url"`
 	Title string `json:"title"`
 	Error string `json:"error,omitempty"`
+	// Loading is a page that is there to read while something on it has not finished arriving: it was
+	// parsed, and its load event did not come in the grace after that (parsedGrace).
+	Loading bool       `json:"loading,omitempty"`
+	Timing  *NavTiming `json:"timing,omitempty"`
 	// Download is the file the navigation turned into instead of a page (pdf.go): the tab stayed
 	// where it was.
 	Download *Kept `json:"download,omitempty"`
 }
 
-// Navigate loads url in t and waits for its load event, at most timeout. A page that failed to load
-// (no such host, refused) is a result with its error, not an error: the agent reads it and decides.
+// parsedGrace is how long a parsed document is given to reach its load event before the navigation
+// returns without it. The load event waits for every frame on the page, and advertising keeps adding
+// frames for as long as the page has not fired it. Measured on a classifieds site, in a plain Chromium
+// with nothing of ours in the way: DOMContentLoaded came within 1.7 s of every navigation, load
+// anywhere from 0.9 s to not within 32 s (2 of 15). Over 58 navigations, 2 s after DOMContentLoaded
+// every page had at least 93 % of the text it ended with, so a second more is margin, and a page that
+// needs longer says so in its snapshot ("still loading") and has BrowserWait.
+const parsedGrace = 3 * time.Second
+
+// Navigate loads url in t and waits for its load event, or for parsedGrace once it is parsed, at most
+// timeout in all. A page that failed to load (no such host, refused) is a result with its error, not
+// an error: the agent reads it and decides.
 func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time.Duration) (NavResult, error) {
 	if d := t.Dialog(); d != nil {
 		return NavResult{}, ErrDialogOpen(d)
 	}
+	began := time.Now()
 	// Judged before the navigation is made, so a refusal is the agent's 1102 with its reason rather
 	// than the proxy's error page. The proxy refuses the same destinations on its own either way.
 	if m.deps.Wall != nil {
@@ -299,6 +314,12 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 	if err := t.Call(nctx, "Page.navigate", map[string]any{"url": url}, &r); err != nil {
 		return NavResult{}, err
 	}
+	answered := time.Since(began).Milliseconds()
+	timed := func(res NavResult) NavResult {
+		res.Timing = t.timing(began)
+		res.Timing.AnsweredMS = answered
+		return res
+	}
 	if b := t.blockedSince(blocks); b != nil {
 		return NavResult{}, ErrGuardBlocked(b)
 	}
@@ -310,8 +331,9 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 		return res, nil
 	}
 	if r.ErrorText != "" {
-		return m.result(ctx, t, r.ErrorText), nil
+		return timed(m.result(ctx, t, r.ErrorText)), nil
 	}
+	loading := false
 	if r.LoaderID != "" {
 		// The guard stopping a redirect ends the wait: the original document's load never comes, and
 		// the navigation once waited out its whole 30 s and reported the tab on the blocked address.
@@ -330,7 +352,7 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 				}
 			}
 		}()
-		err := t.WaitLifecycle(wctx, r.LoaderID, "load")
+		loaded, err := t.WaitDocument(wctx, r.LoaderID, parsedGrace)
 		stop()
 		if b := t.blockedSince(blocks); b != nil {
 			return NavResult{}, ErrGuardBlocked(b)
@@ -338,12 +360,15 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 		if err != nil {
 			if nctx.Err() != nil && ctx.Err() == nil {
 				// Slow pages are common; what has loaded is usable, and the agent is told.
-				return m.result(ctx, t, "the page was still loading after "+timeout.String()), nil
+				return timed(m.result(ctx, t, "the page was still loading after "+timeout.String())), nil
 			}
 			return NavResult{}, err
 		}
+		loading = !loaded
 	}
-	return m.result(ctx, t, ""), nil
+	res := timed(m.result(ctx, t, ""))
+	res.Loading = loading
+	return res, nil
 }
 
 func (m *Manager) result(ctx context.Context, t *Tab, errText string) NavResult {
@@ -356,11 +381,16 @@ func (m *Manager) History(ctx context.Context, t *Tab, delta int, timeout time.D
 	if d := t.Dialog(); d != nil {
 		return NavResult{}, ErrDialogOpen(d)
 	}
+	began := time.Now()
 	nctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	t.mu.Lock()
 	before := t.loader
 	t.mu.Unlock()
+	timed := func(res NavResult) NavResult {
+		res.Timing = t.timing(began)
+		return res
+	}
 	if delta == 0 {
 		if err := t.Call(nctx, "Page.reload", nil, nil); err != nil {
 			return NavResult{}, err
@@ -389,29 +419,40 @@ func (m *Manager) History(ctx context.Context, t *Tab, delta int, timeout time.D
 	defer deadline.Stop()
 	settle := time.NewTimer(300 * time.Millisecond)
 	defer settle.Stop()
+	var parsed string
+	var enough <-chan time.Time
 	for {
 		t.mu.Lock()
-		changed, loaded := t.loader != before, t.life["load"]
+		current, loaded, ready := t.loader, t.life["load"], t.life["DOMContentLoaded"]
 		wake := t.wake
 		t.mu.Unlock()
+		changed := current != before
 		if changed && loaded {
 			break
+		}
+		if changed && ready && parsed != current {
+			parsed = current
+			enough = time.After(parsedGrace)
 		}
 		select {
 		case <-wake:
 			continue
 		case <-settle.C:
 			if !changed {
-				return m.result(ctx, t, ""), nil
+				return timed(m.result(ctx, t, "")), nil
 			}
 			continue
+		case <-enough:
+			res := timed(m.result(ctx, t, ""))
+			res.Loading = true
+			return res, nil
 		case <-deadline.C:
-			return m.result(ctx, t, "the page was still loading after "+timeout.String()), nil
+			return timed(m.result(ctx, t, "the page was still loading after "+timeout.String())), nil
 		case <-ctx.Done():
 			return NavResult{}, ctx.Err()
 		}
 	}
-	return m.result(ctx, t, ""), nil
+	return timed(m.result(ctx, t, "")), nil
 }
 
 // RefreshTargets reads every page's address and title from Chromium. A title a page sets from a

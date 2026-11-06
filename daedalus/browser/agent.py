@@ -94,6 +94,9 @@ TEXT_MAX = 10_000
 """What one ``type`` may carry, as the daemon allows."""
 WAIT_MAX_S = 60
 NAVIGATE_TIMEOUT_MS = 30_000
+UNFINISHED = "The page is there to read, though something on it has not finished arriving. If what you came for is missing, BrowserWait(until='load'), or until='text' with the words you expect."
+"""Said of a navigation that returned once the page was parsed, without its load event. It is no failure:
+a page's load also waits for every frame of its advertising, which it may never finish."""
 UPLOAD_MAX_FILES = 10
 UPLOAD_MAX_BYTES = 100 << 20
 DOWNLOAD_MAX_BYTES = 500 << 20
@@ -1116,6 +1119,7 @@ class BrowserAgent:
         opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor)
         group = opened["group"]
         found = ""
+        unfinished = ""
         if url and not opened["created"] and (same := self._showing(group["id"], await self._tab_list(group["id"]), url)) is not None:
             # The browser was open and a tab of it is on that address already: that tab is brought
             # forward instead of the active one being taken away from what it shows.
@@ -1130,7 +1134,9 @@ class BrowserAgent:
                 # and the group came back on it.
                 await self._site_ask(caller, row, url, why or "", tool="BrowserOpen")
                 tab = await self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": "about:blank", "origin": self._origin(caller)}, what="opening a tab", timeout=40.0)
-            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), tool="BrowserOpen", url=url, why=why or "", tab=str(tab.get("id") or ""))
+            arrived = await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), tool="BrowserOpen", url=url, why=why or "", tab=str(tab.get("id") or ""))
+            await self._page_load(row, caller, tab, arrived, url)
+            unfinished = f"\n{UNFINISHED}" if arrived.get("loading") else ""
         if url:
             await self._site_notes(caller, url)
         if found:
@@ -1141,7 +1147,7 @@ class BrowserAgent:
                 f"Browser {'opened' if opened['created'] else 'already open'} in the operator's own Chrome «{self._user_name()}», which they gave this conversation: "
                 "signed in as them, in a tab group of yours in a window of its own. Every new site asks them first; a purchase, a message, a deletion or a sign-in always asks."
             )
-            return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
+            return f"{head} Tabs:\n{await self._tabs_text(group['id'])}{unfinished}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
         connected, name, _ = self.service.user_connection()
@@ -1152,7 +1158,7 @@ class BrowserAgent:
                 f"Browser {'opened' if opened['created'] else 'already open'} in the agent's own browser (not the operator's Chrome «{name or 'Chrome'}») ({where}). "
                 "If the operator asked for their own browser, call BrowserAskOperatorChrome instead of working here."
             )
-        return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
+        return f"{head} Tabs:\n{await self._tabs_text(group['id'])}{unfinished}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
 
     async def open_webgl(self, caller: Caller, mode: str, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> tuple[str, bool]:
         """``BrowserOpen(webgl=mode)``: the browser in that WebGL mode, then opened as usual.
@@ -1259,6 +1265,7 @@ class BrowserAgent:
             await self._watch(group, caller, url)
             result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), tool="BrowserNavigate", url=url, why=why or "", tab=str(current["id"]))
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
+        await self._page_load(group, caller, current, result, url or "")
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
         if anti_bot(reached):
@@ -1270,9 +1277,19 @@ class BrowserAgent:
         title = str(result.get("title") or "").strip()
         self._told(group, current, result.get("dialogs_auto"))
         said = self._page_said(result, reached)
+        if result.get("loading"):
+            said.append(UNFINISHED)
         if download := _downloaded(result):
             return f"{download} Tab {current['id']} stayed on {result.get('url') or current.get('url') or 'its page'}." + "".join(f"\n{line}" for line in said)
         return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
+
+    async def _page_load(self, group: dict[str, Any], caller: Caller, tab: dict[str, Any], result: dict[str, Any], url: str) -> None:
+        """Where a navigation's time went, for the next complaint about a slow page: the daemon's
+        split and the hosts that never answered. Not a line of the action log, which says what the
+        agent did and not how long the page took."""
+        timing = result.get("timing")
+        if isinstance(timing, dict):
+            await self._audit(group, caller, "page_load", {"tab": tab.get("id"), "url": str(result.get("url") or url)[:2000], "timing": timing, "loading": bool(result.get("loading")), "error": str(result.get("error") or "")[:300], "waiting_on": result.get("waiting_on") or []})
 
     async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, tool: str, url: str = "", why: str = "", tab: str = "") -> Any:
         """Run a call that loads an address; when the network wall asks rather than refuses (a host
