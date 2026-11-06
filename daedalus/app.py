@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.config import RuntimeConfig, Settings
+from daedalus.extensions import guest_door
 from daedalus.extensions.notifications import Category, Draft, NotificationService, Tone
 from daedalus.extensions.resource_runtime import ResourceMonitor
 from daedalus.host import components, searxng
@@ -127,6 +128,12 @@ class Application:
                 # multi-voice model is not, and neither is the speed: both are arguments to every call,
                 # so dropping a loaded model for either is a second of silence bought for nothing.
                 self.tts.forget()
+            # Here and not beside each save that touches a preset: there are a dozen of those, and a model
+            # the table has not heard of is one a stand-in stops answering on. Under the lock, so that two
+            # saves cannot leave the older table standing.
+            models_moved = guest_door.write_model_table(self)
+        if models_moved:
+            await guest_door.routes_changed(self)
 
     async def start(self) -> None:
         self.executions.acquire()

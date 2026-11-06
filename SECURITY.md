@@ -35,6 +35,11 @@ installation, so it is built on what that stranger cannot reach rather than on w
   completion on chosen upstreams and nothing else: no streaming, no tools, a small output bound, no dot segments in
   the path, and no header of the door's own, so a call cannot hide from the ledger. The door holds no credential;
   the proxy adds it, for a key, a prepaid plan or a CLI login alike. Search backends are never among the upstreams.
+- That listener serves only the models the app lists, on the upstream it lists them for, by a table the app writes
+  into its state folder, which the door does not mount. A model the operator limited to some OpenRouter providers is
+  served only within them, and one with no such choice takes no provider object. A change holds from the next call
+  with nothing restarted, and with no table the listener serves nothing. So a taken door can still spend on a listed
+  model and cannot pick a dearer one, and a link whose preset was removed stops being answered.
 - A stand-in link answers from a tools-free model call that holds only a briefing the operator approved, so private
   data is absent rather than filtered. The Codex route cannot carry an output bound: its backend refuses the field,
   so a reply there is bounded by the plan and not by the request.
@@ -125,11 +130,14 @@ so a public service's page can use a visitor's phone pass or key cookie for anot
 plain http on a home network: it opens one service for one phone by that door only, is spent once within ten
 minutes, and has a table of its own so that it cannot be taken for a way into the app.
 
-**Tokens of the public address.** A provider's token and the launcher's token are files of this user. The
-policy refuses a command that names them, by matching words. On Linux with the sandbox on, a command's filesystem
-does not hold them; on a Mac, on Windows, or with the sandbox off, a command that builds the path reads them, and so
-does a team member's CLI anywhere. The agent with such a token could raise a tunnel of its own, which the watch would
-report. Provider keys in `keyproxy.env` stay readable the same way, sandbox or not.
+**Tokens of the public address, and provider keys.** A provider's token, the launcher's token and the keys in
+`keyproxy.env` are files of this user on a native install. The policy refuses a command that names them, by matching
+words. On Linux with the sandbox on, a command's filesystem does not hold them, nor the copies of the keys in the
+backups and the update's folders; on a Mac, on Windows, or with the sandbox off, a command that builds the path reads
+them all, and so does a team member's CLI anywhere and a terminal, whose own sandbox hides only the terminal daemon's
+folders. The agent with such a token could raise a tunnel of its own, which the watch would report. With a key it
+could spend from anywhere, past the proxy's budget and ledger. The key proxy's own port stays open to a command in
+every case: it can use a key it cannot read, as far as the proxy's budget lets it.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.

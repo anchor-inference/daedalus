@@ -1267,6 +1267,11 @@ link named, and ``reasoning_effort`` makes the Claude route raise the output bou
 GUEST_ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
 """OpenRouter's ``provider[/variant][/region][/tier]``."""
 GUEST_ROUTE_MAX_SLUGS = 32
+GUEST_MODELS = BUDGET_DB.with_name("guest-models.json")
+"""What the app lists: written by the host, beside the database, read here on each of the door's calls. In the
+state folder because that is the one place the host writes, this process reads and the door cannot reach. Named
+from the database's path so that both ways of starting this proxy find it with nothing further to set."""
+_guest_models_missing = False
 
 
 def guest_upstreams() -> frozenset[str]:
@@ -1291,7 +1296,7 @@ def guest_route_refusal(route: Any) -> str:
     Exactly ``{"only": [slugs], "allow_fallbacks": false}``. The rest of the object spends or widens: ``order``
     with fallbacks on reaches any provider, ``sort`` and ``max_price`` move a call between prices, and
     ``ignore`` and ``data_collection`` overrule what the operator chose. A door that could send them would hold
-    the operator's routing, where this key lets it only narrow a call to providers of a listed shape.
+    the operator's routing. This is the shape; :func:`guest_model_refusal` holds it to the operator's choice.
     """
     if not isinstance(route, dict) or set(route) != {"only", "allow_fallbacks"} or route["allow_fallbacks"] is not False:
         return "a stand-in's provider object is only and allow_fallbacks false"
@@ -1299,6 +1304,65 @@ def guest_route_refusal(route: Any) -> str:
     if not isinstance(only, list) or not 0 < len(only) <= GUEST_ROUTE_MAX_SLUGS or not all(isinstance(slug, str) and GUEST_ROUTE_SLUG.fullmatch(slug) for slug in only):
         return "a stand-in's provider object lists provider slugs"
     return ""
+
+
+def guest_models() -> dict[tuple[str, str], frozenset[str]] | None:
+    """(path, model) → the providers it is limited to, or ``None`` with no table to read.
+
+    Read for each call rather than kept: a change holds from the next call, and at a few calls a minute there is
+    nothing to save. Anything but a whole table is no table, because half of one would be read as a list of what
+    is allowed by accident. Said once in the log: the door only reports a refusal as a stand-in that did not answer.
+    """
+    global _guest_models_missing
+    try:
+        table = json.loads(GUEST_MODELS.read_text(encoding="utf-8"))
+        models = {(row["path"], row["model"]): frozenset(row["only"]) for row in table["models"]}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        if not _guest_models_missing:
+            logger.warning("no table of guest models at %s (%s): every stand-in is refused until the host writes one", GUEST_MODELS, type(exc).__name__)
+        _guest_models_missing = True
+        return None
+    _guest_models_missing = False
+    return models
+
+
+def guest_model_refusal(path: str, upstream: str, request: dict[str, Any]) -> str:
+    """Why the app does not list this model here, or the operator did not choose this route; empty when both hold.
+
+    Nothing less leaves the choice with the operator. A model is bound to its whole path, so one listed under an
+    upstream names nothing under another, and the bound is the exact name, because on OpenRouter a suffix is a
+    different price. A limited model must say so: left out, ``provider`` would let OpenRouter route it anywhere. And
+    ``only`` is compared whole, because ``deepinfra`` is not within ``deepinfra/fp8`` but wider: it reaches every
+    endpoint of that provider, which is how a door got a model set to one of them served by another.
+    """
+    models = guest_models()
+    if models is None:
+        return "the key proxy has no table of the app's models, so it serves no stand-in"
+    model = request.get("model")
+    chosen = models.get((path, model)) if isinstance(model, str) else None
+    if chosen is None:
+        return "this model is not one the app lists for this upstream"
+    if "provider" not in request:
+        return "this model is limited to the providers the operator chose, and the call names none" if chosen else ""
+    if not routes_between_providers(upstream):
+        return "only OpenRouter takes a provider object"
+    refused = guest_route_refusal(request["provider"])
+    if refused:
+        return refused
+    if not chosen:
+        return "the operator chose no providers for this model, so a stand-in names none"
+    if not chosen.issuperset(request["provider"]["only"]):
+        return "a stand-in's provider object stays within what the operator chose"
+    return ""
+
+
+def one_of_each(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """An object with no name twice. What was judged is what is sent, as bytes, so a body that says ``model`` twice
+    would have this read the last and an upstream free to read the first: the bound would hold for one of them."""
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError("a name is repeated")
+    return fields
 
 
 def guest_refusal(path: str, method: str, body: bytes) -> str:
@@ -1309,7 +1373,7 @@ def guest_refusal(path: str, method: str, body: bytes) -> str:
     if len(body) > GUEST_MAX_BYTES:
         return "too large"
     try:
-        request = json.loads(body)
+        request = json.loads(body, object_pairs_hook=one_of_each)
     except ValueError:
         return "not JSON"
     if not isinstance(request, dict) or request.get("stream") or not GUEST_BODY_FIELDS.issuperset(request):
@@ -1317,11 +1381,7 @@ def guest_refusal(path: str, method: str, body: bytes) -> str:
     bound = request.get("max_tokens", request.get("max_completion_tokens"))
     if not isinstance(bound, int) or isinstance(bound, bool) or not 0 < bound <= GUEST_MAX_TOKENS:
         return "a stand-in's call names a small max_tokens"
-    if "provider" in request:
-        if not routes_between_providers(matched.group(1)):
-            return "only OpenRouter takes a provider object"
-        return guest_route_refusal(request["provider"])
-    return ""
+    return guest_model_refusal(path.removesuffix("/chat/completions").strip("/"), matched.group(1), request)
 
 
 async def handle_guest(request: web.Request) -> web.StreamResponse:

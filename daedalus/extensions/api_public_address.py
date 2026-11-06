@@ -68,8 +68,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, door_c
         return await drawn(await address().refresh())
 
     async def tokens_hidden() -> bool:
-        """Whether a command the agent runs cannot reach the file a token is in, which the form has to say
-        when it is not so. Only the Linux sandbox hides it: the policy reads a command's words, no more."""
+        """Whether a command the agent runs cannot reach the file a token is in, or ``keyproxy.env``, which the
+        form has to say when it is not so. Only the Linux sandbox hides them: the policy reads a command's words."""
         if not sys.platform.startswith("linux") or getattr(app.config.tools.exec, "sandbox", "off") != "workspace":
             return False
         return await asyncio.to_thread(bwrap_status) == "ok"

@@ -331,6 +331,10 @@ A stand-in can use any model the app lists that is behind the key proxy, CLI log
 `KEYPROXY_GUEST_UPSTREAMS` narrows that to named upstreams; the default `*` is all of them, search backends never. The
 door's socket takes one non-streaming chat completion with no tools and a small output bound on any of them. A plan
 counts no dollars, so its link is bounded by its message limits alone; the form hides the dollar field and says so.
+The socket serves only the models the app lists and, for one limited to some OpenRouter providers, only those: the
+app writes `guest-models.json` into its state folder at start and at every save that moves a model, and the proxy
+reads it on each call, so no restart is needed and with no file it serves nothing. A link stops being answered when
+its preset is removed or its model changed.
 A model that is left out has a stated reason in `/api/guest/door` (`left_out`): outside the key proxy, not named, or
 metered with no known price.
 

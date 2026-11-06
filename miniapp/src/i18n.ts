@@ -9371,7 +9371,7 @@ Object.assign(DICT, {
   "address.ngrok.token": { en: "ngrok token", ru: "Токен ngrok" },
   "address.ngrok.found": { en: "Is this your ngrok?", ru: "Это ваш ngrok?" },
   "address.ngrok.trust": { en: "Use this one", ru: "Использовать" },
-  "address.token.readable": { en: "Here a command the agent runs could read this token: no sandbox hides it.", ru: "Здесь команда агента может прочитать этот токен: песочницы, которая его скрыла бы, нет." },
+  "address.token.readable": { en: "Here a command the agent runs could read this token and the provider keys in keyproxy.env: no sandbox hides them.", ru: "Здесь команда агента может прочитать этот токен и ключи провайдеров в keyproxy.env: песочницы, которая их скрыла бы, нет." },
   "address.frp.tls": { en: "frpc does not verify your server's certificate unless you give it a CA, so someone on the path could read the traffic.", ru: "frpc не проверяет сертификат сервера, пока вы не дадите ему свой CA: кто-то на пути мог бы читать трафик." },
   "address.ngrok.missing": { en: "ngrok has to be installed first.", ru: "Сначала нужно установить ngrok." },
   "address.ngrok.get": { en: "Get it from ngrok.com", ru: "Скачать с ngrok.com" },

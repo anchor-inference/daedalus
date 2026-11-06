@@ -48,6 +48,7 @@ from daedalus import public_address
 from daedalus.config import is_keyproxy_url, keyproxy_base
 from daedalus.extensions.notifications import Action, ActionConflict, ActionOutcome, ActionRefused, ActionRequest, Draft
 from daedalus.host import guest_turns
+from daedalus.host.filesystem import write_atomically
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.notify_text import render
 
@@ -77,6 +78,8 @@ CHAT_FREE_SECONDS = 900.0
 starting an hour later for a guest who has long stopped reading."""
 NOTIFY_EVERY_SECONDS = 3600.0
 """At most one notice of each kind per link in this long: a guest must not be able to page the operator."""
+MODEL_TABLE_NAME = "guest-models.json"
+"""In the state folder, which the key proxy mounts read-only and the door does not mount at all."""
 
 
 def chat_link(session_id: str | None) -> str:
@@ -699,6 +702,49 @@ def model_routes(app: Application | Any) -> list[dict[str, Any]]:
     return list(routes.values())
 
 
+def model_table(config: Any) -> list[dict[str, Any]]:
+    """What the key proxy may serve a stand-in: every model the app lists behind it, and the providers of each.
+
+    What a taken door could otherwise choose for itself, so this is decided here, and the door is not asked.
+    The set is :func:`model_routes`' and not the narrower one offered to new links, for the same reason: a link
+    already made does not stop running when its model stops being offered. A model limited twice under two
+    presets takes the last choice, as that table does, or the door would send what the proxy then refuses. The
+    empty list is a real answer, a model nobody limited, for which the proxy refuses a ``provider`` object.
+    """
+    base = keyproxy_base()
+    models: dict[tuple[str, str], list[str]] = {}
+    for preset in config.presets.values():
+        provider = config.providers.get(preset.provider)
+        if provider is None or not is_keyproxy_url(provider.base_url):
+            continue
+        key = (provider.base_url.rstrip("/").removeprefix(base).strip("/"), preset.model)
+        if preset.openrouter_providers or key not in models:
+            models[key] = list(preset.openrouter_providers)
+    return [{"path": path, "model": model, "only": only} for (path, model), only in sorted(models.items())]
+
+
+def write_model_table(app: Application | Any) -> bool:
+    """Put the table where the key proxy reads it on each of the door's calls; True when it moved.
+
+    A file rather than a push, because either side restarts alone: a proxy that held this in memory would refuse
+    every stand-in from its restart until something told it again. It is written whole by a rename, so the proxy
+    reads the old table or the new one, and it is left alone when nothing moved, because most saves are of
+    something else. No write leaves the old table standing, which the log has to say: the proxy cannot tell.
+    """
+    path = app.settings.state_dir / MODEL_TABLE_NAME
+    text = jsonlib.dumps({"models": model_table(app.config)}, indent=1) + "\n"
+    with suppress(OSError, ValueError):
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    try:
+        write_atomically(path, text.encode("utf-8"))
+        # The agent's container is root and the proxy is not. Model names and provider slugs, no secret.
+        os.chmod(path, 0o644)
+    except OSError as exc:
+        logger.error("the key proxy's table of guest models could not be written: %s", exc)
+    return True
+
+
 async def routes_changed(app: Application | Any) -> None:
     """A model's providers or their price moved: the door's table follows."""
     bridge = bridge_of(app)
@@ -718,6 +764,8 @@ def bridge_of(app: Application | Any) -> GuestBridge | None:
 async def install(app: Application) -> list[asyncio.Task[None]]:
     bridge = GuestBridge(app)
     app.extensions[EXTENSION_KEY] = bridge
+    # Whether or not there is a door yet: the proxy's listener is open either way, and refuses without this.
+    write_model_table(app)
     if app.notifications is not None:
         app.notifications.register_resolver(REF, bridge.resolve_action)
     if app.manager is not None:
@@ -728,4 +776,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(bridge.serve(), name="guest-door")]
 
 
-__all__ = ["EXTENSION_KEY", "LEFT_OUT", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options", "model_routes", "routes_changed"]
+__all__ = ["EXTENSION_KEY", "LEFT_OUT", "MODEL_TABLE_NAME", "DoorClient", "DoorRefused", "DoorSocket", "DoorUnavailable", "GuestBridge", "bridge_of", "ensure_token", "install", "model_choices", "model_options", "model_routes", "model_table", "routes_changed", "write_model_table"]
