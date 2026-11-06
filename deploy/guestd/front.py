@@ -16,6 +16,11 @@ visitor name their own address to the limits, so it is refused at start.
 Only the first request of a connection is read, a body is passed by its ``Content-Length`` and nothing
 else, and ``Transfer-Encoding`` is refused: there is one way to tell where a request ends, so a second
 one cannot be smuggled past this process.
+
+Natively this stands on loopback, and what arrives there from outside comes through the local router of
+a tunnel (``tunneld``). That router is the peer ``GUEST_TRUSTED_PROXIES`` names there, and it writes the
+visitor's address itself, whatever the visitor sent. The door's socket may be a loopback port, in which
+case ``public.endpoint`` beside the socket's name says which.
 """
 
 from __future__ import annotations
@@ -29,6 +34,9 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Iterable
+from pathlib import Path
+
+from .confine import confine, is_loopback
 
 logger = logging.getLogger("guestd.front")
 
@@ -133,6 +141,19 @@ def refusal(status: int, detail: str, retry_after: int | None = None) -> bytes:
     return ("\r\n".join(headers) + "\r\n\r\n").encode() + body
 
 
+def door_port(socket_path: str) -> int | None:
+    """The door's port when it listens on one: named in a file beside its socket, read each time
+    because a door that restarts is handed another."""
+    with contextlib.suppress(OSError, ValueError):
+        return int(Path(socket_path).with_suffix(".endpoint").read_text().strip().rsplit(":", 1)[1])
+    return None
+
+
+async def dial_door(socket_path: str) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    port = door_port(socket_path)
+    return await (asyncio.open_connection("127.0.0.1", port) if port is not None else asyncio.open_unix_connection(socket_path))
+
+
 class Front:
     def __init__(self, socket_path: str, trusted: str = "", *, per_address: int = PER_ADDRESS, overall: int = OVERALL, head_seconds: float = HEAD_SECONDS, life_seconds: float = LIFE_SECONDS) -> None:
         self.socket_path = socket_path
@@ -199,7 +220,7 @@ class Front:
 
     async def pass_on(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, head: bytes, length: int) -> None:
         try:
-            door_reader, door_writer = await asyncio.open_unix_connection(self.socket_path)
+            door_reader, door_writer = await dial_door(self.socket_path)
         except OSError:
             writer.write(refusal(502, "This door is closed for the moment. Try again in a minute.", 60))
             await writer.drain()
@@ -223,6 +244,8 @@ async def main() -> None:
         os.path.join(os.environ.get("GUEST_FRONT_DIR", "/run/daedalus-guest-front"), "public.sock"), os.environ.get("GUEST_TRUSTED_PROXIES", ""),
     )
     server = await asyncio.start_server(front.handle, os.environ.get("GUEST_HOST", "0.0.0.0"), int(os.environ.get("GUEST_DOOR_PORT", "8764")), limit=MAX_HEAD)
+    if os.environ.get("GUEST_CONFINE"):
+        confine(lambda address: address == front.socket_path or (is_loopback(address) and address[1] == door_port(front.socket_path)))
     async with server:
         await server.serve_forever()
 

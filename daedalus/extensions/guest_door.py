@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 EXTENSION_KEY = "guest_door"
 SOCKET_NAME = "control.sock"
+ENDPOINT_NAME = "control.endpoint"
 TOKEN_NAME = "control.token"
 TOKEN_MAX_BYTES = 256
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -98,6 +99,10 @@ class DoorRefused(RuntimeError):
         self.detail = detail
 
 
+_OPEN_GUARDED = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+"""Neither name exists on Windows, where the directory is the operator's own and the launcher's to make."""
+
+
 def ensure_token(directory: Path, door_uid: int) -> str:
     """This side's token for the door, made once in a directory only this side writes.
 
@@ -107,13 +112,14 @@ def ensure_token(directory: Path, door_uid: int) -> str:
     """
     path = directory / TOKEN_NAME
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        descriptor = os.open(path, os.O_RDONLY | _OPEN_GUARDED | getattr(os, "O_NONBLOCK", 0))
     except FileNotFoundError:
         token = secrets.token_urlsafe(32)
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o640)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _OPEN_GUARDED, 0o640)
         with os.fdopen(descriptor, "w") as file:
-            with suppress(PermissionError):  # only root can give a group away; a test is not root
-                os.fchown(file.fileno(), -1, door_uid)
+            if door_uid >= 0:  # natively there is no other user to hand it to
+                with suppress(PermissionError):  # only root can give a group away; a test is not root
+                    os.fchown(file.fileno(), -1, door_uid)
             file.write(token)
         return token
     with os.fdopen(descriptor, "rb") as file:
@@ -129,6 +135,9 @@ class DoorSocket(httpcore.AnyIOBackend):
     The directory is the door's, so the name in it could be a link to any other daemon's socket here,
     and this process would connect as root and write to it. Checked on the connection itself, after
     the name has been resolved, where it cannot be swapped.
+
+    Only in a container: natively the door is the same user as this process, there is no other uid to
+    compare, and ``SO_PEERCRED`` does not exist on a Mac. The directory there is private to that user.
     """
 
     def __init__(self, door_uid: int) -> None:
@@ -165,15 +174,27 @@ class DoorClient:
         if not self.configured:
             raise DoorUnavailable("no guest door is set up on this installation")
         if self._client is None:
-            transport = self.transport
-            if transport is None:
-                assert self.run_dir is not None
-                path = str(self.run_dir / SOCKET_NAME)
-                dialled = httpx.AsyncHTTPTransport(uds=path)
-                dialled._pool = httpcore.AsyncConnectionPool(uds=path, network_backend=DoorSocket(self.door_uid))
-                transport = dialled
-            self._client = httpx.AsyncClient(transport=transport, base_url="http://guestd", timeout=CALL_SECONDS)
+            self._client = httpx.AsyncClient(transport=self.transport or self._dial(), base_url=self._address(), timeout=CALL_SECONDS, trust_env=False)
         return self._client
+
+    def _address(self) -> str:
+        """The door's own loopback port where it has one in place of a socket (see ``deploy/guestd``)."""
+        if self.transport is None and self.run_dir is not None:
+            with suppress(OSError):
+                kind, _, rest = (self.run_dir / ENDPOINT_NAME).read_text().strip().partition(":")
+                if kind == "tcp" and rest.startswith("127.0.0.1:"):
+                    return f"http://{rest}"
+        return "http://guestd"
+
+    def _dial(self) -> httpx.AsyncBaseTransport | None:
+        assert self.run_dir is not None
+        if self._address() != "http://guestd":
+            return None
+        path = str(self.run_dir / SOCKET_NAME)
+        dialled = httpx.AsyncHTTPTransport(uds=path)
+        if self.door_uid >= 0:
+            dialled._pool = httpcore.AsyncConnectionPool(uds=path, network_backend=DoorSocket(self.door_uid))
+        return dialled
 
     async def _token(self) -> str:
         if not self.token:
@@ -195,6 +216,8 @@ class DoorClient:
                     if len(raw) > MAX_RESPONSE_BYTES:
                         raise DoorRefused(502, "the door's answer is too long")
         except (httpx.HTTPError, OSError) as exc:
+            # A door on a loopback port comes back on another one, so the address is read again.
+            await self.aclose()
             raise DoorUnavailable("the guest door is not running") from exc
         try:
             body = jsonlib.loads(raw)

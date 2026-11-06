@@ -1321,19 +1321,32 @@ async def handle_guest(request: web.Request) -> web.StreamResponse:
 
 
 async def start_guest_listener(app: web.Application) -> None:
+    """The guest door's listener: a socket when ``KEYPROXY_GUEST_SOCKET`` names one, or, where there are no
+    unix sockets to have (Windows) or the folder is too deep for one, a loopback port the system hands out,
+    written to the file ``KEYPROXY_GUEST_ENDPOINT`` names. It admits as little in either form, and the main
+    listener, on loopback in that same installation, admits more to the same programs."""
     path = os.environ.get("KEYPROXY_GUEST_SOCKET", "").strip()
-    if not path:
+    endpoint = os.environ.get("KEYPROXY_GUEST_ENDPOINT", "").strip()
+    if not path and not endpoint:
         return
     guest = web.Application(client_max_size=GUEST_MAX_BYTES + 1)
     guest["client"] = app["client"]
     guest.router.add_route("*", "/{upstream}/{rest:.*}", handle_guest)
     runner = web.AppRunner(guest, access_log=None)
     await runner.setup()
+    app["guest_runner"] = runner
+    if endpoint:
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        scratch = Path(endpoint).with_suffix(".tmp")
+        scratch.write_text(f"tcp:127.0.0.1:{port}\n")
+        scratch.replace(endpoint)
+        return
     Path(path).unlink(missing_ok=True)
     await web.UnixSite(runner, path).start()
     # Whoever mounts the directory may connect, and only the door's container does.
     os.chmod(path, 0o666)
-    app["guest_runner"] = runner
 
 
 async def stop_guest_listener(app: web.Application) -> None:

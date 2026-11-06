@@ -12,9 +12,11 @@ The answer leaves straight to the person who asked, which is why that absence ha
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -91,14 +93,27 @@ class KeyProxyCaller:
     what guests cost shows up in the same daily total as everything else.
     """
 
-    def __init__(self, socket_path: str, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, socket_path: str, client: httpx.AsyncClient | None = None, *, endpoint: str = "") -> None:
         self.socket_path = socket_path
-        self.client = client or httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(uds=socket_path) if socket_path else None, timeout=CALL_SECONDS)
+        self.endpoint = endpoint
+        """A file naming the listener's loopback port, where it has one in place of a socket. Read at each
+        call: the proxy is handed a new port whenever it restarts, and the door outlives it."""
+        transport = httpx.AsyncHTTPTransport(uds=socket_path) if socket_path else None
+        # Not from the environment: an operator's HTTP_PROXY must not carry a stranger's words to it.
+        self.client = client or httpx.AsyncClient(transport=transport, timeout=CALL_SECONDS, trust_env=False)
+
+    def base(self) -> str:
+        if not self.endpoint:
+            return "http://keyproxy" if self.socket_path else ""
+        with contextlib.suppress(OSError, IndexError):
+            return "http://127.0.0.1:" + Path(self.endpoint).read_text().strip().rsplit(":", 1)[1]
+        return ""
 
     async def __call__(self, link: Any, request: dict[str, Any]) -> ModelReply:
-        if not self.socket_path:
+        base = self.base()
+        if not base:
             raise ModelFailed("no model address is configured", spent=False)
-        url = f"http://keyproxy/{str(link['model_path']).strip('/')}/chat/completions"
+        url = f"{base}/{str(link['model_path']).strip('/')}/chat/completions"
         try:
             response = await self.client.post(url, json=request)
             if response.status_code == 400 and "max_completion_tokens" in response.text:
