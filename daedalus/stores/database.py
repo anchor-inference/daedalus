@@ -3589,20 +3589,6 @@ CREATE TABLE IF NOT EXISTS guest_links (
 CREATE INDEX IF NOT EXISTS guest_links_by_session ON guest_links(session_id);
 """)
 
-MIGRATIONS.append("""
-CREATE TABLE IF NOT EXISTS phone_passes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_hash TEXT NOT NULL UNIQUE,
-    pass_hash TEXT UNIQUE,
-    slug TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    code_expires_at TEXT NOT NULL,
-    expires_at TEXT,
-    used_at TEXT
-);
-CREATE INDEX IF NOT EXISTS phone_passes_by_slug ON phone_passes(slug);
-""")
-
 async def _repeated_media(conn: aiosqlite.Connection) -> None:
     """Answers that repeated a file an earlier answer held were stored without it, because only a
     staged item was bound, and the app printed their raw Markdown. They take the file now, as the
@@ -3664,6 +3650,20 @@ def _json_value(row: Any) -> Any:
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _chromes_of_their_own))
+
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS phone_passes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT NOT NULL UNIQUE,
+    pass_hash TEXT UNIQUE,
+    slug TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    code_expires_at TEXT NOT NULL,
+    expires_at TEXT,
+    used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS phone_passes_by_slug ON phone_passes(slug);
+""")
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
