@@ -2,10 +2,15 @@ package relay
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -15,7 +20,8 @@ import (
 
 // The relay's liveness: a ping every PingInterval, and the relay is lost after MissedPings of them
 // go unanswered. A worker the browser suspended, a bridge whose Chrome quit without closing its
-// pipe, a WebSocket whose network went away: each would otherwise hold the one relay slot for ever.
+// pipe, a WebSocket whose network went away: each would otherwise hold its Chrome's place for ever,
+// and a Chrome that came back would replace a relay nobody could tell was dead.
 const (
 	PingInterval = 15 * time.Second
 	MissedPings  = 3
@@ -33,8 +39,12 @@ const (
 // shutdownBye is how long a stopping daemon waits for the relay to take its bye and close.
 const shutdownBye = time.Second
 
-// ErrNotConnected is a call made while no relay is connected.
+// ErrNotConnected is a call made while the Chrome it names has no relay.
 var ErrNotConnected = errors.New("Chrome is not connected")
+
+// keepChromes bounds how many Chromes that went away the hub remembers for a status. A Chrome that is
+// connected is never dropped; a host pairs at most twenty, and a computer has a handful of profiles.
+const keepChromes = 64
 
 // Options are what the hub needs from the daemon.
 type Options struct {
@@ -59,23 +69,60 @@ type Sender interface {
 	Close()
 }
 
-// Hub holds the one relay a `user` daemon has at a time.
+// Hub holds the relays a `user` daemon has: one for each Chrome connected, however many that is. They
+// share nothing but the daemon: each has its own place, so a Chrome going away, or reconnecting,
+// says nothing about any other. One daemon rather than one per Chrome, because this one launches no
+// browser and costs a few goroutines per relay, and because a server's compose stack has one
+// browser-user service and nothing that could start another.
 type Hub struct {
 	o Options
 
-	mu        sync.Mutex
-	cur       *Session
-	last      Status // the relay that was connected last, for a status while none is
+	mu sync.Mutex
+	// places are the Chromes heard from, connected or not, by ChromeID.
+	places map[string]*place
+	// lastError is the newest refusal of a relay that never became a Chrome: a broken hello, a
+	// protocol the daemon does not speak.
 	lastError string
 	closed    bool
-	// lostAt is when a relay last ended by itself (not replaced, not the daemon stopping): while it
-	// is recent the same Chrome is expected back, and a call waits for it (Hub.Expected).
-	lostAt time.Time
 	// onSession is told of each relay accepted, before its welcome goes out and so before the tabs
 	// the extension replays after the welcome: the attach backend binds its browser to it there.
 	onSession func(*Session)
-	// connected is closed and made anew each time a relay is accepted.
+	// connected is closed and made anew each time any relay is accepted.
 	connected chan struct{}
+}
+
+// place is one Chrome as the hub knows it.
+type place struct {
+	cur       *Session
+	last      Status // the relay that was connected last, for a status while none is
+	lastError string
+	// lostAt is when its relay last ended by itself (not replaced, not the daemon stopping): while it
+	// is recent the same Chrome is expected back, and a call waits for it (Hub.Expected).
+	lostAt time.Time
+	// connected is closed and made anew each time this Chrome's relay is accepted.
+	connected chan struct{}
+}
+
+var plainChromeID = regexp.MustCompile(`^[0-9a-z]{1,16}$`)
+
+// ChromeID is what the daemon and the host call the Chrome a hello speaks for. A server's host puts
+// its paired device's id in the hello, which is proved by the token and short enough to go in a
+// group's id; natively the extension's profile id is the operator's own and of any shape, so its
+// digest is used. Nothing here is a secret, only a name that stays the same.
+func ChromeID(profileID string) string {
+	if plainChromeID.MatchString(profileID) {
+		return profileID
+	}
+	sum := sha256.Sum256([]byte(profileID))
+	return hex.EncodeToString(sum[:6])
+}
+
+// anonymousChrome names a relay whose hello gave no profile: nothing connects to it again, so it
+// never takes another Chrome's place.
+func anonymousChrome() string {
+	raw := make([]byte, 6)
+	_, _ = rand.Read(raw)
+	return hex.EncodeToString(raw)
 }
 
 // OnSession names who is told of each relay accepted, before its welcome goes out.
@@ -85,26 +132,92 @@ func (h *Hub) OnSession(f func(*Session)) {
 	h.mu.Unlock()
 }
 
-// Expected reports whether no relay is connected but one ended by itself less than within ago: the
-// same Chrome reconnecting, which its extension does within seconds.
-func (h *Hub) Expected(within time.Duration) (bool, time.Duration) {
+// Expected reports whether chrome has no relay but its last one ended by itself less than within ago:
+// the same Chrome reconnecting, which its extension does within seconds. An empty chrome asks about
+// any Chrome.
+func (h *Hub) Expected(chrome string, within time.Duration) (bool, time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.cur != nil || h.closed || h.lostAt.IsZero() {
+	if h.closed {
 		return false, 0
 	}
-	left := within - time.Since(h.lostAt)
-	return left > 0, left
+	var most time.Duration
+	found := false
+	for id, pl := range h.places {
+		if (chrome != "" && id != chrome) || pl.cur != nil || pl.lostAt.IsZero() {
+			continue
+		}
+		if left := within - time.Since(pl.lostAt); left > 0 {
+			found = true
+			most = max(most, left)
+		}
+	}
+	return found, most
 }
 
-// Connected is closed when the next relay is accepted.
-func (h *Hub) Connected() <-chan struct{} {
+// Candidates are the Chromes an unnamed call could mean: connected now, or expected back within.
+func (h *Hub) Candidates(within time.Duration) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.connected == nil {
-		h.connected = make(chan struct{})
+	var out []string
+	for id, pl := range h.places {
+		if pl.cur != nil || (!pl.lostAt.IsZero() && time.Since(pl.lostAt) < within) {
+			out = append(out, id)
+		}
 	}
-	return h.connected
+	sort.Strings(out)
+	return out
+}
+
+// Connected is closed when the next relay of chrome is accepted; of any Chrome when chrome is empty.
+func (h *Hub) Connected(chrome string) <-chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if chrome == "" {
+		if h.connected == nil {
+			h.connected = make(chan struct{})
+		}
+		return h.connected
+	}
+	pl := h.places[chrome]
+	if pl == nil {
+		return nil // never connected, so nothing to wait for: Expected says no
+	}
+	if pl.connected == nil {
+		pl.connected = make(chan struct{})
+	}
+	return pl.connected
+}
+
+// placeOf is chrome's place, made when it has none. The caller holds h.mu.
+func (h *Hub) placeOf(chrome string) *place {
+	pl := h.places[chrome]
+	if pl == nil {
+		pl = &place{}
+		h.places[chrome] = pl
+		h.forgetOldest()
+	}
+	return pl
+}
+
+// forgetOldest keeps the table of Chromes that went away bounded. The caller holds h.mu.
+func (h *Hub) forgetOldest() {
+	for len(h.places) > keepChromes {
+		oldest := ""
+		var at time.Time
+		for id, pl := range h.places {
+			if pl.cur != nil || pl.last.Since == nil {
+				continue
+			}
+			if oldest == "" || pl.last.Since.Before(at) {
+				oldest, at = id, *pl.last.Since
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(h.places, oldest)
+	}
 }
 
 // NewHub returns a hub with no relay.
@@ -121,7 +234,7 @@ func NewHub(o Options) *Hub {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Hub{o: o}
+	return &Hub{o: o, places: map[string]*place{}}
 }
 
 func (h *Hub) publish(typ string, data any) {
@@ -130,9 +243,12 @@ func (h *Hub) publish(typ string, data any) {
 	}
 }
 
-// Status is the relay as daemon.info and relay.status report it.
+// Status is one Chrome as daemon.info and relay.status report it. Reconnecting, Groups and Tabs are
+// the attach backend's to fill in (Manager.RelayReport): the hub knows the relay, not the browser.
 type Status struct {
+	Chrome        string     `json:"chrome,omitempty"`
 	Connected     bool       `json:"connected"`
+	Reconnecting  bool       `json:"reconnecting,omitempty"`
 	ProfileID     string     `json:"profile_id,omitempty"`
 	ProfileName   string     `json:"profile_name,omitempty"`
 	ExtVersion    string     `json:"ext_version,omitempty"`
@@ -142,39 +258,113 @@ type Status struct {
 	Since         *time.Time `json:"since"`
 	LastSeen      *time.Time `json:"last_seen"`
 	LastError     string     `json:"last_error,omitempty"`
+	Groups        int        `json:"groups"`
+	Tabs          int        `json:"tabs"`
 }
 
-// Status is the relay now: the connected one, or the last one with why it is not.
-func (h *Hub) Status() Status {
+// Report is the relays of a daemon: every Chrome it has heard from, the connected ones first, oldest
+// connection first, so a list read twice stays in one order.
+type Report struct {
+	// Connected says any Chrome is.
+	Connected bool `json:"connected"`
+	// LastError is the newest refusal that belongs to no Chrome, else the newest Chrome's loss.
+	LastError string   `json:"last_error,omitempty"`
+	Chromes   []Status `json:"chromes"`
+}
+
+// Status is the relays now.
+func (h *Hub) Status() Report {
 	h.mu.Lock()
-	cur, last, lastError := h.cur, h.last, h.lastError
-	h.mu.Unlock()
-	if cur != nil {
-		st := cur.status()
-		st.LastError = lastError
-		return st
+	r := Report{LastError: h.lastError, Chromes: []Status{}}
+	type entry struct {
+		id        string
+		cur       *Session
+		last      Status
+		lastError string
 	}
-	last.Connected = false
-	last.LastError = lastError
-	return last
+	var entries []entry
+	for id, pl := range h.places {
+		if pl.cur == nil && pl.last.Since == nil {
+			continue // only ever waited for
+		}
+		entries = append(entries, entry{id, pl.cur, pl.last, pl.lastError})
+	}
+	h.mu.Unlock()
+	for _, e := range entries {
+		st := e.last
+		if e.cur != nil {
+			st = e.cur.status()
+		}
+		st.Chrome, st.LastError = e.id, e.lastError
+		st.Connected = e.cur != nil
+		r.Connected = r.Connected || st.Connected
+		r.Chromes = append(r.Chromes, st)
+	}
+	sort.Slice(r.Chromes, func(i, j int) bool {
+		a, b := r.Chromes[i], r.Chromes[j]
+		if a.Connected != b.Connected {
+			return a.Connected
+		}
+		if a.Since != nil && b.Since != nil && !a.Since.Equal(*b.Since) {
+			return a.Since.Before(*b.Since)
+		}
+		return a.Chrome < b.Chrome
+	})
+	if r.LastError == "" {
+		for _, st := range r.Chromes {
+			if st.LastError != "" {
+				r.LastError = st.LastError
+				break
+			}
+		}
+	}
+	return r
 }
 
-// Current is the connected relay, or nil.
-func (h *Hub) Current() *Session {
+// Session is chrome's connected relay, or nil. An empty chrome means the only one connected, and nil
+// while there are several: a call that names no Chrome must never land on one by the order of a map.
+func (h *Hub) Session(chrome string) *Session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.cur
+	if chrome != "" {
+		if pl := h.places[chrome]; pl != nil {
+			return pl.cur
+		}
+		return nil
+	}
+	var only *Session
+	for _, pl := range h.places {
+		if pl.cur == nil {
+			continue
+		}
+		if only != nil {
+			return nil
+		}
+		only = pl.cur
+	}
+	return only
 }
 
-// Close ends the relay with a bye saying the daemon stops, and refuses any other.
+// Close ends every relay with a bye saying the daemon stops, and refuses any other.
 func (h *Hub) Close() {
 	h.mu.Lock()
 	h.closed = true
-	cur := h.cur
-	h.mu.Unlock()
-	if cur != nil {
-		cur.end(LostShutdown, &Bye{T: TBye, Reason: ByeShutdown, Message: "Daedalus is stopping"})
+	var live []*Session
+	for _, pl := range h.places {
+		if pl.cur != nil {
+			live = append(live, pl.cur)
+		}
 	}
+	h.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, s := range live {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.end(LostShutdown, &Bye{T: TBye, Reason: ByeShutdown, Message: "Daedalus is stopping"})
+		}()
+	}
+	wg.Wait()
 }
 
 // Open takes over a channel a relay.open opened: the frames that arrive on it go to the returned
@@ -336,24 +526,22 @@ func (l *Link) hello(frame []byte) {
 		l.refuse(Bye{T: TBye, Reason: ByeShutdown, Message: "Daedalus is stopping"})
 		return
 	}
-	old := h.cur
-	if old != nil && (hi.ProfileID == "" || old.hello.ProfileID != hi.ProfileID) {
-		name := old.hello.ProfileName
-		h.lastError = fmt.Sprintf("another Chrome tried to connect (%s) while %s was connected", hi.ProfileName, name)
-		h.mu.Unlock()
-		h.o.Log.Info("relay refused", "reason", "another relay", "connected", name, "refused", hi.ProfileName)
-		l.refuse(Bye{T: TBye, Reason: ByeAnotherRelay, Message: "another Chrome is already connected: " + name})
-		return
+	chrome := anonymousChrome()
+	if hi.ProfileID != "" {
+		chrome = ChromeID(hi.ProfileID)
 	}
+	pl := h.placeOf(chrome)
+	old := pl.cur
 	now := time.Now().UTC()
-	s := &Session{h: h, link: l, hello: hi, transport: l.transport, since: now, lastSeen: now,
+	s := &Session{h: h, link: l, hello: hi, chrome: chrome, transport: l.transport, since: now, lastSeen: now,
 		pending: map[int64]func(*Result){}, done: make(chan struct{}), observed: make(chan func(), 256)}
-	h.cur = s
+	pl.cur = s
+	pl.lastError = ""
+	pl.lostAt = time.Time{}
 	h.lastError = ""
-	h.lostAt = time.Time{}
 	told := h.onSession
-	connected := h.connected
-	h.connected = nil
+	connected, anyone := pl.connected, h.connected
+	pl.connected, h.connected = nil, nil
 	h.mu.Unlock()
 	if old != nil {
 		// The same Chrome profile again: its worker restarted, or its bridge outlived a Chrome that
@@ -370,6 +558,9 @@ func (l *Link) hello(frame []byte) {
 	if connected != nil {
 		close(connected)
 	}
+	if anyone != nil {
+		close(anyone)
+	}
 	kind := InstallNative
 	if l.transport == TransportServer {
 		kind = InstallServer
@@ -380,8 +571,8 @@ func (l *Link) hello(frame []byte) {
 	}
 	go s.observe()
 	go s.live()
-	h.o.Log.Info("relay connected", "profile", hi.ProfileName, "extension", hi.ExtVersion, "chrome", hi.ChromeVersion, "transport", l.transport)
-	h.publish("relay.connected", map[string]any{"profile_id": hi.ProfileID, "profile_name": hi.ProfileName, "ext_version": hi.ExtVersion,
+	h.o.Log.Info("relay connected", "chrome", chrome, "profile", hi.ProfileName, "extension", hi.ExtVersion, "chrome_version", hi.ChromeVersion, "transport", l.transport)
+	h.publish("relay.connected", map[string]any{"chrome": chrome, "profile_id": hi.ProfileID, "profile_name": hi.ProfileName, "ext_version": hi.ExtVersion,
 		"chrome_version": hi.ChromeVersion, "platform": hi.Platform, "transport": l.transport, "proto": hi.Proto})
 }
 
@@ -403,6 +594,7 @@ type Session struct {
 	h         *Hub
 	link      *Link
 	hello     Hello
+	chrome    string
 	transport string
 	since     time.Time
 
@@ -434,11 +626,14 @@ func (s *Session) Reason() string {
 // Hello is what the extension said of itself.
 func (s *Session) Hello() Hello { return s.hello }
 
+// Chrome is the Chrome this relay is of (ChromeID).
+func (s *Session) Chrome() string { return s.chrome }
+
 func (s *Session) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	since, seen := s.since, s.lastSeen
-	return Status{Connected: !s.ended, ProfileID: s.hello.ProfileID, ProfileName: s.hello.ProfileName, ExtVersion: s.hello.ExtVersion,
+	return Status{Chrome: s.chrome, Connected: !s.ended, ProfileID: s.hello.ProfileID, ProfileName: s.hello.ProfileName, ExtVersion: s.hello.ExtVersion,
 		ChromeVersion: s.hello.ChromeVersion, Platform: s.hello.Platform, Transport: s.transport, Since: &since, LastSeen: &seen}
 }
 
@@ -508,15 +703,16 @@ func (s *Session) end(reason string, bye *Bye) {
 	s.mu.Unlock()
 	h := s.h
 	h.mu.Lock()
-	if h.cur == s {
-		h.cur = nil
-		h.last = s.status()
-		h.last.Connected = false
+	pl := h.places[s.chrome]
+	if pl != nil && pl.cur == s {
+		pl.cur = nil
+		pl.last = s.status()
+		pl.last.Connected = false
 	}
-	if reason != LostReplaced && reason != LostShutdown {
-		h.lastError = lostWords(reason)
-		if h.cur == nil {
-			h.lostAt = time.Now()
+	if pl != nil && reason != LostReplaced && reason != LostShutdown {
+		pl.lastError = lostWords(reason)
+		if pl.cur == nil {
+			pl.lostAt = time.Now()
 		}
 	}
 	h.mu.Unlock()
@@ -543,8 +739,8 @@ func (s *Session) end(reason string, bye *Bye) {
 		}
 	}
 	s.link.out.Close()
-	h.o.Log.Info("relay lost", "profile", s.hello.ProfileName, "reason", reason)
-	h.publish("relay.lost", map[string]any{"reason": reason, "profile_id": s.hello.ProfileID, "profile_name": s.hello.ProfileName})
+	h.o.Log.Info("relay lost", "chrome", s.chrome, "profile", s.hello.ProfileName, "reason", reason)
+	h.publish("relay.lost", map[string]any{"chrome": s.chrome, "reason": reason, "profile_id": s.hello.ProfileID, "profile_name": s.hello.ProfileName})
 }
 
 // lostWords is a lost relay's reason as the app shows it under "Not connected".
@@ -603,7 +799,7 @@ func (s *Session) frame(t string, frame []byte) {
 		}
 		seen := s.h.o.HostSeen != nil && s.h.o.HostSeen()
 		_ = s.link.send(CheckOK{T: TCheckOK, N: c.N, HostSeen: seen})
-		s.h.publish("relay.check", map[string]any{"n": c.N, "profile_id": s.hello.ProfileID, "profile_name": s.hello.ProfileName})
+		s.h.publish("relay.check", map[string]any{"n": c.N, "chrome": s.chrome, "profile_id": s.hello.ProfileID, "profile_name": s.hello.ProfileName})
 	case TTabs:
 		var tb Tabs
 		if err := json.Unmarshal(frame, &tb); err != nil {

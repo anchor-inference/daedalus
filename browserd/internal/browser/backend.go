@@ -19,8 +19,9 @@ const (
 	BackendAttach = config.BackendAttach
 )
 
-// UserProfile is the one browser of the attach backend: the operator's Chrome, whatever profile the
-// host names, since the daemon has no profiles of its own to give it.
+// UserProfile starts the key a browser of the attach backend has in the manager: one for each of the
+// operator's Chromes, whatever profile the host names, since the daemon has no profiles of its own to
+// give them.
 const UserProfile = "user"
 
 // Backend is how the manager reaches a browser above its pages. Its methods are called with the
@@ -75,6 +76,19 @@ func (m *Manager) Attached() bool { return m.backend.Name() == BackendAttach }
 
 // Attached reports whether the browser is the operator's Chrome behind a relay.
 func (b *Browser) Attached() bool { return b.attached }
+
+// chrome is which of the operator's Chromes the browser is, "" for a browser of the daemon's own.
+func (b *Browser) chrome() string {
+	if p, ok := b.proc.(*attachProc); ok {
+		return p.chrome
+	}
+	return ""
+}
+
+// sessionKey is a session id as the manager's tables keep it. Chrome numbers its tabs per process and
+// a relay's session is "x<tab>", so a session id alone names a different tab on each computer: the
+// events of one Chrome's tab 412 found the other Chrome's, and a command went to the wrong machine.
+func (b *Browser) sessionKey(session string) string { return b.ID + "/" + session }
 
 // CancelDownload stops one of the browser's downloads.
 func (b *Browser) CancelDownload(ctx context.Context, guid string) error {

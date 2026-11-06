@@ -86,7 +86,7 @@ func (r droppedMidCall) Handle(name string, h server.Handler) {
 		if waits {
 			// A call in the second the operator's Chrome is reconnecting waits for it rather than
 			// failing with "not connected" (Manager.AwaitRelay).
-			r.d.Manager.AwaitRelay(ctx)
+			r.d.Manager.AwaitRelay(ctx, params)
 		}
 		out, err := h(ctx, c, params)
 		if err != nil && pipeClosed(err) {
@@ -179,13 +179,13 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 	}
 	var relayStatus any
 	if d.Relay != nil {
-		// The operator's Chrome is the browser: no Chromium of the daemon's to report, and the
-		// connected Chrome's version stands in its place.
-		st := d.Relay.Status()
+		// The operator's Chromes are the browsers: no Chromium of the daemon's to report, and a
+		// connected Chrome's version stands in its place. The report lists each one's.
+		st := d.Manager.RelayReport()
 		relayStatus = st
 		chromium = map[string]any{"path": "", "version": nil, "kind": "relay"}
-		if st.Connected && st.ChromeVersion != "" {
-			chromium["version"] = st.ChromeVersion
+		if len(st.Chromes) > 0 && st.Chromes[0].Connected && st.Chromes[0].ChromeVersion != "" {
+			chromium["version"] = st.Chromes[0].ChromeVersion
 		}
 	}
 	counts := d.Manager.Counts()

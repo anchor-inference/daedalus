@@ -228,7 +228,7 @@ func TestBridgeCarriesTheRelay(t *testing.T) {
 	if typ := c.read(t, &w); typ != relay.TWelcome || w.InstallName != "Home" || w.InstallKind != relay.InstallNative {
 		t.Fatalf("%s %+v", typ, w)
 	}
-	s := hub.Current()
+	s := hub.Session("")
 	if s == nil || s.Hello().ProfileName != "Home" {
 		t.Fatal("the daemon has no relay")
 	}
@@ -262,7 +262,7 @@ func TestBridgeCarriesTheRelay(t *testing.T) {
 		t.Fatal("the bridge outlived Chrome's pipe")
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for hub.Current() != nil {
+	for hub.Session("") != nil {
 		if time.Now().After(deadline) {
 			t.Fatal("the daemon kept a relay whose Chrome went")
 		}
@@ -272,21 +272,20 @@ func TestBridgeCarriesTheRelay(t *testing.T) {
 
 // The daemon ending the relay (a second Chrome refused) reaches the extension as its bye, and the
 // bridge exits.
-func TestBridgeDaemonBye(t *testing.T) {
-	run, _ := daemon(t, false)
+// Two Chromes on one computer (two profiles) each come through a bridge of their own, and both stay.
+func TestBridgeSecondChrome(t *testing.T) {
+	run, hub := daemon(t, false)
 	first := startBridge(t, Options{Origin: "chrome-extension://" + testID + "/", RunDir: run, Allowed: []string{testID}})
 	first.send(t, relay.Hello{T: relay.THello, Proto: relay.Proto, ProfileID: "p1", ProfileName: "Home"})
 	first.read(t, nil)
 	second := startBridge(t, Options{Origin: "chrome-extension://" + testID + "/", RunDir: run, Allowed: []string{testID}})
 	second.send(t, relay.Hello{T: relay.THello, Proto: relay.Proto, ProfileID: "p2", ProfileName: "Laptop"})
-	var bye relay.Bye
-	if typ := second.read(t, &bye); typ != relay.TBye || bye.Reason != relay.ByeAnotherRelay {
-		t.Fatalf("%s %+v", typ, bye)
+	var welcome relay.Welcome
+	if typ := second.read(t, &welcome); typ != relay.TWelcome {
+		t.Fatalf("%s %+v", typ, welcome)
 	}
-	select {
-	case <-second.run:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the refused bridge did not exit")
+	if st := hub.Status(); !st.Connected || len(st.Chromes) != 2 {
+		t.Fatalf("status %+v", st)
 	}
 }
 
@@ -311,7 +310,7 @@ func TestBridgeRefusesAnOrigin(t *testing.T) {
 	run, hub := daemon(t, false)
 	var out bytes.Buffer
 	err := Run(Options{Origin: "chrome-extension://" + strings.Repeat("b", 32) + "/", RunDir: run, Allowed: []string{testID}}, strings.NewReader(""), &out)
-	if err == nil || out.Len() != 0 || hub.Current() != nil {
+	if err == nil || out.Len() != 0 || hub.Session("") != nil {
 		t.Fatalf("%v, %d bytes out", err, out.Len())
 	}
 }
