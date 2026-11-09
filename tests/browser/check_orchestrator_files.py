@@ -59,28 +59,32 @@ def visit(browser, lang: str, phone: bool) -> None:  # type: ignore[no-untyped-d
         page.wait_for_selector(".chat.in-project .panel", timeout=15000)
         tabs = page.eval_on_selector_all(".panel .panel-tab", "els => els.map(e => e.dataset.tab)")
         assert tabs[:3] == ["questions", "details", "files"], f"{where}: the orchestrator's tabs are {tabs}"
-    switcher = page.locator(f"{scope} .explorer-folders select")
+    # The folders are a menu off the header's chevron; the header itself names the folder by its path.
+    switcher = page.locator(f"{scope} .explorer-switch")
     expect(switcher).to_be_visible(timeout=15000)
     assert switcher.get_attribute("aria-label") == FOLDER_NAME[lang], f"{where}: the switch is named {switcher.get_attribute('aria-label')!r}"
-    options = switcher.locator("option").all_inner_texts()
+    switcher.click()
+    options = page.locator(".menu [role=menuitem]").evaluate_all("els => els.map(e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim())")
     label = f"{WORKTREE_MEMBER} · {WORKTREE_BRANCH}"
     assert options[:3] == ["bakery-site", "bakery-api", "bakery-bot"] and options[-1] == label, f"{where}: the switch lists {options}"
+    page.keyboard.press("Escape")
     assert any(p.endswith(f"/api/projects/{pid}/worktrees") for p in requests), f"{where}: the worktrees were never asked for"
     # The project's own folder is read-only for the orchestrator: no upload, and the lock says so.
     explorer = page.locator(f"{scope} .explorer")
-    expect(explorer.locator(".explorer-folders .chip")).to_be_visible()
+    expect(explorer.locator(".explorer-head .explorer-readonly")).to_be_visible()
     expect(explorer.locator("input[type=file]")).to_have_count(0)
 
-    switcher.select_option(WORKTREE_PANE)
+    switcher.click()
+    page.locator(".menu [role=menuitem]", has_text=label).click()
     tree = explorer.locator(".explorer-tree")
     expect(tree.locator('[data-path="docs"]')).to_be_visible()
-    expect(explorer.locator(".explorer-folders .chip")).to_be_visible()
+    expect(explorer.locator(".explorer-head .explorer-readonly")).to_be_visible()
     expect(explorer.locator("input[type=file]")).to_have_count(0)
     assert any(p.endswith(f"/folders/{WORKTREE_PANE}/files") for p in requests), f"{where}: the worktree was listed through {[p for p in requests if '/files' in p]}"
-    # A long label stays inside the switch rather than pushing the chips out of the pane.
-    inside = page.evaluate("""(scope) => { const row = document.querySelector(scope + ' .explorer-folders'); const pane = document.querySelector(scope + ' .explorer');
+    # A long path stays inside the header, its middle given up, rather than pushing the badges out of the pane.
+    inside = page.evaluate("""(scope) => { const row = document.querySelector(scope + ' .explorer-head'); const pane = document.querySelector(scope + ' .explorer');
       const a = row.getBoundingClientRect(), b = pane.getBoundingClientRect(); return a.right <= b.right + 1 && row.scrollWidth <= row.clientWidth + 1; }""", scope)
-    assert inside, f"{where}: the folder switch overflows its pane"
+    assert inside, f"{where}: the folder header overflows its pane"
 
     tree.locator('[data-path="docs"]').click()
     tree.locator('[data-path="docs/drafts"]').click()

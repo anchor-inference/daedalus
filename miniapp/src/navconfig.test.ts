@@ -4,7 +4,7 @@
 // file too.
 
 import { describe, expect, it } from "vitest";
-import { type NavConfig, type PageInfo, catalogue, desktopLayout, drawerLayout, iconPath, moveItem, pagePath, resolveNav } from "./navconfig";
+import { type NavConfig, type PageInfo, catalogue, desktopLayout, drawerLayout, iconPath, launcherLayout, moveItem, pagePath, resolveNav } from "./navconfig";
 
 const ids = (items: { id: string }[]) => items.map((it) => it.id);
 const DOSING: PageInfo = { slug: "dosing", title: { en: "Dosing", ru: "Дозировка" }, icon: null, icon_path: "M4 12h16M12 4v16", path: "/app/p/dosing", version: 3, updated_at: "2026-10-11T08:00:00Z" };
@@ -165,5 +165,24 @@ describe("what Settings writes", () => {
     expect(moveItem(["a", "b", "c", "d"], 0, 2)).toEqual(["b", "c", "a", "d"]);
     expect(moveItem(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
     expect(moveItem(["a", "b"], 5, 0)).toEqual(["a", "b"]);
+  });
+});
+
+describe("the More launcher", () => {
+  const nav = resolveNav({ config: { hidden: ["health"] }, pages: [DOSING], selfdev: "server" });
+
+  it("lists everything shown, what the rail holds first and marked, never what is hidden", () => {
+    const desk = launcherLayout(nav, nav.rail);
+    expect(ids(desk.catalogue)).toEqual(["inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules", "harnesses", "services", "memory", "usage", "page:dosing"]);
+    expect([...desk.placed]).toEqual(ids(nav.rail));
+  });
+
+  it("offers what the surface does not show while Frequent has learned nothing", () => {
+    expect(launcherLayout(nav, nav.rail).fallback).toEqual(["harnesses", "services", "memory", "usage", "page:dosing"]);
+    const phone = launcherLayout(nav, nav.drawer.agents);
+    expect(ids(phone.catalogue).slice(0, 5)).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
+    expect(phone.fallback).not.toContain("inbox");
+    expect(phone.fallback).not.toContain("health");
+    expect(phone.fallback.slice(0, 3)).toEqual(["harnesses", "services", "memory"]);
   });
 });

@@ -215,7 +215,7 @@ def _multi_edit(args: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     path, edits = _path(args), args.get("edits")
     if not path or not isinstance(edits, list) or not edits:
         return None
-    return "MultiEdit", {"path": path, "edits": edits}
+    return "Edit", {"path": path, "edits": edits}
 
 
 def _find(args: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:

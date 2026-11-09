@@ -1,5 +1,8 @@
-// The right panel: the session's workspace beside the conversation. Four tabs — Details, Files,
-// Preview, Jobs — and Subagents for a session that has helpers, a toolbar of its own, a drag handle on its left edge, expand-to-full and close.
+// The right panel: the session's workspace beside the conversation. Over everything a strip with the
+// session's state (its model, how full the context is, what it cost) that stays on every tab, so the two
+// numbers the operator watches are never a scroll or a click away; under it the tabs — Details, Files,
+// Preview, Jobs, Notes, and Subagents, Browser, Questions when there are any — then the open tab. A drag
+// handle on its left edge, pin, expand-to-full and close.
 // On a desktop it is a column of the chat grid; on a phone the same tabs in a full-height sheet.
 // The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
 
@@ -25,8 +28,15 @@ import {
   boundPanelPct,
   clampPanelPct,
   closePanel,
+  closeEntry,
   crumbsOf,
   currentEntry,
+  isCurrent,
+  openBeside,
+  openEntries,
+  readPanelPinned,
+  rememberPanelPinned,
+  showEntry,
   goBack,
   goForward,
   openFile,
@@ -51,6 +61,8 @@ import { PaneHandle, clampWidth, pixelDrag, usePaneWidth, type PaneDrag } from "
 import { t } from "./i18n";
 import { SnapshotButton } from "./annotate/Annotate";
 import { previewSnapshot } from "./annotate/source";
+import { fileIcon } from "./artifact";
+import "./panel.css";
 
 export type PanelHostProps = {
   state: PanelState;
@@ -83,6 +95,14 @@ export type PanelHostProps = {
   sheetSub?: ReactNode;
   /** Desktop: what dragging the left edge does. */
   drag?: PaneDrag;
+  /** The session's state over every tab: its model, its context, its cost, its menu (panelstrip.tsx). */
+  strip?: ReactNode;
+  /** Whether the panel stays open in every chat, and the button that says so. */
+  pinned?: boolean;
+  onPin?: () => void;
+  /** The open files' tabs: show one, close one. */
+  onShowEntry?: (entry: PanelEntry) => void;
+  onCloseEntry?: (entry: PanelEntry) => void;
 };
 
 /** What the panel keeps for itself: a reload counter for the viewer, the phone-width toggle,
@@ -117,8 +137,10 @@ export function Panel(props: PanelHostProps) {
     return (
       <Sheet size="full" className={`panel-sheet ${local.closing ? "panel-closing" : ""}`} ariaLabel={t("panel.label")} onClose={props.onClose} head={<>
         {props.sheetTitle && <div className="panel-sheet-title"><b className="truncate">{props.sheetTitle}</b>{props.sheetSub && <span className="truncate">{props.sheetSub}</span>}</div>}
+        {props.strip && <div className="panel-sheet-strip">{props.strip}</div>}
         <Tabs {...shownProps} local={local} inSheet />
       </>}>
+        <FileTabs {...shownProps} local={local} />
         <Toolbar {...shownProps} local={local} />
         <Body {...shownProps} local={local} />
       </Sheet>
@@ -148,8 +170,10 @@ function Column(props: HostProps) {
   return (
     <aside ref={box} inert={props.local.closing} className={`panel ${props.local.closing ? "panel-closing" : ""} ${state.expanded ? "full" : ""} ${visible ? "shown" : ""} ${props.local.narrow ? "phone-width" : ""}`} aria-label={t("panel.label")}>
       {props.drag && !state.expanded && <PaneHandle side="right" drag={props.drag} />}
+      {props.strip}
       <Tabs {...props} />
-      <Toolbar {...props} />
+      {!splitOf(props) && <FileTabs {...props} />}
+      {!splitOf(props) && <Toolbar {...props} />}
       <Body {...props} />
     </aside>
   );
@@ -210,7 +234,7 @@ function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, co
   return fit;
 }
 
-function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
+function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, pinned, onPin, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);
   // What the strip holds and how long its words are: a new tab, a badge, the open tab, the language.
   const fit = useTabFit(strip, !!inSheet, `${tabs.join()}|${state.tab}|${JSON.stringify(badges ?? {})}|${tabs.map((tab) => t(`panel.tab.${tab}`)).join()}`);
@@ -249,6 +273,11 @@ function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, 
       </div>
       {!inSheet && (
         <div className="panel-actions">
+          {onPin && (
+            <button className={`iconbtn small panel-pin ${pinned ? "on" : ""}`} onClick={onPin} aria-pressed={!!pinned} aria-label={t(pinned ? "panel.unpin" : "panel.pin")} title={t(pinned ? "panel.unpin.title" : "panel.pin.title")}>
+              <Icon name="pushpin" size={16} />
+            </button>
+          )}
           <button className={`iconbtn small ${state.expanded ? "on" : ""}`} onClick={onExpand} aria-label={t(state.expanded ? "panel.restore" : "panel.expand")} title={t(state.expanded ? "panel.restore" : "panel.expand")} aria-pressed={state.expanded}>
             <Icon name={state.expanded ? "panel" : "expand"} size={16} />
           </button>
@@ -263,9 +292,10 @@ function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, 
 
 /** The Preview tab's toolbar: history, the breadcrumb, open-in-new, phone width, download. The
  *  other tabs carry their own controls in their bodies and draw no toolbar. */
-function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, local, files }: HostProps) {
+function Toolbar(props: HostProps) {
+  const { state, onBack, onForward, onTab, root, downloadUrl, sheet, local, files } = props;
   const entry = currentEntry(state);
-  if (state.tab !== "preview") return null;
+  if (state.tab !== "preview" && !splitOf(props)) return null;
   const html = local.info?.kind === "html" ? local.nav : null;
   const crumbs = entry ? crumbsOf(html?.path ?? entry.path) : [];
   // The tree beside the file is offered only where it could be drawn: a panel wide enough for both.
@@ -307,6 +337,57 @@ function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, lo
   );
 }
 
+/** Whether the panel draws the tree and the open files side by side: a panel wide enough for both, on
+ *  Preview with the tree shown, or on Files once a file is open — so in a wide panel Files and Preview
+ *  are one view and the reader never loses the tree to read a file, nor the file to find the next one. */
+function splitOf({ state, files, sheet, local }: HostProps): boolean {
+  if (files === undefined || sheet || !local.wide || !local.tree) return false;
+  return state.tab === "preview" || (state.tab === "files" && currentEntry(state) !== null);
+}
+
+/** The open files as tabs over the viewer, each closable. Shown on Preview and in the wide view; the
+ *  history behind Back and Forward still holds every step, the tabs are its files once each. */
+function FileTabs(props: HostProps) {
+  const { state, onShowEntry, onCloseEntry } = props;
+  const entries = openEntries(state);
+  const strip = useRef<HTMLDivElement>(null);
+  useEdgeFade(strip, state.at);
+  useEffect(() => {
+    strip.current?.querySelector<HTMLElement>(".file-tab.on")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [state.at]);
+  if (!onShowEntry || entries.length === 0) return null;
+  if (state.tab !== "preview" && !splitOf(props)) return null;
+  const onKey = (e: React.KeyboardEvent) => {
+    const i = entries.findIndex((entry) => isCurrent(state, entry));
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      const next = entries[(i + (e.key === "ArrowRight" ? 1 : entries.length - 1)) % entries.length];
+      onShowEntry(next);
+      e.preventDefault();
+      window.requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(".file-tab.on")?.focus());
+    } else if ((e.key === "Delete" || e.key === "Backspace") && onCloseEntry && entries[i]) {
+      onCloseEntry(entries[i]);
+      e.preventDefault();
+    }
+  };
+  return (
+    <div ref={strip} className="panel-filetabs" role="tablist" aria-label={t("panel.files.open")} onKeyDown={onKey}>
+      {entries.map((entry) => {
+        const on = isCurrent(state, entry);
+        const name = entry.path.split("/").pop() || entry.path;
+        return (
+          <div key={`${entry.base}:${entry.path}:${entry.lines ?? ""}`} className={`file-tab ${on ? "on" : ""}`} title={entry.path}>
+            <button role="tab" aria-selected={on} tabIndex={on ? 0 : -1} className="file-tab-name" onClick={() => onShowEntry(entry)} onAuxClick={(e) => { if (e.button === 1 && onCloseEntry) { e.preventDefault(); onCloseEntry(entry); } }}>
+              <Icon name={fileIcon(name)} size={14} />
+              <span className="truncate">{name}{entry.lines ? `:${entry.lines}` : ""}</span>
+            </button>
+            {onCloseEntry && <button className="file-tab-close" tabIndex={-1} aria-label={t("panel.files.close", { name })} title={t("panel.files.close", { name })} onClick={() => onCloseEntry(entry)}><Icon name="close" size={12} /></button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Body(props: HostProps) {
   const { state, local } = props;
   const entry = currentEntry(state);
@@ -322,17 +403,25 @@ function Body(props: HostProps) {
     return () => observer.disconnect();
   }, [setWide]);
   const [visited, setVisited] = useState(state.tab === "files");
-  const split = wide && state.tab === "preview" && local.tree;
+  const split = splitOf(props);
   useEffect(() => { if (state.tab === "files" || split) setVisited(true); }, [state.tab, split]);
   useMoreBelow(box, state.tab);
   const progress = local.nav?.busy ? null : local.info?.progress;
   const loading = state.tab === "preview" && (local.info?.loading || local.nav?.busy);
   return (
-    <div ref={box} id={`${local.ids}-body`} role="tabpanel" aria-labelledby={`${local.ids}-tab-${state.tab}`} tabIndex={-1} className={`panel-body tab-${state.tab} ${split ? "split" : ""}`}>
+    <div ref={box} id={`${local.ids}-body`} role="tabpanel" aria-labelledby={`${local.ids}-tab-${state.tab}`} tabIndex={-1} className={`panel-body tab-${split ? "preview" : state.tab} ${split ? "split" : ""}`}>
       {loading && <div className={`preview-progress ${progress == null ? "busy" : ""}`} role="progressbar" aria-label={t("common.loading")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress == null ? undefined : Math.round(progress * 100)}><i style={progress == null ? undefined : { width: `${progress * 100}%` }} /></div>}
       {state.tab === "details" && props.details?.(local.ids)}
       {props.files !== undefined && <div ref={files} className="panel-files" hidden={state.tab !== "files" && !split} style={split ? { width } : undefined}>{(visited || state.tab === "files" || split) && props.files}{split && <PaneHandle side="left" drag={treeDrag} />}</div>}
-      {state.tab === "preview" && (entry ? <Viewer key={`${entry.base}:${entry.path}:${entry.lines ?? ""}:${local.gen}`} src={entry as PreviewSource} onInfo={local.setInfo} onNavigation={local.setNav} className="panel-viewer" /> : <div className="empty">{t("panel.preview.empty")}</div>)}
+      {split ? (
+        // The wide view: the tree on the left, the open files as tabs on the right with the viewer's
+        // toolbar under them — a file manager and an editor side by side, the way a wide panel is used.
+        <div className="panel-beside">
+          <FileTabs {...props} />
+          <Toolbar {...props} />
+          {entry ? <Viewer key={`${entry.base}:${entry.path}:${entry.lines ?? ""}:${local.gen}`} src={entry as PreviewSource} onInfo={local.setInfo} onNavigation={local.setNav} className="panel-viewer" /> : <div className="empty">{t("panel.preview.empty")}</div>}
+        </div>
+      ) : state.tab === "preview" && (entry ? <Viewer key={`${entry.base}:${entry.path}:${entry.lines ?? ""}:${local.gen}`} src={entry as PreviewSource} onInfo={local.setInfo} onNavigation={local.setNav} className="panel-viewer" /> : <div className="empty">{t("panel.preview.empty")}</div>)}
       {state.tab === "jobs" && props.jobs}
       {state.tab && props.pages?.[state.tab]}
     </div>
@@ -352,6 +441,13 @@ export type PanelControls = {
   openFile: (entry: PanelEntry) => void;
   /** The Subagents tab on one helper's conversation, or on the list with null. */
   openSubagent: (sub: string | null) => void;
+  /** A file opened beside the one on screen, as a tab of its own. */
+  openBeside: (entry: PanelEntry) => void;
+  showEntry: (entry: PanelEntry) => void;
+  closeEntry: (entry: PanelEntry) => void;
+  /** Whether the panel opens in every chat on this device, and the switch for it. */
+  pinned: boolean;
+  togglePin: () => void;
 };
 
 /** A pane's panel. With `route`, the URL carries the open tab and the previewed path, so a link
@@ -428,6 +524,7 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
   }, [pane]);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const [pinned, setPinned] = useState(readPanelPinned);
   const open = useCallback(
     (tab: PanelTab) => {
       const s = stateRef.current;
@@ -464,6 +561,25 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
       },
       [commit, announce],
     ),
+    openBeside: useCallback(
+      (entry: PanelEntry) => {
+        const s = stateRef.current;
+        if (s.tab === null) announce();
+        // Nothing open yet: the first file is the one on screen, on Preview as any opened file is.
+        commit(s.tab === null || currentEntry(s) === null ? openFile(s, entry) : openBeside(s, entry), s.tab === null);
+      },
+      [commit, announce],
+    ),
+    showEntry: useCallback((entry: PanelEntry) => commit(showEntry(stateRef.current, entry)), [commit]),
+    closeEntry: useCallback((entry: PanelEntry) => commit(closeEntry(stateRef.current, entry)), [commit]),
+    pinned,
+    togglePin: useCallback(() => setPinned((was) => {
+      rememberPanelPinned(!was);
+      // The open tab is written again under the new pin, so a panel pinned while open is the one the
+      // next chat opens on.
+      if (!was && stateRef.current.tab) rememberPanelTab(stateRef.current.tab, undefined, context);
+      return !was;
+    }), [context]),
     openSubagent: useCallback(
       (sub: string | null) => {
         const s = stateRef.current;

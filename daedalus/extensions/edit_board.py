@@ -1,7 +1,7 @@
 """The who-edits-what board, wired to the agents that edit: native tools, CLI members, the team.
 
 The store (``stores/edit_board.py``) knows leases and notes; this knows who an agent is. A native
-Write, Edit or MultiEdit asks through the session manager's ``edit_board`` service hook, a CLI
+Write or Edit asks through the session manager's ``edit_board`` service hook, a CLI
 member's runtime through its ``edit_board`` attribute, and both get back the line to append to the
 tool's result. Nothing here ever reaches a system prompt or an earlier message: the note travels
 only in the result of the edit that found the overlap, so the cached prefix is never touched.

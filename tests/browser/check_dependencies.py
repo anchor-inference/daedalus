@@ -48,7 +48,8 @@ def run() -> None:
                 cancel = "Cancel" if language == "en" else "Отмена"
                 install = "Accept and install" if language == "en" else "Принять и установить"
                 page.get_by_role("button", name=prepare, exact=True).click()
-                dialog = page.get_by_role("dialog")
+                # The review sheet: Settings is itself a dialog now, so "the dialog" has to name which.
+                dialog = page.locator(".sheet[role='dialog']")
                 expect(dialog).to_be_visible()
                 expect(dialog.locator(".deps-patch")).to_contain_text("Pillow")
                 expect(dialog.get_by_role("button", name=install)).to_be_disabled()

@@ -139,23 +139,26 @@ def desktop(page: Page, lang: str) -> None:
         rail.locator(f"[data-rail='{key}']").click()
         page.wait_for_url(f"**{path}")
         expect(rail.locator(f"[data-rail='{key}']")).to_have_class(re.compile(r"\bon\b"))
-    # Settings takes the window: its own column, the section centred beside it, the rail stepped aside.
+    # Settings is a dialog over the screen it was opened from: the rail and the screen stay under it,
+    # and closing it goes back there however many sections were opened inside it.
     rail.locator("[data-rail='settings']").click()
     page.wait_for_url("**/app/settings")
-    expect(page.locator(".settings-stage")).to_be_visible()
-    expect(rail).to_be_hidden()
-    column = page.locator(".settings-col")
-    centre = column.evaluate("el => { const box = el.getBoundingClientRect(); const parent = el.parentElement.getBoundingClientRect(); return Math.abs((box.left + box.right) / 2 - (parent.left + parent.right) / 2); }")
-    assert centre <= 2, f"{lang}: the settings column is {centre}px off centre"
+    dialog = page.locator(".settings-dialog[role='dialog'][aria-modal='true']")
+    expect(dialog).to_be_visible()
+    expect(rail).to_be_visible()
+    rail_box = rail.bounding_box()
+    assert rail_box and round(rail_box["width"]) == 52, f"{lang}: the rail is {rail_box} wide under Settings, not 52"
     page.locator(".settings-nav a[href$='/settings/security']").click()
     page.wait_for_url("**/app/settings/security")
     expect(page.locator("h1.settings-title")).to_have_text("Security" if lang == "en" else "Безопасность")
-    page.locator(".settings-back").click()
+    page.locator(".settings-close").click()
+    page.wait_for_url(re.compile(r"/app/schedules(/|$)"))
+    expect(dialog).to_be_hidden()
+    rail.locator("[data-rail='agents']").click()
     page.wait_for_url("**/app/agents")
-    expect(rail).to_be_visible()
     # The menu opens from the rail's foot with everything else.
     rail.locator("[data-rail='menu']").click()
-    expect(page.locator(".navmenu[role='menu']")).to_be_visible()
+    expect(page.locator(".navmenu[role='dialog']")).to_be_visible()
     menu_box = page.locator(".navmenu").bounding_box()
     trigger_box = rail.locator("[data-rail='menu']").bounding_box()
     assert menu_box and trigger_box and abs(menu_box["x"] - trigger_box["x"] - trigger_box["width"] - 6) <= 1, "More must overlay the list beside its own trigger"

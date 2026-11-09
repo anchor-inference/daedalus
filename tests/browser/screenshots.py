@@ -1349,7 +1349,7 @@ def open_drawer(page: Page) -> None:
 
 
 def open_more(page: Page) -> None:
-    """The drawer's More sheet on a phone: every other destination, and the language switch under them."""
+    """The drawer's More sheet on a phone: the same launcher as the desktop's, as a sheet."""
     open_drawer(page)
     page.locator(".ph-drawer-root.open [data-nav='more']").click()
     page.wait_for_selector(".ph-more-sheet", timeout=5000)
@@ -1412,9 +1412,9 @@ def open_hire(page: Page) -> None:
 
 
 def open_menu(page: Page) -> None:
-    """The menu from the rail's foot: every destination with its count, the language, Settings — over the conversation."""
+    """The More launcher from the rail's foot: its search, the Frequent tiles and every destination with its count — over the conversation."""
     page.locator(".rail [data-rail='menu']").click()
-    page.wait_for_selector(".navmenu[role='menu']", timeout=5000)
+    page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
 
 
 def fold_sidebar(page: Page) -> None:

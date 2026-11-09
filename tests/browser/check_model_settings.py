@@ -121,10 +121,12 @@ def details(browser, lang: str, width: int, scheme: str, failures: list[str]) ->
     page.route("**/api/sessions/*/subagent-models", chosen)
     page.goto(f"{BASE}/agents/{S1}?panel=details&token=t&scheme={scheme}&lang={lang}")
     scope = ".panel-sheet" if mobile else ".panel"
+    # Details is an inspector: the helper models have a line of their own, opened in place of the list.
+    page.locator(f"{scope} [data-prop='helpers']").click()
     box = page.locator(f"{scope} .dt-subagent-models")
     box.wait_for()
     if words["subm"] not in box.inner_text():
-        failures.append(f"{where}: the session card has no helper models: {box.inner_text()!r}")
+        failures.append(f"{where}: the helper models page has no picker: {box.inner_text()!r}")
     box.get_by_role("radio", name=words["chosen"]).click()
     page.wait_for_timeout(200)
     if {"mode": "chosen", "presets": []} not in sent:

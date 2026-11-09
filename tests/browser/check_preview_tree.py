@@ -40,7 +40,7 @@ def wide(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-un
     page = context.new_page()
     page.route("**/api/**", stub)
     opened(page, lang)
-    page.locator(".panel.shown .panel-actions button[aria-pressed]").first.click()
+    page.locator(".panel.shown .panel-actions button[aria-pressed]:not(.panel-pin)").first.click()
     expect(page.locator(".panel.full .panel-body.split .panel-files")).to_be_visible(timeout=5000)
     before = page.evaluate(WIDTH, ".panel-viewer")
     hide = page.get_by_role("button", name=words["hide"])
@@ -53,7 +53,7 @@ def wide(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-un
     page.reload()
     expect(page.locator(".panel.shown .preview-doc")).to_be_visible(timeout=20000)
     if not page.locator(".panel.full").count():
-        page.locator(".panel.shown .panel-actions button[aria-pressed]").first.click()
+        page.locator(".panel.shown .panel-actions button[aria-pressed]:not(.panel-pin)").first.click()
     page.wait_for_timeout(500)
     if page.locator(".panel .panel-body.split").count():
         problems.append(f"{lang} 1440px: the tree came back after a reload")

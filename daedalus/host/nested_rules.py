@@ -3,7 +3,7 @@
 A project keeps rules for one part of it next to that part: ``miniapp/AGENTS.md`` for the app,
 ``desktop/AGENTS.md`` for the launcher. The root's file is in every run's opening message
 (:meth:`SessionManager.workspace_notes`); these were never seen unless the agent happened to open
-them. Now the first time in a run that Read, Write, Edit, MultiEdit, Find or Search reaches a file or
+them. Now the first time in a run that Read, Write, Edit, Find or Search reaches a file or
 folder below one, its ``AGENTS.md`` (and ``CLAUDE.md``, when it says something else) is put at the
 head of that tool's result.
 

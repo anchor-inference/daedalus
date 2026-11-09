@@ -22,7 +22,7 @@ from daedalus.browser.model import EnvUnavailable, Forbidden, Owner
 from daedalus.harness.contract import ToolSetSpec
 from daedalus.host.policy import ASK, BROWSER_NAV_TOOLS, DENY
 from daedalus.host.prompts import STAFF_BROWSER_NETWORK_HINT
-from daedalus.stores.files import FileRefused, human_size, parse_handle
+from daedalus.stores.files import FileRefused, parse_handle, saved_report
 from daedalus.tools.browser import READ_ONLY_TOOLS, TOOLS
 from daedalus.tools.vision import VisionUnavailable, look
 
@@ -110,7 +110,8 @@ class StaffFiles:
             raise Forbidden(str(exc)) from None
         where = delivered[0].path if delivered else ""
         note = " (a path was asked for; a download goes to your inbox)" if to else ""
-        return f"Saved {name} ({human_size(len(data))}) to {where}{note}. It is also kept as {stored.handle}, which passes to the team by handle."
+        report = saved_report(where, len(data), stored.sha256, source="a site, through the browser")
+        return f"Saved {name} to {where}{note}.\n{report}\nIt is also kept as {stored.handle}, which passes to the team by handle."
 
 
 class StaffBrowser:

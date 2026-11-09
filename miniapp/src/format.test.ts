@@ -28,6 +28,7 @@ describe("numbers", () => {
     expect(duration(134000)).toBe("2m 14s");
     expect(duration(6240000)).toBe("1h 44m");
     expect(tokens(711_500_000)).toBe("711.5M");
+    expect(tokens(1_214_900_000)).toBe("1.21B");
     expect(tokens(28_400)).toBe("28k");
     expect(usd(3.9)).toBe("$3.90");
     expect(usd(0.004)).toBe("< $0.01");

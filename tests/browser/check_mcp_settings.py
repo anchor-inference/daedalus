@@ -52,7 +52,7 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
     sign_in = "Sign in" if LANG == "en" else "Войти"
     if tracker.get_by_role("button", name=sign_in).count() != 1 or files.get_by_role("button", name=sign_in).count():
         problems.append("only the server waiting for its sign-in should offer Sign in")
-    card.get_by_role("button", name="Add server" if LANG == "en" else "Добавить сервер").click()
+    card.get_by_role("button", name="Fill in by hand" if LANG == "en" else "Заполнить вручную").click()
     form = card.locator("[data-mcp-form]")
     form.locator("input.field").first.fill("linear")
     form.locator("input.field.mono").nth(1).fill("https://mcp.linear.example/mcp")

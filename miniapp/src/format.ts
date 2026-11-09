@@ -127,9 +127,11 @@ export function duration(ms: number): string {
   return t("fmt.dur.d", { n: d }) + (h % 24 ? ` ${t("fmt.dur.h", { n: h % 24 })}` : "");
 }
 
-/** Compact token counts: 71.1M, 28k, 950. */
+/** Compact token counts: 1.21B, 71.1M, 28k, 950. Billions have a unit of their own: a long session's
+ *  cache reads ran past a thousand million and read as "1214.9M", a number to count digits in. */
 export function tokens(n: number | null | undefined): string {
   const v = n ?? 0;
+  if (v >= 1_000_000_000) return t("fmt.tok.b", { n: (v / 1_000_000_000).toFixed(2) });
   if (v >= 1_000_000) return t("fmt.tok.m", { n: (v / 1_000_000).toFixed(1) });
   if (v >= 10_000) return t("fmt.tok.k", { n: Math.round(v / 1000) });
   return num(v);

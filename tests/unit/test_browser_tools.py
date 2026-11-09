@@ -6,6 +6,7 @@ where the browser may go."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 import tempfile
@@ -255,6 +256,8 @@ async def test_tabs_waits_dialogs_downloads_and_close(rig: Rig) -> None:
     assert not failed and "downloads/manual.pdf" in text, text
     workspace = rig.manager.workspace_for(sid)
     assert (workspace / "downloads" / "manual.pdf").read_bytes() == b"%PDF-1.7 manual"
+    # The same lines WebFetch's save_to gives: a hash the agent can check, and the file named as a site's.
+    assert f"sha256: {hashlib.sha256(b'%PDF-1.7 manual').hexdigest()}" in text and "size: 15 bytes" in text and "untrusted" in text
     text, failed = await rig.call(sid, "BrowserDownload", name="manual.pdf", to="/etc/manual.pdf")
     assert failed and "/etc/manual.pdf" in text
     text, failed = await rig.call(sid, "BrowserDownload", name="nothing.zip")

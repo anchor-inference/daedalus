@@ -41,7 +41,7 @@ from daedalus.host.notify_text import render
 KINDS = ("migration", "containers", "services", "git_history", "delete_outside", "database", "write_outside")
 """What the operator may allow for the rest of a goal, one rule family each."""
 
-WRITE_TOOLS = ("Write", "Edit", "MultiEdit")
+WRITE_TOOLS = ("Write", "Edit")
 NEVER_RAN_KINDS = frozenset({"permission", "validation", "unknown_tool"})
 """The core's error kinds for a call it answered without running the tool."""
 ERROR_KIND_KEY = "tool_dispatch.replay_error_kind"
@@ -100,7 +100,7 @@ class FileWrite:
     tool: str
     path: str
     edits: tuple[tuple[str, str], ...] = ()
-    """For Edit and MultiEdit, each ``(old, new)``; empty for a Write, which replaces the whole file."""
+    """For an Edit, each ``(old, new)`` (one, or its batch); empty for a Write, which replaces the whole file."""
 
 
 @dataclass(frozen=True)
@@ -211,10 +211,10 @@ def writes_of(calls: Iterable[Call], scope: Scope) -> list[FileWrite]:
         if not named:
             continue
         edits: tuple[tuple[str, str], ...] = ()
-        if call.tool == "Edit":
-            edits = ((str(call.arguments.get("old_string") or ""), str(call.arguments.get("new_string") or "")),)
-        elif call.tool == "MultiEdit":
+        if call.tool == "Edit" and isinstance(call.arguments.get("edits"), list):
             edits = tuple((str(e.get("old_string") or ""), str(e.get("new_string") or "")) for e in call.arguments.get("edits") or [] if isinstance(e, dict))
+        elif call.tool == "Edit":
+            edits = ((str(call.arguments.get("old_string") or ""), str(call.arguments.get("new_string") or "")),)
         out.append(FileWrite(call.tool, _absolute(named, scope.work_dir, scope.home), edits))
     return out
 

@@ -58,12 +58,19 @@ export function PageHeader({ title, subtitle, actions, back, lead, children }: {
 
 export type PaletteItem = { id: string; label: string; hint?: string; icon: IconName; iconPath?: string | null; run: () => void };
 
+/** The palette's search, shared with the More launcher's field so the two never find different
+ *  things for the same words. */
+export function matchPalette(items: PaletteItem[], query: string, limit = 12): PaletteItem[] {
+  const needle = query.trim().toLowerCase();
+  return (needle ? items.filter((it) => `${it.label} ${it.hint ?? ""}`.toLowerCase().includes(needle)) : items).slice(0, limit);
+}
+
 /** Ctrl/⌘ K: go somewhere by name — a screen, a session, an action. */
 export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
   const needle = q.trim().toLowerCase();
-  const shown = (needle ? items.filter((it) => `${it.label} ${it.hint ?? ""}`.toLowerCase().includes(needle)) : items).slice(0, 12);
+  const shown = matchPalette(items, q);
   useEffect(() => setCursor(0), [needle]);
   const run = (it: PaletteItem) => {
     onClose();

@@ -13,6 +13,12 @@ import {
   canGoBack,
   canGoForward,
   clampPanelPct,
+  closeEntry,
+  openBeside,
+  openEntries,
+  readPanelPinned,
+  rememberPanelPinned,
+  showEntry,
   closePanel,
   crumbsOf,
   currentEntry,
@@ -307,5 +313,67 @@ describe("how much of each tab the strip draws", () => {
     expect(widestFit(fitsFor(false), (fit) => fit !== "full")).toBe("words");
     expect(widestFit(fitsFor(true), (fit) => fit === "icons" || fit === "active")).toBe("active");
     expect(widestFit(fitsFor(false), () => false)).toBe("icons");
+  });
+});
+
+describe("open files as tabs", () => {
+  const a = { base, path: "a.md" };
+  const b = { base, path: "b.md" };
+  const c = { base, path: "c.md" };
+  it("lists each open file once, in the order it was first opened", () => {
+    const s = openFile(openFile(openFile(openFile(PANEL_CLOSED, a), b), a), c);
+    expect(openEntries(s).map((e) => e.path)).toEqual(["a.md", "b.md", "c.md"]);
+  });
+  it("shows a tab's file without growing the history", () => {
+    const s = openFile(openFile(PANEL_CLOSED, a), b);
+    const shown = showEntry(s, a);
+    expect(currentEntry(shown)?.path).toBe("a.md");
+    expect(shown.stack).toHaveLength(2);
+  });
+  it("closing the file on screen moves to the one before it, or the next when it was first", () => {
+    const s = openFile(openFile(openFile(PANEL_CLOSED, a), b), c);
+    expect(currentEntry(closeEntry(s, c))?.path).toBe("b.md");
+    const first = showEntry(s, a);
+    expect(currentEntry(closeEntry(first, a))?.path).toBe("b.md");
+  });
+  it("closing another file keeps the one on screen", () => {
+    const s = openFile(openFile(openFile(PANEL_CLOSED, a), b), c);
+    const closed = closeEntry(s, a);
+    expect(currentEntry(closed)?.path).toBe("c.md");
+    expect(openEntries(closed).map((e) => e.path)).toEqual(["b.md", "c.md"]);
+  });
+  it("closing the last file leaves nothing on screen", () => {
+    const closed = closeEntry(openFile(PANEL_CLOSED, a), a);
+    expect(closed.at).toBe(-1);
+    expect(currentEntry(closed)).toBeNull();
+  });
+  it("opens a file beside the current one and stays on the current one", () => {
+    const s = openBeside(openFile(PANEL_CLOSED, a), b);
+    expect(currentEntry(s)?.path).toBe("a.md");
+    expect(openEntries(s).map((e) => e.path)).toEqual(["a.md", "b.md"]);
+    expect(openBeside(s, b)).toBe(s);
+  });
+});
+
+describe("the pin", () => {
+  const store = () => {
+    const values = new Map<string, string>();
+    return { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => void values.set(k, v) };
+  };
+  it("opens a pinned panel in every chat on any window that draws it as a column", () => {
+    expect(defaultPanelTab("0", 1100, undefined, true)).toBe("details");
+    expect(defaultPanelTab("files", 1100, undefined, true)).toBe("files");
+    expect(defaultPanelTab("files", 900, undefined, true)).toBeNull();
+  });
+  it("is remembered on the device, and a closed pinned panel keeps its last tab", () => {
+    const storage = store();
+    expect(readPanelPinned(storage)).toBe(false);
+    rememberPanelPinned(true, storage);
+    rememberPanelTab("jobs", storage);
+    rememberPanelTab(null, storage);
+    expect(readPanelTab(1100, storage)).toBe("jobs");
+    rememberPanelPinned(false, storage);
+    rememberPanelTab(null, storage);
+    expect(readPanelTab(1440, storage)).toBeNull();
   });
 });

@@ -52,7 +52,7 @@ READ_TOOLS = tuple(BTW_TOOLS)
 """What ``read`` means: the same read-only set a side question has. ``WebFetch`` is left out because a URL is
 a way to send something somewhere, and the searches over other chats because a link belongs to one chat."""
 
-ALL_TOOLS = (*READ_TOOLS, "Write", "Edit", "MultiEdit", "Exec", "WebSearch")
+ALL_TOOLS = (*READ_TOOLS, "Write", "Edit", "Exec", "WebSearch")
 """What ``all`` means. ``WebFetch`` stays out here too: it runs in the host's own process, outside any
 sandbox, and would reach the key proxy and the app by name. ``Exec`` runs only in the foreground."""
 
@@ -60,7 +60,7 @@ REPLY_TOOLS = (TALK_TOOL,)
 """What a turn started by a reply has: the conversation itself. Reading a file on a stranger's prompt with nobody
 watching is the first half of sending it to them."""
 
-FOLDER_TOOLS = frozenset({*READ_TOOLS, "Write", "Edit", "MultiEdit"})
+FOLDER_TOOLS = frozenset({*READ_TOOLS, "Write", "Edit"})
 """The file tools, which run in the host's process and so are held to the chat's folder by the policy gate."""
 
 NO_TOOL = "\0guest-turn-has-no-tools"

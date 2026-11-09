@@ -47,10 +47,13 @@ import agentFeed from "./staff/agentfeed.css?raw";
 import taskDialog from "./board/taskdialog.css?raw";
 import notes from "./notes/notes.css?raw";
 import guests from "./guestlinks.css?raw";
+import settingsDialog from "./screens/settings.css?raw";
+import explorerPanel from "./explorerpanel.css?raw";
+import launcher from "./navlauncher.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
-// Terminals page, the task dialog and the agent link keep their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests;
+// Terminals page, the task dialog, the agent link, the Files tab and the More launcher keep their looks beside their components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -167,6 +170,8 @@ const BOX_ALLOWED = [
   // The note editor is a dialog of its own, and its writing and reading panes are pages, not rows:
   // the room under the last line is where the next one is written.
   ".ne-dialog", ".ne-field", ".ne-tint", ".ne-read",
+  // Settings is a dialog: its section is a page inside it, with the room round it a page has.
+  ".settings-dialog",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -181,13 +186,12 @@ const PHONE_BOX_LIMIT = 61;
 // two: both are taller than a text row on purpose.
 const PHONE_SURFACES = [".ph-empty", ".ph-tile", ".ph-hero", ".bp-list-open", ".bp-give-note"];
 
-/** Content with an intentional height: two-line file cards and search hits, a message placeholder,
+/** Content with an intentional height: two-line file cards, a message placeholder,
  *  and the document viewport. Keep their limits explicit so larger boxes still fail the guard. */
 const CONTENT_BOXES = [
   { selector: ".artifact", property: "min-height", max: 48 },
   { selector: ".artifact-main", property: "min-height", max: 46 },
   { selector: ".turn-skeleton .sk-user", property: "height", max: 40 },
-  { selector: ".files .tree-row.grep-row", property: "height", max: 48 },
   { selector: ".html-frame", property: "min-height", max: 400 },
   // A note card's picture and the card-shaped placeholders the Notes tab shows while it loads.
   { selector: ".note-thumb", property: "height", max: 52 },
@@ -608,11 +612,16 @@ describe("settings", () => {
   const decl = (selector: string) => all.filter((r) => r.selector === selector && !r.media).map((r) => r.body).join(" ");
   const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("gives the section a 960 px column that grows with the window until then", () => {
-    // Widened from 760 px on the owner's word that the column was too narrow: at 960 a row's words
-    // and its control share one line with a lane to spare. The rail stays 280 px; the gain is content.
-    expect(wide(".settings-col")).toContain("width: min(960px, calc(100% - 96px))");
-    expect(wide(".settings-stage")).toContain("grid-template-columns: 280px minmax(0, 1fr)");
+  it("opens as a dialog of Claude's proportions with a 248 px list and the section at the full width beside it", () => {
+    // Settings was a page that took the window, its section a centred 960 px column; on the owner's
+    // word it is now a dialog over the screen it was opened from: nine tenths of the window up to
+    // 1100 × 760, the list of sections 248 px, and the section using the rest of the dialog's width,
+    // since the dialog is already the reading width. Between 1024 and 1180 px the list is icons.
+    expect(wide(".settings-dialog")).toContain("width: min(90vw, 1100px)");
+    expect(wide(".settings-dialog")).toContain("height: min(100vh - 64px, 760px)");
+    expect(wide(".settings-stage")).toContain("grid-template-columns: 248px minmax(0, 1fr)");
+    expect(wide(".settings-stage.icons")).toContain("grid-template-columns: 56px minmax(0, 1fr)");
+    expect(wide(".settings-col")).not.toContain("width:");
   });
 
   it("draws every setting as a touch-height row with its control in one lane", () => {

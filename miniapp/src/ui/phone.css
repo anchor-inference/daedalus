@@ -1024,21 +1024,9 @@
   .cal-fab { bottom: calc(16px + env(safe-area-inset-bottom)); }
 
   /* ── Settings and Usage in grouped cards ─────────────────────────────────────────────────── */
-  .settings-index { display: flex; flex-direction: column; }
-  .settings-index > div:not(.settings-link) { display: flex; flex-direction: column; gap: 2px; }
-  .settings-group { padding: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-2); }
-  .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border: 0; border-radius: var(--radius-xs); background: var(--surface-1); font-size: var(--fs-15); }
-  .settings-link .ic { color: var(--fg); }
-  .settings-link b { font-weight: 400; font-size: var(--fs-15); }
-  .settings-link .settings-link-text .sub { display: none; }
-  .settings-link .chev { display: none; }
-  .settings-group + .settings-link { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
-  .settings-index > div > .settings-link:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
-  .settings-lang { margin-top: var(--space-2); border-radius: var(--radius-xl); }
   /* The language switch is a pair of small pills; each reaches 44 px to the finger. */
   .segmented.lang button { position: relative; min-height: var(--chip-h); min-width: var(--tap); }
   .segmented.lang button::after { content: ""; position: absolute; inset: -8px 0; }
-  .settings-index .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-pill); background: var(--surface-2); padding: 0 14px; }
   .settings-col .card { border: 0; border-radius: var(--radius-xl); background: var(--surface-1); }
   .settings-row { min-height: var(--set-row-h); }
   /* Section labels are words in the grey of the design, not tracked capitals. */
