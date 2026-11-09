@@ -16,11 +16,15 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tools import Tool
 from protocore.runtime.token_counting import estimate_tokens
+from protocore.runtime.tool_deferral import _catalogue_follows_load
+
+if TYPE_CHECKING:
+    from protocore.runtime.query_engine import QueryEngine
 
 from daedalus.config import RuntimeConfig
 from daedalus.tools import GROUP_LOADS, TOOL_GROUPS
@@ -176,6 +180,24 @@ def group_of(member_lists: Mapping[str, Sequence[str]]) -> dict[str, str]:
     return {tool: group for group, names in member_lists.items() for tool in names}
 
 
+def load_into_run(engine: QueryEngine, groups: Mapping[str, Sequence[str]]) -> None:
+    """Load whole groups (``{group: its admitted tools}``) into a run in progress, from its next request on.
+
+    What ToolSearch(group=...) does, done for a skill that names the groups it works with. The core
+    believes a load only from a tool in its discovery role, and that role is wrong for Skill: it takes the
+    tool off the surface whenever nothing is held back, and the catalogue names the alphabetically first
+    discovery tool as the way to load a group. So the loading is done here, through the same two steps the
+    core takes after a search: each tool is discovered as a member of its group, one entry under the cap,
+    and the group's rules join the catalogue at the request the new tool list misses the cache on anyway —
+    without them, the first call of the group's tools came back unrun with the rules instead.
+    """
+    manager = engine.context_manager
+    for group, names in groups.items():
+        for name in names:
+            manager.discover_tool(name, group=group)
+    _catalogue_follows_load(engine, groups)
+
+
 __all__ = [
     "LOAD_NOW_KEY",
     "SESSION_LOADS_KEY",
@@ -185,6 +207,7 @@ __all__ = [
     "UsageCache",
     "configured_loads",
     "group_of",
+    "load_into_run",
     "load_source",
     "members",
     "resolved_loads",

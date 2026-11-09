@@ -63,6 +63,7 @@ const SAME_IN_BOTH = [
   "nset.test.line",
   // GitHub check names are exact job identifiers, so translating this example would name another check.
   "pboard.review.ci.namesPlaceholder",
+  "run.outcome.times",
   "sched.cron",
   "sched.when.cron",
   // The fallback pill's second name: an arrow and the configured model, nothing to translate.

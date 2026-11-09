@@ -129,7 +129,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
             say("the host is greyed out while the daemon answers")
         option.click()
         expect(select.locator(".term-env.host")).to_be_visible()
-    composer.locator("textarea").fill("Check the disk")
+    composer.locator(".composer-field").fill("Check the disk")
     composer.locator(".roundbtn.primary").click()
     page.wait_for_timeout(600)
     if not host.created or host.created[-1].get("env") != "host":
@@ -190,7 +190,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
             expect(page.locator(".sheet").filter(has=page.locator("[data-folder]"))).to_be_visible()
             page.keyboard.press("Escape")
             composer = page.locator(".start-composer")
-            composer.locator("textarea").fill("Check the oven timer")
+            composer.locator(".composer-field").fill("Check the oven timer")
             composer.locator(".roundbtn.primary").click()
             page.wait_for_timeout(600)
             made = host.created[-1] if host.created else {}

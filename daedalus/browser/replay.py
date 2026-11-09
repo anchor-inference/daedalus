@@ -273,7 +273,7 @@ class RecordedSkills:
         try:
             directory, slug, verdict = save_skill_draft(
                 self.state_dir, redact, slug, description, skill_markdown_body(script),
-                params=", ".join(script["params"]) or None, front={"requires": "browser", "tools": "BrowserReplay"},
+                params=", ".join(script["params"]) or None, front={"requires": "browser"},
                 files={SCRIPT_FILE: json.dumps(script, ensure_ascii=False, indent=1)},
             )
         except ValueError as exc:

@@ -42,23 +42,24 @@ def run() -> None:
         page.get_by_role("button", name="Model for this session", exact=True).click(button="right")
         expect(page.locator(".menu.pop")).to_be_visible()
         page.keyboard.press("Escape")
-        field = page.locator(".start-composer textarea")
+        field = page.locator(".start-composer .composer-field")
         field.fill("A draft with a selection")
-        field.evaluate("el => { el.focus(); el.setSelectionRange(2, 7); el.dispatchEvent(new MouseEvent('contextmenu', { bubbles:true, cancelable:true, clientX:1438, clientY:898 })); }")
+        field.evaluate("""el => { el.focus(); const text = el.querySelector('[data-line]').firstChild; const range = document.createRange(); range.setStart(text, 2); range.setEnd(text, 7);
+          getSelection().removeAllRanges(); getSelection().addRange(range); el.dispatchEvent(new MouseEvent('contextmenu', { bubbles:true, cancelable:true, clientX:1438, clientY:898 })); }""")
         expect(menu.get_by_role("menuitem", name="Copy", exact=True)).to_be_visible()
         expect(menu.get_by_role("menuitem", name="Cut", exact=True)).to_be_visible()
         box = menu.bounding_box()
         assert box and box["x"] >= 8 and box["y"] >= 8 and box["x"] + box["width"] <= 1432 and box["y"] + box["height"] <= 892, box
         menu.get_by_role("menuitem", name="Select all", exact=True).click()
-        assert field.evaluate("el => [el.selectionStart, el.selectionEnd]") == [0, 24]
-        expect(field).to_have_value("A draft with a selection")
+        assert page.evaluate("() => getSelection().toString()") == "A draft with a selection"
+        expect(field).to_have_text("A draft with a selection")
         field.evaluate("el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles:true, cancelable:true, clientX:900, clientY:600 }))")
         menu.get_by_role("menuitem", name="Cut", exact=True).click()
-        expect(field).to_have_value("")
+        expect(field).to_have_text("")
         expect(field).to_be_focused()
         field.click(button="right")
         menu.get_by_role("menuitem", name="Paste", exact=True).click()
-        expect(field).to_have_value("A draft with a selection")
+        expect(field).to_have_text("A draft with a selection")
         expect(field).to_be_focused()
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en")
         answer = page.locator(".answer").first

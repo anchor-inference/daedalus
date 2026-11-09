@@ -81,7 +81,7 @@ def choose_private(page: Page, composer, phone: bool) -> None:  # type: ignore[n
     expect(item).to_be_visible()
     item.click()
     if phone:
-        composer.locator("textarea").click()
+        composer.locator(".composer-field").click()
 
 
 def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
@@ -103,20 +103,20 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     if phone:
         # The idle pill shares its one row with the field and leaves the chip for the open toolbar.
         expect(composer.locator(".private-chip")).to_be_hidden()
-        composer.locator("textarea").click()
+        composer.locator(".composer-field").click()
     chip = composer.locator(".private-chip")
     expect(chip).to_be_visible()
     expect(chip).to_contain_text(words["badge"])
     if composer.get_attribute("data-private") is None:
         say("the composer does not show that the chat will be private")
-    if words["placeholder"] not in (composer.locator("textarea").get_attribute("placeholder") or ""):
+    if words["placeholder"] not in (composer.locator(".composer-field").get_attribute("placeholder") or ""):
         say("the placeholder does not say the chat is private")
     row = composer.locator(".composer-row").bounding_box()
     if row and row["height"] > 44:
         say(f"the chip makes the composer row {row['height']} px tall")
     chip.click()
     expect(chip).to_have_count(0)
-    composer.locator("textarea").fill("An ordinary question")
+    composer.locator(".composer-field").fill("An ordinary question")
     composer.locator(".roundbtn.primary").click()
     page.wait_for_timeout(600)
     if not host.created or "private" in host.created[-1]:
@@ -126,24 +126,24 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(composer).to_be_visible(timeout=15000)
     choose_private(page, composer, phone)
     expect(composer.locator(".private-chip")).to_be_visible()
-    composer.locator("textarea").fill("Something between us")
+    composer.locator(".composer-field").fill("Something between us")
     composer.locator(".roundbtn.primary").click()
     page.wait_for_timeout(600)
     if not host.created or host.created[-1].get("private") is not True:
         say(f"the private chat was not created private: {host.created}")
     if page.evaluate("document.documentElement.scrollWidth - innerWidth") > 0:
         say("the page scrolls sideways")
-    # The New agent sheet, where the other options of a new chat are.
-    page.goto(f"{BASE}/agents?new=1&token=t&lang={lang}")
-    toggle = page.locator(".sheet [data-private]")
-    expect(toggle).to_be_visible(timeout=15000)
-    expect(toggle).to_contain_text(words["menu"])
-    page.locator(".sheet input.field").first.fill("Kept quiet")
-    toggle.locator("input").check()
-    page.locator(".sheet .sheet-foot .btn.primary").click()
+    # New agent: the composer in Agent mode, named, private, and made idle with no first task.
+    page.goto(f"{BASE}/agents?agent=1&token=t&lang={lang}")
+    composer = page.locator(".start-composer")
+    expect(composer.locator(".start-agent-name")).to_be_visible(timeout=15000)
+    composer.locator(".start-agent-name").fill("Kept quiet")
+    choose_private(page, composer, phone)
+    composer.locator(".roundbtn.primary").click()
     page.wait_for_timeout(600)
-    if not host.created or host.created[-1].get("private") is not True or host.created[-1].get("title") != "Kept quiet":
-        say(f"the New agent sheet did not create a private chat: {host.created[-1:]}")
+    made = host.created[-1] if host.created else {}
+    if made.get("private") is not True or made.get("title") != "Kept quiet" or made.get("autotitle"):
+        say(f"New agent did not create a named private chat: {host.created[-1:]}")
     context.close()
 
     # The marks: the private session's row and header, none on an ordinary one.

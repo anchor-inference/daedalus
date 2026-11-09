@@ -327,6 +327,10 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .thinking-head:hover .worked, .thinking-head:hover .families { color:var(--fg); }
 .chev { display:inline-flex; align-items:center; color:var(--fg-3); transition:transform .14s var(--ease-out); flex:none; }
 .thinking-head .chev, .summary-head .chev { margin-left:2px; }
+/* A block of steps holding a request that waits on the operator: open, and marked in the warning
+   colour, so the refusal under it is not mistaken for the end of the turn. */
+.thinking-head.awaiting .worked { color:var(--fg); }
+.awaiting-badge { flex:none; padding:0 var(--space-2); border-radius:var(--radius-pill); border:1px solid color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 12%, transparent); color:var(--warn); font-size:var(--fs-12); line-height:20px; white-space:nowrap; }
 .chev.down { transform:rotate(90deg); }
 .thinking-head .steps { color:var(--muted); font-size:var(--fs-13); }
 .activity { display:flex; flex-direction:column; padding-left:2px; border-left:2px solid var(--line); margin-left:8px; padding-left:12px; }
@@ -435,16 +439,16 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 
 .codecard { margin:6px 0 10px; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; background:var(--card); }
 .codehead { display:flex; align-items:center; justify-content:space-between; padding:6px 12px; border-bottom:1px solid var(--line); font-size:var(--fs-13); color:var(--fg); }
-.codehead .copy { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-3); cursor:pointer; padding:0; }
-.codehead .copy:hover { color:var(--fg); background:var(--surface-2); }
-.codehead .copy .glyph-done, .codehead .copy[data-state="done"] .glyph-copy { display:none; }
-.codehead .copy[data-state="done"] .glyph-done { display:inline-flex; color:var(--ok); }
-.codehead .copy span { display:inline-flex; }
-.codecard pre { margin:0; padding:10px 12px; overflow-x:auto; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre-wrap; word-break:break-word; color:var(--code-block); }
+.codehead .copy, .cf-card > .copy { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-3); cursor:pointer; padding:0; }
+:is(.codehead, .cf-card) .copy:hover { color:var(--fg); background:var(--surface-2); }
+:is(.codehead, .cf-card) .copy .glyph-done, :is(.codehead, .cf-card) .copy[data-state="done"] .glyph-copy { display:none; }
+:is(.codehead, .cf-card) .copy[data-state="done"] .glyph-done { display:inline-flex; color:var(--ok); }
+:is(.codehead, .cf-card) .copy span { display:inline-flex; }
+.codecard pre { margin:0; padding:10px 12px; overflow-x:auto; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; word-break:normal; overflow-wrap:normal; color:var(--code-block); }
 /* The block is the frame; its text is not an inline code span again. The answer's inline-code tint
-   reached into it and drew a rounded chip behind every line of a fenced block. */
-.codecard pre code { background:none; padding:0; border-radius:0; }
-.codecard .nobreak { white-space:nowrap; }
+   reached into it and drew a rounded chip behind every line of a fenced block; the operator's bubble,
+   whose rule weighs more, did it still, and drew its code smaller than the answer's. */
+.codecard pre code, .msg.user .codecard pre code { background:none; padding:0; border-radius:0; font-size:inherit; }
 .toolcard .codecard { margin:0; }
 /* Inside the card the halves meet its frame: their own rounded corners drew a card in a card. */
 .diffcard .diff .del, .diffcard .diff .add { border-radius:0; padding:8px 10px 8px 26px; }
@@ -460,6 +464,8 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .sysnote-head .ic { color:var(--fg-3); flex:none; }
 .sysnote-head:hover { color:var(--fg); }
 .sysnote.loop .sysnote-head .ic { color:var(--ok); }
+.sysnote.notice .sysnote-head, .sysnote.notice .sysnote-head .ic { color:var(--warn); }
+.sysnote-way { margin:0; padding-left:22px; font-size:var(--fs-12); color:var(--fg-2); }
 .sysnote-body { padding:8px 12px; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
 .sysnote-body p { margin:0 0 8px; }
 .sysnote-body p:last-child { margin-bottom:0; }
@@ -692,6 +698,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* When the message was sent or the answer given. It lives in the row that is already there, so a turn
    is no taller for it, and it shows when the row does: on hover on a desk, always on touch. */
 .msg-time { padding-inline:var(--space-2); font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
+/* How fast the turn generated, beside its time and as quiet as it: a figure to glance at, not to read. */
+.msg-speed { padding-inline:var(--space-1) var(--space-2); font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
 /* The one undoing action turns red when it is pointed at, not before: red at rest it was the loudest
    mark in a row of grey ones and read as an alert with no word to explain it. The confirmation it
    opens says what it removes. */
@@ -718,8 +726,23 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .composer-box.two { border-radius:var(--radius-lg); }
 .composer-box:focus-within { border-color:color-mix(in srgb, var(--fg) 30%, var(--line-strong)); }
 .composer-row { display:flex; align-items:flex-end; gap:2px; min-width:0; }
-.composer-box textarea { flex:1; min-width:0; width:auto; resize:none; border:0; background:none; color:var(--fg); padding:9px 6px; min-height:38px; line-height:1.4; font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); outline:none; overflow-y:auto; }
-.composer-box textarea::placeholder { color:var(--fg-3); }
+.composer-box .composer-field { flex:1; min-width:0; width:auto; resize:none; border:0; background:none; color:var(--fg); padding:9px 6px; min-height:38px; max-height:calc(8lh + 18px); line-height:1.4; font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); outline:none; overflow-y:auto; }
+.composer-box .composer-field[data-empty]::before { color:var(--fg-3); }
+/* The composer's field is an editable element that draws a fenced block as the answer's code card
+   (codefield.tsx). Its lines wrap as a textarea's did; the code inside a card does not, and scrolls
+   sideways in the card, so a long line never widens the composer on a phone. The placeholder lies over
+   the empty first line, inside the field's own padding, on one line cut with an ellipsis. */
+.composer-field { position:relative; display:block; white-space:pre-wrap; overflow-wrap:anywhere; cursor:text; }
+.composer-box .composer-field:has(.cf-card) { max-height:min(60vh, calc(16lh + 18px)); }
+.composer-field[data-empty]::before { content:attr(data-placeholder); position:absolute; inset:0 0 auto 0; padding:inherit; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.composer-field[contenteditable="false"] { opacity:.6; cursor:default; }
+.composer-field .cf-card { position:relative; margin:6px 0; white-space:normal; cursor:text; }
+.composer-field .cf-card > .copy { position:absolute; top:4px; right:8px; z-index:1; }
+.composer-field .cf-card .codehead { display:block; min-height:24px; padding:5px 44px 5px 12px; white-space:pre; overflow:hidden; text-overflow:ellipsis; }
+.composer-field .cf-tick { color:var(--fg-3); }
+.composer-field .cf-code { overflow-x:auto; padding:8px 12px; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; color:var(--code-block); }
+.composer-field .cf-code > .cf-line { white-space:pre; width:max-content; min-width:100%; }
+.composer-field .cf-close { padding:2px 12px 4px; border-top:1px solid var(--line); font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; }
 .composer-tools { display:flex; align-items:center; gap:2px; flex:none; }
 .composer-row > .iconbtn.plus { margin-bottom:3px; }
 .composer-tools .roundbtn { margin-left:4px; }
@@ -764,7 +787,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* A voice note being recorded is the whole pill: cancel, the waveform with the time, stop, send. The
    bar is as tall as the field and its row were, so the conversation above does not jump when it opens. */
 /* The field and its row stay mounted under the bar, so the draft and its measured height survive it. */
-.composer-box.voicing > textarea[hidden], .composer-box.voicing > .composer-row[hidden] { display:none; }
+.composer-box.voicing > .composer-field[hidden], .composer-box.voicing > .composer-row[hidden] { display:none; }
 .voicebar { display:flex; align-items:center; gap:6px; min-height:calc(38px + var(--ctl-h-lg) + 2px); padding:0 2px; }
 .voicebar-wave { flex:1; min-width:0; height:32px; color:var(--fg-2); }
 .voicebar-time { flex:none; min-width:3.5ch; text-align:right; font-variant-numeric:tabular-nums; font-size:var(--fs-13); color:var(--fg-2); }
@@ -817,7 +840,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* Narrow, the context stays as its number alone rather than going away: a phone otherwise had no
      sight of how full the window is. The number without the arc does not read as a spinner. */
   .ctx-ring svg { display:none; }
-  .composer-box textarea { padding:9px 4px; }
+  .composer-box .composer-field { padding:9px 4px; max-height:calc(8lh + 18px); }
   .composer-tools { gap:0; }
 }
 
@@ -1368,7 +1391,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
      the shell takes the whole window, the prose does not. */
   .timeline, .composer-box { width: min(100%, var(--chat-w)); margin-inline: auto; }
   .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width: min(100%, var(--chat-w)); margin-inline: auto; }
-  .codecard pre { white-space: pre; }
   /* One column. The prose, the operator's card, the step list, the files a turn produced and the
      field they are answered in all take the same stripe, so nothing is offset against anything
      else and the conversation uses the room the window gives it. */
@@ -2010,7 +2032,7 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 }
 /* A text field under a thumb is 16 px whatever the scale says: iOS zooms the page into anything smaller. */
 @media (hover: none) {
-  .composer-box textarea, .palette-sheet .field, input.field, textarea.field, select.field { font-size: 16px; }
+  .composer-box .composer-field, .palette-sheet .field, input.field, textarea.field, select.field { font-size: 16px; }
 }
 /* the wheel and the keyboard, not the thumb: hover states only where hovering exists */
 @media (hover: none) {
@@ -2080,6 +2102,38 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .mcp-form .mcp-actions { flex-direction: row; gap: 8px; }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
+/* "Allow all from <server>": the button and its span read as one control, in the card's own button
+   style; the row it sits in wraps rather than pushing the approval wider than the column. */
+.dock-actions:has(.srv-grant), .sp-card-actions:has(.srv-grant) { flex-wrap: wrap; }
+.srv-grant { display: inline-flex; align-items: stretch; min-width: 0; max-width: 100%; }
+.srv-grant > .btn, .srv-grant > .ph-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
+.srv-grant-span { flex: none; font: inherit; font-size: var(--fs-12); color: var(--fg); background: var(--surface-1); border: 1px solid var(--line); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 0 6px; }
+.srv-grant-span[data-forever] { color: var(--warn); }
+.srv-grant.phone { width: 100%; }
+.srv-grant.phone > .ph-btn { flex: 1; }
+.dt-server-grant { display: flex; }
+/* The session's standing grants: what, how long it has left, and the way to take it back. */
+.dt-grants { display: flex; flex-direction: column; gap: 6px; }
+.dt-grant { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 6px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-grant-left { flex: none; font-size: var(--fs-12); color: var(--fg-2); }
+.dt-grant-left[data-tone="warn"] { color: var(--warn); }
+/* One-step add: paste, try, read what came of it, add. */
+.mcp-quick { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 10px; min-width: 0; }
+.mcp-quick-row { display: flex; gap: var(--space-2); min-width: 0; }
+.mcp-quick-row .field { margin: 0; min-width: 0; flex: 1; width: auto; }
+.mcp-quick-row .btn { flex: none; }
+.mcp-trial .mcp-trial-name { margin: 0; flex: 1; min-width: 0; }
+.mcp-trial .dt-hint[data-tone="bad"] { color: var(--bad); }
+.mcp-trial .dt-hint[data-tone="warn"] { color: var(--warn); }
+.mcp-trial .mfield { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.mcp-trial .mcp-actions, .mcp-quick .mcp-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mcp-stderr summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-2); }
+.mcp-stderr pre { margin: 4px 0 0; max-height: 180px; overflow: auto; padding: 6px 8px; font-size: var(--fs-mono); background: var(--surface-1); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-policy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mcp-policy .segmented { flex-wrap: wrap; }
+.mcp-tools summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-2); }
+.mcp-tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px 0; }
+.mcp-tool-row .field { margin: 0; width: auto; flex: none; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
 .priority-pick button.bad { color: var(--bad); }
 .priority-pick button.attn { color: var(--warn); }
@@ -2571,6 +2625,15 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
 .settings-name-field { width: 220px; padding: 6px 10px; }
 .mpanel-rows { margin-top: 8px; border-top: 1px solid var(--line); }
+/* A model's price: three rates side by side wherever they fit, which on a phone is still one line each. */
+.model-price { border-top: 1px solid var(--line); }
+.model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
+.model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* A session's helper models: the choice, then the list it allows, under the model line of Details. */
+.dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
+/* Its own title rather than the 64px label of the lines above, which broke it into a word a line. */
+.dt-subagent-models-title { color: var(--fg-2); min-width: 0; }
+.subagent-models { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
@@ -3450,11 +3513,22 @@ input.field[type="range"] {
 .run-outcome-more { margin-top:2px; }
 .run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--muted); cursor:pointer; }
 .run-outcome-more summary:hover { color:var(--fg); }
+.run-outcome-count { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.run-outcome-failures { margin:2px 0 0; padding:0; list-style:none; }
+/* Recovered: a later turn answered, so the stop is history. One neutral line in the run's quiet grey
+   that opens onto its details; the red card is kept for a stop nothing has answered yet. */
+.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--muted); }
+.run-outcome.recovered .run-outcome-line { display:flex; align-items:center; gap:var(--space-2); width:fit-content; max-width:100%; min-height:var(--row-h-dense); cursor:pointer; list-style:none; }
+.run-outcome.recovered .run-outcome-line::-webkit-details-marker { display:none; }
+.run-outcome.recovered .run-outcome-line:hover { color:var(--fg); }
+.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--muted); }
+.run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
+.run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
 /* Composer card: the text owns its row; controls never compete with its width. */
 .composer { gap:var(--space-2); }
 .composer-box { gap:var(--space-2); padding:var(--space-2); border-radius:var(--radius-lg); transition:none; }
-.composer-box textarea { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
+.composer-box .composer-field { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); max-height:calc(8lh + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
 .composer-row { align-items:center; flex-wrap:nowrap; gap:var(--space-1); }
 /* The plus wears the same filled ground as the mode and model chips beside it: bare on the card, its
    tap area was the one control in the row nothing marked. */
@@ -3508,7 +3582,7 @@ input.field[type="range"] {
   .composer-row .model-select.attn .model-effort { display:none; }
 }
 @media (max-width: 1023px) {
-  .composer-box textarea { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
+  .composer-box .composer-field { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
 }
 @media (min-width: 1024px) {
   .composer-box, .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
@@ -3602,6 +3676,7 @@ input.field[type="range"] {
 .sub-dot.running { background:var(--info); box-shadow:none; animation:pulse 1.2s ease-in-out infinite; }
 .sub-dot.waiting { background:var(--warn); box-shadow:none; }
 .sub-dot.failed { background:var(--bad); box-shadow:none; }
+.sub-dot.parked { background:var(--warn); box-shadow:none; opacity:.55; }
 /* The Subagents tab: the list, then one helper's conversation under a head that stays in place. */
 .panel-body.tab-subagents { padding-top:0; }
 .subagents { font-size:var(--fs-13); }
@@ -3635,6 +3710,16 @@ input.field[type="range"] {
 .start-hero { padding-top: calc(var(--space-6) + var(--banner-h, 0px)); }
 h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weight:560; letter-spacing:-0.02em; text-align:center; line-height:1.3; }
 .start-composer { width:min(100%, var(--chat-w)); }
+/* Agent mode of the new-chat composer: the name heads the field, set apart from the task by a hairline,
+   and what was chosen under + that shows nowhere else is said once under the field. */
+.start-agent-name { display:block; width:100%; min-width:0; border:0; border-bottom:1px solid var(--line); background:none; color:var(--fg); padding:8px 6px 7px; font:inherit; font-size:var(--fs-14); font-weight:600; outline:none; }
+.start-agent-name::placeholder { color:var(--fg-3); font-weight:400; }
+.start-agent-chosen { padding:0 6px 2px; font-size:var(--fs-12); }
+.start-agent-chip { display:inline-flex; align-items:center; gap:4px; flex:none; }
+.start-agent-loop { display:flex; flex-direction:column; gap:6px; margin-top:8px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); }
+.start-agent-loop textarea.field { resize:vertical; }
+.start-agent-loop-row { display:flex; flex-wrap:wrap; gap:6px; }
+.start-agent-loop-row .field { flex:1 1 110px; min-width:0; width:auto; }
 /* Where the attachments were while they upload: the percentage, in figures that do not jitter. */
 .composer .upload-progress { font-variant-numeric: tabular-nums; }
 .composer .upload-progress { padding: 8px 14px 0; }
@@ -4002,19 +4087,64 @@ button.staff-row:hover { background: var(--surface-2); }
 .term-card-foot .btn.small { flex: none; }
 .term-group + .term-group { margin-top: var(--space-2); }
 
-.term-new-options { display: grid; gap: var(--space-1); }
-.term-new-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-h-touch); padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-.term-new-row:hover:not(:disabled) { background: var(--surface-2); }
-.term-new-row:disabled { opacity: .5; cursor: default; }
-.term-new-row > .ic { flex: none; color: var(--accent); }
-.term-new-row.host > .ic { color: var(--warn); }
-.term-new-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.term-new-text .sub { font-size: var(--fs-12); font-family: var(--mono); }
-.term-new-folder .segmented { margin-bottom: var(--space-2); }
 .term-new-path { display: flex; gap: var(--space-2); align-items: center; }
 .term-new-path .field { flex: 1; min-width: 0; font-family: var(--mono); }
 .term-new-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2); }
 .term-new-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* Where a new terminal runs (terminal/picker.tsx): a popover from the "+" on a desktop, a sheet on a
+   phone. The host is amber, as every host terminal is; the place chosen last carries a quiet tag. */
+.menu.pop.term-pick-pop { width: min(360px, calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); padding: 4px; }
+.term-pick { display: flex; flex-direction: column; }
+.term-pick-title { padding: 6px 10px 4px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.menu .term-pick-row, .term-pick-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-touch); padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.term-pick-row:hover:not(:disabled), .term-pick-row:focus-visible { background: var(--surface-3); outline: none; }
+.term-pick-row:disabled { opacity: .5; cursor: default; }
+.term-pick-row > .ic { flex: none; color: var(--accent); }
+.term-pick-row.host > .ic { color: var(--warn); }
+.term-pick-row.sandbox > .ic { color: var(--fg-2); }
+.term-pick-text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.term-pick-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); }
+.term-pick-sub { font-size: var(--fs-12); color: var(--fg-2); }
+.term-pick-sub.mono { font-family: var(--mono); }
+.term-pick-sub.why { white-space: normal; }
+.term-pick-tag { flex: none; padding: 0 6px; border-radius: 999px; font-size: var(--fs-11); line-height: 18px; }
+.term-pick-tag.ok { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.term-pick-tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.term-pick-last { margin-left: auto; flex: none; color: var(--fg-3); font-size: var(--fs-11); }
+.term-pick-key { flex: none; min-width: 18px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-11); text-align: center; }
+.term-pick-row .menu-check { margin-left: auto; flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
+.term-pick-row .menu-check.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.term-pick-folder { display: grid; gap: var(--space-2); padding: 8px; }
+.term-pick-folder .term-new-actions { margin-top: var(--space-1); }
+.term-pick-folder .segmented .ic { margin-right: 4px; }
+.term-pick-sheet .term-pick { padding: 0 var(--space-2) var(--space-3); }
+.term-pick-sheet .term-pick-folder { padding: 0 var(--space-3) var(--space-3); }
+
+/* Clean-up on the Overview: a terminal's End beside Open, the selection, the group's End all, and the
+   question that lists what each one stops. */
+.term-card { position: relative; }
+.term-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.term-card.stale:not(.selected) { border-style: dashed; }
+.term-card-status[data-level="stale"] { color: var(--warn); }
+.term-card-check { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; padding: 4px; border-radius: var(--radius-xs); }
+.term-card.selecting .term-card-head { padding-left: 36px; }
+.term-card-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+/* Red words, no red frame: a row of framed red buttons read as an alarm over every card. */
+.term-card-foot .term-card-end { border-color: transparent; }
+.term-card-end .ic { margin-right: 4px; }
+.term-group-title { display: flex; align-items: center; gap: var(--space-2); }
+.term-group-end { margin-left: auto; }
+.term-group-end .ic, .tp-overview .pagehead .btn.small .ic { margin-right: 4px; }
+.pagehead .btn.small .num { margin-left: 4px; color: var(--fg-2); }
+.pagehead .btn[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-strong); }
+.term-select-bar { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0 2px; }
+.term-bulk-list { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; max-height: 40vh; overflow: auto; }
+.term-bulk-list li { overflow-wrap: anywhere; }
+.term-bulk-title { font-family: var(--mono); font-size: var(--fs-13); }
+/* What stops in it, under its title: the command line or the member's session. */
+.term-bulk-note { display: block; color: var(--warn); font-size: var(--fs-12); background: none; padding: 0; }
+.term-phone-end { color: var(--bad); }
 
 .pagehead .loadbar { margin: 6px 0 2px; }
 
@@ -5538,7 +5668,7 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 
 /* The guessed next message is the empty field's placeholder, set apart from the usual hint so it
    reads as an offer rather than as an instruction; the key that takes it sits in the field's corner. */
-.composer-box textarea.ghost::placeholder { color:var(--fg-3); font-style:italic; opacity:1; }
+.composer-box .composer-field.ghost[data-empty]::before { color:var(--fg-3); font-style:italic; opacity:1; }
 .composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius-xs); background:var(--surface-1); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
 .composer-ghost-accept:hover { color:var(--accent); border-color:var(--accent); }
 .composer-ghost-accept kbd { font:inherit; }

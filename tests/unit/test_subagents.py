@@ -12,7 +12,7 @@ import pytest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.config import RuntimeConfig, Settings
-from daedalus.extensions.subagents import NO_ANSWER, Subagents
+from daedalus.extensions.subagents import Subagents
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 
@@ -29,7 +29,7 @@ async def app(settings: Settings, db: Database) -> Any:
 def _capture(manager: SessionManager) -> list[tuple[str, str, str]]:
     submitted: list[tuple[str, str, str]] = []
 
-    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator") -> str:  # type: ignore[no-untyped-def]
+    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator", **_: Any) -> str:  # type: ignore[no-untyped-def]
         submitted.append((session_id, text, origin))
         return "run-x"
 
@@ -68,7 +68,9 @@ async def test_subagent_failed_run_reports_no_answer(app: Any) -> None:
     submitted = _capture(manager)
     result = await subs.spawn(leader_id=leader.session.id, task="explode")
     await subs.on_run_finished(result["session_id"], "run-x", "failed")
-    assert submitted[-1][0] == leader.session.id and NO_ANSWER in submitted[-1][1] and "failed" in submitted[-1][1]
+    # It wrote no reply, so the report says so and what it had done; it is kept, not deleted with its work.
+    assert submitted[-1][0] == leader.session.id and "failed before its report" in submitted[-1][1] and "What it had done: 0 tool calls" in submitted[-1][1]
+    assert await manager.get_state(result["session_id"]) is not None and not subs._removing
 
 
 async def test_subagent_model_choice_depth_and_limits(app: Any) -> None:
@@ -78,7 +80,7 @@ async def test_subagent_model_choice_depth_and_limits(app: Any) -> None:
     _capture(manager)
     with pytest.raises(ValueError, match="unknown model"):
         await subs.spawn(leader_id=leader.session.id, task="t", model="nope.model")
-    models = await subs.models()
+    models = await subs.models(leader.session.id)
     if models:
         chosen = models[-1]
         result = await subs.spawn(leader_id=leader.session.id, task="t", model=chosen)

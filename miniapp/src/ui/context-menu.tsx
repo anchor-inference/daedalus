@@ -20,7 +20,7 @@ export function useContextActions(ref: RefObject<HTMLElement | null>, items: Men
     const open = (event: MouseEvent | KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event instanceof KeyboardEvent && event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-      if ((event.target as HTMLElement).closest("input, textarea, [contenteditable='true']")) return;
+      if ((event.target as HTMLElement).closest("input, textarea, [contenteditable]:not([contenteditable='false'])")) return;
       if (window.getSelection()?.toString()) return;
       const rect = owner.getBoundingClientRect();
       event.preventDefault();
@@ -97,7 +97,8 @@ export function ContextMenuHost() {
         return;
       }
       const field = target.closest<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-      const owner = field ?? target;
+      const editable = field ? null : target.closest<HTMLElement>("[contenteditable]:not([contenteditable='false'])");
+      const owner = field ?? editable ?? target;
       const items: MenuItem[] = [];
       const selected = field ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0) : window.getSelection()?.toString() ?? "";
       const secret = field instanceof HTMLInputElement && field.type === "password";
@@ -115,6 +116,30 @@ export function ContextMenuHost() {
         if (editable && !secret && selected) items.push({ label:t("context.cut"), onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
         if (editable) items.push({ label:t("context.paste"), onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
         items.push({ label:t("context.selectAll"), disabled:field.disabled, onSelect:() => { field.focus(); field.select(); } });
+      } else if (editable) {
+        // An editable element (the composer's field) has no value or selection range of its own: the
+        // page's selection is it. The range is kept from the click, since the menu takes the focus.
+        const held = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0).cloneRange() : null;
+        const restore = () => {
+          editable.focus();
+          if (!held) return;
+          const now = window.getSelection();
+          now?.removeAllRanges();
+          now?.addRange(held);
+        };
+        const replace = (text: string) => {
+          restore();
+          if (!document.execCommand(text ? "insertText" : "delete", false, text)) toast(t("context.edit.failed"));
+        };
+        if (selected) items.push({ label:t("context.cut"), onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
+        items.push({ label:t("context.paste"), onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
+        items.push({ label:t("context.selectAll"), onSelect:() => {
+          editable.focus();
+          const range = document.createRange();
+          range.selectNodeContents(editable);
+          window.getSelection()?.removeAllRanges();
+          window.getSelection()?.addRange(range);
+        } });
       }
       const link = target.closest<HTMLAnchorElement>("a[href]");
       if (link) items.push(

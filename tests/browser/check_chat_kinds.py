@@ -3,7 +3,7 @@
 The desktop column has tabs over its lists — All, Chats, Computer, Browser, Remote — and a chosen tab keeps
 only that kind (a project is listed while it holds one) and is remembered across a reload. Under All a
 computer or Chrome chat carries its mark on the plate, with a tooltip. New chat's mode chip offers
-Chat, Computer and Browser, and Remote, which is only ever started from daedalus-cli and so always
+Chat, Agent, Computer and Browser, and Remote, which is only ever started from daedalus-cli and so always
 stands greyed with where it starts: on a server (the shared stub's default) Computer and Browser stand
 greyed with the reason too; in the native application with the operator's Chrome configured, the Computer tab
 makes Computer the default, sending creates a session of kind "computer" and lands on it with the
@@ -127,7 +127,7 @@ def main() -> int:
             menu = page.locator(".kind-menu")
             expect(menu).to_be_visible()
             disabled = menu.locator(".kind-row").evaluate_all("els => els.map((b) => [b.dataset.kind, b.disabled, !!b.title])")
-            check(disabled == [["chat", False, False], ["computer", True, True], ["chrome", True, True], ["remote", True, True]], f"{lang}: on a server Computer, Browser and Remote are greyed with the reason ({disabled})")
+            check(disabled == [["chat", False, False], ["agent", False, False], ["computer", True, True], ["chrome", True, True], ["remote", True, True]], f"{lang}: on a server Computer, Browser and Remote are greyed with the reason ({disabled})")
             check(page.locator(".start .kind-select").get_attribute("data-kind") == "chat", f"{lang}: the Browser tab cannot make Browser the default where it is not offered")
             page.wait_for_timeout(400)
             shot(page, f"desktop-mode-server-{lang}")
@@ -155,12 +155,12 @@ def main() -> int:
             check(True, f"{lang}: with the Computer tab chosen, New chat starts in Computer mode")
             chip.click()
             rows = page.locator(".kind-menu .kind-row").evaluate_all("els => els.map((b) => b.disabled)")
-            check(rows == [False, False, False, True], f"{lang}: natively, with Chrome configured, every mode but Remote is offered ({rows})")
+            check(rows == [False, False, False, False, True], f"{lang}: natively, with Chrome configured, every mode but Remote is offered ({rows})")
             page.wait_for_timeout(400)
             shot(page, f"desktop-mode-native-{lang}")
             page.keyboard.press("Escape")
             del api_stub.CREATED_SESSIONS[:]
-            page.locator(".start textarea").fill("Rename the photos in the Pictures folder")
+            page.locator(".start .composer-field").fill("Rename the photos in the Pictures folder")
             shot(page, f"desktop-newchat-computer-{lang}")
             page.locator(".start [data-action=send]").click()
             page.wait_for_url(f"**/agents/{shots.S6}*", timeout=10000)

@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, PriceView, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
 import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
@@ -16,6 +16,8 @@ import { ComponentsTab } from "./Components";
 import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
+import { ModelPrice } from "../modelprice";
+import { SubagentModelsPicker } from "../subagentmodels";
 import { FreeModels } from "./FreeModels";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
@@ -204,9 +206,12 @@ function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Pres
 }
 
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, routed, onDemandByModel, windowSources, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
+function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
+  price?: PriceView;
+  onPriceSaved: (next: Settings) => void;
+  toast: (text: string) => void;
   /** Its endpoint is OpenRouter, which alone routes between providers. */
   routed: boolean;
   onDemandByModel?: boolean;
@@ -325,6 +330,7 @@ function PresetRow({ id, p, routed, onDemandByModel, windowSources, isDefault, i
               </Row>
             )}
           </div>
+          <ModelPrice id={id} view={price} onSaved={onPriceSaved} toast={toast} />
           <div className="btnrow mrow-foot">
             <span className="sub mono">{id}</span>
             {isDefault ? <span className="sub">{t("settings.preset.opens")}</span> : <button className="btn small primary" onClick={onDefault}>{t("settings.preset.makedefault")}</button>}
@@ -1308,6 +1314,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                     routed={s.providers[p.provider]?.kind === "openrouter"}
                     onDemandByModel={s.on_demand_defaults?.[id]}
                     windowSources={s.context_window_sources?.[id]}
+                    price={s.prices?.[id]}
+                    onPriceSaved={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })}
+                    toast={toast}
                     onRefreshWindow={() => void refreshWindow(id)}
                     isDefault={s.model.preset === id}
                     inChain={(s.model.chain ?? []).includes(id)}
@@ -1467,6 +1476,13 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} />
+            <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
+              <SubagentModelsPicker
+                value={s.subagents?.models ?? { mode: "all", presets: [] }}
+                options={Object.entries(s.presets ?? {}).map(([pid, p]) => ({ id: pid, label: p.label || `${p.provider}/${p.model}` }))}
+                onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
+              />
+            </Row>
             <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>

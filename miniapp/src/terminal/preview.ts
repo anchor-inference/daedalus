@@ -132,6 +132,28 @@ export function cardStatus(row: TerminalView, now = Date.now()): CardStatus {
   return { text: t("term.card.running", { t: span(row.created_at, now) }), level: "ok" };
 }
 
+/** A terminal "End idle" takes: a shell the host is sure sits at its prompt, nobody looking at it,
+ *  and nobody's work — not a staff member's, not one another part of the app is waiting on. */
+export function idleUnwatched(row: TerminalView): boolean {
+  return running(row) && row.at_prompt === true && row.live?.clients === 0 && row.owner.kind !== "staff" && !row.activity;
+}
+
+/** How long past which an unwatched terminal is marked as one to clean up. */
+export const STALE_MS = 24 * 3600_000;
+
+/**
+ * How long a running terminal nobody watches has gone untouched, when that is past `STALE_MS`; ""
+ * otherwise. Typed input counts, and so does output: a server printing its log is in use. A staff
+ * member's terminal is never stale, its member is the one who watches it.
+ */
+export function staleFor(row: TerminalView, now = Date.now()): string {
+  if (!running(row) || row.live?.clients !== 0 || row.owner.kind === "staff") return "";
+  const stamps = [row.last_input_at, row.last_output_at, row.created_at].map((s) => Date.parse(s ?? "")).filter(Number.isFinite);
+  if (!stamps.length) return "";
+  const latest = Math.max(...stamps);
+  return now - latest >= STALE_MS ? span(new Date(latest).toISOString(), now) : "";
+}
+
 /** Where a terminal's owner lives in the app, when it has a page: the session, or the project's team. */
 export function ownerPath(row: TerminalView, sessionPath: (id: string) => string, teamPath: (projectId: string) => string): string | null {
   if (row.owner.kind === "session" && row.owner.id) return sessionPath(row.owner.id);

@@ -126,6 +126,9 @@ class Term:
     agent: dict[str, Any] | None = None
     git: dict[str, Any] | None = None
     last_command: dict[str, Any] | None = None
+    # What the host says runs in it, for the question "end it?": a command line, a program's argv.
+    # A shell is at its prompt when nothing is busy and no agent works in it, as the host decides.
+    running_text: str | None = None
 
     def view(self, preview: bool = False) -> dict[str, Any]:
         running = self.status == "running"
@@ -138,6 +141,8 @@ class Term:
             "live": {"clients": self.clients, "busy": self.busy, "keyboard": {"owner": self.keyboard, "until": None}, "size_owner": self.size_owner, "alt_screen": False} if running else None,
             "last_command": self.last_command, "preview": self.preview if preview else [], "activity": self.activity,
             "agent": self.agent if running else None, "git": self.git if running else None,
+            "at_prompt": running and not self.busy and self.agent is None and self.owner_kind != "staff" and self.running_text is None,
+            "running": self.running_text,
         }
 
 

@@ -1,6 +1,7 @@
 ---
 name: canvas-boards
 description: Draw clear, editable canvases in Daedalus (flows, plans, architectures, decision trees, mind maps) with the Canvas tools, and link the operator to the board.
+requires: canvas
 ---
 # Canvas boards
 

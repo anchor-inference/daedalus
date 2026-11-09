@@ -7,6 +7,7 @@
 
 import { FLOW_OPEN_RE, type Flow, type FlowNode, flowIcon, parseFlow } from "./flow";
 import { t } from "./i18n";
+import { HIGHLIGHT_MAX_LINES, highlight, langOfLabel } from "./highlight";
 import { iconSvg } from "./icons";
 import { CARD_CLOSE_RE, CARD_OPEN_RE, CITE_RUN_RE, type Card, type Citation, citationsIn, parseCard, siteOf, webUrl } from "./rich";
 
@@ -312,13 +313,6 @@ function renderTable(lines: string[]): string {
 const COPY_GLYPH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9h11v11H9zM15 9V4H4v11h5"/></svg>';
 const DONE_GLYPH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-11"/></svg>';
 
-/** A command-line flag held together: a wrapped block may break after any hyphen, and a phone
- *  showed "-resize 1600x -" on one line and "quality 78" on the next, which reads as a broken
- *  flag. The span changes no text, so what the copy button takes is the command as it ran. */
-function keepFlags(html: string): string {
-  return html.replace(/(^|[\s(])(--?[A-Za-z][\w-]*)/gm, '$1<span class="nobreak">$2</span>');
-}
-
 /** A closed ```mermaid fence: the code card it always was, marked for diagrams.ts to draw. The two
  *  buttons show once the drawing is in (see the styles): back to the code, and the drawing large. */
 function mermaidBlock(code: string): string {
@@ -328,10 +322,22 @@ function mermaidBlock(code: string): string {
   return codeBlock(code, "mermaid", buttons).replace('<div class="codecard">', '<div class="codecard mermaid-card" data-mermaid="pending">');
 }
 
+/** The copy button of a code card; the composer's card draws the same one. */
+export function copyButton(): string {
+  const copy = escape(t("common.copy"));
+  return `<button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button>`;
+}
+
+/**
+ * A fenced block as a card: the label, the copy button, and the code coloured by its label. The code
+ * scrolls sideways rather than wrapping, at every width: a wrapped line of code reads as two lines,
+ * and a phone once broke "-quality 78" in the middle of the flag. The composer draws the same card
+ * (codefield.tsx), so a message looks the same typed and sent.
+ */
 export function codeBlock(code: string, lang = "", buttons = ""): string {
   const label = lang || "text";
-  const copy = escape(t("common.copy"));
-  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span>${buttons}<button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button></div><pre><code>${keepFlags(escape(code))}</code></pre></div>`;
+  const colours = code.split("\n").length > HIGHLIGHT_MAX_LINES ? "text" : langOfLabel(label);
+  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span>${buttons}${copyButton()}</div><pre><code>${highlight(code, colours)}</code></pre></div>`;
 }
 
 const LIST_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;

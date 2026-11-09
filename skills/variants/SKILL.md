@@ -1,6 +1,7 @@
 ---
 name: variants
 description: Changing something and measuring the result — benchmark tuning, a performance hunt, prompt work, a flaky test. Frozen results, one fixed run command, a tree of variants that builds on its own winners. Use before the second attempt at anything you measure.
+requires: board
 ---
 # Variants you can compare
 

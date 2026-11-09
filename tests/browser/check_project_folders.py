@@ -2,7 +2,7 @@
 
 A folder is added through the folder browser (with the mount line for a container folder that is not
 mounted, and the host mark for a host one), locked read-only, and refused removal with the host's own sentence naming the agent in
-it. The new-agent form offers the project's folders once there is more than one to choose from.
+it. New agent offers the project's folders under the composer's + once there is more than one to choose from.
 """
 from __future__ import annotations
 
@@ -213,18 +213,22 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     assert len(patches) == 2 and patches[0]["expected_entity_revision"] == 4 and patches[1]["expected_entity_revision"] == 5
     assert patches[0]["client_operation_id"] != patches[1]["client_operation_id"] and state["project"]["name"] == "Bakery revised", patches
 
-    # The new-agent form: the project now has several folders an agent can work in, so it offers them.
+    # New agent, in the project: it now has several folders an agent can work in, so the composer's +
+    # offers them, by name and without their paths.
     page.keyboard.press("Escape")
     page.keyboard.press("Escape")
-    page.goto(f"{BASE}/agents?token=t&lang={lang}&new=1")
-    page.locator(".sheet select.field").nth(1).select_option("p1")
-    choice = page.locator("#newagent-folder")
+    page.goto(f"{BASE}/agents?token=t&lang={lang}&agent=1&in=p1")
+    page.locator(".start-composer .plus").click()
+    page.locator("[data-option='folder']").click()
+    choice = page.locator(".start-agent-folders")
     expect(choice).to_be_visible()
     # The site, the docs, the unmounted assets folder and the host folder, which a Daedalus agent now
     # works in through the host terminal daemon.
-    expect(choice.locator("option")).to_have_count(4)
+    expect(choice.locator(".ph-mrow")).to_have_count(4)
     # Unmounted, and the host folder while this installation has no host terminal daemon.
-    expect(choice.locator("option[disabled]")).to_have_count(2)
+    expect(choice.locator(".ph-mrow[disabled]")).to_have_count(2)
+    if "/" in choice.inner_text():
+        raise AssertionError(f"the folder choice shows a path: {choice.inner_text()!r}")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/newagent-{name}.png")
 

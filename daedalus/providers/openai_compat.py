@@ -44,7 +44,7 @@ from protocore.providers.openai_compat import ReasoningReplay
 from protocore.providers.openai_compat.wire import reasoning_envelope, replayed_details
 
 from daedalus import __version__
-from daedalus.config import keyproxy_upstream
+from daedalus.config import keyproxy_upstream, login_route
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import stated_window
 from daedalus.providers.dsml import DsmlGuard
@@ -52,7 +52,7 @@ from daedalus.providers.failure_evidence import FailureEvidence, failure_evidenc
 from daedalus.providers.image_fit import FittedImages, limits_for
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.openrouter_routes import refused_route, routing_body
-from daedalus.providers.pricing import ModelPricing, complete_usage
+from daedalus.providers.pricing import ModelPricing, complete_usage, matching_key
 from daedalus.providers.wire import (
     InlineFitter,
     arguments_cut,
@@ -274,12 +274,12 @@ def message_shape(messages: list[dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
-REASONING_REPLAY_UPSTREAMS = ("codex", "claude")
+REASONING_REPLAY_UPSTREAMS = ("codex", "claude", "anthropic")
 """Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
 
 The Codex route turns the Responses API's encrypted reasoning into these entries and back, so a
 reasoning model keeps its thinking across tool steps the way it does under the Codex CLI. The Claude
-route does the same with Anthropic's signed thinking blocks, which Claude Code sends back on every
+route, and the Anthropic key that shares its translation, do the same with Anthropic's signed thinking blocks, which Claude Code sends back on every
 request; without them each tool step of a long task re-derived its plan from the raw tool outputs and
 spent most of a minute thinking before a single grep. The core sends the entries back only to the
 endpoint and model that wrote them, which is where Claude Code drops them too: after a model switch.
@@ -394,10 +394,21 @@ class ProviderEndpoint:
         return hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def pricing_for(self, model: str) -> ModelPricing | None:
-        if model in self.pricing:
-            return self.pricing[model]
-        best = max((key for key in self.pricing if model.startswith(key)), key=len, default=None)
-        return self.pricing[best] if best is not None else None
+        key = matching_key(self.pricing, model)
+        return self.pricing[key] if key is not None else None
+
+    def plan_for(self, model: str) -> bool:
+        """Whether a call to ``model`` here is paid for up front: recorded at $0 and never counted against a cap.
+
+        A prepaid endpoint is a plan for every model on it. Otherwise the operator's word on the one model
+        decides, and without it a CLI login behind the key proxy is a plan and everything else is per token.
+        """
+        if self.subscription:
+            return True
+        price = self.pricing_for(model)
+        if price is not None and price.plan is not None:
+            return price.plan
+        return login_route(self.base_url)
 
     def measures_spend(self, model: str) -> bool:
         """Whether a dollar cap can count what a call to this model costs.
@@ -407,7 +418,7 @@ class ProviderEndpoint:
         Codex, Claude) or a self-hosted server. OpenRouter is the exception to the last, since it
         reports each call's cost itself.
         """
-        if self.kind == "llamacpp" or self.subscription or model.endswith((":free", "-free")):
+        if self.kind == "llamacpp" or self.plan_for(model) or model.endswith((":free", "-free")):
             return False
         price = self.pricing_for(model)
         if price is not None and price.input is not None and price.output is not None:
@@ -1145,7 +1156,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             # zero rather than an unknown price keeps the usage ledger complete while ensuring every
             # spending cap treats the call as free.
             cost = 0.0
-        elif self.endpoint.subscription:
+        elif self.endpoint.plan_for(model):
             # The plan is paid for up front: a call spends its allowance, not money. A gateway that
             # reports a list-price cost in the usage would otherwise book that as dollars charged.
             cost = 0.0

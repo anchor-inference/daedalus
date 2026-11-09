@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { dockShortcut, insideTerminal, KeyLike, reservedKey } from "./keys";
+import { dockShortcut, insideTerminal, KeyLike, reservedKey, terminalCommandKey } from "./keys";
 
 const key = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
 const linux = { mac: false, altScreen: false };
@@ -11,6 +11,17 @@ describe("reservedKey", () => {
     // On a Russian layout the same key reports key "ё"; only `code` is read.
     expect(reservedKey(key("Backquote", { ctrlKey: true }), linux)).toBe("toggle-dock");
     expect(reservedKey(key("Backquote", { ctrlKey: true }), mac)).toBe("toggle-dock");
+  });
+
+  it("takes Ctrl+Shift+W and Ctrl+Shift+` back from the program, to end and to open a terminal", () => {
+    expect(reservedKey(key("KeyW", { ctrlKey: true, shiftKey: true }), linux)).toBe("close-terminal");
+    expect(reservedKey(key("Backquote", { ctrlKey: true, shiftKey: true }), linux)).toBe("new-terminal");
+    // Plain Ctrl+W deletes a word in the shell and stays the shell's.
+    expect(reservedKey(key("KeyW", { ctrlKey: true }), linux)).toBeNull();
+    expect(terminalCommandKey(key("KeyW", { ctrlKey: true, shiftKey: true }))).toBe("close");
+    expect(terminalCommandKey(key("Backquote", { ctrlKey: true, shiftKey: true }))).toBe("new");
+    expect(terminalCommandKey(key("KeyW", { ctrlKey: true }))).toBeNull();
+    expect(terminalCommandKey(key("KeyW", { ctrlKey: true, shiftKey: true, altKey: true }))).toBeNull();
   });
 
   it("leaves the shell's own control keys to the shell", () => {

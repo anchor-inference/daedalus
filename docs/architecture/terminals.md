@@ -1074,6 +1074,13 @@ A view in the listing carries what the Terminals page's status line reads, besid
   10 s and with a 2 s timeout; a listing serves the last answer and never waits for git. These reads
   write no audit row (`exec_run(audit=False)`): they are the host's own fixed read, and one row per
   folder every ten seconds would bury the rows a person or an agent caused.
+- `at_prompt` and `running`: what ending the terminal would stop. `at_prompt` is true only when the
+  terminal is a shell the daemon lists with nothing in its foreground — no marked command open, no
+  foreground process group but the shell's own, no alternate screen, no agent — and the daemon can
+  tell: by the shell's marks, or by the foreground group, which a Windows daemon cannot read. Any
+  doubt leaves it false, and the app asks before ending. `running` is the marked command line of a
+  busy shell, the argv of a terminal started as a program (a staff member's CLI), or the detected
+  agent's kind; null when nothing is known. A shell's background jobs are seen by neither.
 
 ### The WebSocket
 

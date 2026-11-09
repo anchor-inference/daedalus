@@ -172,6 +172,9 @@ def priced_entry(prior: Any, bill: dict[str, float | None]) -> dict[str, Any]:
     The operator's input ceiling stays. An old ``cache_hit`` does not: an unknown one has to be absent, or
     the previous provider's discount outlives it.
     """
+    if isinstance(prior, dict) and prior.get("manual"):
+        # The operator typed this price in the model's settings: a choice of providers does not move it.
+        return dict(prior)
     entry = dict(prior) if isinstance(prior, dict) else {}
     for name in PRICE_FIELDS:
         entry.pop(name, None)

@@ -261,7 +261,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("desktop: the added value stayed in the page")
 
     # The message names the secrets and carries no value.
-    page.locator(".composer textarea").fill("Print the firmware notes")
+    page.locator(".composer .composer-field").fill("Print the firmware notes")
     page.locator(".composer .roundbtn.primary").click()
     if wait_for(page, lambda: bool(SENT), "desktop: the message going out", problems):
         if SENT[-1].get("secrets") != ["nas", "printer_admin"] or NEW_VALUE in json.dumps(SENT[-1]) or FAKE_SECRET_VALUE in json.dumps(SENT[-1]):

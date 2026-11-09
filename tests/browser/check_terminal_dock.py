@@ -1,8 +1,8 @@
 """Drive the session's terminal dock in a real browser and refuse what does not behave.
 
-Tabs and the split; a tab's ✕ only detaches (no request reaches the host); End on a busy terminal
-asks first and then POSTs the kill; a new terminal is made in the session's folder in the default
-environment; maximise and back moves the same terminal instead of reattaching it; the header button
+Tabs and the split; a tab's ✕ ends an idle shell at once and takes its tab; End on a busy terminal
+asks first and then POSTs the kill; "+" asks where, and a new terminal is made for the session in
+the place chosen; maximise and back moves the same terminal instead of reattaching it; the header button
 and the session's row both count the running terminals; and on a phone the header opens a list, a
 row of which opens the terminal full screen.
 
@@ -85,26 +85,33 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     if not term.resizes("t2bbbbbbbbbb"):
         problems.append("the right pane never sent its size once shown")
 
-    # ✕ on the right tab detaches: the tab goes, nothing is asked of the host.
+    # ✕ on the right tab, a shell at its prompt: it ends at once, without a question, and its tab goes.
     before = len(term.requests)
     page.locator(".term-tab[data-tab='t2bbbbbbbbbb'] .term-tab-x").click()
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(500)
     after = [(m, p) for m, p, _ in term.requests[before:] if m != "GET"]
     if page.locator(".term-tab[data-tab='t2bbbbbbbbbb']").count():
         problems.append("✕ left the tab in place")
-    if after:
-        problems.append(f"✕ asked the host for something: {after}")
+    if page.locator(".dialog").count():
+        problems.append("✕ on an idle shell asked a question")
+    if after != [("POST", "/api/terminals/t2bbbbbbbbbb/kill")]:
+        problems.append(f"✕ did not end the terminal: {after}")
     if page.locator(".term-panes.split").count():
         problems.append("the split stayed after its right tab was closed")
 
-    # The menu offers the terminals that have no tab; picking one opens it.
+    # The menu offers the running terminals that have no tab and the active one's own commands; a
+    # new terminal is only the "+"'s question.
     page.locator(".term-tabs button[aria-label='More terminals']").click()
     items = page.locator(".menu button").all_inner_texts()
     print("menu:", items)
-    if not any("htop" in i for i in items) or not any("npm run dev" in i for i in items):
+    if not any("htop" in i for i in items):
         problems.append(f"the menu does not offer the terminals without a tab: {items}")
-    if not any(i.strip() == "New terminal on the host" for i in items):
-        problems.append("the menu has no host terminal")
+    if any("npm run dev" in i for i in items):
+        problems.append("the menu offers a terminal that ended")
+    if any("New terminal" in i or i.strip() == "Sandbox" for i in items):
+        problems.append(f"the menu still opens terminals or switches the sandbox: {items}")
+    if not any(i.strip() == "Detach, keep running" for i in items):
+        problems.append("the menu has no Detach")
     page.locator(".menu button", has_text="htop").click()
     page.wait_for_selector(".term-tab.on[data-tab='t3cccccccccc']", timeout=5000)
     page.locator(".term-tab[data-tab='t1aaaaaaaaaa']").click()
@@ -115,7 +122,7 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     page.wait_for_selector(".dialog", timeout=5000)
     question = page.locator(".dialog").inner_text()
     print("end asks:", question.replace("\n", " | "))
-    if "stops" not in question or not stub_requests(term, "POST", "/kill") == []:
+    if "stops" not in question or stub_requests(term, "POST", "/t1aaaaaaaaaa/kill") != []:
         problems.append("End on a busy terminal did not ask first")
     page.locator(".dialog .btn.danger").click()
     page.wait_for_timeout(600)
@@ -147,8 +154,10 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     if len(later) != n_attaches or [a for a in later if not a.get("haveState")] != snapshot_attaches:
         problems.append(f"maximise and back reattached the terminal: {later}")
 
-    # "+" makes a terminal for this session in the default environment and shows it.
+    # "+" asks where; 1 is the container, and the terminal is this session's, in its own folder.
     page.locator(".term-tabs button[aria-label='New terminal']").click()
+    page.wait_for_selector(".term-pick-pop", timeout=5000)
+    page.keyboard.press("1")
     page.wait_for_timeout(800)
     made = stub_requests(term, "POST", "/api/terminals")
     print("created:", made)

@@ -65,7 +65,7 @@ def run() -> None:
         page.goto(f"{BASE}/agents/{shots.S1}?token=t&lang=en")
         expect(page.locator(".chat-title")).to_be_visible()
         expect(page.get_by_role("link", name="Chat canvases (1)")).to_be_visible()
-        page.locator(".composer textarea").fill(WORDS)
+        page.locator(".composer .composer-field").fill(WORDS)
         page.locator(".composer [data-action=send]").click()
         expect(page.locator(".timeline .msg.user").last).to_contain_text(WORDS, timeout=1000)
         expect(page.locator(".timeline .msg.user").last).to_be_in_viewport(timeout=1000)
@@ -74,7 +74,7 @@ def run() -> None:
         assert len(sent) == 1 and sent[0]["text"] == WORDS
         expect(page.locator(".timeline .msg.user").filter(has_text=WORDS)).to_have_count(1, timeout=8000)
         page.locator('.composer input[type="file"]').first.set_input_files({"name": "sample.txt", "mimeType": "text/plain", "buffer": b"example"})
-        page.locator(".composer textarea").fill(UPLOAD_WORDS)
+        page.locator(".composer .composer-field").fill(UPLOAD_WORDS)
         page.locator(".composer [data-action=send]").click()
         expect(page.locator(".timeline .msg.user").filter(has_text=UPLOAD_WORDS)).to_have_count(1, timeout=8000)
         assert len(sent) == 2 and sent[1]["id"] != sent[0]["id"]

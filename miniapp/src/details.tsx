@@ -16,6 +16,9 @@ import { contextSegments, contextTone, quotaTone } from "./detailsmodel";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
+import { ServerGrantButton, StandingGrants } from "./servergrant";
+import { McpQuickAdd } from "./mcpquickadd";
+import { SessionSubagentModels } from "./subagentmodels";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
 import { MoveFolderButton } from "./project/MoveFolder";
@@ -62,6 +65,8 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   const conductor = role !== "session";
   const sessionFolder = detail.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail.project?.folders?.[0] ?? null;
   const folderMove = useFolderMove(sessionFolder?.id);
+  // Bumped when the MCP panel grants a server, so the list of what stands reloads beside it.
+  const [grantsTick, setGrantsTick] = useState(0);
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   useEffect(() => {
     if (!focus || focus === "session") return;
@@ -82,6 +87,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
           <button className="linkbtn grow truncate" onClick={on.openPicker} title={detail.model}>{detail.model || t("session.model.global")}</button>
           <button className="btn small" onClick={on.openPicker}>{t("session.model.change")}</button>
         </div>
+        <SessionSubagentModels sessionId={id} toast={toast} />
       </Section>
 
       {detail.context && (
@@ -164,7 +170,12 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
       )}
 
       <Section ids={ids} id="mcp" icon="plug" label={t("session.mcp")}>
-        <McpPanel sessionId={id} toast={toast} />
+        <McpPanel sessionId={id} toast={toast} onGranted={() => setGrantsTick((n) => n + 1)} />
+      </Section>
+
+      <Section ids={ids} id="grants" icon="shield" label={t("grant.section")}>
+        <p className="dt-hint">{t("grant.section.sub")}</p>
+        <StandingGrants sessionId={id} toast={toast} refresh={grantsTick} />
       </Section>
 
       <Section ids={ids} id="toolgroups" icon="skill" label={t("session.toolgroups")}>
@@ -492,7 +503,7 @@ function ToolTiming({ sessionId }: { sessionId: string }) {
 
 type McpServer = { name: string; description: string; connected: boolean; error: string | null; tools: string[]; state: "disabled" | "connecting" | "ready" | "auth_required" | "unavailable" | "draining"; catalog_revision: number; last_error_code: string | null; in_flight: number };
 
-function McpPanel({ sessionId, toast }: { sessionId: string; toast: (t: string) => void }) {
+function McpPanel({ sessionId, toast, onGranted }: { sessionId: string; toast: (t: string) => void; onGranted: () => void }) {
   const [data, setData] = useState<{ enabled: string[]; servers: McpServer[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => {
@@ -513,8 +524,17 @@ function McpPanel({ sessionId, toast }: { sessionId: string; toast: (t: string) 
       setBusy(null);
     }
   }
+  async function grant(server: string, hours: number) {
+    try {
+      await api.post(`/api/sessions/${sessionId}/policy/grant-server`, { server, hours });
+      onGranted();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
   if (!data) return <div className="empty">…</div>;
-  if (data.servers.length === 0) return <div className="empty">{t("session.mcp.none")}</div>;
+  const quick = <McpQuickAdd sessionId={sessionId} toast={toast} onAdded={load} />;
+  if (data.servers.length === 0) return <><div className="empty">{t("session.mcp.none")}</div>{quick}</>;
   return (
     <div className="dt-mcp">
       <p className="dt-hint">{t("session.mcp.sub")}</p>
@@ -533,9 +553,11 @@ function McpPanel({ sessionId, toast }: { sessionId: string; toast: (t: string) 
             <div className={`dt-hint${s.description ? "" : " quiet"}`}>{s.description || t("session.mcp.nodesc")}</div>
             {s.error && <Note tone="bad">{t("session.mcp.error", { error: s.error }).replace(/^ · /, "")}</Note>}
             {s.tools.length > 0 && <div className="dt-tags">{s.tools.map((tool) => <span key={tool} className="dt-tag mono">{tool}</span>)}</div>}
+            {on && s.state === "ready" && <div className="dt-server-grant"><ServerGrantButton server={s.name} onGrant={(hours) => void grant(s.name, hours)} /></div>}
           </div>
         );
       })}
+      {quick}
     </div>
   );
 }
