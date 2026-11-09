@@ -5,10 +5,14 @@
 // The iframe is the second wall. Its sandbox has no `allow-same-origin`, so the page runs with an opaque
 // origin even if the door's own header were lost: no cookie, no storage of the app, no popups, no
 // navigation of the board around it. Everything the page says arrives through `postMessage` from its
-// bridge script and is untrusted text. A message is believed to be from a frame only because it came
-// from that frame's window; its `origin` is "null" for every sandboxed page and proves nothing.
+// bridge script and is untrusted text. Coming from the frame's window proves little: the window stays
+// the same when the page navigates it to some other site, and its `origin` is "null" for every
+// sandboxed page. So each document's bridge carries a nonce the door gave that one document, the host
+// confirms it once, and the board listens only to messages carrying the confirmed nonce of the
+// document loaded last. In comment mode a glass over the frame takes the operator's clicks, and a pick
+// counts only as the answer to the board's own question about a point it saw clicked.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { api, ApiError } from "../api";
 import { Icon } from "../icons";
 import { t } from "../i18n";
@@ -17,7 +21,16 @@ import type { CanvasNode } from "./model";
 
 export type FrameInfo = { device: string; rev: number };
 export type Mode = "interact" | "comment";
-export type Picked = { selector: string; tag: string; text: string; html: string; rect: { x: number; y: number; width: number; height: number } };
+export type Picked = { id: string; selector: string; tag: string; text: string; html: string; rect: { x: number; y: number; width: number; height: number } };
+
+/** The selector grammar the bridge writes, and the host accepts; anything else did not come from it. */
+const PART = String.raw`(?:#[A-Za-z][\w-]*|[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z][\w-]*){0,2}(?::nth-of-type\(\d{1,4}\))?)`;
+export const SELECTOR = new RegExp(`^${PART}(?: > ${PART}){0,5}$`);
+const TAG = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
+
+/** One id per open board, for the host to know which board allowed an origin "this time". */
+export const BOARD_ID = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const HEARTBEAT_MS = 60_000;
 export type Address = { url: string; expires_at: number; origins: { canvas: string[]; all: string[] }; once: string[]; generation: number };
 type AddressAnswer = Address | { needs_door: true; origins: { canvas: string[]; all: string[] } };
 
@@ -41,10 +54,21 @@ function clean(value: unknown, limit: number): string {
 }
 
 /** A message from a frame's bridge, read field by field into known shapes, or null. */
-export function readFrameMessage(data: unknown): ({ type: "loaded"; title: string } | { type: "console"; level: "error" | "warning" | "exception"; text: string } | { type: "blocked"; origin: string } | ({ type: "picked" } & Picked) | { type: "snapshot"; html: string; width: number; height: number }) | null {
+export type FrameMessage = ({ type: "loaded"; title: string } | { type: "console"; level: "error" | "warning" | "exception"; text: string } | { type: "blocked"; origin: string } | ({ type: "picked" } & Picked) | { type: "snapshot"; html: string; width: number; height: number }) & { nonce: string };
+
+export function readFrameMessage(data: unknown): FrameMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as Record<string, unknown>;
   if (message.daedalus !== "canvas-frame") return null;
+  const nonce = clean(message.nonce, 64);
+  if (!nonce) return null;
+  const read = readBody(message);
+  return read ? { ...read, nonce } : null;
+}
+
+type FrameBody = FrameMessage extends infer T ? (T extends { nonce: string } ? Omit<T, "nonce"> : never) : never;
+
+function readBody(message: Record<string, unknown>): FrameBody | null {
   switch (message.type) {
     case "loaded":
       return { type: "loaded", title: clean(message.title, 200) };
@@ -66,7 +90,11 @@ export function readFrameMessage(data: unknown): ({ type: "loaded"; title: strin
     case "picked": {
       const rect = (message.rect ?? {}) as Record<string, unknown>;
       const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.max(-100000, Math.min(100000, value)) : 0);
-      return { type: "picked", selector: clean(message.selector, 600), tag: clean(message.tag, 40), text: clean(message.text, 400), html: clean(message.html, 2000), rect: { x: number(rect.x), y: number(rect.y), width: number(rect.width), height: number(rect.height) } };
+      const selector = clean(message.selector, 600);
+      const tag = clean(message.tag, 40);
+      // A selector outside the bridge's grammar is page-written text pretending to be one: dropped.
+      if (!SELECTOR.test(selector) || (tag && !TAG.test(tag))) return null;
+      return { type: "picked", id: clean(message.id, 64), selector, tag, text: clean(message.text, 400), html: clean(message.html, 2000), rect: { x: number(rect.x), y: number(rect.y), width: number(rect.width), height: number(rect.height) } };
     }
     case "snapshot": {
       const html = clean(message.html, 3_000_000);
@@ -82,6 +110,8 @@ export function readFrameMessage(data: unknown): ({ type: "loaded"; title: strin
 export type FrameHost = {
   canvasId: string;
   mode: Mode;
+  /** Whether the canvas has a public link: still copies of its pages are taken only then. */
+  shared: boolean;
   /** The element a chip points at, outlined in its frame while the chip is hovered or focused. */
   highlight: { frameId: string; selector: string } | null;
   /** Bumped when the canvas's allowed origins change: every frame fetches a new address. */
@@ -101,6 +131,8 @@ export const FrameContext = createContext<FrameHost | null>(null);
 const SNAPSHOT_QUIET_MS = 2000;
 const REPORT_DELAY_MS = 1000;
 const LEFT_AFTER_MS = 3000;
+const PICK_ANSWER_MS = 2000;
+const HOVER_EVERY_MS = 50;
 /** The last snapshot sent per frame in this window, so an unchanged page is not uploaded again. */
 const sentSnapshots = new Map<string, string>();
 
@@ -125,6 +157,11 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
   live.current = state.kind === "live";
   const iframe = useRef<HTMLIFrameElement>(null);
   const counts = useRef({ loads: 0, bridged: 0 });
+  // The nonce of the document loaded last, once the host has confirmed it; until then the frame's words
+  // wait here, and words under any other nonce are dropped.
+  const trusted = useRef<string | null>(null);
+  const waiting = useRef<FrameMessage[]>([]);
+  const asked = useRef<{ id: string; at: number } | null>(null);
   const report = useRef<{ loaded?: boolean; title?: string; lines: { level: string; text: string }[]; blocked: string[] }>({ lines: [], blocked: [] });
   const reportTimer = useRef<number>(0);
   const snapshotTimer = useRef<number>(0);
@@ -140,7 +177,10 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
     setState({ kind: "loading" });
     setRefused([]);
     counts.current = { loads: 0, bridged: 0 };
-    api.post<AddressAnswer>(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/address`, { once: once ? once.split(" ") : [] })
+    // A new address is a new page: whom the board believed before counts for nothing now.
+    trusted.current = null;
+    waiting.current = [];
+    api.post<AddressAnswer>(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/address`, { once: once ? once.split(" ") : [], board: BOARD_ID })
       .then((answer) => {
         if (!active) return;
         setState("needs_door" in answer ? { kind: "needs_door" } : { kind: "live", address: answer });
@@ -151,6 +191,15 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
       });
     return () => { active = false; };
   }, [canvasId, node.id, frame?.rev, host?.originsVersion, once, reloads]);
+
+  // An origin allowed "this time" holds only while this board says it is open: once it stops (closed,
+  // reloaded), the address that carries the origin stops answering within minutes.
+  useEffect(() => {
+    if (!once || !canvasId) return;
+    const beat = () => void api.post("/api/canvases/frames/heartbeat", { board: BOARD_ID }).catch(() => undefined);
+    const handle = window.setInterval(beat, HEARTBEAT_MS);
+    return () => window.clearInterval(handle);
+  }, [once, canvasId]);
 
   // An address lasts twelve hours; a board left open longer gets a new one before it runs out.
   useEffect(() => {
@@ -180,36 +229,63 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
     iframe.current?.contentWindow?.postMessage({ daedalus: "canvas-board", ...message }, "*");
   }, []);
 
+  const handle = useCallback((message: FrameMessage) => {
+    if (message.type === "loaded") {
+      counts.current.bridged += 1;
+      queueReport((pending) => { pending.loaded = true; pending.title = message.title; });
+      post({ type: "mode", mode: host?.mode ?? "interact" });
+      window.clearTimeout(snapshotTimer.current);
+      if (host?.shared) snapshotTimer.current = window.setTimeout(() => post({ type: "snapshot" }), SNAPSHOT_QUIET_MS);
+    } else if (message.type === "console") {
+      queueReport((pending) => { pending.lines.push({ level: message.level, text: message.text }); });
+    } else if (message.type === "blocked") {
+      queueReport((pending) => { if (!pending.blocked.includes(message.origin)) pending.blocked.push(message.origin); });
+      // A page that retries a script refuses the same origin many times: one row for it.
+      setRefused((current) => (current.includes(message.origin) || current.length >= 6 ? current : [...current, message.origin]));
+      host?.onBlocked(node.id, message.origin);
+    } else if (message.type === "picked") {
+      // Only the answer to the board's last question, about a click the board itself saw, and soon.
+      const question = asked.current;
+      if (!question || question.id !== message.id || Date.now() - question.at > PICK_ANSWER_MS || host?.mode !== "comment") return;
+      asked.current = null;
+      host.onPicked(node.id, message);
+    } else if (message.type === "snapshot") {
+      if (!host?.shared) return;
+      const key = `${canvasId}:${node.id}`;
+      if (sentSnapshots.get(key) === message.html) return;
+      sentSnapshots.set(key, message.html);
+      void api.put(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/snapshot`, { html: message.html, width: message.width, height: message.height }).catch(() => sentSnapshots.delete(key));
+    }
+  }, [canvasId, host, node.id, post, queueReport]);
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!iframe.current || event.source !== iframe.current.contentWindow) return;
       const message = readFrameMessage(event.data);
       if (!message) return;
-      if (message.type === "loaded") {
-        counts.current.bridged += 1;
-        queueReport((pending) => { pending.loaded = true; pending.title = message.title; });
-        post({ type: "mode", mode: host?.mode ?? "interact" });
-        window.clearTimeout(snapshotTimer.current);
-        snapshotTimer.current = window.setTimeout(() => post({ type: "snapshot" }), SNAPSHOT_QUIET_MS);
-      } else if (message.type === "console") {
-        queueReport((pending) => { pending.lines.push({ level: message.level, text: message.text }); });
-      } else if (message.type === "blocked") {
-        queueReport((pending) => { if (!pending.blocked.includes(message.origin)) pending.blocked.push(message.origin); });
-        // A page that retries a script refuses the same origin many times: one row for it.
-        setRefused((current) => (current.includes(message.origin) || current.length >= 6 ? current : [...current, message.origin]));
-        host?.onBlocked(node.id, message.origin);
-      } else if (message.type === "picked") {
-        host?.onPicked(node.id, message);
-      } else if (message.type === "snapshot") {
-        const key = `${canvasId}:${node.id}`;
-        if (sentSnapshots.get(key) === message.html) return;
-        sentSnapshots.set(key, message.html);
-        void api.put(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/snapshot`, { html: message.html, width: message.width, height: message.height }).catch(() => sentSnapshots.delete(key));
+      if (message.nonce === trusted.current) {
+        handle(message);
+        return;
       }
+      // A document not confirmed yet: keep its words (a page logs errors and is refused origins
+      // before it has loaded) and ask the host about its nonce when it says it has loaded. Until then
+      // the document confirmed last stays the one that is believed.
+      if (waiting.current.length < 50) waiting.current.push(message);
+      if (message.type !== "loaded") return;
+      const nonce = message.nonce;
+      void api.post<{ ok: boolean }>(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/nonce`, { nonce })
+        .then((answer) => {
+          if (!answer.ok) return;
+          trusted.current = nonce;
+          const held = waiting.current.filter((item) => item.nonce === nonce);
+          waiting.current = waiting.current.filter((item) => item.nonce !== nonce);
+          held.forEach(handle);
+        })
+        .catch(() => undefined);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [canvasId, host, node.id, post, queueReport]);
+  }, [canvasId, handle, node.id]);
 
   useEffect(() => { if (state.kind === "live") post({ type: "mode", mode: host?.mode ?? "interact" }); }, [host?.mode, post, state.kind]);
   const highlight = host?.highlight && host.highlight.frameId === node.id ? host.highlight.selector : null;
@@ -226,6 +302,7 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
    *  after it is the page gone somewhere else (a link, a form, a script setting `location`), which
    *  could be anything; the frame is emptied and its address retired. */
   const onLoad = () => {
+    // A new document: it counts as the page only once its own nonce is confirmed (see the timer).
     counts.current.loads += 1;
     const expected = counts.current.loads;
     window.clearTimeout(leftTimer.current);
@@ -251,7 +328,7 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
         className="cv-frame-page"
         src={state.address.url}
         title={t("canvas.frame.title", { page: pageName(node) })}
-        sandbox="allow-scripts allow-forms allow-modals allow-downloads"
+        sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
         allow=""
         loading="lazy"
@@ -266,6 +343,17 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
       <FrameHeader node={node} onReload={reload} />
       <div className="cv-frame-body" data-mode={host?.mode ?? "interact"}>
         {body}
+        {state.kind === "live" && near && host?.mode === "comment" && (
+          <Glass
+            node={node}
+            onHover={(x, y) => post({ type: "hover-at", x, y })}
+            onPick={(x, y) => {
+              const id = BOARD_ID.slice(0, 8) + Math.random().toString(36).slice(2, 12);
+              asked.current = { id, at: Date.now() };
+              post({ type: "pick-at", x, y, id });
+            }}
+          />
+        )}
         {asking.length > 0 && host && (
           <OriginBar
             origins={asking}
@@ -276,6 +364,35 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
         )}
       </div>
     </>
+  );
+}
+
+/** The glass over a frame in comment mode. The page never receives the operator's clicks there; the
+ *  board turns each click into the page's own coordinates and asks the bridge what lies under it. */
+function Glass({ node, onHover, onPick }: { node: CanvasNode; onHover: (x: number, y: number) => void; onPick: (x: number, y: number) => void }) {
+  const last = useRef(0);
+  const point = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return [Math.round(((event.clientX - box.left) * node.width) / Math.max(1, box.width)), Math.round(((event.clientY - box.top) * node.height) / Math.max(1, box.height))] as const;
+  };
+  return (
+    <div
+      className="cv-frame-glass"
+      data-ui
+      role="button"
+      aria-label={t("canvas.pick.title")}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerMove={(event) => {
+        if (Date.now() - last.current < HOVER_EVERY_MS) return;
+        last.current = Date.now();
+        onHover(...point(event));
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!event.isTrusted) return;
+        onPick(...point(event));
+      }}
+    />
   );
 }
 
@@ -403,5 +520,5 @@ export function SnapshotFrame({ node, token, capturedAt }: { node: CanvasNode; t
 
 /** Memoised host value, so frames re-render only when something they read changes. */
 export function useFrameHost(value: FrameHost): FrameHost {
-  return useMemo(() => value, [value.canvasId, value.mode, value.highlight, value.originsVersion, value.onPicked, value.onBlocked, value.onceFor, value.allowOnce, value.allowAlways]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => value, [value.canvasId, value.mode, value.shared, value.highlight, value.originsVersion, value.onPicked, value.onBlocked, value.onceFor, value.allowOnce, value.allowAlways]); // eslint-disable-line react-hooks/exhaustive-deps
 }

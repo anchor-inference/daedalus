@@ -398,7 +398,7 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
       setOriginsVersion((n) => n + 1);
     } catch (error) { toast(errorText(error)); }
   }, [id, toast]);
-  const frameHost = useFrameHost({ canvasId: id, mode, highlight, originsVersion, onPicked, onBlocked, onceFor, allowOnce, allowAlways });
+  const frameHost = useFrameHost({ canvasId: id, mode, shared: !!meta.share_token, highlight, originsVersion, onPicked, onBlocked, onceFor, allowOnce, allowAlways });
   const renderFrame = useCallback((node: CanvasNode, near: boolean) => <LiveFrame node={node} near={near} />, []);
   const onPoint = useCallback((node: CanvasNode) => {
     setChips((current) => (current.some((chip) => chip.kind === "card" && chip.nodeId === node.id) ? current : [...current, { id: newId(), kind: "card", nodeId: node.id, words: cardWords(node) }]));
@@ -414,11 +414,12 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
   const pendingNode = picking ? doc.nodes.find((node) => node.id === picking.frameId) : undefined;
   const overlay = picking && pendingNode ? (
     <PickNote
+      key={picking.picked.id}
       node={pendingNode}
       picked={picking.picked}
       onCancel={() => setPicking(null)}
       onAdd={(note) => {
-        const { rect: _rect, ...element } = picking.picked;
+        const { rect: _rect, id: _question, ...element } = picking.picked;
         setChips((current) => [...current, { id: newId(), kind: "pick", frameId: picking.frameId, page: pageName(pendingNode), note, ...element }]);
         setPicking(null);
       }}
@@ -629,6 +630,8 @@ function PickNote({ node, picked, onAdd, onCancel }: { node: CanvasNode; picked:
   return (
     <div className="cv-pick-note" data-ui role="dialog" aria-label={t("canvas.pick.title")} style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
       <div className="cv-pick-what"><code>{picked.selector || picked.tag}</code>{picked.text && <span>{picked.text}</span>}</div>
+      {/* The page's markup goes to the agent with the note, so the operator sees all of it here. */}
+      <pre className="cv-pick-html" aria-label={t("canvas.pick.sent")}>{picked.html}</pre>
       <textarea
         ref={(element) => { if (element && document.activeElement !== element && !element.dataset.focused) { element.dataset.focused = "1"; element.focus({ preventScroll: true }); } }}
         rows={3}

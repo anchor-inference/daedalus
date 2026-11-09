@@ -464,7 +464,10 @@ class CanvasStore:
 
     async def revoke_share(self, canvas_id: str) -> None:
         found = await self.require(canvas_id)
-        await self.db.execute("UPDATE canvases SET share_token='' WHERE id=?", (canvas_id,))
+        async with self.db.transaction() as conn:
+            await conn.execute("UPDATE canvases SET share_token='' WHERE id=?", (canvas_id,))
+            # The still copies exist for the shared view alone, and go with it.
+            await conn.execute("DELETE FROM canvas_snapshots WHERE canvas_id=?", (canvas_id,))
         await self._announce(canvas_id, Scope(found["scope"], found["scope_id"]), "shared", by="operator")
 
     async def shared(self, token: str) -> dict[str, Any] | None:

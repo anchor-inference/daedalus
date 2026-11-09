@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS canvas_frames (
     root TEXT NOT NULL,
     entry TEXT NOT NULL,
     generation INTEGER NOT NULL DEFAULT 1,
+    secret TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (canvas_id, node_id)

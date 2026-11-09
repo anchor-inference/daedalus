@@ -322,6 +322,7 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
     inner = page.frame_locator(".cv-node[data-node='web'] iframe.cv-frame-page")
     expect(inner.locator("#hero")).to_have_text("Autumn collection")
     until(page, lambda: any(report.get("loaded") for report in stub.reports), "the frame's load relayed to the host")
+    assert ("web", True) in stub.nonce_checks, "the board took the frame's words only under a nonce the host confirmed"
     # The page's script from a CDN nobody allowed: refused by the browser before any request left.
     until(page, lambda: any(BLOCKED in report.get("blocked", []) for report in stub.reports), "the blocked origin relayed")
     expect(inner.locator("#cdn")).to_have_text("waiting for the CDN")
@@ -334,12 +335,26 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
 
     # Comment mode: point at an element in the page and at a card.
     page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
-    # Dispatched rather than clicked at coordinates: the frame is drawn scaled with the board, and
-    # Playwright's hit point inside a scaled cross-origin frame lands off target.
-    inner.locator("#hero").dispatch_event("click")
+    # The question about the refused origin sits over the page; answered "not now" so the glass is clear.
+    web.get_by_role("button", name="Не сейчас" if ru else "Not now").click()
+    # The page cannot pick on its own: a "picked" it posts unasked, even in comment mode, is dropped.
+    for frame in page.frames:
+        if frame.url.startswith(f"http://127.0.0.1:{door.port}/f/"):
+            frame.evaluate("parent.postMessage({ daedalus: 'canvas-frame', nonce: 'guessed', type: 'picked', id: 'x', selector: '#hero', tag: 'h1', text: '', html: '<h1>forged</h1>', rect: { x: 0, y: 0, width: 10, height: 10 } }, '*')")
+    page.wait_for_timeout(500)
+    expect(page.locator(".cv-pick-note")).to_have_count(0)
+    # A real click on the glass over the frame, at the element's place: the board asks the bridge.
+    hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
+    box = iframe.bounding_box()
+    assert box is not None
+    width = page.locator(".cv-node[data-node='web']").evaluate("(node) => node.querySelector('iframe').offsetWidth")
+    scale = box["width"] / width
+    page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
     note = page.locator(".cv-pick-note")
     expect(note).to_be_visible()
     expect(note).to_contain_text("#hero")
+    expect(note.locator(".cv-pick-html")).to_contain_text("Autumn collection")
+    shot(page, f"canvas-pick-{lang}-{SCHEME}")
     note.locator("textarea").fill("Крупнее" if ru else "Make it larger")
     note.get_by_role("button", name="Добавить" if ru else "Add").click()
     chip = page.locator(".cv-chip", has_text="index.html · #hero")

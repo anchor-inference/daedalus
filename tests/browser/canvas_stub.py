@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import secrets
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -105,7 +106,9 @@ class Door:
                 parts = self.path.split("?")[0].split("/")
                 if self.path.startswith("/elsewhere"):
                     # Somewhere a page went that is not its folder: no bridge answers from here.
-                    return self.reply(200, "text/html", b"<!doctype html><p>elsewhere</p>", {})
+                    # It tries to speak for the frame it took over, with a nonce it cannot have.
+                    forged = b"<!doctype html><p>elsewhere</p><script>parent.postMessage({daedalus: 'canvas-frame', nonce: 'made-up', type: 'loaded', title: 'still me'}, '*')</script>"
+                    return self.reply(200, "text/html", forged, {})
                 if len(parts) < 4 or parts[1] != "f":
                     return self.reply(404, "text/plain", b"nothing here", {})
                 token = parts[2]
@@ -114,12 +117,17 @@ class Door:
                     return self.reply(410, "text/plain", b"expired", {})
                 door.stub.door_hits.append("/".join(parts[3:]))
                 allowed = door.stub.origins_for(data["canvas"])
-                headers = {"Content-Security-Policy": policy(door.app_origin, sorted({*allowed["canvas"], *allowed["all"], *data["once"]})), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+                own = f"http://127.0.0.1:{door.port}/f/{token}/"
+                headers = {"Content-Security-Policy": policy(door.app_origin, own, sorted({*allowed["canvas"], *allowed["all"], *data["once"]})), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
                 rest = "/".join(parts[3:])
                 if rest == ".daedalus/bridge.js":
                     return self.reply(200, "text/javascript", BRIDGE.encode(), headers)
                 if rest in ("index.html", ""):
-                    return self.reply(200, "text/html; charset=utf-8", inject(PAGE.encode(), token, door.app_origin), headers)
+                    # As the host does: a nonce only for a document the board's iframe loads.
+                    nonce = secrets.token_urlsafe(12) if self.headers.get("Sec-Fetch-Dest") == "iframe" else ""
+                    if nonce:
+                        door.stub.nonces.add((data["canvas"], data["node"], nonce))
+                    return self.reply(200, "text/html; charset=utf-8", inject(PAGE.encode(), token, door.app_origin, nonce), headers)
                 return self.reply(404, "text/plain", b"not found", headers)
 
             def reply(self, status: int, mime: str, body: bytes, headers: dict[str, str]) -> None:
@@ -160,6 +168,9 @@ class CanvasStub:
         self.messages: list[dict[str, Any]] = []
         self.door_hits: list[str] = []
         self.revoked: list[str] = []
+        self.nonces: set[tuple[str, str, str]] = set()
+        self.nonce_checks: list[tuple[str, bool]] = []
+        self.heartbeats = 0
 
     def add(self, title: str, doc: dict[str, Any], *, scope: str = "chat", source: str = "operator", minutes_ago: float = 5, shared: bool = False, history: list[tuple[dict[str, Any], str, float]] | None = None) -> str:
         self.counter += 1
@@ -247,6 +258,9 @@ class CanvasStub:
         if segments[:2] != ["api", "canvases"]:
             return None
         self.calls.append((method, path, body))
+        if segments[2:] == ["frames", "heartbeat"] and method == "POST":
+            self.heartbeats += 1
+            return 200, {"ok": True}
         if len(segments) == 2:
             if method == "GET":
                 query = parse_qs(parts.query)
@@ -307,10 +321,18 @@ class CanvasStub:
             once = sorted(set(body.get("once") or []))
             token = encode({"canvas": found["id"], "node": frame["id"], "once": once, "rev": frame["daedalus"]["frame"]["rev"]})
             return 200, {"url": f"http://127.0.0.1:{self.door_port}/f/{token}/index.html", "expires_at": int(datetime.now(UTC).timestamp()) + 12 * 3600, "origins": self.origins_for(found["id"]), "once": once, "generation": 1}
+        if frame is not None and rest[2:] == ["nonce"] and method == "POST":
+            key = (found["id"], frame["id"], str(body.get("nonce")))
+            known = key in self.nonces
+            self.nonces.discard(key)
+            self.nonce_checks.append((frame["id"], known))
+            return 200, {"ok": known}
         if frame is not None and rest[2:] == ["report"] and method == "POST":
             self.reports.append({"node": frame["id"], **body})
             return 200, {"ok": True}
         if frame is not None and rest[2:] == ["snapshot"] and method == "PUT":
+            if not found["share_token"]:
+                return 409, {"detail": "the canvas is not shared"}
             self.snapshots[(found["id"], frame["id"])] = {**body, "captured_at": datetime.now(UTC).isoformat()}
             return 200, {"ok": True}
         if frame is not None and rest[2:] == ["revoke"] and method == "POST":
@@ -338,6 +360,8 @@ class CanvasStub:
             if body.get("session_id"):
                 found["owner_session_id"] = body["session_id"]
             text = compose(self.view(found), MessageBody(**body))
+            if body.get("version") != found["version"] or text != body.get("preview"):
+                return 409, {"detail": {"message": "the canvas changed since this message was shown; check it again", "text": text, "version": found["version"]}}
             self.messages.append({**body, "composed": text})
             return 200, {"run_id": "run-canvas", "session_id": found["owner_session_id"], "text": text}
         if rest == ["head"] and method == "GET":

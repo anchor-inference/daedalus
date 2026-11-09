@@ -327,6 +327,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "canvas.mode.interact.hint": { en: "Clicks reach the pages; cards are edited", ru: "Щелчки идут в страницы; карточки правятся" },
   "canvas.mode.comment.hint": { en: "Click an element or a card to point at it", ru: "Щёлкните элемент или карточку, чтобы указать" },
   "canvas.pick.title": { en: "Note on this element", ru: "Заметка к элементу" },
+  "canvas.pick.sent": { en: "Markup sent with the note", ru: "Разметка уйдёт с заметкой" },
+  "canvas.bar.changed": { en: "The canvas changed. Check the message and send again.", ru: "Холст изменился. Проверьте сообщение и отправьте снова." },
   "canvas.pick.placeholder": { en: "What should change here?", ru: "Что здесь изменить?" },
   "canvas.pick.add": { en: "Add", ru: "Добавить" },
   "canvas.bar": { en: "Message to the agent", ru: "Сообщение агенту" },

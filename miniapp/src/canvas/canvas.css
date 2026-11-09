@@ -304,7 +304,9 @@
 /* The note beside a picked element: drawn on the plane, kept at its own size on screen. */
 .cv-pick-note { position: absolute; z-index: 6; display: grid; gap: 8px; width: 280px; padding: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-pop); transform: scale(var(--cv-inv)); transform-origin: 0 0; cursor: default; user-select: text; }
 .cv-pick-what { display: grid; gap: 2px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
-.cv-pick-what code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+.cv-pick-what code { overflow-wrap: anywhere; color: var(--accent); }
+.cv-pick-html { margin: 0; max-height: 120px; overflow: auto; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); font-size: var(--fs-11); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
+.cv-frame-glass { position: absolute; inset: 0; cursor: crosshair; background: transparent; z-index: 2; }
 .cv-pick-what span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-pick-note textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-13); resize: vertical; }
 .cv-pick-actions { display: flex; justify-content: flex-end; gap: 6px; }
