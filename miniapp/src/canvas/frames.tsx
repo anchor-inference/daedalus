@@ -90,6 +90,10 @@ export type FrameHost = {
   onBlocked: (frameId: string, origin: string) => void;
   /** Origins allowed for one load of one frame, until the board closes; stored nowhere. */
   onceFor: (frameId: string) => string[];
+  /** "Allow this time": this frame, this board, until it closes or the page is shown again. */
+  allowOnce: (frameId: string, origin: string) => void;
+  /** "Always": stored on the host for this canvas, or for every canvas. */
+  allowAlways: (origin: string, everywhere: boolean) => Promise<void>;
 };
 
 export const FrameContext = createContext<FrameHost | null>(null);
@@ -114,6 +118,9 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
   const frame = frameOf(node);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [reloads, setReloads] = useState(0);
+  // Origins the browser refused this load, in the order met, and the ones the operator waved off.
+  const [refused, setRefused] = useState<string[]>([]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const live = useRef(false);
   live.current = state.kind === "live";
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -131,6 +138,7 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
     if (!canvasId) return;
     let active = true;
     setState({ kind: "loading" });
+    setRefused([]);
     counts.current = { loads: 0, bridged: 0 };
     api.post<AddressAnswer>(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/address`, { once: once ? once.split(" ") : [] })
       .then((answer) => {
@@ -187,6 +195,8 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
         queueReport((pending) => { pending.lines.push({ level: message.level, text: message.text }); });
       } else if (message.type === "blocked") {
         queueReport((pending) => { if (!pending.blocked.includes(message.origin)) pending.blocked.push(message.origin); });
+        // A page that retries a script refuses the same origin many times: one row for it.
+        setRefused((current) => (current.includes(message.origin) || current.length >= 6 ? current : [...current, message.origin]));
         host?.onBlocked(node.id, message.origin);
       } else if (message.type === "picked") {
         host?.onPicked(node.id, message);
@@ -250,11 +260,79 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
       />
     );
   })();
+  const asking = state.kind === "live" ? refused.filter((origin) => !dismissed.includes(origin)) : [];
   return (
     <>
       <FrameHeader node={node} onReload={reload} />
-      <div className="cv-frame-body" data-mode={host?.mode ?? "interact"}>{body}</div>
+      <div className="cv-frame-body" data-mode={host?.mode ?? "interact"}>
+        {body}
+        {asking.length > 0 && host && (
+          <OriginBar
+            origins={asking}
+            onOnce={(origin) => host.allowOnce(node.id, origin)}
+            onAlways={(origin, everywhere) => void host.allowAlways(origin, everywhere)}
+            onDismiss={(origin) => setDismissed((current) => [...current, origin])}
+          />
+        )}
+      </div>
     </>
+  );
+}
+
+/** The question a refused origin raises, on the frame that raised it rather than in a dialog over the
+ *  board: the page goes on without it until the operator answers, and other frames are not held up. */
+function OriginBar({ origins, onOnce, onAlways, onDismiss }: { origins: string[]; onOnce: (origin: string) => void; onAlways: (origin: string, everywhere: boolean) => void; onDismiss: (origin: string) => void }) {
+  return (
+    <div className="cv-origin-bar" data-ui role="alert" onPointerDown={(event) => event.stopPropagation()}>
+      {origins.map((origin) => (
+        <div key={origin} className="cv-origin-row">
+          <Icon name="shield" size={14} />
+          <span className="cv-origin-text">{t("canvas.origin.asked")} <strong>{origin}</strong></span>
+          <span className="cv-origin-actions">
+            <button type="button" className="btn small primary" onClick={() => onOnce(origin)} title={t("canvas.origin.once.hint")}>{t("canvas.origin.once")}</button>
+            <button type="button" className="btn small" onClick={() => onAlways(origin, false)}>{t("canvas.origin.canvas")}</button>
+            <button type="button" className="btn small" onClick={() => onAlways(origin, true)}>{t("canvas.origin.all")}</button>
+            <button type="button" className="btn small ghost" onClick={() => onDismiss(origin)}>{t("canvas.origin.not.now")}</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The sites live pages of this canvas may load from, kept on the host: this canvas's and every
+ *  canvas's, each with a way to take it back. "This time" never appears here: it is stored nowhere. */
+export function AllowedSites({ canvasId, version, onChanged, toast }: { canvasId: string; version: number; onChanged: () => void; toast: (message: string) => void }) {
+  const [origins, setOrigins] = useState<{ canvas: string[]; all: string[] } | null>(null);
+  useEffect(() => {
+    let active = true;
+    api.get<{ canvas: string[]; all: string[] }>(`/api/canvases/${canvasId}/origins`).then((found) => { if (active) setOrigins(found); }).catch((error) => toast(error instanceof Error ? error.message : String(error)));
+    return () => { active = false; };
+  }, [canvasId, version, toast]);
+  async function remove(origin: string, everywhere: boolean) {
+    try {
+      setOrigins(await api.delete<{ canvas: string[]; all: string[] }>(`/api/canvases/${canvasId}/origins?origin=${encodeURIComponent(origin)}&everywhere=${everywhere}`));
+      onChanged();
+    } catch (error) { toast(error instanceof Error ? error.message : String(error)); }
+  }
+  if (!origins) return <div className="empty">{t("common.loading")}</div>;
+  const section = (title: string, list: string[], everywhere: boolean) => (
+    <section className="cv-sites-section" aria-label={title}>
+      <h4>{title}</h4>
+      {list.length === 0 ? <p className="cv-sites-none">{t("canvas.sites.none")}</p> : list.map((origin) => (
+        <div key={origin} className="cv-sites-row">
+          <Icon name="globe" size={14} /><span>{origin}</span>
+          <button type="button" className="btn small" onClick={() => void remove(origin, everywhere)} aria-label={t("canvas.sites.remove", { origin })}>{t("canvas.sites.remove.short")}</button>
+        </div>
+      ))}
+    </section>
+  );
+  return (
+    <div className="cv-sites">
+      <p className="cv-sites-intro">{t("canvas.sites.intro")}</p>
+      {section(t("canvas.sites.canvas"), origins.canvas, false)}
+      {section(t("canvas.sites.all"), origins.all, true)}
+    </div>
   );
 }
 
@@ -325,5 +403,5 @@ export function SnapshotFrame({ node, token, capturedAt }: { node: CanvasNode; t
 
 /** Memoised host value, so frames re-render only when something they read changes. */
 export function useFrameHost(value: FrameHost): FrameHost {
-  return useMemo(() => value, [value.canvasId, value.mode, value.highlight, value.originsVersion, value.onPicked, value.onBlocked, value.onceFor]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => value, [value.canvasId, value.mode, value.highlight, value.originsVersion, value.onPicked, value.onBlocked, value.onceFor, value.allowOnce, value.allowAlways]); // eslint-disable-line react-hooks/exhaustive-deps
 }

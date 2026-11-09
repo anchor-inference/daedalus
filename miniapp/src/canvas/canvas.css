@@ -340,3 +340,17 @@
   .cv-comment-send { width: var(--row-h-touch); min-height: var(--row-h-touch); }
   .cv-mode button { height: 34px; padding: 0 8px; }
 }
+
+/* The question a refused site raises, on its frame and kept at its own size on screen. */
+.cv-origin-bar { position: absolute; left: 0; top: 0; z-index: 3; display: grid; gap: 6px; width: max-content; max-width: min(calc(100vw - 48px), calc(100% / var(--cv-inv))); box-sizing: border-box; padding: 8px; border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line-strong); border-bottom-right-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 12%, var(--surface-1)); color: var(--fg); font-size: var(--fs-13); box-shadow: var(--shadow-pop); transform: scale(var(--cv-inv)); transform-origin: 0 0; cursor: default; }
+.cv-origin-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.cv-origin-row > .ic { color: var(--warn); }
+.cv-origin-text { min-width: 0; overflow-wrap: anywhere; }
+.cv-origin-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-origin-actions .btn.ghost { background: transparent; border-color: transparent; }
+.cv-sites { display: grid; gap: 14px; }
+.cv-sites-intro { margin: 0; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+.cv-sites-section h4 { margin: 0 0 6px; font-size: var(--fs-13); color: var(--fg-2); }
+.cv-sites-row { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); font-size: var(--fs-14); }
+.cv-sites-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cv-sites-none { margin: 0; color: var(--fg-3); font-size: var(--fs-13); }

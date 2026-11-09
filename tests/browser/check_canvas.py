@@ -398,6 +398,95 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
     door.close()
 
 
+def origins(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """A site a page may not load from, proved in the browser: nothing reaches it until the operator
+    allows it; "this time" lasts for this board and not past a reload; "always" is kept by the host."""
+    ru = lang == "ru"
+    stub = CanvasStub(shots.S1)
+    app_origin = "/".join(BASE.split("/")[:3])
+    door = Door(stub, app_origin)
+    stub.door_port = door.port
+    site = stub.add("Витрина" if ru else "Shop pages", {"nodes": [frame_node("web", 0, 0)], "edges": []})
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    hits: list[str] = []
+
+    def cdn(request_route) -> None:  # type: ignore[no-untyped-def]
+        hits.append(request_route.request.url)
+        request_route.fulfill(status=200, content_type="text/javascript", body="document.getElementById('cdn').textContent = 'cdn loaded';")
+
+    context.route(f"{BLOCKED}/**", cdn)
+    page = context.new_page()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    route(page, stub)
+    address = f"{BASE}/canvas/{site}?session={shots.S1}&token=t&lang={lang}&scheme={SCHEME}"
+    page.goto(address)
+    inner = page.frame_locator(".cv-node[data-node='web'] iframe.cv-frame-page")
+    bar = page.locator(".cv-node[data-node='web'] .cv-origin-bar")
+    expect(bar).to_contain_text(BLOCKED, timeout=15000)
+    expect(inner.locator("#cdn")).to_have_text("waiting for the CDN")
+    assert hits == [], hits
+    shot(page, f"canvas-origin-{lang}-{SCHEME}")
+
+    # This time: a new address carrying the origin for this load, the frame reloads, the request goes.
+    before = len(stub.addresses)
+    bar.get_by_role("button", name="Разрешить сейчас" if ru else "Allow this time").click()
+    until(page, lambda: len(stub.addresses) > before and stub.addresses[-1].get("once") == [BLOCKED], "an address with the origin allowed once")
+    expect(inner.locator("#cdn")).to_have_text("cdn loaded", timeout=15000)
+    assert len(hits) == 1, hits
+    expect(bar).to_have_count(0)
+    assert stub.origins_for(site) == {"canvas": [], "all": []}, "this time is stored nowhere"
+
+    # A reload of the app forgets it: the page asks again and nothing reaches the site.
+    page.reload()
+    expect(bar).to_contain_text(BLOCKED, timeout=15000)
+    page.wait_for_timeout(1000)
+    assert len(hits) == 1, hits
+    assert stub.addresses[-1].get("once") == [], stub.addresses[-1]
+
+    # Always on this canvas: kept by the host, so it holds after a reload with no question.
+    bar.get_by_role("button", name="Всегда на этом холсте" if ru else "Always on this canvas").click()
+    expect(inner.locator("#cdn")).to_have_text("cdn loaded", timeout=15000)
+    assert stub.origins_for(site)["canvas"] == [BLOCKED]
+    page.reload()
+    expect(inner.locator("#cdn")).to_have_text("cdn loaded", timeout=15000)
+    expect(bar).to_have_count(0)
+    assert len(hits) == 3, hits
+
+    # The allowed sites list takes it back; the page asks again; "always everywhere" is kept for all.
+    page.get_by_role("button", name="Файл" if ru else "File").click()
+    page.get_by_role("menuitem", name="Разрешённые сайты" if ru else "Allowed sites").click()
+    sheet = page.get_by_role("dialog", name="Разрешённые сайты" if ru else "Allowed sites")
+    expect(sheet).to_contain_text(BLOCKED)
+    shot(page, f"canvas-sites-{lang}-{SCHEME}")
+    sheet.get_by_role("button", name=(f"Запретить {BLOCKED}" if ru else f"Stop allowing {BLOCKED}")).click()
+    until(page, lambda: stub.origins_for(site)["canvas"] == [], "the origin taken back")
+    page.keyboard.press("Escape")
+    expect(bar).to_contain_text(BLOCKED, timeout=15000)
+    bar.get_by_role("button", name="Всегда везде" if ru else "Always everywhere").click()
+    expect(inner.locator("#cdn")).to_have_text("cdn loaded", timeout=15000)
+    assert stub.origins_for(site)["all"] == [BLOCKED]
+
+    # Not now: the question goes; the page stays without the site.
+    stub.origins["*"] = []
+    page.reload()
+    expect(bar).to_contain_text(BLOCKED, timeout=15000)
+    hits_now = len(hits)
+    bar.get_by_role("button", name="Не сейчас" if ru else "Not now").click()
+    expect(bar).to_have_count(0)
+    page.wait_for_timeout(800)
+    assert len(hits) == hits_now
+
+    phone_page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
+    route(phone_page, stub)
+    phone_page.goto(address)
+    expect(phone_page.locator(".cv-origin-bar")).to_be_visible(timeout=15000)
+    assert phone_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "the origin bar scrolls the page sideways"
+    shot(phone_page, f"canvas-origin-phone-{lang}-{SCHEME}")
+    phone_page.context.close()
+    context.close()
+    door.close()
+
+
 def run() -> int:
     expect_app(BASE)
     if SHOTS:
@@ -407,10 +496,14 @@ def run() -> int:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         for lang in langs:
-            if os.environ.get("ONLY") != "frames":
+            only = os.environ.get("ONLY")
+            if not only:
                 desktop(browser, lang, errors)
                 phone(browser, lang, errors)
-            frames(browser, lang, errors)
+            if only in (None, "", "frames"):
+                frames(browser, lang, errors)
+            if only in (None, "", "origins"):
+                origins(browser, lang, errors)
         browser.close()
     assert not errors, errors
     return shots.UNHANDLED.report()

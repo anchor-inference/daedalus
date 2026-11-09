@@ -26,7 +26,7 @@ import { changeSummary, clockTime, groupByDay, type RevisionItem } from "./histo
 import { newId, normalizeDoc, nodeLabel, type Canvas, type CanvasDoc, type CanvasHead, type CanvasNode } from "./model";
 import { UndoStack, applyOps, compact, type Op } from "./ops";
 import { CommentBar, cardWords, type Chip } from "./CommentBar";
-import { FrameContext, LiveFrame, StillFrame, frameOf, pageName, useFrameHost, type Mode, type Picked } from "./frames";
+import { AllowedSites, FrameContext, LiveFrame, StillFrame, frameOf, pageName, useFrameHost, type Mode, type Picked } from "./frames";
 import { CanvasThumb, attachmentUrl, download, fileName, pickCanvasFile } from "./parts";
 import "./canvas.css";
 
@@ -351,6 +351,8 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
   const fileItems: MenuItem[] = [
     { label: t("canvas.export"), icon: "download", onSelect: () => void exportFile() },
     { label: t("canvas.import"), icon: "import", onSelect: () => void importFile() },
+    "-",
+    { label: t("canvas.sites"), icon: "shield", onSelect: () => setSitesOpen(true) },
   ];
   const statusIcon = status === "saved" ? "check" : status === "conflict" || status === "offline" ? "alert" : "dot";
   const sharePanel = <SharePanel id={id} title={meta.title} token={meta.share_token} onToken={(token) => setMeta((current) => ({ ...current, share_token: token, shared: !!token }))} toast={toast} />;
@@ -362,7 +364,8 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
   const [chips, setChips] = useState<Chip[]>([]);
   const [picking, setPicking] = useState<{ frameId: string; picked: Picked } | null>(null);
   const [highlight, setHighlight] = useState<{ frameId: string; selector: string } | null>(null);
-  const [originsVersion] = useState(0);
+  const [originsVersion, setOriginsVersion] = useState(0);
+  const [sitesOpen, setSitesOpen] = useState(false);
   // Origins allowed for one load of one frame, keyed by the frame and the time the agent showed it:
   // they live in this window only, and showing the page again asks again.
   const once = useRef(new Map<string, string[]>());
@@ -381,7 +384,21 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
     seen.add(origin);
     blocked.current.set(frameId, seen);
   }, []);
-  const frameHost = useFrameHost({ canvasId: id, mode, highlight, originsVersion, onPicked, onBlocked, onceFor });
+  // "This time" is held here and nowhere else: closing the board, reloading the app or the agent
+  // showing the page again (a new rev, so a new key) forgets it, and the page asks again.
+  const allowOnce = useCallback((frameId: string, origin: string) => {
+    const key = onceKey(frameId);
+    const current = once.current.get(key) ?? [];
+    if (!current.includes(origin)) once.current.set(key, [...current, origin]);
+    setOnceVersion((n) => n + 1);
+  }, [onceKey]);
+  const allowAlways = useCallback(async (origin: string, everywhere: boolean) => {
+    try {
+      await api.post(`/api/canvases/${id}/origins`, { origin, everywhere });
+      setOriginsVersion((n) => n + 1);
+    } catch (error) { toast(errorText(error)); }
+  }, [id, toast]);
+  const frameHost = useFrameHost({ canvasId: id, mode, highlight, originsVersion, onPicked, onBlocked, onceFor, allowOnce, allowAlways });
   const renderFrame = useCallback((node: CanvasNode, near: boolean) => <LiveFrame node={node} near={near} />, []);
   const onPoint = useCallback((node: CanvasNode) => {
     setChips((current) => (current.some((chip) => chip.kind === "card" && chip.nodeId === node.id) ? current : [...current, { id: newId(), kind: "card", nodeId: node.id, words: cardWords(node) }]));
@@ -477,6 +494,11 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
         onOwner={(sessionId) => setMeta((current) => ({ ...current, owner_session_id: sessionId }))}
         toast={toast}
       />
+      {sitesOpen && (
+        <Sheet title={t("canvas.sites")} onClose={() => setSitesOpen(false)} size="narrow">
+          <AllowedSites canvasId={id} version={originsVersion} onChanged={() => setOriginsVersion((n) => n + 1)} toast={toast} />
+        </Sheet>
+      )}
       {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="right" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
       {shareOpen && phone && <Sheet title={t("canvas.share")} onClose={() => setShareOpen(false)} size="narrow">{sharePanel}</Sheet>}
     </div>
