@@ -57,6 +57,12 @@ describe("the files of a turn", () => {
       ["site/robots.txt", "edited", "m1"],
     ]);
   });
+
+  it("names a folder sent with zip by the archive the host wrote beside it", () => {
+    const items: Activity[] = [tool("z1", "SendFile", "reports/", { args: { path: "reports/", zip: true }, result: "shown reports.zip (5120 bytes) — 3 files to the operator" })];
+    const { sent } = turnFiles(items, "/srv/ws/a1");
+    expect(sent.map((f) => [f.name, f.size, f.place?.rel])).toEqual([["reports.zip", "5 KB", "reports.zip"]]);
+  });
 });
 
 describe("drawn under the answer", () => {

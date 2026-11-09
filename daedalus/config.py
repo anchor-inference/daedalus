@@ -780,6 +780,8 @@ class WebToolsConfig(BaseModel):
     """HTTP(S)/SOCKS proxy URL for WebFetch and the directly scraped search backends, e.g. ``socks5://127.0.0.1:1080``; empty = direct."""
     user_agent: str = "Mozilla/5.0 (X11; Linux x86_64) Daedalus/0.1"
     fetch_max_chars: int = Field(default=40_000, ge=1_000, le=500_000)
+    download_max_bytes: int = Field(default=200 << 20, ge=1 << 20, le=2 << 30)
+    """The largest file WebFetch saves with ``save_to``; a larger answer is cut off and nothing is kept."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 

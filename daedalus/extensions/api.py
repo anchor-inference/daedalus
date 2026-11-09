@@ -2963,11 +2963,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                     if block.name != "SendFile":
                         raise HTTPException(404, "that call did not send a file")
                     try:
-                        raw = json.loads(block.arguments_json or "{}").get("path")
+                        arguments = json.loads(block.arguments_json or "{}")
                     except ValueError:
-                        raw = None
+                        arguments = {}
+                    raw = arguments.get("path") if isinstance(arguments, dict) else None
                     if not isinstance(raw, str) or not raw.strip():
                         raise HTTPException(404, "the call named no file")
+                    if arguments.get("zip") is True:
+                        # A folder was sent as its archive, which SendFile writes beside it under the
+                        # folder's name: the same rule read back, since the call names only the folder.
+                        raw = raw.strip().rstrip("/\\") + ".zip"
                     if state.project is not None and manager.is_orchestrator(state):
                         return await _sent_by_orchestrator(state.project, raw.strip(), request.headers.get("range", ""))
                     backend = state.services.exec_backend if state.services is not None else None
