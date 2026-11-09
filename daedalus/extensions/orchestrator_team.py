@@ -180,8 +180,10 @@ async def _helper_model(orch: Orchestrators, session_id: str, model: str) -> Non
     the operator, and a command-line agent's model is not a preset at all.
     """
     manager = orch.manager
+    if not model or model not in manager.config.presets:
+        return  # an unknown preset is the store's to refuse, in its own words
     state = await manager.get_state(session_id)
-    if not model or state is None:
+    if state is None:
         return
     try:
         manager.subagent_allowance(state.metadata, await manager.live.load(session_id)).check(model)
