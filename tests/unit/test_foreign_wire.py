@@ -28,7 +28,7 @@ from tests.unit.test_project_unification import HEADERS, _client
 from tests.unit.test_session_import import finished, host_of, import_config, manager  # noqa: F401 — the fixture
 
 SAMPLES = Path(__file__).resolve().parents[2] / "ptyd" / "sidechan" / "sessions" / "testdata" / "wire"
-NATIVE = {"Exec", "Read", "Write", "Edit", "MultiEdit", "Find", "Search", "WebFetch", "WebSearch"}
+NATIVE = {"Exec", "Read", "Write", "Edit", "Find", "Search", "WebFetch", "WebSearch"}
 CWD = "/home/someone/proj"
 CLAUDE_ID = "c0ffee00-0000-4000-8000-000000000001"
 

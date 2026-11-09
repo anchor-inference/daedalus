@@ -61,7 +61,7 @@ async def test_the_coach_may_ask_read_and_save_and_nothing_else(manager: Session
     known = {t.name for t in manager.tools.list_all()}
     blocked = manager.blocked_tools_for(coach)
     assert blocked == known - set(PROMPT_COACH_TOOLS)
-    for name in ("Write", "Edit", "MultiEdit", "Exec", "WebFetch", "WebSearch", "SubAgent", "SpawnAgent", "ToolSearch", "Skill", "Remember", "Notify"):
+    for name in ("Write", "Edit", "Exec", "WebFetch", "WebSearch", "SubAgent", "SpawnAgent", "ToolSearch", "Skill", "Remember", "Notify"):
         assert name in blocked, name
     for name in PROMPT_COACH_TOOLS:
         assert name not in blocked, name

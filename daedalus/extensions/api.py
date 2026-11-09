@@ -1354,7 +1354,7 @@ _TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("MCP", ("Mcp",)),
     ("Memory & history", ("Remember", "Recall", "Forget", "History", "Skill")),
     ("Web", ("Web",)),
-    ("Files & shell", ("Exec", "Job", "Read", "Write", "Edit", "MultiEdit", "Find", "Search", "SendFile", "AttachMedia", "ImageView", "Verify")),
+    ("Files & shell", ("Exec", "Job", "Read", "Write", "Edit", "Find", "Search", "SendFile", "AttachMedia", "ImageView", "Verify")),
 )
 
 
