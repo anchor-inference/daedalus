@@ -62,9 +62,18 @@ export type Turn = {
   lastActivityAt?: number | null;
   /** The run ended without an answer: why, and where. Drawn as the turn's closing line. */
   outcome?: RunOutcome;
+  /** Every stop the closing line stands for, the first one included: the runs the host drove again
+   *  after an outage that stopped the same way are folded into it rather than drawn as lines of their own. */
+  failures?: RunFailure[];
+  /** A later turn answered: the stop is history, drawn as one quiet line rather than as an alarm. */
+  recovered?: boolean;
   /** The program this turn was imported from, when it was: its work is that program's, not Daedalus's. */
   imported?: string;
 };
+
+/** One stopped run, for the closing line's technical details: when, the engine's word for it, and the
+ *  run's id, which is what the host's log and the request records are searched by. */
+export type RunFailure = { at: number; runId?: string; seq?: number; errorKind: string; reason: string; detail: string };
 
 export type ActivityPhase = "preparing_call" | "reading" | "editing" | "testing" | "waiting_provider" | "waiting_user" | "compacting" | "responding";
 export type ActivitySummary = { phase: ActivityPhase; steps: number; lastActivityAt: number | null; staleSeconds: number };
@@ -168,12 +177,24 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
           break;
         }
       }
+      const failure: RunFailure = { at, runId: m.run_id || undefined, seq: m.seq ?? undefined, errorKind: m.outcome.error_kind ?? "", reason: m.outcome.reason ?? "", detail: m.outcome.detail ?? "" };
       if (index < 0) {
+        // A run with nothing of its own to show — the host driving the turn again after an outage, its
+        // note to the model hidden — that stopped the way the line just above it says: one more count
+        // on that line. Each such run wrote a red card of its own, four in a row for one outage.
+        let last = turns.length - 1;
+        while (last >= 0 && turns[last].summary) last--;
+        if (last >= 0 && turns[last].outcome?.cause === m.outcome.cause) {
+          turns[last].failures = [...(turns[last].failures ?? []), failure];
+          sigs[last].push(`o${m.seq ?? i}`);
+          return;
+        }
         current = open(`o${m.seq ?? i}`, at);
         current.runId = m.run_id || undefined;
         index = turns.length - 1;
       }
       turns[index].outcome = m.outcome;
+      turns[index].failures = [failure];
       sigs[index].push(`o${m.seq ?? i}:${m.outcome.cause}`);
       return;
     }
@@ -248,6 +269,16 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}${r.images?.length ?? ""}${r.attachments?.length ? `+${r.attachments.length}` : ""}` : "-"}`);
     }
   });
+  // A stop is recovered once a later turn answers. Read from the history, not from what this screen
+  // saw happen, so a reload draws it the same way.
+  let answeredLater = false;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn.outcome) {
+      turn.recovered = answeredLater;
+      if (answeredLater) sigs[i].push("recovered");
+    } else if (turn.answer) answeredLater = true;
+  }
   const before = new Map<string, Turn>();
   for (const t of previous) before.set(t.key, t);
   return turns.map((t, i) => {

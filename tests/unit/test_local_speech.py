@@ -726,6 +726,10 @@ class FakeManager:
         def available() -> list[str]:
             return []
 
+        @staticmethod
+        def price_view(*_: Any, **__: Any) -> dict[str, Any]:
+            return {}
+
 
 class FakeApp:
     """The application as the API reads it, with a real models directory under tmp_path."""

@@ -372,19 +372,6 @@
   .ph-dot[data-level="ok"] { background: var(--ok); } .ph-dot[data-level="warn"] { background: var(--warn); } .ph-dot[data-level="bad"] { background: var(--bad); }
   .ph-dot[data-level="idle"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
   .ph-terms .ph-page-pad { padding-bottom: var(--space-1); }
-  .ph-opts { display: flex; flex-direction: column; gap: var(--space-2); }
-  .ph-opt { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-  .ph-opt.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
-  .ph-opt:disabled { opacity: .45; }
-  .ph-opt > .ic { color: var(--fg-2); flex: none; }
-  .ph-opt.host > .ic { color: var(--warn); }
-  .ph-radio { width: 22px; height: 22px; flex: none; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--fg-3); }
-  .ph-opt.on .ph-radio { box-shadow: inset 0 0 0 6px var(--accent); }
-  .ph-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .ph-opt-t { font-size: var(--fs-15); font-weight: 500; }
-  .ph-opt-m { margin-top: 2px; font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
-  .ph-opt.host .ph-opt-m { color: var(--warn); }
-  .ph-field.mono { font-family: var(--mono); font-size: var(--fs-16); }
   .ph-foot-row > .ph-field { flex: 1; min-width: 0; }
   .ph-btn.block { width: 100%; }
   .ph-ask { display: flex; flex-direction: column; gap: var(--space-2); }

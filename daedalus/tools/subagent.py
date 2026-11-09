@@ -132,9 +132,9 @@ async def sub_agent_list(context: ToolContext) -> ToolResult:
     if hook is None:
         return error(context, "subagents are not available")
     views = await hook("views", leader_id=context.session_id)
-    models = await hook("models")
+    models = await hook("models", leader_id=context.session_id)
     lines = [_list_line(v) for v in views] or ["(no subagents yet)"]
-    return ok(context, "\n".join(lines) + "\n\nmodels: " + ", ".join(models) + "\nefforts: " + ", ".join(("off", *REASONING_EFFORTS)))
+    return ok(context, "\n".join(lines) + "\n\nmodels: " + (", ".join(models) or "none to name (your environment says why)") + "\nefforts: " + ", ".join(("off", *REASONING_EFFORTS)))
 
 
 def _list_line(view: dict) -> str:  # type: ignore[type-arg]

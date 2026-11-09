@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { fmtRate } from "./screens/Usage";
+import { fmtRate } from "./format";
 
 describe("a provider's output rate", () => {
   it("reads in whole tokens past ten a second and keeps a decimal below", () => {

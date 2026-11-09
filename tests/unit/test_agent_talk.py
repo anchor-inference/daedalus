@@ -709,6 +709,25 @@ async def test_a_standing_allow_does_not_cover_a_touched_run(rig_for: Any) -> No
     assert gate("Exec", {"command": "ls"}).action == "ask"
 
 
+async def test_allow_all_from_a_server_neither_covers_nor_is_made_in_a_touched_run(rig_for: Any) -> None:
+    from daedalus.config import McpServerConfig  # noqa: PLC0415
+    from daedalus.host.policy import server_grant  # noqa: PLC0415
+    from daedalus.mcp.manager import McpConnection, mcp_tool_name  # noqa: PLC0415
+
+    rig = await rig_for([], "hello")
+    connection = McpConnection("phone", McpServerConfig(transport="stdio", command="x"))
+    rig.manager.mcp._replace_catalog("phone", [connection._proxy(SimpleNamespace(name="tap", description="tap", input_schema={}))])
+    state, gate = await touched_chat(rig)
+    state.metadata["policy_similar"] = [server_grant("phone", seconds=3600)]
+    tool = mcp_tool_name("phone", "tap")
+    decision = gate(tool, {})
+    assert decision.action != "allow", "a grant made before the stranger's words cannot answer for them"
+    if decision.action == "ask":
+        assert "server" not in state.metadata["policy_pending"][decision.key], "no \"Allow all\" button on a touched run's card"
+        with pytest.raises(ValueError, match="another agent"):
+            await rig.manager.grant_server(state.session.id, decision.key, via="app")
+
+
 async def test_the_operators_allow_on_the_card_passes_that_call_once(rig_for: Any) -> None:
     rig = await rig_for([], "hello")
     state, gate = await touched_chat(rig)

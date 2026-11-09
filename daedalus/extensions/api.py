@@ -160,7 +160,7 @@ from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFI
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
-from daedalus.host import attached_files, capabilities, component_install, launcher_bridge
+from daedalus.host import attached_files, capabilities, component_install, launcher_bridge, subagent_models
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secret_part, worktree_root
@@ -169,7 +169,7 @@ from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.filesystem import foreign_paths, machine_of
 from daedalus.host.host_exec import BRIDGE_DOWN
-from daedalus.host.policy import sealed_root
+from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
@@ -217,7 +217,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project, ProjectError
-from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed
+from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed, run_speeds
 from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
@@ -644,6 +644,13 @@ class ToolsOffBody(BaseModel):
     tools_off: list[str] = Field(default_factory=list)
 
 
+class SubagentModelsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["all", "session", "chosen"] | None = None
+    """``None`` returns the session to the default from Settings."""
+    presets: list[str] = Field(default_factory=list, max_length=200)
+
+
 class ToolGroupLoadBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     load: Literal["eager", "auto", "lazy"] | None = None
@@ -908,6 +915,17 @@ class ModelsLookupBody(BaseModel):
 class FreeProbeBody(BaseModel):
     provider: str
     model: str
+
+
+class PresetPriceBody(BaseModel):
+    """The operator's own price for one model, USD per million tokens, and how it is paid for."""
+
+    model_config = ConfigDict(extra="forbid")
+    input: float = Field(ge=0, le=10_000, allow_inf_nan=False)
+    output: float = Field(ge=0, le=10_000, allow_inf_nan=False)
+    cache_hit: float | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
+    """Absent counts a cached token at the fresh input rate, the upper bound."""
+    billing: Literal["metered", "subscription"] = "metered"
 
 
 class PresetPatch(BaseModel):
@@ -1444,9 +1462,10 @@ def direct_usage_booking(manager: Any) -> Callable[[dict[str, Any]], Awaitable[d
             endpoint = manager.providers.get(provider_id).endpoint
             pricing = endpoint.pricing_for(model)
             # A prepaid plan's call spends its allowance, not money, however it reached the plan.
-            cost = 0.0 if endpoint.subscription else pricing.cost(tokens) if pricing is not None else None
+            plan = endpoint.plan_for(model)
+            cost = 0.0 if plan else pricing.cost(tokens) if pricing is not None else None
             stated = body.get("cost_usd")
-            if not endpoint.subscription and isinstance(stated, int | float) and not isinstance(stated, bool) and stated >= 0:
+            if not plan and isinstance(stated, int | float) and not isinstance(stated, bool) and stated >= 0:
                 # What was really charged, as a run's own calls are booked. The table is typed by hand.
                 cost = float(stated)
         except KeyError:
@@ -2619,6 +2638,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "first_seq": first_seq,
             "has_older": bool(first_seq and oldest and first_seq > oldest),
             "usage": dict(usage) if usage else {},
+            # How fast each run on this page generated, by run id, for the speed under its turn. The
+            # runs of the page only, so a poll that reads one message asks about one run.
+            "run_speeds": await run_speeds(app.db, session_id, (str(v["run_id"]) for v in messages if v.get("run_id"))),
         }
 
     @api.get("/api/sessions/{session_id}/subagents")
@@ -2629,6 +2651,39 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if "subagents" not in app.extensions:
             return {"subagents": []}
         return {"subagents": await app.extensions["subagents"].views(session_id, model_label=session_model_label)}
+
+    async def _subagent_models_view(session_id: str) -> dict[str, Any]:
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        mode, chosen, inherited = subagent_models.choice(state.metadata, app.config.subagents.models)
+        overrides = await manager.live.load(session_id)
+        allowed = manager.subagent_allowance(state.metadata, overrides)
+        available = set(manager.providers.available())
+        return {
+            "mode": mode, "presets": chosen, "inherited": inherited, "allowed": list(allowed.presets),
+            "default": app.config.subagents.models.model_dump(mode="json"),
+            "session_preset": manager.session_preset_id(overrides),
+            # Set from the session that started this one: a helper's helpers cannot reach further than it could.
+            "from_parent": bool(state.metadata.get("subagent_of") or state.metadata.get("spawned_by")) and not inherited,
+            "options": [{"id": pid, "label": preset.display(pid)} for pid, preset in app.config.presets.items() if preset.provider in available and preset.model],
+        }
+
+    @api.get("/api/sessions/{session_id}/subagent-models")
+    async def session_subagent_models(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Which presets this session's helpers may run on, and where that choice comes from."""
+        return await _subagent_models_view(session_id)
+
+    @api.put("/api/sessions/{session_id}/subagent-models")
+    async def set_session_subagent_models(session_id: str, body: SubagentModelsBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        unknown = [p for p in body.presets if p not in app.config.presets]
+        if unknown:
+            raise HTTPException(422, f"no such model preset: {', '.join(unknown)}")
+        try:
+            await manager.set_subagent_models(session_id, body.mode, body.presets if body.mode == "chosen" else [])
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+        return await _subagent_models_view(session_id)
 
     @api.get("/api/sessions/{session_id}/tasks")
     async def session_tasks(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -5316,9 +5371,41 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if await manager.get_state(session_id) is None:
             raise HTTPException(404, "no such session")
         try:
-            return {"similar": manager.similar_of(session_id, key)}
+            # ``server``: the MCP server "Allow all from <server>" would allow, with the spans offered.
+            server = manager.server_of(session_id, key)
+            return {"similar": manager.similar_of(session_id, key),
+                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/sessions/{session_id}/policy/grant-server")
+    async def policy_grant_server(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Allow every tool of an MCP server in this session: ``{"key": "<approval key>", "hours": 1 | 2 | 6 | 12 | 0}``
+        for the server an open request came from, or ``{"server": "<name>", "hours": …}`` (0: for the whole session)."""
+        try:
+            hours = float(body["hours"]) if body.get("hours") is not None else None
+            return await manager.grant_server(session_id, str(body.get("key") or ""), server=str(body.get("server") or ""),
+                                              hours=hours, via=front_of(_))
+        except KeyError as exc:
+            raise HTTPException(404, "no such session") from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.get("/api/sessions/{session_id}/policy/standing")
+    async def policy_standing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        return {"standing": manager.standing(state)}
+
+    @api.delete("/api/sessions/{session_id}/policy/standing/{grant_id}")
+    async def policy_revoke_standing(session_id: str, grant_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Take one standing grant back; what it allowed is asked about again."""
+        try:
+            return {"standing": await manager.revoke_standing(session_id, grant_id, via=front_of(_))}
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @api.post("/api/sessions/{session_id}/policy/grant-similar")
     async def policy_grant_similar(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -6329,6 +6416,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
+        # What each preset costs and where that comes from, so its settings can say which source wins.
+        data["prices"] = {pid: manager.providers.price_view(preset.provider, preset.model, routed=bool(preset.openrouter_providers)) for pid, preset in app.config.presets.items()}
         # What every source knows about each preset's window, so the settings can say why it is what it is.
         windows = getattr(app, "extensions", {}).get("context_windows")
         if windows is not None:
@@ -7027,6 +7116,47 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 pass
             view = await _settings_view()
         return view
+
+    async def _save_price(preset_id: str, entry: dict[str, Any] | None) -> dict[str, Any]:
+        """Write or remove the operator's price for the preset's model; it holds for the next call, no restart.
+
+        The price lives with the endpoint, keyed by the model, because that is what a call is priced by: two
+        presets of one model on one endpoint are one price. Removed, the model is priced as it was before it
+        was typed (the providers chosen on OpenRouter take a sweep to write theirs back).
+        """
+        preset = app.config.presets.get(preset_id)
+        if preset is None:
+            raise HTTPException(404, "no such model preset")
+        raw = app.config.model_dump(mode="json")
+        provider = raw.get("providers", {}).get(preset.provider)
+        if provider is None:
+            raise HTTPException(400, f"provider {preset.provider!r} is not a configured client")
+        pricing = provider.setdefault("pricing", {})
+        if entry is None:
+            if not (pricing.get(preset.model) or {}).get("manual"):
+                return await _settings_view()
+            del pricing[preset.model]
+        else:
+            pricing[preset.model] = entry
+        try:
+            new_config = type(app.config).model_validate(raw)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, str(exc)) from exc
+        view = await _save_provider_config(new_config)
+        # The door prices the links of a routed model from this table on every turn.
+        await guest_door.routes_changed(app)
+        return view
+
+    @api.put("/api/presets/{preset_id}/price")
+    async def put_preset_price(preset_id: str, body: PresetPriceBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        entry: dict[str, Any] = {"manual": True, "billing": body.billing, "input": body.input, "output": body.output}
+        if body.cache_hit is not None:
+            entry["cache_hit"] = body.cache_hit
+        return await _save_price(preset_id, entry)
+
+    @api.delete("/api/presets/{preset_id}/price")
+    async def reset_preset_price(preset_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await _save_price(preset_id, None)
 
     @api.post("/api/presets/{preset_id}/context-window")
     async def refresh_context_window(preset_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

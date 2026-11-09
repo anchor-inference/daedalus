@@ -1,16 +1,24 @@
 ---
 name: webapp-testing
 description: Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.
-requires: browser, node
+requires: playwright, npm
 ---
 # Web Application Testing
 
 To test local web applications, write native Python Playwright scripts.
 
+**Run them with `python3`.** Playwright and a headless Chromium are already installed for the shell's
+`python3` (`PLAYWRIGHT_BROWSERS_PATH` points at the browser), so a script runs as it is:
+`python3 qa/shoot.py`. Do not `uv add playwright`, `uv run` it or `playwright install`: `uv` picks
+another interpreter without Playwright, and the install downloads a second browser into the workspace.
+Write screenshots into the workspace (`qa/shots/…`), not `/tmp`, which is gone when the command ends,
+then look at them with `ImageView`.
+
 **Helper Scripts Available**:
 - `scripts/with_server.py` - Manages server lifecycle (supports multiple servers)
 
-**Always run scripts with `--help` first** to see usage. DO NOT read the source until you try running the script first and find that a customized solution is abslutely necessary. These scripts can be very large and thus pollute your context window. They exist to be called directly as black-box scripts rather than ingested into your context window.
+They live in this skill's directory, at the absolute path the Skill tool printed with the skill: run
+them by that path, since a command starts in the workspace. **Always run scripts with `--help` first** to see usage. DO NOT read the source until you try running the script first and find that a customized solution is abslutely necessary. These scripts can be very large and thus pollute your context window. They exist to be called directly as black-box scripts rather than ingested into your context window.
 
 ## Decision Tree: Choosing Your Approach
 
@@ -65,7 +73,7 @@ with sync_playwright() as p:
 
 1. **Inspect rendered DOM**:
    ```python
-   page.screenshot(path='/tmp/inspect.png', full_page=True)
+   page.screenshot(path='qa/shots/inspect.png', full_page=True)
    content = page.content()
    page.locator('button').all()
    ```
@@ -83,6 +91,8 @@ with sync_playwright() as p:
 
 - **Use bundled scripts as black boxes** - To accomplish a task, consider whether one of the scripts available in `scripts/` can help. These scripts handle common, complex workflows reliably without cluttering the context window. Use `--help` to see usage, then invoke directly. 
 - Use `sync_playwright()` for synchronous scripts
+- Picture one section with `page.locator('#pricing').screenshot(path=...)` or the whole page with
+  `full_page=True`: a viewport shot cuts the section at the fold, and the review of it asks for the rest
 - Always close the browser when done
 - Use descriptive selectors: `text=`, `role=`, CSS selectors, or IDs
 - Add appropriate waits: `page.wait_for_selector()` or `page.wait_for_timeout()`

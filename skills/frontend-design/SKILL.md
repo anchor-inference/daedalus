@@ -1,6 +1,7 @@
 ---
 name: frontend-design
 description: Distinctive visual design for any UI: principles, a subject-first process, and a gallery of 216 directions to pick by category (67 style archetypes, 86 brand systems, 25 original web systems, 38 app references) plus a library map for charts, motion, 3D and UX. Use before building or restyling any page, app or demo.
+requires: browser, services, playwright, ImageView
 ---
 # Frontend Design
 
@@ -13,10 +14,10 @@ read a gallery entry with `Read` before you build.
 ## Choosing a direction (do this first, every project)
 
 1. **Name the subject, the audience and the job** of the thing you are designing. One sentence.
-2. **Recall what you used before**: call `Recall("design directions used")`. A direction you used
-   for a recent project is off the table unless the client asked for that look.
-3. **Pick a category** from the gallery, then read two or three candidate entries and choose one.
-   Reading the entry is mandatory: the index line is a scent, the file is the brief.
+2. **Pick a category** from the gallery, then read two or three candidate entries and choose one.
+   Choose by the subject, audience and job of step 1: a direction that fits this subject is what
+   keeps one project from looking like the last. Reading the entry is mandatory: the index line is
+   a scent, the file is the brief.
    - `styles/` are archetypes (brutalism, editorial, glassmorphism…): fastest way to a strong,
      coherent look for a new product.
    - `brands/` are analyses of real design systems (tokens, type, components, do/don't): use one
@@ -24,14 +25,18 @@ read a gallery entry with `Read` before you build.
    - `systems/` are complete original web systems with a demo page whose CSS you can read.
    - `apps/` describe product UIs (feeds, finance, messaging…): the reference for app screens,
      dashboards and mobile layouts rather than marketing pages.
-4. **Write the brief** in the project (a `DESIGN.md`: palette, type scale, spacing, radius, motion,
+3. **Write the brief** in the project (a `DESIGN.md`: palette, type scale, spacing, radius, motion,
    the one hero idea, what is forbidden). Everything you build must trace back to it.
-5. **Make it live where it matters**: pick libraries from `references/libraries.md` for the parts
+4. **Make it live where it matters**: pick libraries from `references/libraries.md` for the parts
    that need data, motion or interaction. Purposeful, one orchestrated moment, reduced-motion
    respected. Not a carousel of effects.
-6. **Record the choice**: `Remember("design directions used: <project> → <entry>, <one line why>")`.
-7. **Verify with eyes**: screenshots at 360 and 1440 (`Skill("webapp-testing")`), viewed with
-   `ImageView`, then the `no-ai-design-slop` gate. Fix what you see before you report.
+5. **Verify with eyes**: serve it (`ServiceStart`), take screenshots at 390 and 1440 with a
+   Playwright script run as `python3 shoot.py` (Playwright and its Chromium are installed for the
+   shell's `python3`: never `uv add` or `playwright install` them; `Skill("webapp-testing")` has
+   the patterns), and look at each with `ImageView`. Your own browser is loaded with this skill:
+   `BrowserOpen` the service's address, `BrowserLogs` for console errors, `BrowserLook` for a
+   question about the live page. Then the `no-ai-design-slop` gate. Fix what you see before you
+   report.
 
 Domain-specific guidance (product UI vs marketing pages, dashboards, admin panels):
 `references/principles-by-domain.md`, `references/app-ui.md`, `references/marketing-pages.md`.

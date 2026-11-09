@@ -36,6 +36,49 @@ describe("buildTurns", () => {
     expect(turns).toHaveLength(1);
     expect(turns[0].outcome).toEqual(outcome);
   });
+  // The trigonometry chat: an outage stopped the run, the host drove the turn again three times as it
+  // was down, and each attempt wrote a closing line: four red cards in a row, still red after "continue".
+  it("folds the stops of the runs the host drove again into one line, recovered once a later turn answers", () => {
+    const provider = (steps: number) => ({ status: "failed" as const, cause: "provider" as const, error_kind: "llm_provider_error", reason: "connection", detail: "transport error", steps });
+    const retry = (seq: number, run: string) => [
+      msg(seq, { role: "user", internal: true, origin: "core", text: "[The previous turn stopped because the model provider was unreachable for a while.]", run_id: run }),
+      msg(seq + 1, { role: "system", text: "The run ended without an answer", outcome: provider(0), run_id: run }),
+    ];
+    const history = [
+      { ...user(1, "fix the scope"), run_id: "r1" },
+      { ...call(2, "v1", "ImageView"), run_id: "r1" },
+      { ...result(3, "v1", "image"), run_id: "r1" },
+      msg(4, { role: "system", text: "The run ended without an answer", outcome: provider(29), run_id: "r1" }),
+      ...retry(5, "r2"),
+      ...retry(7, "r3"),
+      ...retry(9, "r4"),
+    ];
+    const stopped = buildTurns(history);
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0].outcome?.steps).toBe(29);
+    expect(stopped[0].failures?.map((f) => f.runId)).toEqual(["r1", "r2", "r3", "r4"]);
+    expect(stopped[0].failures?.[3]).toMatchObject({ errorKind: "llm_provider_error", reason: "connection", seq: 10 });
+    expect(stopped[0].recovered).toBe(false);
+    // "continue", and the run answers: the line goes quiet, read from the history alone, so a reload agrees.
+    const resumed = buildTurns([...history, { ...user(11, "continue"), run_id: "r5" }, { ...answer(12, "Continuing — applying the fix batch"), run_id: "r5" }], stopped);
+    expect(resumed).toHaveLength(2);
+    expect(resumed[0]).not.toBe(stopped[0]);
+    expect(resumed[0].recovered).toBe(true);
+    expect(resumed[0].failures).toHaveLength(4);
+  });
+  it("keeps a stop of another kind, or one after the operator's own message, a line of its own", () => {
+    const provider = { status: "failed" as const, cause: "provider" as const };
+    const cancelled = { status: "cancelled" as const, cause: "cancelled" as const };
+    const turns = buildTurns([
+      { ...user(1, "go"), run_id: "r1" },
+      msg(2, { role: "system", text: "stopped", outcome: provider, run_id: "r1" }),
+      msg(3, { role: "system", text: "stopped", outcome: cancelled, run_id: "r2" }),
+      { ...user(4, "again"), run_id: "r3" },
+      msg(5, { role: "system", text: "stopped", outcome: provider, run_id: "r3" }),
+    ]);
+    expect(turns.map((turn) => [turn.outcome?.cause, turn.failures?.length])).toEqual([["provider", 1], ["cancelled", 1], ["provider", 1]]);
+    expect(turns.every((turn) => !turn.recovered)).toBe(true);
+  });
   it("presents lifecycle state without reading reasoning and keeps keepalives out of its clock", () => {
     const state = { ...EMPTY_LIVE, lastActivityAt: 1000, thinking: "hidden", tools: [{ id: "r", name: "Read", args: "{}", startedAt: 1000 }] };
     const turn = applyLive(null, state, 32_000);

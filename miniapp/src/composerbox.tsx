@@ -51,6 +51,7 @@ import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
 import { clearQuoteReplies, removeQuoteReply, replyPreview, serialiseReplies, useQuoteReplies } from "./quotereply";
 import { ReplyCard, ReplyDialog } from "./replyselect";
+import { ServerGrantButton } from "./servergrant";
 
 export type { Answer } from "./questions/ask";
 
@@ -127,6 +128,9 @@ export type ComposerProps = {
   /** What "Allow similar" grants for this request (``npm test*``), when the host offers a family. */
   similar?: string | null;
   onApproveSimilar?: (a: Approval) => void;
+  /** The MCP server "Allow all from <server>" grants for a span of this session, when the request is one of its tools. */
+  server?: string | null;
+  onApproveServer?: (a: Approval, hours: number) => void;
   onDeny?: (a: Approval) => void;
   /** A file waiting in the pill, opened before it goes. */
   onPreviewFile?: (file: File) => void;
@@ -600,6 +604,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <span className="truncate">{t("composer.approve.similar", { label: props.similar })}</span>
               </button>
             )}
+            {props.server && props.onApproveServer && !approval.chrome && (
+              <ServerGrantButton phone server={props.server} onGrant={(hours) => props.onApproveServer?.(approval, hours)} />
+            )}
             <button type="button" className="ph-btn ph-deny" onClick={() => props.onDeny?.(approval)}>{t(approval.chrome ? "composer.chrome.deny" : "composer.deny")}</button>
           </div>
         </div>
@@ -621,6 +628,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <button type="button" className="btn small" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
                 {t("composer.approve.similar", { label: props.similar })}
               </button>
+            )}
+            {props.server && props.onApproveServer && !approval.chrome && (
+              <ServerGrantButton server={props.server} onGrant={(hours) => props.onApproveServer?.(approval, hours)} />
             )}
             <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{t(approval.chrome ? "composer.chrome.deny" : "composer.deny")}</button>
           </div>

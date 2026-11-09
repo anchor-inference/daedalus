@@ -244,7 +244,9 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(page.locator(".tside-layout .tside-chip:not(.shape)").count() == 4, "the saved layout does not list its panes")
     shoot(page, "terminals-panel-panes.png")
     page.locator(".tp-layout[data-layout='1']").click()
-    page.locator(".tp-pane[data-slot='0'] .tp-pane-close").click()
+    # Out of its pane, still running: the pane's menu says so by name (its ✕ would end it).
+    page.locator(".tp-pane[data-slot='0'] .tp-pane-menu").click()
+    page.locator(".menu button", has_text="Take out of the pane, keep running").click()
     page.wait_for_timeout(300)
     page.locator(".tside-restore").click()
     page.wait_for_timeout(500)

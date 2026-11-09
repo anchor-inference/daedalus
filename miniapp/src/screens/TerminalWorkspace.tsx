@@ -30,7 +30,8 @@ import { TerminalSidePanel } from "../terminal/sidepanel";
 import { readSide, saveSide, type SidePrefs } from "../terminal/sidestate";
 import { activeId, close, focus, fromAddress, loadWorkspace, place, replace, saveView, saveWorkspace, toAddress, type Workspace } from "../terminal/workspacestate";
 import { StaffPhoneTerminal } from "../project/phone";
-import { NewTerminalSheet } from "./Terminals";
+import { FreeTerminalPicker } from "./Terminals";
+import { terminalCommandKey } from "../terminal/keys";
 
 const LIST_POLL_MS = 5000;
 const LOAD_POLL_MS = 10000;
@@ -139,7 +140,8 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
   const [side, setSide] = useState<SidePrefs>(() => readSide());
   useEffect(() => saveSide(side), [side]);
 
-  const [creating, setCreating] = useState(false);
+  // The open "where?" question, and the control it hangs from.
+  const [picking, setPicking] = useState<{ anchor: HTMLElement | null } | null>(null);
   const lens = projects.find((p) => p.id === project) ?? null;
 
   const open = useCallback((id: string) => {
@@ -179,6 +181,34 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     invalidate("/api/terminals");
   };
 
+  const closeTerminal = async (tid: string) => {
+    const row = byId.get(tid);
+    const finished = !!states[tid]?.exit || (!!row && row.status !== "running");
+    if (!finished && !(await endTerminal(tid, states[tid]?.title || row?.title, toast))) return;
+    invalidate("/api/terminals");
+    update((w) => (w.panes.includes(tid) ? close(w, w.panes.indexOf(tid)) : w));
+  };
+
+  // Ctrl+Shift+W ends the active pane's terminal while the focus is in the grid; Ctrl+Shift+` asks
+  // where to open a new one, hanging the question from the bar's button.
+  const closeRef = useRef(closeTerminal);
+  closeRef.current = closeTerminal;
+  useEffect(() => {
+    if (!wide) return;
+    const onKey = (e: KeyboardEvent) => {
+      const command = terminalCommandKey(e);
+      if (command === "new") {
+        e.preventDefault();
+        setPicking({ anchor: document.querySelector<HTMLElement>(".tp-new") });
+      } else if (command === "close" && current && (e.target as HTMLElement | null)?.closest?.(".tp-grid")) {
+        e.preventDefault();
+        void closeRef.current(current);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [wide, current]);
+
   const rename = async (tid: string, title: string) => {
     try {
       await api.renameTerminal(tid, title);
@@ -194,7 +224,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     navigate(pathFor("terminals", null, { view: "overview" }));
   };
 
-  const sheet = creating ? <NewTerminalSheet envs={envs} lens={lens} projects={projects} toast={toast} onClose={() => setCreating(false)} /> : null;
+  const sheet = picking ? <FreeTerminalPicker envs={envs} lens={lens} projects={projects} toast={toast} anchor={picking.anchor} phone={!wide} onClose={() => setPicking(null)} /> : null;
 
   if (!wide) {
     const filled = ws.panes.map((id, slot) => ({ id, slot })).filter((p): p is { id: string; slot: number } => !!p.id);
@@ -248,8 +278,9 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
         onRestart={(id) => void restart(id)}
         onRemove={(id) => void remove(id)}
         onEnd={(id) => void end(id)}
+        onCloseTerminal={(id) => void closeTerminal(id)}
         onRename={(id, title) => void rename(id, title)}
-        onNew={() => setCreating(true)}
+        onNew={(anchor) => setPicking({ anchor })}
         onOverview={overview}
         toast={toast}
         messaged={messaged}
