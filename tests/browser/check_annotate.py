@@ -118,7 +118,7 @@ def desktop(browser, scenes, problems: list[str]) -> None:  # type: ignore[no-un
     # The arrow is the tool it opens on.
     drag(page, box, (0.6, 0.6), (0.4, 0.4))
     page.locator(".annotate-tool[data-tool='box']").click()
-    page.locator(".annotate-swatch").nth(3).click()
+    page.locator(".annotate-swatch").nth(4).click()
     drag(page, box, (0.1, 0.1), (0.3, 0.3))
     page.locator(".annotate-tool[data-tool='pen']").click()
     drag(page, box, (0.7, 0.2), (0.9, 0.3), steps=12)

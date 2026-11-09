@@ -533,7 +533,8 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           {files.length > 0 && !voiceBar && (
             <div className="attachments" aria-label={t("session.attachments")}>
               {files.map((file, i) => (
-                <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))} />
+                <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))}
+                  onReplace={(marked) => setFiles((held) => held.map((one) => (one === file ? marked : one)))} />
               ))}
             </div>
           )}
@@ -576,7 +577,8 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
         {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((file, i) => (
-              <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))} />
+              <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))}
+                onReplace={(marked) => setFiles((held) => held.map((one) => (one === file ? marked : one)))} />
             ))}
           </div>
         )}

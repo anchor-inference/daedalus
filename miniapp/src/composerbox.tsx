@@ -16,6 +16,7 @@ import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
 import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
+import { MarkupButton, markable } from "./annotate/markup";
 import { useReply } from "./project/chat";
 import { AttachedSecret, SecretChip, SecretSheet } from "./secrets";
 import {
@@ -675,7 +676,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           <div className="attachments" aria-label={t("session.attachments")}>
             {replies.map((reply) => <ReplyCard key={reply.id} reply={reply} onOpen={() => setReplyOpen(reply.id)} onRemove={() => { if (!sending) removeQuoteReply(sessionId, reply.id); }} />)}
             {files.map((f, i) => (
-              <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => { if (!sending) setFiles((p) => p.filter((_, j) => j !== i)); }} />
+              <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => { if (!sending) setFiles((p) => p.filter((_, j) => j !== i)); }}
+                onReplace={(marked) => { if (!sending) setFiles((p) => p.map((held) => (held === f ? marked : held))); }} />
             ))}
             {secrets.map((secret) => <SecretChip key={secret.id} name={secret.name} scope={secret.scope} onRemove={() => { if (!sending) void unattachSecret(secret); }} />)}
           </div>
@@ -866,14 +868,16 @@ function Ring({ pct }: { pct: number }) {
   );
 }
 
-export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen?: () => void; onRemove: () => void }) {
+/** `onReplace`, where the holder can take a file back, puts a pencil on a picture that opens the markup editor. */
+export function AttachmentCard({ file, onOpen, onRemove, onReplace }: { file: File; onOpen?: () => void; onRemove: () => void; onReplace?: (file: File) => void }) {
   const isImage = file.type.startsWith("image/") || previewKind(file.name) === "image";
+  const pencil = onReplace !== undefined && markable(file);
   // A video shows its first frame, as a picture does itself: a clapperboard glyph said only "video".
   const isVideo = file.type.startsWith("video/");
   const url = useMemo(() => (isImage || isVideo ? URL.createObjectURL(file) : null), [file, isImage, isVideo]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   return (
-    <div className={`attachment ${isImage || isVideo ? "image" : ""}`}>
+    <div className={`attachment ${isImage || isVideo ? "image" : ""} ${pencil ? "markable" : ""}`}>
       <button type="button" className="attachment-open" onClick={onOpen} title={canPreview(file.name) ? t("preview.open") : file.name}>
         {url && isVideo ? <video src={`${url}#t=0.1`} muted playsInline preload="metadata" aria-hidden /> : url ? <img src={url} alt={file.name} /> : <span className="attachment-glyph" aria-hidden>{fileGlyph(file.name)}</span>}
         <span className="attachment-meta">
@@ -884,6 +888,7 @@ export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen?
       <button type="button" className="attachment-x" onClick={onRemove} aria-label={t("common.remove")} title={t("common.remove")}>
         <Icon name="close" size={12} />
       </button>
+      {pencil && <MarkupButton file={file} onReplace={onReplace} />}
     </div>
   );
 }
