@@ -1,6 +1,7 @@
 ---
 name: excalidraw
 description: Draw clear, editable Excalidraw diagrams in Daedalus (flows, architectures, decision trees) with the Diagram tools, and link the operator to the canvas.
+requires: diagrams
 ---
 # Excalidraw diagrams
 

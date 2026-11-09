@@ -47,6 +47,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -119,8 +120,8 @@ CATALOGUE: dict[str, Component] = {
     SEARXNG: Component(SEARXNG, ("websearch",), 40 * 1024 * 1024, requires_restart=False),
 }
 
-#: The requirement name a skill's front matter uses, for the two components skills can declare.
-SKILL_REQUIREMENTS = {BROWSER: "browser", NODE: "node"}
+#: The ``requires:`` items of a skill's front matter each of the two optional components provides.
+SKILL_REQUIREMENTS = {BROWSER: ("playwright", "chromium", "python:PIL"), NODE: ("node", "npx", "npm")}
 
 
 @dataclass(slots=True)
@@ -217,8 +218,8 @@ def _dir_bytes(root: Path) -> int:
     return total
 
 
-def skills_needing(requirement: str, skills_dir: Path) -> list[str]:
-    """The skills whose front matter declares this requirement, by folder name.
+def skills_needing(requirements: Collection[str], skills_dir: Path) -> list[str]:
+    """The skills whose front matter declares any of these requirements, by folder name.
 
     Read from the files rather than from a running store: this is asked by the doctor and by a page
     that renders before a session exists, and a skill is a directory with a heading in it either way.
@@ -236,8 +237,8 @@ def skills_needing(requirement: str, skills_dir: Path) -> list[str]:
             continue
         for line in head.splitlines():
             if line.startswith("requires:"):
-                names = [part.strip() for part in line.partition(":")[2].split(",")]
-                if requirement in names:
+                names = {part.strip() for part in line.partition(":")[2].split(",")}
+                if names & set(requirements):
                     found.append(entry.name)
                 break
     return found
