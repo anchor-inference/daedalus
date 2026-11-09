@@ -38,6 +38,9 @@ class ScriptedProvider(ILLMProvider):
         kind = "scripted"
         pricing = {"scripted-model": ModelPricing(input_limit=128_000, limit_source="scripted test provider")}
 
+        def plan_for(self, model: str) -> bool:
+            return False
+
     endpoint = _Endpoint()
 
     async def stream_with_tools(self, request: LLMRequest) -> AsyncIterator[ProviderDelta]:

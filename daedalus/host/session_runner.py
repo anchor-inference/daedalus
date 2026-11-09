@@ -97,6 +97,7 @@ from daedalus.host import (
     prompt_coach,
     prompts,
     standing,
+    subagent_models,
     summaries,
     summary_calls,
     tool_groups,
@@ -3081,7 +3082,7 @@ class SessionManager:
             trimmed = sorted(source.engine.trimmed_tool_result_ids) if source.engine is not None else []
             pinned = {"workspace": str(self.work_dir(source)),
                       "project": source.project.name if source.project is not None else "",
-                      "notes": self.notes_for(source, window=int(source.context_window or 0)),
+                      "notes": self.notes_for(source, window=int(source.context_window or 0), overrides=await self.live.load(source_id)),
                       "trimmed": trimmed, "cache_key": source_id}
         copied = {key: source.metadata[key] for key in FORK_COPIED_KEYS if key in source.metadata}
         for meta in (target.metadata, target.session.metadata):
@@ -4235,7 +4236,7 @@ class SessionManager:
             return None
         provider, model = rungs[0]
         endpoint = provider.endpoint
-        if getattr(endpoint, "subscription", False) or guest_turns.login_route(str(getattr(endpoint, "base_url", ""))) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
+        if endpoint.plan_for(model) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
             return 0.0, 0.0
         pricing = endpoint.pricing_for(model) if hasattr(endpoint, "pricing_for") else endpoint.pricing.get(model)
         if pricing is None or pricing.input is None or pricing.output is None:
@@ -4876,7 +4877,7 @@ class SessionManager:
             reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
-            extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
+            extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0), overrides=overrides),
             tool_visibility_policy=self.tool_policy_for(state),
             role="companion" if self.is_companion(state) else "coach" if self.is_prompt_coach(state) else "btw" if self.is_btw(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
@@ -7064,7 +7065,85 @@ class SessionManager:
         await self.refresh_on_demand_groups(state)
         return self.tool_group_states(state)
 
-    def notes_for(self, state: SessionState, *, window: int = 0) -> str:
+    def session_preset_id(self, overrides: dict[str, Any]) -> str | None:
+        """The preset a session runs on: its chosen one, else the default; ``None`` for a provider and model picked by hand."""
+        if overrides.get("preset") in self.config.presets:
+            return str(overrides["preset"])
+        if overrides.get("provider") and overrides.get("model_name"):
+            return None
+        default = self.config.default_preset()
+        return default[0] if default else None
+
+    def subagent_allowance(self, metadata: dict[str, Any], overrides: dict[str, Any]) -> subagent_models.Allowance:
+        """The presets this session's helpers may run on (:mod:`daedalus.host.subagent_models`)."""
+        available = set(self.providers.available())
+        ready = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
+        mode, chosen, _ = subagent_models.choice(metadata, self.config.subagents.models)
+        return subagent_models.allowance(mode, chosen, available=ready, session_preset=self.session_preset_id(overrides))
+
+    async def set_subagent_models(self, session_id: str, mode: str | None, presets: list[str]) -> None:
+        """The session's own choice of helper models; ``mode=None`` returns it to the global default.
+        It reaches the environment at the next run, the one place the list is written for the model."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        for meta in (state.metadata, state.session.metadata):
+            if mode is None:
+                meta.pop(subagent_models.KEY, None)
+            else:
+                meta[subagent_models.KEY] = {"mode": mode, "presets": list(dict.fromkeys(presets))}
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+
+    async def tools_for_skill(self, session_id: str, names: Sequence[str]) -> tuple[dict[str, list[str]], list[str]]:
+        """Load what a skill names in ``requires:`` (tools and tool groups) into the session's run, now.
+
+        ``({group: tools loaded}, [names this session cannot call])``. A tool of a group loads its whole
+        group, as a direct call of it would: the rules are the group's, and the next step usually wants a
+        sibling. A group already on the surface, or loaded whole, is left as it is. Loaded in the run in
+        progress when there is one, so the request after the Skill call already offers them; queued for
+        the next run otherwise. Without this a model told by a skill to use BrowserLook spent its next
+        steps searching for it, or worked around it in the shell.
+        """
+        state = self._states.get(session_id)
+        if state is None:
+            return {}, []
+        registry = self.registry_for(state)
+        policy = self.tool_policy_for(state)
+        declared = registry.tool_groups()
+        admitted = self._admitted_groups(state)
+        wanted: list[str] = []
+        missing: list[str] = []
+        for name in names:
+            if name in TOOL_GROUPS or name in admitted:
+                if admitted.get(name):
+                    wanted.append(name)
+                else:
+                    missing.append(name)
+                continue
+            tool = registry.get(name)
+            if tool is None or not policy_admits(policy, name):
+                missing.append(name)
+            elif group := tool_group_of(tool, declared):
+                wanted.append(group)
+        engine = state.engine if state.running else None
+        loaded_now = set(engine.context_manager.discovered_tool_names()) if engine is not None else set()
+        loads: dict[str, list[str]] = {}
+        for group in dict.fromkeys(wanted):
+            if state.tool_group_surface.get(group) == "advertised":
+                continue
+            tools = [name for name in admitted[group] if name not in loaded_now]
+            if tools:
+                loads[group] = tools
+        if not loads:
+            return {}, missing
+        if engine is not None:
+            tool_groups.load_into_run(engine, loads)
+        else:
+            for group in loads:
+                await self._queue_group_load(state, group)
+        return loads, missing
+
+    def notes_for(self, state: SessionState, *, window: int = 0, overrides: dict[str, Any] | None = None) -> str:
         """What the system prompt says about this session beyond the environment: the brief it was created
         with, and what an imported session carries from the program it came from (loaded beforehand into
         ``state.standing`` by :func:`standing.load`)."""
@@ -7073,10 +7152,14 @@ class SessionManager:
         if note is not None and state.services is not None:
             # The sandbox line of the environment section describes this process's commands, not these.
             parts.append(note(state.services.workspace_dir))
-        available = set(self.providers.available())
-        models = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
-        if models:
-            parts.append("- Models SubAgent accepts (preset ids): " + ", ".join(models))
+        allowed = self.subagent_allowance(state.metadata, overrides or {})
+        if allowed.presets:
+            parts.append("- Models SubAgent accepts (preset ids): " + ", ".join(allowed.presets)
+                         + ("" if allowed.leader_model else "; your own model is not among them, so always name one"))
+        elif allowed.limited and allowed.leader_model:
+            parts.append("- SubAgent runs only on your own model in this session: do not pass `model`")
+        elif allowed.limited:
+            parts.append("- No model is allowed for helpers in this session: SubAgent and SpawnAgent will refuse")
         loop_note = str(state.metadata.get("loop_note") or "").strip()
         if loop_note:
             parts.append(loop_note)

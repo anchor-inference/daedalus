@@ -1,7 +1,7 @@
 ---
 name: web-artifacts-builder
 description: Scaffold and bundle a multi-component React + Tailwind + shadcn/ui app into one self-contained HTML file (GitHub Pages, board demo, hosted Service). For apps needing state, routing or shadcn/ui; not for a simple single page.
-requires: browser, node
+requires: node, npm
 ---
 # Web Artifacts Builder
 

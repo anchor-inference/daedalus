@@ -41,6 +41,9 @@ def quotable(endpoint: ProviderEndpoint, model: str) -> bool:
     """
     if endpoint.kind == "llamacpp":
         return True
+    if endpoint.plan_for(model):
+        # A plan the operator named on one model of a metered endpoint: nothing is charged to reserve.
+        return False
     price = endpoint.pricing.get(model)
     return not (price is None or price.input is None or price.output is None
                 or price.input_limit is None or not price.limit_source)

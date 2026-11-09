@@ -653,7 +653,7 @@ def model_choices(app: Application | Any) -> tuple[list[dict[str, Any]], list[di
             leave_out(preset_id, preset, "not_named")
             continue
         pricing = endpoint.pricing_for(preset.model)
-        plan = bool(endpoint.subscription) or guest_turns.login_route(provider.base_url)
+        plan = endpoint.plan_for(preset.model)
         if plan:
             billing = "plan"
         elif endpoint.kind == "llamacpp" or preset.model.endswith((":free", "-free")):

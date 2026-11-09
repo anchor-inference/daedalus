@@ -315,6 +315,9 @@ class _Providers:
     def available(self) -> list[str]:
         return list(self.endpoints)
 
+    def price_view(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {}
+
     async def close_retired(self) -> None:
         pass
 

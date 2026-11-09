@@ -2577,6 +2577,15 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
 .settings-name-field { width: 220px; padding: 6px 10px; }
 .mpanel-rows { margin-top: 8px; border-top: 1px solid var(--line); }
+/* A model's price: three rates side by side wherever they fit, which on a phone is still one line each. */
+.model-price { border-top: 1px solid var(--line); }
+.model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
+.model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* A session's helper models: the choice, then the list it allows, under the model line of Details. */
+.dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
+/* Its own title rather than the 64px label of the lines above, which broke it into a word a line. */
+.dt-subagent-models-title { color: var(--fg-2); min-width: 0; }
+.subagent-models { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }

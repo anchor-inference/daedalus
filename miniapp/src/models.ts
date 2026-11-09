@@ -6,7 +6,7 @@
 // figure read from it afterwards — every spend total, every cap, every usage chart — and nothing in
 // the app ever says so. They are worth testing on their own.
 
-import type { Preset } from "./api";
+import type { Preset, PriceView } from "./api";
 
 /** One model as an endpoint described it. Only the id is ever certain. */
 export type ModelEntry = {
@@ -176,4 +176,42 @@ export function orchestratorPreset(presets: Record<string, Preset>, chosen: stri
   if (chosen && chosen in presets) return chosen;
   if (strongest && strongest in presets) return strongest;
   return Object.keys(presets)[0] ?? "";
+}
+
+/** The three rates as typed in a model's price section: text, so a half-typed number is not lost. */
+export type PriceDraft = { input: string; output: string; cache_hit: string };
+
+/** What the fields show: the operator's own price, else the default, else nothing. */
+export function priceDraft(view: PriceView | undefined): PriceDraft {
+  const text = (n: number | null | undefined) => (n === null || n === undefined ? "" : String(n));
+  return { input: text(view?.input), output: text(view?.output), cache_hit: text(view?.cache_hit) };
+}
+
+export type PriceBody = { input: number; output: number; cache_hit?: number; billing: "metered" | "subscription" };
+
+/**
+ * The price to save, or why it cannot be. Input and output are needed for anything to be counted; a
+ * cache rate left empty counts a cached token at the input rate, which is the upper bound. On a plan the
+ * rates are kept for the day the switch goes back, and empty ones are saved as zero.
+ */
+export function priceBody(draft: PriceDraft, plan: boolean): { body: PriceBody | null; error: "rates" | null } {
+  const rate = (value: string) => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+  const blank = (value: string) => value.trim() === "";
+  if (plan) {
+    const n = (value: string) => (rate(value) ? Number(value) : 0);
+    const body: PriceBody = { input: n(draft.input), output: n(draft.output), billing: "subscription" };
+    if (rate(draft.cache_hit)) body.cache_hit = Number(draft.cache_hit);
+    return { body, error: null };
+  }
+  if (!rate(draft.input) || !rate(draft.output) || (!blank(draft.cache_hit) && !rate(draft.cache_hit))) return { body: null, error: "rates" };
+  const body: PriceBody = { input: Number(draft.input), output: Number(draft.output), billing: "metered" };
+  if (!blank(draft.cache_hit)) body.cache_hit = Number(draft.cache_hit);
+  return { body, error: null };
+}
+
+/** Whether the typed rates differ from what is saved: only then is there anything to save. */
+export function priceChanged(draft: PriceDraft, view: PriceView | undefined): boolean {
+  const saved = priceDraft(view);
+  const same = (a: string, b: string) => (a.trim() === "" && b.trim() === "") || (a.trim() !== "" && b.trim() !== "" && Number(a) === Number(b));
+  return !(same(draft.input, saved.input) && same(draft.output, saved.output) && same(draft.cache_hit, saved.cache_hit));
 }
