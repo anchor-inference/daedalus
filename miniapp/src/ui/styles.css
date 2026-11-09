@@ -2080,6 +2080,38 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .mcp-form .mcp-actions { flex-direction: row; gap: 8px; }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
+/* "Allow all from <server>": the button and its span read as one control, in the card's own button
+   style; the row it sits in wraps rather than pushing the approval wider than the column. */
+.dock-actions:has(.srv-grant), .sp-card-actions:has(.srv-grant) { flex-wrap: wrap; }
+.srv-grant { display: inline-flex; align-items: stretch; min-width: 0; max-width: 100%; }
+.srv-grant > .btn, .srv-grant > .ph-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
+.srv-grant-span { flex: none; font: inherit; font-size: var(--fs-12); color: var(--fg); background: var(--surface-1); border: 1px solid var(--line); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 0 6px; }
+.srv-grant-span[data-forever] { color: var(--warn); }
+.srv-grant.phone { width: 100%; }
+.srv-grant.phone > .ph-btn { flex: 1; }
+.dt-server-grant { display: flex; }
+/* The session's standing grants: what, how long it has left, and the way to take it back. */
+.dt-grants { display: flex; flex-direction: column; gap: 6px; }
+.dt-grant { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 6px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-grant-left { flex: none; font-size: var(--fs-12); color: var(--fg-2); }
+.dt-grant-left[data-tone="warn"] { color: var(--warn); }
+/* One-step add: paste, try, read what came of it, add. */
+.mcp-quick { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 10px; min-width: 0; }
+.mcp-quick-row { display: flex; gap: var(--space-2); min-width: 0; }
+.mcp-quick-row .field { margin: 0; min-width: 0; flex: 1; width: auto; }
+.mcp-quick-row .btn { flex: none; }
+.mcp-trial .mcp-trial-name { margin: 0; flex: 1; min-width: 0; }
+.mcp-trial .dt-hint[data-tone="bad"] { color: var(--bad); }
+.mcp-trial .dt-hint[data-tone="warn"] { color: var(--warn); }
+.mcp-trial .mfield { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.mcp-trial .mcp-actions, .mcp-quick .mcp-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mcp-stderr summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-2); }
+.mcp-stderr pre { margin: 4px 0 0; max-height: 180px; overflow: auto; padding: 6px 8px; font-size: var(--fs-mono); background: var(--surface-1); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-policy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mcp-policy .segmented { flex-wrap: wrap; }
+.mcp-tools summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-2); }
+.mcp-tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px 0; }
+.mcp-tool-row .field { margin: 0; width: auto; flex: none; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
 .priority-pick button.bad { color: var(--bad); }
 .priority-pick button.attn { color: var(--warn); }

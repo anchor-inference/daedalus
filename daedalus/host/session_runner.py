@@ -117,7 +117,19 @@ from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
-from daedalus.host.policy import ASK, Decision, Policy, Rule, approval_key, canonical, similar_covers, similar_grant
+from daedalus.host.policy import (
+    ASK,
+    SERVER_GRANT_HOURS,
+    Decision,
+    Policy,
+    Rule,
+    approval_key,
+    canonical,
+    server_grant,
+    similar_covers,
+    similar_grant,
+    standing_alive,
+)
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.rules_gate import RulesGate
@@ -135,6 +147,7 @@ from daedalus.host.setting_refs import (
 from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
+from daedalus.mcp import manager as mcp_manager
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
 from daedalus.memory import privacy
@@ -881,6 +894,10 @@ class SessionManager:
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
         )
+        # In Docker a stdio server starts inside this container, which is not the machine a session
+        # working in a host folder runs its Exec on: what the agent checks there (adb, a paired phone,
+        # an installed CLI) is not what the server sees. Every error and the app say where it ran.
+        mcp_manager.WHERE[0] = "machine" if settings.native else "container"
         self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp",
                               redirect_default=lambda: mcp_callback_url(settings.miniapp_public_url))
         # A server's catalogue can change under running sessions — a re-listing, a reconnect, another
@@ -7186,6 +7203,7 @@ class SessionManager:
             # is read as the file it names rather than as a word with no slash at the front.
             base_dir=base_dir,
             mcp_approvals=self.mcp.approvals(),
+            mcp_servers=self.mcp.servers_by_tool(),
         )
 
     def sealed_ports(self) -> tuple[int, ...]:
@@ -7285,7 +7303,9 @@ class SessionManager:
             now = time.time()
             # What the operator allowed for their own work is theirs: a guest neither spends nor inherits it.
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None and turn is None else set()
-            similar = list(state.metadata.get("policy_similar") or []) if state is not None and turn is None else []
+            # A grant made for a span ("every tool of this server, for six hours") stops answering at
+            # its end, and the next call is asked again like the first.
+            similar = [g for g in state.metadata.get("policy_similar") or [] if standing_alive(g, now)] if state is not None and turn is None else []
             if touch is not None:
                 # Only what the operator allowed knowing about the reply: a grant a touched turn could
                 # spend from before would answer a question nobody was shown, and so would a standing one.
@@ -7362,9 +7382,15 @@ class SessionManager:
         # The family "Allow similar" would grant, worked out now: the arguments are gone by the
         # time the operator answers, and the pending entry keeps only a redacted preview.
         # A touched run's questions have no family: "allow the like" is exactly what a stranger would ask for.
-        family = similar_grant(tool, arguments, decision.rule) if agent_talk.touch_of(state.metadata) is None else None
+        touched = agent_talk.touch_of(state.metadata) is not None
+        server = self.mcp.servers_by_tool().get(tool, "") if decision.rule == "mcp.annotations" else ""
+        family = similar_grant(tool, arguments, decision.rule, server=server) if not touched else None
         if family is not None:
             pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
+        if server and not touched:
+            # What "Allow all from <server>" would grant. A touched run has none, for the reason it has
+            # no family, and a guest's turn never gets this far: its questions are refusals.
+            pending[decision.key]["server"] = server
         for meta in (state.metadata, state.session.metadata):
             meta["policy_pending"] = dict(list(pending.items())[-20:])
         if fresh:
@@ -7665,6 +7691,94 @@ class SessionManager:
         family = refused.get("similar")
         return dict(family) if isinstance(family, dict) else None
 
+    def server_of(self, session_id: str, key: str) -> str | None:
+        """The MCP server "Allow all from <server>" would allow for an open request, if it offers one."""
+        state = self._states.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        refused = (state.metadata.get("policy_pending") or {}).get(self._approval_key(key)) or {}
+        server = refused.get("server")
+        return str(server) if server else None
+
+    async def grant_server(self, session_id: str, key: str = "", *, server: str = "", hours: float | None = None,
+                           seconds: float | None = None, via: str) -> dict[str, Any]:
+        """The operator allows every tool of the MCP server an open request came from, in this session, for a span.
+
+        One of :data:`SERVER_GRANT_HOURS` (0: until the session ends); ``seconds`` is for a test that
+        cannot wait an hour. It stands beside the "Allow similar" grants and is read the same way: a
+        guest's turn and a run touched by another agent's text use none of them, and the run whose
+        reply woke it cannot be given one either, since the request it would answer may be the
+        stranger's. When it ends the policy asks again, and the operator can take it back sooner from
+        the session's settings. Every open request of the server is answered with it.
+
+        Named by an open request's ``key`` (the approval card) or by the ``server`` itself (the
+        session's MCP panel, before anything has asked)."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        if agent_talk.touch_of(state.metadata) is not None or state.guest_turn is not None:
+            raise ValueError("another agent's or a guest's text reached this run, so nothing standing is granted in it; allow the call once instead")
+        if key:
+            key = self._approval_key(key)
+            server = self.server_of(session_id, key) or ""
+            if not server:
+                raise ValueError("this request is not an MCP server's tool asking to run; allow it once instead")
+        elif server not in self.mcp_visible(state):
+            raise ValueError(f"no MCP server {server!r} in this session")
+        if seconds is None:
+            span = SERVER_GRANT_HOURS[2] if hours is None else hours
+            if span not in SERVER_GRANT_HOURS:
+                raise ValueError(f"the span is one of {', '.join(str(h) for h in SERVER_GRANT_HOURS)} hours (0: for the whole session)")
+            seconds = span * 3600.0
+        grant = server_grant(server, seconds=seconds)
+        standing = [g for g in (state.metadata.get("policy_similar") or [])
+                    if standing_alive(g) and not (g.get("kind") == "server" and g.get("value") == server)]
+        standing.append(grant)
+        resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items() if refused.get("server") == server]
+        approves = [self._drop_pending(state, k) for k in resolved]
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_similar"] = standing[-20:]
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        for k in resolved:
+            await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via})
+        if via != "orchestrator":
+            await self._resume_after_grant(session_id, [item for item in approves if item])
+        return {"key": key, "server": server, "grant": grant, "resolved": resolved, "approves": approves, "standing": self.standing(state)}
+
+    @staticmethod
+    def _standing_id(grant: dict[str, Any]) -> str:
+        """A standing grant's name for taking it back: a digest of what it is, so none has to be stored."""
+        body = {k: v for k, v in grant.items() if k != "id"}
+        return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+    def standing(self, state: SessionState) -> list[dict[str, Any]]:
+        """The session's standing grants that still stand, each with its id and the seconds it has left (``None``: no end)."""
+        now = time.time()
+        out = []
+        for grant in state.metadata.get("policy_similar") or []:
+            if not standing_alive(grant, now):
+                continue
+            until = float(grant.get("until") or 0)
+            out.append({"id": self._standing_id(grant), "kind": grant.get("kind"), "tool": grant.get("tool"), "rule": grant.get("rule"),
+                        "label": grant.get("label"), "server": grant.get("value") if grant.get("kind") == "server" else None,
+                        "at": grant.get("at"), "until": until or None, "left_seconds": max(0, int(until - now)) if until else None})
+        return out
+
+    async def revoke_standing(self, session_id: str, grant_id: str, *, via: str) -> list[dict[str, Any]]:
+        """Take one standing grant back; the next call it would have answered is asked again."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        before = list(state.metadata.get("policy_similar") or [])
+        kept = [g for g in before if standing_alive(g) and self._standing_id(g) != grant_id]
+        if len(kept) == len([g for g in before if standing_alive(g)]):
+            raise KeyError(f"no standing grant {grant_id!r} in this session")
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_similar"] = kept
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        logger.info("session %s: standing grant %s revoked via %s", session_id, grant_id, via)
+        return self.standing(state)
+
     async def grant_similar(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
         """The operator allows calls like a refused one for the rest of the session.
 
@@ -7680,7 +7794,9 @@ class SessionManager:
         family = self.similar_of(session_id, key)
         if family is None:
             raise ValueError("this request has no narrower family of calls to allow; allow it once instead")
-        standing = [g for g in (state.metadata.get("policy_similar") or []) if g != family]
+        family = {**family, "at": time.time()}
+        standing = [g for g in (state.metadata.get("policy_similar") or [])
+                    if standing_alive(g) and {k: v for k, v in g.items() if k != "at"} != {k: v for k, v in family.items() if k != "at"}]
         standing.append(family)
         resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items()
                     if isinstance(refused.get("similar"), dict)

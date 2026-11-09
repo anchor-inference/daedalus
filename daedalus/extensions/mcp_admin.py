@@ -8,14 +8,18 @@ one is stopped and forgotten with its OAuth tokens. Nothing here needs a restart
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import posixpath
 import re
+import shlex
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from pydantic import ValidationError
 
 from daedalus.config import McpServerConfig
+from daedalus.mcp.manager import WHERE, runs_in
 from daedalus.security import redact
 
 if TYPE_CHECKING:
@@ -26,6 +30,12 @@ logger = logging.getLogger(__name__)
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,47}")
 CONNECT_SECONDS = 20.0
 """How long an add waits to see the server answer before reporting what it has so far."""
+TRIAL_SECONDS = 90.0
+"""How long a pasted command is given to answer before it is added: ``npx -y`` installs the package on
+its first start, which takes tens of seconds on a cold cache."""
+LAUNCHERS = {"npx": 1, "bunx": 1, "uvx": 1, "pnpx": 1, "pipx": 2, "uv": 3, "pnpm": 2, "yarn": 2, "docker": 0}
+"""Commands that run a package named in their arguments, so the server is named after the package and
+not after the launcher (every ``npx`` server would be called "npx")."""
 
 
 class McpAdminError(ValueError):
@@ -71,8 +81,103 @@ def describe(app: Application) -> list[dict[str, Any]]:
             "headers": _masked(config.headers), "env": _masked(config.env), "oauth": oauth,
             "approval": config.approval, "tool_approval": dict(config.tool_approval),
             "state": live.get("state", "disabled"), "error": live.get("error"), "tools": live.get("tools", []),
+            "stderr": live.get("stderr", ""), "runs_in": WHERE[0] if config.transport == "stdio" else "",
+            # By their names on the server, which is what a per-tool rule names.
+            "remote_tools": sorted(tool.remote_name for tool in manager.proxies(name)) if manager is not None else [],
         })
     return rows
+
+
+def _package_name(word: str) -> str:
+    """``@mobilenext/mobile-mcp@latest`` → ``mobile-mcp``; ``mcp-server-git==1.2`` → ``mcp-server-git``."""
+    word = re.split(r"==|>=|<=|~=", word, maxsplit=1)[0]
+    if word.startswith("@"):
+        word = "@" + word[1:].split("@", 1)[0]
+    else:
+        word = word.split("@", 1)[0]
+    return posixpath.basename(word.rstrip("/")) or word
+
+
+def _clean_name(raw: str, taken: set[str]) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("-._")[:40] or "server"
+    if not name[0].isalnum():
+        name = "mcp-" + name
+    candidate, n = name, 2
+    while candidate in taken:
+        candidate, n = f"{name}-{n}", n + 1
+    return candidate
+
+
+def parse_pasted(text: str, *, taken: set[str] = frozenset()) -> tuple[str, dict[str, Any]]:  # type: ignore[assignment]
+    """A server's name and spec from what the operator pasted: a command line (``npx -y @x/y-mcp``,
+    with ``KEY=value`` words in front for its environment), an ``https://`` address, or the JSON block a
+    README gives (``{"mcpServers": {"name": {"command": …}}}``). The name is a suggestion: the package
+    after its launcher, the address's host, or the block's own key."""
+    text = text.strip()
+    if not text:
+        raise McpAdminError("paste the command that starts the server, or its https:// address")
+    if text.startswith("{"):
+        try:
+            block = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise McpAdminError(f"that looks like JSON but does not parse: {exc.msg}") from exc
+        servers = block.get("mcpServers") or block.get("servers") or block
+        if not isinstance(servers, dict) or not servers:
+            raise McpAdminError("the JSON names no server")
+        key, entry = next(iter(servers.items()))
+        if not isinstance(entry, dict):
+            raise McpAdminError("the JSON server entry is not an object")
+        if entry.get("url"):
+            spec = {"transport": "http", "url": str(entry["url"]), "headers": {str(k): str(v) for k, v in (entry.get("headers") or {}).items()}}
+        else:
+            spec = {"transport": "stdio", "command": str(entry.get("command") or ""), "args": [str(a) for a in entry.get("args") or []],
+                    "env": {str(k): str(v) for k, v in (entry.get("env") or {}).items()}}
+        return _clean_name(str(key), set(taken)), spec
+    if re.match(r"https?://", text, re.I):
+        host = (urlparse(text).hostname or "server").split(".")
+        label = next((part for part in host if part not in ("mcp", "api", "www", "server")), host[0])
+        return _clean_name(label, set(taken)), {"transport": "http", "url": text}
+    try:
+        words = shlex.split(text)
+    except ValueError as exc:
+        raise McpAdminError(f"the command does not parse: {exc}") from exc
+    env: dict[str, str] = {}
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        key, _, value = words.pop(0).partition("=")
+        env[key] = value
+    if not words:
+        raise McpAdminError("the command is missing: only environment values were given")
+    command, args = words[0], words[1:]
+    label = posixpath.basename(command)
+    if label in LAUNCHERS:
+        rest = args[LAUNCHERS[label] - 1:] if LAUNCHERS[label] > 1 else args
+        package = next((a for a in rest if not a.startswith("-") and a not in ("run", "tool", "dlx", "exec")), "")
+        label = _package_name(package) if package else label
+    elif label in ("python", "python3", "node", "deno", "bun") and args:
+        module = args[args.index("-m") + 1] if "-m" in args[:-1] else next((a for a in args if not a.startswith("-")), label)
+        label = _package_name(posixpath.splitext(posixpath.basename(module))[0])
+    return _clean_name(label, set(taken)), {"transport": "stdio", "command": command, "args": args, "env": env}
+
+
+async def trial(app: Application, text: str, name: str = "") -> dict[str, Any]:
+    """What adding a pasted server would give: its name, spec, state, tools and what it wrote, from one
+    start of it that nothing keeps. The operator then adds it as it is, or reads why it did not start."""
+    taken = set(app.config.mcp.servers)
+    suggested, spec = parse_pasted(text, taken=taken)
+    name = name.strip() or suggested
+    config = build(name, spec, None)
+    result = await app.manager.mcp.trial(name, config, deadline=TRIAL_SECONDS)
+    return {**result, "spec": {**spec, "env": _masked(spec.get("env") or {}), "headers": _masked(spec.get("headers") or {})},
+            "exists": name in taken}
+
+
+async def add_pasted(app: Application, text: str, name: str = "", approval: str = "auto") -> dict[str, Any]:
+    """Add what was pasted, as it was tried: parsed again here so the keys in it never travel back
+    to the app and return masked."""
+    suggested, spec = parse_pasted(text, taken=set(app.config.mcp.servers))
+    name = name.strip() or suggested
+    saved = await put(app, name, {**spec, "approval": approval})
+    return {**saved, "probe": await probe(app, name)}
 
 
 def build(name: str, spec: dict[str, Any], stored: McpServerConfig | None) -> McpServerConfig:
@@ -137,9 +242,10 @@ async def probe(app: Application, name: str) -> dict[str, Any]:
     except (TimeoutError, RuntimeError):
         pass  # still connecting, or failed: the status row below says which, with the error
     except Exception as exc:  # noqa: BLE001 — what failed is the answer to the person who asked
-        return {"name": name, "state": "unavailable", "error": str(exc), "tools": []}
+        return {"name": name, "state": "unavailable", "error": str(exc), "tools": [], "stderr": ""}
     row = next((item for item in manager.status() if item["name"] == name), None) or {}
-    return {"name": name, "state": row.get("state", "disabled"), "error": row.get("error"), "tools": row.get("tools", [])}
+    return {"name": name, "state": row.get("state", "disabled"), "error": row.get("error"), "tools": row.get("tools", []),
+            "stderr": row.get("stderr", "")}
 
 
 async def agent_service(app: Application, op: str, *, session_id: str, name: str, spec: dict[str, Any] | None = None) -> str:
@@ -159,8 +265,15 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
     result = await probe(app, name)
     verb = "added" if saved["added"] else "changed"
     if result["state"] == "ready":
-        return (f"{verb} {name}; it answers with {len(result['tools'])} tools. Enable it in a session with "
-                f"McpEnable(server={name!r}).")
+        # Enabled here at once: the agent that adds a server means to use it, and adding, enabling and
+        # loading were three steps before the first call.
+        try:
+            enabled = await app.manager.mcp_service("enable", session_id=session_id, server=name)
+        except (KeyError, RuntimeError) as exc:
+            return (f"{verb} {name}; it answers with {len(result['tools'])} tools, but it could not be enabled here ({exc}). "
+                    f"Enable it in a session with McpEnable(server={name!r}).")
+        where = f" It runs in {runs_in()}: what its tools need (a CLI, a device, a key) has to be there." if app.config.mcp.servers[name].transport == "stdio" else ""
+        return f"{verb} {name}; it answers with {len(result['tools'])} tools. In this session it is {enabled}.{where}"
     if result["state"] == "auth_required" and app.config.mcp.servers[name].oauth is not None:
         try:
             url = await app.manager.mcp.oauth_begin(name)
@@ -169,7 +282,9 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
         return (f"{verb} {name}; it needs the owner to sign in. Give them this link — after approving, the browser "
                 f"returns to the app and the link completes (Settings → MCP servers shows it):\n\n{url}\n\n"
                 f"Then McpEnable(server={name!r}).")
-    return f"{verb} {name}, but it does not answer yet: {result.get('error') or result['state']}. McpRemove takes it back."
+    where = f" It was started in {runs_in()}." if app.config.mcp.servers[name].transport == "stdio" else ""
+    said = f"\nIts last words on stderr:\n{result['stderr']}" if result.get("stderr") and result["stderr"] not in str(result.get("error") or "") else ""
+    return f"{verb} {name}, but it does not answer yet: {result.get('error') or result['state']}.{where} McpRemove takes it back.{said}"
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
@@ -182,4 +297,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return []
 
 
-__all__ = ["McpAdminError", "agent_service", "build", "describe", "install", "probe", "put", "remove"]
+__all__ = ["McpAdminError", "add_pasted", "agent_service", "build", "describe", "install", "parse_pasted", "probe", "put", "remove", "trial"]

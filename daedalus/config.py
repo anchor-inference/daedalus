@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -31,6 +32,13 @@ from daedalus.slugs import is_page_slug
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def inherited_environment(names: Iterable[str]) -> dict[str, str]:
+    """The named variables of this process's environment that are set, to hand on to a child
+    process (an MCP server) that would otherwise not see them. Read here, the one place the
+    environment is read, rather than by the caller."""
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def native_mode() -> bool:
@@ -918,7 +926,7 @@ class McpOAuthConfig(BaseModel):
     """That client's secret, when the server issued one."""
 
 
-McpApproval = Literal["auto", "ask", "allow"]
+McpApproval = Literal["auto", "ask", "allow", "deny"]
 
 
 class McpServerConfig(BaseModel):
@@ -936,7 +944,9 @@ class McpServerConfig(BaseModel):
     """Whether a call to this server's tools is asked about first. ``auto`` reads each tool's own
     annotations (:func:`daedalus.mcp.manager.annotation_approval`): a tool that says it only reads
     runs, and one that may destroy or reach the outside world — or says nothing, which by the
-    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server."""
+    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server, and
+    ``deny`` refuses every call to it without asking: the server stays connected for the tools the
+    operator allows one by one in ``tool_approval``."""
     tool_approval: dict[str, McpApproval] = Field(default_factory=dict)
     """The same, for one tool by its name on the server; it beats ``approval``, and ``auto`` here
     hands the tool back to the server's setting."""

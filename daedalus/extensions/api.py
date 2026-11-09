@@ -169,7 +169,7 @@ from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.filesystem import foreign_paths, machine_of
 from daedalus.host.host_exec import BRIDGE_DOWN
-from daedalus.host.policy import sealed_root
+from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
@@ -5316,9 +5316,41 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if await manager.get_state(session_id) is None:
             raise HTTPException(404, "no such session")
         try:
-            return {"similar": manager.similar_of(session_id, key)}
+            # ``server``: the MCP server "Allow all from <server>" would allow, with the spans offered.
+            server = manager.server_of(session_id, key)
+            return {"similar": manager.similar_of(session_id, key),
+                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/sessions/{session_id}/policy/grant-server")
+    async def policy_grant_server(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Allow every tool of an MCP server in this session: ``{"key": "<approval key>", "hours": 1 | 2 | 6 | 12 | 0}``
+        for the server an open request came from, or ``{"server": "<name>", "hours": …}`` (0: for the whole session)."""
+        try:
+            hours = float(body["hours"]) if body.get("hours") is not None else None
+            return await manager.grant_server(session_id, str(body.get("key") or ""), server=str(body.get("server") or ""),
+                                              hours=hours, via=front_of(_))
+        except KeyError as exc:
+            raise HTTPException(404, "no such session") from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.get("/api/sessions/{session_id}/policy/standing")
+    async def policy_standing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        return {"standing": manager.standing(state)}
+
+    @api.delete("/api/sessions/{session_id}/policy/standing/{grant_id}")
+    async def policy_revoke_standing(session_id: str, grant_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Take one standing grant back; what it allowed is asked about again."""
+        try:
+            return {"standing": await manager.revoke_standing(session_id, grant_id, via=front_of(_))}
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @api.post("/api/sessions/{session_id}/policy/grant-similar")
     async def policy_grant_similar(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

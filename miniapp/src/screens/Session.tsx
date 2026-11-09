@@ -754,15 +754,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // What "Allow similar" would grant for the request in the dock, asked of the host because only it
   // still holds the refused call's arguments; the button says it before it is pressed.
   const [similar, setSimilar] = useState<{ key: string; label: string } | null>(null);
+  // The MCP server "Allow all from <server>" would allow, asked in the same call.
+  const [grantServer, setGrantServer] = useState<{ key: string; name: string } | null>(null);
   const approvalKey = approval?.key ?? "";
   useEffect(() => {
     setSimilar(null);
+    setGrantServer(null);
     if (!approvalKey) return;
     let gone = false;
-    api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approvalKey}`)
+    api.get<{ similar?: { label?: unknown } | null; server?: { name?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approvalKey}`)
       .then((r) => {
         const label = r?.similar?.label;
         if (!gone && typeof label === "string" && label) setSimilar({ key: approvalKey, label });
+        const name = r?.server?.name;
+        if (!gone && typeof name === "string" && name) setGrantServer({ key: approvalKey, name });
       })
       .catch(() => undefined);
     return () => {
@@ -780,6 +785,18 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       }
     },
     [id, toast, similar],
+  );
+  const approveServer = useCallback(
+    async (a: Approval, hours: number) => {
+      try {
+        const r = await api.post<{ resolved?: unknown }>(`/api/sessions/${id}/policy/grant-server`, { key: a.key, hours });
+        const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
+        setSeenKeys((k) => new Set([...k, a.key, ...answered]));
+      } catch (e) {
+        toast(errorText(e));
+      }
+    },
+    [id, toast],
   );
   // Refusing tells the host too, so the request stops being open on every other front that shows it.
   const deny = useCallback(
@@ -1941,6 +1958,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onApprove={approve}
             similar={similar && similar.key === approval?.key ? similar.label : null}
             onApproveSimilar={approveSimilar}
+            server={grantServer && grantServer.key === approval?.key ? grantServer.name : null}
+            onApproveServer={approveServer}
             onDeny={deny}
             onPreviewFile={(file) => setPreview({ file })}
             phone={phone}
