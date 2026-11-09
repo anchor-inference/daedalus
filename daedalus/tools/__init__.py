@@ -192,7 +192,8 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
     "canvas": ToolGroupSpec(
         "Canvases the operator opens in the app, boards of cards, groups and arrows in Obsidian's JSON Canvas format, "
         "whenever they say canvas, board, diagram or 'холст': list, read, create laid out, edit item by item (CanvasList, "
-        "CanvasRead, CanvasCreate, CanvasEdit). Not the task Board, not a mermaid diagram in the answer",
+        "CanvasRead, CanvasCreate, CanvasEdit), an HTML page of the workspace shown live on the board and its console "
+        "errors (CanvasShow, CanvasInspect). Not the task Board, not a mermaid diagram in the answer",
         "lazy",
     ),
     "notes": ToolGroupSpec(

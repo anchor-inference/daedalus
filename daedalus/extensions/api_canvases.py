@@ -12,14 +12,22 @@ download.
 
 from __future__ import annotations
 
+import mimetypes
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from daedalus import public_address
+from daedalus.extensions.api_services_door import SCOPE_KEY
+from daedalus.stores import canvas_frames
 from daedalus.stores.canvas_doc import CanvasError
+from daedalus.stores.canvas_frames import Capability, FrameError, frames_for
 from daedalus.stores.canvases import NotFound, Stale, store_for
 from daedalus.stores.notes import Scope
 
@@ -81,9 +89,74 @@ class ImportBody(BaseModel):
     text: str = Field(max_length=4_200_000)
 
 
+class AddressBody(BaseModel):
+    once: list[str] = Field(default_factory=list, max_length=20)
+    """Origins the operator allowed for this load only: signed into this one address, stored nowhere."""
+
+
+class ReportBody(BaseModel):
+    loaded: bool | None = None
+    title: str | None = Field(default=None, max_length=400)
+    lines: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    blocked: list[str] = Field(default_factory=list, max_length=20)
+
+
+class SnapshotBody(BaseModel):
+    html: str = Field(max_length=3_000_000)
+    width: int = Field(ge=1, le=10_000)
+    height: int = Field(ge=1, le=10_000)
+
+
+class Pick(BaseModel):
+    frame_id: str = Field(max_length=128)
+    selector: str = Field(default="", max_length=600)
+    tag: str = Field(default="", max_length=40)
+    text: str = Field(default="", max_length=400)
+    html: str = Field(default="", max_length=2200)
+    note: str = Field(default="", max_length=4000)
+
+
+class MessageBody(BaseModel):
+    text: str = Field(default="", max_length=20_000)
+    picks: list[Pick] = Field(default_factory=list, max_length=10)
+    session_id: str | None = Field(default=None, max_length=80)
+    """The chat to write to when the canvas has no owner chat any more; it becomes the owner."""
+    client_message_id: str = Field(default="", max_length=64)
+
+
+FENCE = "`" * 3
+
+
+def compose(canvas: dict[str, Any], body: MessageBody) -> str:
+    """The message the comment bar sends: which canvas, then each element the operator pointed at, then
+    the typed words. The app shows exactly this before it goes. A picked snippet is the page's own
+    markup, so it travels in a fence it cannot close, as quoted material."""
+    nodes = {node["id"]: node for node in canvas["doc"].get("nodes", [])}
+    lines = [f"[Canvas «{canvas['title']}» · canvas {canvas['id']} · version {canvas['version']} · /app/canvas/{canvas['id']}]"]
+    for pick in body.picks:
+        node = nodes.get(pick.frame_id) or {}
+        where = f"{node.get('file', '')}, {node.get('width', '?')}x{node.get('height', '?')}" if node else "a frame no longer on the board"
+        lines.append(f"On frame `{pick.frame_id}` ({where}), element `{pick.selector or pick.tag}`:")
+        if pick.html:
+            lines.append(f"{FENCE}html\n{pick.html.replace(FENCE, '')}\n{FENCE}")
+        if pick.note.strip():
+            lines.append(pick.note.strip())
+    if body.text.strip():
+        lines.append(body.text.strip())
+    return "\n\n".join(lines)
+
+
+class OriginBody(BaseModel):
+    origin: str = Field(max_length=300)
+    everywhere: bool = False
+    """True allows it on every canvas; false on this canvas only."""
+
+
 def refused(exc: Exception) -> HTTPException:
     if isinstance(exc, NotFound):
         return HTTPException(404, "not found")
+    if isinstance(exc, FrameError):
+        return HTTPException(400, str(exc))
     if isinstance(exc, Stale):
         return HTTPException(409, {"message": str(exc) if exc.ids else "the canvas changed since you read it", "conflicts": exc.ids, "current": exc.current})
     return HTTPException(400, str(exc))
@@ -253,12 +326,162 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such file")
         return _attachment(found, save)
 
+    @api.post("/api/canvases/{canvas_id}/message")
+    async def canvas_message(canvas_id: str, body: MessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The comment bar: a message into the chat that owns the canvas, queued behind a running turn
+        like any message sent while the agent works."""
+        if not body.text.strip() and not body.picks:
+            raise HTTPException(400, "nothing to send")
+        found = await store().get(canvas_id)
+        if found is None:
+            raise HTTPException(404, "no such canvas")
+        target = found["owner_session_id"]
+        if target is None:
+            if not body.session_id:
+                raise HTTPException(409, "this canvas has no chat to write to; choose one")
+            try:
+                found = await store().set_owner(canvas_id, body.session_id)
+            except (CanvasError, NotFound) as exc:
+                raise refused(exc) from exc
+            target = found["owner_session_id"]
+        text = compose(found, body)
+        try:
+            run_id = await app.manager.submit(target, text, follow_up=True, client_message_id=body.client_message_id or None)
+        except KeyError as exc:
+            raise HTTPException(404, "the canvas's chat is gone") from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"run_id": run_id, "session_id": target, "text": text}
+
+    # -- live frames ---------------------------------------------------------------------------------
+
+    async def frame_of(canvas_id: str, node_id: str) -> dict[str, Any]:
+        found = await frames_for(app.manager).get(canvas_id, node_id)
+        if found is None:
+            raise HTTPException(404, "no live frame there")
+        return found
+
+    @api.post("/api/canvases/{canvas_id}/frames/{node_id}/address")
+    async def frame_address(canvas_id: str, node_id: str, body: AddressBody, request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A fresh signed address for one frame, on the services door. With no door (an https app whose
+        services address is not set) there is no address at all: the board says what is missing rather
+        than run the page on its own origin."""
+        frame = await frame_of(canvas_id, node_id)
+        frames = frames_for(app.manager)
+        allowed = await frames.origins(canvas_id)
+        door = public_address.services_base(app.settings)
+        if not door:
+            return {"needs_door": True, "origins": allowed}
+        try:
+            once = sorted({canvas_frames.origin_of(origin) for origin in body.once})
+            parent = canvas_frames.app_origin_of(request.headers.get("origin") or f"{request.url.scheme}://{request.headers.get('host', '')}")
+        except FrameError as exc:
+            raise refused(exc) from exc
+        expires = int(time.time()) + canvas_frames.ADDRESS_HOURS * 3600
+        token = await frames.sign(Capability(canvas_id, node_id, int(frame["generation"]), expires, parent, tuple(once)))
+        return {"url": f"{door}/f/{token}/{quote(frame['entry'])}", "expires_at": expires, "origins": allowed, "once": once, "generation": frame["generation"]}
+
+    @api.post("/api/canvases/{canvas_id}/frames/{node_id}/report")
+    async def frame_report(canvas_id: str, node_id: str, body: ReportBody, _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        """What the board heard from a frame's bridge, kept for the agent's CanvasInspect."""
+        await frame_of(canvas_id, node_id)
+        frames_for(app.manager).record(canvas_id, node_id, body.model_dump())
+        return {"ok": True}
+
+    @api.put("/api/canvases/{canvas_id}/frames/{node_id}/snapshot")
+    async def frame_snapshot(canvas_id: str, node_id: str, body: SnapshotBody, _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        await frame_of(canvas_id, node_id)
+        try:
+            await frames_for(app.manager).save_snapshot(canvas_id, node_id, body.html, body.width, body.height)
+        except FrameError as exc:
+            raise refused(exc) from exc
+        return {"ok": True}
+
+    @api.post("/api/canvases/{canvas_id}/frames/{node_id}/revoke")
+    async def frame_revoke(canvas_id: str, node_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        await frame_of(canvas_id, node_id)
+        await frames_for(app.manager).revoke(canvas_id, node_id)
+        return {"ok": True}
+
+    @api.post("/api/canvases/{canvas_id}/origins")
+    async def origin_allow(canvas_id: str, body: OriginBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if await store().head(canvas_id) is None:
+            raise HTTPException(404, "no such canvas")
+        try:
+            await frames_for(app.manager).allow(canvas_id, body.origin, everywhere=body.everywhere)
+        except FrameError as exc:
+            raise refused(exc) from exc
+        return await frames_for(app.manager).origins(canvas_id)
+
+    @api.get("/api/canvases/{canvas_id}/origins")
+    async def origin_list(canvas_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await frames_for(app.manager).origins(canvas_id)
+
+    @api.delete("/api/canvases/{canvas_id}/origins")
+    async def origin_disallow(canvas_id: str, origin: str = Query(max_length=300), everywhere: bool = False, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        await frames_for(app.manager).disallow(canvas_id, origin, everywhere=everywhere)
+        return await frames_for(app.manager).origins(canvas_id)
+
+    # The frames themselves. No auth: the signed address is the credential. Only the door answers;
+    # on the app's origin these paths do not exist, so a page can never run beside the operator's session.
+
+    @api.get("/f/{token}")
+    async def frame_root(token: str, request: Request) -> Response:
+        if not request.scope.get(SCOPE_KEY):
+            raise HTTPException(404, "not here")
+        return RedirectResponse(f"/f/{token}/")
+
+    @api.api_route("/f/{token}/{path:path}", methods=["GET", "HEAD"])
+    async def frame_file(token: str, path: str, request: Request) -> Response:
+        if not request.scope.get(SCOPE_KEY):
+            raise HTTPException(404, "not here")
+        frames = frames_for(app.manager)
+        cap = await frames.verify(token)
+        frame = await frames.get(cap.canvas_id, cap.node_id) if cap is not None else None
+        if cap is None or frame is None or int(frame["generation"]) != cap.generation:
+            return Response("this frame's address has expired; the board fetches a new one", status_code=410, media_type="text/plain", headers={"Cache-Control": "no-store"})
+        allowed = await frames.origins(cap.canvas_id)
+        headers = {
+            "Content-Security-Policy": canvas_frames.policy(cap.app_origin, sorted({*allowed["canvas"], *allowed["all"], *cap.once})),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "X-Robots-Tag": "noindex, nofollow",
+        }
+        if path == f"{canvas_frames.RESERVED}/bridge.js":
+            return Response(canvas_frames.BRIDGE, media_type="text/javascript", headers=headers)
+        found = canvas_frames.served_file(Path(frame["root"]), path)
+        if found is None:
+            return Response("not found", status_code=404, media_type="text/plain", headers=headers)
+        mime = mimetypes.guess_type(found.name)[0] or "application/octet-stream"
+        data = found.read_bytes()
+        if mime == "text/html":
+            data = canvas_frames.inject(data, token, cap.app_origin)
+            mime = "text/html; charset=utf-8"
+        return Response(b"" if request.method == "HEAD" else data, media_type=mime, headers=headers)
+
     @api.get("/api/public/canvases/{token}")
     async def canvas_shared(token: str) -> dict[str, Any]:
         found = await store().shared(token)
         if found is None:
             raise HTTPException(404, "no such shared canvas")
-        return {key: value for key, value in found.items() if key != "id"}
+        snapshots = await frames_for(app.manager).snapshot_times(found["id"])
+        return {**{key: value for key, value in found.items() if key != "id"}, "snapshots": snapshots}
+
+    @api.get("/api/public/canvases/{token}/snapshots/{node_id}")
+    async def canvas_shared_snapshot(token: str, node_id: str) -> Response:
+        """A frame of a shared canvas, as the still copy the board last took: served as text for the
+        viewer's page to put in a frame with no scripts and no origin, never as a page of this origin."""
+        found = await store().shared(token)
+        snapshot = await frames_for(app.manager).snapshot(found["id"], node_id) if found is not None else None
+        if snapshot is None:
+            raise HTTPException(404, "no snapshot of that frame")
+        return Response(
+            snapshot["html"], media_type="text/plain; charset=utf-8",
+            headers={**INERT, "X-Snapshot-Width": str(snapshot["width"]), "X-Snapshot-Height": str(snapshot["height"]), "X-Captured-At": snapshot["captured_at"], "Cache-Control": "no-store"},
+        )
 
     @api.get("/api/public/canvases/{token}/files/{file_id}")
     async def canvas_shared_file(token: str, file_id: str, save: bool = False) -> Response:

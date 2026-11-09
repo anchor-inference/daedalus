@@ -6,13 +6,16 @@ dragging from a side; cards move, resize, group, delete and come back with Undo,
 operations on the version the page holds; an agent's edit to another card is merged without a word,
 while an edit to the same card raises a banner that names it and lets the operator keep theirs; the
 shared view draws the board read only; and a phone gets the same board with a toolbar it can tap,
-inside the window. With SHOTS set, the pictures go there.
+inside the window. Live pages run on another origin in a sandbox without allow-same-origin, a script
+from a site nobody allowed never leaves the browser, pointing and the bar send what the preview showed,
+and a shared view shows only an inert still copy. With SHOTS set, the pictures go there.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
@@ -20,7 +23,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
-from canvas_stub import CanvasStub, card, edge  # noqa: E402
+from canvas_stub import BLOCKED, CanvasStub, Door, card, edge, frame_node  # noqa: E402
 
 BASE = shots.BASE
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -274,6 +277,127 @@ def phone(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-unt
     context.close()
 
 
+def until(page: Page, predicate, what: str, seconds: float = 10) -> None:  # type: ignore[no-untyped-def]
+    """Waits by the page's clock, not the thread's: the stub answers the app's requests only while
+    Playwright runs, and a plain sleep would starve the very request being waited for."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """Live pages: on another origin, in a sandbox without allow-same-origin, with no app-origin fallback;
+    pointing at an element and a card, the composed message as the host composes it, a page that leaves
+    its folder stopped, and a shared view that shows only an inert still copy."""
+    ru = lang == "ru"
+    stub = CanvasStub(shots.S1)
+    app_origin = "/".join(BASE.split("/")[:3])
+    door = Door(stub, app_origin)
+    stub.door_port = door.port
+    site = stub.add("Витрина" if ru else "Shop pages", {"nodes": [frame_node("web", 0, 0), frame_node("nodoor", 1400, 0, "phone"), card("note", 0, 900, "Герой крупнее" if ru else "Hero needs work", width=360)], "edges": []}, shared=True)
+    stub.no_door.add("nodoor")
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    cdn_hits: list[str] = []
+
+    def cdn(request_route) -> None:  # type: ignore[no-untyped-def]
+        cdn_hits.append(request_route.request.url)
+        request_route.fulfill(status=200, content_type="text/javascript", body="document.getElementById('cdn').textContent = 'cdn loaded';")
+
+    context.route(f"{BLOCKED}/**", cdn)
+    page = context.new_page()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    route(page, stub)
+    page.goto(f"{BASE}/canvas/{site}?session={shots.S1}&token=t&lang={lang}&scheme={SCHEME}")
+    web = page.locator(".cv-node[data-node='web']")
+    iframe = web.locator("iframe.cv-frame-page")
+    expect(iframe).to_be_visible(timeout=15000)
+    sandbox = iframe.get_attribute("sandbox") or ""
+    assert "allow-scripts" in sandbox and "allow-same-origin" not in sandbox and "allow-popups" not in sandbox and "allow-top-navigation" not in sandbox, sandbox
+    src = iframe.get_attribute("src") or ""
+    assert src.startswith(f"http://127.0.0.1:{door.port}/f/") and not src.startswith(app_origin), src
+    expect(web.locator(".cv-frame-head")).to_contain_text("index.html")
+    inner = page.frame_locator(".cv-node[data-node='web'] iframe.cv-frame-page")
+    expect(inner.locator("#hero")).to_have_text("Autumn collection")
+    until(page, lambda: any(report.get("loaded") for report in stub.reports), "the frame's load relayed to the host")
+    # The page's script from a CDN nobody allowed: refused by the browser before any request left.
+    until(page, lambda: any(BLOCKED in report.get("blocked", []) for report in stub.reports), "the blocked origin relayed")
+    expect(inner.locator("#cdn")).to_have_text("waiting for the CDN")
+    assert not cdn_hits, cdn_hits
+    # No services address: a card that says so, and no frame of any kind.
+    nodoor = page.locator(".cv-node[data-node='nodoor']")
+    expect(nodoor.locator(".cv-frame-notice")).to_contain_text("адрес сервисов" if ru else "services address")
+    expect(nodoor.locator("iframe")).to_have_count(0)
+    until(page, lambda: ("web" in [key[1] for key in stub.snapshots]), "a still copy for the shared view", 15)
+
+    # Comment mode: point at an element in the page and at a card.
+    page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+    # Dispatched rather than clicked at coordinates: the frame is drawn scaled with the board, and
+    # Playwright's hit point inside a scaled cross-origin frame lands off target.
+    inner.locator("#hero").dispatch_event("click")
+    note = page.locator(".cv-pick-note")
+    expect(note).to_be_visible()
+    expect(note).to_contain_text("#hero")
+    note.locator("textarea").fill("Крупнее" if ru else "Make it larger")
+    note.get_by_role("button", name="Добавить" if ru else "Add").click()
+    chip = page.locator(".cv-chip", has_text="index.html · #hero")
+    expect(chip).to_be_visible()
+    page.locator(".cv-node[data-node='note']").click()
+    expect(page.locator(".cv-chip", has_text="Герой крупнее" if ru else "Hero needs work")).to_be_visible()
+    # Hovering the chip outlines the element in its page.
+    chip.hover()
+    page.wait_for_timeout(400)
+    outlined = None
+    for frame in page.frames:
+        if frame.url.startswith(f"http://127.0.0.1:{door.port}/f/"):
+            outlined = frame.evaluate("[...document.documentElement.children].some((node) => node.style && node.style.zIndex === '2147483647' && node.style.display === 'block')")
+    assert outlined, "the chip's element is not outlined in its page"
+    bar = page.locator(".cv-comment textarea")
+    bar.fill("Пожалуйста, исправьте" if ru else "Please fix this")
+    preview = page.locator(".cv-compose-preview").inner_text()
+    shot(page, f"canvas-frames-{lang}-{SCHEME}")
+    bar.press("Enter")
+    until(page, lambda: len(stub.messages) == 1, "the bar's message")
+    sent = stub.messages[0]
+    assert sent["picks"][0]["selector"] == "#hero" and sent["picks"][0]["note"] == ("Крупнее" if ru else "Make it larger"), sent
+    assert "On card note" in sent["text"], sent["text"]
+    assert sent["composed"] == preview, (sent["composed"], preview)
+    expect(page.locator(".cv-sent")).to_be_visible()
+    expect(page.locator(".cv-chip")).to_have_count(0)
+
+    # A page that goes elsewhere is stopped and its address retired.
+    page.get_by_role("button", name="Работа" if ru else "Interact").click()
+    inner.locator("#leave").dispatch_event("click")
+    expect(web.locator(".cv-frame-notice")).to_contain_text("ушла из рамки" if ru else "left its frame", timeout=10000)
+    until(page, lambda: "web" in stub.revoked, "the address retired")
+
+    # The shared view: an inert still copy, never a live address.
+    token = stub.canvases[site]["share_token"]
+    page.goto(f"{BASE}/d/{token}?lang={lang}&scheme={SCHEME}")
+    still = page.locator(".cv-shared .cv-node[data-node='web'] iframe")
+    expect(still).to_have_attribute("sandbox", "")
+    assert "src" not in (still.evaluate("(node) => node.getAttributeNames()")), "a shared still copy has no address"
+    expect(page.frame_locator(".cv-shared .cv-node[data-node='web'] iframe").locator("#hero")).to_have_text("Autumn collection")
+    expect(page.locator(".cv-shared .cv-node[data-node='nodoor'] .cv-frame-notice")).to_be_visible()
+    for frame in page.locator("iframe").all():
+        assert str(door.port) not in (frame.get_attribute("src") or ""), "a live page in a shared view"
+    shot(page, f"canvas-frames-shared-{lang}-{SCHEME}")
+
+    # A phone: the frames fit in a smaller window, the bar stays at the bottom.
+    phone_page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
+    route(phone_page, stub)
+    phone_page.goto(f"{BASE}/canvas/{site}?session={shots.S1}&token=t&lang={lang}&scheme={SCHEME}")
+    expect(phone_page.locator(".cv-comment textarea")).to_be_visible()
+    assert phone_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "the frames page scrolls sideways"
+    phone_page.wait_for_timeout(1500)
+    shot(phone_page, f"canvas-frames-phone-{lang}-{SCHEME}")
+    phone_page.context.close()
+    context.close()
+    door.close()
+
+
 def run() -> int:
     expect_app(BASE)
     if SHOTS:
@@ -283,8 +407,10 @@ def run() -> int:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         for lang in langs:
-            desktop(browser, lang, errors)
-            phone(browser, lang, errors)
+            if os.environ.get("ONLY") != "frames":
+                desktop(browser, lang, errors)
+                phone(browser, lang, errors)
+            frames(browser, lang, errors)
         browser.close()
     assert not errors, errors
     return shots.UNHANDLED.report()

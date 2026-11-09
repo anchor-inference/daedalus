@@ -69,7 +69,7 @@ export type Canvas = CanvasItem & { doc: CanvasDoc; share_token: string; files: 
 export type CanvasHead = { id: string; title: string; version: number; updated_at: string; updated_by: Author };
 export type ScopeRef = { kind: Scope; id: string; name: string };
 export type CanvasListing = { scopes: ScopeRef[]; items: CanvasItem[] };
-export type SharedCanvasDoc = { title: string; version: number; updated_at: string; doc: CanvasDoc; files: CanvasFile[] };
+export type SharedCanvasDoc = { title: string; version: number; updated_at: string; doc: CanvasDoc; files: CanvasFile[]; snapshots?: Record<string, string> };
 
 export type Point = { x: number; y: number };
 export type Box = { x: number; y: number; width: number; height: number };

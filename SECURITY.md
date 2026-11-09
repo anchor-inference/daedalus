@@ -130,6 +130,17 @@ so a public service's page can use a visitor's phone pass or key cookie for anot
 plain http on a home network: it opens one service for one phone by that door only, is spent once within ten
 minutes, and has a table of its own so that it cannot be taken for a way into the app.
 
+A canvas shows agent-written pages as live frames, under `/f/` on the same door and nowhere else: on the app's
+origin the route does not exist, and an https app with no services address shows a card instead of the page.
+A frame's address is signed for one frame and one generation and expires in twelve hours; it names the app as
+the only page that may frame it. Every answer is sandboxed without `allow-same-origin`, so the page runs with no
+origin, no cookie and no storage of anyone's. Its content security policy lets it load its own folder and only
+the origins the operator allowed, once or for good; anything else is refused by the browser and reported to the
+board. What a page can still do: read every file under its root (its own folder unless the agent names a wider
+one inside the workspace, never the workspace itself) and send it to an allowed origin; navigate its own frame
+somewhere else, which the board notices and answers by blanking the frame and retiring its address, though a
+request already sent is sent; and open a WebRTC connection, which no policy governs in the browsers of today.
+
 **Tokens of the public address, and provider keys.** A provider's token, the launcher's token and the keys in
 `keyproxy.env` are files of this user on a native install. The policy refuses a command that names them, by matching
 words. On Linux with the sandbox on, a command's filesystem does not hold them, nor the copies of the keys in the

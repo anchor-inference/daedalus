@@ -1,9 +1,12 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import { changeSummary, dayLabel, groupByDay } from "./history";
 import { attachment, colorValue, edgeGeometry, facingSide, groupContents, movingSet, nearestSide, normalizeDoc, safeUrl, type CanvasDoc } from "./model";
 import { UndoStack, applyOps, compact, diffDocs, invertOps, type Op } from "./ops";
 import { TEMPLATES, templateDoc } from "./templates";
+import { frameOf, readFrameMessage } from "./frames";
+import { barPicks, barText, composeMessage, type Chip } from "./CommentBar";
 
 afterEach(() => setLang("en"));
 
@@ -147,5 +150,38 @@ describe("templates", () => {
       }
     }
     expect(templateDoc("blank")).toEqual({ nodes: [], edges: [] });
+  });
+});
+
+describe("frames", () => {
+  it("knows a live page from a file card", () => {
+    expect(frameOf({ id: "f", type: "file", file: "site/index.html", x: 0, y: 0, width: 1280, height: 800, daedalus: { frame: { device: "desktop", rev: 2 } } })).toEqual({ device: "desktop", rev: 2 });
+    expect(frameOf({ id: "f", type: "file", file: "notes.md", x: 0, y: 0, width: 100, height: 100 })).toBeNull();
+  });
+
+  it("reads a frame's message field by field and refuses what is not one", () => {
+    expect(readFrameMessage({ daedalus: "canvas-frame", type: "blocked", origin: "https://cdn.example.test" })).toEqual({ type: "blocked", origin: "https://cdn.example.test" });
+    expect(readFrameMessage({ daedalus: "canvas-frame", type: "blocked", origin: "https://cdn.example.test/x.js" })).toBeNull();
+    expect(readFrameMessage({ daedalus: "canvas-frame", type: "blocked", origin: "javascript:alert(1)" })).toBeNull();
+    expect(readFrameMessage({ daedalus: "other", type: "loaded" })).toBeNull();
+    const picked = readFrameMessage({ daedalus: "canvas-frame", type: "picked", selector: "#hero", tag: "h1", text: "x".repeat(900), html: "<h1>", rect: { x: 1, y: "2", width: Infinity, height: 4 } });
+    expect(picked).toMatchObject({ type: "picked", selector: "#hero", rect: { x: 1, y: 0, width: 0, height: 4 } });
+    expect((picked as { text: string }).text).toHaveLength(400);
+  });
+
+  it("composes the bar's message as the host does", () => {
+    const canvas = { id: "c1", title: "Shop", version: 3, doc: { nodes: [{ id: "web", type: "file" as const, file: "site/index.html", x: 0, y: 0, width: 1280, height: 800 }], edges: [] } };
+    const chips: Chip[] = [
+      { id: "1", kind: "pick", frameId: "web", page: "index.html", selector: "#hero", tag: "h1", text: "Hi", html: "<h1 id=\"hero\">Hi```</h1>", note: " Larger " },
+      { id: "2", kind: "card", nodeId: "n1", words: "Hero needs work" },
+    ];
+    expect(barText(chips, " Please ")).toBe("On card n1 «Hero needs work»:\n\nPlease");
+    expect(composeMessage(canvas, barText(chips, "Please"), barPicks(chips))).toBe([
+      "[Canvas «Shop» · canvas c1 · version 3 · /app/canvas/c1]",
+      "On frame `web` (site/index.html, 1280x800), element `#hero`:",
+      "```html\n<h1 id=\"hero\">Hi</h1>\n```",
+      "Larger",
+      "On card n1 «Hero needs work»:\n\nPlease",
+    ].join("\n\n"));
   });
 });

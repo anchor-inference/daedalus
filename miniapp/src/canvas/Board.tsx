@@ -20,6 +20,7 @@ import {
   type Box, type CanvasDoc, type CanvasEdge, type CanvasNode, type Point, type Side,
 } from "./model";
 import type { Op } from "./ops";
+import { frameOf, type Mode } from "./frames";
 
 type View = { x: number; y: number; zoom: number };
 type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -52,6 +53,15 @@ export type BoardProps = {
    *  owner holds back a newer version from elsewhere until it ends instead of swapping the card out
    *  from under a half-typed edit. */
   onBusy?: (busy: boolean) => void;
+  /** How a live page node is drawn (a frame, a still copy, a placeholder); without it, a file card. */
+  renderFrame?: (node: CanvasNode, near: boolean) => ReactNode;
+  /** Interact: clicks reach pages and cards are edited. Comment: a click points at what it hits. */
+  mode?: Mode;
+  onModeChange?: (mode: Mode) => void;
+  /** A card pointed at in comment mode. */
+  onPoint?: (node: CanvasNode) => void;
+  /** Drawn in board coordinates over everything, such as the note beside a picked element. */
+  overlay?: ReactNode;
 };
 
 const ZOOM_MIN = 0.1;
@@ -71,7 +81,7 @@ function typing(target: EventTarget | null): boolean {
   return !!element && (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.isContentEditable);
 }
 
-export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, onRedo, canUndo, canRedo, marked, compact, onBusy }: BoardProps) {
+export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, onRedo, canUndo, canRedo, marked, compact, onBusy, renderFrame, mode = "interact", onModeChange, onPoint, overlay }: BoardProps) {
   const root = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const viewRef = useRef(view);
@@ -128,7 +138,9 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
 
   const fit = useCallback((whole = true) => {
     const element = root.current;
-    const box = bounds(docRef.current.nodes);
+    // A group's label and a page's header sit above their boxes; fitted without them, the board's
+    // own toolbar covered the header of a page at the top.
+    const box = bounds(docRef.current.nodes.map((node) => (node.type === "group" || frameOf(node) ? { ...node, y: node.y - 40, height: node.height + 40 } : node)));
     if (!element) return;
     const width = element.clientWidth;
     const height = element.clientHeight;
@@ -367,6 +379,15 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
       gesture.current = null;
       return;
     }
+    if (!panning && nodeId && mode === "comment" && onPoint) {
+      const node = shown.nodes.find((item) => item.id === nodeId);
+      // A page is pointed at element by element inside its frame; its header still moves it.
+      if (node && !frameOf(node)) {
+        onPoint(node);
+        gesture.current = null;
+        return;
+      }
+    }
     if (!panning && nodeId && !readOnly && !(editing && editing.id === nodeId)) {
       const wasSelected = selected.has(nodeId);
       const additive = event.shiftKey || event.metaKey || event.ctrlKey;
@@ -599,6 +620,12 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
   const margin = 400;
   const svgBox = { x: extent.x - margin, y: extent.y - margin, width: extent.width + margin * 2, height: extent.height + margin * 2 };
   const single = selected.size === 1 ? [...selected][0] : null;
+  // The part of the plane on screen, with a screen's margin round it: a live page far outside it is a
+  // placeholder, so a board of many pages, or a phone, runs only the ones in reach.
+  const rootWidth = root.current?.clientWidth ?? 1600;
+  const rootHeight = root.current?.clientHeight ?? 1000;
+  const reach: Box = { x: (-view.x - rootWidth) / view.zoom, y: (-view.y - rootHeight) / view.zoom, width: (rootWidth * 3) / view.zoom, height: (rootHeight * 3) / view.zoom };
+  const frameBody = (node: CanvasNode) => (renderFrame && frameOf(node) ? renderFrame(node, intersects(reach, boxes.get(node.id) ?? node)) : null);
   const selectedNodes = shown.nodes.filter((node) => selected.has(node.id));
   const selectedEdges = shown.edges.filter((edge) => selected.has(edge.id));
   const style = {
@@ -610,7 +637,7 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
   return (
     <div
       ref={root}
-      className={`cv-board ${readOnly ? "read-only" : ""} ${connecting ? "connecting" : ""}`}
+      className={`cv-board ${readOnly ? "read-only" : ""} ${connecting ? "connecting" : ""} ${busy ? "busy" : ""} mode-${mode}`}
       role="application"
       aria-label={label}
       aria-roledescription={t("canvas.board")}
@@ -623,6 +650,10 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
+      // The board never scrolls: it moves by its view. Focusing a field on the plane (a card being typed,
+      // a note beside a picked element) would otherwise scroll this clipped box to bring it in, and
+      // shift every card and control on it out of place.
+      onScroll={(event) => { event.currentTarget.scrollTop = 0; event.currentTarget.scrollLeft = 0; }}
       onContextMenu={(event) => { if (!(event.target as HTMLElement).closest("a")) event.preventDefault(); }}
     >
       <div className="cv-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
@@ -652,8 +683,9 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
           );
         })}
         {others.map((node) => (
-          <NodeFrame key={node.id} node={node} box={boxes.get(node.id)!} selected={selected.has(node.id)} single={single === node.id && !readOnly} marked={marked?.has(node.id)} editing={editing?.id === node.id ? editing.kind : null} onCommit={commitEdit} fileUrl={fileUrl} />
+          <NodeFrame key={node.id} node={node} box={boxes.get(node.id)!} selected={selected.has(node.id)} single={single === node.id && !readOnly} marked={marked?.has(node.id)} editing={editing?.id === node.id ? editing.kind : null} onCommit={commitEdit} fileUrl={fileUrl} frame={frameBody(node)} />
         ))}
+        {overlay}
         {marquee && <div className="cv-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} />}
       </div>
       {!shown.nodes.length && !readOnly && (
@@ -661,6 +693,15 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
       )}
       {!readOnly && (
         <div className="cv-toolbar" data-ui role="toolbar" aria-label={t("canvas.tools")}>
+          {onModeChange && (
+            <>
+              <div className="cv-mode" role="group" aria-label={t("canvas.mode")}>
+                <button type="button" className={mode === "interact" ? "on" : ""} aria-pressed={mode === "interact"} onClick={() => onModeChange("interact")} title={t("canvas.mode.interact.hint")}>{t("canvas.mode.interact")}</button>
+                <button type="button" className={mode === "comment" ? "on" : ""} aria-pressed={mode === "comment"} onClick={() => onModeChange("comment")} title={t("canvas.mode.comment.hint")}>{t("canvas.mode.comment")}</button>
+              </div>
+              <span className="cv-toolbar-sep" />
+            </>
+          )}
           <ToolButton icon="note" label={t("canvas.add.card")} onClick={() => addCard()} />
           <ToolButton icon="link" label={t("canvas.add.link")} onClick={addLink} />
           {selected.size > 0 && <span className="cv-toolbar-sep" />}
@@ -758,22 +799,22 @@ function ToolButton({ icon, label, onClick, disabled, pressed, className }: { ic
 
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
-type FrameProps = { node: CanvasNode; box: Box; selected: boolean; single: boolean; marked?: boolean; editing: Editing["kind"] | null; onCommit: (value: string | null) => void; fileUrl: (fileId: string, name: string) => string };
+type FrameProps = { node: CanvasNode; box: Box; selected: boolean; single: boolean; marked?: boolean; editing: Editing["kind"] | null; onCommit: (value: string | null) => void; fileUrl: (fileId: string, name: string) => string; frame?: ReactNode };
 
 /** One node at its place. The place changes on every frame of a drag; the content (`NodeBody`) is
  *  memoised on the node itself, so Markdown is not rendered again while the card merely moves. */
-function NodeFrame({ node, box, selected, single, marked, editing, onCommit, fileUrl }: FrameProps) {
+function NodeFrame({ node, box, selected, single, marked, editing, onCommit, fileUrl, frame }: FrameProps) {
   const ink = colorValue(node.color);
   const shape = node.daedalus?.shape;
   return (
     <div
-      className={`cv-node cv-${node.type} ${selected ? "selected" : ""} ${marked ? "marked" : ""} ${ink ? "tinted" : ""} ${shape ? `shape-${shape}` : ""}`}
+      className={`cv-node cv-${node.type} ${frame ? "cv-live" : ""} ${selected ? "selected" : ""} ${marked ? "marked" : ""} ${ink ? "tinted" : ""} ${shape ? `shape-${shape}` : ""}`}
       data-node={node.id}
       role="group"
       aria-label={nodeLabel(node, t(`canvas.kind.${node.type}`))}
       style={{ left: box.x, top: box.y, width: box.width, height: box.height, ...(ink ? { "--cv-ink": ink } as CSSProperties : {}) }}
     >
-      {node.type === "group" ? (
+      {frame ? frame : node.type === "group" ? (
         <div className="cv-group-label">{editing === "label" ? <InlineField value={node.label ?? ""} label={t("canvas.group.label")} onDone={onCommit} /> : node.label || (selected ? t("canvas.group.unnamed") : "")}</div>
       ) : editing === "text" ? (
         <TextField value={node.text ?? ""} onDone={onCommit} />
@@ -916,8 +957,8 @@ function InlineField({ value, label, placeholder, onDone }: { value: string; lab
   };
   return (
     <input
+      ref={(element) => { if (element && !done.current && document.activeElement !== element) element.focus({ preventScroll: true }); }}
       className="cv-inline-field"
-      autoFocus
       defaultValue={value}
       placeholder={placeholder}
       aria-label={label}

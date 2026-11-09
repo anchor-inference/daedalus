@@ -5,9 +5,11 @@ import { t } from "../i18n";
 import { Board } from "./Board";
 import { normalizeDoc, type SharedCanvasDoc } from "./model";
 import { publicAttachmentUrl } from "./parts";
+import { SnapshotFrame } from "./frames";
 import "./canvas.css";
 
-/** A canvas someone was sent a link to: read only, the latest version, pan and zoom and nothing else. */
+/** A canvas someone was sent a link to: read only, the latest version, pan and zoom and nothing else.
+ *  A live page is shown as the still copy the board last took, never as a running page. */
 export function SharedCanvas({ token }: { token: string }) {
   const [canvas, setCanvas] = useState<SharedCanvasDoc | null>(null);
   const [failed, setFailed] = useState(false);
@@ -30,7 +32,7 @@ export function SharedCanvas({ token }: { token: string }) {
         </div>
         <span className="cv-shared-made">{t("canvas.shared.made")}</span>
       </header>
-      <Board doc={canvas.doc} label={canvas.title} readOnly fileUrl={(fileId) => publicAttachmentUrl(token, fileId)} />
+      <Board doc={canvas.doc} label={canvas.title} readOnly fileUrl={(fileId) => publicAttachmentUrl(token, fileId)} renderFrame={(node) => <SnapshotFrame node={node} token={token} capturedAt={canvas.snapshots?.[node.id]} />} />
     </div>
   );
 }

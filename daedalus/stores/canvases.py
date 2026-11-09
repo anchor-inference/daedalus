@@ -402,7 +402,9 @@ class CanvasStore:
 
     async def delete(self, canvas_id: str) -> None:
         found = await self.require(canvas_id)
-        await self.db.execute("DELETE FROM canvases WHERE id=?", (canvas_id,))
+        async with self.db.transaction() as conn:
+            await conn.execute("DELETE FROM canvases WHERE id=?", (canvas_id,))
+            await conn.execute("DELETE FROM canvas_origins WHERE canvas_id=?", (canvas_id,))
         await self._announce(canvas_id, Scope(found["scope"], found["scope_id"]), "deleted", by="operator")
 
     async def _get_in(self, conn: aiosqlite.Connection, canvas_id: str) -> dict[str, Any]:
@@ -418,6 +420,10 @@ class CanvasStore:
         )
         if cursor.rowcount == 0:
             raise NotFound(canvas_id)
+        # A frame whose node left the board stops answering at once: its row is what the door checks.
+        kept = json.dumps([node["id"] for node in doc["nodes"]])
+        for table in ("canvas_frames", "canvas_snapshots"):
+            await conn.execute(f"DELETE FROM {table} WHERE canvas_id=? AND node_id NOT IN (SELECT value FROM json_each(?))", (canvas_id, kept))
 
     # -- history ---------------------------------------------------------------------------------------
 

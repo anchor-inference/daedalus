@@ -13,6 +13,12 @@ file the operator can download and open at excalidraw.com, both in a group besid
 diagram revisions are not carried over: they are Excalidraw scenes, and nothing here draws those any
 more. The canvas history starts at the conversion, with a revision that says what was lost.
 
+Two more tables serve live frames (``canvas_frames``): which folder a frame's page is served from,
+which the canvas document must not hold because an exported file would hand out a path of this
+machine, a frame's last static snapshot (what a shared view shows in its place, ``canvas_snapshots``),
+and the origins the operator allowed frames to load from. An origin allowed on every canvas
+is stored under the canvas id ``*``, which is why that column has no foreign key; a canvas's own rows
+go when it is deleted (``CanvasStore.delete``).
 """
 
 from __future__ import annotations
@@ -69,6 +75,31 @@ CREATE TABLE IF NOT EXISTS canvas_files (
     data BLOB NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (canvas_id, id)
+);
+CREATE TABLE IF NOT EXISTS canvas_frames (
+    canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    generation INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (canvas_id, node_id)
+);
+CREATE TABLE IF NOT EXISTS canvas_snapshots (
+    canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    html TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    captured_at TEXT NOT NULL,
+    PRIMARY KEY (canvas_id, node_id)
+);
+CREATE TABLE IF NOT EXISTS canvas_origins (
+    canvas_id TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (canvas_id, origin)
 );
 """
 

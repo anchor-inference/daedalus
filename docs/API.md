@@ -75,7 +75,11 @@ brings one back as a new version. `GET …/export` is the `.canvas` file laid ou
 writes it; `POST /api/canvases/import` with `{"title", "scope", "scope_id", "text"}` reads one.
 `POST …/share` answers a public link, `/app/d/<token>`, read through `GET /api/public/canvases/{token}`.
 Each change is announced live as `canvas.changed`. The agent works on the same canvases through its
-on-demand `canvas` tool group.
+on-demand `canvas` tool group. A file node with `daedalus.frame` is a live page of the agent's
+workspace: `POST …/frames/{node}/address` answers its signed address on the services door (or
+`{"needs_door": true}` when there is none), `/api/canvases/{id}/origins` lists, allows and removes the
+other sites frames may load from, and `POST …/message` with `{"text", "picks"}` sends the comment bar's
+words, and the elements the operator pointed at, into the canvas's chat.
 
 **Everything that happens, as one stream.** `GET /api/events` is a server-sent event stream of what
 happens to sessions, terminals, staff and notifications. It opens with a `hello` frame carrying

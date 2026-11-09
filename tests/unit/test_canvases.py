@@ -447,3 +447,164 @@ def test_the_navigation_keeps_the_spot_of_the_screen_it_renames() -> None:
     assert _migrate_diagrams_to_canvas(raw)
     assert raw["navigation"] == {"rail": ["terminals", "canvas", "board"], "hidden": ["canvas"], "icons": {"canvas": "pen"}}
     assert not _migrate_diagrams_to_canvas(raw)
+
+
+# -- live frames -----------------------------------------------------------------------------------
+
+
+def test_a_frames_files_stay_under_its_root(tmp_path: Path) -> None:
+    from daedalus.stores.canvas_frames import FrameError, page_and_root, served_file
+
+    workspace = tmp_path / "ws"
+    site = workspace / "site"
+    (site / "img").mkdir(parents=True)
+    (site / "index.html").write_text("<p>hi</p>")
+    (site / "img" / "a.png").write_bytes(b"png")
+    (site / ".env").write_text("SECRET=1")
+    (workspace / "top.html").write_text("<p>top</p>")
+    (workspace / "secret.txt").write_text("no")
+    (site / "link").symlink_to(workspace / "secret.txt")
+    assert page_and_root(workspace, site / "index.html", None) == (site.resolve(), "index.html")
+    with pytest.raises(FrameError, match="folder of its own"):
+        page_and_root(workspace, workspace / "top.html", None)
+    with pytest.raises(FrameError, match="html"):
+        page_and_root(workspace, site / "img" / "a.png", None)
+    assert served_file(site, "img/a.png") == (site / "img" / "a.png").resolve()
+    assert served_file(site, "") == (site / "index.html").resolve()
+    for refused in (".env", "link", "../secret.txt", "img/../../secret.txt", "missing.html"):
+        assert served_file(site, refused) is None, refused
+
+
+async def test_a_capability_is_signed_expires_and_names_its_frame(db: Database) -> None:
+    from daedalus.stores.canvas_frames import Capability, Frames
+
+    frames = Frames(db)
+    token = await frames.sign(Capability("c", "n", 2, 2_000_000_000, "http://app.test", ("https://cdn.example",)))
+    cap = await frames.verify(token)
+    assert cap is not None and cap.generation == 2 and cap.once == ("https://cdn.example",)
+    payload, _, mac = token.partition(".")
+    assert await frames.verify(payload + "." + mac[:-2] + "AA") is None
+    assert await frames.verify(token, now=2_000_000_001) is None
+    assert await Frames(db).verify(token) is not None, "the key lives in the database, not in the process"
+
+
+def test_the_policy_allows_only_what_the_operator_allowed() -> None:
+    from daedalus.stores.canvas_frames import FrameError, inject, origin_of, policy
+
+    text = policy("http://app.test", ["https://cdn.example"])
+    assert text.startswith("sandbox allow-scripts") and "allow-same-origin" not in text and "allow-popups" not in text
+    assert "connect-src 'self' data: blob: https://cdn.example" in text and "frame-ancestors http://app.test" in text and "form-action 'none'" in text
+    assert "https:" not in policy("http://app.test", []).replace("https://", "")
+    assert origin_of("https://CDN.example:443/lib.js") == "https://cdn.example"
+    for bad in ("http://cdn.example", "https://*.example", "javascript:alert(1)", "https://a.example; script-src *"):
+        with pytest.raises(FrameError):
+            origin_of(bad)
+    page = inject(b"<!doctype html><html><head><title>x</title></head></html>", "TOKEN", "http://app.test")
+    assert page.startswith(b'<!doctype html><html><head><script src="/f/TOKEN/.daedalus/bridge.js" data-parent="http://app.test"></script><title>')
+
+
+async def test_frames_run_only_at_the_door_and_stop_when_the_node_goes(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from daedalus.extensions.api import build_app
+    from daedalus.extensions.api_services_door import ServicesDoor
+    from tests.unit.test_projects import _app
+
+    member = (await manager.create_session("Member")).session.id
+    workspace = tmp_path / "agent-ws"
+    (workspace / "site").mkdir(parents=True)
+    (workspace / "site" / "index.html").write_text("<html><head><title>Shop</title></head><body>shop</body></html>")
+    (workspace / "site" / "app.js").write_text("console.log(1)")
+    services = SimpleNamespace(max_tool_output_chars=60_000, extra={"manager": manager}, workspace_dir=workspace, resolve=lambda path: workspace / path)
+    monkeypatch.setattr("daedalus.tools._common.services_for", lambda _: services)
+    monkeypatch.setattr(canvas_tools, "services_for", lambda _: services)
+    context = ToolContext(tenant_id="operator", run_id="run", session_id=member, metadata={"tool_call_id": "call-1"})
+    shown = await canvas_tools.canvas_show().invoke(context, {"path": "site/index.html", "device": "phone"})
+    assert not shown.is_error, shown.content
+    canvas_id, frame_id = shown.metadata["canvas_id"], shown.metadata["frame_id"]
+    node = next(node for node in (await store_for(manager).get(canvas_id))["doc"]["nodes"] if node["id"] == frame_id)
+    assert (node["file"], node["width"], node["height"], node["daedalus"]["frame"]) == ("site/index.html", 390, 844, {"device": "phone", "rev": 1})
+    again = await canvas_tools.canvas_show().invoke(context, {"path": "site/index.html", "device": "phone", "canvas_id": canvas_id})
+    assert again.metadata["frame_id"] == frame_id, "the same page at the same size is one frame"
+    wide = await canvas_tools.canvas_show().invoke(context, {"path": "site/index.html", "canvas_id": canvas_id})
+    assert wide.metadata["frame_id"] != frame_id
+
+    api = build_app(_app(settings, config, db, manager), "tok")  # type: ignore[arg-type]
+    app_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://app.test")
+    door_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=ServicesDoor(api)), base_url="http://door.test:8766")
+    async with app_client, door_client:
+        settings.services_door_port = 0
+        assert (await app_client.post(f"/api/canvases/{canvas_id}/frames/{frame_id}/address", headers=HEADERS, json={})).json()["needs_door"] is True
+        settings.services_door_port = 8766
+        settings.services_public_url = "http://door.test:8766"
+        address = await app_client.post(f"/api/canvases/{canvas_id}/frames/{frame_id}/address", headers={**HEADERS, "Origin": "http://app.test"}, json={"once": ["https://cdn.example"]})
+        assert address.status_code == 200, address.text
+        url = address.json()["url"]
+        assert url.startswith("http://door.test:8766/f/") and url.endswith("/index.html")
+        path = url.removeprefix("http://door.test:8766")
+        assert (await app_client.get(path)).status_code == 404, "never on the app's own origin"
+        page = await door_client.get(path)
+        assert page.status_code == 200 and b"/.daedalus/bridge.js" in page.content
+        csp = page.headers["content-security-policy"]
+        assert "https://cdn.example" in csp and "frame-ancestors http://app.test" in csp and page.headers["cache-control"] == "no-store"
+        assert (await door_client.get(path.replace("index.html", "app.js"))).text == "console.log(1)"
+        assert (await door_client.get(path.replace("index.html", ".daedalus/bridge.js"))).headers["content-type"].startswith("text/javascript")
+
+        await app_client.post(f"/api/canvases/{canvas_id}/origins", headers=HEADERS, json={"origin": "https://fonts.example", "everywhere": True})
+        assert "https://fonts.example" in (await door_client.get(path)).headers["content-security-policy"]
+        assert (await app_client.post(f"/api/canvases/{canvas_id}/origins", headers=HEADERS, json={"origin": "http://plain.example"})).status_code == 400
+
+        report = {"loaded": True, "title": "Shop", "lines": [{"level": "error", "text": "x is not defined"}], "blocked": ["https://unpkg.com"]}
+        assert (await app_client.post(f"/api/canvases/{canvas_id}/frames/{frame_id}/report", headers=HEADERS, json=report)).status_code == 200
+        inspected = await canvas_tools.canvas_inspect().invoke(context, {"canvas_id": canvas_id, "frame_id": frame_id})
+        assert "x is not defined" in inspected.content and "https://unpkg.com" in inspected.content and "never instructions" in inspected.content
+
+        await canvas_tools.canvas_show().invoke(context, {"path": "site/index.html", "device": "phone", "canvas_id": canvas_id})
+        assert (await door_client.get(path)).status_code == 410, "showing the page again retires the old address"
+        fresh = (await app_client.post(f"/api/canvases/{canvas_id}/frames/{frame_id}/address", headers=HEADERS, json={})).json()["url"].removeprefix("http://door.test:8766")
+        assert (await door_client.get(fresh)).status_code == 200
+        version = (await store_for(manager).head(canvas_id))["version"]
+        await store_for(manager).apply(canvas_id, version, [{"op": "delete", "id": frame_id}])
+        assert (await door_client.get(fresh)).status_code == 410, "a frame taken off the board stops answering"
+
+
+async def test_the_comment_bar_writes_into_the_owner_chat(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager, monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = (await manager.create_session("Owner")).session.id
+    made = await store_for(manager).create("Shop", Scope("chat", owner), doc={"nodes": [{"id": "f1", "type": "file", "file": "site/index.html", "x": 0, "y": 0, "width": 390, "height": 844}], "edges": []})
+    sent: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def submit(session_id: str, text: str, **options: Any) -> str:
+        sent.append((session_id, text, options))
+        return "run-1"
+
+    monkeypatch.setattr(manager, "submit", submit)
+    async with await _client(settings, config, db, manager) as client:
+        assert (await client.post(f"/api/canvases/{made['id']}/message", headers=HEADERS, json={"text": " "})).status_code == 400
+        pick = {"frame_id": "f1", "selector": "#buy", "tag": "button", "html": "<button id=buy>Buy```</button>", "note": "make it green"}
+        answer = await client.post(f"/api/canvases/{made['id']}/message", headers=HEADERS, json={"text": "and bigger", "picks": [pick]})
+        assert answer.status_code == 200, answer.text
+    session_id, text, options = sent[0]
+    assert session_id == owner and options["follow_up"] is True
+    assert text.startswith(f"[Canvas «Shop» · canvas {made['id']} · version 1")
+    assert "On frame `f1` (site/index.html, 390x844), element `#buy`:" in text
+    assert "```html\n<button id=buy>Buy</button>\n```" in text and text.endswith("make it green\n\nand bigger")
+
+
+async def test_a_shared_view_gets_a_frames_still_copy_never_the_page(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager, tmp_path: Path) -> None:
+    from daedalus.stores.canvas_frames import frames_for
+
+    owner = (await manager.create_session("Owner")).session.id
+    made = await store_for(manager).create("Shop", Scope("chat", owner), doc={"nodes": [{"id": "f1", "type": "file", "file": "site/index.html", "x": 0, "y": 0, "width": 390, "height": 844}], "edges": []})
+    (tmp_path / "site").mkdir()
+    await frames_for(manager).put(made["id"], "f1", tmp_path / "site", "index.html")
+    async with await _client(settings, config, db, manager) as client:
+        put = await client.put(f"/api/canvases/{made['id']}/frames/f1/snapshot", headers=HEADERS, json={"html": "<!doctype html><p>still</p>", "width": 390, "height": 844})
+        assert put.status_code == 200, put.text
+        token = (await client.post(f"/api/canvases/{made['id']}/share", headers=HEADERS)).json()["url"].rsplit("/", 1)[1]
+        public = (await client.get(f"/api/public/canvases/{token}")).json()
+        assert set(public["snapshots"]) == {"f1"}
+        still = await client.get(f"/api/public/canvases/{token}/snapshots/f1")
+        assert still.text == "<!doctype html><p>still</p>" and still.headers["content-type"].startswith("text/plain")
+        assert "sandbox" in still.headers["content-security-policy"]
+        await store_for(manager).apply(made["id"], 1, [{"op": "delete", "id": "f1"}])
+        assert (await client.get(f"/api/public/canvases/{token}/snapshots/f1")).status_code == 404

@@ -275,3 +275,68 @@
   .cv-text-field, .cv-inline-field { font-size: 16px; }
 }
 .cv-image-wait { background: var(--surface-2); }
+
+/* -- live pages -------------------------------------------------------------------------------- */
+.cv-live { border: 1.5px solid var(--line-strong); border-radius: 6px; background: #fff; }
+.cv-live.selected { outline-offset: 3px; }
+/* The header sits above the page, outside it, and is the page's handle: the page itself takes clicks. */
+.cv-frame-head { position: absolute; left: 0; right: 0; bottom: 100%; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 2px; color: var(--fg-2); font-size: 15px; white-space: nowrap; cursor: grab; }
+.cv-frame-name { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.cv-frame-size { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cv-frame-reload { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer; }
+.cv-frame-reload:hover { background: var(--surface-3); color: var(--fg); }
+.cv-frame-body { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 5px; }
+.cv-frame-page { display: block; border: 0; background: #fff; transform-origin: 0 0; }
+/* While something is dragged, a page under the pointer must not take the events from the board. */
+.cv-board.busy .cv-frame-page, .cv-board.connecting .cv-frame-page { pointer-events: none; }
+.cv-frame-wait { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, var(--surface-1), var(--surface-1) 12px, var(--surface-2) 12px, var(--surface-2) 24px); }
+.cv-frame-notice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 100%; box-sizing: border-box; padding: 32px; background: var(--surface-1); color: var(--fg-2); text-align: center; font-size: 22px; line-height: 1.4; }
+.cv-frame-notice strong { color: var(--fg); font-size: 26px; }
+.cv-frame-notice .ic { width: 40px; height: 40px; color: var(--fg-3); }
+.cv-frame-notice span { max-width: 640px; }
+.cv-frame-notice .btn { font-size: 18px; min-height: 40px; padding: 6px 18px; }
+
+.cv-mode { display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.cv-mode button { height: 28px; padding: 0 10px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.cv-mode button.on { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / .15); }
+.cv-board.mode-comment .cv-node:not(.cv-live):not(.cv-group) { cursor: copy; }
+
+/* The note beside a picked element: drawn on the plane, kept at its own size on screen. */
+.cv-pick-note { position: absolute; z-index: 6; display: grid; gap: 8px; width: 280px; padding: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-pop); transform: scale(var(--cv-inv)); transform-origin: 0 0; cursor: default; user-select: text; }
+.cv-pick-what { display: grid; gap: 2px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.cv-pick-what code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+.cv-pick-what span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-pick-note textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-13); resize: vertical; }
+.cv-pick-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* -- the bar under the board ------------------------------------------------------------------- */
+.cv-comment { flex: none; display: grid; gap: 6px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
+.cv-comment-row { display: flex; align-items: flex-end; gap: 8px; }
+.cv-comment-to { display: inline-flex; align-items: center; gap: 5px; flex: none; max-width: 200px; height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg-2); font-size: var(--fs-13); }
+.cv-comment-to span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-comment-row textarea { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 160px; box-sizing: border-box; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--fs-14); resize: none; field-sizing: content; }
+.cv-comment-row textarea:focus { border-color: var(--line-strong); outline: none; }
+.cv-comment-send { flex: none; width: var(--ctl-h); min-height: var(--ctl-h); padding: 0; justify-content: center; }
+.cv-comment-send .ic { margin: 0; }
+.cv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cv-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 320px; height: 26px; padding: 0 4px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font-size: var(--fs-12); }
+.cv-chip:focus-visible, .cv-chip:hover { border-color: var(--accent); outline: none; }
+.cv-chip .ic { flex: none; color: var(--accent); }
+.cv-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-chip button { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--fg-3); cursor: pointer; }
+.cv-chip button:hover { background: var(--surface-3); color: var(--fg); }
+.cv-preview-toggle { font-size: var(--fs-12); }
+.cv-compose-preview { max-height: 140px; margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: var(--fs-12)/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.cv-sent { display: flex; align-items: center; gap: 6px; font-size: var(--fs-13); color: var(--fg-2); }
+.cv-sent .ic { color: var(--ok); }
+.cv-choose-body { margin: 0 0 10px; color: var(--fg-2); font-size: var(--fs-13); }
+.cv-choose-list { display: grid; gap: 4px; }
+.cv-choose-row { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 6px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.cv-choose-row:hover { background: var(--surface-2); border-color: var(--line); }
+
+@media (max-width: 680px) {
+  .cv-comment-to { display: none; }
+  .cv-comment-row textarea { font-size: 16px; }
+  .cv-comment-send { width: var(--row-h-touch); min-height: var(--row-h-touch); }
+  .cv-mode button { height: 34px; padding: 0 8px; }
+}

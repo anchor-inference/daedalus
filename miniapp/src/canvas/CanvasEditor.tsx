@@ -23,8 +23,10 @@ import { copyText, useCopied } from "../ui/components";
 import { relTimeLong } from "../format";
 import { Board } from "./Board";
 import { changeSummary, clockTime, groupByDay, type RevisionItem } from "./history";
-import { normalizeDoc, nodeLabel, type Canvas, type CanvasDoc, type CanvasHead } from "./model";
+import { newId, normalizeDoc, nodeLabel, type Canvas, type CanvasDoc, type CanvasHead, type CanvasNode } from "./model";
 import { UndoStack, applyOps, compact, type Op } from "./ops";
+import { CommentBar, cardWords, type Chip } from "./CommentBar";
+import { FrameContext, LiveFrame, StillFrame, frameOf, pageName, useFrameHost, type Mode, type Picked } from "./frames";
 import { CanvasThumb, attachmentUrl, download, fileName, pickCanvasFile } from "./parts";
 import "./canvas.css";
 
@@ -354,6 +356,57 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
   const sharePanel = <SharePanel id={id} title={meta.title} token={meta.share_token} onToken={(token) => setMeta((current) => ({ ...current, share_token: token, shared: !!token }))} toast={toast} />;
   const fileUrl = useCallback((fileId: string) => attachmentUrl(id, fileId), [id]);
   const marked = useMemo(() => new Set(conflict?.ids ?? []), [conflict]);
+
+  // -- live frames, pointing and the bar ----------------------------------------------------------
+  const [mode, setMode] = useState<Mode>("interact");
+  const [chips, setChips] = useState<Chip[]>([]);
+  const [picking, setPicking] = useState<{ frameId: string; picked: Picked } | null>(null);
+  const [highlight, setHighlight] = useState<{ frameId: string; selector: string } | null>(null);
+  const [originsVersion] = useState(0);
+  // Origins allowed for one load of one frame, keyed by the frame and the time the agent showed it:
+  // they live in this window only, and showing the page again asks again.
+  const once = useRef(new Map<string, string[]>());
+  const [onceVersion, setOnceVersion] = useState(0);
+  const blocked = useRef(new Map<string, Set<string>>());
+  const onceKey = useCallback((frameId: string) => {
+    const node = docRef.current.nodes.find((item) => item.id === frameId);
+    return `${frameId}@${node ? frameOf(node)?.rev ?? 0 : 0}`;
+  }, []);
+  const onceFor = useCallback((frameId: string) => once.current.get(onceKey(frameId)) ?? [], [onceKey, onceVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onPicked = useCallback((frameId: string, picked: Picked) => {
+    if (mode === "comment") setPicking({ frameId, picked });
+  }, [mode]);
+  const onBlocked = useCallback((frameId: string, origin: string) => {
+    const seen = blocked.current.get(frameId) ?? new Set<string>();
+    seen.add(origin);
+    blocked.current.set(frameId, seen);
+  }, []);
+  const frameHost = useFrameHost({ canvasId: id, mode, highlight, originsVersion, onPicked, onBlocked, onceFor });
+  const renderFrame = useCallback((node: CanvasNode, near: boolean) => <LiveFrame node={node} near={near} />, []);
+  const onPoint = useCallback((node: CanvasNode) => {
+    setChips((current) => (current.some((chip) => chip.kind === "card" && chip.nodeId === node.id) ? current : [...current, { id: newId(), kind: "card", nodeId: node.id, words: cardWords(node) }]));
+  }, []);
+  const changeMode = useCallback((next: Mode) => {
+    setMode(next);
+    if (next === "interact") setPicking(null);
+  }, []);
+  const removeChip = useCallback((chipId: string | null) => {
+    setChips((current) => (chipId === null ? [] : current.filter((chip) => chip.id !== chipId)));
+    setHighlight(null);
+  }, []);
+  const pendingNode = picking ? doc.nodes.find((node) => node.id === picking.frameId) : undefined;
+  const overlay = picking && pendingNode ? (
+    <PickNote
+      node={pendingNode}
+      picked={picking.picked}
+      onCancel={() => setPicking(null)}
+      onAdd={(note) => {
+        const { rect: _rect, ...element } = picking.picked;
+        setChips((current) => [...current, { id: newId(), kind: "pick", frameId: picking.frameId, page: pageName(pendingNode), note, ...element }]);
+        setPicking(null);
+      }}
+    />
+  ) : null;
   const conflictNames = useMemo(() => {
     if (!conflict) return "";
     const names = conflict.ids.map((item) => {
@@ -397,7 +450,9 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
         {/* The preview of an earlier version lies over the board only, never under the history drawer
             beside it, whose rows choose what it shows. */}
         <div className="cv-board-wrap">
-          <Board doc={doc} label={meta.title} fileUrl={fileUrl} onOps={onOps} onUndo={onUndo} onRedo={onRedo} canUndo={undoState.undo} canRedo={undoState.redo} marked={marked} compact={phone} onBusy={onBusy} />
+          <FrameContext.Provider value={frameHost}>
+            <Board doc={doc} label={meta.title} fileUrl={fileUrl} onOps={onOps} onUndo={onUndo} onRedo={onRedo} canUndo={undoState.undo} canRedo={undoState.redo} marked={marked} compact={phone} onBusy={onBusy} renderFrame={renderFrame} mode={mode} onModeChange={changeMode} onPoint={onPoint} overlay={overlay} />
+          </FrameContext.Provider>
           {selected !== null && <RevisionPreview id={id} version={selected} current={selected === meta.version} onRestore={() => void restore(selected)} onClose={() => setSelected(null)} />}
         </div>
         {historyOpen && (
@@ -413,6 +468,15 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
           />
         )}
       </div>
+      <CommentBar
+        canvas={meta}
+        doc={doc}
+        chips={chips}
+        onRemove={removeChip}
+        onHighlight={(chip) => setHighlight(chip && chip.kind === "pick" ? { frameId: chip.frameId, selector: chip.selector } : null)}
+        onOwner={(sessionId) => setMeta((current) => ({ ...current, owner_session_id: sessionId }))}
+        toast={toast}
+      />
       {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="right" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
       {shareOpen && phone && <Sheet title={t("canvas.share")} onClose={() => setShareOpen(false)} size="narrow">{sharePanel}</Sheet>}
     </div>
@@ -529,7 +593,37 @@ function RevisionPreview({ id, version, current, onRestore, onClose }: { id: str
         <button className="btn small" onClick={onClose}>{t("canvas.return")}</button>
         {!current && <button className="btn small primary" disabled={!revision} onClick={onRestore}><Icon name="undo" size={14} />{t("canvas.restore")}</button>}
       </div>
-      {revision && <Board key={version} doc={revision.doc} label={revision.title} readOnly fileUrl={(fileId) => attachmentUrl(id, fileId)} />}
+      {revision && <Board key={version} doc={revision.doc} label={revision.title} readOnly fileUrl={(fileId) => attachmentUrl(id, fileId)} renderFrame={(node) => <StillFrame node={node} />} />}
+    </div>
+  );
+}
+
+/** The note beside an element picked in a frame, drawn in board coordinates next to the element and
+ *  kept at its own size on screen whatever the zoom. */
+function PickNote({ node, picked, onAdd, onCancel }: { node: CanvasNode; picked: Picked; onAdd: (note: string) => void; onCancel: () => void }) {
+  const [note, setNote] = useState("");
+  const x = node.x + Math.max(0, Math.min(node.width, picked.rect.x + picked.rect.width)) + 12;
+  const y = node.y + Math.max(0, Math.min(node.height, picked.rect.y));
+  return (
+    <div className="cv-pick-note" data-ui role="dialog" aria-label={t("canvas.pick.title")} style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
+      <div className="cv-pick-what"><code>{picked.selector || picked.tag}</code>{picked.text && <span>{picked.text}</span>}</div>
+      <textarea
+        ref={(element) => { if (element && document.activeElement !== element && !element.dataset.focused) { element.dataset.focused = "1"; element.focus({ preventScroll: true }); } }}
+        rows={3}
+        value={note}
+        placeholder={t("canvas.pick.placeholder")}
+        aria-label={t("canvas.pick.placeholder")}
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Escape") onCancel();
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onAdd(note);
+        }}
+      />
+      <div className="cv-pick-actions">
+        <button type="button" className="btn small" onClick={onCancel}>{t("common.cancel")}</button>
+        <button type="button" className="btn small primary" onClick={() => onAdd(note)}>{t("canvas.pick.add")}</button>
+      </div>
     </div>
   );
 }
