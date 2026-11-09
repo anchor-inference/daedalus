@@ -207,6 +207,22 @@ export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[
   return { rail: railItems, more: sections, drawer: { agents, orchestration }, phoneMore, shown, catalogue: all, hidden };
 }
 
+/** What the More launcher draws for one surface: the desktop's rail beside it, or a phone drawer.
+ *
+ *  `catalogue` is every shown item, those the surface already shows first and in its order, then the
+ *  rest in the menu's order: the launcher lists everything, the rail's items included, so it is a
+ *  table of contents rather than a list of leftovers, and `placed` is what its dot marks. `fallback`
+ *  is what Frequent offers before it has learned anything: the items the surface does not show,
+ *  which are the ones the operator needs the launcher for. */
+export function launcherLayout(nav: ResolvedNav, placedItems: NavItem[]): { catalogue: NavItem[]; placed: Set<string>; fallback: string[] } {
+  const placed = new Set(placedItems.map((it) => it.id));
+  const shown = new Set(nav.shown.map((it) => it.id));
+  const first = placedItems.filter((it) => shown.has(it.id));
+  const catalogue = [...first, ...nav.shown.filter((it) => !placed.has(it.id))];
+  const unplaced = [...nav.more.flatMap((g) => g.items), ...nav.phoneMore, ...nav.shown].map((it) => it.id).filter((id) => !placed.has(id));
+  return { catalogue, placed, fallback: [...new Set(unplaced)] };
+}
+
 /** The id of the item the route stands on: a screen's name, or `page:<slug>`. */
 export function currentId(screen: Screen, detail: string | null): string {
   return screen === "page" && detail ? pageId(detail) : screen;

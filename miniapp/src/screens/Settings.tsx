@@ -23,8 +23,8 @@ import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { describeIntegration, type IntegrationRow } from "../integrationHealth";
-import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/index";
-import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
+import { Dropdown, MultiDropdown, Segmented, Switch } from "../ui/index";
+import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
 import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
@@ -49,7 +49,8 @@ import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from
 import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
-import { SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
+import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
+import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
 
 /** The answer languages the page offers; any other the configuration names is shown as it is written,
  *  since the prompt takes the name as it stands ("Always answer the operator in …"). */
@@ -93,6 +94,12 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
       </div>
     </div>
   );
+}
+
+/** What a row needs to say it was changed. The default is the value the page falls back to when the
+ *  host sends none — the one shipped value the app can see — so only rows with such a fallback use it. */
+function shipped<T>(value: T, fallback: T, reset: () => void, shown = String(fallback)): Changed {
+  return value === fallback ? {} : { changed: true, defaultText: shown, onReset: reset };
 }
 
 /** A preset as the model picker names it: its label, or provider/model when it has none. */
@@ -1072,7 +1079,9 @@ const MOVED: Record<string, { to: Section; anchor?: string }> = {
   browser: { to: "environments", anchor: "browser-sessions" },
 };
 
-export function SettingsScreen({ toast, section }: { toast: (t: string) => void; section?: string | null }) {
+/** Settings: a dialog over the screen it was opened from on a desktop, a full-screen stack of two
+ *  levels on a phone. `onClose` is the shell's way back to that screen. */
+export function SettingsScreen({ toast, section, onClose }: { toast: (t: string) => void; section?: string | null; onClose?: () => void }) {
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
   // `?add=1` on the models section opens the add sheet straight away: the composer's model picker
@@ -1085,6 +1094,16 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const [status, setStatus] = useState<any>(null);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
+  const dialog = useRef<HTMLDivElement>(null);
+  const searchField = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLElement>(null);
+  // Between 1024 and 1180 px the list of sections is a column of icons, so the section keeps the width
+  // it needs; it opens out to its full width while the search is in use.
+  const narrow = useMedia("(max-width: 1180px)");
+  const [opened, setOpened] = useState(false);
+  const close = onClose ?? (() => navigate(modeHome(storedMode(), wide)));
+  useDialogKeys({ dialog, search: searchField, query, clear: () => setQuery(""), onClose: close });
+  const covered = useCovered();
   const moved = section ? MOVED[section] : undefined;
   // The public address is the native installation's alone, and whether this is one only the host knows.
   const native = useQuery<PublicAddress>(ADDRESS, { staleMs: 20000 }).data?.native;
@@ -1123,7 +1142,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     if (!target || !shown) return;
     if (shown === "models") setModelsTab(target.startsWith("providers.") ? "providers" : "my");
     let cancelled = false;
-    void revealSetting(target).then(() => {
+    void revealSetting(target, { root: dialog.current ?? document }).then(() => {
       if (!cancelled) clearSettingTarget();
     });
     return () => {
@@ -1211,67 +1230,106 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     }
   }
 
-  const needle = query.trim().toLowerCase();
-  const matches = (id: Section | "language") => {
-    const label = id === "language" ? t("settings.sec.language") : sectionLabel(id);
-    const hint = id === "language" ? t("lang.hint") : t(`settings.sec.${id}.hint`);
-    return !needle || `${label} ${hint}`.toLowerCase().includes(needle) || (id !== "language" && matchFields(needle, id).length > 0);
+  const needle = query.trim();
+  // The desktop application's own settings are listed only in its window, and the public address
+  // only by an installation that says it is native, which a browser on a phone can be looking at too.
+  const visible = (id: Section) => (id !== "desktop" || !!window.daedalus?.desk) && (id !== "address" || !!native);
+  const fields = needle ? matchFields(needle).filter((field) => visible(field.section as Section)) : [];
+  const fieldsOf = (id: Section) => fields.filter((field) => field.section === id);
+  const titled = (id: Section) => {
+    const entry = INDEX_SECTIONS.find((item) => item.id === id);
+    const words = [sectionLabel(id), t(`settings.sec.${id}.hint`), ...(entry ? [entry.title.en, entry.title.ru, ...entry.synonyms] : [])];
+    return words.join("\n").toLowerCase().includes(needle.toLowerCase());
   };
-  const home = modeHome(storedMode(), wide);
-  const index = (
-    <div className="settings-index">
-      <a className="settings-back" href={home} onClick={(e) => go(e, home)}>
-        <Icon name="back" size={16} /> {t("settings.back")}
+  const hits = needle ? SECTIONS.filter((sec) => visible(sec.id) && (titled(sec.id) || fieldsOf(sec.id).length > 0)) : [];
+  const about = (id: Section) => INDEX_SECTIONS.find((item) => item.id === id)?.about[lang()] ?? t(`settings.sec.${id}.hint`);
+  const leave = (e: React.MouseEvent, href: string) => {
+    setQuery("");
+    setOpened(false);
+    go(e, href);
+  };
+  // Enter in the search goes where the first result does: the first row found, else the first section.
+  const first = fields[0] ? fieldPath(fields[0]) : hits[0] ? pathFor("settings", hits[0].id) : null;
+
+  const link = (sec: { id: Section; icon: IconName }) => {
+    const href = pathFor("settings", sec.id);
+    const here = !needle && shown === sec.id;
+    return (
+      <a key={sec.id} href={href} className={`settings-link ${here ? "active" : ""}`} aria-current={here ? "page" : undefined} title={narrow && wide ? sectionLabel(sec.id) : undefined} data-section={sec.id} onClick={(e) => leave(e, href)}>
+        <Icon name={sec.icon} size={wide ? 16 : 18} />
+        <span className="settings-link-text">
+          <b>{sectionLabel(sec.id)}</b>
+          <span className="sub">{t(`settings.sec.${sec.id}.hint`)}</span>
+        </span>
+        {/* A mark, not a count: the one thing worth interrupting a reader for is a feature they have
+            already configured whose runtime is not installed. Beside the words rather than in them, so
+            it stays on the icon when the list is folded to icons. */}
+        {sec.id === "components" && componentsNeedAttention(caps.data) && <span className="tab-badge dot settings-mark" role="img" aria-label={t("comp.state.missing")} />}
+        <span className="chev" aria-hidden><Icon name="chevron" size={14} /></span>
       </a>
-      <input className="field settings-search" value={query} placeholder={t("common.search")} aria-label={t("common.search")} onChange={(e) => setQuery(e.target.value)} />
-      {/* The language is answered here: a reader who cannot read the rest of the page should not
-          have to open a section to change the language of the page. */}
-      {matches("language") && (
-        <div className="settings-link settings-lang">
-          <Icon name="globe" size={18} />
-          <span className="settings-link-text">
-            <b>{t("settings.sec.language")}</b>
-            <span className="sub">{t("lang.hint")}</span>
-          </span>
-          <LangPicker />
-        </div>
-      )}
-      {GROUPS.map((group) => {
-        // The desktop application's own settings are listed only in its window, and the public address
-        // only by an installation that says it is native, which a browser on a phone can be looking at too.
-        const items = group.sections.filter((sec) => matches(sec.id) && (sec.id !== "desktop" || !!window.daedalus?.desk) && (sec.id !== "address" || !!native));
-        if (!items.length) return null;
-        return (
-          <div key={group.id}>
-            <div className="settings-group">{t(`settings.group.${group.id}`)}</div>
-            {items.map((sec) => (
+    );
+  };
+  const search = (
+    <div className="settings-search-box">
+      <Icon name="search" size={15} />
+      <input
+        ref={searchField}
+        className="field settings-search"
+        value={query}
+        placeholder={t("settings.find.placeholder")}
+        aria-label={t("settings.find.placeholder")}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => setOpened(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && first) {
+            e.preventDefault();
+            setQuery("");
+            setOpened(false);
+            navigate(first);
+          } else moveInList(e, list.current);
+        }}
+      />
+      {query ? (
+        <button type="button" className="iconbtn small settings-search-clear" aria-label={t("settings.find.clear")} title={t("settings.find.clear")} onClick={() => (setQuery(""), searchField.current?.focus())}>
+          <Icon name="close" size={13} />
+        </button>
+      ) : wide && <kbd className="settings-search-key" aria-hidden>/</kbd>}
+    </div>
+  );
+  const index = (
+    <nav ref={list} className="settings-index" aria-label={screenTitle("settings")} onKeyDown={(e) => moveInList(e, list.current)}>
+      {needle ? (
+        hits.length ? (
+          <div className="settings-group-block">
+            <div className="settings-group settings-count" role="status">{hitCount(fields.length, hits.length)}</div>
+            {hits.map((sec) => (
               <Fragment key={sec.id}>
-              <a href={pathFor("settings", sec.id)} className={`settings-link ${shown === sec.id ? "active" : ""}`} aria-current={shown === sec.id ? "page" : undefined} onClick={(e) => go(e, pathFor("settings", sec.id))}>
-                <Icon name={sec.icon} size={18} />
-                <span className="settings-link-text">
-                  <b>
-                    {sectionLabel(sec.id)}
-                    {/* A mark, not a count: the one thing worth interrupting a reader for is a feature they
-                        have already configured whose runtime is not installed. */}
-                    {sec.id === "components" && componentsNeedAttention(caps.data) && <span className="tab-badge dot settings-mark" aria-label={t("comp.state.missing")} />}
-                  </b>
-                  <span className="sub">{t(`settings.sec.${sec.id}.hint`)}</span>
-                </span>
-                <span className="chev">›</span>
-              </a>
-              {/* The rows a search found by one of their names, each a way straight to the row. */}
-              {needle && matchFields(needle, sec.id).map((field) => (
-                <a key={field.anchor} href={fieldPath(field)} className="settings-field-hit" data-field-hit={field.anchor} onClick={(e) => go(e, fieldPath(field))}>
-                  {field.title[lang()]}
-                </a>
-              ))}
-            </Fragment>
+                {link(sec)}
+                {/* The rows a search found by one of their names, each a way straight to the row. */}
+                {fieldsOf(sec.id).map((field) => (
+                  <a key={field.anchor} href={fieldPath(field)} className="settings-field-hit" data-field-hit={field.anchor} onClick={(e) => leave(e, fieldPath(field))}>
+                    {field.title[lang()]}
+                  </a>
+                ))}
+              </Fragment>
             ))}
           </div>
-        );
-      })}
-      {needle && !matches("language") && GROUPS.every((group) => group.sections.every((sec) => !matches(sec.id))) && <div className="sub">{t("settings.search.empty")}</div>}
-    </div>
+        ) : (
+          <div className="sub settings-empty" role="status">{t("settings.search.empty")}</div>
+        )
+      ) : (
+        GROUPS.map((group) => {
+          const items = group.sections.filter((sec) => visible(sec.id));
+          if (!items.length) return null;
+          return (
+            <div key={group.id} className="settings-group-block">
+              <div className="settings-group">{t(`settings.group.${group.id}`)}</div>
+              {items.map(link)}
+            </div>
+          );
+        })
+      )}
+    </nav>
   );
 
   const body = (sec: Section) => {
@@ -1466,17 +1524,17 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             {/* Only where the environment sets one: without it the line read "daily cap: $undefined". */}
             {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
-            <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} />
+            <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>
-            <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} />
-            <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} />
-            <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} />
-            <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} />
+            <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} {...shipped(s.compaction?.auto_ratio ?? 0.8, 0.8, () => save({ compaction: { ...s.compaction, auto_ratio: 0.8 } }))} />
+            <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
+            <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} {...shipped(s.compaction?.max_words ?? 1200, 1200, () => save({ compaction: { ...s.compaction, max_words: 1200 } }), `1200 ${t("settings.unit.words")}`)} />
+            <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} {...shipped(s.compaction?.core_trigger_ratio ?? 0.85, 0.85, () => save({ compaction: { ...s.compaction, core_trigger_ratio: 0.85 } }))} />
             <CompactionModelSelect presets={s.presets} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
-            <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} />
+            <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
             {/* A heading of their own: they trailed the compaction fields with nothing to say they
                 were a different subject. */}
             <div className="section-title">{t("settings.balance.title")}</div>
@@ -1514,7 +1572,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
           <>
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.app")}</div>
-              <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict">
+              <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict" {...shipped(s.assist?.predict ?? true, true, () => save({ assist: { ...s.assist, predict: true } }), t("common.on"))}>
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
             </div>
@@ -1634,36 +1692,115 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       />
     </Sheet>
   );
+  // Found rows as the controls they are, each section's body cut down to them (settingsdialog.tsx);
+  // a section found by its own name, not by a row, is a way into it.
+  const results = hits.length === 0 ? (
+    <div className="empty">{t("settings.search.empty")}</div>
+  ) : (
+    hits.map((sec) => {
+      const own = fieldsOf(sec.id);
+      const href = pathFor("settings", sec.id);
+      return (
+        <section key={sec.id} className="settings-hit-section" data-hit-section={sec.id}>
+          <h2 className="settings-hit-head">
+            <a href={href} onClick={(e) => leave(e, href)}>{sectionLabel(sec.id)}</a>
+          </h2>
+          {own.length ? (
+            <HitBody fields={own}>{body(sec.id)}</HitBody>
+          ) : (
+            <div className="card settings-hit-links">
+              <a className="settings-hit-link" href={href} onClick={(e) => leave(e, href)}>
+                <b>{sectionLabel(sec.id)}</b>
+                <span className="sub">{about(sec.id)}</span>
+              </a>
+            </div>
+          )}
+        </section>
+      );
+    })
+  );
+
   if (wide) {
+    const open = needle !== "" || opened;
     return (
-      <>
-        <div className="settings-stage">
-          <aside className="settings-nav">{index}</aside>
-          <div className="settings-main">
-            <div className="settings-col">
-              {shown && <h1 className="settings-title">{sectionLabel(shown)}</h1>}
-              {shown && body(shown)}
+      <div className="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+        <div ref={dialog} className="settings-dialog" role="dialog" aria-modal={covered ? undefined : true} aria-labelledby="settings-dialog-title" tabIndex={-1} onKeyDown={trapTab}>
+          <div className={`settings-stage ${narrow ? "icons" : ""} ${narrow && open ? "opened" : ""}`.trim()}>
+            <aside
+              className="settings-nav"
+              onBlur={(e) => {
+                if (!needle && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpened(false);
+              }}
+            >
+              <h2 id="settings-dialog-title" className="settings-dialog-title">{screenTitle("settings")}</h2>
+              {narrow && !open && (
+                <button type="button" className="iconbtn settings-search-open" aria-label={t("settings.find.placeholder")} title={t("settings.find.placeholder")} onClick={() => (setOpened(true), window.setTimeout(() => searchField.current?.focus()))}>
+                  <Icon name="search" size={16} />
+                </button>
+              )}
+              {search}
+              {index}
+              <div className="settings-foot">
+                <span>{status?.supervisor?.bot ? `Daedalus ${String(status.supervisor.bot).slice(0, 7)}` : "Daedalus"}</span>
+                <span>{t("settings.esc")}</span>
+              </div>
+            </aside>
+            <div className="settings-pane">
+              <header className="settings-head">
+                <div className="settings-head-text">
+                  <h1 className="settings-title">{needle ? t("settings.find.title", { q: needle }) : sectionLabel(shown!)}</h1>
+                  <p className="settings-about">{needle ? t("settings.find.lead") : about(shown!)}</p>
+                </div>
+                <button type="button" className="iconbtn settings-close" aria-label={t("common.close")} title={t("settings.esc")} onClick={close}>
+                  <Icon name="close" size={18} />
+                </button>
+              </header>
+              <div className="settings-main">
+                <div className="settings-col">{needle ? results : body(shown!)}</div>
+              </div>
             </div>
           </div>
         </div>
         {addSheet}
-      </>
+      </div>
     );
   }
-  if (!current) {
-    return (
-      <>
-        <PageHeader title={screenTitle("settings")} />
-        <div className="screen narrow">{index}</div>
-        {addSheet}
-      </>
-    );
-  }
+  // A phone: the list of sections (the first level) or one section (the second). A link to a row
+  // opens the second level straight away; its back goes to the first, not out of Settings.
+  const level = current && !needle ? current : null;
   return (
-    <>
-      <PageHeader title={sectionLabel(current)} back={pathFor("settings")} />
-      <div className="screen narrow settings-col">{body(current)}</div>
+    <div ref={dialog} className="settings-phone" tabIndex={-1} aria-labelledby="settings-dialog-title">
+      <header className="pagehead settings-phone-head">
+        <div className="pagehead-row">
+          {level ? (
+            <button type="button" className="settings-phone-back" onClick={() => navigate(pathFor("settings"), { replace: true })}>
+              <Icon name="back" /> <span id="settings-dialog-title">{screenTitle("settings")}</span>
+            </button>
+          ) : (
+            <>
+              <button type="button" className="iconbtn settings-close" aria-label={t("common.close")} title={t("common.close")} onClick={close}>
+                <Icon name="close" />
+              </button>
+              <div className="pagehead-title">
+                <h1 id="settings-dialog-title">{screenTitle("settings")}</h1>
+              </div>
+            </>
+          )}
+        </div>
+      </header>
+      {level ? (
+        <div className="screen narrow settings-col">
+          <h1 className="settings-title">{sectionLabel(level)}</h1>
+          <p className="settings-about">{about(level)}</p>
+          {body(level)}
+        </div>
+      ) : (
+        <div className="screen narrow">
+          {search}
+          {index}
+        </div>
+      )}
       {addSheet}
-    </>
+    </div>
   );
 }

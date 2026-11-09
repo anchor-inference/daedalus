@@ -101,6 +101,9 @@ import { SelectionReply, SentReplies, revealPassage } from "../replyselect";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
+import { MoveFolderSheet, movable } from "../project/MoveFolder";
+import { PanelStrip } from "../panelstrip";
+import type { ProjectEnvironments } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
 // The Notes tab's editor and renderer are a chunk of their own, fetched the first time the tab opens.
@@ -309,7 +312,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The session's terminals: the dock under the conversation on a desktop, a sheet and a full-screen
   // view on a phone. Listed here because the header's button, the dock and the delete dialog all count them.
   const sessionTerminals = useSessionTerminals(id);
-  const [detailsFocus, setDetailsFocus] = useState<string | null>(null);
+  // The Details section a chip, the strip or a menu item asked for, with a counter so asking for the same
+  // section again (after going back to the list) opens it again.
+  const [detailsFocus, setFocusRequest] = useState<{ page: string; n: number } | null>(null);
+  const setDetailsFocus = useCallback((page: string) => setFocusRequest((was) => ({ page, n: (was?.n ?? 0) + 1 })), []);
+  // The session's folder carried between the host and the container, from the session's menu.
+  const [movingFolder, setMovingFolder] = useState(false);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
   const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | null>(null);
@@ -1592,7 +1600,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return null;
   })();
   // The phone's tile shows how many notes the chat has; a desktop has the tab itself for that.
-  const notesListing = useQuery<NotesListing>(phone && id && !pane ? notesKey(id) : null, { staleMs: 30000 }).data;
+  const notesListing = useQuery<NotesListing>(id && !pane && !bare && !embedded ? notesKey(id) : null, { staleMs: 30000 }).data;
   const notesCount = (notesListing?.chat?.notes?.length ?? 0) + (detail?.project && isProject(detail.project) ? notesListing?.project_scope?.notes?.length ?? 0 : 0);
   const lastSeq = detail?.messages.reduce<number | null>((last, message) => (typeof message.seq === "number" ? message.seq : last), null) ?? null;
   // The phone's bar and its ⋮ sheet hold the same commands as the desktop header above; a command
@@ -1620,9 +1628,56 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const makeProject = makeProjectCommand(detail?.project, () => setPromoting(true));
   // A link is made from an ordinary chat: not the main chat, a project's orchestrator or a helper's own.
   const guestable = !!detail && !main && !orchestrating && !detail.subagent_of;
+  // The folder the chat works in, and whether it can be carried between the host and the container.
+  const sessionFolder = detail?.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail?.project?.folders?.[0] ?? null;
+  const environments = useQuery<ProjectEnvironments>(sessionFolder && !focus && !main && !orchestrating ? "/api/project-environments" : null, { staleMs: 60000 }).data;
+  const folderMovable = !!sessionFolder && !focus && !main && !orchestrating && movable(sessionFolder, environments);
+  const copySessionId = async () => {
+    const ok = await copyText(id);
+    if (!ok) toast(id);
+    return ok;
+  };
+  // The session's menu: one list for the chat header's ⋯ and the panel strip's ⋯, so what one does to the
+  // session is found in the same place from either side. The rare things the Details tab used to carry
+  // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
+  const sessionMenu: MenuItem[] = [
+    { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
+    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: openPicker }] : []),
+    // A session in a project's focus mode stays in its project; the orchestrator's chat has no
+    // files or jobs of its own to show.
+    ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
+    ...(folderMovable ? [{ label: t(sessionFolder!.env === "container" ? "move.tohost" : "move.tocontainer"), icon: "forward" as IconName, onSelect: () => setMovingFolder(true) }] : []),
+    ...(!focus && makeProject ? [makeProject] : []),
+    "-",
+    ...(hasDetails
+      ? [
+          { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
+          ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
+          ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
+          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+          ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
+          { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
+        ]
+      : []),
+    ...(onSplit ? [{ label: t("session.split"), icon: "split" as IconName, onSelect: onSplit }] : []),
+    // This chat's schedules over the chat; the dialog's switch reaches everyone else's.
+    ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
+    "-",
+    { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
+    ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
+    ...(agentTalks.length ? [{ label: t("session.talks"), icon: "link" as IconName, onSelect: () => setTalking({ first: null }) }] : []),
+    { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
+    { label: t("session.copyid"), icon: "copy", ticks: true, onSelect: copySessionId },
+    { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
+    ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
+    "-",
+    { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
+    { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
+  ];
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
+    ...(folderMovable ? [{ icon: "forward" as IconName, label: t(sessionFolder!.env === "container" ? "move.tohost" : "move.tocontainer"), onSelect: () => setMovingFolder(true) }] : []),
     ...(!focus && makeProject ? [{ icon: makeProject.icon!, label: makeProject.label, onSelect: makeProject.onSelect }] : []),
     // A helper's own chat leads back to its leader; a leader's helpers are a tile of the panel above.
     ...(detail?.subagent_of ? [{ icon: "back" as IconName, label: t("session.leader.word"), value: detail.leader_title ?? undefined, onSelect: () => onOpen?.(detail.subagent_of!) }] : []),
@@ -1632,6 +1687,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(guestable ? [{ icon: "link" as IconName, label: t("session.guest"), onSelect: () => setGuesting(true) }] : []),
     ...(agentTalks.length ? [{ icon: "link" as IconName, label: t("session.talks"), onSelect: () => setTalking({ first: null }) }] : []),
     { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
+    { icon: "copy", label: t("session.copyid"), onSelect: () => void copySessionId() },
     ...(revealer && hasDetails ? [{ icon: "external" as IconName, label: revealer.label, onSelect: revealWorkspace }] : []),
     { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
     ...(detail?.telegram_linked ? [{ icon: "unlink" as IconName, label: t("session.telegram.detach"), onSelect: detachTelegram }] : []),
@@ -1762,40 +1818,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
           </button>}
-          <OverflowMenu
-            label={t("session.actions")}
-            items={[
-              { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
-              // A session in a project's focus mode stays in its project; the orchestrator's chat has no
-              // files or jobs of its own to show.
-              ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
-              ...(!focus && makeProject ? [makeProject] : []),
-              "-",
-              ...(hasDetails
-                ? [
-                    { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
-                    ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
-                    ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
-                    ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
-                    ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
-                    { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
-                  ]
-                : []),
-              ...(onSplit ? [{ label: t("session.split"), icon: "split" as IconName, onSelect: onSplit }] : []),
-              // This chat's schedules over the chat; the dialog's switch reaches everyone else's.
-              ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
-              "-",
-              { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
-              ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
-              ...(agentTalks.length ? [{ label: t("session.talks"), icon: "link" as IconName, onSelect: () => setTalking({ first: null }) }] : []),
-              { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
-              { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
-              ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
-              "-",
-              { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
-              { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
-            ]}
-          />
+          <OverflowMenu label={t("session.actions")} items={sessionMenu} />
         </div>
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
       </div>}
@@ -1963,6 +1986,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             sheetSub={[detail.project?.name, detail.context?.messages ? plural("session.phone.messages", detail.context.messages) : null].filter(Boolean).join(" · ")}
             drag={dragPanel}
             tabs={panelTabs}
+            pinned={panel.pinned}
+            onPin={phone ? undefined : panel.togglePin}
+            onShowEntry={panel.showEntry}
+            onCloseEntry={panel.closeEntry}
+            strip={hasDetails ? <PanelStrip
+              model={detail.fallback?.to ?? detail.model}
+              effort={effortText}
+              context={detail.context ?? null}
+              usage={detail.usage}
+              menu={sessionMenu}
+              onModel={orchestrating ? undefined : openPicker}
+              onContext={detail.context ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
+              onUsage={() => { setDetailsFocus("usage"); panel.open("details"); }}
+            /> : undefined}
             pages={{
               ...(focus ? {
                 board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
@@ -1983,7 +2020,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
               />,
             }}
-            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}) }}
+            // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
+            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
             marks={browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : undefined}
             details={hasDetails ? (ids) =>
               <SessionDetails
@@ -1998,7 +2036,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 onOpen={onOpen}
                 toast={toast}
                 reload={load}
-                focus={detailsFocus}
+                focus={detailsFocus?.page}
+                focusKey={detailsFocus?.n}
                 on={{
                   rename,
                   openPicker,
@@ -2014,7 +2053,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 }}
               />
             : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
+            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
             jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} /> : undefined}
           />
         )}
@@ -2036,6 +2075,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       )}
 
       {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
+      {movingFolder && detail && sessionFolder && <MoveFolderSheet projectId={detail.project.id} folder={sessionFolder} onClose={() => setMovingFolder(false)} toast={toast} />}
       {moving && detail && <MoveSessionSheet sessionId={id} current={detail.project.id} currentOwn={!!detail.workspace_own} onClose={() => setMoving(false)} onMoved={() => load(true)} toast={toast} />}
 
       {guesting && <GuestLinksSheet sessionId={id} toast={toast} onClose={() => setGuesting(false)} />}

@@ -1,27 +1,53 @@
 // The menu's keyboard without its markup: where the arrows go, and which key combinations are the shell's.
 
 import { describe, expect, it } from "vitest";
-import { latinKey, moveIndex, shortcutFor } from "./navigation";
+import { type Box, SEARCH, latinKey, moveInGrid, shortcutFor } from "./navigation";
+
+// The launcher as it is drawn: four tiles, then a catalogue three across with a short last row,
+// then the foot's three entries, each row 40 px under the one before.
+const row = (y: number, xs: number[], w: number): Box[] => xs.map((x) => ({ x, y, w, h: 32 }));
+const LAUNCHER: Box[] = [
+  ...row(0, [0, 150, 300, 450], 140), // 0-3 tiles
+  ...row(80, [0, 200, 400], 190), // 4-6
+  ...row(120, [0, 200, 400], 190), // 7-9
+  ...row(160, [0], 190), // 10
+  ...row(220, [0, 120, 240], 110), // 11-13 the foot
+];
 
 describe("the arrows", () => {
-  it("move down and up and wrap at both ends", () => {
-    expect(moveIndex(0, "ArrowDown", 4)).toBe(1);
-    expect(moveIndex(3, "ArrowDown", 4)).toBe(0);
-    expect(moveIndex(0, "ArrowUp", 4)).toBe(3);
-    expect(moveIndex(2, "ArrowUp", 4)).toBe(1);
+  it("go from the search field into the first item, and from the top row back to it", () => {
+    expect(moveInGrid(LAUNCHER, SEARCH, "ArrowDown")).toBe(0);
+    expect(moveInGrid(LAUNCHER, SEARCH, "ArrowUp")).toBeNull();
+    expect(moveInGrid(LAUNCHER, SEARCH, "ArrowRight")).toBeNull();
+    expect(moveInGrid(LAUNCHER, 2, "ArrowUp")).toBe(SEARCH);
   });
 
-  it("start from the first item when nothing is focused", () => {
-    expect(moveIndex(-1, "ArrowDown", 4)).toBe(0);
-    expect(moveIndex(-1, "ArrowUp", 4)).toBe(3);
+  it("move along a row, and carry on into the next one past its end", () => {
+    expect(moveInGrid(LAUNCHER, 0, "ArrowRight")).toBe(1);
+    expect(moveInGrid(LAUNCHER, 5, "ArrowLeft")).toBe(4);
+    expect(moveInGrid(LAUNCHER, 3, "ArrowRight")).toBe(4);
+    expect(moveInGrid(LAUNCHER, 4, "ArrowLeft")).toBe(3);
+    expect(moveInGrid(LAUNCHER, 13, "ArrowRight")).toBeNull();
+    expect(moveInGrid(LAUNCHER, 0, "ArrowLeft")).toBeNull();
+  });
+
+  it("go down to the nearest item of the next row, whatever its column count", () => {
+    // The fourth tile's middle is at 520: the catalogue's third column (495) is nearest.
+    expect(moveInGrid(LAUNCHER, 3, "ArrowDown")).toBe(6);
+    expect(moveInGrid(LAUNCHER, 1, "ArrowDown")).toBe(5);
+    expect(moveInGrid(LAUNCHER, 9, "ArrowDown")).toBe(10);
+    // The short last row is the next row down for every column above it.
+    expect(moveInGrid(LAUNCHER, 6, "ArrowUp")).toBe(3);
+    expect(moveInGrid(LAUNCHER, 10, "ArrowDown")).toBe(11);
+    expect(moveInGrid(LAUNCHER, 12, "ArrowDown")).toBeNull();
   });
 
   it("jump to the ends, and ignore every other key", () => {
-    expect(moveIndex(2, "Home", 4)).toBe(0);
-    expect(moveIndex(1, "End", 4)).toBe(3);
-    expect(moveIndex(1, "Enter", 4)).toBeNull();
-    expect(moveIndex(1, "a", 4)).toBeNull();
-    expect(moveIndex(0, "ArrowDown", 0)).toBeNull();
+    expect(moveInGrid(LAUNCHER, 5, "Home")).toBe(0);
+    expect(moveInGrid(LAUNCHER, 5, "End")).toBe(13);
+    expect(moveInGrid(LAUNCHER, 5, "Enter")).toBeNull();
+    expect(moveInGrid(LAUNCHER, 5, "a")).toBeNull();
+    expect(moveInGrid([], SEARCH, "ArrowDown")).toBeNull();
   });
 });
 

@@ -171,21 +171,28 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     out["reopened"] = page.evaluate(LEFT)
 
     page.locator('.rail [data-rail="menu"]').click()
-    page.wait_for_selector(".navmenu[role='menu']", timeout=5000)
-    out["menuItems"] = page.locator(".navmenu [role='menuitem']").count()
+    page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
+    out["menuItems"] = page.locator(".navmenu [data-launch]").count()
     out["menuLang"] = page.locator(".navmenu .lang").count()
-    out["menuFocusInside"] = page.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.navmenu')")
+    out["menuFocusInside"] = page.evaluate("() => !!document.activeElement && document.activeElement.matches('.navmenu .launch-field')")
     out["menuBox"] = page.evaluate("() => { const r = document.querySelector('.navmenu').getBoundingClientRect(); return { x: Math.round(r.x), bottom: Math.round(innerHeight - r.bottom), w: Math.round(r.width) }; }")
-    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu [role=menuitem]').getBoundingClientRect().height)")
+    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu .launch-catalogue [data-launch]').getBoundingClientRect().height)")
     page.keyboard.press("ArrowDown")
-    out["arrowMoves"] = page.evaluate("() => document.activeElement === document.querySelectorAll('.navmenu [role=menuitem]')[1]")
+    page.keyboard.press("ArrowRight")
+    out["arrowMoves"] = page.evaluate("() => document.activeElement === document.querySelectorAll('.navmenu [data-launch]')[1]")
+    # Esc in a search with words in it empties the field and leaves the launcher open.
+    page.keyboard.press("ArrowUp")
+    page.keyboard.type("usa")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    out["escClears"] = page.locator(".navmenu").count() == 1 and page.locator(".navmenu .launch-field").input_value() == ""
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     out["menuClosed"] = page.locator(".navmenu").count() == 0
     out["focusBack"] = page.evaluate("() => document.activeElement === document.querySelector('.rail [data-rail=\"menu\"]')")
     page.keyboard.press("Control+Shift+M")
     page.wait_for_timeout(300)
-    out["shortcutOpens"] = page.locator(".navmenu[role='menu']").count() == 1
+    out["shortcutOpens"] = page.locator(".navmenu[role='dialog']").count() == 1
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     page.keyboard.press("g")
@@ -228,9 +235,9 @@ def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """Settings' column and rows as drawn: the column is min(960, pane - 96) and centred, a row is at
-    least the touch height, its control ends at the column's right edge, and a phone does not scroll
-    sideways. Widened from 760 on the owner's word that the column was too narrow."""
+    """Settings' column and rows as drawn: inside the dialog the section takes the pane's whole width
+    (the dialog is already the reading width; the page's centred 960 px column went with the page), a
+    row is at least the touch height, and a phone does not scroll sideways."""
     problems: list[str] = []
     for width, height, mobile in ((1920, 1080, False), (1180, 820, False), (390, 844, True)):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
@@ -249,9 +256,9 @@ def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
         }""")
         print(f"settings-{width}", json.dumps({k: v for k, v in m.items() if k != "rows"}), f"{len(m['rows'])} rows")
         if m["pane"]:
-            want = min(960, m["pane"]["w"] - 96)
+            want = m["pane"]["w"]
             if abs(m["col"]["w"] - want) > 1:
-                problems.append(f"settings {width}: the column is {m['col']['w']}px, not {want}")
+                problems.append(f"settings {width}: the column is {m['col']['w']}px, not the pane's {want}")
             if abs((m["col"]["x"] - m["pane"]["x"]) - (m["pane"]["x"] + m["pane"]["w"] - m["col"]["r"])) > 2:
                 problems.append(f"settings {width}: the column is off centre {m['col']} in {m['pane']}")
         for row in m["rows"]:
@@ -613,8 +620,10 @@ def judge(m: dict) -> list[str]:
         else:
             if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
                 problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            if not m["panelTabs"] or m["panelTabs"]["h"] != 40:
-                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 40")
+            # 48, the header's height: the tabs draw their icon over their word, so six named tabs fit
+            # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
+            if not m["panelTabs"] or m["panelTabs"]["h"] != 48:
+                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 48")
     elif m["panel"]:
         problems.append(f"{m['vw']}: a phone shows the panel as a column")
     # Running phones reserve the composer for steering; idle settings use a full touch target.
@@ -663,20 +672,19 @@ def judge_sidebar(s: dict) -> list[str]:
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
             problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
-    # Diagrams moved from More to a dedicated rail icon, so the menu has one fewer item. Two more came
-    # with the configurable navigation: the stub's one published page, which waits under More until it
-    # is placed, and the Customise entry that opens Settings -> Navigation. One more since the search
-    # left the rail's top: it heads the menu with its key, so a mouse still reaches it.
-    if s["menuItems"] != 10:
-        problems.append(f"the menu has {s['menuItems']} items")
-    if not s["menuLang"]:
-        problems.append("the menu has no language switch")
-    # The menu opens from the rail's foot, beside the rail rather than over it.
-    if not 48 <= s["menuBox"]["x"] <= 58 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 300:
-        problems.append(f"the secondary menu is not over the list beside its rail trigger at 300 wide: {s['menuBox']}")
-    if s["menuRow"] != 36:
-        problems.append(f"a menu row is {s['menuRow']}px")
-    for key in ("menuFocusInside", "arrowMoves", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):
+    # The launcher lists every destination, the rail's included, as Frequent tiles and the catalogue
+    # (the stub's thirteen screens and its one published page), then Settings, Customise and About.
+    if s["menuItems"] != 17:
+        problems.append(f"the launcher has {s['menuItems']} items")
+    # The language and the companion went to Settings -> Appearance.
+    if s["menuLang"]:
+        problems.append("the launcher still has a language switch")
+    # It opens from the rail's foot, beside the rail rather than over it, 600 wide while the window allows.
+    if not 48 <= s["menuBox"]["x"] <= 58 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 600:
+        problems.append(f"the launcher is not beside its rail trigger at 600 wide: {s['menuBox']}")
+    if s["menuRow"] != 32:
+        problems.append(f"a catalogue row is {s['menuRow']}px")
+    for key in ("menuFocusInside", "arrowMoves", "escClears", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):
         if not s[key]:
             problems.append(f"{key} is false")
     return problems

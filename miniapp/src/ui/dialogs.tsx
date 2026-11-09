@@ -192,8 +192,9 @@ function ConfirmDialog({ pending, onDone }: { pending: Pending; onDone: (ok: boo
 /** `warn` marks an item that reaches outside the sandbox (a terminal on the machine itself): amber, not red.
  * `checked` makes the item a checkbox, which keeps the menu open: it sets how the items below it act. */
 /** ``ticks`` marks a row that resolves true once its work went through, a copy above all: the menu
- *  closes on the press, so the tick shows on the button that opened it. */
-export type MenuItem = { label: string; icon?: IconName; danger?: boolean; warn?: boolean; disabled?: boolean; hint?: string; checked?: boolean; ticks?: boolean; onSelect: () => unknown } | "-";
+ *  closes on the press, so the tick shows on the button that opened it. ``aside`` sits at the row's
+ *  far end: a folder's environment and read-only badges in the file pane's folder list. */
+export type MenuItem = { label: string; icon?: IconName; danger?: boolean; warn?: boolean; disabled?: boolean; hint?: string; checked?: boolean; ticks?: boolean; aside?: ReactNode; onSelect: () => unknown } | "-";
 
 /** With `trigger`, the button is that content (a title with a chevron) rather than an icon. */
 export function OverflowMenu({ items, label, icon = "more", small, className, trigger: customTrigger, contextSelector }: { contextSelector?: string; items: MenuItem[]; label?: string; icon?: IconName; small?: boolean; className?: string; trigger?: ReactNode }) {
@@ -302,6 +303,7 @@ export function OverflowMenu({ items, label, icon = "more", small, className, tr
               }}>
                 {it.icon && <Icon name={it.icon} size={16} />}
                 {it.label}
+                {it.aside && <span className="menu-aside">{it.aside}</span>}
                 {it.checked !== undefined && <span className={`menu-check ${it.checked ? "on" : ""}`} aria-hidden="true">{it.checked && <Icon name="check" size={14} />}</span>}
               </button>
             ),

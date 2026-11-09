@@ -18,10 +18,11 @@ import { type NavItem, type ResolvedNav, currentId } from "./navconfig";
 import { screenTitle } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
-import { LangPicker } from "./ui/components";
+import { Launcher } from "./navmenu";
+import type { PaletteItem } from "./shell";
 import { KindMark } from "./chatkind";
 import { PrivateMark, isPrivate } from "./privatechat";
-import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, SheetRow, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
+import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
 export const CHATS_PATH = pathFor("agents", null, { view: "chats" });
@@ -60,9 +61,11 @@ export type AppDrawerProps = {
   projects: Project[];
   /** The project switcher: every project, adding one, the archived ones. */
   onProjects: () => void;
+  /** The Ctrl K palette's items, which the More sheet's search field searches. */
+  search?: () => PaletteItem[];
 };
 
-export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects }: AppDrawerProps) {
+export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects, search }: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
   // The switch shows a mode's lists without leaving the page; a destination inside it goes there.
@@ -226,15 +229,20 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
         )}
       </Drawer>
       {more && (
-        <BottomSheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-more-sheet">
-          {moreItems.map((it) => {
-            const tag = it.screen ? screenTag(it.screen, selfdev, BETA) : "";
-            return <SheetRow key={it.id} data={{ screen: it.id }} icon={it.icon} iconPath={it.iconPath} label={it.title} hint={tag ? t(tag) : undefined} value={it.badge > 0 ? <span className="ph-badge">{it.badge}</span> : undefined} onClick={() => { setMore(false); navigateFromDrawer(it.path); }} />;
-          })}
-          <div className="ph-msep" />
-          {/* The language is changed from here as well as from Settings: a reader who cannot read the
-              page cannot be asked to find a section of Settings first. */}
-          <SheetRow icon="globe" label={t("lang.menu")}><LangPicker /></SheetRow>
+        // The same launcher as the desktop's, as a sheet: the dot marks what this drawer already
+        // lists. The language moved to Settings → Appearance with the rest of how the app looks.
+        <BottomSheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-more-sheet launch-sheet">
+          <Launcher
+            nav={layout}
+            placed={shown === "agents" ? layout.drawer.agents : layout.drawer.orchestration}
+            current={route.session ? "" : standing}
+            selfdev={selfdev}
+            search={search}
+            phone
+            onGo={(path) => { setMore(false); navigateFromDrawer(path); }}
+            onRun={(run) => { setMore(false); closeDrawer(); run(); }}
+            onClose={() => setMore(false)}
+          />
         </BottomSheet>
       )}
     </>

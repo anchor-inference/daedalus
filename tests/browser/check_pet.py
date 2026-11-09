@@ -67,9 +67,9 @@ def main() -> None:
         page.wait_for_selector(".rail", timeout=15000)
         assert page.locator(".pet-host").count() == 0
         assert not any("/assets/stage-" in address for address in requests)
-        page.locator('[data-rail="menu"]').click()
-        assert page.get_by_role("menuitem", name="Show companion").evaluate("node => getComputedStyle(node).backgroundColor") == "rgba(0, 0, 0, 0)"
-        page.get_by_role("menuitem", name="Show companion").click()
+        # The companion is turned on where the rest of the app's looks are: it left the More menu.
+        page.goto(base + "/settings/appearance?token=t&scheme=dark&lang=en")
+        page.get_by_role("switch", name="Daedalus companion").click()
         page.wait_for_selector(".pet-canvas", timeout=15000)
         page.wait_for_timeout(1500)
         assert page.locator(".pet-host").count() == 1

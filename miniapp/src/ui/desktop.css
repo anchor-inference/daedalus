@@ -15,8 +15,6 @@
   .desktop-column.folded .desktop-context { display:none; }
   .desktop-column .rail-item:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .bulkbar { left:calc(var(--rail-w) + var(--sidebar-w)); }
-  .app.settings-open { grid-template-columns:minmax(0,1fr); }
-  .app.settings-open .desktop-column { display:none; }
 }
 /* Value buttons keep an explicit boundary in both themes; a caret never flows as text. */
 .control-trigger { display:inline-flex; align-items:center; gap:var(--space-2); min-width:0; border:1px solid var(--line-strong); background:var(--surface-2); border-radius:var(--radius-sm); height:var(--ctl-h); padding:0 var(--space-2); font:inherit; font-size:var(--fs-13); color:var(--fg-2); cursor:pointer; }

@@ -56,8 +56,8 @@ def sideways(page: Page) -> int:
 
 
 def sections(page: Page, scope: str) -> list[str]:
-    ids = page.eval_on_selector_all(f"{scope} .details .dt-section", "els => els.map(e => e.id)")
-    return [i.rsplit("-info-", 1)[-1] for i in ids]
+    # The inspector: one line a section, named by `data-prop`.
+    return page.eval_on_selector_all(f"{scope} .details [data-prop]", "els => els.map(e => e.dataset.prop)")
 
 
 def stand(lang: str):  # type: ignore[no-untyped-def]
@@ -81,12 +81,15 @@ def open_page(context, focus: FocusStub, term: TerminalStub, url: str) -> Page: 
 
 def orchestrator(page: Page, lang: str, check: Check, scope: str, where: str) -> None:
     words = WORDS[lang]
-    page.wait_for_selector(f"{scope} .details .dt-section", timeout=15000)
+    page.wait_for_selector(f"{scope} .details [data-prop]", timeout=15000)
     found = sections(page, scope)
-    check.that({"session", "context", "usage", "brief", "advanced"} <= set(found), f"{lang} {where}: the orchestrator's Details have {found}")
+    check.that({"context", "usage", "brief", "advanced"} <= set(found), f"{lang} {where}: the orchestrator's Details have {found}")
     check.that(not REMOVED & set(found) and "workspace" not in found, f"{lang} {where}: the orchestrator's Details still offer {sorted((REMOVED | {'workspace'}) & set(found))}")
+    page.locator(f"{scope} [data-prop='usage']").click()
     today = page.locator(f"{scope} [data-usage-today]")
     check.that(today.count() == 1 and words["today"] in today.inner_text() and "$0.31" in today.inner_text(), f"{lang} {where}: today's spend reads {today.all_inner_texts()}")
+    page.locator(f"{scope} .dt-back").click()
+    page.locator(f"{scope} [data-prop='context']").click()
     compacted = page.locator(f"{scope} [data-last-compaction]")
     check.that(compacted.count() == 1 and words["compacted"] in compacted.inner_text(), f"{lang} {where}: the last compaction reads {compacted.all_inner_texts()}")
     check.that(sideways(page) <= 0, f"{lang} {where}: the page scrolls sideways by {sideways(page)} px")
@@ -149,7 +152,7 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page = context.new_page()
     page.route("**/api/**", handle)
     page.goto(f"{BASE}/orchestration?panel=details&token=t&lang={lang}")
-    page.wait_for_selector(".panel .details .dt-section", timeout=15000)
+    page.wait_for_selector(".panel .details [data-prop]", timeout=15000)
     found = sections(page, ".panel")
     check.that("usage" in found and not REMOVED & set(found), f"{lang}: the main orchestrator's Details have {found}")
     context.close()

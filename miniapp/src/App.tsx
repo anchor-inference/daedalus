@@ -1,16 +1,17 @@
-import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { openPathOf } from "./subagents";
 import { SchedulesDialogHost } from "./schedules/host";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
 import type { OnboardingState } from "./screens/AddModel";
-import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
 import { Sidebar, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
+import { useRecordVisit } from "./navfrequent";
 import { shortcutFor } from "./navigation";
 import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePaneWidth } from "./layout";
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
@@ -151,8 +152,57 @@ const SIDEBAR_W_MAX = 360;
 
 export function App() {
   useLang();
-  const route = useRoute();
+  const live = useRoute();
   const wide = useWide();
+  // Settings is a dialog over the screen it was opened from, so on a desktop the shell goes on
+  // drawing that screen (`route` below) while the address is Settings' (`live`). Opened from
+  // scratch — a reload, a link from outside — there is no such screen and the mode's home is drawn
+  // under it. A phone has no "under": Settings is a full-screen stack there and `route` is the address.
+  const overlay = wide && live.screen === "settings";
+  const beneath = useRef<{ route: Route; href: string; depth: number } | null>(null);
+  if (live.screen !== "settings") beneath.current = { route: live, href: window.location.pathname + window.location.search + window.location.hash, depth: historyDepth() };
+  const homeRoute = useMemo(() => {
+    const [path, search = ""] = modeHome(storedMode(), wide).split("?");
+    return parse(path, search ? `?${search}` : "");
+  }, [wide]);
+  const route = overlay ? beneath.current?.route ?? homeRoute : live;
+  // The screen under the dialog choosing its own entry (`replace`) changes that screen, not the address.
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    if (!overlay) return;
+    holdReplacements((path) => {
+      const [pathname, search = ""] = path.split("#")[0].split("?");
+      const next = parse(pathname, search ? `?${search}` : "");
+      if (next.screen === "settings") return false;
+      // Opened from scratch there is no entry of the app's under the dialog (-1): closing then goes to
+      // this address rather than back through the history.
+      beneath.current = { route: next, href: path, depth: beneath.current?.depth ?? -1 };
+      redraw((n) => n + 1);
+      return true;
+    });
+    return () => holdReplacements(null);
+  }, [overlay]);
+  // Focus goes back to whatever opened the dialog when it closes. Noted here, as the shell decides to
+  // draw it: the shell turns inert under the dialog in that same commit, before the dialog's lazy code
+  // has even arrived, and the browser drops the focus from an inert control onto the body.
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOverlay = useRef(false);
+  if (overlay && !wasOverlay.current) opener.current = document.activeElement as HTMLElement | null;
+  wasOverlay.current = overlay;
+  useEffect(() => {
+    if (overlay) return;
+    const back = opener.current;
+    opener.current = null;
+    if (back?.isConnected) requestAnimationFrame(() => back.focus({ preventScroll: true }));
+  }, [overlay]);
+  // Closing goes back through the history to the screen under the dialog, however many sections
+  // were opened inside it; with nothing of the app's under it, it goes to the mode's home instead.
+  const closeSettings = useCallback(() => {
+    const under = beneath.current;
+    const now = historyDepth();
+    if (under && under.depth >= 0 && under.depth < now) window.history.go(under.depth - now);
+    else navigate(under?.href ?? modeHome(storedMode(), wide));
+  }, [wide]);
   // Which mode the shell is in: the route's, where the route belongs to one, and otherwise the one the
   // operator was last in — Terminals, Settings and the other shared screens keep the column they were
   // opened from. Remembered per device, so a reload or a bare /app opens the same mode again. A bare
@@ -296,6 +346,9 @@ export function App() {
   const counts: Counts = { inbox: notifications.unseen + waitingSchedules.length, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
   const nav = useNav(selfdev, counts, !!authed);
+  // The More launcher's Frequent tiles learn from where the operator goes, outside a chat.
+  const standingOn = currentId(route.screen, route.detail);
+  useRecordVisit(standingOn, !route.session && nav.shown.some((it) => it.id === standingOn));
   // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.
   useEffect(() => {
     if (!wide) return;
@@ -312,6 +365,18 @@ export function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [wide, sidebarToggle]);
+  // Ctrl , (⌘ , on a Mac) opens Settings, as it does in most desktop programs. By the key's place
+  // rather than its letter: on a Russian layout the comma key types "б".
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || insideTerminal(e.target)) return;
+      if (e.code !== "Comma" && e.key !== ",") return;
+      e.preventDefault();
+      if (parse().screen !== "settings") navigate(pathFor("settings"));
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (authed !== null) return;
@@ -478,7 +543,7 @@ export function App() {
 
   useEffect(() => {
     setMenu(false);
-  }, [route.screen, route.session]);
+  }, [route.screen, route.session, live.screen]);
   // A window widened past the phone's size has no drawer to leave open behind the desktop's column.
   useEffect(() => {
     if (wide) closeDrawer();
@@ -629,7 +694,7 @@ export function App() {
         {route.screen === "memory" && <MemoryScreen toast={showToast} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}
-        {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}
+        {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} onClose={closeSettings} />}
         {mainChat && <MainScreen toast={showToast} />}
         {orchestrationList && !listInColumn && <OrchestrationList onProjects={() => setSwitching(true)} />}
         {focusProject !== null &&
@@ -652,11 +717,14 @@ export function App() {
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
   return (
-    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""} ${diagramOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
+    <HeldRoute.Provider value={overlay ? route : null}>
+    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${diagramOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
-        <div className={`desktop-column ${columnFolded ? "folded" : ""}`}><Rail
-          screen={route.screen}
-          detail={route.detail}
+        // Under the Settings dialog the shell is out of reach — for the pointer (the backdrop), for Tab
+        // (the dialog's own trap) and for a screen reader, which otherwise read the chat beneath it.
+        <div className={`desktop-column ${columnFolded ? "folded" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}><Rail
+          screen={live.screen}
+          detail={live.detail}
           mode={mode}
           collapsed={columnFolded}
           onToggle={sidebarToggle}
@@ -698,13 +766,20 @@ export function App() {
       )}
         </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
-      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearch={() => setPalette(true)} />}
-      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} search={paletteItems} />}
+      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />
         <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
       </div>
+      {overlay && (
+        <ErrorBoundary key="settings">
+          <Suspense fallback={null}>
+            <SettingsScreen toast={showToast} section={live.detail} onClose={closeSettings} />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once.
@@ -720,7 +795,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} search={paletteItems} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PairingHost />
@@ -730,7 +805,13 @@ export function App() {
       <ToastHost />
       <ConfirmHost />
     </div>
+    </HeldRoute.Provider>
   );
+}
+
+/** How deep in the app's own history the current entry is (the router writes it on every entry). */
+function historyDepth(): number {
+  return (window.history.state as { d?: number } | null)?.d ?? 0;
 }
 
 /** The unseen count on the installed app's icon, where the platform draws one. */

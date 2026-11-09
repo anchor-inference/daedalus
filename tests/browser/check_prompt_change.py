@@ -62,7 +62,8 @@ def run() -> None:
 
             proposal = state["proposal"]
             proposal.update(state="ready", stage="ready", summary="Добавлено подтверждение удаления." if language == "ru" else "Added confirmation before deletion.", rules=revised, diff="--- Current working rules\n+++ Proposed working rules\n@@ -1,3 +1,4 @@\n Working rules:\n - Verify results.\n+- Ask before deleting files.\n - Keep changes focused.\n")
-            dialog = page.get_by_role("dialog")
+            # The review sheet: Settings is itself a dialog now, so "the dialog" has to name which.
+            dialog = page.locator(".sheet[role='dialog']")
             expect(dialog).to_be_visible(timeout=8000)
             expect(dialog.locator(".diff-add")).to_contain_text("Ask before deleting files")
             assert original in page.locator(".rules-editor-field").input_value()

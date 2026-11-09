@@ -30,7 +30,7 @@ import { errorText } from "./ui";
 
 /** A Mac says ⌘ where everything else says Ctrl; the shortcut is the same key either way. */
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K" };
+export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K", settings: MAC ? "⌘ ," : "Ctrl ," };
 
 /** The account is Settings' security section: two-factor sign-in, the operator's secrets, and signing
  *  every browser out. There is one operator, so there is no profile beyond it. */
@@ -104,7 +104,7 @@ function useItemMenu(ref: RefObject<HTMLElement | null>, href: string, nav: Reso
   useContextActions(ref, items);
 }
 
-function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, data, nav = null }: { href: string; icon: IconName; iconPath?: string | null; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string; nav?: ResolvedNav | null }) {
+function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, data, nav = null, keys }: { href: string; icon: IconName; iconPath?: string | null; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string; nav?: ResolvedNav | null; keys?: string }) {
   const counted = badge ? `${label} · ${badge}` : quiet ? `${label} · ${plural("mode.waiting", quiet)}` : label;
   const link = useRef<HTMLAnchorElement>(null);
   useItemMenu(link, href, nav, data);
@@ -114,7 +114,7 @@ function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, dat
       <span className="rail-label">{label}</span>
       {!!badge && <span className="rail-badge" data-count={badge} aria-hidden>{badge > 99 ? "99+" : badge}</span>}
       {!badge && !!quiet && <span className="rail-badge quiet" data-waiting={quiet} aria-hidden>{quiet > 99 ? "99+" : quiet}</span>}
-      <Tip text={counted} />
+      <Tip text={counted} keys={keys} />
     </a>
   );
 }
@@ -183,7 +183,8 @@ export function Rail(p: RailProps) {
           {(p.counts.changes ?? 0) > 0 && <span className="rail-dot" aria-hidden />}
           <Tip text={t("nav.menu")} keys={KEYS.menu} />
         </button>
-        <Item data="settings" href={pathFor("settings")} icon="settings" label={screenTitle("settings")} on={p.screen === "settings" && p.detail !== ACCOUNT} />
+        {/* The gear keeps the rail's 52 px: its name is in the tooltip with the shortcut, not under it. */}
+        <Item data="settings" href={pathFor("settings")} icon="settings" label={screenTitle("settings")} keys={KEYS.settings} on={p.screen === "settings" && p.detail !== ACCOUNT} />
 
       </div>
     </nav>

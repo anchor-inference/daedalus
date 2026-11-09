@@ -160,15 +160,24 @@ describe("the panels", () => {
     const on = new Proxy({}, { get: () => () => {} }) as DetailsActions;
     const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
     await render("orchestrator");
-    const sections = () => [...host.querySelectorAll(".dt-section")].map((s) => s.id.replace(/^d-\w+-info-/, ""));
-    expect(sections()).toEqual(["session", "context", "usage", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    // The inspector lists one line a section; a section's page opens in place of the list.
+    const sections = () => [...host.querySelectorAll<HTMLElement>("[data-prop]")].map((s) => s.dataset.prop);
+    expect(sections()).toEqual(["context", "usage", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    const openPage = (id: string) => act(async () => { host.querySelector<HTMLElement>(`[data-prop="${id}"]`)!.click(); });
+    await openPage("usage");
     expect(host.querySelector("[data-usage-today]")!.textContent).toContain("$0.75");
+    expect(host.querySelector("[data-usage-table]")!.textContent).toContain("90k");
+    await act(async () => { host.querySelector<HTMLElement>(".dt-back")!.click(); });
+    await openPage("context");
     expect(host.querySelector("[data-last-compaction]")!.textContent).toContain("(auto)");
+    await act(async () => { host.querySelector<HTMLElement>(".dt-back")!.click(); });
     await render("main");
-    expect(sections()).toEqual(["session", "context", "usage", "workspace", "disk", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["context", "usage", "workspace", "disk", "mcp", "toolgroups", "brief", "spend", "advanced"]);
     await render("session");
-    expect(sections()).toContain("danger");
+    // Clearing and deleting the session left the tab for the session's menu.
+    expect(sections()).not.toContain("danger");
     expect(sections()).toContain("loop");
+    expect(sections()).toContain("tools");
   });
 });
 

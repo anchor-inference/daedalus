@@ -103,11 +103,16 @@ export function revealSetting(key: string, opts: { root?: ParentNode; tries?: nu
       row.scrollIntoView?.({ block: "center", behavior: reduced ? "auto" : "smooth" });
       // A card above the row that answers its own request later (the companion's, on the voice
       // section) grows after the scroll and pushes the row out of sight; for a moment after the
-      // scroll the row is put back whenever the section moves it.
+      // scroll the row is put back whenever the section moves it. Measured against the box that
+      // scrolls it: inside the Settings dialog a row can be within the window and still hidden
+      // under the dialog's edge, which the window's bounds alone took for "in view".
       const until = performance.now() + 1500;
       const keep = () => {
         const box = row.getBoundingClientRect();
-        if (box.top < 0 || box.bottom > window.innerHeight) row.scrollIntoView?.({ block: "center" });
+        const pane = scrollerOf(row)?.getBoundingClientRect();
+        const top = Math.max(0, pane?.top ?? 0);
+        const bottom = Math.min(window.innerHeight, pane?.bottom ?? window.innerHeight);
+        if (box.top < top || box.bottom > bottom) row.scrollIntoView?.({ block: "center" });
         if (performance.now() < until) window.setTimeout(keep, 120);
       };
       window.setTimeout(keep, 250);
@@ -116,6 +121,15 @@ export function revealSetting(key: string, opts: { root?: ParentNode; tries?: nu
     };
     attempt();
   });
+}
+
+/** The nearest box around the row that scrolls it vertically, or null when the page itself does. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
+  }
+  return null;
 }
 
 // ── notices ────────────────────────────────────────────────────────────────────────────────

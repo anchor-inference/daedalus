@@ -1,0 +1,115 @@
+/* The right panel's frame (panelhost.tsx), its state strip (panelstrip.tsx) and the Details inspector
+   (details.tsx). This file is bundled before ui/styles.css, so a rule that replaces one of the older
+   panel rules there is written one class more specific rather than relying on the order. */
+
+/* The strip over every tab: the model on one line, the context and the cost on the next, the context's
+   bar under both. It is the first thing in the column so the two numbers are read before the tabs. */
+.panel-strip { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 10px 12px; border-bottom: 1px solid var(--line); }
+.panel-strip-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.panel-strip-model { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: var(--ctl-h-sm); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.panel-strip-model.static { cursor: default; }
+.panel-strip-model .ic { flex: none; color: var(--fg-2); }
+.panel-strip-model:hover:not(.static) { background: var(--surface-2); }
+.panel-strip-model:focus-visible, .panel-strip-context:focus-visible, .panel-strip-cost:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.panel-strip-effort { flex: none; }
+.panel-strip-figures { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; row-gap: 5px; padding-right: 4px; }
+.panel-strip-context, .panel-strip-cost { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.panel-strip-context:disabled, .panel-strip-cost:disabled { cursor: default; }
+.panel-strip-context b, .panel-strip-cost b { color: var(--fg); font-size: var(--fs-13); font-weight: 700; }
+.panel-strip-context b.attn { color: var(--warn); }
+.panel-strip-context b.bad { color: var(--bad); }
+.panel-strip-context:hover:not(:disabled) span, .panel-strip-cost:hover:not(:disabled) span { color: var(--fg); }
+.panel-strip-bar { grid-column: 1 / -1; }
+.panel-strip .panel-strip-bar.dt-segbar { height: 4px; gap: 1px; background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.panel-strip-bar.solo { height: 4px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--fg) 10%, transparent); overflow: hidden; }
+.panel-strip-bar.solo i { display: block; height: 100%; background: var(--data-context); }
+.panel-strip-bar.solo.attn i { background: var(--warn); }
+.panel-strip-bar.solo.bad i { background: var(--bad); }
+
+/* The tabs of a desktop column: the icon over the word, the way an app's tab bar reads, so six named
+   tabs fit in the panel's 360–420 px where a row of "icon word" pairs needed about 600 and fell back
+   to icons alone. The measured fits (panelhost.tsx, useTabFit) still step down to the words, the word on
+   the open tab, and the icons when even this does not fit. */
+.panel .panel-tabs { height: 48px; }
+.panel .panel-tablist.fit-full .panel-tab { flex-direction: column; justify-content: center; gap: 2px; padding: 0 10px; font-size: var(--fs-11); font-weight: 600; line-height: 1.2; }
+.panel .panel-tablist.fit-full .panel-tab .ic { opacity: 1; }
+.panel .panel-tablist.fit-full .panel-tab .count { position: absolute; top: 3px; left: calc(50% + 3px); font-size: 10px; line-height: 14px; min-width: 14px; padding: 0 4px; }
+.panel .panel-tablist.fit-full .panel-tab .tab-mark { position: absolute; top: 5px; left: calc(50% + 6px); }
+.panel .panel-tab.on::after { bottom: 0; }
+/* The icons alone, for the nine tabs of a project's orchestrator in the narrowest panel: a little
+   closer, since the pin took a button's width from the strip. */
+.panel .panel-tablist.fit-icons .panel-tab { padding: 0 7px; }
+.panel-pin.on { color: var(--accent); }
+
+/* The open files as tabs over the viewer. */
+.panel-filetabs { flex: none; display: flex; align-items: stretch; gap: 2px; height: 34px; padding: 0 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.panel-filetabs::-webkit-scrollbar { display: none; }
+.file-tab { position: relative; flex: none; display: flex; align-items: center; max-width: 220px; margin-top: 4px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; color: var(--fg-2); }
+.file-tab.on { background: var(--bg); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.file-tab:hover:not(.on) { background: var(--surface-2); }
+.file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 10px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.file-tab-name .ic { flex: none; color: var(--fg-3); }
+.file-tab-name:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+.file-tab-close { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); cursor: pointer; }
+.file-tab-close:hover { background: var(--surface-3); color: var(--fg); }
+
+/* The wide view: the tree on the left, the open files with the viewer on the right. */
+.panel-body.split { display: flex; flex-direction: row; }
+.panel-beside { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.panel-beside .panel-viewer { flex: 1; min-height: 0; }
+.panel-beside > .empty { margin: auto; }
+
+/* The inspector: one line a section, grouped under quiet headings, all of them on one screen. */
+.details.inspector { gap: 0; padding: 0 0 8px; }
+.dt-props { display: flex; flex-direction: column; }
+.dt-grp { margin: 0; padding: 12px 8px 4px; font-size: var(--fs-11); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
+.dt-props:first-child .dt-grp { padding-top: 4px; }
+.dt-prop { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-dense); padding: 0 6px 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.dt-prop:hover { background: var(--surface-1); }
+.dt-prop:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface-1); }
+.dt-prop > .ic:first-child { flex: none; color: var(--fg-3); }
+.dt-prop > .ic:last-child { flex: none; color: var(--fg-3); }
+.dt-prop-k { flex: none; }
+.dt-prop-attn { flex: none; display: inline-flex; color: var(--warn); }
+.dt-prop-v { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dt-prop-v .truncate { min-width: 0; max-width: 180px; }
+.dt-prop-v .quiet, .dt-window .quiet { color: var(--fg-3); }
+.dt-window { display: inline-flex; align-items: center; gap: 4px; }
+.dt-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
+.dt-dot.ok { background: var(--ok); }
+.dt-mini { display: inline-block; width: 40px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--fg) 12%, transparent); overflow: hidden; flex: none; }
+.dt-mini i { display: block; height: 100%; background: var(--ok); }
+.dt-mini.context i { background: var(--data-context); }
+.dt-mini.attn i { background: var(--warn); }
+.dt-mini.bad i { background: var(--bad); }
+
+/* A section opened in place of the list. */
+.dt-drill { display: flex; flex-direction: column; min-width: 0; }
+.dt-drillhead { position: sticky; top: -8px; z-index: 1; display: flex; align-items: center; gap: 4px; min-height: 36px; margin: -8px 0 8px; padding: 0; border-bottom: 1px solid var(--line); background: var(--bg); }
+.dt-drillhead h3 { margin: 0; font-size: var(--fs-14); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-crumb { padding: 0 2px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.dt-crumb:hover { color: var(--fg); }
+.dt-crumb-sep { color: var(--fg-3); }
+.dt-page { display: flex; flex-direction: column; gap: 10px; padding: 0 4px; min-width: 0; }
+.dt-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* The usage table: total and today side by side. */
+.dt-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.dt-table th, .dt-table td { padding: 5px 0; font-size: var(--fs-13); font-weight: 400; text-align: right; border-bottom: 1px solid var(--line); }
+.dt-table thead th { padding-top: 0; color: var(--fg-3); font-size: var(--fs-11); border-bottom: 0; }
+.dt-table thead td { border-bottom: 0; }
+.dt-table tbody th { text-align: left; color: var(--fg-2); }
+.dt-table td + td, .dt-table th + th { padding-left: 16px; }
+.dt-table tbody td:last-child { color: var(--fg-2); }
+.dt-table tbody td:nth-child(2) { color: var(--fg); }
+
+@media (max-width: 1023px) {
+  .panel-sheet-strip { order: 2; flex: 1 1 100%; margin: 0 calc(-1 * var(--space-2)) 0 calc(-1 * var(--gutter)); }
+  .panel-sheet-strip .panel-strip { padding: 4px var(--gutter) 10px; border-bottom: 0; }
+  .panel-sheet .details.inspector { gap: 0; padding: 0 0 var(--space-6); }
+  .panel-sheet .dt-prop { min-height: var(--row-h-touch); font-size: var(--fs-15); }
+  .panel-sheet .dt-grp { padding: 14px 8px 4px; }
+  .panel-sheet .dt-prop-v .truncate { max-width: 120px; }
+  .panel-sheet .dt-drillhead { margin: 0 0 8px; padding: 0; top: 0; }
+  .panel-sheet .file-tab-name { font-size: var(--fs-13); }
+}

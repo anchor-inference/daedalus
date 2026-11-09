@@ -115,6 +115,50 @@ export function openFile(s: PanelState, entry: PanelEntry): PanelState {
   return { ...s, tab: "preview", stack, at: stack.length - 1 };
 }
 
+/** A file opened next to the one on screen without taking its place: it joins the open files right after
+ *  the current one, and the reader stays where they are. The Files tab's "Open beside" is this: in a wide
+ *  panel the open files are tabs, and a reader comparing two files wants the second one a click away
+ *  rather than in front of the first. A file already open is left where it is. */
+export function openBeside(s: PanelState, entry: PanelEntry): PanelState {
+  if (s.stack.some((e) => sameEntry(e, entry))) return s;
+  if (s.at < 0) return openFile(s, entry);
+  const stack = [...s.stack.slice(0, s.at + 1), entry, ...s.stack.slice(s.at + 1)];
+  return { ...s, stack };
+}
+
+/** The open files, each once, in the order they were first opened: the tabs over the viewer. The
+ *  history keeps every step (Back walks it), but a file read twice is one tab, not two. */
+export function openEntries(s: PanelState): PanelEntry[] {
+  const seen: PanelEntry[] = [];
+  for (const entry of s.stack) if (!seen.some((e) => sameEntry(e, entry))) seen.push(entry);
+  return seen;
+}
+
+/** Whether `entry` is the file on screen. */
+export function isCurrent(s: PanelState, entry: PanelEntry): boolean {
+  const current = currentEntry(s);
+  return !!current && sameEntry(current, entry);
+}
+
+/** A file's tab closed: every step of the history that showed it goes, and the viewer moves to the
+ *  step nearest the one it was on — the one before, as a browser does, or the next when it was first. */
+export function closeEntry(s: PanelState, entry: PanelEntry): PanelState {
+  const before = s.stack.slice(0, Math.max(0, s.at)).filter((e) => !sameEntry(e, entry)).length;
+  const stack = s.stack.filter((e) => !sameEntry(e, entry));
+  if (stack.length === s.stack.length) return s;
+  const onIt = isCurrent(s, entry);
+  const at = stack.length === 0 ? -1 : onIt ? Math.max(0, Math.min(stack.length - 1, before - 1 < 0 ? 0 : before - 1)) : Math.min(stack.length - 1, before);
+  return { ...s, stack, at };
+}
+
+/** Makes an open file the one on screen without growing the history: a click on its tab. */
+export function showEntry(s: PanelState, entry: PanelEntry): PanelState {
+  if (isCurrent(s, entry)) return s.tab === "preview" || s.tab === "files" ? s : { ...s, tab: "preview" };
+  let at = -1;
+  for (let i = s.stack.length - 1; i >= 0; i--) if (sameEntry(s.stack[i], entry)) { at = i; break; }
+  return at < 0 ? openFile(s, entry) : { ...s, tab: s.tab === "files" ? "files" : "preview", at };
+}
+
 export function canGoBack(s: PanelState): boolean {
   return s.at > 0;
 }
@@ -223,9 +267,16 @@ const TAB_KEY = "daedalus.session.panel";
 /** Below this the panel is closed unless the route or the operator opens it. */
 export const PANEL_OPEN_MIN = 1280;
 
+/** Below this the panel is a sheet over the chat, never a column; a pinned panel does not open itself there. */
+export const PANEL_COLUMN_MIN = 1024;
+
 /** Which tab a session opens on with nothing in the route: what was open last time, or Details on
- *  a window wide enough for both; "0" is the operator having closed it. */
-export function defaultPanelTab(stored: string | null, viewportWidth: number, tabs: readonly PanelTab[] = PANEL_TABS): PanelTab | null {
+ *  a window wide enough for both; "0" is the operator having closed it. A pinned panel opens in every
+ *  chat, on any window that draws it as a column, whatever the last chat did with it: pinning is the
+ *  operator saying the panel belongs beside every conversation, and a panel that closed itself on a
+ *  1200 px laptop because the window was under the auto-open width would undo that. */
+export function defaultPanelTab(stored: string | null, viewportWidth: number, tabs: readonly PanelTab[] = PANEL_TABS, pinned = false): PanelTab | null {
+  if (pinned && viewportWidth >= PANEL_COLUMN_MIN) return isPanelTab(stored, tabs) ? stored : tabs[0];
   if (stored === "0") return null;
   if (isPanelTab(stored, tabs)) return viewportWidth >= PANEL_OPEN_MIN ? stored : null;
   return viewportWidth >= PANEL_OPEN_MIN ? tabs[0] : null;
@@ -244,14 +295,39 @@ export function readPanelTab(viewportWidth: number, storage: Pick<Storage, "getI
   } catch {
     /* private mode */
   }
-  return defaultPanelTab(stored, viewportWidth, tabsFor(context));
+  return defaultPanelTab(stored, viewportWidth, tabsFor(context), readPanelPinned(storage));
 }
 
-export function rememberPanelTab(tab: PanelTab | null, storage: Pick<Storage, "setItem"> | null = safeStorage(), context: PanelContext = "session"): void {
+/** Remembers the open tab, or "0" for a panel the operator closed. A pinned panel keeps its last tab
+ *  when it is closed in one chat, so the next chat still opens it on that tab rather than on Details. */
+export function rememberPanelTab(tab: PanelTab | null, storage: (Pick<Storage, "setItem"> & Partial<Pick<Storage, "getItem">>) | null = safeStorage(), context: PanelContext = "session"): void {
+  if (tab === null && storage?.getItem && readPanelPinned(storage as Pick<Storage, "getItem">)) return;
   try {
     storage?.setItem(panelTabKey(context), tab ?? "0");
   } catch {
     /* private mode */
+  }
+}
+
+// ── the pin ──────────────────────────────────────────────────────────────────────────────────
+
+const PIN_KEY = "daedalus.panel.pinned";
+
+/** Whether the operator pinned the panel open in every chat. Kept per device: a phone draws the panel
+ *  as a sheet and a pin made at a wide monitor means nothing there. */
+export function readPanelPinned(storage: Pick<Storage, "getItem"> | null = safeStorage()): boolean {
+  try {
+    return storage?.getItem(PIN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberPanelPinned(pinned: boolean, storage: Pick<Storage, "setItem"> | null = safeStorage()): void {
+  try {
+    storage?.setItem(PIN_KEY, pinned ? "1" : "0");
+  } catch {
+    /* private mode: the pin lasts for the visit */
   }
 }
 

@@ -246,20 +246,20 @@ def dual(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("dual at 2560: panels open", n)
     if n != 2:
         problems.append(f"dual view at 2560 holds {n} panels, not two")
-    sections = page.locator(".panel .dt-section")
+    page.wait_for_selector(".panel [data-prop='context']")
+    sections = page.locator(".panel [data-prop]")
     section_ids = sections.evaluate_all("els => els.map(el => el.id)")
     assert len(section_ids) == len(set(section_ids)), "Details sections share ids across panels"
     for side in ("right", "left"):
-        for section in page.locator(".panel [id$='-info-context']").all():
-            if section.get_attribute("open") is not None:
-                section.locator("summary").click()
-            expect(section).not_to_have_attribute("open", "")
+        # Both inspectors back on their lists, then one pane's chip opens the Context page of its own panel.
+        for back in page.locator(".panel .dt-back").all():
+            back.click()
         pane = page.locator(f".pane-{side}")
-        target = pane.locator(".panel [id$='-info-context']")
-        other = page.locator(f".pane-{'left' if side == 'right' else 'right'} .panel [id$='-info-context']")
+        other_side = "left" if side == "right" else "right"
         pane.get_by_role("button", name="Context in use").click()
-        expect(target).to_have_attribute("open", "")
-        expect(other).not_to_have_attribute("open", "")
+        target = pane.locator(".panel .dt-drill[data-page='context']")
+        expect(target).to_have_count(1)
+        expect(page.locator(f".pane-{other_side} .panel .dt-drill")).to_have_count(0)
         prefix = pane.locator(".panel [role='tabpanel']").get_attribute("id").removesuffix("-body")
         assert target.get_attribute("id") == f"{prefix}-info-context"
         print(f"{side} Context in use opens its own section; the other stays closed")

@@ -1,0 +1,106 @@
+/* The Files tab of the side panel. A quiet header (the folder's real path, its environment, upload and
+   a menu of the rarer actions), one filter field, the tree, and a status line for the selected file.
+   Size and the row menu appear only on the row the reader is on: on every row they made a column of
+   numbers and dots that the eye had to read past to find a name. */
+
+.explorer { position:relative; display:flex; flex-direction:column; min-height:0; height:100%; font-size:var(--fs-13); }
+
+.explorer-head { display:flex; align-items:center; gap:6px; flex:none; min-width:0; padding:8px 8px 6px 12px; }
+.explorer-head > .ic { flex:none; color:var(--fg-3); }
+.explorer-head .term-env { margin-right:0; flex:none; }
+.explorer-head .iconbtn { flex:none; }
+/* The path keeps its last part and gives up its middle: the head shrinks to an ellipsis first, the
+   tail only once nothing else is left. A plain ellipsis at the end cut off the folder's own name,
+   the one part the reader looks for. */
+.explorer-where { display:inline-flex; align-items:center; flex:0 1 auto; min-width:0; height:var(--ctl-h-sm); padding:0 6px; margin-left:-6px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg); font:var(--fs-12) var(--mono); font-weight:500; white-space:nowrap; cursor:pointer; }
+span.explorer-where { cursor:default; font-family:inherit; font-size:var(--fs-13); font-weight:600; overflow:hidden; text-overflow:ellipsis; }
+button.explorer-where:hover { background:var(--surface-1); }
+.explorer-where:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.explorer-where-head { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--fg-3); }
+.explorer-where-tail { flex:0 0 auto; max-width:100%; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
+.explorer-where .ic { flex:none; margin-left:4px; color:var(--accent); }
+.explorer-readonly { display:inline-flex; align-items:center; gap:4px; flex:none; }
+/* The progress of an upload sits under the header, in the flow, rather than over the panel's top edge. */
+.explorer > .preview-progress { position:relative; flex:none; }
+
+.explorer-filter { display:flex; align-items:center; gap:8px; flex:none; height:var(--ctl-h); margin:0 8px 6px; padding:0 3px 0 10px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--fg-3); }
+.explorer-filter:focus-within, .explorer-filter.filled { border-color:color-mix(in srgb, var(--accent) 60%, transparent); }
+.explorer-filter > .ic { flex:none; }
+.explorer-filter input { flex:1; min-width:0; height:100%; margin:0; padding:0; border:0; outline:none; box-shadow:none; background:none; color:var(--fg); font:inherit; font-size:var(--fs-13); appearance:none; }
+.explorer-filter input::placeholder { color:var(--fg-3); }
+.explorer-mode { display:inline-flex; flex:none; gap:2px; padding:2px; border-radius:var(--radius-xs); background:var(--surface-2); }
+.explorer-mode button { height:22px; min-height:22px; padding:0 7px; border:0; border-radius:4px; background:none; color:var(--fg-3); font-size:var(--fs-12); cursor:pointer; }
+.explorer-mode button.on { background:var(--surface-4); color:var(--fg); }
+.explorer-mode button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+
+.explorer-note { display:flex; flex-wrap:wrap; gap:2px 10px; flex:none; margin:0 12px 6px; font-size:var(--fs-12); color:var(--fg-3); animation:menu-enter 180ms var(--ease-out); }
+
+.explorer-tree { flex:1; min-height:0; overflow:auto; padding:2px 6px 8px; }
+.files.explorer .tree-row { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-height:28px; margin:0; padding-right:4px; border:1px solid transparent; border-radius:var(--radius-sm); background:none; color:var(--fg); cursor:pointer; animation:row-enter 180ms var(--ease-out); }
+.files.explorer .tree-row:hover { background:var(--surface-1); }
+.files.explorer .tree-row.selected { background:var(--surface-2); border-color:var(--line-strong); }
+.files.explorer .tree-row:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
+.files.explorer .tree-row .title { min-width:0; font-size:inherit; font-weight:400; }
+.tree-row > .ic { flex:none; color:var(--fg-3); }
+.tree-row.dim { color:var(--fg-3); }
+.tree-row.dim > .ic { opacity:.6; }
+.tree-chevron { display:inline-flex; justify-content:center; width:14px; flex:none; color:var(--fg-3); }
+.tree-chevron .ic { transform:rotate(-90deg); transition:transform 120ms var(--ease-out); }
+.tree-chevron.open .ic { transform:none; }
+.written-badge { width:6px; height:6px; flex:none; border-radius:50%; background:var(--accent); }
+.file-size { flex:none; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; visibility:hidden; }
+.explorer-actions { display:inline-flex; flex:none; visibility:hidden; }
+.explorer-actions .iconbtn { width:22px; height:22px; min-width:22px; min-height:22px; }
+.tree-row:hover .file-size, .tree-row.selected .file-size, .tree-row:focus-within .file-size,
+.tree-row:hover .explorer-actions, .tree-row.selected .explorer-actions, .tree-row:focus-within .explorer-actions,
+.explorer-actions:has([aria-expanded="true"]) { visibility:visible; }
+.explorer-count { display:inline-flex; align-items:center; justify-content:center; flex:none; min-width:18px; height:18px; padding:0 6px; border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg-2); font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
+.tree-error { flex:none; color:var(--bad); }
+
+/* A found line: its number, then the line with the match marked, under its file. */
+.files.explorer .tree-row.grep-row { height:auto; min-height:24px; gap:8px; padding-top:2px; padding-bottom:2px; }
+.explorer-ln { flex:none; min-width:20px; text-align:right; color:var(--fg-3); font:var(--fs-11) var(--mono); font-variant-numeric:tabular-nums; }
+.grep-snippet { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; background:none; color:var(--fg-2); font:var(--fs-11)/1.5 var(--mono); }
+.grep-snippet mark { padding:0; border-radius:2px; background:color-mix(in srgb, var(--accent) 28%, transparent); color:var(--fg); }
+
+.explorer-status { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 12px; border-top:1px solid var(--line); color:var(--fg-3); font-size:var(--fs-11); }
+.explorer-status-path { display:flex; flex:1; min-width:0; font-family:var(--mono); white-space:nowrap; }
+.explorer-status-path > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.explorer-status-path > span:last-child { flex:none; max-width:100%; }
+.explorer-status-path button { min-height:0; padding:0; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
+.explorer-status-path button:hover { color:var(--fg); text-decoration:underline; }
+.explorer-status-path b { color:var(--fg-2); font-weight:500; }
+.explorer-status-size { flex:none; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.explorer-status-written { display:inline-flex; align-items:center; gap:5px; flex:none; white-space:nowrap; }
+.explorer-status-written::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+
+/* A folder's badges at the end of its row in the folder list. */
+.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
+.menu .menu-aside .term-env { margin-right:0; }
+
+/* Rows enter quietly without changing their measured height or delaying hover feedback. */
+@keyframes row-enter { from { opacity:0; } to { opacity:1; } }
+
+/* Without a pointer that hovers there is no way to reveal what hover shows, so a touch screen shows it. */
+@media (hover: none) {
+  .file-size, .explorer-actions { visibility:visible; }
+}
+
+@media (max-width: 1023px) {
+  .explorer-head { padding:6px var(--gutter) 6px 12px; }
+  .explorer-filter { height:var(--ctl-h); margin:0 var(--gutter) 8px; }
+  .explorer-filter input { font-size:var(--fs-16); }
+  .explorer-mode button { height:28px; min-height:28px; padding:0 10px; font-size:var(--fs-13); }
+  .explorer-note { margin:0 var(--gutter) 6px; }
+  .explorer-tree { padding:2px 8px 12px; }
+  .files.explorer .tree-row { height:var(--row-h-touch); min-height:var(--row-h-touch); font-size:var(--fs-15); }
+  .files.explorer .tree-row.grep-row { min-height:var(--ctl-h); font-size:var(--fs-13); }
+  /* The phone sheet's older rule gives every file title of a sheet a 44 px box of its own; inside a row
+     that is already 44 px the name sat at the top of that box, above its icon and size. */
+  .panel-sheet .files.explorer .tree-row .title { min-height:0; }
+  .file-size, .explorer-actions { visibility:visible; }
+  .file-size { font-size:var(--fs-12); }
+  .explorer-actions .iconbtn { width:32px; height:32px; min-width:32px; min-height:32px; }
+  .explorer-count, .explorer-ln, .grep-snippet, .explorer-status { font-size:var(--fs-12); }
+  .explorer-status { padding:6px var(--gutter); }
+}

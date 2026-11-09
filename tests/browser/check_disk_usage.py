@@ -83,7 +83,8 @@ def run() -> int:
                 section = page.locator("[id$='-info-disk']")
                 expect(section).to_be_visible()
                 assert not any("/api/disk" in r for r in requests), requests
-                section.locator("summary").click()
+                # The inspector's line opens the section's page in its place, under the same id.
+                section.click()
                 usage(page, "[id$='-info-disk']", words, requests)
                 context.close()
                 print(f"{language} {width}px: session details showed the size, the folders and the clean-up")

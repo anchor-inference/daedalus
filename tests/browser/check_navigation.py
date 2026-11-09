@@ -2,8 +2,8 @@
 
 On a 1440 × 900 desktop and a 390 px phone, in English and Russian:
 
-- with nothing configured the rail is the one the app ships with, and the published page waits in the
-  More menu under its own heading, drawn with its own glyph;
+- with nothing configured the rail is the one the app ships with, and the published page is in the
+  More launcher's catalogue, drawn with its own glyph and not marked as already on the rail;
 - in Settings → Navigation, moving Terminals up with its arrow saves the rail's new order with the
   settings revision, and the rail redraws in that order without a reload;
 - dragging Board into the Hidden list hides it from the rail and the menu;
@@ -36,8 +36,8 @@ LANG = os.environ.get("LANG_UI", "")
 SHIPPED = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules"]
 EMPTY = {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
 WORDS = {
-    "en": {"page": "Dosing calculator", "pages": "Pages", "customise": "Customise…", "reset": "Reset to default", "rail": "Rail"},
-    "ru": {"page": "Калькулятор дозировки", "pages": "Страницы", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "rail": "Панель"},
+    "en": {"page": "Dosing calculator", "all": "All screens", "customise": "Customise…", "reset": "Reset to default", "rail": "Rail"},
+    "ru": {"page": "Калькулятор дозировки", "all": "Все экраны", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "rail": "Панель"},
 }
 
 
@@ -104,11 +104,16 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if rail(page) != SHIPPED:
         say(f"with nothing configured the rail reads {rail(page)}")
 
-    # The page waits in the More menu, under its own heading, with its own glyph.
+    # The page is in the launcher's catalogue with its own glyph, not marked as on the rail; a rail
+    # item is listed there too, with the mark.
     page.locator(".rail [data-rail='menu']").click()
     entry = page.locator(".navmenu [data-nav-item='page:dosing']")
     expect(entry).to_contain_text(words["page"])
-    expect(page.locator(".navmenu-section", has=page.locator("[data-nav-item='page:dosing']")).locator(".navmenu-label")).to_have_text(words["pages"])
+    expect(page.locator(".launch-sec", has=page.locator("[data-nav-item='page:dosing']")).locator(".launch-label > span").first).to_have_text(words["all"])
+    if entry.get_attribute("data-placed") is not None:
+        say("the page is marked as already on the rail")
+    if page.locator(".navmenu [data-nav-item='inbox']").get_attribute("data-placed") is None:
+        say("Inbox is not marked as already on the rail")
     if entry.locator("svg.ic-custom path").get_attribute("d") != SAMPLE_PAGE["icon_path"]:
         say("the page's glyph is not drawn in the menu")
     # Customise opens the section.
@@ -148,7 +153,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if host.settings["navigation"]["icons"].get("inbox") != "bolt":
         say(f"the icon was saved as {host.settings['navigation']['icons']}")
 
-    page.locator(".settings-back").click()
+    page.locator(".settings-close").click()
     page.wait_for_selector(".rail .rail-places [data-rail]", timeout=10000)
     want = ["inbox", "calendar", "diagrams", "terminals", "changes", "companion", "schedules", "page:dosing"]
     wait_rail(page, want, say, "after the changes")
@@ -170,7 +175,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.wait_for_timeout(600)
     if host.settings["navigation"] != EMPTY:
         say(f"Reset left {host.settings['navigation']}")
-    page.locator(".settings-back").click()
+    page.locator(".settings-close").click()
     wait_rail(page, SHIPPED, say, "after Reset")
     page.context.close()
 
@@ -196,8 +201,10 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
         say(f"the drawer reads {rows}")
     expect(page.locator(".ph-nrow[data-screen='page:dosing']")).to_contain_text(words["page"])
     page.locator("[data-nav='more']").tap()
-    more = page.locator(".ph-more-sheet [data-screen]").evaluate_all("els => els.map(e => e.dataset.screen)")
-    if "usage" in more or "board" in more or "terminals" not in more:
+    # The sheet is the launcher: everything shown, what the drawer lists marked, nothing hidden.
+    more = page.locator(".ph-more-sheet [data-screen]").evaluate_all("els => els.map(e => [e.dataset.screen, e.dataset.placed !== undefined])")
+    marks = dict(more)
+    if "usage" in marks or marks.get("board") is not True or marks.get("terminals") is not False:
         say(f"the phone's More reads {more}")
     page.keyboard.press("Escape")
 

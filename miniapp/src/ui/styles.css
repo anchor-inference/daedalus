@@ -88,8 +88,7 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .more-item .tab-badge { top: 8px; right: 8px; }
 /* The language, under the destinations: the sheet is the menu on a phone. */
 .more-lang { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-13); font-weight: 600; }
-.settings-lang { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.sidebar, .navmenu, .navmenu-backdrop { display: none; }
+.sidebar { display: none; }
 
 /* ── primitives ─────────────────────────────────────────────────────────────────────────── */
 .card {
@@ -1316,31 +1315,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
      fits its 52 px width, and the mode stripe's offset follows because it is computed from the same
      variable. */
   @media (pointer: coarse) { .rail { --row-h: var(--row-h-touch); } }
-  /* The menu over the content: anchored bottom-left, opening upward, never centred, never a modal. */
-  .navmenu-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: transparent; }
-  /* As tall as the window allows, from its foot to 8 px under the top: capped at 70 % it ended at
-     Health on a landscape tablet, with Language, Settings and About below the edge and nothing on
-     screen to say the list went on. */
-  .navmenu { display: flex; flex-direction: column; position: fixed; left: calc(var(--rail-w) + 6px); bottom: 8px; z-index:var(--z-navigation); width: 300px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 6px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); animation: navmenu-in 160ms var(--ease-out); }
-  .navmenu-section { display: flex; flex-direction: column; padding: 2px 0; }
-  .navmenu-section + .navmenu-section { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 4px; }
-  .navmenu-label { padding: 4px 10px 2px; font-size: var(--fs-11); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3); }
-  .navmenu-item { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 0 10px; border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); font-weight: 500; text-decoration: none; }
-  .navmenu-action { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
-  .navmenu-item .ic { color: var(--fg-2); flex: none; }
-  .navmenu-item:hover, .navmenu-item:focus-visible { background: var(--surface-3); outline: none; }
-  .navmenu-item.active .ic { color: var(--accent); }
-  /* The same count is the same red it is on the rail's icon a few pixels away; a white one here
-     looked like a different number. */
-  .navmenu-item .count { margin-left: auto; font-size: var(--fs-11); font-weight: 700; color: #fff; background: var(--bad); border-radius: var(--radius-pill); padding: 1px 6px; min-width: 18px; text-align: center; }
-  .navmenu-item .count.attn { background: var(--warn); color: var(--bg); }
-  .navmenu-item .count.ok { background: var(--ok); color: var(--bg); }
-  .navmenu-item kbd { margin-left: auto; font: var(--fs-11) var(--mono); color: var(--fg-3); }
-  .navmenu-item .beta-tag { margin-left: 0; }
-  .navmenu-lang { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 0 10px; font-size: var(--fs-14); font-weight: 500; }
-  .navmenu-lang > span { display: flex; align-items: center; gap: 10px; }
-  .navmenu-lang .ic { color: var(--fg-2); }
-  .navmenu-lang .segmented { margin: 0; }
   .main { min-width: 0; }
   :root { --page-pad: 24px; }
   .pagehead { padding: 8px 24px 6px; }
@@ -1700,7 +1674,6 @@ button.secret-chip:hover { background: var(--card-2); }
 .jump-down:hover { background: var(--card-2); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes sidebar-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-@keyframes navmenu-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ── files the agent looked at or sent, right under the step ───────────────────────────── */
 .tool-attachment { margin: 2px 0 6px 28px; }
@@ -2509,26 +2482,6 @@ a.memory-source:hover { color: var(--fg); }
   .usage .tablecard td.tpsc { grid-area: tps; }
 }
 .speed-hint { padding: 6px 2px 2px; }
-.settings-stage { display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--bg); }
-.settings-index { display: flex; flex-direction: column; gap: 2px; }
-.settings-back { display: none; }
-.settings-group { margin: 14px 10px 4px; color: var(--fg-3); font-size: var(--fs-13); }
-.settings-search { margin: 4px 0 8px; border-radius: var(--radius-pill); background: var(--surface-2); }
-.settings-link { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg); min-height: var(--row-h-touch); }
-.settings-link .ic { color: var(--fg-2); }
-.settings-link-text { display: flex; flex-direction: column; min-width: 0; }
-.settings-link-text b { font-weight: 600; }
-/* Two lines before the ellipsis: held to one, most hints on a phone ended mid-word ("that run h…",
-   "fetc…") and read as broken text rather than as a summary. */
-.settings-link-text .sub { font-size: var(--fs-12); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
-/* A row a search found by one of its names, under its section: indented to the section's text so it reads as
-   part of it, and a link rather than a card because it goes to a place on the page, not to a page. */
-.settings-field-hit { display: block; margin: 2px 0 4px 42px; padding: 4px 8px; border-radius: var(--radius-xs); color: var(--accent); font-size: var(--fs-13); text-decoration: none; }
-.settings-field-hit:hover { background: var(--surface-2); }
-.settings-link .chev { color: var(--fg-3); font-size: var(--fs-18); line-height: 1; }
-.settings-link:hover { background: var(--surface-2); }
-.settings-link.active { background: var(--surface-2); border-color: var(--line-strong); }
-h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-spacing: -0.03em; line-height: 1.15; }
 .settings-col .card { background: transparent; border-radius: var(--radius-lg); }
 .settings-col .section-title { text-transform: none; letter-spacing: 0; color: var(--fg); font-size: var(--fs-14); font-weight: 650; }
 .settings-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; margin: 8px 0 12px; }
@@ -2664,30 +2617,6 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 }
 .settings-faces button.on { background: var(--surface-2); }
 h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; }
-@media (min-width: 1024px) {
-  /* Settings takes the window. The rail and the session column step aside; Back is how the reader
-     returns, and the section itself sits in the middle of the remaining space rather than against
-     the nav. */
-  .app.settings-open { grid-template-columns: minmax(0, 1fr); }
-  .app.settings-open .rail,
-  .app.settings-open .sidebar { display: none; }
-  .app.settings-open .main { grid-column: 1; overflow: hidden; }
-  .settings-stage { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; }
-  .settings-nav { overflow: auto; border-right: 1px solid var(--line); padding: 12px 12px 24px; }
-  .settings-main { overflow: auto; min-width: 0; }
-  /* Wide enough that a row's words and its control sit on one line with a lane to spare; the rail
-     keeps its 280 px and the whole gain goes to the content. The column grows with the window until
-     the cap binds, then the gutters take the rest, so prose never runs edge to edge. */
-  .settings-col { width: min(960px, calc(100% - 96px)); margin: 36px auto 72px; }
-  .settings-back { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 0 10px; color: var(--fg-2); }
-  .settings-link { padding: 6px 12px; min-height: var(--row-h); background: transparent; border-color: transparent; }
-  .settings-link .chev { display: none; }
-  .settings-link-text .sub { display: none; }
-  .settings-link.active { background: var(--surface-2); border-color: var(--line); }
-  /* The label names the setting in both languages and the EN/RU switch shares its row, so in the
-     280 px column it wraps after the slash. Cut to one line it read "Language / …" on every width. */
-  .settings-lang .settings-link-text b { line-height: 1.25; }
-}
 
 /* ── palette, offline strip ──────────────────────────────────────────────── */
 .offline-strip { position: sticky; top: 0; z-index: 13; text-align: center; padding: 6px 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
@@ -3287,7 +3216,6 @@ input.field[type="range"] {
 .comp-detail { margin-top: 2px; font-size: var(--fs-12); }
 .voice-needs { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line); }
 
-.settings-link-text .settings-mark { position: static; display: inline-block; margin-left: 7px; vertical-align: middle; }
 
 /* The tree keeps its own scrolling area beside a wide preview. Hidden tabs stay mounted so a
    return to Files keeps the expanded folders, selection and scroll position. */
@@ -3298,36 +3226,6 @@ input.field[type="range"] {
 .split > .panel-files { flex:none; max-width:48%; border-right:1px solid var(--line); }
 .split > .panel-viewer { min-width:0; overflow:auto; }
 .panel-files .pane-handle { left:auto; right:-3px; }
-.explorer { display:flex; flex-direction:column; min-height:0; height:100%; font-size:var(--fs-13); }
-.explorer-folders { display:flex; align-items:center; gap:4px; padding:8px 8px 0; flex:none; min-width:0; }
-.explorer-folders select { flex:1; min-width:0; margin:0; height:var(--ctl-h); font-size:var(--fs-12); padding:0 4px; text-overflow:ellipsis; }
-.explorer-folders .chip { flex:none; }
-.explorer-search { display:flex; gap:4px; padding:8px; flex:none; }
-.explorer-search input { flex:1; min-width:0; }
-.explorer-search .field { margin:0; font-size:var(--fs-12); height:var(--ctl-h); }
-.explorer-search select { width:100px; padding:0 4px; }
-.explorer-crumbs { padding:0 8px; display:flex; flex-wrap:wrap; gap:2px; font-size:var(--fs-12); }
-.explorer-tools { display:flex; align-items:center; gap:4px; padding:0 8px 4px; margin-bottom:4px; border-bottom:1px solid var(--line); }
-.explorer-hidden { display:inline-flex; align-items:center; gap:8px; margin-right:auto; color:var(--fg-2); font-size:var(--fs-12); cursor:pointer; }
-.explorer-tree { overflow:auto; flex:1; min-height:0; }
-.files .tree-row { display:flex; align-items:center; gap:6px; height:var(--row-h-dense); min-height:var(--row-h-dense); padding:0 4px; border:0; border-radius:0; margin:0; background:none; cursor:pointer; }
-.tree-row:hover, .tree-row.selected { background:var(--surface-2); }
-.tree-row:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
-.tree-row .title { font-size:var(--fs-13); font-weight:400; }
-.tree-row.dim { color:var(--fg-3); }
-.tree-row.dim .ic { opacity:.5; }
-.tree-chevron { width:10px; flex:none; color:var(--fg-3); }
-.file-size { font-size:var(--fs-11); color:var(--fg-3); opacity:0; white-space:nowrap; }
-.tree-row:hover .file-size, .tree-row:focus-within .file-size { opacity:1; }
-.explorer-actions { opacity:0; flex:none; }
-.tree-row:hover .explorer-actions, .tree-row:focus-within .explorer-actions { opacity:1; }
-.explorer-actions .iconbtn { width:24px; height:24px; min-height:24px; }
-@media (hover: none) { .explorer-actions { opacity:1; } }
-.written-badge { color:var(--accent); font-size:var(--fs-11); }
-.tree-error { color:var(--bad); }
-.files .tree-row.grep-row { height:48px; }
-.grep-snippet { display:block; overflow:hidden; text-overflow:ellipsis; color:var(--fg-3); font:var(--fs-12) var(--mono); }
-.explorer-note { padding:8px; font-size:var(--fs-12); color:var(--fg-2); }
 .file-skeleton { padding:8px; }
 .file-skeleton > div { height:var(--row-h-dense); display:flex; align-items:center; }
 .file-skeleton .skeleton { display:block; height:10px; }
@@ -3389,15 +3287,12 @@ input.field[type="range"] {
 @keyframes menu-enter { from { opacity:0; translate:0 6px; } to { opacity:1; translate:0 0; } }
 .sheet { animation:sheet-enter 240ms var(--ease-out); }
 @keyframes sheet-enter { from { opacity:0; translate:0 24px; } to { opacity:1; translate:0 0; } }
-.explorer-note, .dt-content { animation:menu-enter 180ms var(--ease-out); }
+.dt-content { animation:menu-enter 180ms var(--ease-out); }
 @media (prefers-reduced-motion:reduce) { .preview-progress.busy i { width:100%; } }
 
 .panel .panel-files .pane-handle { left:auto; right:-3px; }
 
-/* Rows enter quietly without changing their measured height or delaying hover feedback. */
-.tree-row { animation:row-enter 180ms var(--ease-out); }
-@keyframes row-enter { from { opacity:0; } to { opacity:1; } }
-@media (hover: none) { .explorer-search .field, .explorer-folders .field, .source-tools .field { font-size:16px; } }
+@media (hover: none) { .source-tools .field { font-size:16px; } }
 
 /* Closing keeps only the panel surface for the short fade; the conversation measures its final
    width once. Expanding reveals the larger surface without animating the transcript's layout. */
