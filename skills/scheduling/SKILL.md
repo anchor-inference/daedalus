@@ -1,6 +1,7 @@
 ---
 name: scheduling
 description: Creating recurring or one-shot tasks that run later in their own session and workspace.
+requires: scheduling
 ---
 # Scheduling tasks
 

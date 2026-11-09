@@ -1,6 +1,7 @@
 ---
 name: calendar
 description: Plan the operator's time - events (one-off and recurring), free time, structured plans (meal plans, shopping lists, workouts) with typed events, checklists, tables and groups via CalendarBulkCreate and CalendarBlockPatch, and their personal to-do tasks with the Planner tools.
+requires: calendar, board, scheduling
 ---
 # Calendar and planner
 

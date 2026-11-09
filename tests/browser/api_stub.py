@@ -177,6 +177,15 @@ TOOL_GROUP_CATALOGUE: dict[str, object] = {
 """``GET /api/tool-groups``: every host group, shaped like one month of a real installation's use."""
 
 
+def standing_grants() -> list[dict[str, object]]:
+    return [
+        {"id": "a1b2c3d4e5f6", "kind": "server", "tool": "*", "rule": "mcp.annotations", "label": "every tool of files", "server": "files",
+         "at": 0, "until": 1, "left_seconds": 5 * 3600 + 12 * 60},
+        {"id": "0f9e8d7c6b5a", "kind": "prefix", "tool": "Exec", "rule": "egress.unlisted", "label": "npm test*", "server": None,
+         "at": 0, "until": None, "left_seconds": None},
+    ]
+
+
 def session_tool_groups() -> dict[str, object]:
     """``GET /api/sessions/<id>/tool-groups`` for a session that loaded the browser, cannot sign in to MCP
     servers and chose its own mode for the board. Every other group is where its mode puts it, as the
@@ -1620,8 +1629,23 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"similar": None})
     if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-similar"]:
         return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
+    if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-server"]:
+        key = str((body or {}).get("key") or "") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"key": key, "server": "files", "resolved": [key] if key else [], "approves": [], "standing": standing_grants()})
+    if len(parts) >= 6 and parts[2] == "sessions" and parts[4:6] == ["policy", "standing"]:
+        # The session's standing grants: one server allowed for a span, one for good, so the list shows both kinds.
+        return 200, "application/json", json.dumps({"standing": [] if method.upper() == "DELETE" else standing_grants()})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "subagent-models":
+        # Every session's Details shows which models its helpers may run on: the default here, every model;
+        # a change answers the choice it was given. check_model_settings.py draws the others.
+        chosen = body if method.upper() == "PUT" and isinstance(body, dict) else {}
+        mode = chosen.get("mode") or "all"
+        options = [{"id": "default", "label": "Test model"}, {"id": "fast", "label": "Fast model"}]
+        allowed = [o["id"] for o in options] if mode == "all" else ["default"] if mode == "session" else [p for p in chosen.get("presets") or [] if p in ("default", "fast")]
+        return 200, "application/json", json.dumps({"mode": mode, "presets": list(chosen.get("presets") or []), "inherited": not chosen.get("mode"), "from_parent": False, "allowed": allowed,
+                                                    "default": {"mode": "all", "presets": []}, "session_preset": "default", "options": options})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "tool-groups":
         # Every session's Details lists its tool groups; a change or a "Load now" answers the same list.
         return 200, "application/json", json.dumps(session_tool_groups())
@@ -1649,10 +1673,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         servers = [
             {"name": "files", "transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"], "url": "",
              "description": "Read and write the shared data folder", "headers": {}, "env": {}, "oauth": None,
+             "approval": "auto", "tool_approval": {"write_file": "ask"}, "remote_tools": ["list_directory", "read_file", "write_file"],
+             "runs_in": "container", "stderr": "",
              "state": "ready", "error": None, "tools": ["Mcp_Files_read_file", "Mcp_Files_write_file", "Mcp_Files_list_directory"]},
             {"name": "tracker", "transport": "http", "command": "", "args": [], "url": "https://mcp.tracker.example/mcp",
              "description": "Issues and projects", "headers": {}, "env": {},
              "oauth": {"scopes": [], "issuer": "", "client_id": "", "client_secret": "", "linked": False, "redirect_uri": ""},
+             "approval": "auto", "tool_approval": {}, "remote_tools": [], "runs_in": "", "stderr": "",
              "state": "auth_required", "error": None, "tools": []},
         ]
         probe = {"state": "ready", "error": None, "tools": ["Mcp_Files_read_file"]}
@@ -1660,6 +1687,19 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 200, "application/json", json.dumps({"servers": servers, "callback": "https://agent.example/api/mcp/oauth/callback"})
         if method.upper() == "POST" and path.endswith("/oauth/begin"):
             return 200, "application/json", json.dumps({"auth_url": "about:blank"})
+        if method.upper() == "POST" and path == "/api/mcp/try":
+            # A pasted command started once: it answers, and says on stderr what a phone server says without a device.
+            return 200, "application/json", json.dumps({
+                "name": "mobile-mcp", "state": "ready", "error": None, "exists": False,
+                "runs_in": "container",
+                "stderr": "mobile-mcp server running on stdio\nadb: no devices/emulators found",
+                "spec": {"transport": "stdio", "command": "npx", "args": ["-y", "@mobilenext/mobile-mcp@latest"], "env": {}},
+                "tools": [{"name": "mobile_list_available_devices", "description": "List all available devices.", "approval": "allow"},
+                          {"name": "mobile_take_screenshot", "description": "Take a screenshot of the mobile device.", "approval": "ask"},
+                          {"name": "mobile_click_on_screen_at_coordinates", "description": "Click on the screen.", "approval": "ask"}]})
+        if method.upper() == "POST" and path == "/api/mcp/add":
+            return 200, "application/json", json.dumps({"name": "mobile-mcp", "added": True, "probe": probe,
+                                                         "enabled": ["mobile-mcp"] if isinstance(body, dict) and body.get("session_id") else None, "servers": servers})
         if method.upper() in ("PUT", "POST"):
             return 200, "application/json", json.dumps({"name": parts[4] if len(parts) > 4 else "", "added": True, "probe": probe, "servers": servers})
         if method.upper() == "DELETE":

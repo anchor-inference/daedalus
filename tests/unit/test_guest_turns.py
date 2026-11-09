@@ -36,6 +36,7 @@ from daedalus.host.engine_factory import TENANT
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.session_runner import SessionManager
 from daedalus.memory import render as memory_render
+from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.stores.database import Database
 from daedalus.tools import files
 from tests.support.models import model_config
@@ -923,9 +924,9 @@ async def test_model_choices_are_the_ones_the_door_can_reach_cheapest_first(sett
         "own": SimpleNamespace(base_url="https://own.example.test/v1"), "mystery": SimpleNamespace(base_url="http://keyproxy:3200/mystery/v1"),
     }
     endpoints = {
-        "paid": SimpleNamespace(subscription=False, kind="openai", pricing_for=lambda _m: ModelPricing(input=1, output=2)),
-        "plan": SimpleNamespace(subscription=True, kind="openai", pricing_for=lambda _m: None),
-        "mystery": SimpleNamespace(subscription=False, kind="openai", pricing_for=lambda _m: None),
+        "paid": ProviderEndpoint(id="paid", kind="openai", base_url=providers["paid"].base_url, pricing={"m": ModelPricing(input=1, output=2)}),
+        "plan": ProviderEndpoint(id="plan", kind="openai", base_url=providers["plan"].base_url, subscription=True),
+        "mystery": ProviderEndpoint(id="mystery", kind="openai", base_url=providers["mystery"].base_url),
     }
 
     def preset(provider: str, model: str) -> Any:
@@ -961,7 +962,7 @@ def test_every_model_the_app_lists_is_offered_or_has_a_stated_reason(monkeypatch
         "mystery": ("http://keyproxy:3200/mystery", metered, None, None), "lan": ("http://lan.example.test:9000/v1", metered, priced, None),
     }
     providers = {name: SimpleNamespace(base_url=route[0]) for name, route in routes.items()}
-    endpoints = {name: SimpleNamespace(pricing_for=lambda _m, price=route[2]: price, **route[1]) for name, route in routes.items()}
+    endpoints = {name: ProviderEndpoint(id=name, base_url=route[0], pricing={"m": route[2]} if route[2] else {}, **route[1]) for name, route in routes.items()}
     presets = {name: SimpleNamespace(provider=name, model="m", display=lambda pid: pid) for name in routes} | {"ghost": SimpleNamespace(provider="nowhere", model="m", display=lambda pid: pid)}
     app = SimpleNamespace(
         settings=SimpleNamespace(guest_model_upstreams="*"), config=SimpleNamespace(providers=providers, presets=presets),
@@ -982,7 +983,7 @@ async def test_a_call_past_the_bot_is_booked_at_the_bill_its_upstream_stated(set
 
     captured: list[Any] = []
     usage = SimpleNamespace(record=lambda record: captured.append(record) or asyncio.sleep(0))
-    endpoint = SimpleNamespace(subscription=False, pricing_for=lambda _m: ModelPricing(input=1.0, output=1.0))
+    endpoint = ProviderEndpoint(id="acme", kind="openai", base_url="https://api.example.test/v1", pricing={"m": ModelPricing(input=1.0, output=1.0)})
     routes = api_module.direct_usage_booking(SimpleNamespace(usage=usage, providers=SimpleNamespace(get=lambda _id: SimpleNamespace(endpoint=endpoint))))
     await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000, "cost_usd": 0.25})
     await routes({"provider_id": "acme", "model": "m", "input_tokens": 1_000_000})

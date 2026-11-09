@@ -35,6 +35,34 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def servers(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return {"servers": mcp_admin.describe(app), "callback": mcp_callback_url(app.settings.miniapp_public_url)}
 
+    @api.post("/api/mcp/try")
+    async def try_server(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Start what the operator pasted — a command, an address, a README's JSON block — once, unsaved:
+        ``{"input": "npx -y @x/y-mcp", "name": optional}``. The answer has the name and spec to add it
+        with, its state, tools, the last of what it wrote to stderr, and where it ran."""
+        manager()
+        try:
+            return await mcp_admin.trial(app, str(body.get("input") or ""), str(body.get("name") or ""))
+        except mcp_admin.McpAdminError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.post("/api/mcp/add")
+    async def add_pasted(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Add what the operator pasted and tried: ``{"input": …, "name": …, "approval": "auto" | "ask" | "allow" | "deny",
+        "session_id": optional}``; with a session it is switched on there too."""
+        manager()
+        try:
+            added = await mcp_admin.add_pasted(app, str(body.get("input") or ""), str(body.get("name") or ""), str(body.get("approval") or "auto"))
+        except mcp_admin.McpAdminError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        enabled = None
+        if (session_id := str(body.get("session_id") or "")) and added["probe"]["state"] in ("ready", "connecting"):
+            try:
+                enabled = await app.manager.set_mcp(session_id, added["name"], True)
+            except (KeyError, RuntimeError) as exc:
+                logger.info("MCP server %s added but not enabled in %s: %s", added["name"], session_id, exc)
+        return {**added, "enabled": enabled, "servers": mcp_admin.describe(app)}
+
     @api.put("/api/mcp/servers/{name}")
     async def put_server(name: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Add or change a server; it is connected once at once so the answer says whether it works."""

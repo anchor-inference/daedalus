@@ -254,8 +254,19 @@ describe("the approval dock", () => {
 
   it("is silent once the key was spent or waved away, and for an ordinary error", () => {
     const history = [call("c1", "Exec", { command: "x" }), refusal("c1", "0123456789ab")];
-    expect(pendingApproval(history, new Set(["0123456789ab"]), open("0123456789ab"))).toBeNull();
+    expect(pendingApproval(history, new Set(["c1"]), open("0123456789ab"))).toBeNull();
     expect(pendingApproval([call("c1", "Exec", { command: "x" }), { tool_calls: [], tool_results: [{ id: "c1", content: "exit 1", is_error: true }] }], new Set(), open("0123456789ab"))).toBeNull();
+  });
+
+  // The bank form: allowed once, the agent clicked again, and the same key came back on a new call.
+  // The screen that answered the first refusal offered nothing, and the buttons were in the folded steps.
+  it("offers a refusal of the same action again after the first one was answered", () => {
+    const history = [call("c1", "BrowserAct", { action: "click" }, "r1"), refusal("c1", "a1b2c3d4e5f6", "r1"), call("c2", "BrowserAct", { action: "click" }, "r2"), refusal("c2", "a1b2c3d4e5f6", "r2")];
+    expect(pendingApproval(history, new Set(["c1"]), open("a1b2c3d4e5f6"))).toMatchObject({ key: "a1b2c3d4e5f6", callId: "c2" });
+    expect(pendingApproval(history, new Set(["c1", "c2"]), open("a1b2c3d4e5f6"))).toBeNull();
+    // A browser action has no command to quote; the dock says what the host asked about instead.
+    const said = { tool_calls: [], tool_results: [{ id: "c3", content: "[in the operator's own Chrome «Work»]\nneeds the operator's approval: this would submit a form on example.org (rule browser.sensitive). Approval key: 0123456789ab.", is_error: true }] };
+    expect(pendingApproval([call("c3", "BrowserAct", { action: "click" }), said], new Set(), open("0123456789ab"))?.detail).toBe("this would submit a form on example.org");
   });
 
   it("offers the newest refusal", () => {

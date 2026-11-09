@@ -271,6 +271,7 @@ export type Approval = {
 export const CHROME_ASK_TOOL = "BrowserAskOperatorChrome";
 
 const APPROVAL_RE = /Approval key: ([0-9a-f]{12})/;
+const REASON_RE = /needs (?:the operator's )?approval: (.+?) \(rule /;
 
 type CallLike = { id: string; name: string; arguments: Record<string, unknown> };
 type MessageLike = { run_id?: string | null; tool_calls: CallLike[]; tool_results: { id: string; content: string; is_error: boolean }[] };
@@ -289,6 +290,11 @@ export type ApprovalState = { open: readonly string[] | null | undefined; runId?
  * Telegram — came back as an open card on every reload, and went away only when a new run pushed it
  * out of the last messages. The host closes a request when the next run starts; checking the run
  * here as well keeps a card from outliving it between that start and the next read.
+ *
+ * `seen` holds the refused calls the operator answered on this screen, by call id and not by key.
+ * The key is a hash of the action, so the agent trying the same click again after an Allow is a new
+ * request under the old key: kept by key, the screen that had answered the first one never offered
+ * the second, and the only buttons left were inside the folded steps.
  */
 export function pendingApproval(messages: readonly MessageLike[], seen: ReadonlySet<string>, host: ApprovalState, lastMessages = 12): Approval | null {
   if (!host.open?.length) return null;
@@ -302,14 +308,17 @@ export function pendingApproval(messages: readonly MessageLike[], seen: Readonly
     for (const r of [...tail[i].tool_results].reverse()) {
       if (!r.is_error) continue;
       const key = APPROVAL_RE.exec(r.content)?.[1];
-      if (!key || seen.has(key) || !open.has(key)) continue;
+      if (!key || seen.has(r.id) || !open.has(key)) continue;
       const call = calls.get(r.id);
       const a = call?.arguments ?? {};
       if (call?.name === CHROME_ASK_TOOL) {
         const reason = typeof a.reason === "string" ? a.reason.trim().slice(0, 300) : "";
         return { key, callId: r.id, tool: call.name, detail: reason, chrome: { name: /«([^»]{1,80})»/.exec(r.content)?.[1] ?? "Chrome", reason } };
       }
-      const detail = typeof a.command === "string" ? a.command : typeof a.path === "string" ? a.path : typeof a.url === "string" ? a.url : "";
+      // A browser action has no command, path or address to quote: the reason the host gave for asking
+      // ("this would submit a form on …") is what says what Allow lets through.
+      const said = typeof a.command === "string" ? a.command : typeof a.path === "string" ? a.path : typeof a.url === "string" ? a.url : "";
+      const detail = said || (REASON_RE.exec(r.content)?.[1] ?? "");
       return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160) };
     }
   }

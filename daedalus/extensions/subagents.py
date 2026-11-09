@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.config import REASONING_EFFORTS
+from daedalus.host import subagent_models
 from daedalus.host.prompts import split_headline
 from daedalus.tools._common import idle_words
 
@@ -203,12 +204,18 @@ class Subagents:
         """Subagents a removal was scheduled for: finished and on their way out, so never "lingering"."""
         self._reminders: set[asyncio.Task[None]] = set()
 
-    async def models(self) -> list[str]:
-        """Preset ids a subagent can run on: those whose provider is configured."""
+    async def allowance(self, leader_id: str) -> Any:
+        """The presets this leader's helpers may run on: those whose provider is configured, narrowed
+        by the session's (or the global) choice of helper models."""
         manager = self.app.manager
         assert manager is not None
-        available = set(manager.providers.available())
-        return [pid for pid, preset in self.app.config.presets.items() if preset.provider in available and preset.model]
+        leader = await manager.get_state(leader_id)
+        if leader is None:
+            raise ValueError("unknown leader session")
+        return manager.subagent_allowance(leader.metadata, await manager.live.load(leader_id))
+
+    async def models(self, leader_id: str) -> list[str]:
+        return list((await self.allowance(leader_id)).presets)
 
     async def spawn(
         self,
@@ -252,11 +259,12 @@ class Subagents:
                 "set in Settings → Limits → Subagents at once, config subagents.max_active); wait for their reports"
             )
         effort = check_effort(effort)
-        models = await self.models()
+        allowed = await self.allowance(leader_id)
         if model is not None:
             model = model.strip()
-            if model not in models:
-                raise ValueError(f"unknown model {model!r}; choose one of: {', '.join(models)}")
+            if model not in allowed.presets and (model not in self.app.config.presets or not allowed.limited):
+                raise ValueError(f"unknown model {model!r}; choose one of: {', '.join(allowed.presets)}")
+        allowed.check(model)
         # Withholding runs down the tree, not just one level: a subagent that keeps SubAgent would
         # otherwise hand a grandchild the very tool its leader took away from it, and tools_off would
         # be a request rather than the enforcement it is sold as. Names the leader carries are already
@@ -286,6 +294,8 @@ class Subagents:
         }
         if withheld:
             metadata["tools_off"] = withheld
+        if allowed.inherited() is not None:
+            metadata[subagent_models.KEY] = allowed.inherited()
         if leader.metadata.get("mcp") is not None:
             metadata["mcp"] = leader.metadata["mcp"]
         # A subagent works beside its leader, which in a project means inside the project: the same
@@ -669,7 +679,7 @@ class Subagents:
         if op == "spawn":
             return await self.spawn(**kwargs)
         if op == "models":
-            return await self.models()
+            return await self.models(kwargs["leader_id"])
         if op == "personas":
             return self.personas()
         if op == "children":

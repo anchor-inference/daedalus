@@ -8,7 +8,7 @@ are read and ranked here; a call row is three numbers, and a busy month is tens 
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -92,4 +92,74 @@ async def provider_speed(db: Database, *, hours: int, provider_id: str | None = 
     return out
 
 
-__all__ = ["MAX_WINDOW_HOURS", "ModelSpeed", "percentile", "provider_speed"]
+MIN_TURN_TOKENS = 20
+"""Below this a turn's speed is noise: a one-line answer's rate is mostly its first token's luck."""
+
+RUN_BATCH = 400
+"""Runs asked about in one statement, well under SQLite's limit on bound values."""
+
+
+def turn_speed(rows: Sequence[Any]) -> dict[str, Any] | None:
+    """A run's generation speed: the output its streamed calls produced over the time they took to produce it.
+
+    Only the run's own calls (purpose ``stream``) with a rate, which only a streamed call long enough
+    to time has (``CallTiming.measures``). Each call's time is its output at its own measured rate, so
+    what the tools did between the calls and the wait for each first token are not in it, and the
+    figure is what the run's rows on Usage add up to: their output over their output at their rates.
+    The rows keep the rate and not the clock it was taken from; the call's span from its first token to
+    its end is no stand-in, since a stream that ends on a tool call's arguments goes on long after its
+    last counted token. ``None`` when no call was timed or the turn wrote under :data:`MIN_TURN_TOKENS`.
+    """
+    total_tokens = 0
+    total_ms = 0.0
+    by_model: dict[str, int] = {}
+    calls = 0
+    for row in rows:
+        rate = row["output_tokens_per_second"]
+        tokens = int(row["output_tokens"] or 0)
+        if rate is None or float(rate) <= 0 or tokens <= 0:
+            continue
+        calls += 1
+        total_tokens += tokens
+        total_ms += tokens / float(rate) * 1000
+        by_model[str(row["model"])] = by_model.get(str(row["model"]), 0) + tokens
+    if not calls or total_tokens < MIN_TURN_TOKENS:
+        return None
+    return {
+        "tokens": total_tokens,
+        "ms": round(total_ms),
+        "rate": round(total_tokens / (total_ms / 1000), 2),
+        "calls": calls,
+        "model": max(by_model, key=lambda name: by_model[name]),
+    }
+
+
+async def run_speeds(db: Database, session_id: str, run_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """:func:`turn_speed` of each of the session's runs named, by run id; a run with none is left out.
+
+    Asked for the runs on the page the app reads, by the run index: a chat of twenty thousand turns
+    costs what its page costs, and the poll that reads one message asks about one run. The ``+`` keeps
+    the planner off the session's index, which it preferred and which walks every call the session made.
+    """
+    wanted = sorted({run for run in run_ids if run})
+    grouped: dict[str, list[Any]] = {}
+    for start in range(0, len(wanted), RUN_BATCH):
+        batch = wanted[start:start + RUN_BATCH]
+        marks = ",".join("?" * len(batch))
+        rows = await db.fetchall(
+            "SELECT run_id, model, output_tokens, output_tokens_per_second"
+            f" FROM usage_events WHERE run_id IN ({marks}) AND +session_id = ? AND purpose = 'stream'"  # noqa: S608 — placeholders only
+            " AND output_tokens_per_second IS NOT NULL",
+            (*batch, session_id),
+        )
+        for row in rows:
+            grouped.setdefault(str(row["run_id"]), []).append(row)
+    out: dict[str, dict[str, Any]] = {}
+    for run, rows in grouped.items():
+        speed = turn_speed(rows)
+        if speed is not None:
+            out[run] = speed
+    return out
+
+
+__all__ = ["MAX_WINDOW_HOURS", "MIN_TURN_TOKENS", "ModelSpeed", "percentile", "provider_speed", "run_speeds", "turn_speed"]

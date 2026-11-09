@@ -90,6 +90,7 @@ class Host:
         # The request "Allow similar" has a family for, and the other open ones that family answers.
         self.similar_key = ""
         self.covered: list[str] = []
+        self.server_key = ""
         # The keys of the requests the host still holds open; the app offers a refusal only while its
         # key is here, as the real host's detail says.
         self.open: list[str] = []
@@ -191,6 +192,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []
             HOST.answered(*resolved)
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "similar": {"label": "rm*"}, "resolved": resolved, "approves": [], "standing": []}))
+        if rel == f"/api/sessions/{SESSION}/policy/grant-server":
+            key = str((data or {}).get("key") or "")
+            HOST.answered(key)
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "server": "mobile-mcp", "resolved": [key], "approves": [], "standing": []}))
         if rel in (f"/api/sessions/{SESSION}/policy/grant", f"/api/sessions/{SESSION}/policy/refuse"):
             HOST.answered(str((data or {}).get("key") or ""))
             return route.fulfill(status=200, content_type="application/json", body="{}")
@@ -232,7 +237,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         body = HOST.detail()
     elif rel.startswith(f"/api/sessions/{SESSION}/policy/similar/"):
         key = rel.rsplit("/", 1)[1]
-        body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None}
+        body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None,
+                "server": {"name": "mobile-mcp", "hours": [1, 2, 6, 12, 0], "default_hours": 6} if key == HOST.server_key else None}
     elif rel.startswith(f"/api/sessions/{SESSION}/"):
         body = []
     elif rel == "/api/settings":
@@ -586,6 +592,35 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("the dock came back for a request the similar grant answered")
     HOST.similar_key = ""
     HOST.covered = []
+
+    # An MCP server's tool asking: "Allow all from <server>" with six hours chosen, and a span changed
+    # before the press is the span that reaches the host.
+    HOST.messages = HOST.messages[:2]
+    HOST.server_key = "3c3c3c3c3c3c"
+    HOST.messages = HOST.messages + [
+        message(107, "assistant", "", tool_calls=[{"id": "c_tap", "name": "Mcp_MobileMcp_mobile_click_on_screen_at_coordinates", "arguments": {"x": 10, "y": 20}}]),
+        message(108, "tool", "", tool_results=[{"id": "c_tap", "content": "needs the operator's approval: an MCP tool that may change or reach the outside world.\nApproval key: 3c3c3c3c3c3c", "is_error": True}]),
+    ]
+    HOST.open.append("3c3c3c3c3c3c")
+    page.reload()
+    page.wait_for_selector(".composer .dock.approval [data-action='allow-server']", timeout=15000)
+    grant = page.locator(".composer .dock.approval [data-action='allow-server']")
+    print("allow all:", grant.inner_text())
+    if "Allow all from mobile-mcp" not in grant.inner_text():
+        problems.append(f"the server button does not name the server ({grant.inner_text()!r})")
+    if grant.locator("select").input_value() != "6":
+        problems.append("six hours is not the span chosen at first")
+    grant.locator("select").select_option("2")
+    before = len(posts("/policy/grant-server"))
+    grant.locator("button").click()
+    reached(page, "/policy/grant-server", before, "Allow all from the server", problems)
+    asked = posts("/policy/grant-server")
+    if not asked or asked[-1][2] != {"key": "3c3c3c3c3c3c", "hours": 2}:
+        problems.append(f"Allow all did not reach the host with the key and the span ({asked})")
+    page.wait_for_timeout(200)
+    if page.locator(".composer .dock.approval").count():
+        problems.append("the dock came back for a request the server grant answered")
+    HOST.server_key = ""
 
     # Refusing tells the host as well, so the request is closed wherever else it is shown.
     HOST.messages = HOST.messages[:2]

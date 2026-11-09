@@ -249,10 +249,13 @@ def grid_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(b"deploy" not in term.inputs(IDS[0]), "the rename's keys reached the shell")
     page.wait_for_function(f"() => document.querySelector(\".tp-pane[data-pane='{IDS[0]}'] .tp-pane-title\")?.textContent.includes('deploy')", timeout=8000)
 
-    # Close a pane: its place is empty, the others stay; the empty pane offers the spare terminal.
+    # A pane's ✕ ends its terminal (a shell at its prompt: at once, unasked) and frees the place; the
+    # others stay; the empty pane offers the spare terminal. The terminal is ended, not forgotten.
     others = [p for i, p in enumerate(panes(page)) if str(i) != slot]
     page.locator(f".tp-pane[data-slot='{slot}'] .tp-pane-close").click()
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(500)
+    c.that(page.locator(".dialog").count() == 0, "✕ on a shell at its prompt asked a question")
+    c.that(len(stub_requests(term, "POST", f"/{IDS[0]}/kill")) == 1, "✕ did not end the pane's terminal")
     c.that(panes(page)[int(slot or 0)] == "", f"the closed place holds {panes(page)[int(slot or 0)]!r}")
     c.that([p for i, p in enumerate(panes(page)) if str(i) != slot] == others, "closing a pane moved the others")
     c.that(not stub_requests(term, "DELETE", IDS[0]), "closing a pane removed the terminal")
