@@ -8,6 +8,7 @@ import html
 import ipaddress
 import mimetypes
 import os
+import posixpath
 import re
 import socket
 import tempfile
@@ -21,6 +22,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.policy import PUBLIC_PATHS
 from daedalus.host.setting_refs import WEB_SEARCH
 from daedalus.security.untrusted import fenced, injection_signs, origin_of
 from daedalus.stores.files import safe_name, saved_report
@@ -74,7 +76,7 @@ def page_head(raw: str, url: str) -> str:
 
 
 DOWNLOAD_REDIRECTS = 5
-"""Redirects a download follows, each one checked as the first address was."""
+"""Redirects a fetch follows, a page read as text or a file saved, each one checked as the first address was."""
 
 _WEB_PAGE_TYPES = ("text/html", "application/xhtml+xml")
 _WEB_PAGE_SUFFIXES = (".html", ".htm", ".xhtml")
@@ -83,15 +85,16 @@ _MAGIC = {".pdf": b"%PDF-", ".zip": b"PK\x03\x04", ".docx": b"PK\x03\x04", ".xls
 
 
 class DownloadRefused(Exception):
-    """Why a download was not made, in words the model reads."""
+    """Why a fetch was not made, in words the model reads."""
 
 
-async def public_address(host: str, port: int) -> str:
+async def public_address(host: str, port: int, *, private: bool = False) -> str:
     """The address to connect to for ``host``, refused unless every address it has is on the public internet.
 
     Every address and not any: a name with one public and one private address is how a page aims a
     client at the inside of the network it runs in, and which of the two is used is the resolver's
-    choice. An IPv4 address written as IPv6 is judged as the IPv4 one it is.
+    choice. An IPv4 address written as IPv6 is judged as the IPv4 one it is. ``private`` lets any address through,
+    for the one door that may answer on one: this installation's own shared links (:func:`_own_public_link`).
     """
     if not host:
         raise DownloadRefused("the address names no host")
@@ -102,14 +105,17 @@ async def public_address(host: str, port: int) -> str:
     addresses = list(dict.fromkeys(str(info[4][0]) for info in found))
     if not addresses:
         raise DownloadRefused(f"{host} does not resolve")
-    for address in addresses:
+    for address in [] if private else addresses:
         parsed = ipaddress.ip_address(address.split("%", 1)[0])
         if not (getattr(parsed, "ipv4_mapped", None) or parsed).is_global:
-            raise DownloadRefused(f"{host} is not on the public internet ({address}); a file is saved only from a public site")
+            raise DownloadRefused(
+                f"{host} is not on the public internet ({address}); WebFetch reads and saves only from public sites. "
+                "A page on this machine or the local network is opened with BrowserOpen, which asks the operator about such an address."
+            )
     return addresses[0]
 
 
-async def _pinned(url: str, proxy: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+async def _pinned(url: str, proxy: str, *, private: bool = False) -> tuple[str, dict[str, str], dict[str, Any]]:
     """``url`` rewritten to the address that was checked, with the name kept for the Host header and TLS.
 
     Resolved twice, the second answer would be the site's to choose, and a name that was public when
@@ -124,13 +130,51 @@ async def _pinned(url: str, proxy: str) -> tuple[str, dict[str, str], dict[str, 
         port = parts.port or (443 if parts.scheme == "https" else 80)
     except ValueError:
         raise DownloadRefused("that address has no valid port") from None
-    address = await public_address(host, port)
+    address = await public_address(host, port, private=private)
     if proxy:
         return url, {}, {}
     named = (f"[{host}]" if ":" in host else host) + (f":{parts.port}" if parts.port else "")
     place = f"[{address}]" if ":" in address else address
     target = parts._replace(netloc=f"{place}:{port}").geturl()
     return target, {"host": named}, ({"sni_hostname": host} if parts.scheme == "https" else {})
+
+
+def _policy_of(services: Any) -> Any | None:
+    """The session's policy, which judged the first address when the call was made and judges every redirect here."""
+    make = getattr(services.extra.get("manager"), "policy", None)
+    return make(base_dir=services.workspace_dir) if callable(make) else None
+
+
+def _own_public_link(policy: Any | None, url: str) -> bool:
+    """Whether ``url`` is one of this installation's own shared links, a service or a dialog.
+
+    The agent may check the link it just handed out, and these hold nothing the link does not already give
+    (:data:`daedalus.host.policy.PUBLIC_PATHS`). Its own address may resolve to one on the local network, as a
+    name behind a home router does from inside, so for these paths alone the address is not required to be public.
+    Everything else under its own name is the policy's to refuse.
+    """
+    if policy is None:
+        return False
+    parts = urlsplit(url)
+    if (parts.hostname or "").lower() not in policy.own_doors().hosts:
+        return False
+    return (posixpath.normpath("/" + parts.path.lstrip("/")) + "/").startswith(PUBLIC_PATHS)
+
+
+async def _hop(url: str, proxy: str, policy: Any | None, *, first: bool) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """One address of a fetch, checked and pinned: :func:`_pinned`, and for a redirect the policy too.
+
+    The first address went through the policy when the call was made, and a grant may have let it through
+    there; a redirect is an address the site chose, so it is asked again here, and anything short of allowed
+    is refused, since nobody can be asked in the middle of a call. Without the policy a redirect to this
+    installation's own public name reached the app's API, which the rule against the agent calling itself
+    refuses by name only.
+    """
+    if not first and policy is not None:
+        decision = policy.evaluate("WebFetch", {"url": url})
+        if decision.action != "allow":
+            raise DownloadRefused(f"the site redirected to {url}, which is refused: {decision.reason}")
+    return await _pinned(url, proxy, private=_own_public_link(policy, url))
 
 
 _STAR_RE = re.compile(r"filename\*\s*=\s*([^;]+)", re.IGNORECASE)
@@ -234,6 +278,7 @@ async def _download(context: ToolContext, url: str, save_to: str) -> ToolResult:
     except DownloadRefused as exc:
         return error(context, str(exc))
     current = url
+    policy = _policy_of(services)
     spool = Path(tempfile.gettempdir()) / f"daedalus-download-{uuid.uuid4().hex}.part"
     if not fs.remote:
         await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
@@ -241,8 +286,8 @@ async def _download(context: ToolContext, url: str, save_to: str) -> ToolResult:
         spool = folder / f".download-{uuid.uuid4().hex}.part"
     try:
         async with httpx.AsyncClient(timeout=web.fetch_timeout_seconds, follow_redirects=False, headers={"user-agent": web.user_agent}, proxy=web.proxy or None, trust_env=False) as client:
-            for _ in range(DOWNLOAD_REDIRECTS + 1):
-                target, headers, extensions = await _pinned(current, web.proxy)
+            for hop in range(DOWNLOAD_REDIRECTS + 1):
+                target, headers, extensions = await _hop(current, web.proxy, policy, first=hop == 0)
                 async with client.stream("GET", target, headers=headers, extensions=extensions) as response:
                     if response.is_redirect:
                         location = response.headers.get("location")
@@ -315,17 +360,35 @@ async def web_fetch(context: ToolContext, url: str, max_chars: int | None = None
         return await _download(context, url, save_to)
     services = services_for(context)
     web = tool_config(context).web
+    # Read as the download is: only from the public internet, and every redirect checked as the first address
+    # was. This path once followed redirects on its own and dialled whatever a name resolved to, so a page could
+    # answer with a redirect to the router, the cloud's metadata address or this machine's own API and have the
+    # agent read it back.
+    policy = _policy_of(services)
+    current = url
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=web.fetch_timeout_seconds, headers={"user-agent": web.user_agent}, proxy=web.proxy or None
+            follow_redirects=False, timeout=web.fetch_timeout_seconds, headers={"user-agent": web.user_agent}, proxy=web.proxy or None, trust_env=False
         ) as client:
-            response = await client.get(url)
-    except httpx.HTTPError as exc:
+            for hop in range(DOWNLOAD_REDIRECTS + 1):
+                target, headers, extensions = await _hop(current, web.proxy, policy, first=hop == 0)
+                response = await client.get(target, headers=headers, extensions=extensions)
+                if not response.is_redirect:
+                    break
+                location = response.headers.get("location")
+                if not location:
+                    break
+                current = urljoin(current, location)
+            else:
+                raise DownloadRefused(f"more than {DOWNLOAD_REDIRECTS} redirects from {url}; nothing was read")
+    except DownloadRefused as exc:
+        return error(context, str(exc))
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         return error(context, f"fetch failed: {exc}")
     content_type = response.headers.get("content-type", "")
     head = ""
     if "html" in content_type:
-        head = page_head(response.text, str(response.url))
+        head = page_head(response.text, current)
         body = html_to_text(response.text)
     elif "json" in content_type or content_type.startswith("text/"):
         body = response.text
@@ -333,14 +396,14 @@ async def web_fetch(context: ToolContext, url: str, max_chars: int | None = None
         return ok(context, f"HTTP {response.status_code}, {content_type}, {len(response.content)} bytes (binary; pass save_to to save it in the workspace)")
     limit = min(max_chars or web.fetch_max_chars, services.max_tool_output_chars)
     text = clip(body, limit)
-    origin = origin_of(str(response.url))
+    origin = origin_of(current)
     signs: list[str] = []
     rules = getattr(services.extra.get("manager"), "action_rules", None)
     if rules is not None and not injection_signs(text):
         # The patterns found nothing; the operator may have a small model look as well.
         signs = await rules.injection_check(origin, text)
     page = fenced(text, kind="page content", origin=origin, source="the web", quoted_by="the page", signs=signs)
-    return ok(context, f"HTTP {response.status_code} {url}\n{head}\n{page}", status=response.status_code)
+    return ok(context, f"HTTP {response.status_code} {current}\n{head}\n{page}", status=response.status_code)
 
 
 @search_hint(

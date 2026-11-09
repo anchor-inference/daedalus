@@ -797,6 +797,17 @@ class Terminals(SideChannels):
 
     # -- creating and ending ----------------------------------------------------------------
 
+    def _sandbox_hidden(self, env: str, link: Link) -> list[str]:
+        """What the owners say a sandboxed terminal in ``env`` may not read, for a daemon that can hide it.
+
+        A daemon from before the field refuses a create that names it, so it is told only to one that says
+        it hides (``sandbox_hide``); an older one goes on masking its own folders alone until it is updated,
+        which ``SECURITY.md`` says."""
+        hidden = getattr(self.owners, "sandbox_hidden", None)
+        if hidden is None or (link.info.get("capabilities") or {}).get("sandbox_hide") is not True:
+            return []
+        return list(hidden(env))
+
     async def create(self, spec: TerminalSpec, *, confirm_over_cap: bool = False, wait: float | None = None) -> TerminalView:
         """Start a terminal for an owner and return its view.
 
@@ -894,6 +905,8 @@ class Terminals(SideChannels):
             params["log_to_disk"] = True
         if spec.sandbox:
             params["sandbox"] = {"writable": writable}
+            if hidden := self._sandbox_hidden(spec.env, link):
+                params["sandbox"]["hide"] = hidden
         if spec.resources is not None:
             params["resources"] = spec.resources
         try:

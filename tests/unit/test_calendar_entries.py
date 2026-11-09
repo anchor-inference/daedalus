@@ -548,7 +548,9 @@ async def test_routes_follow_the_entries_contract(db):
         assert action.status_code == 200, action.text
         ran = await client.post(f"/api/calendar/events/{event['event_id']}/blocks/act/run")
         assert ran.status_code == 200 and ran.json() == {"ok": True, "session_id": "s1", "run_id": "run-1"}
-        assert sent[0][0] == "s1" and "rebuild the basket" in sent[0][1] and event["event_id"] in sent[0][1] and "☐ eggs" in sent[0][1] and sent[0][2]["origin"] == "operator"
+        assert sent[0][0] == "s1" and "rebuild the basket" in sent[0][1] and event["event_id"] in sent[0][1] and "☐ eggs" in sent[0][1]
+        # From the calendar, not as the operator's words: they are the agent's, and an operator's message ends a touch.
+        assert sent[0][2]["origin"] == "inbound:calendar"
         assert (await client.post(f"/api/calendar/events/{event['event_id']}/blocks/{checklist['id']}/run")).status_code == 400
         assert (await client.delete(f"/api/calendar/groups/{group['id']}", params={"events": "delete"})).json() == {"ok": True}
         assert (await client.get(f"/api/calendar/events/{event['event_id']}")).status_code == 404

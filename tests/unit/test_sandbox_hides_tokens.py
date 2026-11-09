@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -49,13 +50,16 @@ def test_the_sandbox_covers_both(installation: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(shell, "_native", lambda: True)
     argv = hidden_installation()
     assert argv[:2] == ["--tmpfs", str(installation / "local")]
-    assert argv[2:] == ["--ro-bind", "/dev/null", str(installation / "launcher.json")]
+    assert argv[2:5] == ["--ro-bind", "/dev/null", str(installation / "launcher.json")]
+    assert argv[5:] == ["--tmpfs", str(installation / "state")]
 
 
 def test_nothing_is_asked_for_a_path_that_is_not_there(installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """bwrap refuses a whole command over a bind it cannot make, which would be a broken sandbox for all of them."""
     monkeypatch.setattr(shell, "_native", lambda: True)
     (installation / "launcher.json").unlink()
+    (installation / "state").rmdir()
+    monkeypatch.setenv("DAEDALUS_ENV_FILE", str(installation / ".env"))
     assert hidden_installation() == ["--tmpfs", str(installation / "local")]
     monkeypatch.setenv("DAEDALUS_LOCAL", str(installation / "not-there"))
     assert hidden_installation() == []
@@ -224,3 +228,105 @@ def test_a_key_saved_under_a_running_command_is_written_and_stays_hidden(keys: P
     at = argv.index(str(keys.parent))
     file_cover = [*argv[:at - 1], "--ro-bind", "/dev/null", str(keys), *argv[at + 1:]]
     assert "sk-the-key-after" in read_after_a_save(file_cover, flag, keys, "sk-the-key-after"), "the kernel kept the cover: the folder is no longer needed"
+
+
+# -- the state folder and the launcher's environment file ---------------------------------------------------
+
+TELEGRAM = "123456:the-telegram-bot-token"
+API_TOKEN = "the-apps-api-token"
+
+
+@pytest.fixture
+def state(installation: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A native installation's state folder with its database, and the launcher's environment file beside it."""
+    folder = installation / "state"
+    (folder / "daedalus.sqlite").write_text(f"api_token={API_TOKEN}")
+    (folder / "config.toml").write_text("[api]\n")
+    env = installation / ".env"
+    env.write_text(f"TELEGRAM_BOT_TOKEN={TELEGRAM}\nAPI_PORT=8765\n")
+    monkeypatch.setenv("DAEDALUS_ENV_FILE", str(env))
+    monkeypatch.setattr(shell, "_native", lambda: True)
+    monkeypatch.setattr(shell, "bwrap_status", lambda: "ok")
+    return folder
+
+
+def test_the_state_folder_and_the_environment_file_are_what_the_policy_seals(state: Path, installation: Path) -> None:
+    """The sandbox and the policy name one set: what the policy refuses by name a command cannot reach by building it."""
+    folders, files = shell.hidden_installation_paths(str(state))
+    sealed = set(Settings(_env_file=None, state_dir=state).sealed_paths)  # type: ignore[call-arg]
+    assert state in folders and state in sealed
+    assert files == [installation / ".env"] and installation / ".env" in sealed
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="a real sandbox")
+def test_a_real_command_that_builds_the_path_reads_neither_the_database_nor_the_telegram_token(state: Path, installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    built = f'd="{installation}"; cat "$d/sta""te/daedalus.sqlite" "$d/state/config"".toml"; cat "$d/.e""nv"; ls "$d/state"; echo done'
+
+    def run() -> str:
+        done = subprocess.run(sandboxed(built), capture_output=True, text=True, timeout=20, check=False)
+        assert "done" in done.stdout, done.stderr
+        return done.stdout
+
+    output = run()
+    assert API_TOKEN not in output and TELEGRAM not in output and "daedalus.sqlite" not in output
+    # The control: uncovered, the same command reads both.
+    monkeypatch.setattr(shell, "hidden_installation_paths", lambda _state: ([], []))
+    output = run()
+    assert API_TOKEN in output and TELEGRAM in output
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="a real sandbox")
+def test_the_environment_file_written_under_a_running_command_stays_hidden(state: Path, installation: Path) -> None:
+    """As the launcher writes it, in place: the cover on the file holds through the write, and the write lands."""
+    env = installation / ".env"
+    flag = installation / "written"
+    wait = f'echo ready; while [ ! -e "{flag}" ]; do sleep 0.05; done; cat "{installation}/.e""nv"; echo done'
+    running = subprocess.Popen(sandboxed(wait), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert running.stdout is not None and running.stdout.readline().strip() == "ready"
+        with env.open("w", encoding="utf-8") as handle:  # what os.WriteFile does: truncate and write the same file
+            handle.write("TELEGRAM_BOT_TOKEN=999:the-next-token\n")
+        flag.touch()
+        output, errors = running.communicate(timeout=20)
+    finally:
+        running.kill()
+    assert "done" in output, errors
+    assert "the-next-token" not in output and TELEGRAM not in output
+    assert "the-next-token" in env.read_text(), "the write itself went through"
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="a real sandbox")
+def test_a_state_folder_that_is_a_link_is_covered_where_it_really_is(state: Path, installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    elsewhere = installation / "other-disk-state"
+    state.rename(elsewhere)
+    state.symlink_to(elsewhere)
+    done = subprocess.run(sandboxed(f'cat "{state}/daedalus.sqlite" "{elsewhere}/daedalus.sqlite"; echo done'), capture_output=True, text=True, timeout=20, check=False)
+    assert "done" in done.stdout and API_TOKEN not in done.stdout, done.stderr
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="a real sandbox")
+def test_a_folder_the_host_opened_inside_a_state_folder_is_still_the_commands(state: Path) -> None:
+    """A benchmark's state folder holds its own workspaces: a cover over the folder must not take the work away."""
+    work = state / "workspaces" / "task"
+    work.mkdir(parents=True)
+    config = SimpleNamespace(sandbox="workspace", sandbox_extra_writable=[])
+    argv, _ = asyncio.run(sandbox_argv(f'cd "{work}" && echo made > out.txt && cat "{state}/daedalus.sqlite"; echo done', config, writable=[work], sealed=[]))
+    done = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
+    assert "done" in done.stdout, done.stderr
+    assert (work / "out.txt").read_text().strip() == "made" and API_TOKEN not in done.stdout
+
+
+def test_the_launcher_writes_its_environment_file_in_place() -> None:
+    """The cover on the file holds only while the file is written where it is: a rename over it would take the
+    cover off in every running sandbox, as it did for ``keyproxy.env``. The launcher is Go and this is the one
+    place both sides meet, so its sources are read for every write of that file."""
+    desktop = Path(__file__).resolve().parents[2] / "desktop"
+    writes = []
+    for source in sorted(desktop.glob("*.go")):
+        if source.name.endswith("_test.go"):
+            continue
+        for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\b(?:p|paths|s\.app\.paths|a\.paths|n\.paths|t\.paths)\.Env\b", line) and re.search(r"Rename|Create|OpenFile|WriteFile|atomic", line):
+                writes.append((source.name, number, line.strip()))
+    assert writes, "the launcher writes the file somewhere"
+    assert all("os.WriteFile(" in line and "Rename" not in line for _, _, line in writes), writes

@@ -40,7 +40,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
-from daedalus.host import subagent_models
+from daedalus.host import agent_talk, subagent_models
 from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS
@@ -477,6 +477,27 @@ def server_grant_rows(session_id: str, key: str, server: str) -> list[list[tuple
             [(f"{h} h" if h else "∞ ⚠️", f"ps:{session_id}:{key}:{h}") for h in hours]]
 
 
+def approval_rows(session_id: str, key: str, server: str | None) -> list[list[tuple[str, str]]]:
+    """The buttons under a refused call: what the app's card offers for it, and nothing it does not.
+
+    ``server`` is the host's answer to "Allow all from which server?" (:meth:`SessionManager.server_of`), the one
+    the app's card asks; it is ``None`` for a run another agent's words reached, which is answered one call at a
+    time. Read from the request as it was recorded, a server named before the touch was offered here still.
+    """
+    rows = [[("✅ Allow once", f"pa:{session_id}:{key}"), ("✖ Leave refused", f"pa:{session_id}:{key}:no")]]
+    if server:
+        rows.extend(server_grant_rows(session_id, key, server))
+    return rows
+
+
+def held_message_rows(session_id: str, key: str) -> list[list[tuple[str, str]]]:
+    """Send and Don't send under a message the agent wrote to another agent, as the app's sheet has them.
+
+    The same callbacks as a refusal's: the request is the host's (:meth:`SessionManager.ask_operator`), and its
+    answer sends exactly the text that was held."""
+    return [[("📤 Send", f"pa:{session_id}:{key}"), ("✖ Don't send", f"pa:{session_id}:{key}:no")]]
+
+
 class TelegramFront:
     """Wires a :class:`SessionManager` to Telegram."""
 
@@ -566,9 +587,40 @@ class TelegramFront:
     # -- lifecycle ------------------------------------------------------------------
 
     def listen(self) -> None:
-        """Subscribe to what the bus says about questions answered on another front."""
+        """Subscribe to what the bus says about questions answered on another front, and about requests that
+        reach nobody here otherwise: a message to another agent held for the operator."""
         if self._answered_task is None:
-            self._answered_task = self.manager.bus.on(EventFilter(types=("ask.answered",)), self._on_answered_elsewhere, name="telegram-questions")
+            self._answered_task = self.manager.bus.on(EventFilter(types=("ask.answered", "permission.pending")), self._on_bus, name="telegram-questions")
+
+    async def _on_bus(self, event: AppEvent) -> None:
+        if event.type == "permission.pending":
+            await self._on_held_message(event)
+        else:
+            await self._on_answered_elsewhere(event)
+
+    async def _on_held_message(self, event: AppEvent) -> None:
+        """A message to another agent that waits for the operator, posted with Send and Don't send.
+
+        Every other card reaches Telegram from the tool's refusal, which names its approval key. A held message
+        is no refusal: the tool tells the agent it is with the operator, and the card is the host's. Marked as
+        Telegram's to deliver, it was not pushed anywhere either, so an operator with Telegram alone never saw
+        it and the message never went.
+        """
+        payload = event.payload
+        session_id, key = event.session_id, str(payload.get("request_id") or "")
+        if not session_id or not key or payload.get("tool") != agent_talk.TOOL or not payload.get("telegram"):
+            return
+        state = await self.manager.get_state(session_id)
+        if state is None or key not in (state.metadata.get("policy_pending") or {}):
+            return
+        outbox = await self.outbox_for_session(session_id)
+        if outbox is None:
+            return
+        text = str(payload.get("text") or "")
+        try:
+            await self.send_choice(outbox, f"✉️ Your agent wants to send this to another agent:\n\n{text}\n\nSend it as it is?", held_message_rows(session_id, key))
+        except Exception:  # noqa: BLE001
+            logger.warning("could not post the held message's buttons", exc_info=True)
 
     async def stop_listening(self) -> None:
         task, self._answered_task = self._answered_task, None
@@ -1490,14 +1542,15 @@ class TelegramFront:
         """
         if len(data) == 4 and data[3] == "no":
             _, session_id, key, _no = data
+            held = await self._held_message(session_id, key)
             try:
                 await self.manager.refuse(session_id, key, via="telegram")
             except (KeyError, ValueError) as exc:
                 await query.answer(str(exc)[:180])
                 return
-            await query.answer("left refused")
+            await query.answer("not sent" if held else "left refused")
             if query.message is not None:
-                await query.message.edit_text("Left refused.", reply_markup=None)
+                await query.message.edit_text("✖ Not sent. Nothing left this chat." if held else "Left refused.", reply_markup=None)
             return
         if len(data) != 3:
             await query.answer("stale button")
@@ -1512,16 +1565,28 @@ class TelegramFront:
             if query.message is not None:
                 await query.message.edit_text("This request is closed: it was answered or its run is over. The agent asks again if it still needs it.", reply_markup=None)
             return
+        held = await self._held_message(session_id, key)
         try:
             result = await self.manager.grant(session_id, key, via="telegram")
         except (KeyError, ValueError) as exc:
             await query.answer(str(exc)[:180])
+            return
+        if held:
+            await query.answer("sent")
+            if query.message is not None:
+                await query.message.edit_text("📤 Let go, word for word as it was held. The chat's conversations say whether it arrived.", reply_markup=None)
             return
         approves = result.get("approves")
         what = f"{approves['tool']}: {approves['text']}" if approves else "the refused call"
         await query.answer("granted once")
         if query.message is not None:
             await query.message.edit_text(f"✅ Allowed once ({key}): {what}. The agent retries it on its next step; the grant expires in {result['expires_in_minutes']} minutes.", reply_markup=None)
+
+    async def _held_message(self, session_id: str, key: str) -> bool:
+        """Whether an open request is a message to another agent waiting for the operator, not a refused call."""
+        state = await self.manager.get_state(session_id)
+        pending = (state.metadata.get("policy_pending") or {}).get(key) if state is not None else None
+        return bool(pending) and pending.get("tool") == agent_talk.TOOL and bool(pending.get("on_answer"))
 
     async def _on_server_grant(self, query: CallbackQuery, data: list[str]) -> None:
         """"Allow all from <server>" pressed under a refusal: ``ps:<session>:<key>:<hours>``, 0 for the whole session.
@@ -2613,11 +2678,14 @@ class TelegramFront:
                 what = f"{pending['tool']}: {pending['text']}" if pending else "a call the policy wants approved"
                 if outbox is not None:
                     key = match.group(1)
-                    rows = [[("✅ Allow once", f"pa:{session_id}:{key}"), ("✖ Leave refused", f"pa:{session_id}:{key}:no")]]
-                    if pending and pending.get("server"):
-                        rows.extend(server_grant_rows(session_id, key, str(pending["server"])))
                     try:
-                        await self.send_choice(outbox, f"🛂 The policy stopped {what}\n\nAllow it once? The agent retries on its next step.", rows)
+                        server = self.manager.server_of(session_id, key) if pending else None
+                    except (KeyError, ValueError):
+                        server = None
+                    touched = state is not None and agent_talk.touch_of(state.metadata) is not None
+                    why = "\n\nAnother agent's words reached this run: this allows this one call and nothing more." if touched else ""
+                    try:
+                        await self.send_choice(outbox, f"🛂 The policy stopped {what}{why}\n\nAllow it once? The agent retries on its next step.", approval_rows(session_id, key, server))
                     except Exception:  # noqa: BLE001
                         logger.warning("could not post the approval buttons", exc_info=True)
 

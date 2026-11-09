@@ -671,3 +671,25 @@ async def test_the_app_lists_and_writes_key_proxy_values_through_its_own_api(cli
     refused = await client.put("/api/keyproxy/KEYPROXY_PORT", json={"value": "1"}, headers=H)
     assert refused.status_code == 404 and "not a setting" in refused.json()["detail"]
     assert (await client.put("/api/keyproxy/..%2Fkeys", json={"value": "1"}, headers=H)).status_code in (400, 404)
+
+
+async def test_the_key_proxys_card_is_told_when_a_command_could_read_its_keys(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Natively nothing but the Linux sandbox hides keyproxy.env from a command; the card where keys are typed says so."""
+    from daedalus.security import installation_reach  # noqa: PLC0415
+
+    _answering(monkeypatch, lambda request: httpx.Response(200, json={"writable": True, "upstreams": []}))
+    app = client.daedalus  # type: ignore[attr-defined]
+    monkeypatch.setattr(app.settings, "native", True)
+    monkeypatch.setattr(installation_reach, "bwrap_status", lambda: "ok")
+    monkeypatch.setattr(installation_reach.sys, "platform", "linux")
+    app.config.tools.exec.sandbox = "workspace"
+    assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is True
+    app.config.tools.exec.sandbox = "off"
+    assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is False
+    saved = await client.put("/api/keyproxy/KEYPROXY_KEY_KEENABLE", json={"value": "kn"}, headers=H)
+    assert saved.json()["keys_hidden"] is False, "the answer to a save draws the same card"
+    app.config.tools.exec.sandbox = "workspace"
+    monkeypatch.setattr(installation_reach.sys, "platform", "darwin")
+    assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is False
+    monkeypatch.setattr(app.settings, "native", False)
+    assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is True, "in a container the keys are in the proxy's own"

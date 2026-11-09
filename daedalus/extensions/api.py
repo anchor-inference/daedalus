@@ -195,6 +195,7 @@ from daedalus.remote import door as remote_door
 from daedalus.remote.turns import EXTERNAL_CALL
 from daedalus.search.service import ConversationSearch, SearchBusy
 from daedalus.security import redact
+from daedalus.security.installation_reach import secrets_hidden_from_commands
 from daedalus.speech import catalog as speech_catalog
 from daedalus.speech import models as speech_models
 from daedalus.speech import service as speech_service
@@ -6562,11 +6563,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Everything the key proxy lets the operator set: keys only as held or not, addresses and headers in full.
 
         ``reachable`` false is a proxy that could not be asked, which the screen says instead of
-        showing an empty list that reads as "nothing to configure".
+        showing an empty list that reads as "nothing to configure". ``keys_hidden`` false is an
+        installation where a command the agent runs could read the keys this card saves, which the card
+        says where they are typed (:func:`secrets_hidden_from_commands`).
         """
         origin = _keyproxy_origin()
         if not origin:
             return {"reachable": False, "state": "none"}
+        hidden = await secrets_hidden_from_commands(app)
         try:
             response = await keyproxy_client().get(origin + "/settings", headers={"x-daedalus-token": api_token})
             data = response.json() if response.status_code == 200 else None
@@ -6574,7 +6578,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             return {"reachable": False, "state": "unreachable"}
         if not isinstance(data, dict):
             return {"reachable": False, "state": "refused" if response.status_code == 403 else "unreachable"}
-        return {"reachable": True, "state": "ok", **data}
+        return {"reachable": True, "state": "ok", **data, "keys_hidden": hidden}
 
     @api.put("/api/keyproxy/{name}")
     async def put_keyproxy_setting(name: str, body: KeyproxySettingBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -6596,7 +6600,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except ValueError:
             data = {}
         if response.status_code == 200 and isinstance(data, dict):
-            return {"reachable": True, "state": "ok", **data}
+            return {"reachable": True, "state": "ok", **data, "keys_hidden": await secrets_hidden_from_commands(app)}
         reason = str(data.get("error") or "") if isinstance(data, dict) else ""
         if response.status_code == 403:
             raise HTTPException(502, "the key proxy refused this installation's token, so nothing was saved")

@@ -609,3 +609,47 @@ async def test_a_host_terminal_takes_a_windows_folder_and_a_container_does_not(d
         await service.close()
     assert absolute_on("container", "/tmp") and not absolute_on("container", "C:\\Users\\operator")
     assert absolute_on("host", "/home/operator") and absolute_on("host", "D:\\work") and not absolute_on("host", "work")
+
+
+async def test_a_sandboxed_terminal_is_told_what_the_installation_hides_when_its_daemon_can(db: Database, run_dir: Path, owners: FakeOwners, cfg: TerminalsConfig, daemon: FakePtyd, tmp_path: Path) -> None:
+    """Natively the daemon masked only its own folders, and a shell the agent drove read the state, the keys and
+    the Telegram token. The host names them; a daemon from before the field would refuse the create, so only one
+    that says it hides is told."""
+    daemon.sandbox = "ok"
+    owners.sandbox_hidden = lambda env: [str(tmp_path / "state"), str(tmp_path / ".env")] if env == "container" else []  # type: ignore[attr-defined]
+    service = await _service(db, run_dir, owners, cfg)
+    try:
+        assert await service.wait_available("container")
+        await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd=str(tmp_path), sandbox=True))
+        assert [p for m, p in daemon.calls if m == "terminal.create"][-1]["sandbox"] == {"writable": [str(tmp_path)]}, "an older daemon is not sent the field"
+        # What a daemon that hides says in its info, as the link holds it.
+        service.links["container"].info.setdefault("capabilities", {})["sandbox_hide"] = True
+        await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd=str(tmp_path), sandbox=True))
+        last = [p for m, p in daemon.calls if m == "terminal.create"][-1]["sandbox"]
+        assert last == {"writable": [str(tmp_path)], "hide": [str(tmp_path / "state"), str(tmp_path / ".env")]}
+    finally:
+        await service.close()
+
+
+def test_the_owners_hide_the_installation_natively_and_nothing_elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from daedalus.terminals.owners import ManagerOwners  # noqa: PLC0415
+
+    data = tmp_path / "data"
+    state, local, env = data / "state", tmp_path / "local", data / ".env"
+    for folder in (state / "secrets", local, data / "backups"):
+        folder.mkdir(parents=True)
+    env.write_text("TELEGRAM_BOT_TOKEN=x\n")
+    (data / "launcher.json").write_text("{}")
+    monkeypatch.setenv("DAEDALUS_ENV_FILE", str(env))
+    monkeypatch.delenv("DAEDALUS_SECRETS", raising=False)
+    settings = SimpleNamespace(native=True, state_dir=state, local_dir=local)
+    owners = ManagerOwners.__new__(ManagerOwners)
+    owners.manager, owners.local_env = SimpleNamespace(settings=settings), "host"  # type: ignore[assignment]
+    hidden = owners.sandbox_hidden("host")
+    for path in (state, state / "secrets", data / "backups", env, data / "launcher.json", local):
+        assert str(path.resolve()) in hidden or str(path) in hidden, path
+    assert owners.sandbox_hidden("container") == [], "another environment's filesystem has none of these"
+    settings.native = False
+    assert owners.sandbox_hidden("host") == [], "a container's state is not on the host's daemon's filesystem"

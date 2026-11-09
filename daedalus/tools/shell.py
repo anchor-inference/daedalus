@@ -366,9 +366,36 @@ def folders_with_keys(state: str) -> list[Path]:
     return [folder.resolve() for folder in found if folder.is_dir()]
 
 
-def hidden_installation() -> list[str]:
+def hidden_installation_paths(state: str) -> tuple[list[Path], list[Path]]:
+    """What a native installation hides from a sandboxed command: folders, covered by an empty one, and files,
+    covered by an empty file. Resolved, and only what is there, for the reasons :func:`folders_with_keys` gives.
+
+    The state folder whole, as the policy seals it whole (:attr:`daedalus.config.Settings.sealed_paths`): the
+    database with the app's API token in it, ``config.toml``, the sign-in link. A folder because the database
+    and its journal are written by rename and by new files, which a cover on a file does not survive. The
+    environment file the launcher keeps the Telegram token and the API hash in is a file at the top of the data
+    folder, beside the workspaces, so it can only be covered as a file; the launcher writes it in place
+    (``os.WriteFile``), which keeps the cover on, and a test reads the launcher to keep it so.
+    """
+    folders: list[Path] = []
+    if state and Path(state).is_dir():
+        folders.append(Path(state).resolve())
+    folders += folders_with_keys(state)
+    files: list[Path] = []
+    for named in (os.environ.get("DAEDALUS_ENV_FILE", "").strip(),):
+        if named and Path(named).is_file():
+            files.append(Path(named).resolve())
+    return folders, files
+
+
+def hidden_installation(writable: Sequence[str] = ()) -> list[str]:
     """What covers the launcher's private files in a command's sandbox. Natively only: in a container they
-    are not on this filesystem, and nothing here may fail a command over a path that is not there."""
+    are not on this filesystem, and nothing here may fail a command over a path that is not there.
+
+    ``writable`` is what the sandbox bound writable before this: a path of it inside a hidden folder is bound
+    again after the cover, because the host opened it for the command, and a cover laid over it would leave
+    the command an empty directory where its work is. None is inside the keys' folders or the real state
+    folder, which the policy seals; a benchmark's state folder holds its own workspaces."""
     argv: list[str] = []
     local = os.environ.get("DAEDALUS_LOCAL", "").strip()
     if local and Path(local).is_dir():
@@ -378,8 +405,16 @@ def hidden_installation() -> list[str]:
     if _native() and handover is not None and handover.is_file():
         argv += ["--ro-bind", "/dev/null", str(handover)]
     if _native():
-        for folder in folders_with_keys(state):
+        folders, files = hidden_installation_paths(state)
+        for folder in folders:
             argv += ["--tmpfs", str(folder)]
+        for file in files:
+            argv += ["--ro-bind", "/dev/null", str(file)]
+        keys = folders_with_keys(state)
+        for raw in writable:
+            path = Path(raw).resolve()
+            if any(path == f or f in path.parents for f in folders) and not any(path == k or k in path.parents for k in keys):
+                argv += ["--bind", str(path), str(path)]
     return argv
 
 
@@ -407,11 +442,12 @@ async def sandbox_argv(
     ``session_id`` draws from are bound back, read-only: the read-only root bind would otherwise show a
     session every other chat's and project's secrets.
 
-    The launcher's local state goes the same way, its handover file is covered, and so is the provider
-    keys' folder with the copies of it: the first holds the tokens of the public address and of the
-    daemons, the second a token that runs the installation, the third ``keyproxy.env``. The policy refuses
-    a command that names them, by matching words, and a command that builds the path is not one it can
-    read. Here there is simply nothing at that path.
+    The launcher's local state goes the same way, its handover file is covered, and so are the provider
+    keys' folder with the copies of it, the state folder and the launcher's environment file: the first
+    holds the tokens of the public address and of the daemons, the second a token that runs the
+    installation, the third ``keyproxy.env``, the fourth the database with the app's API token, the last
+    the Telegram token. The policy refuses a command that names them, by matching words, and a command
+    that builds the path is not one it can read. Here there is simply nothing at that path.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
@@ -458,7 +494,7 @@ async def sandbox_argv(
         for scope in store.scope_dirs(session_id or ""):
             if scope.is_dir():
                 argv += ["--ro-bind", str(scope), str(scope)]
-    return argv + hidden_installation() + shell_argv(command), True
+    return argv + hidden_installation(sorted(bound)) + shell_argv(command), True
 
 
 # Environment names a tool's subprocess may inherit. Everything else —

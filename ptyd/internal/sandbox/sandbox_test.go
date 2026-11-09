@@ -193,6 +193,26 @@ func TestWrapRebindsExistingPathsOnly(t *testing.T) {
 	}
 }
 
+func TestWrapCoversFilesAfterTheMasksAndBeforeTheRebinds(t *testing.T) {
+	base := t.TempDir()
+	home, state, shell := filepath.Join(base, "home"), filepath.Join(base, "state"), filepath.Join(base, "state", "shell")
+	env := filepath.Join(base, ".env")
+	for _, d := range []string{home, shell} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan, err := Wrap(Options{Bwrap: "bwrap", Argv: []string{"/bin/sh"}, Cwd: home, Writable: []string{home},
+		Mask: []string{state}, Cover: []string{env}, Rebind: []Bind{{Path: shell}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind, mask, cover, rebind := flagAt(plan.Argv, "--bind", home, home), slices.Index(plan.Argv, state), flagAt(plan.Argv, "--ro-bind", "/dev/null", env), flagAt(plan.Argv, "--ro-bind", shell, shell)
+	if bind < 0 || mask < bind || cover < mask || rebind < cover {
+		t.Fatalf("order bind %d mask %d cover %d rebind %d: %q", bind, mask, cover, rebind, plan.Argv)
+	}
+}
+
 func TestProberCachesSuccessForGoodAndFailureForAWhile(t *testing.T) {
 	var calls atomic.Int32
 	answer := atomic.Bool{}

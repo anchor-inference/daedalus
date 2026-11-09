@@ -22,6 +22,10 @@ a hole in it.
   no origin at all, never on the app's; and the session cookie counts only on a request the app itself
   made, because a port or a sibling subdomain is another origin but not another site, and a browser
   attaches the cookie there. A custom page, by contrast, is the operator's own and has the whole API.
+- **`WebFetch` reads the public internet only.** Every address a name resolves to must be public, the connection goes
+  to the address that was checked, and every redirect is checked again, by the policy as well, so a page cannot turn
+  the fetch towards the router, the cloud's metadata address or the app's own API under its public name. The one
+  exception is the installation's own shared links (`/s/`, `/c/`), whose name may resolve inside the home network.
 - **Secrets are masked** in tool output, logs, transcripts, proposal cards and pull requests.
 - **The sandbox fails closed.** With `tools.exec.sandbox = "workspace"`, a container that cannot create
   namespaces refuses commands instead of running them bare.
@@ -80,13 +84,15 @@ means of acting on its own.
   app nor a log, belongs to one chat, and is emptied when the conversation closes.
 - A reply reaches the model inside a fence with a nonce of its own and is stripped of what draws as nothing. From then
   until the operator's next message the run is touched: reads and the conversation go on; commands, file changes and
-  web requests each wait on a card of their own, past any grant made earlier and any standing allow, and it offers none;
+  web requests each wait on a card of their own, past any grant made earlier and any standing allow, and it offers none,
+  in the app or in Telegram;
   and everything else is refused, memory, schedules, notes, the board, other agents and whatever tool is added next.
   The touch survives a restart, the turn an approval continues and a recovery. Autopilot does not continue such a run.
   The memory pass, the learning record, compaction and the identifier index all treat its words as a stranger's.
 - What goes out: the first message of a conversation waits for the operator, as does a later one sent after the run
-  read or ran anything since a reply, one that looks like a secret, and one the automatic review did not pass. Allowing
-  it sends the text as it was held, and no model says it again; a long one is cut on the card, which says so, and is
+  read or ran anything since a reply, one that looks like a secret, and one the automatic review did not pass. Its card
+  reaches the app and Telegram, with Send and Don't send. Allowing it sends the text as it was held, and no model says
+  it again; a long one is cut on the card, which says so, and is
   whole in the chat's sheet. The review setting per conversation is `first`, `all` or `off`.
 - A reply that comes after the turn waits in the chat and costs nothing. Waking the chat on a reply is the operator's
   switch per conversation, with a number of turns and dollars, and no tool can reach it. Such a turn is a guest's
@@ -130,13 +136,20 @@ so a public service's page can use a visitor's phone pass or key cookie for anot
 plain http on a home network: it opens one service for one phone by that door only, is spent once within ten
 minutes, and has a table of its own so that it cannot be taken for a way into the app.
 
-**Tokens of the public address, and provider keys.** A provider's token, the launcher's token and the keys in
-`keyproxy.env` are files of this user on a native install. The policy refuses a command that names them, by matching
-words. On Linux with the sandbox on, a command's filesystem does not hold them, nor the copies of the keys in the
-backups and the update's folders; on a Mac, on Windows, or with the sandbox off, a command that builds the path reads
-them all, and so does a team member's CLI anywhere and a terminal, whose own sandbox hides only the terminal daemon's
-folders. The agent with such a token could raise a tunnel of its own, which the watch would report. With a key it
-could spend from anywhere, past the proxy's budget and ledger. The key proxy's own port stays open to a command in
+**What the installation keeps on a native install.** A provider's token, the launcher's token, the keys in
+`keyproxy.env`, the Telegram bot token and API hash in the launcher's `.env`, and the state folder with the database
+that holds the app's API token are all files of this user. The policy refuses a command that names them, by matching
+words. On Linux with the sandbox on, a command's filesystem holds none of them: the state folder, the keys' folder and
+the folders with copies of them (the backups, the update's) are covered by empty ones, which a save by rename does not
+undo, and `.env` by an empty file, which holds because the launcher writes it in place. Links are followed first, so a
+folder moved elsewhere is covered where it is. A terminal the agent drives in its sandbox is shown the same nothing once
+its terminal daemon is new enough to hide what the app names; an older one hides only its own folders until it is
+updated. On a Mac, on Windows, or with the sandbox off, there is no such wall: a command that builds the path reads
+them all, and the key proxy's card and the public address form say so. A team member's CLI and a terminal outside the
+sandbox read them everywhere. In the container the keys are in the key proxy's container and there is no `.env` to
+read; the state volume is mounted, and a command there can read it. The agent with such a token could raise a tunnel
+of its own, which the watch would report. With a key it could spend from anywhere, past the proxy's budget and ledger.
+With the API token it could call the app as the operator. The key proxy's own port stays open to a command in
 every case: it can use a key it cannot read, as far as the proxy's budget lets it.
 
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub

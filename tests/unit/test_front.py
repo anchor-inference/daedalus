@@ -401,3 +401,72 @@ async def test_a_message_handed_back_unsent_goes_back_to_the_topic_it_was_typed_
     assert "<pre>check &lt;both&gt; servers</pre>" in first and "<code>shot.png</code>" in first
     assert "typed in the app" not in " ".join(m["html"] for m in bot.sent)
     assert await front.manager.queued_input(state.session.id) == []
+
+
+def _press(data: str, edited: list[str]) -> CallbackQuery:
+    query = CallbackQuery.model_validate(
+        {
+            "id": "cq",
+            "from": {"id": OWNER, "is_bot": False, "first_name": "A"},
+            "chat_instance": "x",
+            "data": data,
+            "message": {"message_id": 5, "date": 1, "chat": {"id": OWNER, "type": "private"}, "text": "card"},
+        }
+    )
+
+    async def reply(*args: Any, **kwargs: Any) -> None:
+        edited.extend(str(a) for a in args)
+
+    object.__setattr__(query, "answer", reply)
+    object.__setattr__(query.message, "edit_text", reply)
+    return query
+
+
+async def test_a_message_held_for_the_operator_reaches_telegram_with_send_and_dont_send(front: TelegramFront) -> None:
+    """The host's own card, not a refusal: it names no approval key in a tool result, so it once reached nobody here,
+    and push stayed quiet too because Telegram was the front said to deliver it."""
+    state = await front.manager.create_session("talk")
+    sid = state.session.id
+    await front.bind_topic(OWNER, 0, sid, "talk")
+    answers: list[tuple[str, bool]] = []
+
+    async def decided(session_id: str, request: dict[str, Any], allowed: bool) -> None:
+        answers.append((str(request.get("message")), allowed))
+
+    front.manager.answer_hooks["agent_talk.send"] = decided
+    front.listen()
+    try:
+        bot = front.bot
+        for message, key in ((1, "0123456789ab"), (2, "abcdef012345")):
+            assert front.manager.ask_operator(sid, key=key, tool="AgentTalk", text=f"To door.example: hello {message}", on_answer="agent_talk.send", extra={"talk": "t1", "message": message})
+            await grows_to(bot.sent, message, "the held message's card")  # type: ignore[attr-defined]
+            card = bot.sent[-1]  # type: ignore[attr-defined]
+            buttons = [(b.text, b.callback_data) for row in card["reply_markup"].inline_keyboard for b in row]
+            assert f"hello {message}" in card["text"]
+            assert buttons == [("📤 Send", f"pa:{sid}:{key}"), ("✖ Don't send", f"pa:{sid}:{key}:no")]
+        edited: list[str] = []
+        await front.on_callback(_press(f"pa:{sid}:0123456789ab", edited))
+        await front.on_callback(_press(f"pa:{sid}:abcdef012345:no", edited))
+        assert answers == [("1", True), ("2", False)]
+        assert any("word for word" in text for text in edited) and any("Not sent" in text for text in edited)
+        assert not state.metadata.get("policy_grants"), "letting a message go writes no grant for the agent's next call"
+    finally:
+        await front.stop_listening()
+
+
+async def test_a_touched_runs_card_in_telegram_offers_what_the_apps_does(front: TelegramFront) -> None:
+    """A request recorded before another agent's words reached the run kept its "Allow all from a server": the app's
+    card asks the host and the host refuses that grant there, so neither card offers it now."""
+    from daedalus.host import agent_talk  # noqa: PLC0415
+    from daedalus.transport.telegram.front import approval_rows  # noqa: PLC0415
+
+    state = await front.manager.create_session("touched")
+    sid, key = state.session.id, "0123456789ab"
+    state.metadata["policy_pending"] = {key: {"tool": "mcp__phone__tap", "text": "{}", "at": "2026-11-10T00:00:00+00:00", "server": "phone",
+                                              "similar": {"tool": "mcp__phone__tap", "rule": "mcp.annotations", "kind": "server", "value": "phone", "label": "phone"}}}
+    assert front.manager.server_of(sid, key) == "phone", "an ordinary run's card offers it"
+    state.metadata[agent_talk.TOUCHED_KEY] = {"at": time.time(), "looked": False}
+    assert front.manager.server_of(sid, key) is None and front.manager.similar_of(sid, key) is None
+    rows = approval_rows(sid, key, front.manager.server_of(sid, key))
+    assert [label for row in rows for label, _ in row] == ["✅ Allow once", "✖ Leave refused"]
+    assert len(approval_rows(sid, key, "phone")) > 1, "and an untouched one still has the server's row"

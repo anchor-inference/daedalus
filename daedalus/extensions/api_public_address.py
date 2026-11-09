@@ -11,8 +11,6 @@ A service with a key gets a code too and never its key, which lasts and which a 
 
 from __future__ import annotations
 
-import asyncio
-import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlsplit
@@ -25,9 +23,9 @@ from daedalus.extensions import api_services_door
 from daedalus.extensions.tunnel_address import EXTENSION_KEY
 from daedalus.host import launcher_bridge
 from daedalus.host.reveal import is_local_client
+from daedalus.security.installation_reach import secrets_hidden_from_commands
 from daedalus.security.two_factor import qr_rows
 from daedalus.stores import pairing
-from daedalus.tools.shell import bwrap_status
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -68,11 +66,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, door_c
         return await drawn(await address().refresh())
 
     async def tokens_hidden() -> bool:
-        """Whether a command the agent runs cannot reach the file a token is in, or ``keyproxy.env``, which the
-        form has to say when it is not so. Only the Linux sandbox hides them: the policy reads a command's words."""
-        if not sys.platform.startswith("linux") or getattr(app.config.tools.exec, "sandbox", "off") != "workspace":
-            return False
-        return await asyncio.to_thread(bwrap_status) == "ok"
+        """Whether a command the agent runs cannot reach the file a token is in, or the installation's other
+        secrets, which the form has to say when it is not so (:func:`secrets_hidden_from_commands`)."""
+        return await secrets_hidden_from_commands(app)
 
     async def drawn(view: dict[str, Any]) -> dict[str, Any]:
         """What the settings need beyond the launcher's view. The QR is drawn here, as the two-factor one is."""

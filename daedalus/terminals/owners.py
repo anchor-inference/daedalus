@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from daedalus.terminals.awareness import staff_agent
 from daedalus.terminals.model import Owner
+from daedalus.tools.shell import hidden_installation_paths
 
 if TYPE_CHECKING:
     from daedalus.host.session_runner import SessionManager
@@ -34,7 +35,8 @@ class Owners(Protocol):
 
     # Optional: ``staffed(terminal_ids) -> {terminal_id: {"activity": …, "agent": …}}``, what the
     # team says the staff member in a terminal is doing and which agent it is. The service asks it
-    # when the owners have it.
+    # when the owners have it. The same for ``sandbox_hidden(env) -> [path, …]``, what a sandboxed
+    # terminal in ``env`` may not read besides the daemon's own directories.
 
 
 ACTIVITY_LEVELS = {"permission": "warn", "question": "warn", "error": "bad", "no_signal": "idle", "turn_done_unseen": "ok", "idle": "idle"}
@@ -49,6 +51,24 @@ class ManagerOwners:
         self.manager = manager
         self.db = manager.db
         self.local_env = manager.projects.local_env
+
+    def sandbox_hidden(self, env: str) -> list[str]:
+        """What a sandboxed terminal on this machine is not shown: what a sandboxed command is not.
+
+        Only natively and only in the environment this process runs in: there the daemon runs as the
+        operator, beside the installation's state, keys and launcher files, and masks no more than its
+        own folders, so a shell the agent drives read the database with the API token, the Telegram
+        token and the provider keys by any path the policy's reading of words did not catch. A container's
+        daemon and a remote machine's have none of these on their filesystem.
+        """
+        settings = self.manager.settings
+        if env != self.local_env or not settings.native:
+            return []
+        folders, files = hidden_installation_paths(str(settings.state_dir))
+        paths = [*folders, *files, settings.state_dir.parent / "launcher.json"]
+        if settings.local_dir is not None:
+            paths.append(settings.local_dir)
+        return list(dict.fromkeys(str(p) for p in paths if p.exists()))
 
     async def exists(self, owner: Owner) -> bool:
         if owner.kind == "free":

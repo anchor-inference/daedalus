@@ -127,6 +127,58 @@ func TestSandboxedShellWritesOnlyWhereItMay(t *testing.T) {
 	}
 }
 
+func TestSandboxedShellCannotReadWhatTheHostHides(t *testing.T) {
+	box := realSandbox(t)
+	f, _ := startSideWith(t, box)
+	root := outsideTmp(t)
+	project, state, elsewhere := filepath.Join(root, "project"), filepath.Join(root, "state"), filepath.Join(root, "other-disk")
+	for _, d := range []string{project, state, elsewhere} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env, linked := filepath.Join(root, ".env"), filepath.Join(root, "backups")
+	for path, body := range map[string]string{filepath.Join(state, "daedalus.sqlite"): "API-TOKEN-1", env: "TELEGRAM-TOKEN-2", filepath.Join(elsewhere, "copy"): "BACKUP-COPY-3"} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(elsewhere, linked); err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Cwd string `json:"cwd"`
+	}
+	f.call(t, "terminal.create", map[string]any{"id": "hd", "argv": []string{"bash", "--norc", "--noprofile"},
+		"cwd": project, "env": map[string]string{"PS1": "$ "},
+		"sandbox": map[string]any{"writable": []string{project}, "hide": []string{state, env, linked, filepath.Join(root, "missing")}}}, &created)
+	if created.Cwd != project {
+		t.Fatalf("create: %+v", created)
+	}
+	// The paths built in pieces, as a command the host's policy cannot read would build them.
+	f.type_(t, "hd", `d="`+root+`"; echo "R=$(cat "$d/sta""te/daedalus.sqlite" "$d/.e""nv" "$d/back""ups/copy" "$d/other-disk/copy" 2>/dev/null | tr -d '\n')."`)
+	out := f.waitOutput(t, "hd", "R=")
+	f.waitOutput(t, "hd", ".\n")
+	for _, secret := range []string{"API-TOKEN-1", "TELEGRAM-TOKEN-2", "BACKUP-COPY-3"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("the sandbox showed %s: %q", secret, out)
+		}
+	}
+	f.type_(t, "hd", `touch "`+project+`/still-mine"; echo W=$?`)
+	f.waitOutput(t, "hd", "W=0")
+}
+
+func TestHiddenPathsAreAbsoluteAndBounded(t *testing.T) {
+	f, _ := startSideWith(t, nil)
+	for _, hide := range [][]string{{"relative/state"}, make([]string, 65)} {
+		err := f.callErr("terminal.create", map[string]any{"id": "bad", "argv": []string{"sh"}, "cwd": "/",
+			"sandbox": map[string]any{"writable": []string{}, "hide": hide}})
+		if err == nil {
+			t.Fatalf("accepted hide %q", hide)
+		}
+	}
+}
+
 func TestSandboxedShellKeepsJobControl(t *testing.T) {
 	box := realSandbox(t)
 	f, _ := startSideWith(t, box)

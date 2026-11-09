@@ -45,6 +45,7 @@ type Options struct {
 	Cwd      string   // absolute
 	Writable []string // folders the program may write, as the host sent them
 	Mask     []string // directories to hide behind an empty tmpfs: the daemon's run and state
+	Cover    []string // files to hide behind an empty one, after the masks
 	Rebind   []Bind   // paths under a mask that are bound back
 	Strict   bool     // refuse writable paths through symlinks for a kernel-isolated attempt
 }
@@ -66,9 +67,9 @@ type Plan struct {
 // Wrap returns the bubblewrap command for o.
 //
 // The order of the mounts is the design: the read-only root and the private /tmp first; the
-// writable folders over them; the masks after the writable folders, so a writable folder that
-// holds the daemon's directory (a home, say) cannot expose it again; the daemon's own paths a
-// launch needs after the masks; the working directory last.
+// writable folders over them; the masks and the covered files after the writable folders, so a
+// writable folder that holds the daemon's directory (a home, say) cannot expose it again; the
+// daemon's own paths a launch needs after the masks; the working directory last.
 func Wrap(o Options) (Plan, error) {
 	if o.Bwrap == "" || len(o.Argv) == 0 {
 		return Plan{}, errors.New("sandbox: no bubblewrap or no program")
@@ -127,6 +128,11 @@ func Wrap(o Options) (Plan, error) {
 	}
 	for _, m := range masks {
 		argv = append(argv, "--tmpfs", m)
+	}
+	for _, c := range o.Cover {
+		if c != "" {
+			argv = append(argv, "--ro-bind", "/dev/null", filepath.Clean(c))
+		}
 	}
 	for _, b := range o.Rebind {
 		if b.Path == "" {

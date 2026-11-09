@@ -9,6 +9,7 @@ were keyed only by editing keyproxy.env by hand and restarting the stack. What i
 - Settings → Models → Providers has the key proxy card with the model, search and own-upstream
   groups, an upstream of the operator's own can be added (address and key written), and the daily
   cap is written as a number;
+- where a command could read the keys (no sandbox hides them), the card says so, and only there;
 - nothing on either page reaches past the screen on a phone.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_keyproxy.py
@@ -132,6 +133,19 @@ def run(width: int) -> list[str]:
             problems.append(f"{width}: the daily cap was not written: {proxy.writes}")
         if phone and (outside := page.evaluate(OUTSIDE)):
             problems.append(f"{width}: Models reaches past the screen: {outside}")
+
+        # Where nothing hides keyproxy.env from a command, the card the keys are typed in says so.
+        if card.locator("[data-keys-readable]").count():
+            problems.append(f"{width}: the card warns though the host did not say the keys are readable")
+        proxy.view["keys_hidden"] = False
+        page.reload()
+        warning = page.locator('[data-setting="keyproxy.upstreams"] [data-keys-readable]')
+        warning.scroll_into_view_if_needed()
+        expect(warning).to_have_text("Here a command the agent runs could read these keys: no sandbox hides them.")
+        if shots := os.environ.get("SHOTS"):
+            page.locator('[data-setting="keyproxy.upstreams"]').screenshot(path=f"{shots}/keyproxy-readable-{width}.png")
+        if phone and (outside := page.evaluate(OUTSIDE)):
+            problems.append(f"{width}: the warning reaches past the screen: {outside}")
         context.close()
         browser.close()
     return problems

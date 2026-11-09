@@ -21,6 +21,9 @@ from daedalus.stores.planner import PlannerStore
 if TYPE_CHECKING:
     from daedalus.app import Application
 
+CALENDAR_ORIGIN = "inbound:calendar"
+"""Who an entry's action is from as its session records it: the calendar, a source the app names on the message."""
+
 
 class CalendarBody(BaseModel):
     name: str | None = None
@@ -285,8 +288,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.post("/api/calendar/events/{event_id}/blocks/{block_id}/run")
     async def event_action(event_id: str, block_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        # The operator's press is the confirmation the spec asks for: the prompt the agent wrote
-        # into the block goes to the session it named, as the operator's own message, and nowhere else.
+        # The operator's press is the confirmation the spec asks for: the prompt the agent wrote into the
+        # block goes to the session it named, and nowhere else. It goes in from the calendar and not as the
+        # operator's own words, because they are the agent's: sent as ``operator`` they ended the touch a
+        # stranger's reply had put on that session's run, though nobody wrote anything with the reply in view.
         manager = getattr(app, "manager", None)
         if manager is None:
             raise HTTPException(503, "the agent is not running")
@@ -295,7 +300,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except (ValueError, KeyError) as exc:
             raise refused(exc) from exc
         try:
-            run_id = await manager.submit(str(block["session_id"]), text, as_answer=False, origin="operator", via="app")
+            run_id = await manager.submit(str(block["session_id"]), text, as_answer=False, origin=CALENDAR_ORIGIN, via="app")
         except KeyError as exc:
             raise HTTPException(404, "the session this action talks to no longer exists") from exc
         except RuntimeError as exc:

@@ -24,6 +24,8 @@ export type KeyproxySettings = {
   upstreams?: KeyproxyUpstream[];
   cli_logins?: { upstream: string; configured: boolean }[];
   budget?: KeyproxyVar;
+  /** False where a command the agent runs could read the keys saved here: no sandbox hides them. */
+  keys_hidden?: boolean;
 };
 
 /** The proxy's settings and one way to write a value; `onChanged` lets the page re-read what depends on them. */
@@ -334,6 +336,7 @@ export function KeyproxyCard({ toast, onChanged }: { toast: (text: string) => vo
       {!data?.reachable ? <Unavailable data={data} /> : (
         <>
           {!writable && <div className="sub" style={{ color: "var(--warn)" }}>{t("keyproxy.readonly")}</div>}
+          {data.keys_hidden === false && <div className="sub" data-keys-readable="" style={{ color: "var(--warn)" }}>{t("keyproxy.keys.readable")}</div>}
           <div className="section-title">{t("keyproxy.group.model")}</div>
           <div className="mlist">{group("model").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div>
           <div className="section-title">{t("keyproxy.group.search")}</div>

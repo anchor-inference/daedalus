@@ -1796,6 +1796,54 @@ class SessionManager:
         if outcome.exit_code != 0:
             logger.warning("session %s deleted; its folder on the host stays: %s", session_id, outcome.output.strip())
 
+    async def _remove_scratch_folder(self, project: Project) -> None:
+        """Remove the folder of a chat's scratch project once the project is gone with its last chat.
+
+        Every deleted chat that named no project used to leave its folder under the workspaces root, and a
+        folder a guest or a stranger's agent wrote in was one of them. Decided by the folder's shape and never
+        by a list: only the folder :meth:`ProjectStore.create` makes for a project with none, the workspaces
+        root's child named after the project's own id, for a project that was a scratch one to the end, with
+        that one folder, in this process's environment, a real directory there and not a link to one, and
+        nothing still working in it. A folder the chat was started in, a project's, the operator's own, a host
+        folder (:meth:`_remove_host_chat_folder` has its own shape) or a project a second chat made real all
+        fail one of these, so a protected project folder needs no name here to stay.
+        """
+        if not (project.settings.ephemeral and not project.settings.system and len(project.folders) == 1):
+            return
+        folder = project.primary
+        root = Path(os.path.normpath(self.settings.workspaces_dir))
+        path = Path(os.path.normpath(folder.path))
+        if folder.env != self.projects.local_env or not re.fullmatch(r"[0-9a-f]{12}", project.id) or path != root / project.id:
+            return
+        if path.is_symlink() or not path.is_dir() or path.resolve() != root.resolve() / project.id:
+            return
+        for other in await self.projects.list():
+            for kept in other.folders:
+                if kept.path == path or path in kept.path.parents:
+                    logger.warning("project %s deleted; its folder %s stays, %s holds it", project.id, path, other.id)
+                    return
+        if await self._works_inside(path):
+            logger.warning("project %s deleted; its folder %s stays, a session still works in it", project.id, path)
+            return
+        await asyncio.to_thread(shutil.rmtree, path, True)
+
+    async def _works_inside(self, folder: Path) -> bool:
+        """Whether a session that still exists works in ``folder`` or below it."""
+        target = folder.resolve()
+        projects = {p.id: p for p in await self.projects.list()}
+        for row in await self.db.fetchall("SELECT id, metadata, project_id FROM sessions"):
+            try:
+                metadata = json.loads(row["metadata"] or "{}")
+            except (ValueError, AttributeError):
+                metadata = {}
+            try:
+                path = self.workspace_of(row["id"], metadata, projects.get(row["project_id"])).resolve()
+            except (RuntimeError, KeyError, ValueError, AttributeError):
+                continue
+            if path == target or target in path.parents:
+                return True
+        return False
+
     async def _make_host_directory(self, path: Path, folder: ProjectFolder) -> None:
         """Make a session's own directory inside a host folder, through the daemon, as ``_ensure_inbox``
         makes it locally; the daemon refuses a command whose working directory is not there."""
@@ -2202,6 +2250,8 @@ class SessionManager:
         await self.projects.list()
         if state.project is not None and await self.projects.get(state.project.id) is None:
             await self._remove_host_chat_folder(state.project, session_id)
+            if delete_workspace:
+                await self._remove_scratch_folder(state.project)
         # After the rows are gone, so a list read on hearing it no longer carries the session.
         await self._publish(state, "session.deleted", {"title": state.session.title})
         # The logs a read-only folder's session kept in the state volume are the session's alone.
@@ -7792,6 +7842,10 @@ class SessionManager:
             raise KeyError(session_id)
         refused = (state.metadata.get("policy_pending") or {}).get(self._approval_key(key)) or {}
         family = refused.get("similar")
+        if agent_talk.touch_of(state.metadata) is not None:
+            # A request recorded before another agent's words reached the run still names its family; the
+            # card no longer offers it, wherever it is shown.
+            return None
         return dict(family) if isinstance(family, dict) else None
 
     def server_of(self, session_id: str, key: str) -> str | None:
@@ -7801,6 +7855,8 @@ class SessionManager:
             raise KeyError(session_id)
         refused = (state.metadata.get("policy_pending") or {}).get(self._approval_key(key)) or {}
         server = refused.get("server")
+        if agent_talk.touch_of(state.metadata) is not None or state.guest_turn is not None:
+            return None  # :meth:`grant_server` refuses it there, so no card offers it (Telegram's included)
         return str(server) if server else None
 
     async def grant_server(self, session_id: str, key: str = "", *, server: str = "", hours: float | None = None,

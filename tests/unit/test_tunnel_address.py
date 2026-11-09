@@ -16,6 +16,7 @@ from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import api_public_address, tunnel_address, tunnel_watch
 from daedalus.extensions.tunnel_address import TunnelAddress
 from daedalus.host import launcher_bridge, tunnels
+from daedalus.security import installation_reach
 
 ADDRESS = "https://x.example.test"
 
@@ -285,14 +286,14 @@ def test_the_settings_read_and_change_it_and_see_what_is_exposed(tmp_path: Path,
 def test_the_form_is_told_when_a_command_could_read_a_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     address, app = rig(tmp_path, monkeypatch, {"enabled": False, "state": "off"})
     client = routes(address, app)
-    monkeypatch.setattr(api_public_address, "bwrap_status", lambda: "ok")
-    monkeypatch.setattr(api_public_address.sys, "platform", "linux")
+    monkeypatch.setattr(installation_reach, "bwrap_status", lambda: "ok")
+    monkeypatch.setattr(installation_reach.sys, "platform", "linux")
     app.config.tools.exec.sandbox = "workspace"
     assert client.get("/api/public-address").json()["tokens_hidden"] is True
     app.config.tools.exec.sandbox = "off"
     assert client.get("/api/public-address").json()["tokens_hidden"] is False
     app.config.tools.exec.sandbox = "workspace"
-    monkeypatch.setattr(api_public_address.sys, "platform", "darwin")
+    monkeypatch.setattr(installation_reach.sys, "platform", "darwin")
     assert client.get("/api/public-address").json()["tokens_hidden"] is False
 
 

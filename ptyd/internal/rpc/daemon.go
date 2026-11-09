@@ -154,6 +154,10 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 			// The version of the folder moves (fs.unpack_*, fs.pack_*): 0 for a daemon without them,
 			// so the host can say "update the host terminal" before it starts a move, not halfway.
 			"fs_transfer": d.transferVersion(),
+			// The sandbox hides the paths a create names in sandbox.hide besides the daemon's own
+			// directories; a host sends them only to a daemon that says so, since an older one refuses
+			// a field it does not know and would start no sandboxed terminal at all.
+			"sandbox_hide": true,
 		},
 		"hooks":         d.hooksInfo(),
 		"side_channels": d.sideInfo(),

@@ -67,6 +67,10 @@ Transcript:
 """
 
 
+MEETING_ORIGIN = "inbound:meeting"
+"""Who the notes come from as the session records it: a source the app draws as a message with its name on it."""
+
+
 @dataclass
 class MeetingJob:
     id: str
@@ -297,11 +301,17 @@ class MeetingService:
         return event
 
     async def send_to_chat(self, job: MeetingJob, *, via: str = "app") -> str:
-        """The notes as the operator's message in the session, with the file the transcript is in."""
+        """The notes as a message in the session, with the file the transcript is in.
+
+        Sent from another channel (:data:`MEETING_ORIGIN`) and not as the operator's own words, though the
+        operator pressed the button: a model wrote the notes from what other people said in the room. Sent
+        as ``operator``, they ended the touch a stranger's reply had put on the run, and wrote memory with the
+        operator's authority.
+        """
         if job.status != "done":
             raise RuntimeError("the notes are not written yet")
         text = notes_markdown(job.notes) + f"\nThe full transcript is in {job.file}."
-        return await self.manager.submit(job.session_id, text, follow_up=True, via=via)
+        return await self.manager.submit(job.session_id, text, follow_up=True, via=via, origin=MEETING_ORIGIN)
 
 
 def safe_suffix(name: str, content_type: str = "") -> str:
