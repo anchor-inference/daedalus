@@ -585,7 +585,7 @@ class ProviderConfig(BaseModel):
     ToolSearch, MCP servers first, rather than send a request the endpoint refuses."""
     pricing: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-model USD per 1M tokens overriding the built-in table (``daedalus.providers.pricing``):
-    ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
+    ``{"model": {"input", "output", "cache_hit"[, "cache_write", "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
     reasoning_replay: Literal["never", "when_present", "required"] | None = None
     """Whether an assistant turn's reasoning text (``reasoning_content``) goes back to this endpoint on later

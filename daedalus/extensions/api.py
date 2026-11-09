@@ -1438,7 +1438,7 @@ def direct_usage_booking(manager: Any) -> Callable[[dict[str, Any]], Awaitable[d
         model = str(body.get("model") or "")
         if not provider_id or not model:
             raise HTTPException(422, "provider_id and model are required")
-        tokens = {k: int(body.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens")}
+        tokens = {k: int(body.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_input_tokens", "reasoning_tokens")}
         cost: float | None = None
         try:
             endpoint = manager.providers.get(provider_id).endpoint

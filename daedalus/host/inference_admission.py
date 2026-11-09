@@ -61,7 +61,7 @@ def model_quote(endpoint: ProviderEndpoint, model: str, output: int) -> tuple[di
         input_bound = price.input_limit
         if type(input_bound) is not int or not 1 <= input_bound <= 2**63 - 1:
             raise BudgetRefused("the provider's billable input ceiling is invalid")
-        input_rate = maximum_rate(price.input, price.input_off_peak, price.cache_hit, price.cache_hit_off_peak)
+        input_rate = maximum_rate(price.input, price.input_off_peak, price.cache_hit, price.cache_hit_off_peak, price.cache_write)
         output_rate = maximum_rate(price.output, price.output_off_peak)
     quoted = microusd((input_rate * input_bound + output_rate * output) / Decimal(1_000_000))
     quote = {'provider_id': endpoint.id, 'provider_kind': endpoint.kind, 'model': model, 'input_bound': input_bound,
