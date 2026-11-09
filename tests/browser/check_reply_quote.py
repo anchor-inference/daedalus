@@ -289,7 +289,7 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         return
     if words["one"] not in cards.nth(0).inner_text() or words["reply"].lower()[:4] not in cards.nth(0).inner_text().lower():
         say(f"the first card does not show the reply and its chip ({cards.nth(0).inner_text()!r})")
-    page.locator(".composer textarea").first.blur()
+    page.locator(".composer .composer-field").first.blur()
     page.wait_for_timeout(250)
     shot("cards")
     off = overflow(page)

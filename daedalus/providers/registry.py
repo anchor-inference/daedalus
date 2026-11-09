@@ -17,6 +17,7 @@ from daedalus.config import (
     RuntimeConfig,
     Settings,
     first_byte_timeout_for,
+    keyproxy_upstream,
     login_route,
     reasoning_replay_for,
 )
@@ -30,7 +31,14 @@ from daedalus.providers.openai_compat import (
     ProviderEndpoint,
     UsageSink,
 )
-from daedalus.providers.pricing import BUILTIN, ModelPricing, matching_key, pricing_table
+from daedalus.providers.pricing import (
+    ANTHROPIC_HOUR_WRITE,
+    BUILTIN,
+    ModelPricing,
+    matching_key,
+    pricing_table,
+    with_cache_write,
+)
 from daedalus.providers.tls import shared_context
 
 logger = logging.getLogger(__name__)
@@ -185,6 +193,13 @@ class ProviderRegistry:
             return None
         if pc.kind in ("deepseek", "openrouter", "opencode") and not api_key and _is_vendor_host(pc.kind, base_url):
             return None  # the vendor itself needs a key; a key proxy in front of it does not
+        # A llama.cpp process runs the operator's own model. It has no billable token price, so
+        # neither a similarly named hosted model nor a stale hand-written price may make its
+        # calls consume a session, provider, total or daily spending cap.
+        # A prepaid plan is not charged per token either: a list price under it would read as money spent.
+        pricing = {} if pc.kind == "llamacpp" or pc.billing == "subscription" else {**self._fetched.get(pc.kind, {}), **pricing_table(pc.kind, pc.pricing)}
+        if keyproxy_upstream(base_url) == "anthropic":
+            pricing = with_cache_write(pricing, ANTHROPIC_HOUR_WRITE)
         return ProviderEndpoint(
             id=provider_id,
             kind=pc.kind,
@@ -192,11 +207,7 @@ class ProviderRegistry:
             api_key=api_key,
             timeout_seconds=pc.timeout_seconds,
             extra_headers=headers,
-            # A llama.cpp process runs the operator's own model. It has no billable token price, so
-            # neither a similarly named hosted model nor a stale hand-written price may make its
-            # calls consume a session, provider, total or daily spending cap.
-            # A prepaid plan is not charged per token either: a list price under it would read as money spent.
-            pricing={} if pc.kind == "llamacpp" or pc.billing == "subscription" else {**self._fetched.get(pc.kind, {}), **pricing_table(pc.kind, pc.pricing)},
+            pricing=pricing,
             temperature=pc.temperature,
             subscription=pc.billing == "subscription",
             first_byte_timeout_seconds=first_byte_timeout_for(pc),

@@ -274,12 +274,12 @@ def message_shape(messages: list[dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
-REASONING_REPLAY_UPSTREAMS = ("codex", "claude")
+REASONING_REPLAY_UPSTREAMS = ("codex", "claude", "anthropic")
 """Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
 
 The Codex route turns the Responses API's encrypted reasoning into these entries and back, so a
 reasoning model keeps its thinking across tool steps the way it does under the Codex CLI. The Claude
-route does the same with Anthropic's signed thinking blocks, which Claude Code sends back on every
+route, and the Anthropic key that shares its translation, do the same with Anthropic's signed thinking blocks, which Claude Code sends back on every
 request; without them each tool step of a long task re-derived its plan from the raw tool outputs and
 spent most of a minute thinking before a single grep. The core sends the entries back only to the
 endpoint and model that wrote them, which is where Claude Code drops them too: after a model switch.

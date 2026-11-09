@@ -487,7 +487,7 @@ def run() -> int:
             assert fit["spill"] <= 0 and fit["out"] == 0 and fit["page"] <= 0, (width, fit)
             page.screenshot(path=str(SHOTS / f"side-panel-new-{width}.png"))
         page.set_viewport_size({"width": 400, "height": 760})
-        field = new.locator("textarea")
+        field = new.locator(".composer-field")
         field.fill("Find a birthday gift under 50 euros")
         field.press("Enter")
         expect(page.locator(".sp-title")).to_contain_text("Find a birthday gift")

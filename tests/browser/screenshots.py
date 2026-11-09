@@ -2702,7 +2702,7 @@ def open_toggles(page: Page) -> None:
 
 def open_phone_composer(page: Page) -> None:
     # The phone hides its toolbar until there is a draft, so an empty field makes an invisible chip.
-    page.locator(".composer textarea").fill("Write the delivery page.")
+    page.locator(".composer .composer-field").fill("Write the delivery page.")
     page.wait_for_selector(".composer .composer-mode:visible")
 
 
@@ -2730,9 +2730,9 @@ def run_modes() -> int:
             phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = phone.new_page()
             page.route("**/api/**", stub)
-            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer textarea", before=open_toggles)
+            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer .composer-field", before=open_toggles)
             stub.running = True  # type: ignore[attr-defined]
-            shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer textarea", before=open_phone_composer)
+            shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer .composer-field", before=open_phone_composer)
             # A message written during the run waits for the end of the turn as a card above the
             # composer, with Steer to hand it to the agent now; one already steered sits beside it.
             stub.queued = queued_messages()  # type: ignore[attr-defined]
@@ -2751,7 +2751,7 @@ def run_modes() -> int:
             narrow = browser.new_context(viewport={"width": 360, "height": 780}, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = narrow.new_page()
             page.route("**/api/**", stub)
-            shot(page, "phone-composer-long-model", f"agents/{S1}", wait=".composer textarea", before=open_phone_composer)
+            shot(page, "phone-composer-long-model", f"agents/{S1}", wait=".composer .composer-field", before=open_phone_composer)
             narrow.close()
             browser.close()
     finally:

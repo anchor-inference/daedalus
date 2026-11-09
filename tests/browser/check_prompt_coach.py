@@ -25,7 +25,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, field_text, folders, fulfil_shared  # noqa: E402
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -136,7 +136,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
 
 def parent_field(page: Page):  # type: ignore[no-untyped-def]
     """The chat's own composer field, not the one inside the coach's window."""
-    return page.locator(".composer textarea").filter(has_not=page.locator("xpath=ancestor::*[contains(@class,'coach-')]")).first
+    return page.locator(".composer .composer-field").filter(has_not=page.locator("xpath=ancestor::*[contains(@class,'coach-')]")).first
 
 
 def overflow(page: Page, root: str) -> list[str]:
@@ -206,7 +206,7 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
 
     root = ".coach-sheet" if phone else ".coach-window"
     try:
-        page.wait_for_selector(f"{root} .coach-chat .chat .composer textarea", timeout=10000)
+        page.wait_for_selector(f"{root} .coach-chat .chat .composer .composer-field", timeout=10000)
     except Exception:  # noqa: BLE001 - reported
         say("the window did not open on the coach's conversation")
         context.close()
@@ -291,7 +291,7 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
     # Insert puts the prompt into the chat's own message.
     insert.click()
     page.wait_for_timeout(300)
-    value = parent_field(page).input_value()
+    value = field_text(parent_field(page))
     if value != PROMPT:
         say(f"Insert did not put the prompt into the chat's message ({value[:60]!r})")
     if phone and page.locator(".coach-sheet").count():

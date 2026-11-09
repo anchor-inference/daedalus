@@ -66,7 +66,7 @@ def main() -> None:
         expect(page.locator(".msg.user").first).to_contain_text("Refactor the storage layer")
 
         # The answer settles; the guess arrives as the empty field's placeholder.
-        field = page.locator(".composer textarea")
+        field = page.locator(".composer .composer-field")
         expect(field).not_to_have_attribute("data-suggestion", GUESS)
 
         def event(name: str, payload: dict) -> None:
@@ -90,7 +90,7 @@ def main() -> None:
         sent_before = len([p for p in HOST.posted if p[1].endswith("/messages")])
         field.focus()
         page.keyboard.press("Tab")
-        expect(field).to_have_value(GUESS)
+        expect(field).to_have_text(GUESS)
         expect(page.locator(".composer-ghost-accept")).to_have_count(0)
         assert len([p for p in HOST.posted if p[1].endswith("/messages")]) == sent_before, "a guess is never sent by itself"
         # Taken, it is not offered again for this answer: an emptied field shows the usual hint.

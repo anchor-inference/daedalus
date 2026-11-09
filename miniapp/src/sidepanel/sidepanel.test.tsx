@@ -271,11 +271,10 @@ describe("the screen", { timeout: 20_000 }, () => {
     detail = { ...detail, status: "running", run_id: "r1", messages: refusal("0123456789ab").slice(0, 2), open_approvals: [] };
     act(() => root.render(<SidePanel />));
     await settle();
-    const field = host.querySelector<HTMLTextAreaElement>(".composer textarea")!;
-    expect(field.placeholder).toBe(t("session.composer.running.steer"));
+    const field = host.querySelector<HTMLElement>(".composer .composer-field")!;
+    expect(field.getAttribute("placeholder")).toBe(t("session.composer.running.steer"));
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(field, "only China");
+      field.textContent = "only China";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const button = host.querySelector<HTMLButtonElement>('.composer .roundbtn.primary[data-action="queue"]')!;
@@ -329,10 +328,9 @@ describe("the screen", { timeout: 20_000 }, () => {
     listing = { ...listing, sessions: [], consented: false };
     act(() => root.render(<SidePanel />));
     await settle();
-    const field = host.querySelector<HTMLTextAreaElement>(".sp-new .composer textarea")!;
+    const field = host.querySelector<HTMLElement>(".sp-new .composer .composer-field")!;
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(field, "find a gift");
+      field.textContent = "find a gift";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => {
@@ -353,7 +351,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     fakeShell.current = { ...fakeShell.current!, hello: { ...fakeShell.current!.hello, show: "new" } };
     act(() => root.render(<SidePanel />));
     await settle();
-    expect(host.querySelector(".sp-new .composer textarea")).not.toBeNull();
+    expect(host.querySelector(".sp-new .composer .composer-field")).not.toBeNull();
     expect(host.querySelector(".sp-new-tab")?.textContent).toContain("Bank");
   });
 });

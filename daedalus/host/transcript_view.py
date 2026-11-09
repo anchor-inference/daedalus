@@ -151,6 +151,8 @@ def message_view(message: Message) -> dict[str, Any]:
         "yagni": message.metadata.get("daedalus.yagni") if isinstance(message.metadata, dict) else None,
         # The closing line of a run that produced no answer (``run_outcome``): why it stopped and where.
         "outcome": message.metadata.get(OUTCOME_METADATA_KEY) if isinstance(message.metadata, dict) else None,
+        # The line in a leader's chat that says a helper is parked by the daily cap or its report waits.
+        "subagent_notice": message.metadata.get("daedalus.subagent_notice") if isinstance(message.metadata, dict) else None,
         # How an operator's message reached the model: ``steer`` placed into a turn under way,
         # ``drained`` opening the turn after the one it was written during, ``follow_up`` after it.
         "delivery": delivery if isinstance(delivery, str) else None,

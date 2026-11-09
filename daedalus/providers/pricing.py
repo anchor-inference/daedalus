@@ -33,6 +33,10 @@ class ModelPricing:
     input: float | None = 0.0
     output: float | None = 0.0
     cache_hit: float | None = 0.0
+    cache_write: float | None = None
+    """What a token written to the prompt cache costs, where the vendor bills that apart from input: Anthropic
+    charges 1.25 times the input price for a five-minute entry and twice it for an hour. ``None`` prices the
+    write as fresh input, which is what every other vendor's cache is."""
     input_off_peak: float | None = None
     output_off_peak: float | None = None
     cache_hit_off_peak: float | None = None
@@ -67,7 +71,9 @@ class ModelPricing:
     def cost(self, usage: dict[str, Any], *, now: datetime | None = None) -> float | None:
         cache_hit = int(usage.get("cache_read_tokens") or 0)
         prompt = int(usage.get("input_tokens") or 0)
-        fresh = max(prompt - cache_hit, 0)
+        # Inside the prompt like the read, and taken out of the fresh part only when it has a price of its own.
+        cache_write = min(int(usage.get("cache_creation_input_tokens") or 0), max(prompt - cache_hit, 0)) if self.cache_write is not None else 0
+        fresh = max(prompt - cache_hit - cache_write, 0)
         output = int(usage.get("output_tokens") or 0)
         off = self.off_peak_at(now or datetime.now(UTC))
         p_in = self.input_off_peak if off and self.input_off_peak is not None else self.input
@@ -77,7 +83,7 @@ class ModelPricing:
             return None
         # An omitted cache rate cannot make cached input free; reserve the fresh-input rate.
         p_hit = p_in if p_hit is None else p_hit
-        return (fresh * p_in + cache_hit * p_hit + output * p_out) / 1_000_000
+        return (fresh * p_in + cache_hit * p_hit + cache_write * (self.cache_write or 0.0) + output * p_out) / 1_000_000
 
     @classmethod
     def from_entry(cls, entry: dict[str, Any]) -> ModelPricing:
@@ -101,6 +107,7 @@ class ModelPricing:
             input=_opt(entry.get("input")),
             output=_opt(entry.get("output")),
             cache_hit=_opt(entry.get("cache_hit")),
+            cache_write=_opt(entry.get("cache_write")),
             input_off_peak=_opt(entry.get("input_off_peak")),
             output_off_peak=_opt(entry.get("output_off_peak")),
             cache_hit_off_peak=_opt(entry.get("cache_hit_off_peak")),
@@ -140,6 +147,24 @@ BUILTIN: dict[str, dict[str, ModelPricing]] = {
 """Keyed by provider kind, then model name (prefix match at lookup time)."""
 
 
+ANTHROPIC_HOUR_WRITE = 2.0
+"""Anthropic's price for a cache write that lives an hour, as a multiple of the input price; the key proxy's
+``anthropic`` route marks its breakpoints with the hour (``deploy/keyproxy/claude.py``, ``CACHE_CONTROL``)."""
+
+
+def with_cache_write(table: dict[str, ModelPricing], factor: float) -> dict[str, ModelPricing]:
+    """``table`` with a cache write price of ``factor`` times input on every model that names none.
+
+    For the Anthropic key, where a write is billed apart: a price typed into Settings has only input, output
+    and the read, and without this a write was booked at the input price, half of what the hour costs."""
+    out: dict[str, ModelPricing] = {}
+    for model, price in table.items():
+        if price.cache_write is None and price.input is not None:
+            price = ModelPricing(**{**asdict(price), "cache_write": price.input * factor})
+        out[model] = price
+    return out
+
+
 def pricing_table(kind: str, configured: dict[str, dict[str, Any]]) -> dict[str, ModelPricing]:
     """Built-in prices for ``kind`` overlaid with the operator's ``pricing`` entries."""
     table = dict(BUILTIN.get(kind, {}))
@@ -162,4 +187,4 @@ def matching_key(table: dict[str, Any], model: str) -> str | None:
     return max((key for key in table if model.startswith(key)), key=len, default=None)
 
 
-__all__ = ["BUILTIN", "DEEPSEEK_PEAK_UTC", "ModelPricing", "matching_key", "pricing_table"]
+__all__ = ["ANTHROPIC_HOUR_WRITE", "BUILTIN", "DEEPSEEK_PEAK_UTC", "ModelPricing", "matching_key", "pricing_table", "with_cache_write"]

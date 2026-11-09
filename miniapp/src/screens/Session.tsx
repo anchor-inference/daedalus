@@ -914,7 +914,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (settled.length) setSendingMessages((current) => current.filter((pending) => !settled.includes(pending.id)));
         if (p.reason === "returned") takeReturned(readReturned(p.returned), p.cause);
         if (p.reason === "consumed") refreshSoon("tail");
-      } else if (event === "compaction_completed") refreshSoon("tail");
+      } else if (event === "compaction_completed" || event === "transcript_note") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
     }
     return stop;
@@ -2267,6 +2267,7 @@ function noteTitle(note: SystemNote): string {
     return [head, note.cadence, t("turn.note.instruction")].filter(Boolean).join(" · ");
   }
   if (note.kind === "other") return t("turn.note.other", { origin: note.origin });
+  if (note.kind === "subagent" && note.notice) return t(`turn.note.subagent.${note.notice.state}`, { name: note.origin });
   if (note.kind === "subagent") return t("turn.note.subagent", { name: note.origin });
   if (note.kind === "page") return t("turn.note.page", { slug: note.origin });
   return t(`turn.note.${note.kind}`);
@@ -2278,8 +2279,10 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
   const [open, setOpen] = useState(note.kind === "task");
   const openSubagent = useContext(SubagentOpener);
   const subagentLink = openSubagent && (note.kind === "subagent" || note.kind === "subagents");
+  // Said where the operator looks, not folded: a helper the cap holds back, and what lets it go on.
+  const way = note.notice?.budget ? t("subagents.budget.way") : "";
   return (
-    <div className={`sysnote ${note.kind}`}>
+    <div className={`sysnote ${note.kind}${note.notice ? " notice" : ""}`}>
       <div className="sysnote-row">
       <button type="button" className="sysnote-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : note.kind === "subagent" || note.kind === "subagents" || note.kind === "task" ? "spawn" : note.kind === "answers" ? "ask" : "compact"} size={14} />
@@ -2291,6 +2294,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
         <span>{t(run.folded ? "turn.run.show" : "turn.run.hide")}</span><Chevron open={!run.folded} />
       </button>}
       </div>
+      {way && <p className="sysnote-way">{way}</p>}
       {open && <Md className="sysnote-body" text={note.body} cacheKey={cacheKey} />}
     </div>
   );

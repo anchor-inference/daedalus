@@ -1142,12 +1142,18 @@ export type SessionToolGroup = {
 };
 
 /** One helper of a session, as the host lists it for the Subagents tab and the session's detail. */
+export type SubagentNotice = { state: "parked" | "held"; cause: string; name: string; session_id: string; detail?: string; budget?: boolean; held?: boolean };
+
 export type SubagentView = {
   session_id: string;
   name: string | null;
   running: boolean;
-  /** running, waiting, compacting, failed or idle. */
+  /** running, waiting, compacting, parked (the daily cap stopped it; it goes on when the cap reopens), failed or idle. */
   status: string;
+  /** Why it is parked and since when; null when it is not. */
+  parked?: { reason: string; at: string } | null;
+  /** Reports its leader could not take yet, delivered once the leader can run. */
+  reports_held?: number;
   model: string;
   kept?: boolean;
   /** The first line of the task it was handed; empty for a standing helper or an old one. */
@@ -1229,6 +1235,8 @@ export type MessageView = {
   media?: MediaPresentation[];
   /** Set on the row that closes a run which produced no answer. */
   outcome?: RunOutcome | null;
+  /** The host's line in a leader's chat: a helper parked by the daily cap, or a report of one that waits. */
+  subagent_notice?: SubagentNotice | null;
   /** The YAGNI switch this turn told the model about; the note itself is never shown. */
   yagni?: "on" | "off" | null;
   /** A message autopilot sent on the operator's behalf: a continuation, a chosen option, or the

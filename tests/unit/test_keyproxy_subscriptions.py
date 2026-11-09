@@ -504,6 +504,69 @@ async def test_a_caller_chosen_anthropic_version_is_kept(monkeypatch: pytest.Mon
     assert sent.headers["anthropic-version"] == "2099-01-01"
 
 
+async def test_an_anthropic_key_completion_reaches_the_messages_api_with_cache_breakpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Anthropic's OpenAI-compatible endpoint caches nothing: the first day on the key re-sent every agent step's
+    # whole prompt at the full price. The call must reach /v1/messages, marked like the Claude login's, without
+    # the login's identity, and come back with the cache read and write in its usage.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.delenv("KEYPROXY_AUTH_ANTHROPIC", raising=False)
+    monkeypatch.setattr(proxy, "AGENT_API", "")
+    seen: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        sse = "\n".join([
+            "event: message_start", "data: " + json.dumps({"type": "message_start", "message": {"usage": {"input_tokens": 7, "cache_read_input_tokens": 9000, "cache_creation_input_tokens": 300}}}), "",
+            "event: content_block_delta", "data: " + json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "PONG"}}), "",
+            "event: message_delta", "data: " + json.dumps({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}), "",
+            "event: message_stop", "data: " + json.dumps({"type": "message_stop"}), "",
+        ])
+        return httpx.Response(200, content=sse.encode(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(proxy, "CLAUDE_AUTH", claude_mod.ClaudeAuth(tmp_path / "no-claude.json"))
+    app = proxy.make_app()
+    await app["client"].aclose()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    body = {
+        "model": "claude-sonnet-5-5", "reasoning_effort": "low", "temperature": 0.2,
+        "messages": [{"role": "system", "content": "Be terse."}, {"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}, {"role": "user", "content": "again"}],
+        "tools": [{"type": "function", "function": {"name": name, "parameters": {"type": "object", "properties": {}}}} for name in ("Read", "Exec")],
+    }
+    async with TestClient(TestServer(app)) as client:
+        answer = await client.post("/anthropic/chat/completions", json=body, headers={"authorization": "Bearer caller-token"})
+        data = await answer.json()
+    assert answer.status == 200 and answer.headers["x-keyproxy-upstream"] == "anthropic"
+    assert data["choices"][0]["message"]["content"] == "PONG"
+    assert data["usage"]["cache_read_input_tokens"] == 9000 and data["usage"]["cache_creation_input_tokens"] == 300
+    assert data["usage"]["prompt_tokens"] == 9307
+    sent = seen[0]
+    assert str(sent.url) == "https://api.anthropic.com/v1/messages"
+    assert sent.headers["x-api-key"] == "sk-ant-test" and "authorization" not in sent.headers
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+    betas = sent.headers["anthropic-beta"].split(",")
+    assert "oauth-2025-04-20" not in betas and "claude-code-20250219" not in betas
+    assert "effort-2025-11-24" in betas and "context-management-2025-06-27" in betas
+    payload = json.loads(sent.content)
+    assert payload["system"] == [{"type": "text", "text": "Be terse."}]  # no billing stamp, no CLI identity
+    assert [tool["name"] for tool in payload["tools"]] == ["Read", "Exec"]  # no mcp_ prefix
+    assert payload["tools"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"} and "cache_control" not in payload["tools"][0]
+    assert payload["messages"][-1]["content"][-1]["cache_control"]["type"] == "ephemeral"
+    assert payload["output_config"] == {"effort": "low"} and "temperature" not in payload
+
+
+def test_a_keyed_body_without_tools_marks_the_system_prompt() -> None:
+    out, names = claude_mod.chat_to_messages({"model": "claude-haiku-5-5", "messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}]}, login=False)
+    assert out["system"] == [{"type": "text", "text": "S", "cache_control": {"type": "ephemeral", "ttl": "1h"}}] and names == {}
+    bare, _ = claude_mod.chat_to_messages({"model": "claude-haiku-5-5", "messages": [{"role": "user", "content": "hi"}]}, login=False)
+    assert "system" not in bare
+
+
+def test_a_metered_call_reports_its_cache_write() -> None:
+    usage = {"prompt_tokens": 100, "completion_tokens": 2, "cache_read_input_tokens": 60, "cache_creation_input_tokens": 30}
+    tokens = proxy.parse_usage(json.dumps({"model": "m", "usage": usage}).encode(), "application/json")[1]
+    assert tokens["cache_read_tokens"] == 60 and tokens["cache_creation_input_tokens"] == 30
+
+
 def test_anthropic_auth_scheme_defaults_to_x_api_key_and_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KEYPROXY_AUTH_ANTHROPIC", raising=False)
     assert proxy.auth_scheme("anthropic") == "x-api-key"

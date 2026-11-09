@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from daedalus.host import tunnels
+from daedalus.host import own_containers, tunnels
 from daedalus.public_address import OwnDoors
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
@@ -944,6 +944,8 @@ class Policy:
                 where = real_path(expand_home(words[1], self.home), where)  # a `cd` earlier in the line moves every later command
             if (tunnel := tunnels.tunnel_in([_substitute(w, variables) for w in words], shell_segments)) is not None:
                 escalate(DENY, f"{tunnel} would raise a public tunnel, which the operator opens from settings", "egress.tunnel", tunnels.REFUSAL.format(what=tunnel))
+            if (entry := own_containers.entry_in([_substitute(w, variables) for w in words])) is not None:
+                escalate(DENY, f"{entry}: the app's own containers are not entered from outside", "host.own_containers", own_containers.REFUSAL.format(what=entry))
             head = words[0].lstrip("\\")
             if head.startswith("/") and head.count("/") >= 2:
                 head = head.rsplit("/", 1)[-1]  # /bin/rm is rm
@@ -1135,6 +1137,7 @@ class Policy:
             ("git.operator_push", "Exec", DENY, "git push from the operator's checkouts"),
             ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
+            ("host.own_containers", "Exec, Verify, ServiceStart", DENY, "entering or changing this installation's own containers from outside — nsenter into a process, docker or podman exec, cp, stop or a container joined to one of ours"),
             ("egress.tunnel", "Exec, Verify, ServiceStart, McpAdd", DENY, "raising a public tunnel — ngrok, cloudflared, tailscale funnel, frpc, zrok, ssh -R, an SSH service such as localhost.run or Pinggy; the operator opens tunnels from settings"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
             ("mcp.denied", "MCP tools", DENY, "an MCP tool, or every tool of a server, the operator set to deny in the server's settings"),
