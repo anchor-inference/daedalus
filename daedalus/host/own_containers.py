@@ -18,6 +18,8 @@ import re
 import socket
 from collections.abc import Sequence
 
+from daedalus.config import inherited_environment
+
 REFUSAL = (
     "Refused: {what} would enter or change one of this installation's own containers from outside. It is the "
     "operator's rule (host.own_containers): the app's containers hold its state, keys and database, and the agent "
@@ -36,7 +38,7 @@ JOINING = re.compile(r"^--(?:pid|network|net|ipc|uts|volumes-from)(?:=|$)")
 
 def project() -> str:
     """The compose project this installation runs as; container names begin with it."""
-    return os.environ.get("DAEDALUS_COMPOSE_PROJECT", "").strip() or "deploy"
+    return inherited_environment(["DAEDALUS_COMPOSE_PROJECT"]).get("DAEDALUS_COMPOSE_PROJECT", "").strip() or "deploy"
 
 
 def own_id() -> str:
