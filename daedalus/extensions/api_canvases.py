@@ -411,6 +411,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         frame = await frame_of(canvas_id, node_id)
         frames = frames_for(app.manager)
         allowed = await frames.origins(canvas_id)
+        if not canvas_frames.SUPPORTED:
+            # A native Windows host cannot open files without following links (no O_NOFOLLOW, no dir_fd).
+            return {"unsupported": True, "origins": allowed}
         door = public_address.services_base(app.settings)
         if not door:
             return {"needs_door": True, "origins": allowed}
@@ -528,8 +531,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if mime == "text/html":
             # Only a document the board's iframe loads gets a nonce: a script's own fetch of the page
-            # (destination "empty") would otherwise hand the page a nonce to give away.
-            nonce = frames.issue_nonce(cap.canvas_id, cap.node_id) if request.headers.get("sec-fetch-dest") == "iframe" else ""
+            # (destination "empty") would otherwise hand the page a nonce to give away. A browser sends
+            # no fetch metadata at all to plain http on a LAN address, so a missing header counts as a
+            # document; a page cannot strip the header from its own fetch to look like one.
+            dest = request.headers.get("sec-fetch-dest")
+            nonce = frames.issue_nonce(cap.canvas_id, cap.node_id) if dest in (None, "iframe") else ""
             data = canvas_frames.inject(data, token, cap.app_origin, nonce)
             mime = "text/html; charset=utf-8"
         return Response(b"" if request.method == "HEAD" else data, media_type=mime, headers=headers)

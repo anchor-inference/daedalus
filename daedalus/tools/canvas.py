@@ -339,6 +339,8 @@ async def canvas_show(
     services = services_for(context)
     manager = services.extra["manager"]
     frames = frames_for(manager)
+    if not canvas_frames.SUPPORTED:
+        return error(context, "live frames are not available on this host: it cannot open a page's files without following links (a native Windows install); share the page as a service instead")
     try:
         workspace = Path(services.workspace_dir)
         page = Path(services.resolve(path))

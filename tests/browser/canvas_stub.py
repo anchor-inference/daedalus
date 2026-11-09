@@ -124,7 +124,7 @@ class Door:
                     return self.reply(200, "text/javascript", BRIDGE.encode(), headers)
                 if rest in ("index.html", ""):
                     # As the host does: a nonce only for a document the board's iframe loads.
-                    nonce = secrets.token_urlsafe(12) if self.headers.get("Sec-Fetch-Dest") == "iframe" else ""
+                    nonce = secrets.token_urlsafe(12) if self.headers.get("Sec-Fetch-Dest") in (None, "iframe") else ""
                     if nonce:
                         door.stub.nonces.add((data["canvas"], data["node"], nonce))
                     return self.reply(200, "text/html; charset=utf-8", inject(PAGE.encode(), token, door.app_origin, nonce), headers)

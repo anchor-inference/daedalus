@@ -160,8 +160,12 @@ def page_and_root(workspace: Path, page: Path, root: Path | None) -> tuple[Path,
     return chosen, entry
 
 
-_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-_FILE = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+SUPPORTED = os.name != "nt" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd
+"""Whether this system can open a frame's files the safe way below. Windows has neither the flags nor
+``dir_fd``; there no frame is served at all (the board says why) rather than falling back to a check
+by path, which is the check a swapped folder got past."""
+_DIRECTORY = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_FILE = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 def _open_root(root: Path) -> int:
@@ -195,6 +199,8 @@ def read_served(root: Path, path: str) -> tuple[bytes, str] | None:
     answering its ``index.html``, nothing over :data:`MAX_FILE_BYTES`. A file with more than one hard
     link is refused too: a link made inside the root to a file elsewhere would otherwise be the same
     escape a symbolic link is."""
+    if not SUPPORTED:
+        return None
     parts = [part for part in path.split("/") if part]
     if any(part.startswith(".") or "\\" in part or "\x00" in part for part in parts):
         return None
@@ -512,6 +518,8 @@ BRIDGE = r"""(() => {
     if (!outline.isConnected) document.documentElement.appendChild(outline);
   };
   const selectorOf = (element) => {
+    // The page itself, clicked on its background: the root element, which the walk below stops before.
+    if (element === document.documentElement) return "html";
     const parts = [];
     for (let node = element; node && node.nodeType === 1 && node !== document.documentElement && parts.length < 6; node = node.parentElement) {
       if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) { parts.unshift(`#${node.id}`); break; }
@@ -608,13 +616,25 @@ def inject(html: bytes, token: str, parent: str, nonce: str = "") -> bytes:
         '<meta http-equiv="x-dns-prefetch-control" content="off">'
         f'<script src="/f/{token}/{RESERVED}/bridge.js" data-parent="{parent}" data-nonce="{nonce}"></script>'
     ).encode()
-    lowered = html[:4096].lower()
-    start = len(html) - len(html.lstrip())
-    if lowered[start:].startswith(b"<!doctype"):
-        end = html.find(b">", start)
+    # Past a byte order mark, white space and comments: a doctype after any of them still decides the
+    # mode, and the bridge put before the doctype would have thrown the page into quirks mode.
+    lowered = html[:65536].lower()
+    at = 3 if lowered.startswith(b"\xef\xbb\xbf") else 0
+    lead = at
+    while True:
+        while at < len(lowered) and lowered[at:at + 1].isspace():
+            at += 1
+        if not lowered.startswith(b"<!--", at):
+            break
+        close = lowered.find(b"-->", at + 4)
+        if close < 0:
+            break
+        at = close + 3
+    if lowered.startswith(b"<!doctype", at):
+        end = html.find(b">", at)
         if end >= 0:
             return html[: end + 1] + tag + html[end + 1:]
-    return tag + html
+    return html[:lead] + tag + html[lead:]
 
 
 __all__ = [

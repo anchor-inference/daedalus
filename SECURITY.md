@@ -131,7 +131,8 @@ plain http on a home network: it opens one service for one phone by that door on
 minutes, and has a table of its own so that it cannot be taken for a way into the app.
 
 A canvas shows agent-written pages as live frames, under `/f/` on the same door and nowhere else: on the app's
-origin the route does not exist, and an https app with no services address shows a card instead of the page.
+origin the route does not exist, an https app with no services address shows a card instead of the page, and so
+does a native Windows host, which cannot open the page's files without following links.
 A frame's address is signed with one key for all canvases (`canvas_frame_key` in the database), names one frame
 and a random secret that changes whenever the page is shown again, taken off the board or retired, expires in
 twelve hours, and names the app as the only page that may frame it. The door strips no cookie on `/f/`; the route
@@ -153,7 +154,8 @@ into it, and is deleted when the share ends.
 What a page can still do: read every file under its root (its own folder unless the agent names a wider one
 inside the workspace, never the workspace itself) and send it to an allowed origin; navigate its own frame
 somewhere else, which the board notices and answers by blanking the frame and retiring its address, though a
-request already sent is sent; open a WebRTC connection, which no policy governs in the browsers of today; and
+request already sent is sent, and a navigation answered with 204 leaves the page in place and is not noticed at
+all, so what it carried in its address is gone unseen; open a WebRTC connection, which no policy governs in the browsers of today; and
 resolve names in ways a browser may still prefetch despite the page being told not to.
 
 **Tokens of the public address, and provider keys.** A provider's token, the launcher's token and the keys in

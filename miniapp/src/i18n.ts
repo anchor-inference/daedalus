@@ -323,6 +323,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "canvas.tpl.lane.ship": { en: "Ship", ru: "Выпуск" },
   "canvas.frame.door": { en: "This page needs a services address", ru: "Странице нужен адрес сервисов" },
   "canvas.frame.door.body": { en: "Pages run only on their own origin. Set SERVICES_PUBLIC_URL, or the services address in Settings.", ru: "Страницы работают только на своём адресе. Задайте SERVICES_PUBLIC_URL или адрес сервисов в настройках." },
+  "canvas.frame.unsupported": { en: "Live pages are off on this host", ru: "Живые страницы здесь недоступны" },
+  "canvas.frame.unsupported.body": { en: "A Windows host cannot serve a page's files safely. Share the page as a service instead.", ru: "Хост на Windows не может безопасно отдавать файлы страницы. Откройте её как сервис." },
   "canvas.frame.missing": { en: "Not a live page on this board", ru: "Не живая страница на этой доске" },
   "canvas.frame.failed": { en: "The page could not be opened", ru: "Не удалось открыть страницу" },
   "canvas.frame.reload": { en: "Reload the page", ru: "Перезагрузить страницу" },

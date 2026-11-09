@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -542,6 +543,32 @@ def test_the_policy_allows_only_what_the_operator_allowed() -> None:
     page = inject(b"<!doctype html><html><head><title>x</title></head></html>", "TOKEN", "http://app.test", "NONCE")
     assert page.startswith(b'<!doctype html><meta http-equiv="x-dns-prefetch-control" content="off"><script src="/f/TOKEN/.daedalus/bridge.js" data-parent="http://app.test" data-nonce="NONCE"></script><html>')
     assert inject(b"<script>first()</script>", "T", "http://app.test").index(b"bridge.js") < inject(b"<script>first()</script>", "T", "http://app.test").index(b"first()")
+    # A doctype after a byte order mark, white space or comments still decides the mode: the bridge
+    # goes after it, or the page would fall into quirks mode.
+    for lead in (b"<!-- built by hand -->\n", b"\xef\xbb\xbf", b"\xef\xbb\xbf  <!-- a --><!-- b -->\n"):
+        page = inject(lead + b"<!DOCTYPE html><html><script>first()</script></html>", "T", "http://app.test")
+        assert page.index(b"<!DOCTYPE html>") < page.index(b"bridge.js") < page.index(b"first()"), lead
+    assert inject(b"\xef\xbb\xbf<p>no doctype</p>", "T", "http://app.test").startswith(b"\xef\xbb\xbf<meta"), "the byte order mark stays first"
+
+
+def test_the_frame_module_imports_where_files_cannot_be_opened_without_following_links(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A native Windows host has no O_DIRECTORY, no O_NOFOLLOW and no dir_fd. The module read those at
+    import and broke the whole app there; now it imports, serves no frame, and says so."""
+    import importlib.util
+
+    import daedalus.stores.canvas_frames as real
+
+    for name in ("O_DIRECTORY", "O_NOFOLLOW"):
+        monkeypatch.delattr(os, name, raising=False)
+    spec = importlib.util.spec_from_file_location("canvas_frames_without_flags", real.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)  # dataclasses look their module up there
+    spec.loader.exec_module(module)
+    assert module.SUPPORTED is False
+    (tmp_path / "index.html").write_text("<p>hi</p>")
+    assert module.read_served(tmp_path, "index.html") is None, "no fallback to a check by path"
+
 
 
 async def test_frames_run_only_at_the_door_and_stop_when_the_node_goes(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -594,6 +621,8 @@ async def test_frames_run_only_at_the_door_and_stop_when_the_node_goes(settings:
         nonce = page.text.split('data-nonce="')[1].split('"')[0]
         fetched = await door_client.get(path, headers={"Sec-Fetch-Dest": "empty"})
         assert 'data-nonce=""' in fetched.text, "a script fetching its own page gets no nonce to give away"
+        plain = await door_client.get(path)
+        assert 'data-nonce=""' not in plain.text, "plain http on a LAN sends no fetch metadata: still a document, still a nonce"
         confirm = f"/api/canvases/{canvas_id}/frames/{frame_id}/nonce"
         assert (await app_client.post(confirm, headers=HEADERS, json={"nonce": "made-up-nonce"})).json() == {"ok": False}
         assert (await app_client.post(confirm, headers=HEADERS, json={"nonce": nonce})).json() == {"ok": True}
@@ -630,6 +659,13 @@ async def test_frames_run_only_at_the_door_and_stop_when_the_node_goes(settings:
         await frames.put(canvas_id, frame_id, (workspace / "site").resolve(), "index.html")
         assert (await door_client.get(fresh)).status_code == 410
         assert (await door_client.get(fresh, headers={"Host": "door.test;script-src *"})).status_code in (400, 410)
+
+        # Where files cannot be opened without following links, no frame runs and the board says why.
+        monkeypatch.setattr("daedalus.stores.canvas_frames.SUPPORTED", False)
+        node_now = next(node["id"] for node in (await store_for(manager).get(canvas_id))["doc"]["nodes"] if node["id"].startswith("frame-"))
+        assert (await app_client.post(f"/api/canvases/{canvas_id}/frames/{node_now}/address", headers=HEADERS, json={})).json()["unsupported"] is True
+        refused = await canvas_tools.canvas_show().invoke(context, {"path": "site/index.html", "canvas_id": canvas_id})
+        assert refused.is_error and "not available on this host" in refused.content
 
 
 FRAME = {"id": "f1", "type": "file", "file": "site/index.html", "x": 0, "y": 0, "width": 390, "height": 844, "daedalus": {"frame": {"device": "phone", "rev": 1}}}

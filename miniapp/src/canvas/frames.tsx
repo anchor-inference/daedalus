@@ -32,7 +32,7 @@ const TAG = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
 export const BOARD_ID = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const HEARTBEAT_MS = 60_000;
 export type Address = { url: string; expires_at: number; origins: { canvas: string[]; all: string[] }; once: string[]; generation: number };
-type AddressAnswer = Address | { needs_door: true; origins: { canvas: string[]; all: string[] } };
+type AddressAnswer = Address | { needs_door: true; origins: { canvas: string[]; all: string[] } } | { unsupported: true; origins: { canvas: string[]; all: string[] } };
 
 /** The frame description of a node, or null for any other node (an imported file card stays a card). */
 export function frameOf(node: CanvasNode): FrameInfo | null {
@@ -139,6 +139,7 @@ const sentSnapshots = new Map<string, string>();
 type State =
   | { kind: "loading" }
   | { kind: "needs_door" }
+  | { kind: "unsupported" }
   | { kind: "missing" }
   | { kind: "failed"; message: string }
   | { kind: "left" }
@@ -183,7 +184,7 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
     api.post<AddressAnswer>(`/api/canvases/${canvasId}/frames/${encodeURIComponent(node.id)}/address`, { once: once ? once.split(" ") : [], board: BOARD_ID })
       .then((answer) => {
         if (!active) return;
-        setState("needs_door" in answer ? { kind: "needs_door" } : { kind: "live", address: answer });
+        setState("needs_door" in answer ? { kind: "needs_door" } : "unsupported" in answer ? { kind: "unsupported" } : { kind: "live", address: answer });
       })
       .catch((error) => {
         if (!active) return;
@@ -317,6 +318,7 @@ export function LiveFrame({ node, near }: { node: CanvasNode; near: boolean }) {
   const reload = () => setReloads((n) => n + 1);
   const body: ReactNode = (() => {
     if (state.kind === "needs_door") return <FrameNotice icon="lock" title={t("canvas.frame.door")} body={t("canvas.frame.door.body")} />;
+    if (state.kind === "unsupported") return <FrameNotice icon="lock" title={t("canvas.frame.unsupported")} body={t("canvas.frame.unsupported.body")} />;
     if (state.kind === "missing") return <FrameNotice icon="file" title={pageName(node)} body={t("canvas.frame.missing")} />;
     if (state.kind === "failed") return <FrameNotice icon="alert" title={t("canvas.frame.failed")} body={state.message} action={<button type="button" className="btn small" onClick={reload}>{t("canvas.frame.reload")}</button>} />;
     if (state.kind === "left") return <FrameNotice icon="alert" title={t("canvas.frame.left")} body={t("canvas.frame.left.body")} action={<button type="button" className="btn small" onClick={reload}>{t("canvas.frame.reload")}</button>} />;
