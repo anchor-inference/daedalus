@@ -1,8 +1,8 @@
-// What a diagram's history list says about each revision: who saved it, what changed in words a
-// person reads, and under which day it sits. The counts come from the server, which compares the
-// scenes when it records a revision; element ids never reach the reader, they mean nothing to them.
+// What a canvas's history list says about each revision: who saved it, what changed in words a person
+// reads, and under which day it sits. The counts come from the host, which compares the documents when
+// it records a revision; node ids never reach the reader, they mean nothing to them.
 
-import { locale, plural, t } from "./i18n";
+import { locale, plural, t } from "../i18n";
 
 export type ChangeSummary = {
   created?: boolean;
@@ -19,37 +19,37 @@ export type RevisionItem = {
   title: string;
   saved_at: string;
   started_at?: string | null;
-  source: "user" | "agent";
-  kind: "create" | "edit" | "restore";
+  source: "operator" | "agent";
+  kind: "create" | "edit" | "restore" | "import";
   restored_from?: number | null;
   summary: ChangeSummary;
 };
 
-const CATEGORIES = ["shape", "connector", "text"] as const;
+const CATEGORIES = ["card", "group", "link", "file", "edge"] as const;
 
-/** "+3 shapes, 1 connector removed, 2 changed, renamed", or what the revision was when it is not an edit. */
+/** "+3 cards, 1 edge removed, 2 changed, renamed", or what the revision was when it is not an edit. */
 export function changeSummary(summary: ChangeSummary, kind: RevisionItem["kind"] = "edit"): string {
-  if (kind === "create" || summary.created) return t("diagrams.change.created");
-  if (summary.oldest) return t("diagrams.change.oldest");
+  if (kind === "create" || summary.created) return t("canvas.change.created");
+  if (kind === "import") return t("canvas.change.imported");
+  if (summary.oldest) return t("canvas.change.oldest");
   const parts: string[] = [];
   // A version number means nothing to the reader, so a restore says what it did, and the counts
-  // after it say how far the canvas moved.
-  if (kind === "restore") parts.push(t("diagrams.change.restored"));
+  // after it say how far the board moved.
+  if (kind === "restore") parts.push(t("canvas.change.restored"));
   for (const category of CATEGORIES) {
     const n = summary.added?.[category] ?? 0;
-    if (n) parts.push(`+${plural(`diagrams.change.${category}`, n)}`);
+    if (n) parts.push(`+${plural(`canvas.change.${category}`, n)}`);
   }
   for (const category of CATEGORIES) {
     const n = summary.removed?.[category] ?? 0;
-    if (n) parts.push(t("diagrams.change.removed", { what: plural(`diagrams.change.${category}`, n) }));
+    if (n) parts.push(t("canvas.change.removed", { what: plural(`canvas.change.${category}`, n) }));
   }
-  if (summary.changed) parts.push(plural("diagrams.change.changed", summary.changed));
-  if (summary.renamed) parts.push(t("diagrams.change.renamed"));
-  if (!parts.length) return t("diagrams.change.none");
+  if (summary.changed) parts.push(plural("canvas.change.changed", summary.changed));
+  if (summary.renamed) parts.push(t("canvas.change.renamed"));
+  if (!parts.length) return t("canvas.change.none");
   return parts.join(", ");
 }
 
-/** Midnight of the reader's day for a moment, as a sortable key. */
 function dayKey(at: Date): string {
   return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 }
@@ -60,8 +60,8 @@ export function dayLabel(iso: string, now = new Date()): string {
   const today = dayKey(now);
   const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const key = dayKey(at);
-  if (key === today) return t("diagrams.day.today");
-  if (key === yesterday) return t("diagrams.day.yesterday");
+  if (key === today) return t("canvas.day.today");
+  if (key === yesterday) return t("canvas.day.yesterday");
   return at.toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "long", ...(at.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
 }
 

@@ -663,7 +663,7 @@ def judge_sidebar(s: dict) -> list[str]:
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
             problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
-    # Diagrams moved from More to a dedicated rail icon, so the menu has one fewer item. Two more came
+    # The canvas moved from More to a dedicated rail icon, so the menu has one fewer item. Two more came
     # with the configurable navigation: the stub's one published page, which waits under More until it
     # is placed, and the Customise entry that opens Settings -> Navigation. One more since the search
     # left the rail's top: it heads the menu with its key, so a mouse still reaches it.

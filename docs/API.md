@@ -59,6 +59,24 @@ with the notes that still show the file until `?force=true`. Each change is anno
 on-demand `notes` tool group (`NotesList`, `NoteRead`, `NoteWrite`, `NoteDelete`, `NoteAttach`); notes
 are never put into its prompt.
 
+**Canvases.** A canvas is a board in the [JSON Canvas 1.0](https://jsoncanvas.org) format that Obsidian
+opens: cards, links, files and groups, and edges between them. It belongs to a chat or to that chat's
+project, and it has an owner chat, the one its comment bar writes into. `GET /api/canvases?session_id=`
+lists the chat's canvases and its project's, `?project_id=` one project's, and no query every canvas,
+each answer as `{"scopes": [{"kind", "id", "name"}], "items": [...]}`. `POST /api/canvases` with
+`{"title", "scope": "chat" | "project", "scope_id", "owner_session_id"?, "doc"?}` makes one, and `GET
+/api/canvases/{id}` answers it with its document under `doc`. Changes are operations on items: `POST
+/api/canvases/{id}/ops` with `{"base_version", "ops": [{"op": "put", "kind": "node" | "edge", "item",
+"at"?: "front" | "back"} | {"op": "delete", "id"}], "title"?}`. A `base_version` that is behind is still
+applied when none of the items the operations touch changed since (`"merged": true` in the answer); when
+one did, the answer is **409** with `{"detail": {"conflicts": [ids], "current": canvas}}`. The history is
+`GET …/versions`, a revision `GET …/versions/{n}`, and `POST …/restore` with `{"revision", "version"}`
+brings one back as a new version. `GET …/export` is the `.canvas` file laid out exactly as Obsidian
+writes it; `POST /api/canvases/import` with `{"title", "scope", "scope_id", "text"}` reads one.
+`POST …/share` answers a public link, `/app/d/<token>`, read through `GET /api/public/canvases/{token}`.
+Each change is announced live as `canvas.changed`. The agent works on the same canvases through its
+on-demand `canvas` tool group.
+
 **Everything that happens, as one stream.** `GET /api/events` is a server-sent event stream of what
 happens to sessions, terminals, staff and notifications. It opens with a `hello` frame carrying
 `head` (the newest event number) and `oldest` (the oldest one still kept), then sends each event

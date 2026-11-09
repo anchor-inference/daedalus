@@ -3193,6 +3193,26 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     return changed
 
 
+def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
+    """The Diagrams screen became Canvas. Wherever the operator placed ``diagrams`` in the navigation,
+    ``canvas`` takes its place, so the screen keeps its spot instead of falling back to where a new one
+    ships; a custom icon goes with it."""
+    navigation = raw.get("navigation")
+    if not isinstance(navigation, dict):
+        return False
+    changed = False
+    for field in ("rail", "more", "drawer", "hidden"):
+        items = navigation.get(field)
+        if isinstance(items, list) and "diagrams" in items:
+            navigation[field] = list(dict.fromkeys("canvas" if item == "diagrams" else item for item in items))
+            changed = True
+    icons = navigation.get("icons")
+    if isinstance(icons, dict) and "diagrams" in icons:
+        icons.setdefault("canvas", icons.pop("diagrams"))
+        changed = True
+    return changed
+
+
 def _drop_session_modes(raw: dict[str, Any]) -> bool:
     """Session modes and the per-message depth sort are gone; their tables leave the file.
 
@@ -3226,6 +3246,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_web_search(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
+    changed = _migrate_diagrams_to_canvas(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):

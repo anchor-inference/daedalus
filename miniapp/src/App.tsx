@@ -62,7 +62,7 @@ const CompanionScreen = lazy(retried(() => import("./screens/Companion"), (m) =>
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
 const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
-const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
+const CanvasScreen = lazy(retried(() => import("./canvas/CanvasList"), (m) => ({ default: m.CanvasScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
 const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.HealthScreen })));
@@ -79,7 +79,7 @@ const ProjectTabs = lazy(retried(() => import("./project/phone"), (m) => ({ defa
 const MainScreen = chunk(retried(() => import("./main/MainScreen"), (m) => ({ default: m.MainScreen })));
 const OnboardingScreen = lazy(retried(() => import("./screens/AddModel"), (m) => ({ default: m.OnboardingScreen })));
 const SharedDialog = lazy(retried(() => import("./screens/Shared"), (m) => ({ default: m.SharedDialog })));
-const SharedDiagram = lazy(retried(() => import("./screens/SharedDiagram"), (m) => ({ default: m.SharedDiagram })));
+const SharedCanvas = lazy(retried(() => import("./canvas/SharedCanvas"), (m) => ({ default: m.SharedCanvas })));
 
 /** A shared dialog lives at /app/c/<slug>. It is a page of its own, not a screen of the signed-in shell. */
 function sharedSlug(): string | null {
@@ -87,7 +87,7 @@ function sharedSlug(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function sharedDiagramToken(): string | null {
+function sharedCanvasToken(): string | null {
   const match = /^\/app\/d\/([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
   return match ? match[1] : null;
 }
@@ -200,16 +200,16 @@ export function App() {
     }
     flipSidebar();
   }, [folded, flipSidebar]);
-  // An open diagram is a focus mode. The editor needs the width, and the column beside the rail was a
+  // An open canvas is a focus mode. The editor needs the width, and the column beside the rail was a
   // second left menu next to the canvas's own tools. The rail stays; its fold button shows the column
   // for this visit only, so the folding the operator chose for every other page is left alone.
-  const diagramOpen = route.screen === "diagrams" && !!route.detail;
+  const canvasOpen = route.screen === "canvas" && !!route.detail;
   const [columnShown, setColumnShown] = useState(false);
   useEffect(() => {
-    if (!diagramOpen) setColumnShown(false);
-  }, [diagramOpen]);
-  const columnFolded = diagramOpen ? !columnShown : folded;
-  const sidebarToggle = useCallback(() => (diagramOpen ? setColumnShown((open) => !open) : toggleSidebar()), [diagramOpen, toggleSidebar]);
+    if (!canvasOpen) setColumnShown(false);
+  }, [canvasOpen]);
+  const columnFolded = canvasOpen ? !columnShown : folded;
+  const sidebarToggle = useCallback(() => (canvasOpen ? setColumnShown((open) => !open) : toggleSidebar()), [canvasOpen, toggleSidebar]);
   const [menu, setMenu] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const openPalette = useCallback(() => setPalette(true), []);
@@ -540,9 +540,9 @@ export function App() {
   };
 
   const shared = sharedSlug();
-  const diagramToken = sharedDiagramToken();
-  if (diagramToken) {
-    return <ErrorBoundary><Suspense fallback={<div className="diagram-shared-state">{t("common.loading")}</div>}><SharedDiagram token={diagramToken} /></Suspense></ErrorBoundary>;
+  const canvasToken = sharedCanvasToken();
+  if (canvasToken) {
+    return <ErrorBoundary><Suspense fallback={<div className="cv-shared-state">{t("common.loading")}</div>}><SharedCanvas token={canvasToken} /></Suspense></ErrorBoundary>;
   }
   if (shared) {
     return (
@@ -620,7 +620,7 @@ export function App() {
           ))}
         {route.screen === "schedules" && <SchedulesScreen toast={showToast} onOpen={open} selected={route.detail} />}
         {route.screen === "calendar" && <CalendarScreen toast={showToast} query={route.query} />}
-        {route.screen === "diagrams" && <DiagramsScreen toast={showToast} selected={route.detail} />}
+        {route.screen === "canvas" && <CanvasScreen toast={showToast} selected={route.detail} />}
         {route.screen === "terminals" && <TerminalsScreen detail={route.detail} query={route.query} toast={showToast} project={project} projects={projectList} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
@@ -652,7 +652,7 @@ export function App() {
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
   return (
-    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""} ${diagramOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
+    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""} ${canvasOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
         <div className={`desktop-column ${columnFolded ? "folded" : ""}`}><Rail
           screen={route.screen}
@@ -699,7 +699,7 @@ export function App() {
         </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
       {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearch={() => setPalette(true)} />}
-      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
+      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />

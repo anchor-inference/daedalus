@@ -78,6 +78,7 @@ from daedalus.extensions import (
     api_browsers,
     api_btw,
     api_calendar,
+    api_canvases,
     api_capacity,
     api_card_image,
     api_ci,
@@ -85,7 +86,6 @@ from daedalus.extensions import (
     api_computer,
     api_control,
     api_coordinator_authority,
-    api_diagrams,
     api_disk,
     api_explorations,
     api_favicon,
@@ -1795,11 +1795,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         api_calendar.register(api, app, auth)
         # Meeting notes from a recording, whose action items become a calendar entry.
         api_meetings.register(api, app, auth)
-        # The diagram editor: scenes, their history, previews and public links.
-        api_diagrams.register(api, app, auth)
-        # The Notes tab: a chat's notes and its project's, with the files they show.
         if getattr(app, "manager", None) is not None:
+            # The Notes tab: a chat's notes and its project's, with the files they show.
             api_notes.register(api, app, auth)
+            # Canvases: a chat's and its project's boards, their history, files and public links.
+            api_canvases.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
     # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.
