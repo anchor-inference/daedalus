@@ -233,7 +233,6 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
     { label: t("term.font.bigger"), icon: "expand", onSelect: () => fontSizeStep("font-bigger") },
     { label: t(composeShown ? "term.phone.compose.hide" : "term.phone.compose.show"), icon: "pen", onSelect: toggleCompose },
     ...(menu?.length ? ["-" as const, ...menu] : []),
-    ...(onEnd && running ? ["-" as const, { label: t("term.end"), icon: "stop" as const, danger: true, onSelect: onEnd }] : []),
   ];
 
   return createPortal(
@@ -261,6 +260,9 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
         ) : (
           <CopyOutputButton id={id} state={state ?? undefined} />
         )}
+        {/* End is in the header itself, not only at the bottom of the menu: it is how a terminal is
+            closed on a phone, and a phone has no tab with a ✕. */}
+        {onEnd && running && <button className="iconbtn term-phone-end danger" onClick={onEnd} aria-label={t("term.close")} title={t("term.close")}><Icon name="stop" /></button>}
         <OverflowMenu items={items} icon="vdots" label={t("term.phone.menu")} />
       </div>
       {switcher}

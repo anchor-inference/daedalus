@@ -15,11 +15,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
-from daedalus.host.skills import SKILL_ID, DirectorySkillStore, assess, skill_declarations
+from daedalus.host.skills import SKILL_ID, DirectorySkillStore, assess, classify_requirement, skill_declarations
 from daedalus.host.toolchain import status as toolchain_status
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import Claim, OutboxStore
+from daedalus.tools import TOOL_GROUPS
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -42,10 +43,15 @@ class SkillQuality:
         self.requirement_status = requirement_status
 
     def _check_capabilities(self, markdown: str) -> None:
-        requirements, tools = skill_declarations(markdown)
-        for requirement in requirements:
-            if self.requirement_status(requirement) != "ok":
-                raise SkillRefused(f"required host component {requirement} is unavailable")
+        tools: list[str] = []
+        for item in skill_declarations(markdown):
+            requirement = classify_requirement(item, TOOL_GROUPS)
+            if requirement is None:
+                raise SkillRefused(f"required {item} is not a tool, a tool group, a program or a python: module")
+            if requirement.kind == "tool":
+                tools.append(requirement.name)
+            elif requirement.kind != "group" and self.requirement_status(requirement.name) != "ok":
+                raise SkillRefused(f"required {requirement.name} is unavailable")
         if tools:
             available = self.available_tools() if self.available_tools is not None else set()
             missing = sorted(set(tools) - available)

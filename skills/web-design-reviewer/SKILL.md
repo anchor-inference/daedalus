@@ -1,7 +1,7 @@
 ---
 name: web-design-reviewer
 description: Visual inspection of a live site with headless Chromium to find and fix layout, responsive, consistency and CSS/accessibility issues at source level. Not for automated E2E testing.
-requires: browser
+requires: playwright, ImageView
 ---
 # Web Design Reviewer
 
@@ -21,7 +21,9 @@ Use symptom -> action triggers: when one matches, apply this skill and verify wi
 
 ## Recommended Workflow
 
-1. Open the page with Python Playwright (installed on this host, Chromium bundled) — see `Skill(skill="webapp-testing")` for the server helper.
+1. Open the page with Python Playwright: it and its Chromium are installed for the shell's `python3`, so
+   run the script as `python3 review.py` — never `uv add`, `uv run` or `playwright install` it. See
+   `Skill(skill="webapp-testing")` for the server helper.
 2. Capture the current state before editing.
 3. Test desktop and mobile widths.
 4. Fix the source code, then re-check the same viewports.

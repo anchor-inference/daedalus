@@ -176,8 +176,8 @@ def run() -> int:
                 # Ask fills the composer and sends nothing.
                 widget.locator("#ask").click()
                 expect(widget.locator("#ask")).to_have_attribute("data-done", "1")
-                field = page.locator(".composer textarea").first
-                expect(field).to_have_value("Why is the count 2?")
+                field = page.locator(".composer .composer-field").first
+                expect(field).to_have_text("Why is the count 2?")
 
                 # The theme: dark now, light when the system turns light, without a reload.
                 expect(widget.locator("#look")).to_contain_text("dark")

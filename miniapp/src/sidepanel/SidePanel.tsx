@@ -32,6 +32,7 @@ import { errorText } from "../ui";
 import { ToastHost, toast } from "../ui/dialogs";
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
 import { cardKey, cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
+import { ServerGrantButton } from "../servergrant";
 import "./sidepanel.css";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
@@ -54,8 +55,9 @@ export function SidePanel() {
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
   const show = useRef<string | null>(null);
-  // The actions answered here, per conversation, for as long as the panel is open: the refusal stays
-  // in the transcript after the answer, and coming back to the conversation must not offer it again.
+  // The refused calls answered here, per conversation, for as long as the panel is open: the refusal
+  // stays in the transcript after the answer, and coming back to the conversation must not offer it
+  // again. By call id: the same action refused again later is a new request under the same key.
   const answered = useRef(new Map<string, Set<string>>());
 
   useEffect(() => {
@@ -393,9 +395,10 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   const id = session.id;
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [failed, setFailed] = useState(false);
-  const [seenKeys, setSeenKeys] = useState<Set<string>>(() => answered.get(id) ?? new Set());
-  useEffect(() => void answered.set(id, seenKeys), [answered, id, seenKeys]);
+  const [seenCalls, setSeenCalls] = useState<Set<string>>(() => answered.get(id) ?? new Set());
+  useEffect(() => void answered.set(id, seenCalls), [answered, id, seenCalls]);
   const [similar, setSimilar] = useState<string | null>(null);
+  const [grantServer, setGrantServer] = useState<string | null>(null);
   const [stopAt, setStopAt] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -521,25 +524,44 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   // Offered only while the host lists the request as open, as on the app's own screen: read from the
   // transcript alone, a request answered anywhere came back on every reload of the panel.
   const approval = useMemo(
-    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
-    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+    () => pendingApproval(detail?.messages ?? [], seenCalls, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenCalls, detail?.open_approvals, detail?.run_id],
   );
+  // The panel has no app-wide event stream, so an answer given in the app, in Telegram or on another
+  // device never reached it, and the card stayed until the next run. While a card is up the panel
+  // asks the host which requests are still open; a read of the state alone, the conversation stays.
+  const asking = !!approval;
+  useEffect(() => {
+    if (!asking) return;
+    const timer = window.setInterval(() => {
+      api.get<SessionDetail>(`/api/sessions/${id}?tail=1`)
+        .then((next) => setDetail((prev) => (prev ? { ...prev, open_approvals: next.open_approvals } : prev)))
+        .catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [asking, id]);
   useEffect(() => {
     setSimilar(null);
+    setGrantServer(null);
     if (!approval) return;
     let gone = false;
-    api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approval.key}`)
-      .then((r) => !gone && typeof r?.similar?.label === "string" && setSimilar(r.similar.label))
+    api.get<{ similar?: { label?: unknown } | null; server?: { name?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approval.key}`)
+      .then((r) => {
+        if (gone) return;
+        if (typeof r?.similar?.label === "string") setSimilar(r.similar.label);
+        if (typeof r?.server?.name === "string") setGrantServer(r.server.name);
+      })
       .catch(() => undefined);
     return () => {
       gone = true;
     };
   }, [id, approval?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function decide(a: Approval, how: "allow" | "similar" | "deny") {
-    setSeenKeys((keys) => new Set(keys).add(a.key));
+  async function decide(a: Approval, how: "allow" | "similar" | "deny" | "server", hours = 0) {
+    setSeenCalls((calls) => new Set(calls).add(a.callId));
     try {
-      if (how === "deny") await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
+      if (how === "server" && grantServer) await api.post(`/api/sessions/${id}/policy/grant-server`, { key: a.key, hours });
+      else if (how === "deny") await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
       else if (how === "similar" && similar) await api.post(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
       else await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
       onChanged();
@@ -636,7 +658,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       <div className="sp-body" ref={scroller} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
         {detail ? (
-          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} />
+          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} awaiting={approval?.callId ?? ""} />
         ) : failed ? (
           <div className="empty">{t("sidepanel.unreadable")}</div>
         ) : (
@@ -652,7 +674,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       {/* The agent's side questions in this conversation. The panel never fetched them, so a question
           asked here waited unseen while only the app showed it. */}
       {sideAsked > 0 && asksOpen && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
-      {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} onDecide={(how) => void decide(approval, how)} />}
+      {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} server={grantServer} onDecide={(how) => void decide(approval, how)} onServer={(hours) => void decide(approval, "server", hours)} />}
       {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
       {previewing && <FilePreview src={previewing} onClose={() => setPreviewing(null)} />}
       {detail?.id === id && (
@@ -753,7 +775,7 @@ function ActivityLine({ detail, live, status, paused, stopUnconfirmed: unconfirm
 
 /** A pending action of the agent's, answered here: it takes the focus, so Enter allows once,
  *  Ctrl+Enter allows the like for this conversation and Esc refuses, without the composer hearing. */
-function ApprovalCard({ approval, similar, onDecide }: { approval: Approval; similar: string | null; onDecide: (how: "allow" | "similar" | "deny") => void }) {
+function ApprovalCard({ approval, similar, server, onDecide, onServer }: { approval: Approval; similar: string | null; server: string | null; onDecide: (how: "allow" | "similar" | "deny") => void; onServer: (hours: number) => void }) {
   const card = useRef<HTMLDivElement>(null);
   const [acked, setAcked] = useState<string | null>(null);
   useEffect(() => card.current?.focus(), []);
@@ -777,6 +799,7 @@ function ApprovalCard({ approval, similar, onDecide }: { approval: Approval; sim
       <div className="sp-card-actions">
         <button type="button" className={`btn small primary ${acked === "allow" ? "acked" : ""}`} onClick={() => choose("allow")}>{t("composer.approve")} <kbd>Enter</kbd></button>
         {similar && <button type="button" className={`btn small ${acked === "similar" ? "acked" : ""}`} onClick={() => choose("similar")}>{t("composer.approve.similar", { label: similar })} <kbd>Ctrl+Enter</kbd></button>}
+        {server && <ServerGrantButton server={server} onGrant={onServer} />}
         <button type="button" className={`btn small ${acked === "deny" ? "acked" : ""}`} onClick={() => choose("deny")}>{t("composer.deny")} <kbd>Esc</kbd></button>
       </div>
       <div className="sp-card-foot sub">{t("sidepanel.card.foot")}</div>

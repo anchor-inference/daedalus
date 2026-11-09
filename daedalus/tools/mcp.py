@@ -90,7 +90,8 @@ def _admin(context: ToolContext):  # type: ignore[no-untyped-def]
         "(a static key goes in `headers`, e.g. {\"Authorization\": \"Bearer …\"}). For a server that signs in "
         "with OAuth set oauth=true: the result carries the link the owner opens, and the sign-in completes "
         "by itself. `client_id`/`client_secret` only for a server that does not register clients itself. "
-        "The result says whether it answers; then McpEnable turns it on in a session."
+        "The result says whether it answers, and one that answers is enabled in this session at once "
+        "(its tools are then loaded as the result says); a failing one's result carries what it wrote to stderr."
     ),
 )
 async def mcp_add(

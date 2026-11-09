@@ -372,7 +372,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
             if h != 54:
                 problems.append(f"home {lang}: a live row is {h} px, not 54")
 
-        page.locator(".ph-home .composer textarea").fill("Wire the order form to the sheet")
+        page.locator(".ph-home .composer .composer-field").fill("Wire the order form to the sheet")
         page.wait_for_timeout(300)
         m = read("composer-open", ".ph-home .composer")
         if not m["open"]:
@@ -381,7 +381,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         mic = page.locator(".ph-home .composer .composer-tools > .mic")
         if mic.count() and not mic.is_visible():
             problems.append(f"composer {lang}: the mic is gone once a draft is typed")
-        page.locator(".ph-home .composer textarea").fill("")
+        page.locator(".ph-home .composer .composer-field").fill("")
 
         page.locator(".ph-menu").first.click()
         page.wait_for_selector(".ph-drawer-root.open", timeout=5000)
@@ -708,7 +708,7 @@ def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
     page = open_page(context, "agents", ".start-live-row")
     # An empty field shows the mic alone in the trailing slot; Send, the circle measured, joins it once
     # the field holds words. It was the voice circle on an empty field until that left ordinary chats.
-    page.locator(".start-composer textarea").fill("Bake the menu")
+    page.locator(".start-composer .composer-field").fill("Bake the menu")
     start = page.evaluate(START)
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
     page.wait_for_selector(".projects-row:not(.head)", timeout=15000)

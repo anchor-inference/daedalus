@@ -57,7 +57,7 @@ def scenario(language: str, width: int, unavailable: bool) -> None:
             sheet.locator("#guided-goal-checks").fill("All prices checked")
         page.keyboard.press("Escape")
         expect(sheet).to_have_count(0)
-        expect(composer).to_have_value("Keep the existing conversation available")
+        expect(composer).to_have_text("Keep the existing conversation available")
         page.reload()
         expect(composer).to_be_visible()
         page.locator("[data-goal-setup]").get_by_role("button").click()

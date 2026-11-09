@@ -7,9 +7,10 @@ the daily-budget flag exists on the shared state volume, calls to model upstream
 refused here — below the agent, where a self-modification cannot reach.
 
 Upstreams: ``deepseek`` → https://api.deepseek.com, ``openrouter`` → https://openrouter.ai/api/v1,
-``openai`` → https://api.openai.com/v1, ``anthropic`` → https://api.anthropic.com/v1 (its OpenAI-compatible
-chat and models endpoints; the key goes in ``x-api-key`` and the ``anthropic-version`` header is added when the
-caller sent none), ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go, the prepaid subscription) and
+``openai`` → https://api.openai.com/v1, ``anthropic`` → https://api.anthropic.com/v1 (chat completions are
+translated to the Messages API with prompt-cache breakpoints, as the ``claude`` login is, since Anthropic's
+OpenAI-compatible endpoint caches nothing; the rest, ``models`` among it, is forwarded; the key goes in
+``x-api-key`` and the ``anthropic-version`` header is added when the caller sent none), ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go, the prepaid subscription) and
 ``opencode_zen`` → https://opencode.ai/zen/v1 (OpenCode Zen, pay per token); one OpenCode key serves both. Keys:
 ``DEEPSEEK_API_KEY``, ``OPENROUTER_API_KEY``, ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``OPENCODE_API_KEY``. Extra
 upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
@@ -59,6 +60,7 @@ from claude import (
     chat_to_messages,
     claude_header_windows,
     claude_usage_view,
+    key_betas,
     messages_events_to_chunks,
     prefix_locked,
     request_betas,
@@ -674,6 +676,8 @@ def parse_usage(body: bytes, content_type: str) -> tuple[str, dict[str, int | fl
         "input_tokens": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
         "output_tokens": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
         "cache_read_tokens": int(usage.get("prompt_cache_hit_tokens") or usage.get("cache_read_input_tokens") or (details_in.get("cached_tokens") if isinstance(details_in, dict) else 0) or 0),
+        # Billed apart by Anthropic (twice the input price for the hour); the host prices it where it knows how.
+        "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
         "reasoning_tokens": int((details_out.get("reasoning_tokens") if isinstance(details_out, dict) else 0) or 0),
     }
     stated = usage.get("cost")
@@ -870,18 +874,33 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "anthropic", **limits.get(m, {})} for m in models if m]})
     if tail != "chat/completions":
         return web.json_response({"error": {"message": f"claude serves chat/completions and models, not {tail!r}", "type": "invalid_request_error"}}, status=404)
+    return await serve_messages(request, "claude", headers, login=True)
+
+
+async def serve_messages(request: web.Request, name: str, headers: dict[str, str], *, login: bool) -> web.StreamResponse:
+    """One chat completion answered through Anthropic's Messages API, for the Claude login or the API key.
+
+    ``login`` is the Claude Code route: its body carries the CLI's identity, its betas and URL are the
+    CLI's, and its replies judge a client update and carry the plan's usage windows. The keyed route
+    (``anthropic``) shares the translation and so its cache breakpoints, its thinking replay and its usage
+    with the cache in it, which is what made it cache at all; ``metered`` says whether this proxy reports
+    the call's usage because the bot will not."""
+    client: httpx.AsyncClient = request.app["client"]
     try:
         body = await request.json()
     except ValueError:
         return web.json_response({"error": {"message": "body must be JSON", "type": "invalid_request_error"}}, status=400)
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
-    payload, names = chat_to_messages(body)
-    headers["anthropic-beta"] = request_betas(payload)
+    payload, names = chat_to_messages(body, login=login)
+    headers["anthropic-beta"] = request_betas(payload) if login else key_betas(payload)
+    url = CLAUDE_API + ("/v1/messages?beta=true" if login else "/v1/messages")
+    meter = not login and bool(AGENT_API) and METERED_HEADER not in request.headers
+    started = time.monotonic()
     healed = False
     while True:
-        upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
-        timing = UpstreamTiming("claude", "POST", "v1/messages", str(payload.get("model") or model))
+        upstream = client.build_request("POST", url, json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
+        timing = UpstreamTiming(name, "POST", "v1/messages", str(payload.get("model") or model))
         try:
             response = await client.send(upstream, stream=True)
         except httpx.HTTPError as exc:
@@ -903,30 +922,41 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
             # the turn. Said aloud, since a history edited under replayed thinking should be rare.
             payload, removed = without_thinking(payload, first)
             if removed:
-                logger.warning("claude refused replayed thinking bound to another prefix (%s); retrying without %d block(s)", raw[:200], removed)
+                logger.warning("%s refused replayed thinking bound to another prefix (%s); retrying without %d block(s)", name, raw[:200], removed)
                 healed = True
                 continue
         break
     if response.status_code >= 400:
-        await clients.verify("claude", response.status_code, raw)
+        if login:
+            await clients.verify("claude", response.status_code, raw)
         try:
             payload_err = json.loads(raw)
         except ValueError:
             payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
         return web.json_response(payload_err, status=response.status_code, headers=refusal_headers(response.headers))
-    await clients.verify("claude", response.status_code)
-    if windows := claude_header_windows(response.headers):
-        _claude_header_snapshot.update(windows=windows, at=time.monotonic())
+    if login:
+        await clients.verify("claude", response.status_code)
+        if windows := claude_header_windows(response.headers):
+            _claude_header_snapshot.update(windows=windows, at=time.monotonic())
     chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
-    served = served_headers("claude", str(payload.get("model") or model))
+    served = served_headers(name, str(payload.get("model") or model))
+    captured = bytearray()
     try:
         if not stream:
-            return web.json_response(await collect_completion(chunks, model=model), headers=served)
+            completion = await collect_completion(chunks, model=model)
+            if meter:
+                captured.extend(json.dumps(completion).encode("utf-8"))
+            return web.json_response(completion, headers=served)
         out = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", **served})
         await out.prepare(request)
         async for chunk in chunks:
-            await out.write(chunk.encode("utf-8"))
+            encoded = chunk.encode("utf-8")
+            if meter and len(captured) < CAPTURE_LIMIT:
+                captured.extend(encoded)
+            await out.write(encoded)
         await out.write_eof()
+        if meter:
+            asyncio.create_task(report_direct_usage(client, name, model, bytes(captured), "text/event-stream", started))
         return out
     except (ConnectionResetError, asyncio.CancelledError):
         timing.report("caller_gone")
@@ -935,6 +965,8 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         timing.report(f"upstream_dropped:{type(exc).__name__}")
         raise
     finally:
+        if meter and not stream and captured:
+            asyncio.create_task(report_direct_usage(client, name, model, bytes(captured), "application/json", started))
         timing.report()
         await response.aclose()
 
@@ -1193,6 +1225,8 @@ async def handle(request: web.Request) -> web.StreamResponse:
             inject_key(headers, name, key)
         if name == "anthropic" and "anthropic-version" not in {h.lower() for h in headers}:
             headers["anthropic-version"] = ANTHROPIC_VERSION
+        if name == "anthropic" and request.method == "POST" and rest.strip("/").removeprefix("v1/") == "chat/completions":
+            return await serve_messages(request, name, headers, login=False)
     body = await request.read()
     if name == "grok":
         # The CLI chat proxy routes on this header. The JSON model is not what it documents

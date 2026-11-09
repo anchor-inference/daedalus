@@ -33,7 +33,15 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
-from api_stub import DEFAULT_APP, VOICE_NOTE_PREFIX, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    VOICE_NOTE_PREFIX,
+    Unhandled,
+    expect_app,
+    field_text,
+    folders,
+    fulfil_shared,
+)
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -137,7 +145,7 @@ def new_context(browser, **options):  # type: ignore[no-untyped-def]
 
 
 def field(page: Page):  # type: ignore[no-untyped-def]
-    return page.locator(".composer textarea")
+    return page.locator(".composer .composer-field")
 
 
 def record(page: Page, seconds: float = 1.3) -> None:
@@ -174,8 +182,8 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     check(page.locator(".voicebar-wave").is_visible(), "the waveform is drawn")
     check(page.locator(".voicebar-time").inner_text().startswith("0:0"), f"the time runs ({page.locator('.voicebar-time').inner_text()})")
     page.locator(".voicebar-stop").click()
-    page.wait_for_function("() => document.querySelector('.composer textarea').value.includes('buy milk')", timeout=10000)
-    value = field(page).input_value()
+    page.wait_for_function("() => document.querySelector('.composer .composer-field').textContent.includes('buy milk')", timeout=10000)
+    value = field_text(field(page))
     check(value.startswith("Look at the logs first.\n\n") and value.endswith(HEARD), f"the words land after the typed text ({value!r})")
     check(HOST.transcribes == ["audio"], f"the recording went up as WAV once ({HOST.transcribes})")
     check(not HOST.sent, "stop does not send")
@@ -185,14 +193,14 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     record(page, 0.8)
     page.locator(".voicebar-cancel").click()
     page.wait_for_timeout(600)
-    check(not bar.is_visible() and field(page).input_value() == value, "cancel closes the bar and leaves the draft as it was")
+    check(not bar.is_visible() and field_text(field(page)) == value, "cancel closes the bar and leaves the draft as it was")
     check(not HOST.transcribes, "cancel sends nothing to be transcribed")
 
     # ↑ stops and sends the draft and the words together.
     field(page).fill("Also this.")
     record(page, 0.8)
     page.locator(".voicebar-send").click()
-    page.wait_for_function("() => document.querySelector('.composer textarea').value === ''", timeout=10000)
+    page.wait_for_function("() => document.querySelector('.composer .composer-field').textContent === ''", timeout=10000)
     page.wait_for_timeout(300)
     check(len(HOST.sent) == 1 and HOST.sent[0].startswith("Also this.\n\n") and HOST.sent[0].endswith(HEARD), f"send sends the typed text and the words ({HOST.sent})")
 
@@ -205,10 +213,10 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     strip = page.locator(".voicenote-failed")
     strip.wait_for(timeout=10000)
     check("HTTP 400" in strip.inner_text(), "the failure says why")
-    check(field(page).is_visible() and field(page).input_value() == "Draft that must survive.", "the draft is intact and the field usable")
+    check(field(page).is_visible() and field_text(field(page)) == "Draft that must survive.", "the draft is intact and the field usable")
     check(page.locator(".composer .mic").is_disabled(), "a new recording cannot bury the waiting one")
     page.locator(".voicenote-failed .btn.primary").click()
-    page.wait_for_function("() => document.querySelector('.composer textarea').value.includes('buy milk')", timeout=10000)
+    page.wait_for_function("() => document.querySelector('.composer .composer-field').textContent.includes('buy milk')", timeout=10000)
     check(HOST.transcribes == ["audio", "name"], f"the retry sends the kept recording's name, not the audio ({HOST.transcribes})")
     check(not strip.is_visible(), "a retry that works clears the failure")
 
@@ -251,7 +259,7 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
         mic = target(page, ".composer .mic")
         check(mic["width"] >= 44 and mic["height"] >= 44, f"{label}: the microphone is a thumb's size ({mic['width']}x{mic['height']})")
         # A typed draft keeps the mic beside Send: hiding it left no way to dictate the rest.
-        page.locator(".composer textarea").fill("Wire the order form to the sheet and send me the link")
+        page.locator(".composer .composer-field").fill("Wire the order form to the sheet and send me the link")
         page.wait_for_timeout(300)
         width = options["viewport"]["width"]  # type: ignore[index]
         for selector in (".composer .mic", '.composer .roundbtn[data-action="send"]'):
@@ -276,7 +284,7 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
         page.wait_for_selector('.composer .roundbtn[data-action="stop"]', timeout=15000)
         width = options["viewport"]["width"]  # type: ignore[index]
         for draft in ("", "Also check the second sheet"):
-            page.locator(".composer textarea").fill(draft)
+            page.locator(".composer .composer-field").fill(draft)
             page.wait_for_timeout(300)
             box = target(page, ".composer .mic")
             check(page.locator(".composer .mic").is_visible() and 0 <= box["x"] and box["x"] + box["width"] <= width, f"{label}, running{' with a draft' if draft else ''}: the mic is on screen ({box})")

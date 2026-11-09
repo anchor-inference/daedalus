@@ -83,6 +83,7 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", _SESSION + "/model"),
         ("POST", _SESSION + "/policy/grant"),
         ("POST", _SESSION + "/policy/grant-similar"),
+        ("POST", _SESSION + "/policy/grant-server"),
         ("POST", _SESSION + "/policy/refuse"),
         ("GET", _SESSION + "/browser-approvals"),
         ("PUT", _SESSION + "/browser-approvals"),

@@ -74,7 +74,7 @@ def main() -> int:
         only("window resizes", since("window resizes"), {IDS[0]})
 
         # Collapsed: nobody is on screen, so nobody speaks, whatever the window does.
-        page.locator(".term-tools button[aria-label='Hide the terminal']").click()
+        page.locator(".term-tools button[aria-label='Hide the terminal panel']").click()
         page.wait_for_timeout(200)
         since("collapse")
         for i in range(5):

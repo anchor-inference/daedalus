@@ -179,8 +179,8 @@ def main() -> int:
                     check(head.get_attribute("data-remote-state") == "paused" and words["paused"] in head.inner_text(), f"{lang}: the header says the turn is paused ({head.inner_text()!r})")
                     check(words["banner"] in banner.inner_text(), f"{lang}: the banner says which computer the turn waits for ({banner.inner_text()!r})")
                     check(page.locator(".chat-head .livebar, .chat-head .live-bar").count() == 0, f"{lang}: a paused turn draws no working bar")
-                    check(page.locator(".composer textarea").first.is_enabled(), f"{lang}: the composer stays open while the turn is paused")
-                    placeholder = page.locator(".composer textarea").first.get_attribute("placeholder") or ""
+                    check(page.locator(".composer .composer-field").first.is_enabled(), f"{lang}: the composer stays open while the turn is paused")
+                    placeholder = page.locator(".composer .composer-field").first.get_attribute("placeholder") or ""
                     check(placeholder == words["composer"], f"{lang}: the composer says a message waits for the turn, not to reply ({placeholder!r})")
                 shot(page, f"desktop-header-paused-{scheme}-{lang}")
                 if scheme == "dark":

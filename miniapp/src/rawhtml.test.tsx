@@ -29,7 +29,8 @@ describe("markup rendered from a string", () => {
   });
 
   it("keeps its nodes, scroll and selection across renders with the same string", () => {
-    const html = codeBlock("for f in *.html; do echo \"$f\"; done", "bash");
+    // Labelled plain text, so the code is one text node to select in rather than coloured spans.
+    const html = codeBlock("for f in *.html; do echo \"$f\"; done", "text");
     // A parent that re-renders with a fresh string of the same text, the way a clock tick did.
     act(() => root.render(<RawHtml html={`${html}`} />));
     const pre = host.querySelector("pre")!;

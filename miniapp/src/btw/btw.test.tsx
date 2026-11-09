@@ -67,10 +67,9 @@ describe("the composer", () => {
   }
 
   async function type(text: string) {
-    const field = host.querySelector("textarea")!;
+    const field = host.querySelector<HTMLElement>(".composer-field")!;
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(field, text);
+      field.textContent = text;
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -78,7 +77,7 @@ describe("the composer", () => {
 
   // Ctrl+Enter sends on every device; jsdom reads as a touch screen, where a bare Enter is a new line.
   async function enter() {
-    const field = host.querySelector("textarea")!;
+    const field = host.querySelector(".composer-field")!;
     await act(async () => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true })); });
   }
 
@@ -89,7 +88,7 @@ describe("the composer", () => {
       await enter();
       expect(onBtw).toHaveBeenCalledWith("what is it doing now?");
       expect(onSend).not.toHaveBeenCalled();
-      expect(host.querySelector("textarea")!.value).toBe("");
+      expect(host.querySelector(".composer-field")!.textContent).toBe("");
       // The round button sends the same way.
       await type("/btw and why?");
       await act(async () => { (host.querySelector(".roundbtn.primary") as HTMLButtonElement).click(); });
@@ -157,13 +156,13 @@ describe("the composer", () => {
   it("leaves a press of Escape that a layer above already took", async () => {
     draw();
     await type("/");
-    const field = host.querySelector("textarea")!;
+    const field = host.querySelector(".composer-field")!;
     const taken = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     taken.preventDefault();
     await act(async () => { field.dispatchEvent(taken); });
-    expect(field.value).toBe("/");
+    expect(field.textContent).toBe("/");
     await act(async () => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
-    expect(field.value).toBe("");
+    expect(field.textContent).toBe("");
   });
 });
 
