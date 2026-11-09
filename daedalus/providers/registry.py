@@ -18,6 +18,7 @@ from daedalus.config import (
     Settings,
     first_byte_timeout_for,
     keyproxy_upstream,
+    login_route,
     reasoning_replay_for,
 )
 from daedalus.host.setting_refs import provider_key
@@ -30,7 +31,14 @@ from daedalus.providers.openai_compat import (
     ProviderEndpoint,
     UsageSink,
 )
-from daedalus.providers.pricing import ANTHROPIC_HOUR_WRITE, ModelPricing, pricing_table, with_cache_write
+from daedalus.providers.pricing import (
+    ANTHROPIC_HOUR_WRITE,
+    BUILTIN,
+    ModelPricing,
+    matching_key,
+    pricing_table,
+    with_cache_write,
+)
 from daedalus.providers.tls import shared_context
 
 logger = logging.getLogger(__name__)
@@ -206,6 +214,47 @@ class ProviderRegistry:
             first_byte_retries=pc.first_byte_retries,
             reasoning_replay=ReasoningReplay(reasoning_replay_for(pc)),
         )
+
+    def price_view(self, provider_id: str, model: str, *, routed: bool = False) -> dict[str, Any]:
+        """What a model costs and where each part of that comes from, for the model's settings.
+
+        ``default`` is what applies without the operator's own entry: the OpenRouter providers chosen for it
+        (``route``), another entry in the configuration (``config``), the built-in table (``builtin``) or the
+        models.dev catalogue (``catalog``). ``states_bill`` marks an endpoint whose answer carries the real
+        charge of each call; that charge is what is booked whenever it comes, over any table or entry.
+        """
+        config = getattr(self, "_config", None)
+        pc = config.providers.get(provider_id) if config is not None else None
+        if pc is None:
+            return {}
+        own = pc.pricing.get(model) if isinstance(pc.pricing.get(model), dict) and pc.pricing[model].get("manual") else None
+        configured = {key: entry for key, entry in pc.pricing.items() if not (isinstance(entry, dict) and entry.get("manual"))}
+        fetched = self._fetched.get(pc.kind, {})
+        table = {**fetched, **pricing_table(pc.kind, configured)}
+        key = matching_key(table, model)
+        found = table[key] if key is not None else None
+        source = None if key is None else ("route" if routed else "config") if key in configured else "builtin" if key in BUILTIN.get(pc.kind, {}) else "catalog"
+        if pc.kind == "llamacpp":
+            plan_source = "local"
+        elif pc.billing == "subscription":
+            plan_source = "provider"
+        elif login_route(pc.base_url):
+            plan_source = "login"
+        else:
+            plan_source = ""
+        price = ModelPricing.from_entry(own) if own is not None else found
+
+        def rates(entry: ModelPricing | None) -> dict[str, float | None]:
+            return {name: (getattr(entry, name) if entry is not None else None) for name in ("input", "output", "cache_hit")}
+
+        plan = bool(plan_source)
+        if pc.billing != "subscription" and pc.kind != "llamacpp" and own is not None and own.get("billing") in ("subscription", "metered"):
+            plan = own["billing"] == "subscription"
+        return {
+            **rates(price), "manual": own is not None, "plan": plan, "plan_default": bool(plan_source), "plan_source": plan_source,
+            "plan_locked": plan_source in ("provider", "local"), "states_bill": pc.kind == "openrouter",
+            "default": {**rates(found), "source": source},
+        }
 
     async def refresh_prices(self, db: Any | None = None, *, force: bool = False) -> int:
         """Bring the fetched price tables up to date and put them under every live endpoint of their kind.

@@ -32,7 +32,13 @@ class FakeApp:
         self.settings = SimpleNamespace(miniapp_public_url="https://agent.example")
         mcp = McpManager({}, ToolRegistry(), token_dir=tmp_path / "mcp",
                          redirect_default=lambda: mcp_callback_url(self.settings.miniapp_public_url))
-        self.manager = SimpleNamespace(mcp=mcp)
+        self.enabled: list[tuple[str, str]] = []
+
+        async def mcp_service(op: str, *, session_id: str, server: str) -> str:
+            self.enabled.append((session_id, server))
+            return f"{op}d {server}; tools available from your next step: …"
+
+        self.manager = SimpleNamespace(mcp=mcp, mcp_service=mcp_service)
 
     async def save_config(self, config: RuntimeConfig) -> None:
         self.config = config
@@ -181,10 +187,12 @@ async def test_the_sign_in_finishes_on_the_apps_callback(tmp_path: Path, monkeyp
 async def test_the_agent_adds_and_removes_a_server_and_is_told_what_came_of_it(tmp_path: Path) -> None:
     app = FakeApp(tmp_path)
     said = await mcp_admin.agent_service(app, "add", session_id="s1", name="echo", spec=ECHO)  # type: ignore[arg-type]
-    assert said.startswith("added echo; it answers with 2 tools") and "McpEnable(server='echo')" in said
+    # Enabled in the session that added it: adding, enabling and loading were three steps before the first call.
+    assert said.startswith("added echo; it answers with 2 tools. In this session it is enabled echo") and app.enabled == [("s1", "echo")]
     broken = await mcp_admin.agent_service(app, "add", session_id="s1", name="broken",  # type: ignore[arg-type]
                                            spec={"transport": "stdio", "command": str(tmp_path / "missing")})
-    assert broken.startswith("added broken, but it does not answer yet")
+    assert broken.startswith("added broken, but it does not answer yet") and "is not installed where MCP servers start" in broken
+    assert app.enabled == [("s1", "echo")], "a server that does not answer is not switched on"
     assert (await mcp_admin.agent_service(app, "remove", session_id="s1", name="broken")).startswith("removed broken")  # type: ignore[arg-type]
     with pytest.raises(mcp_admin.McpAdminError, match="no MCP server"):
         await mcp_admin.agent_service(app, "remove", session_id="s1", name="broken")  # type: ignore[arg-type]

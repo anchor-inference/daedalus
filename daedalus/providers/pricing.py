@@ -46,6 +46,12 @@ class ModelPricing:
     input_limit: int | None = None
     limit_source: str = ""
     """The provider-enforced billable input ceiling; a prompt size estimate cannot reserve money."""
+    plan: bool | None = None
+    """The operator's word on how this one model is paid for: ``True`` a prepaid plan (recorded at $0, never
+    counted against a cap), ``False`` per token; ``None`` leaves it to the endpoint (its billing, or a CLI login)."""
+    manual: bool = False
+    """Typed by the operator in the model's settings. Nothing written by the app (an OpenRouter provider
+    choice, the models.dev catalogue) replaces it; resetting it is removing it."""
 
     def off_peak_at(self, now: datetime) -> bool:
         if not self.peak_utc:
@@ -91,7 +97,11 @@ class ModelPricing:
             start, _, end = legacy.partition("-")
             peak = (f"{end}-{start}",)
             weekdays_only = False
+        billing = entry.get("billing")
+        plan = billing == "subscription" if billing in ("subscription", "metered") else entry.get("plan")
         return cls(
+            plan=None if plan is None else bool(plan),
+            manual=bool(entry.get("manual", False)),
             input_limit=int(entry["input_limit"]) if entry.get("input_limit") is not None else None,
             limit_source=str(entry.get("limit_source") or ""),
             input=_opt(entry.get("input")),
@@ -170,4 +180,11 @@ def pricing_table(kind: str, configured: dict[str, dict[str, Any]]) -> dict[str,
     return table
 
 
-__all__ = ["ANTHROPIC_HOUR_WRITE", "BUILTIN", "DEEPSEEK_PEAK_UTC", "ModelPricing", "pricing_table", "with_cache_write"]
+def matching_key(table: dict[str, Any], model: str) -> str | None:
+    """The entry of ``table`` that prices ``model``: its own, else the longest name it starts with."""
+    if model in table:
+        return model
+    return max((key for key in table if model.startswith(key)), key=len, default=None)
+
+
+__all__ = ["ANTHROPIC_HOUR_WRITE", "BUILTIN", "DEEPSEEK_PEAK_UTC", "ModelPricing", "matching_key", "pricing_table", "with_cache_write"]

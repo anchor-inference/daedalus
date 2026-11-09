@@ -20,13 +20,14 @@ import os
 import posixpath
 import re
 import shlex
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from daedalus.host import tunnels
+from daedalus.host import own_containers, tunnels
 from daedalus.public_address import OwnDoors
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
@@ -748,7 +749,7 @@ def _simple_words(command: str) -> list[str] | None:
     return words
 
 
-def similar_grant(tool: str, arguments: dict[str, Any], rule: str) -> dict[str, str] | None:
+def similar_grant(tool: str, arguments: dict[str, Any], rule: str, *, server: str = "") -> dict[str, Any] | None:
     """The narrowest family of calls like this asked one, for "Allow similar for this session".
 
     A shell command generalises to its command and subcommand (``npm test --watch`` → ``npm test``),
@@ -760,10 +761,11 @@ def similar_grant(tool: str, arguments: dict[str, Any], rule: str) -> dict[str, 
 
     An MCP tool asked about for lacking safe annotations is the exception to the last: it names no
     path, url or command to narrow by, so it had no family and could only be allowed one call at a
-    time. Its family is the tool itself, which already names the one server and the one tool.
+    time. Its family is the tool itself, which already names the one server and the one tool; the
+    server it came from rides along (``server``), which is what a grant for the whole server matches.
     """
     if rule == "mcp.annotations":
-        return {"tool": tool, "rule": rule, "kind": "tool", "value": tool, "label": f"{tool}(*)"}
+        return {"tool": tool, "rule": rule, "kind": "tool", "value": tool, "label": f"{tool}(*)", **({"server": server} if server else {})}
     if tool in SHELL_TOOLS:
         words = _simple_words(str(arguments.get("command") or ""))
         if not words or words[0] in WRAPPERS or words[0] in SHELLS or words[0] in KEYWORDS or "=" in words[0]:
@@ -793,9 +795,36 @@ def similar_grant(tool: str, arguments: dict[str, Any], rule: str) -> dict[str, 
     return {"tool": tool, "rule": rule, "kind": "dir", "value": folder, "label": folder.rstrip("/") + "/*"}
 
 
+SERVER_GRANT_HOURS = (1, 2, 6, 12, 0)
+"""The spans "Allow all from a server" offers, in hours; 0 is for as long as the session lasts."""
+SERVER_GRANT_DEFAULT_HOURS = 6
+
+
+def server_grant(server: str, *, seconds: float, now: float | None = None) -> dict[str, Any]:
+    """A standing grant for every tool of one MCP server, for ``seconds`` (0: no end).
+
+    It answers only the question an MCP tool is asked for its annotations (``mcp.annotations``): a
+    path the tool names under the operator's home, or an operator's own rule, still asks, because
+    the operator allowed the server's tools and not whatever their arguments reach."""
+    at = time.time() if now is None else now
+    until = at + seconds if seconds > 0 else 0.0
+    return {"tool": "*", "rule": "mcp.annotations", "kind": "server", "value": server, "at": at, "until": until,
+            "label": f"every tool of {server}"}
+
+
+def standing_alive(grant: dict[str, Any], now: float | None = None) -> bool:
+    """Whether a standing grant still stands: one with an end stops answering at it."""
+    until = float(grant.get("until") or 0)
+    return until <= 0 or until > (time.time() if now is None else now)
+
+
 def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str, Any] | None) -> bool:
     """Whether a standing "similar" grant answers a call whose own family is ``family``."""
-    if family is None or grant.get("tool") != tool or grant.get("rule") != rule or grant.get("kind") != family.get("kind"):
+    if family is None or not standing_alive(grant):
+        return False
+    if grant.get("kind") == "server":
+        return rule == "mcp.annotations" and family.get("rule") == rule and bool(family.get("server")) and family.get("server") == grant.get("value")
+    if grant.get("tool") != tool or grant.get("rule") != rule or grant.get("kind") != family.get("kind"):
         return False
     value, theirs = str(grant.get("value") or ""), str(family.get("value") or "")
     if grant["kind"] == "prefix":
@@ -809,7 +838,7 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
-    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), own_doors: Callable[[], OwnDoors] | None = None, base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None) -> None:
+    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), own_doors: Callable[[], OwnDoors] | None = None, base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None, mcp_servers: Mapping[str, str] | None = None) -> None:
         self.protected = [str(p) for p in protected_paths]
         self.egress_allow = [e for e in egress_allow if e.strip()]
         # The installation's own doors on the loopback interface: the app's API and the launcher's
@@ -839,7 +868,10 @@ class Policy:
         workspace, which is where the file tools resolve theirs and where Exec runs by default."""
         self.mcp_approvals = dict(mcp_approvals or {})
         """An MCP tool's answer when nothing else here decides its call, by tool name: ``ask`` for one
-        whose annotations say it may destroy or reach the world (:func:`daedalus.mcp.manager.annotation_approval`)."""
+        whose annotations say it may destroy or reach the world (:func:`daedalus.mcp.manager.annotation_approval`),
+        ``deny`` for one the operator turned off."""
+        self.mcp_servers = dict(mcp_servers or {})
+        """The server each MCP tool belongs to, by tool name, for a grant made for a whole server."""
 
     # -- the machine's own paths ------------------------------------------------------
 
@@ -912,6 +944,8 @@ class Policy:
                 where = real_path(expand_home(words[1], self.home), where)  # a `cd` earlier in the line moves every later command
             if (tunnel := tunnels.tunnel_in([_substitute(w, variables) for w in words], shell_segments)) is not None:
                 escalate(DENY, f"{tunnel} would raise a public tunnel, which the operator opens from settings", "egress.tunnel", tunnels.REFUSAL.format(what=tunnel))
+            if (entry := own_containers.entry_in([_substitute(w, variables) for w in words])) is not None:
+                escalate(DENY, f"{entry}: the app's own containers are not entered from outside", "host.own_containers", own_containers.REFUSAL.format(what=entry))
             head = words[0].lstrip("\\")
             if head.startswith("/") and head.count("/") >= 2:
                 head = head.rsplit("/", 1)[-1]  # /bin/rm is rm
@@ -1067,7 +1101,9 @@ class Policy:
             decision = self._browser_url(text)
         else:
             decision = (self._mcp_command(arguments) if tool == "McpAdd" else None) or self._host_paths(argument_paths(arguments)) or Decision(ALLOW)
-            if decision.action == ALLOW and self.mcp_approvals.get(tool) == ASK:
+            if self.mcp_approvals.get(tool) == DENY:
+                decision = Decision(DENY, "the operator refuses this MCP tool in the server's settings (Settings → MCP servers)", "mcp.denied")
+            elif decision.action == ALLOW and self.mcp_approvals.get(tool) == ASK:
                 decision = Decision(ASK, "an MCP tool that may change or reach the outside world, and no rule allows it", "mcp.annotations")
         decision = self._config_rules(tool, text, decision)
         if decision.action == ASK:
@@ -1076,7 +1112,7 @@ class Policy:
                 return Decision(ALLOW, f"granted by the operator ({decision.key})", decision.rule, key=decision.key, hosts=decision.hosts)
             standing = list(similar)
             if standing:
-                family = similar_grant(tool, arguments, decision.rule)
+                family = similar_grant(tool, arguments, decision.rule, server=self.mcp_servers.get(tool, ""))
                 grant = next((g for g in standing if similar_covers(g, tool, decision.rule, family)), None)
                 if grant is not None:
                     # Not the key: a standing grant is not spent, and consuming a key it never held
@@ -1101,8 +1137,10 @@ class Policy:
             ("git.operator_push", "Exec", DENY, "git push from the operator's checkouts"),
             ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
+            ("host.own_containers", "Exec, Verify, ServiceStart", DENY, "entering or changing this installation's own containers from outside — nsenter into a process, docker or podman exec, cp, stop or a container joined to one of ours"),
             ("egress.tunnel", "Exec, Verify, ServiceStart, McpAdd", DENY, "raising a public tunnel — ngrok, cloudflared, tailscale funnel, frpc, zrok, ssh -R, an SSH service such as localhost.run or Pinggy; the operator opens tunnels from settings"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
+            ("mcp.denied", "MCP tools", DENY, "an MCP tool, or every tool of a server, the operator set to deny in the server's settings"),
             ("mcp.annotations", "MCP tools", ASK, "an MCP tool whose annotations do not say it only reads, or say it may destroy or reach the outside world, unless the server's settings or an operator rule allow it"),
             ("browser.sensitive", "BrowserAct", ASK, "an action that changes the world: a sign-in submitted, a purchase, a message sent, a deletion, terms accepted, a file uploaded, a form sent to another site"),
             ("agent_talk.touched", "*", ASK, "after a run read another agent's reply, until the operator writes: commands, file changes and web requests each ask, past any grant; tools other than reading are refused"),

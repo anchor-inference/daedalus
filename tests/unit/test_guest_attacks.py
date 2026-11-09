@@ -34,7 +34,7 @@ from daedalus.config import Settings, keyproxy_base
 from daedalus.extensions.guest_door import ChatLine, Delivery, DoorClient, GuestBridge
 from daedalus.host import guest_turns, predict
 from daedalus.host.engine_factory import TENANT
-from daedalus.providers.openai_compat import UsageRecord
+from daedalus.providers.openai_compat import ProviderEndpoint, UsageRecord
 from daedalus.stores.database import Database
 from daedalus.tools import shell
 from tests.unit.test_guest_turns import Host, ScriptedProvider, guest_says, manager_with, settled, texts, turn
@@ -444,15 +444,21 @@ async def test_a_chat_on_a_model_with_no_price_gets_no_paid_turn(settings: Setti
     provider = ScriptedProvider([])
     manager = await manager_with(settings, db, provider)
     state = await manager.create_session("chat", own_directory=True)
-    provider.endpoint = SimpleNamespace(subscription=False, kind="openai", pricing_for=lambda _m: None)  # type: ignore[assignment]
+    model = "scripted-model"
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url="https://api.example.test/v1")  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) is None
-    provider.endpoint = SimpleNamespace(subscription=False, kind="openai", pricing_for=lambda _m: ModelPricing(input=1.0, output=2.0))  # type: ignore[assignment]
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url="https://api.example.test/v1", pricing={model: ModelPricing(input=1.0, output=2.0)})  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) == (1.0, 2.0)
     # A CLI login has no price anyone typed, and is a plan all the same, not a model nobody can price.
-    provider.endpoint = SimpleNamespace(subscription=False, kind="openai", base_url=f"{keyproxy_base()}/claude/v1", pricing_for=lambda _m: None)  # type: ignore[assignment]
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url=f"{keyproxy_base()}/claude/v1")  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) == (0.0, 0.0)
-    provider.endpoint = SimpleNamespace(subscription=True, kind="openai", pricing_for=lambda _m: None)  # type: ignore[assignment]
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url="https://api.example.test/v1", subscription=True)  # type: ignore[assignment]
     assert await manager.guest_price(state.session.id) == (0.0, 0.0)
+    # The operator's word on the one model: a plan at any price, or per token on a login.
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url="https://api.example.test/v1", pricing={model: ModelPricing(input=1.0, output=2.0, plan=True)})  # type: ignore[assignment]
+    assert await manager.guest_price(state.session.id) == (0.0, 0.0)
+    provider.endpoint = ProviderEndpoint(id="p", kind="openai", base_url=f"{keyproxy_base()}/claude/v1", pricing={model: ModelPricing(input=3.0, output=15.0, plan=False)})  # type: ignore[assignment]
+    assert await manager.guest_price(state.session.id) == (3.0, 15.0)
     await manager.close()
 
 

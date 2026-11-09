@@ -71,8 +71,12 @@ export type TerminalWorkspaceProps = {
   onRestart: (id: string) => void;
   onRemove: (id: string) => void;
   onEnd: (id: string) => void;
+  /** A pane's ✕, a tab's middle click, Ctrl+Shift+W: end the terminal (asking when anything runs)
+   *  and free its place; a finished one's place is only freed. */
+  onCloseTerminal: (id: string) => void;
   onRename: (id: string, title: string) => void;
-  onNew: () => void;
+  /** Ask where a new terminal goes, hanging the question from the control pressed. */
+  onNew: (anchor: HTMLElement | null) => void;
   onOverview: () => void;
   toast: (text: string) => void;
   slots?: WorkspaceSlots;
@@ -276,7 +280,10 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
             // A narrow tab shows its state as the dot alone; the tooltip keeps the word.
             const tip = pane.id && pane.status !== "idle" ? t("term.ws.tab.tip", { title, state: t(`term.ws.state.${pane.status}`) }) : title;
             return (
-              <button key={slot} type="button" role="tab" aria-selected={pane.active} className={`tp-tab ${pane.active ? "on" : ""} ${pane.id ? "" : "empty"}`} data-slot={slot} data-state={pane.id ? pane.status : "empty"} onClick={() => choose(slot, true)} title={tip}>
+              <button key={slot} type="button" role="tab" aria-selected={pane.active} className={`tp-tab ${pane.active ? "on" : ""} ${pane.id ? "" : "empty"}`} data-slot={slot} data-state={pane.id ? pane.status : "empty"} onClick={() => choose(slot, true)} title={tip}
+                // The middle button closes a tab as in a browser: here it ends the pane's terminal.
+                onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+                onAuxClick={(e) => { if (e.button === 1 && pane.id) { e.preventDefault(); props.onCloseTerminal(pane.id); } }}>
                 <StateDot status={pane.status} className={pane.id ? "" : "none"} />
                 <span className="tp-tab-title truncate">{title}</span>
                 {pane.id && pane.status !== "idle" && <span className="tp-tab-state" data-state={pane.status}>{t(`term.ws.state.${pane.status}`)}</span>}
@@ -298,7 +305,7 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
             {!!slots.panel.count && <span className="tp-count num">{slots.panel.count}</span>}
           </button>
         )}
-        <button type="button" className="btn small tp-new" onClick={props.onNew}>
+        <button type="button" className="btn small tp-new" onClick={(e) => props.onNew(e.currentTarget)} aria-haspopup="menu" title={`${t("term.new")} (Ctrl+Shift+\`)`}>
           <Icon name="plus" size={14} />
           <span>{t("term.new")}</span>
         </button>
@@ -331,7 +338,7 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
                 onGrip={(event) => startDrag(slot, event)}
                 onGripMove={moveDrag}
                 onGripUp={endDrag}
-                onClose={() => update((w) => close(w, slot))}
+                onDetach={() => update((w) => close(w, slot))}
                 onMaximise={() => update((w) => maximise(w, slot))}
                 onPick={(id) => { update((w) => focus(w, slot)); onOpen(id); }}
                 actions={props}
@@ -404,14 +411,14 @@ type PaneProps = {
   onGrip: (event: ReactPointerEvent<HTMLElement>) => void;
   onGripMove: (event: ReactPointerEvent<HTMLElement>) => void;
   onGripUp: (event: ReactPointerEvent<HTMLElement>) => void;
-  onClose: () => void;
+  onDetach: () => void;
   onMaximise: () => void;
   onPick: (id: string) => void;
-  actions: Pick<TerminalWorkspaceProps, "onRestart" | "onRemove" | "onEnd" | "onRename" | "onNew" | "onState">;
+  actions: Pick<TerminalWorkspaceProps, "onRestart" | "onRemove" | "onEnd" | "onCloseTerminal" | "onRename" | "onNew" | "onState">;
 };
 
 /** One place of the grid: its header, its terminal (or the chooser of an empty place), and the slots under it. */
-export function WorkspacePane({ pane, hidden, grid, maximised, canMaximise, gridArea, over, focusToken, rows, ws, slots, onChoose, onGrip, onGripMove, onGripUp, onClose, onMaximise, onPick, actions }: PaneProps) {
+export function WorkspacePane({ pane, hidden, grid, maximised, canMaximise, gridArea, over, focusToken, rows, ws, slots, onChoose, onGrip, onGripMove, onGripUp, onDetach, onMaximise, onPick, actions }: PaneProps) {
   const { id, row, state, status, active, slot } = pane;
   const title = paneTitle(id, row, state);
   const [editing, setEditing] = useState(false);
@@ -427,6 +434,8 @@ export function WorkspacePane({ pane, hidden, grid, maximised, canMaximise, grid
     { label: t("term.font.bigger"), icon: "expand", onSelect: () => fontSizeStep("font-bigger") },
     { label: t("term.rename"), icon: "pen", hint: t("term.ws.rename.hint"), onSelect: () => setEditing(true) },
     ...(owner ? [{ label: t("term.ws.owner.open"), icon: "external" as const, onSelect: () => navigate(owner) }] : []),
+    // Freeing the place and keeping the process is a choice made by name, never the ✕.
+    { label: t("term.ws.detach"), icon: "unlink", onSelect: onDetach },
     "-",
     ...(live ? [{ label: t("term.end"), icon: "stop" as const, danger: true, onSelect: () => actions.onEnd(id) }] : [
       { label: t("term.restart"), icon: "reload" as const, onSelect: () => actions.onRestart(id) },
@@ -483,7 +492,7 @@ export function WorkspacePane({ pane, hidden, grid, maximised, canMaximise, grid
           </button>
         )}
         {id && (
-          <button type="button" className="iconbtn small flat tp-pane-close" onClick={onClose} aria-label={t("term.ws.close")} title={t("term.ws.close")}>
+          <button type="button" className="iconbtn small flat tp-pane-close" onClick={() => actions.onCloseTerminal(id)} aria-label={live ? t("term.close") : t("term.close.tab")} title={live ? `${t("term.close")} (Ctrl+Shift+W)` : t("term.close.tab")}>
             <Icon name="close" size={14} />
           </button>
         )}
@@ -542,7 +551,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (text: stri
 }
 
 /** An empty place: the running terminals no shown pane holds, and a new one. */
-function EmptyPane({ rows, ws, onPick, onNew }: { rows: TerminalRow[]; ws: Workspace; onPick: (id: string) => void; onNew: () => void }) {
+function EmptyPane({ rows, ws, onPick, onNew }: { rows: TerminalRow[]; ws: Workspace; onPick: (id: string) => void; onNew: (anchor: HTMLElement | null) => void }) {
   const shownIds = new Set(shownSlots(ws).map((s) => ws.panes[s]).filter(Boolean));
   const free = rows.filter((r) => running(r) && !shownIds.has(r.id)).slice(0, 8);
   return (
@@ -559,7 +568,7 @@ function EmptyPane({ rows, ws, onPick, onNew }: { rows: TerminalRow[]; ws: Works
           ))}
         </div>
       )}
-      <button type="button" className="btn small tp-empty-new" onClick={onNew}>
+      <button type="button" className="btn small tp-empty-new" onClick={(e) => onNew(e.currentTarget)} aria-haspopup="menu">
         <Icon name="plus" size={14} />
         <span>{t("term.new")}</span>
       </button>

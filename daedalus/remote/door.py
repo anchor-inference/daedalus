@@ -70,14 +70,15 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "stream", "events", "subagents", "tasks", "checkpoints", "steer", "suggestion", "search",
             "export/download", "attachments/download",
             rf"tool-results/{_PART}", rf"tool-results/{_PART}/images/download", rf"sent/{_PART}/download",
-            r"policy/similar/[^/]{1,512}", rf"media/{_PART}/download", rf"media/{_PART}/{_PART}/content",
+            r"policy/similar/[^/]{1,512}", "policy/standing", rf"media/{_PART}/download", rf"media/{_PART}/{_PART}/content",
         )),
         *(("POST", _SESSION + "/" + tail, SESSION) for tail in (
             "messages", "upload", "stop", "answer", "model", "compact", "clear", "command", "revert", "retry",
-            "fork", "btw", "policy/grant", "policy/grant-similar", "policy/refuse",
+            "fork", "btw", "policy/grant", "policy/grant-similar", "policy/grant-server", "policy/refuse",
             rf"tasks/{_PART}/stop", rf"steer/{_PART}",
         )),
         ("DELETE", _SESSION + rf"/steer/{_PART}", SESSION),
+        ("DELETE", _SESSION + rf"/policy/standing/{_PART}", SESSION),
         ("DELETE", _SESSION + "/btw", SESSION),
     )
 )

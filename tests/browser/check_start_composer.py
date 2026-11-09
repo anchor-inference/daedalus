@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, VOICE_NOTE_PREFIX, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, VOICE_NOTE_PREFIX, expect_app, field_text  # noqa: E402
 from screenshots import S1, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -111,7 +111,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(page.locator(".model-list")).to_have_count(0)
 
     # Switching from an empty field to typed Send must reserve exactly the same toolbar geometry.
-    field = composer.locator("textarea")
+    field = composer.locator(".composer-field")
     field.fill("")
     empty_box = composer.locator(".composer-box").bounding_box()
     empty_row = composer.locator(".composer-row").bounding_box()
@@ -126,7 +126,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     assert multiline_box and multiline_box["height"] > typed_box["height"], "Only multiline text should grow the field"
 
     # The microphone: the words land after what is typed.
-    field = composer.locator("textarea")
+    field = composer.locator(".composer-field")
     field.fill("Check the price")
     expect(composer.locator(".roundbtn.primary")).to_be_visible()
     composer.locator(".plus").click()
@@ -139,8 +139,8 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         say("the field stays in the way while recording")
     page.wait_for_timeout(900)
     page.locator(".start-composer .voicebar-stop").click()
-    page.wait_for_function(f"() => document.querySelector('.start-composer textarea').value.includes({json.dumps(HEARD)})", timeout=10000)
-    value = field.input_value()
+    page.wait_for_function(f"() => document.querySelector('.start-composer .composer-field').innerText.includes({json.dumps(HEARD)})", timeout=10000)
+    value = field_text(field)
     if not value.startswith("Check the price\n\n"):
         say(f"the words did not land after the typed text: {value!r}")
     if len(host.posted("/api/transcribe")) != 1:

@@ -28,7 +28,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, field_text, folders, fulfil_shared  # noqa: E402
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -124,7 +124,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
 
 def parent_field(page: Page):  # type: ignore[no-untyped-def]
     """The chat's own composer field, not the one inside the side question's window."""
-    return page.locator(".composer textarea").filter(has_not=page.locator("xpath=ancestor::*[contains(@class,'coach-')]")).first
+    return page.locator(".composer .composer-field").filter(has_not=page.locator("xpath=ancestor::*[contains(@class,'coach-')]")).first
 
 
 def overflow(page: Page, root: str) -> list[str]:
@@ -263,8 +263,8 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         say(f"/btw did not ask the question it carried ({asked[-1:]})")
     if leaked(words["question"]):
         say(f"the /btw line also went to the chat: {leaked(words['question'])}")
-    if parent_field(page).input_value():
-        say(f"the chat's field still holds the /btw line ({parent_field(page).input_value()!r})")
+    if field_text(parent_field(page)):
+        say(f"the chat's field still holds the /btw line ({field_text(parent_field(page))!r})")
     page.wait_for_timeout(600)
     text = page.locator(root).inner_text()
     if words["question"] not in text:
@@ -275,7 +275,7 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         say("the embedded conversation draws a header or a terminal dock of its own")
     if page.locator(f"{root} .composer .coach-open").count() or page.locator(f"{root} .ph-plus-sheet").count():
         say("the side question's own composer offers the helpers")
-    if not page.locator(f"{root} .coach-chat .composer textarea").count():
+    if not page.locator(f"{root} .coach-chat .composer .composer-field").count():
         say("the window has no field for a follow-up")
     box = page.locator(root).bounding_box()
     if phone:
@@ -301,8 +301,8 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         say("Escape does not close the window")
     if not any(method == "DELETE" and rel == f"/api/sessions/{CHAT}/btw" for method, rel, _ in HOST.posted[before:]):
         say("Escape did not end the side question on the host")
-    if not phone and parent_field(page).input_value() != "/":
-        say(f"the same Escape also cleared the chat's field ({parent_field(page).input_value()!r})")
+    if not phone and field_text(parent_field(page)) != "/":
+        say(f"the same Escape also cleared the chat's field ({field_text(parent_field(page))!r})")
     if f"/agents/{CHAT}" not in page.url:
         say(f"the same Escape also left the chat ({page.url})")
     if errors:

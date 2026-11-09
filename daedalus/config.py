@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -31,6 +32,13 @@ from daedalus.slugs import is_page_slug
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def inherited_environment(names: Iterable[str]) -> dict[str, str]:
+    """The named variables of this process's environment that are set, to hand on to a child
+    process (an MCP server) that would otherwise not see them. Read here, the one place the
+    environment is read, rather than by the caller."""
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def native_mode() -> bool:
@@ -127,6 +135,15 @@ def keyproxy_upstream(url: str) -> str:
         return ""
     tail = url[len(keyproxy_base()) :].strip("/")
     return tail.split("/", 1)[0] if tail else ""
+
+
+LOGIN_UPSTREAMS = ("codex", "grok", "claude")
+"""The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
+
+
+def login_route(base_url: str) -> bool:
+    """Whether ``base_url`` is a CLI login behind the key proxy: a plan, not a price nobody knows."""
+    return keyproxy_upstream(base_url) in LOGIN_UPSTREAMS
 
 
 def _runtime_paths() -> list[str]:
@@ -918,7 +935,7 @@ class McpOAuthConfig(BaseModel):
     """That client's secret, when the server issued one."""
 
 
-McpApproval = Literal["auto", "ask", "allow"]
+McpApproval = Literal["auto", "ask", "allow", "deny"]
 
 
 class McpServerConfig(BaseModel):
@@ -936,7 +953,9 @@ class McpServerConfig(BaseModel):
     """Whether a call to this server's tools is asked about first. ``auto`` reads each tool's own
     annotations (:func:`daedalus.mcp.manager.annotation_approval`): a tool that says it only reads
     runs, and one that may destroy or reach the outside world — or says nothing, which by the
-    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server."""
+    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server, and
+    ``deny`` refuses every call to it without asking: the server stays connected for the tools the
+    operator allows one by one in ``tool_approval``."""
     tool_approval: dict[str, McpApproval] = Field(default_factory=dict)
     """The same, for one tool by its name on the server; it beats ``approval``, and ``auto`` here
     hands the tool back to the server's setting."""
@@ -1754,7 +1773,18 @@ class EditBoardConfig(BaseModel):
     and after this long the agent may well have lost it."""
 
 
+class SubagentModels(BaseModel):
+    """Which presets a session's helpers may run on, unless the session chooses for itself
+    (:mod:`daedalus.host.subagent_models`)."""
+
+    mode: Literal["all", "session", "chosen"] = "all"
+    """``all`` is every preset that can run; ``session`` only the leader's own model; ``chosen`` the list below."""
+    presets: list[str] = Field(default_factory=list)
+    """For ``chosen``. A preset deleted later drops out of it rather than making the setting invalid."""
+
+
 class SubagentsConfig(BaseModel):
+    models: SubagentModels = Field(default_factory=SubagentModels)
     max_active: int = Field(default=10, ge=1, le=32)
     """Running subagents one leader may have at a time. Settings → Limits edits it, and the next
     SubAgent call reads the new value. Four turned out too few for a leader fanning one task out, and

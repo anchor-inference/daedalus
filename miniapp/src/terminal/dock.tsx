@@ -1,23 +1,28 @@
 // The session's terminals: the dock under the conversation (tabs, a split, a height the operator
 // drags), the full-screen view a terminal is maximised into, and on a phone the sheet that lists them.
 //
-// The dock is a set of views onto terminals that live in the page's registry. A tab's ✕ only takes
-// the view away — the process runs on and the tab comes back from the menu; ending a process is the
-// separate End, which asks first when something is running in it. Every tab keeps its view mounted
+// The dock is a set of views onto terminals that live in the page's registry. A tab's ✕ ends the
+// terminal, asking first unless the host is sure only a prompt is lost, and takes the tab away; a
+// finished one's ✕ only takes the tab. Keeping a process running without its tab is the menu's
+// Detach, named for what it does: three crosses that all meant "hide" left forgotten shells running
+// for days. A new terminal always asks where (picker.tsx). Every tab keeps its view mounted
 // (hidden when not shown), so its connection stays up and an unseen line or a bell can mark the tab;
 // a hidden view never sends a size, which is the rule the old web terminal broke.
 
 import { CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useContextActions } from "../ui/context-menu";
 import { createPortal } from "react-dom";
-import { api, TerminalCreate, TerminalEnv, TerminalEnvName, TerminalList, TerminalView as TerminalRow } from "../api";
+import { api, Project, TerminalCreate, TerminalEnv, TerminalEnvName, TerminalList, TerminalView as TerminalRow } from "../api";
 import { confirmDialog, MenuItem, OverflowMenu, Sheet } from "../ui/dialogs";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
-import { useQuery } from "../store";
+import { peek, useQuery } from "../store";
 import { errorText } from "../ui";
-import { createTerminalConfirmed, endTerminal } from "./actions";
-import { clampHeight, closeTab, DockState, loadDock, loadSandboxChoice, openTab, prune, replaceTab, sandboxOffer, sandboxToggle, saveDock, saveSandboxChoice, setSplit, splitCandidate, toggleDock } from "./dockstate";
+import { createTerminalConfirmed, endTerminal, endTerminals } from "./actions";
+import { clampHeight, closeTab, DockState, loadDock, openTab, prune, replaceTab, sandboxOffer, saveDock, setSplit, splitCandidate, toggleDock } from "./dockstate";
+import { PickedPlace, TerminalPicker } from "./picker";
+import { useRenameSheet } from "./rowmenu";
 import type { TerminalState } from "./instance";
 import { isMac } from "./keys";
 import { instanceFor, setTerminalEnvs, terminals } from "./terminals";
@@ -48,13 +53,6 @@ export function useSessionTerminals(sessionId: string): SessionTerminals {
   }, [data, query.refresh]);
 }
 
-/** The environment a new terminal goes to: the project's default when it is up, else the first that is. */
-export function pickEnv(envs: TerminalEnv[], preferred?: TerminalEnvName): TerminalEnvName | null {
-  const up = envs.filter((e) => e.available);
-  if (preferred && up.some((e) => e.env === preferred)) return preferred;
-  return (up.find((e) => e.env === "container") ?? up[0])?.env ?? null;
-}
-
 /** Why no terminal can be opened, or "" when one can. */
 export function unavailableReason(envs: TerminalEnv[], loaded: boolean): string {
   if (!loaded) return "";
@@ -74,14 +72,9 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
   const [sheet, setSheet] = useState(false);
   const [focusToken, setFocusToken] = useState(0);
   const [states, setStates] = useState<Record<string, TerminalState>>({});
-  // New terminals in the sandbox: the menu's checkbox, remembered for the device.
-  const [boxed, setBoxed] = useState(loadSandboxChoice);
-  const toggleSandbox = useCallback(() => {
-    setBoxed((on) => {
-      saveSandboxChoice(!on);
-      return !on;
-    });
-  }, []);
+  // The open "where?" question: whether the new terminal takes a tab or the split's right pane, and
+  // the control it hangs from (null: the dock's "+", once the dock is drawn).
+  const [picking, setPicking] = useState<{ place: "tab" | "split"; anchor: HTMLElement | null } | null>(null);
   // Terminals made here that the next listing may not have caught up with yet: a poll answered a
   // moment before the create must not close the tab that was just opened.
   const fresh = useRef(new Set<string>());
@@ -92,6 +85,7 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
     setState(loadDock(sessionId));
     setFull(null);
     setSheet(false);
+    setPicking(null);
   }
 
   useEffect(() => {
@@ -109,26 +103,12 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
   const focus = useCallback(() => setFocusToken((n) => n + 1), []);
   const onState = useCallback((id: string, next: TerminalState) => setStates((all) => (all[id] === next ? all : { ...all, [id]: next })), []);
 
+  /** Open a terminal where the picker said. The session owns it whatever the folder. */
   const create = useCallback(
-    async (env?: TerminalEnvName, place: "tab" | "split" = "tab") => {
-      const chosen = env ?? pickEnv(terms.envs, preferredEnv);
-      if (!chosen) {
-        toast(unavailableReason(terms.envs, true) || t("term.unavailable.none"));
-        return;
-      }
-      const body: TerminalCreate = { env: chosen, owner_kind: "session", owner_id: sessionId };
-      // Where no environment can sandbox, the checkbox shows as unavailable and does not apply: a
-      // stale tick from a visit when it could must not leave the operator with no terminal at all.
-      if (boxed && sandboxToggle(terms.envs).ok) {
-        // Asked for and not available in this environment is a wall that is missing, not a detail:
-        // the terminal is not opened without it, and the operator can untick the box.
-        const offer = sandboxOffer(terms.envs.find((e) => e.env === chosen));
-        if (!offer.ok) {
-          toast(t("term.sandbox.unavailable", { reason: offer.reason || t("term.unavailable.none") }));
-          return;
-        }
-        body.sandbox = true;
-      }
+    async (picked: PickedPlace, place: "tab" | "split" = "tab") => {
+      const body: TerminalCreate = { env: picked.env, owner_kind: "session", owner_id: sessionId };
+      if (picked.cwd) body.cwd = picked.cwd;
+      if (picked.sandbox) body.sandbox = true;
       let row: TerminalRow | null;
       try {
         // The machine-wide cap is a question for the operator, not a refusal (`actions.ts`).
@@ -145,7 +125,20 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
       focus();
       void terms.refresh();
     },
-    [terms, preferredEnv, sessionId, phone, toast, focus, boxed],
+    [terms, sessionId, phone, toast, focus],
+  );
+
+  /** Ask where a new terminal goes: every "+", the split with nothing to show, the new-terminal key. */
+  const ask = useCallback(
+    (place: "tab" | "split" = "tab", anchor: HTMLElement | null = null) => {
+      if (terms.loaded && !terms.envs.some((e) => e.available)) {
+        toast(unavailableReason(terms.envs, true) || t("term.unavailable.none"));
+        return;
+      }
+      setState((s) => (s.open || phone ? s : { ...s, open: true }));
+      setPicking({ place, anchor });
+    },
+    [terms, phone, toast],
   );
 
   const toggle = useCallback(() => {
@@ -156,9 +149,9 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
     }
     const out = toggleDock(state, terms.running.map((r) => r.id));
     setState(out.state);
-    if (out.create) void create();
+    if (out.create) ask();
     else if (out.state.open) focus();
-  }, [full, state, terms.running, create, focus]);
+  }, [full, state, terms.running, ask, focus]);
 
   const activate = useCallback(
     (id: string) => {
@@ -190,6 +183,31 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
       void terms.refresh();
     },
     [states, terms, toast],
+  );
+
+  /** A tab's ✕, its middle click, Ctrl+Shift+W: end the terminal and take its tab; a finished one's
+   *  tab only goes. Declined, both stay. */
+  const close = useCallback(
+    async (id: string) => {
+      const row = terms.rows.find((r) => r.id === id);
+      const finished = !!states[id]?.exit || (!!row && row.status !== "running");
+      if (!finished && !(await endTerminal(id, states[id]?.title, toast))) return;
+      detach(id);
+      void terms.refresh();
+    },
+    [terms, states, toast, detach],
+  );
+
+  /** Every other running tab, after one question that lists them. */
+  const endOthers = useCallback(
+    async (id: string) => {
+      const others = state.tabs.filter((tab) => tab !== id).map((tab) => terms.rows.find((r) => r.id === tab)).filter((r): r is TerminalRow => !!r && r.status === "running");
+      const ended = await endTerminals(others, toast);
+      if (ended === null) return;
+      for (const row of others) detach(row.id);
+      void terms.refresh();
+    },
+    [state.tabs, terms, toast, detach],
   );
 
   const restart = useCallback(
@@ -249,8 +267,8 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
     if (other) {
       instanceFor(other)?.interact();
       setState((s) => setSplit(s, other));
-    } else void create(undefined, "split");
-  }, [state, create]);
+    } else ask("split");
+  }, [state, ask]);
 
   const maximise = useCallback(
     (id: string) => {
@@ -281,9 +299,14 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
     onState,
     rowOf,
     create,
+    ask,
+    picking,
+    setPicking,
     toggle,
     activate,
     detach,
+    close,
+    endOthers,
     show,
     end,
     restart,
@@ -291,8 +314,9 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
     split,
     maximise,
     restore,
-    boxed,
-    toggleSandbox,
+    preferredEnv,
+    phone,
+    toast,
     reason: unavailableReason(terms.envs, terms.loaded),
   };
 }
@@ -352,46 +376,22 @@ function exitCode(row: TerminalRow | null, state: TerminalState | undefined): st
   return code === null || code === undefined ? "" : String(code);
 }
 
-/** The menu behind ▾: a terminal in either environment, the session's terminals without a tab, End. */
+/** The menu behind ▾: the session's terminals without a tab, and the active one's own commands —
+ *  the sandbox switch that restarts it, Detach, End. Opening a new one is the "+"'s question only. */
 function dockMenu(dock: DockController, active: string | null): MenuItem[] {
-  const envs = dock.terms.envs;
-  const env = (name: TerminalEnvName) => envs.find((e) => e.env === name);
-  const container = env("container");
-  const host = env("host");
-  const toggle = sandboxToggle(envs);
-  // With the sandbox chosen, an environment that cannot give it offers no terminal: the item says why.
-  const blocked = (e: TerminalEnv | undefined) => {
-    const offer = sandboxOffer(e);
-    return dock.boxed && !!e?.available && !offer.ok ? t("term.sandbox.unavailable", { reason: offer.reason }) : "";
-  };
-  const containerWhy = !container?.available ? t("term.unavailable.container") : blocked(container);
-  const hostWhy = !host?.available ? t("term.unavailable.host") : blocked(host);
-  const items: MenuItem[] = [
-    {
-      label: t("term.sandbox.toggle"),
-      icon: "shield",
-      checked: dock.boxed && toggle.ok,
-      disabled: !toggle.ok,
-      hint: toggle.ok ? t("term.sandbox.hint") : t("term.sandbox.unavailable", { reason: toggle.reason || t("term.unavailable.none") }),
-      onSelect: dock.toggleSandbox,
-    },
-    "-",
-    { label: t("term.new.container"), icon: "terminal", disabled: !!containerWhy, hint: containerWhy || undefined, onSelect: () => void dock.create("container") },
-    { label: t("term.new.host"), icon: "lock", warn: true, disabled: !!hostWhy, hint: hostWhy || undefined, onSelect: () => void dock.create("host") },
-  ];
+  const env = (name: TerminalEnvName) => dock.terms.envs.find((e) => e.env === name);
+  const items: MenuItem[] = [];
   const untabbed = dock.terms.running.filter((r) => !dock.state.tabs.includes(r.id));
-  if (untabbed.length) {
-    items.push("-");
-    for (const row of untabbed) items.push({ label: t("term.open", { title: tabTitle(row, dock.states[row.id]) }), icon: "terminal", onSelect: () => dock.show(row.id) });
-  }
+  for (const row of untabbed) items.push({ label: t("term.open", { title: tabTitle(row, dock.states[row.id]) }), icon: "terminal", onSelect: () => dock.show(row.id) });
   const activeRow = dock.rowOf(active);
   if (active && activeRow?.status === "running") {
-    items.push("-");
+    if (items.length) items.push("-");
     if (activeRow.sandbox) items.push({ label: t("term.sandbox.restartOff"), icon: "reload", onSelect: () => void dock.restart(active, false) });
     else {
       const offer = sandboxOffer(env(activeRow.env));
       items.push({ label: t("term.sandbox.restartOn"), icon: "shield", disabled: !offer.ok, hint: offer.ok ? undefined : t("term.sandbox.unavailable", { reason: offer.reason }), onSelect: () => void dock.restart(active, true) });
     }
+    items.push({ label: t("term.detach"), icon: "unlink", onSelect: () => dock.detach(active) });
     items.push({ label: t("term.end"), icon: "stop", danger: true, onSelect: () => void dock.end(active) });
   }
   return items;
@@ -400,6 +400,11 @@ function dockMenu(dock: DockController, active: string | null): MenuItem[] {
 /** The dock's key as a tooltip names it: VS Code's, the one people already know. */
 function dockKeyHint(): string {
   return isMac() ? "\u2318J" : "Ctrl+J";
+}
+
+/** The new-terminal key, VS Code's too. */
+function newKeyHint(): string {
+  return "Ctrl+Shift+`";
 }
 
 /** The header's terminal button: a count, and on a phone the sheet instead of the dock. */
@@ -468,31 +473,18 @@ export function TerminalDock({ dock, workspace, fileOpener }: { dock: DockContro
   const active = state.active;
   const activeRow = dock.rowOf(active);
   const shown = (id: string) => state.open && dock.full !== id && (id === active || id === state.split);
+  const menu = dockMenu(dock, active);
+  const plus = useRef<HTMLButtonElement>(null);
+  const picking = dock.picking;
 
   return (
     <div ref={box} className={`term-dock ${state.open ? "open" : "closed"}`} style={{ "--dock-h": `${height}px` } as CSSProperties} aria-label={t("term.dock")} role="region">
       <div className="term-grip" role="separator" aria-orientation="horizontal" aria-label={t("term.dock.resize")} onPointerDown={drag} />
       <div className="term-bar">
         <div className="term-tabs" role="tablist" aria-label={t("term.dock")}>
-          {state.tabs.map((id) => {
-            const row = dock.rowOf(id);
-            const st = dock.states[id];
-            const dot = tabDot(row, st);
-            const on = id === active || id === state.split;
-            return (
-              <div key={id} role="tab" tabIndex={0} aria-selected={on} className={`term-tab ${on ? "on" : ""} ${row?.env === "host" ? "host" : ""}`} data-tab={id} onClick={() => dock.activate(id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dock.activate(id); } }} title={row?.cwd || undefined}>
-                <span className={`term-dot ${dot}`} aria-hidden="true" title={dotTitle(st)} data-result={st?.commands.last?.result} />
-                <Shield row={row} />
-                <span className="term-tab-title truncate">{tabTitle(row, st)}</span>
-                {dot === "exited" && exitCode(row, st) && <span className="term-tab-code num">{exitCode(row, st)}</span>}
-                <button className="term-tab-x" aria-label={t("term.detach")} title={t("term.detach")} onClick={(e) => { e.stopPropagation(); dock.detach(id); }}>
-                  <Icon name="close" size={12} />
-                </button>
-              </div>
-            );
-          })}
-          <button className="iconbtn small flat" onClick={() => void dock.create()} aria-label={t("term.new")} title={t("term.new")} disabled={!!dock.reason}><Icon name="plus" size={16} /></button>
-          <OverflowMenu small icon="chevron" label={t("term.menu")} className="flat" items={dockMenu(dock, active)} />
+          {state.tabs.map((id) => <DockTab key={id} dock={dock} id={id} on={id === active || id === state.split} />)}
+          <button ref={plus} className="iconbtn small flat term-plus" onClick={(e) => dock.ask("tab", e.currentTarget)} aria-label={t("term.new")} title={`${t("term.new")} (${newKeyHint()})`} aria-haspopup="menu" aria-expanded={!!dock.picking} disabled={!!dock.reason}><Icon name="plus" size={16} /></button>
+          {menu.length > 0 && <OverflowMenu small icon="chevron" label={t("term.menu")} className="flat" items={menu} />}
         </div>
         <div className="term-tools">
           {activeRow && <EnvPill env={activeRow.env} />}
@@ -500,7 +492,7 @@ export function TerminalDock({ dock, workspace, fileOpener }: { dock: DockContro
           <button className="iconbtn small flat" onClick={() => active && instanceFor(active)?.openSearch()} aria-label={t("term.search")} title={`${t("term.search")} (Ctrl+Shift+F)`} disabled={!active}><Icon name="search" size={16} /></button>
           <button className={`iconbtn small flat ${state.split ? "on" : ""}`} onClick={dock.split} aria-label={t("term.split")} title={t("term.split")} aria-pressed={!!state.split} disabled={!active}><Icon name="split" size={16} /></button>
           <button className="iconbtn small flat" onClick={() => active && dock.maximise(active)} aria-label={t("term.maximize")} title={t("term.maximize")} disabled={!active}><Icon name="expand" size={16} /></button>
-          <button className="iconbtn small flat" onClick={dock.toggle} aria-label={t("term.dock.close")} title={`${t("term.dock.close")} (${dockKeyHint()})`}><Icon name="close" size={16} /></button>
+          <button className="iconbtn small flat term-hide" onClick={dock.toggle} aria-label={t("term.dock.close")} title={`${t("term.dock.close")} (${dockKeyHint()})`}><Icon name="chevron" size={16} /></button>
         </div>
       </div>
       <div className={`term-panes ${state.split && state.open ? "split" : ""}`}>
@@ -525,6 +517,77 @@ export function TerminalDock({ dock, workspace, fileOpener }: { dock: DockContro
           ),
         )}
       </div>
+      {picking && state.open && <DockPicker dock={dock} anchor={picking.anchor ?? plus.current} workspace={workspace} />}
+    </div>
+  );
+}
+
+/** The "where?" question for a session terminal: the session's own folder in the container, the
+ *  operator's home on the host, or a folder they choose. */
+function DockPicker({ dock, anchor, workspace, phone = false }: { dock: DockController; anchor: HTMLElement | null; workspace?: string; phone?: boolean }) {
+  const place = dock.picking?.place ?? "tab";
+  const projects = peek<{ projects?: Project[] }>("/api/projects")?.projects ?? [];
+  return (
+    <TerminalPicker
+      envs={dock.terms.envs}
+      folders={{ container: { path: workspace || null }, host: { path: null } }}
+      projects={projects}
+      suggested={dock.preferredEnv}
+      anchor={anchor}
+      align="left"
+      phone={phone}
+      // The quick places start where the host puts a session's terminal (its own folder, or the
+      // project's); only a folder chosen by hand is sent.
+      onPick={(picked) => dock.create(picked.choice === "folder" ? picked : { ...picked, cwd: undefined }, place)}
+      onClose={() => dock.setPicking(null)}
+    />
+  );
+}
+
+/** One tab: its dot, title and exit code; ✕ and a middle click end it; a right click has Rename,
+ *  Detach, End and End the others. */
+function DockTab({ dock, id, on }: { dock: DockController; id: string; on: boolean }) {
+  const row = dock.rowOf(id);
+  const st = dock.states[id];
+  const dot = tabDot(row, st);
+  const title = tabTitle(row, st);
+  const finished = dot === "exited";
+  const box = useRef<HTMLDivElement>(null);
+  const renaming = useRenameSheet(id, row?.title ?? "", dock.toast);
+  const others = dock.state.tabs.some((tab) => tab !== id && dock.rowOf(tab)?.status === "running");
+  const items = useMemo<MenuItem[]>(() => [
+    { label: t("term.rename"), icon: "pen", hint: t("term.rename.hint"), disabled: !row, onSelect: renaming.open },
+    { label: t("term.detach"), icon: "unlink", onSelect: () => dock.detach(id) },
+    "-",
+    finished ? { label: t("term.close.tab"), icon: "close", onSelect: () => dock.detach(id) } : { label: t("term.end"), icon: "stop", danger: true, hint: "Ctrl+Shift+W", onSelect: () => void dock.close(id) },
+    { label: t("term.end.others"), icon: "stop", danger: true, disabled: !others, onSelect: () => void dock.endOthers(id) },
+  ], [row, renaming.open, dock, id, finished, others]);
+  useContextActions(box, items);
+  const label = finished ? t("term.close.tab") : t("term.close");
+  return (
+    <div
+      ref={box}
+      role="tab"
+      tabIndex={0}
+      aria-selected={on}
+      className={`term-tab ${on ? "on" : ""} ${row?.env === "host" ? "host" : ""}`}
+      data-tab={id}
+      onClick={() => dock.activate(id)}
+      // The middle button closes a tab as in every browser and editor. Its press is held back too, or
+      // the browser starts autoscroll under the pointer.
+      onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void dock.close(id); } }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dock.activate(id); } }}
+      title={row?.cwd || undefined}
+    >
+      <span className={`term-dot ${dot}`} aria-hidden="true" title={dotTitle(st)} data-result={st?.commands.last?.result} />
+      <Shield row={row} />
+      <span className="term-tab-title truncate">{title}</span>
+      {finished && exitCode(row, st) && <span className="term-tab-code num">{exitCode(row, st)}</span>}
+      <button className="term-tab-x" aria-label={label} title={finished ? label : `${label} (Ctrl+Shift+W)`} onClick={(e) => { e.stopPropagation(); void dock.close(id); }}>
+        <Icon name="close" size={12} />
+      </button>
+      {renaming.layer}
     </div>
   );
 }
@@ -592,8 +655,9 @@ export function TerminalFull({ dock, phone, workspace, fileOpener }: { dock: Doc
 
 // ── the phone's list ────────────────────────────────────────────────────────────────────────
 
-export function TerminalSheet({ dock }: { dock: DockController }) {
-  if (!dock.sheet) return null;
+export function TerminalSheet({ dock, workspace }: { dock: DockController; workspace?: string }) {
+  // A phone has no dock to hang the question from: it comes up as a sheet of its own.
+  if (!dock.sheet) return dock.phone && dock.picking ? <DockPicker dock={dock} anchor={null} workspace={workspace} phone /> : null;
   const rows = dock.terms.rows;
   const close = () => dock.setSheet(false);
   return (
@@ -609,7 +673,7 @@ export function TerminalSheet({ dock }: { dock: DockController }) {
         </button>
       ))}
       <div className="term-sheet-actions">
-        <button className="btn" disabled={!!dock.reason} onClick={() => { close(); void dock.create(); }}><Icon name="plus" size={16} />{t("term.new")}</button>
+        <button className="btn" disabled={!!dock.reason} onClick={() => { close(); dock.ask(); }}><Icon name="plus" size={16} />{t("term.new")}</button>
       </div>
     </Sheet>
   );

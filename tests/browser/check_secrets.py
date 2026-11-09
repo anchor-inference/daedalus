@@ -167,7 +167,7 @@ def send_and_read(page: Page, where: str, problems: list[str]) -> None:
     if not kept or not isinstance(kept[-1], dict) or kept[-1].get("value") != VALUE or kept[-1].get("name") != "router_admin" or kept[-1].get("session_id") != SESSION:
         problems.append(f"{where}: the value did not go to the host on its own request ({kept})")
     shot(page, f"draft-{where}")
-    page.locator(".composer textarea").fill("Log in and read the firmware version")
+    page.locator(".composer .composer-field").fill("Log in and read the firmware version")
     before = len(writes(f"/api/sessions/{SESSION}/messages"))
     page.locator(".composer .roundbtn.primary").click()
     if not wait_for(page, lambda: len(writes(f"/api/sessions/{SESSION}/messages")) > before, f"{where}: the message", problems):

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TerminalView } from "../api";
 import { setLang } from "../i18n";
-import { cardStatus, groupTerminals, headerCounts, matches, ownerLine, ownerPath, previewRows, runColor, runStyle, span } from "./preview";
+import { cardStatus, groupTerminals, headerCounts, idleUnwatched, matches, ownerLine, ownerPath, previewRows, runColor, runStyle, span, staleFor } from "./preview";
 
 setLang("en");
 
@@ -126,5 +126,25 @@ describe("owners", () => {
     expect(paths(session)).toBe("/s/s1");
     expect(paths(staff)).toBe("/p/p1");
     expect(paths(row("f"))).toBeNull();
+  });
+});
+
+describe("clean-up", () => {
+  const unwatched = { clients: 0, busy: false, keyboard: { owner: "auto" as const, until: null }, size_owner: "", alt_screen: false };
+
+  it("takes only shells at their prompt that nobody watches and nobody works in as idle", () => {
+    expect(idleUnwatched(row("a", { live: unwatched, at_prompt: true }))).toBe(true);
+    expect(idleUnwatched(row("b", { at_prompt: true }))).toBe(false);
+    expect(idleUnwatched(row("c", { live: unwatched, at_prompt: false, running: "npm run dev" }))).toBe(false);
+    expect(idleUnwatched(row("d", { live: unwatched }))).toBe(false);
+    expect(idleUnwatched(row("e", { live: unwatched, at_prompt: true, owner: { kind: "staff", id: "st", label: "ira" } }))).toBe(false);
+    expect(idleUnwatched(row("f", { live: unwatched, at_prompt: true, status: "exited" }))).toBe(false);
+  });
+
+  it("marks an unwatched terminal untouched for a day, by its newest input or output", () => {
+    expect(staleFor(row("a", { live: unwatched, created_at: ago(60 * 24 * 7) }), NOW)).toBe("7d");
+    expect(staleFor(row("b", { live: unwatched, created_at: ago(60 * 24 * 7), last_output_at: ago(5) }), NOW)).toBe("");
+    expect(staleFor(row("c", { created_at: ago(60 * 24 * 7) }), NOW)).toBe("");
+    expect(staleFor(row("d", { live: unwatched, created_at: ago(60 * 24 * 3), owner: { kind: "staff", id: "st", label: "ira" } }), NOW)).toBe("");
   });
 });

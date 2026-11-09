@@ -1693,7 +1693,7 @@ sign-in they saved for the site (`BrowserLogin`), or from operator secrets, one 
 recorded field, which the agent types as it types any placeholder. Nothing but a placeholder is
 accepted in a sign-in's field. The host writes it as a skill draft (`skill-drafts/<name>/` under the
 state directory, by the same code as `SkillDraft`): `SKILL.md` with the steps in words, `requires:
-browser`, `tools: BrowserReplay` and `params`, and `replay.json`. `BrowserReplay` reads a skill of that
+browser` (the group `BrowserReplay` is in, loaded with the skill) and `params`, and `replay.json`. `BrowserReplay` reads a skill of that
 name from the skills directory first, then from the drafts, and without a name lists them. The
 recording's row keeps the skill it became (`skill`), and the audit has `workflow_skill`.
 

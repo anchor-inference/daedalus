@@ -782,7 +782,10 @@ export class TerminalInstance {
         this.jumpToCommand(action === "previous-mark" ? -1 : 1);
         break;
       case "toggle-dock":
-        // The dock's own listener on the document hears the same key; the terminal only stays out.
+      case "close-terminal":
+      case "new-terminal":
+        // The dock's or the workspace's own listener on the document hears the same key; the
+        // terminal only stays out.
         break;
       default:
         break;

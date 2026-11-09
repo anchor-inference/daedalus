@@ -88,7 +88,7 @@ describe("ChatsScreen", () => {
     await act(async () => host.querySelector<HTMLButtonElement>(".ph-row-more")!.click());
     const words = Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent ?? "");
     expect(words).toEqual(expect.arrayContaining([
-      "New chat in Bakery site", "Rename", "Move to a project…", "Settings for Bakery site", "Archive", "Delete",
+      "New agent in Bakery site", "Rename", "Move to a project…", "Settings for Bakery site", "Archive", "Delete",
     ]));
     // Its helper is reached from the chat, not listed in the sheet.
     expect(words.some((w) => w.includes("review"))).toBe(false);

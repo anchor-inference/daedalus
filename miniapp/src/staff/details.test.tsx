@@ -161,11 +161,11 @@ describe("the panels", () => {
     const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
     await render("orchestrator");
     const sections = () => [...host.querySelectorAll(".dt-section")].map((s) => s.id.replace(/^d-\w+-info-/, ""));
-    expect(sections()).toEqual(["session", "context", "usage", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["session", "context", "usage", "mcp", "grants", "toolgroups", "brief", "spend", "advanced"]);
     expect(host.querySelector("[data-usage-today]")!.textContent).toContain("$0.75");
     expect(host.querySelector("[data-last-compaction]")!.textContent).toContain("(auto)");
     await render("main");
-    expect(sections()).toEqual(["session", "context", "usage", "workspace", "disk", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["session", "context", "usage", "workspace", "disk", "mcp", "grants", "toolgroups", "brief", "spend", "advanced"]);
     await render("session");
     expect(sections()).toContain("danger");
     expect(sections()).toContain("loop");

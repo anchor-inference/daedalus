@@ -162,7 +162,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(steps.filter(has_text=words["watch"])).to_have_count(1)
     expect(steps.filter(has_text=words["asked"])).to_have_count(1)
     assert chat.get_by_text(words["created"], exact=True).count() == 2, "a step is drawn once, inside its group"
-    expect(chat.locator(".composer textarea")).to_have_attribute("placeholder", words["placeholder"])
+    expect(chat.locator(".composer .composer-field")).to_have_attribute("placeholder", words["placeholder"])
     # The question it asked is no card in the chat: it waits in the Questions tab, which the panel
     # opens on, and is answered there (check_questions_panel.py follows it further). The chat's line
     # for what waits stays away while that tab is open beside it: its "Open" would open what is shown.
@@ -233,7 +233,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(head).to_contain_text("Lev")
     expect(head).to_contain_text("agent/lev/photos")
     expect(page.locator(".staff-message").first).to_contain_text(words["accepted"])
-    expect(page.locator(".chat textarea")).to_have_attribute("placeholder", words["lev"])
+    expect(page.locator(".chat .composer-field")).to_have_attribute("placeholder", words["lev"])
     expect(page.locator(".panel .panel-tab")).to_have_count(9)
     head.get_by_role("button", name=words["pause"]).click()
     page.wait_for_timeout(300)
@@ -272,7 +272,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(sheet.locator(".autonomy-option")).to_have_count(3)
     expect(sheet.locator(".focus-cost")).to_contain_text(words["cost"])
     sheet.get_by_role("button", name=words["on"], exact=True).click()
-    expect(page.locator(".chat.in-project.orchestrator textarea")).to_have_attribute("placeholder", words["placeholder"])
+    expect(page.locator(".chat.in-project.orchestrator .composer-field")).to_have_attribute("placeholder", words["placeholder"])
     assert focus.enabled == [(GARDEN, {"model": "", "autonomy": "normal", "concurrency_cap": 10})], focus.enabled
 
 
