@@ -18,6 +18,7 @@ import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
 import { ServerGrantButton, StandingGrants } from "./servergrant";
 import { McpQuickAdd } from "./mcpquickadd";
+import { SessionSubagentModels } from "./subagentmodels";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
 import { MoveFolderButton } from "./project/MoveFolder";
@@ -86,6 +87,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
           <button className="linkbtn grow truncate" onClick={on.openPicker} title={detail.model}>{detail.model || t("session.model.global")}</button>
           <button className="btn small" onClick={on.openPicker}>{t("session.model.change")}</button>
         </div>
+        <SessionSubagentModels sessionId={id} toast={toast} />
       </Section>
 
       {detail.context && (

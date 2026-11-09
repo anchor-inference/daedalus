@@ -55,8 +55,9 @@ export function SidePanel() {
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
   const show = useRef<string | null>(null);
-  // The actions answered here, per conversation, for as long as the panel is open: the refusal stays
-  // in the transcript after the answer, and coming back to the conversation must not offer it again.
+  // The refused calls answered here, per conversation, for as long as the panel is open: the refusal
+  // stays in the transcript after the answer, and coming back to the conversation must not offer it
+  // again. By call id: the same action refused again later is a new request under the same key.
   const answered = useRef(new Map<string, Set<string>>());
 
   useEffect(() => {
@@ -394,8 +395,8 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   const id = session.id;
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [failed, setFailed] = useState(false);
-  const [seenKeys, setSeenKeys] = useState<Set<string>>(() => answered.get(id) ?? new Set());
-  useEffect(() => void answered.set(id, seenKeys), [answered, id, seenKeys]);
+  const [seenCalls, setSeenCalls] = useState<Set<string>>(() => answered.get(id) ?? new Set());
+  useEffect(() => void answered.set(id, seenCalls), [answered, id, seenCalls]);
   const [similar, setSimilar] = useState<string | null>(null);
   const [grantServer, setGrantServer] = useState<string | null>(null);
   const [stopAt, setStopAt] = useState<number | null>(null);
@@ -523,9 +524,22 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   // Offered only while the host lists the request as open, as on the app's own screen: read from the
   // transcript alone, a request answered anywhere came back on every reload of the panel.
   const approval = useMemo(
-    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
-    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+    () => pendingApproval(detail?.messages ?? [], seenCalls, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenCalls, detail?.open_approvals, detail?.run_id],
   );
+  // The panel has no app-wide event stream, so an answer given in the app, in Telegram or on another
+  // device never reached it, and the card stayed until the next run. While a card is up the panel
+  // asks the host which requests are still open; a read of the state alone, the conversation stays.
+  const asking = !!approval;
+  useEffect(() => {
+    if (!asking) return;
+    const timer = window.setInterval(() => {
+      api.get<SessionDetail>(`/api/sessions/${id}?tail=1`)
+        .then((next) => setDetail((prev) => (prev ? { ...prev, open_approvals: next.open_approvals } : prev)))
+        .catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [asking, id]);
   useEffect(() => {
     setSimilar(null);
     setGrantServer(null);
@@ -544,7 +558,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   }, [id, approval?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decide(a: Approval, how: "allow" | "similar" | "deny" | "server", hours = 0) {
-    setSeenKeys((keys) => new Set(keys).add(a.key));
+    setSeenCalls((calls) => new Set(calls).add(a.callId));
     try {
       if (how === "server" && grantServer) await api.post(`/api/sessions/${id}/policy/grant-server`, { key: a.key, hours });
       else if (how === "deny") await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
@@ -644,7 +658,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       <div className="sp-body" ref={scroller} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
         {detail ? (
-          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} />
+          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} awaiting={approval?.callId ?? ""} />
         ) : failed ? (
           <div className="empty">{t("sidepanel.unreadable")}</div>
         ) : (

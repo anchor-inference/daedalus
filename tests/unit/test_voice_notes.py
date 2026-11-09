@@ -200,6 +200,10 @@ class FakeManager:
         def available() -> list[str]:
             return []
 
+        @staticmethod
+        def price_view(*_: Any, **__: Any) -> dict[str, Any]:
+            return {}
+
 
 class FakeApp:
     def __init__(self, tmp_path: Path, asr: dict[str, Any] | None = None) -> None:

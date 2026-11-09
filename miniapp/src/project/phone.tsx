@@ -7,7 +7,7 @@
 // 16 px so Safari does not zoom into it.
 
 import { FormEvent, ReactNode, useId, useMemo, useState } from "react";
-import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
+import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnv, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet, toast } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
@@ -21,6 +21,7 @@ import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice 
 import { invalidate, useOffline, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalCard } from "../terminal/phonecard";
+import { type PickedPlace, TerminalPicker } from "../terminal/picker";
 import { PhoneTeamList } from "../team/phone";
 import { StaffSheet } from "../team/StaffSheet";
 import { ProjectSettingsSheet } from "../projects";
@@ -334,23 +335,17 @@ export function PhoneTeam({ projectId, toast }: { projectId: string; toast: (tex
 export function PhoneTerminals({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
   const offline = useOffline();
   const { project } = useProject(projectId);
-  const { data } = useQuery<{ terminals: TerminalRow[] }>(terminalsKey(projectId), { pollMs: 10000, staleMs: 3000 });
+  const { data } = useQuery<{ terminals: TerminalRow[]; envs?: TerminalEnv[] }>(terminalsKey(projectId), { pollMs: 10000, staleMs: 3000 });
   const rows = Array.isArray(data?.terminals) ? data!.terminals : [];
-  const [making, setMaking] = useState(false);
-  // A new terminal opens in the project's first folder of its default environment; the Terminals
-  // screen, one menu away, is where any other folder is chosen.
-  const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
-  const folder = project?.folders.find((f) => f.env === env && !f.readonly) ?? project?.folders.find((f) => f.env === env);
-  async function make() {
-    if (offline) return;
-    setMaking(true);
-    try {
-      const { openFreeTerminal } = await import("../screens/Terminals");
-      await openFreeTerminal(env, folder?.path, projectId, toast);
-      invalidate(terminalsKey(projectId));
-    } finally {
-      setMaking(false);
-    }
+  const [picking, setPicking] = useState(false);
+  // A new terminal asks where, as every "+" does; the quick places are the project's own folders in
+  // each environment (the host's falls back to the operator's home).
+  const folderIn = (env: TerminalEnvName) => project?.folders.find((f) => f.env === env && !f.readonly) ?? project?.folders.find((f) => f.env === env);
+  const suggested: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
+  async function make(picked: PickedPlace) {
+    const { openFreeTerminal } = await import("../screens/Terminals");
+    await openFreeTerminal(picked.env, picked.cwd, projectId, toast, picked.sandbox);
+    invalidate(terminalsKey(projectId));
   }
   return (
     <>
@@ -358,7 +353,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
         projectId={projectId}
         title={t("focus.page.terminals")}
         subtitle={project?.name}
-        actions={<button className="iconbtn" disabled={making || !project || offline} onClick={() => void make()} aria-label={t("term.new")} title={t("term.new")}><Icon name="plus" /></button>}
+        actions={<button className="iconbtn" disabled={!project || offline} onClick={() => setPicking(true)} aria-label={t("term.new")} title={t("term.new")}><Icon name="plus" /></button>}
       />
       <div className="screen phone-project">
         {offline && <div className="result-warning" role="status">{t("focus.terminalOffline")}</div>}
@@ -370,6 +365,19 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
           {rows.map((row) => <div key={row.id} role="listitem"><TerminalCard row={row} projectName={project?.name ?? null} toast={toast} /></div>)}
         </div>
       </div>
+      {picking && (
+        <TerminalPicker
+          envs={data?.envs ?? []}
+          folders={{ container: { path: folderIn("container")?.path ?? null, projectId }, host: { path: folderIn("host")?.path ?? data?.envs?.find((e) => e.env === "host")?.home ?? null } }}
+          projects={project ? [project] : []}
+          lens={project ?? null}
+          suggested={suggested}
+          anchor={null}
+          phone
+          onPick={make}
+          onClose={() => setPicking(false)}
+        />
+      )}
     </>
   );
 }

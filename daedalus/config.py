@@ -137,6 +137,15 @@ def keyproxy_upstream(url: str) -> str:
     return tail.split("/", 1)[0] if tail else ""
 
 
+LOGIN_UPSTREAMS = ("codex", "grok", "claude")
+"""The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
+
+
+def login_route(base_url: str) -> bool:
+    """Whether ``base_url`` is a CLI login behind the key proxy: a plan, not a price nobody knows."""
+    return keyproxy_upstream(base_url) in LOGIN_UPSTREAMS
+
+
 def _runtime_paths() -> list[str]:
     """The directories this installation is made of, as the environment has them.
 
@@ -1764,7 +1773,18 @@ class EditBoardConfig(BaseModel):
     and after this long the agent may well have lost it."""
 
 
+class SubagentModels(BaseModel):
+    """Which presets a session's helpers may run on, unless the session chooses for itself
+    (:mod:`daedalus.host.subagent_models`)."""
+
+    mode: Literal["all", "session", "chosen"] = "all"
+    """``all`` is every preset that can run; ``session`` only the leader's own model; ``chosen`` the list below."""
+    presets: list[str] = Field(default_factory=list)
+    """For ``chosen``. A preset deleted later drops out of it rather than making the setting invalid."""
+
+
 class SubagentsConfig(BaseModel):
+    models: SubagentModels = Field(default_factory=SubagentModels)
     max_active: int = Field(default=10, ge=1, le=32)
     """Running subagents one leader may have at a time. Settings → Limits edits it, and the next
     SubAgent call reads the new value. Four turned out too few for a leader fanning one task out, and

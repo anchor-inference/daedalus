@@ -78,7 +78,7 @@ async def test_subagent_model_choice_depth_and_limits(app: Any) -> None:
     _capture(manager)
     with pytest.raises(ValueError, match="unknown model"):
         await subs.spawn(leader_id=leader.session.id, task="t", model="nope.model")
-    models = await subs.models()
+    models = await subs.models(leader.session.id)
     if models:
         chosen = models[-1]
         result = await subs.spawn(leader_id=leader.session.id, task="t", model=chosen)
