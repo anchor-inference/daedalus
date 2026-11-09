@@ -16,7 +16,9 @@ export type TerminalAction =
   | "font-smaller"
   | "font-reset"
   | "previous-mark"
-  | "next-mark";
+  | "next-mark"
+  | "close-terminal"
+  | "new-terminal";
 
 /** The fields of a `KeyboardEvent` this reads. */
 export type KeyLike = Pick<KeyboardEvent, "code" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey">;
@@ -49,6 +51,8 @@ export function reservedKey(e: KeyLike, context: KeyContext): TerminalAction | n
   }
   if (!e.ctrlKey || e.metaKey) return null;
   if (e.code === "Backquote" && !e.shiftKey) return "toggle-dock";
+  if (e.shiftKey && e.code === "KeyW") return "close-terminal";
+  if (e.shiftKey && e.code === "Backquote") return "new-terminal";
   // Plain Ctrl+C copies while something is selected, as in VS Code and Windows Terminal, and is the
   // interrupt otherwise. Not on a Mac: there Cmd copies and Ctrl+C is always the interrupt.
   if (!context.mac && !e.shiftKey && e.code === "KeyC" && context.selection) return "copy-clear";
@@ -90,6 +94,20 @@ export function dockShortcut(e: KeyLike, mac: boolean): boolean {
   if (e.ctrlKey && !e.metaKey && e.code === "Backquote") return true;
   if (e.code !== "KeyJ") return false;
   return mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
+
+/**
+ * The keys that end or open a terminal wherever the terminals are drawn: Ctrl+Shift+W ends the one in
+ * front (with the same question as its ✕), and Ctrl+Shift+` asks where to open a new one — VS Code's
+ * two keys. Inside a terminal they are taken back from the program too (`reservedKey`): no shell
+ * binds either. A browser keeps Ctrl+Shift+W for closing its window and never lets a page see it, so
+ * there it works in the desktop app only; the tab's ✕ and middle click work everywhere.
+ */
+export function terminalCommandKey(e: KeyLike): "close" | "new" | null {
+  if (!e.ctrlKey || e.metaKey || e.altKey || !e.shiftKey) return null;
+  if (e.code === "KeyW") return "close";
+  if (e.code === "Backquote") return "new";
+  return null;
 }
 
 /** Whether a key event's target is inside a terminal, where the app's global shortcuts stand aside. */

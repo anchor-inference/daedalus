@@ -210,8 +210,10 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     labels = page.locator(".act-orig").all_inner_texts()
     if labels[:3] != ["Bash", "Read", "Edit"] and labels != ["Bash", "Read", "Edit", "Bash"]:
         say(f"the steps' own names are {labels}")
+    # Details is an inspector: the origin is a line of its own, opened in place of the list.
+    page.locator(".panel [data-prop='origin']").click(timeout=10000)
     expect(page.locator(".panel .imp-origin")).to_be_visible(timeout=10000)
-    expect(page.locator(".panel .dt-section", has_text=words["origin"]).first).to_be_visible()
+    expect(page.locator(".panel .dt-drill[data-page='origin']", has_text=words["origin"]).first).to_be_visible()
     expect(page.locator(f".sidebar [data-session='{IMPORTED_ID}'] .imp-hmini")).to_have_text("C")
     if sideways(page):
         say("the chat scrolls sideways")

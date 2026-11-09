@@ -1,9 +1,15 @@
-"""Claude Code login as a key-proxy upstream.
+"""Claude Code login as a key-proxy upstream, and the translation the Anthropic API key shares with it.
 
 The CLI stores OAuth tokens in ``~/.claude/.credentials.json``. This module
 reads them, refreshes them the way the CLI does (and writes the new pair back
 so the CLI keeps working), and translates OpenAI chat completions into
 Anthropic ``/v1/messages`` using the CLI's identity headers and system prefix.
+
+The ``anthropic`` upstream (the operator's API key) goes through the same translation without the CLI's
+identity. Its first version forwarded chat completions to Anthropic's OpenAI-compatible endpoint, which
+takes no ``cache_control`` and caches nothing: every step of an agent run paid the whole prompt again at
+the full input price, about ten times what the same run cost with the cache, and the first day of use spent
+the daily cap on two sessions. That endpoint also ignores ``reasoning_effort``.
 """
 
 from __future__ import annotations
@@ -66,7 +72,13 @@ EFFORT_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 31999, "ma
 EFFORT_MODELS = ("claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-1", "claude-opus-4-8", "claude-sonnet-4-6")
 MAX_OUTPUT = 32000
 CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
-"""Anthropic prompt-cache marker. Prefix order is tools → system → messages; at most four per request."""
+"""Anthropic prompt-cache marker. Prefix order is tools → system → messages; at most four per request.
+
+The hour, on the keyed route too, where a cache write costs twice the input price rather than 1.25 times
+for five minutes. Every request writes only what was added since the previous one, so the premium is paid
+on a few thousand tokens a step; an operator who answers after more than five minutes would otherwise have
+the whole transcript written again, which on a 100k-token Opus conversation is about $0.50 where the hour's
+read is $0.02."""
 CACHE_ANCHOR_STRIDE = 16
 """Messages between moves of the mid-history cache anchor; see ``_anchor_index``."""
 # Sent whenever thinking is on, as the CLI does. keep="all" clears nothing: it pins the server to keeping
@@ -138,6 +150,19 @@ def attribution_hash(text: str, version: str | None = None) -> str:
 def _billing_header(user_text: str) -> str:
     version = clients.version("claude")
     return f"x-anthropic-billing-header: cc_version={version}.{attribution_hash(user_text, version)}; cc_entrypoint={CLAUDE_ENTRYPOINT};"
+
+
+KEY_BETAS = "interleaved-thinking-2025-05-14,context-management-2025-06-27"
+"""What the keyed route asks for beyond what every key has: thinking between tool calls on the models that
+still need it named, and the ``context_management`` edit sent whenever thinking is on (see
+``_KEEP_THINKING_EDIT``). Not the CLI's list: ``oauth`` and ``claude-code`` describe a login, and a key that
+names a beta the API does not grant it is refused outright."""
+
+
+def key_betas(payload: dict[str, Any]) -> str:
+    """The ``anthropic-beta`` value for one keyed ``/v1/messages`` body, effort named only when it is on the wire."""
+    effort = isinstance(payload.get("output_config"), dict) and "effort" in payload["output_config"]
+    return f"{KEY_BETAS},{_BETA_EFFORT},{_BETA_CACHE_TTL}" if effort else f"{KEY_BETAS},{_BETA_CACHE_TTL}"
 
 
 def request_betas(payload: dict[str, Any]) -> str:
@@ -320,8 +345,10 @@ def _fold_into_results(results: list[dict[str, Any]], carried: dict[str, list[di
     return True
 
 
-def _wire_tool_name(name: str) -> str:
+def _wire_tool_name(name: str, login: bool = True) -> str:
     name = str(name or "")
+    if not login:
+        return name
     if not name or name.startswith(TOOL_PREFIX) or name.startswith("mcp__"):
         return name
     return TOOL_PREFIX + name
@@ -372,7 +399,7 @@ def _anchor_index(messages: list[dict[str, Any]], taken: set[int]) -> int | None
     return None
 
 
-def _apply_prompt_cache(system: list[dict[str, Any]], messages: list[dict[str, Any]]) -> None:
+def _apply_prompt_cache(system: list[dict[str, Any]], messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, *, login: bool = True) -> None:
     """Lock the stable prefix, a mid-history anchor and the conversation tail (≤4 breakpoints).
 
     The identity block (system[1]) is byte-stable across turns, and its breakpoint already covers
@@ -380,8 +407,13 @@ def _apply_prompt_cache(system: list[dict[str, Any]], messages: list[dict[str, A
     them either. The billing block before it varies with the first user text and is no breakpoint.
     The harness prompt (system[2]) carries a clock, so it is not one either. The last two stampable
     messages let a tool-call loop reuse the growing transcript; ``_anchor_index`` explains the fourth.
+
+    The keyed route sends no identity block, so its stable prefix is the tools, and the last tool takes
+    that breakpoint; with no tools, the system prompt does.
     """
-    if len(system) >= 2:
+    if not login and tools:
+        tools[-1] = _with_cache(tools[-1])
+    elif len(system) >= 2:
         system[1] = _with_cache(system[1])
     elif system:
         system[-1] = _with_cache(system[-1])
@@ -437,7 +469,7 @@ def _replayed_blocks(message: dict[str, Any]) -> list[tuple[int, int, dict[str, 
     return out
 
 
-def _assistant_content(message: dict[str, Any], names: dict[str, str]) -> list[dict[str, Any]]:
+def _assistant_content(message: dict[str, Any], names: dict[str, str], login: bool = True) -> list[dict[str, Any]]:
     """An assistant chat message → its Anthropic content, its thinking blocks back where the model wrote them.
 
     Claude Code sends every earlier thinking and redacted_thinking block back verbatim, interleaved with
@@ -453,7 +485,7 @@ def _assistant_content(message: dict[str, Any], names: dict[str, str]) -> list[d
     for call in message.get("tool_calls") or []:
         fn = call.get("function") or {}
         original = str(fn.get("name") or "")
-        wire = _wire_tool_name(original)
+        wire = _wire_tool_name(original, login)
         if original:
             names[wire] = original
         calls.append({"type": "tool_use", "id": str(call.get("id") or ""), "name": wire, "input": _parse_args(fn.get("arguments"))})
@@ -523,8 +555,12 @@ def prefix_locked(status: int, text: str, headers: Any) -> tuple[bool, tuple[int
     return True, None
 
 
-def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """OpenAI chat-completions body → Anthropic ``/v1/messages`` plus wire-name → original-name."""
+def chat_to_messages(body: dict[str, Any], *, login: bool = True) -> tuple[dict[str, Any], dict[str, str]]:
+    """OpenAI chat-completions body → Anthropic ``/v1/messages`` plus wire-name → original-name.
+
+    ``login`` is the Claude Code route: the CLI's billing stamp and identity open the system prompt and
+    tool names carry its ``mcp_`` prefix. The keyed route sends the operator's own system prompt and tool
+    names as they are."""
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
     names: dict[str, str] = {}
@@ -549,7 +585,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
             items.append({"role": "user", "content": _user_content(message.get("content"))})
         elif role == "assistant":
             flush_results()
-            content = _assistant_content(message, names)
+            content = _assistant_content(message, names, login)
             if content:
                 items.append({"role": "assistant", "content": content})
         elif role == "tool":
@@ -570,7 +606,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
     system: list[dict[str, Any]] = [
         {"type": "text", "text": _billing_header(first_user)},
         {"type": "text", "text": CLAUDE_IDENTITY},
-    ]
+    ] if login else []
     if instructions:
         system.append({"type": "text", "text": "\n\n".join(instructions)})
     tools: list[dict[str, Any]] = []
@@ -579,23 +615,24 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
         original = str(fn.get("name") or tool.get("name") or "")
         if not original:
             continue
-        wire = _wire_tool_name(original)
+        wire = _wire_tool_name(original, login)
         names[wire] = original
         tools.append({"name": wire, "description": fn.get("description") or tool.get("description") or "", "input_schema": fn.get("parameters") or tool.get("input_schema") or {"type": "object", "properties": {}}})
-    _apply_prompt_cache(system, items)
+    _apply_prompt_cache(system, items, tools, login=login)
     out: dict[str, Any] = {
         "model": model,
         "max_tokens": max(1, max_tokens),
         "stream": True,
-        "system": system,
         "messages": items,
     }
+    if system:
+        out["system"] = system
     if tools:
         out["tools"] = tools
     choice = body.get("tool_choice")
     forced = isinstance(choice, dict) and (choice.get("function") or {}).get("name")
     if forced:
-        out["tool_choice"] = {"type": "tool", "name": _wire_tool_name(choice["function"]["name"])}
+        out["tool_choice"] = {"type": "tool", "name": _wire_tool_name(choice["function"]["name"], login)}
     elif isinstance(choice, str) and choice in ("auto", "none", "any", "required"):
         out["tool_choice"] = {"type": "any"} if choice == "required" else {"type": choice}
     if effort and not forced:

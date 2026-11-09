@@ -204,6 +204,14 @@ exists: pick an endpoint, pick a model from the list it serves — with its cont
 modalities and its prices beside it — and save. The same screen adds the next one later, from
 Settings → Models.
 
+Each model's card in Settings → Models has a **Price** section: input, output and cache hit in USD per
+million tokens, the default it starts from (the built-in table, models.dev, or the OpenRouter providers
+chosen for it), and a switch between *subscription*, recorded at $0 and never counted against a cap, and
+*per token*. A price typed there replaces the default from the next call, with no restart, and *Reset*
+brings the default back. A bill the provider states for a call (OpenRouter sends one) is what was really
+charged, so Usage books that over any price here; the typed price still sets the caps' reservations
+and a guest link's rate.
+
 <p align="center"><img src="screenshots/add-model.png" alt="Add a model: the endpoints this installation can reach, OpenCode Go and OpenCode Zen among them, and the model from the chosen one's own list with its context window and prices" width="100%" /></p>
 
 ## What each gives up

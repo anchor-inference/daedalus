@@ -91,6 +91,12 @@ nobody, and this is how it is noticed."""
 AUDIT_TEXT_BYTES = 4096
 PREVIEW_ROWS = 6
 LIST_PREVIEW_MAX = 12
+SHELLS = frozenset({"bash", "zsh", "fish", "sh", "dash", "ash", "ksh", "mksh", "tcsh", "csh", "nu", "elvish", "xonsh",
+                    "pwsh", "powershell", "cmd"})
+"""Programs whose idle state is a prompt. Anything else a terminal was started as (a staff member's
+CLI, ``htop``, a server) is the work itself, so ending it is never "nothing was running"."""
+RUNNING_TEXT_MAX = 300
+"""How much of a running command line a view carries: enough to recognise it in a question."""
 
 
 def now_iso() -> str:
@@ -257,10 +263,10 @@ class Terminals(SideChannels):
         self._tasks: list[asyncio.Task[None]] = []
         self._closing = False
         self.branches = BranchCache(self._read_branch)
-        self._running_agents: dict[str, tuple[str, dict[str, Any] | None]] = {}
-        """Per busy shell: the marker of the command it runs (the last finished one's time) and the
-        agent that command starts, so a command line is asked of the daemon once per command and not
-        once per listing."""
+        self._running_agents: dict[str, tuple[str, dict[str, Any] | None, str]] = {}
+        """Per busy shell: the marker of the command it runs (the last finished one's time), the agent
+        that command starts and its command line, so a command line is asked of the daemon once per
+        command and not once per listing."""
         self._init_side()
 
     # -- lifecycle --------------------------------------------------------------------------
@@ -544,7 +550,38 @@ class Terminals(SideChannels):
             if view["status"] == "running":
                 view["git"] = self.branches.peek(view["env"], view["cwd"])
         await self._detect_agents([v for v in views if v["agent"] is None], live)
+        for row, view in zip(rows, views, strict=True):
+            self._foreground(row, view, live.get(row["id"]))
         return views
+
+    def _foreground(self, row: dict[str, Any], view: TerminalView, info: dict[str, Any] | None) -> None:
+        """Whether ending the terminal now loses nothing but a prompt (``at_prompt``), and what runs in
+        it when that is known (``running``): the question "end it?" is asked from these.
+
+        ``at_prompt`` is true only when the daemon can tell: the terminal is a shell, the daemon lists
+        it, no command runs under it and no full-screen program holds it, and the daemon has a way to
+        know — the shell's own marks, or the terminal's foreground process group, which every Unix
+        daemon reads. A Windows daemon has no foreground group to read, so there a shell without its
+        marks is never taken to be idle. Whatever cannot be told is not "at the prompt", and the
+        operator is asked; ending a forgotten build without asking is the mistake this guards.
+        Background jobs of an idle shell are not seen by either source and end with it.
+        """
+        argv = json.loads(row["argv_json"] or "[]")
+        program = Path(str(argv[0])).name.lower().removesuffix(".exe") if argv else ""
+        shell = not argv or program in SHELLS
+        running = view.get("running") or ""
+        if not running and not shell:
+            running = " ".join(str(a) for a in argv)
+        if not running and view["agent"]:
+            running = str(view["agent"].get("kind") or "")
+        view["running"] = running[:RUNNING_TEXT_MAX] or None
+        live = view["live"]
+        if view["status"] != "running" or info is None or live is None:
+            view["at_prompt"] = False
+            return
+        link = self.links.get(row["env"])
+        knows = view["shell_integration"] or (link is not None and str(link.info.get("os") or "") != "windows")
+        view["at_prompt"] = shell and knows and not live["busy"] and not live["alt_screen"] and view["agent"] is None
 
     async def _read_branch(self, env: str, argv: builtins.list[str], cwd: str, timeout: float) -> ExecResult:
         return await self.exec_run(env, argv, cwd=cwd, env_vars=dict(GIT_QUIET_ENV), timeout=timeout, max_output=STATUS_OUTPUT_MAX, audit=False)
@@ -563,6 +600,7 @@ class Terminals(SideChannels):
             known = self._running_agents.get(terminal_id)
             if known is not None and known[0] == marker:
                 view["agent"] = dict(known[1]) if known[1] is not None else None
+                view["running"] = known[2] or None
             else:
                 wanted.append((view, marker))
         if not wanted:
@@ -576,9 +614,11 @@ class Terminals(SideChannels):
                 return  # asked again on the next listing
             records = [c for c in result.get("commands") or [] if isinstance(c, dict)]
             open_command = records[-1] if records and records[-1].get("finished_at") is None else None
-            agent = detect_agent(str(open_command.get("command") or "")) if open_command else None
-            self._running_agents[view["id"]] = (marker, agent)
+            command = str(open_command.get("command") or "") if open_command else ""
+            agent = detect_agent(command) if command else None
+            self._running_agents[view["id"]] = (marker, agent, command)
             view["agent"] = dict(agent) if agent is not None else None
+            view["running"] = command or None
 
         await asyncio.gather(*(running(view, marker) for view, marker in wanted))
 
@@ -610,6 +650,8 @@ class Terminals(SideChannels):
             "activity": None,
             "agent": None,
             "git": None,
+            "running": None,
+            "at_prompt": False,
         }
         if info is not None:
             modes = info.get("modes") or {}

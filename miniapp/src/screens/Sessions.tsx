@@ -19,19 +19,19 @@
 import { CompanionFace } from "../companionavatar";
 import { useContextActions } from "../ui/context-menu";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { api, Project, type ProjectRef, SessionList, SessionSummary, Settings } from "../api";
-import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
-import { Skeleton, ToolPicker, fmtInterval, statusWord } from "../ui/components";
+import { api, Project, type ProjectRef, SessionList, SessionSummary } from "../api";
+import { projectPath } from "../folders";
+import { Skeleton, fmtInterval, statusWord } from "../ui/components";
 import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
 import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
-import { MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects";
+import { MoveSessionSheet, ProjectSettingsSheet } from "../projects";
 import { MakeProjectSheet, asChatCommand, dropChat, endChatDrag, makeProjectCommand, startChatDrag, takesDrop } from "../chatproject";
 import { openNewProject } from "../project/NewProject";
 import { openImport } from "../imports/ImportExplorer";
 import { PlateMark, importedHarness } from "../imports/ImportedChat";
-import { navigate, parse, pathFor, sessionPath, useRoute } from "../router";
+import { navigate, newAgentPath, parse, pathFor, sessionPath, useRoute } from "../router";
 import { subagentPath } from "../subagents";
 import { agentsListing } from "../mode";
 import { invalidate, useQuery } from "../store";
@@ -43,8 +43,8 @@ import { insideTerminal } from "../terminal/keys";
 import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
-import { HostMark, RunEnv, useRunOn } from "../runon";
-import { PrivateMark, isPrivate, privateBody } from "../privatechat";
+import { HostMark } from "../runon";
+import { PrivateMark, isPrivate } from "../privatechat";
 import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
 import { remoteRowWords } from "../remote";
 
@@ -218,10 +218,11 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     </button>
   );
   const moreOn = view === "loops" || view === "archive";
-  // The split New chat button's menu, and the right click anywhere on it: both ways a chat begins.
+  // The split New chat button's menu, and the right click anywhere on it: the ways a chat begins.
   const newSplit = useRef<HTMLDivElement>(null);
   const newChatItems = useMemo<MenuItem[]>(() => [
     { label: t("ph.newchat"), icon: "compose", hint: t("side.newchat.keys"), onSelect: () => navigate(pathFor("agents")) },
+    { label: t("shell.search.newagent"), icon: "user", onSelect: () => navigate(newAgentPath()) },
     { label: t("side.import"), icon: "import", hint: t("imp.entry.hint"), onSelect: () => openImport() },
   ], []);
   useContextActions(newSplit, newChatItems);
@@ -493,7 +494,6 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const [open, setOpen] = useState(() => folderOpen(folder.key));
   const [all, setAll] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [adding, setAdding] = useState(false);
   const section = useRef<HTMLElement | null>(null);
   const head = useRef<HTMLDivElement | null>(null);
   const mine = holds(folder.rows, current);
@@ -504,13 +504,13 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
     rememberFolder(folder.key, value);
   }, [folder.key, showing]);
   const editProject = useCallback(() => setEditing(true), []);
-  const newIn = useCallback(() => setAdding(true), []);
+  const newIn = useCallback(() => navigate(newAgentPath(folder.key)), [folder.key]);
   const revealer = useReveal();
   const pinned = !!folder.pinned_at;
   const backToChat = asChatCommand(folder);
   const [dropping, setDropping] = useState(false);
   const items: MenuItem[] = [
-    { label: t("side.project.new", { name: folder.name }), icon: "compose", onSelect: newIn },
+    { label: t("side.project.newagent", { name: folder.name }), icon: "compose", onSelect: newIn },
     pinCommand(folder.key, pinned, { key: true }),
     ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : []),
     { label: t("project.settings.for", { name: folder.name }), icon: "settings", onSelect: editProject },
@@ -555,7 +555,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
           {showing ? <span className="sb-chev" aria-hidden><Icon name="chevron" size={14} /></span> : <span className="sb-pcount num" title={plural("agents.count", folder.total)}>{folder.total}</span>}
         </span>
         <span className="sb-acts" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <button type="button" className="iconbtn small quiet sb-padd" onClick={newIn} aria-label={t("side.project.new", { name: folder.name })} title={t("side.project.new", { name: folder.name })}><Icon name="plus" size={16} /></button>
+          <button type="button" className="iconbtn small quiet sb-padd" onClick={newIn} aria-label={t("side.project.newagent", { name: folder.name })} title={t("side.project.newagent", { name: folder.name })}><Icon name="plus" size={16} /></button>
           <OverflowMenu small className="quiet" label={t("side.project.menu", { name: folder.name })} items={items} />
         </span>
       </div>
@@ -575,7 +575,6 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
         </div>
       )}
       {editing && <ProjectSettingsSheet project={{ ...folder.project, sessions: folder.rows.map((r) => ({ id: r.s.id, title: r.s.title })) }} onClose={() => setEditing(false)} onRemoved={() => setEditing(false)} toast={toast} />}
-      {adding && <NewAgentSheet project={folder.key} onClose={() => setAdding(false)} onCreated={onOpen} toast={toast} />}
     </section>
   );
 }, sameGroup);
@@ -676,7 +675,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
     { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
     ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),
-    ...(onNewIn ? [{ label: t("side.project.new", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
+    ...(onNewIn ? [{ label: t("side.project.newagent", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
     "-",
     ...items.map((item): MenuItem => {
       if (item === "-") return item;
@@ -853,144 +852,6 @@ export function useSessionCommands(session: SessionSummary, opts: { onProject?: 
     </Sheet>}
   </>;
   return { items, layers, run: { rename: startRename, archive, remove } };
-}
-
-/** The form for a new agent: a name, a first task and where it works; the loop and the tools sit behind Advanced. */
-export function NewAgentSheet({ onClose, onCreated, toast, project: initial = "" }: { onClose: () => void; onCreated: (id: string) => void; toast: (t: string) => void; project?: string }) {
-  const [title, setTitle] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [toolsOff, setToolsOff] = useState<string[]>([]);
-  const [loopOn, setLoopOn] = useState(false);
-  const [loopText, setLoopText] = useState("");
-  const [loopMode, setLoopMode] = useState<"interval" | "dynamic">("interval");
-  const [loopMinutes, setLoopMinutes] = useState("10");
-  const [loopMax, setLoopMax] = useState("");
-  const [project, setProject] = useState(initial);
-  const [ownDirectory, setOwnDirectory] = useState(false);
-  const [folder, setFolder] = useState("");
-  const [preset, setPreset] = useState("");
-  const [advanced, setAdvanced] = useState(false);
-  const [secret, setSecret] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const projects = useProjects();
-  const run = useRunOn(project);
-  const chosen = (projects.data ?? []).find((p) => p.id === project);
-  const folderChoice = chosen && offersFolderChoice(chosen) ? agentFolders(chosen) : [];
-  // Empty is the primary: the session then follows whichever folder is first, as one that named
-  // none always has. Only another folder is named outright.
-  const chosenFolder = folderChoice.find((f) => f.id === folder && f.position !== 0);
-  const settings = useQuery<Settings>("/api/settings", { staleMs: 60000 });
-  const presets = settings.data?.presets ?? {};
-  const defaultPreset = settings.data?.model?.preset ?? "";
-  const presetLabel = (id: string) => {
-    const p = presets[id];
-    return p ? p.label || `${p.provider}/${p.model}` : id;
-  };
-
-  async function create() {
-    if (!title.trim() || busy) return;
-    setBusy(true);
-    try {
-      const loop = loopOn && loopText.trim()
-        ? { instruction: loopText.trim(), mode: loopMode, interval_minutes: loopMode === "interval" ? Math.max(1, Number(loopMinutes) || 10) : null, max_runs: loopMax.trim() ? Math.max(1, Number(loopMax) || 1) : null }
-        : undefined;
-      const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined, ...run.body, ...privateBody(secret) });
-      // Read again now: a chat made without a first message starts no run, so no run event would
-      // bring it into the column, and it stayed missing from its project until the next poll.
-      invalidate("/api/sessions");
-      invalidate("/api/projects");
-      onClose();
-      onCreated(created.id);
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Sheet title={t("newagent.title")} onClose={onClose}>
-      <label className="field">{t("common.name")}</label>
-      <input className="field" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("newagent.name.placeholder")} onKeyDown={(e) => e.key === "Enter" && create()} />
-      <label className="field">{t("newagent.first")}</label>
-      <textarea className="field" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t("newagent.first.placeholder")} />
-      <label className="field">{t("newagent.model")}</label>
-      <select className="field" value={preset} onChange={(e) => setPreset(e.target.value)}>
-        <option value="">{t("newagent.model.default")}{defaultPreset ? ` · ${presetLabel(defaultPreset)}` : ""}</option>
-        {Object.keys(presets).map((id) => (
-          <option key={id} value={id}>{presetLabel(id)}</option>
-        ))}
-      </select>
-      <label className="field">{t("newagent.where")}</label>
-      <select className="field" value={project} onChange={(e) => { setProject(e.target.value); setFolder(""); }}>
-        <option value="">{t("newagent.where.newproject")}</option>
-        {(projects.data ?? []).map((p) => (
-          <option key={p.id} value={p.id} disabled={!projectReachable(p)}>
-            {p.name} · {projectPath(p)}{projectReachable(p) ? "" : t("newagent.where.unmounted")}
-          </option>
-        ))}
-      </select>
-      {folderChoice.length > 0 && (
-        <>
-          <label className="field" htmlFor="newagent-folder">{t("newagent.folder")}</label>
-          <select id="newagent-folder" className="field" value={chosenFolder?.id ?? ""} onChange={(e) => setFolder(e.target.value)}>
-            {folderChoice.map((f) => (
-              <option key={f.id} value={f.position === 0 ? "" : f.id} disabled={!f.reachable}>
-                {folderName(f)} · {f.path}{f.position === 0 ? t("newagent.folder.primary") : ""}{f.reachable ? "" : t("newagent.where.unmounted")}
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-      {chosen ? <div className="sub">{t("newagent.where.inside", { root: chosenFolder?.path ?? projectPath(chosen) })}</div> : <div className="sub">{t("newagent.where.newproject.hint")}</div>}
-      {run.offered && (
-        <>
-          <label className="field" htmlFor="newagent-runon">{t("runon.label")}</label>
-          <select id="newagent-runon" className="field" value={run.env} onChange={(e) => run.pick(e.target.value as RunEnv)}>
-            <option value="container">{t("folder.env.container.long")}</option>
-            <option value="host" disabled={!run.hostReady}>{t("folder.env.host.long")}</option>
-          </select>
-          <div className="sub">{run.hostReady ? t(`runon.${run.env}.hint`) : t("runon.host.down")}</div>
-        </>
-      )}
-      <label className="toggle-row" data-private=""><input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /><span>{t("private.menu")}</span><span className="sub">{t("private.menu.hint")}. {t("private.newagent.hint")}</span></label>
-      {chosen && <label className="toggle-row"><input type="checkbox" checked={ownDirectory} onChange={(e) => setOwnDirectory(e.target.checked)} /><span>{t("newagent.directory.own")}</span><span className="sub">{t("newagent.directory.own.hint")}</span></label>}
-      <button type="button" className="disclosure" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
-        <span className={`chev ${advanced ? "down" : ""}`}>›</span> {t("newagent.advanced")}{loopOn ? t("newagent.advanced.loop") : ""}{toolsOff.length ? t("newagent.advanced.tools", { n: toolsOff.length }) : ""}
-      </button>
-      {advanced && (
-        <div className="disclosure-body">
-          <div className="sub">{t("newagent.shared")}</div>
-          <label className="toggle-row">
-            <input type="checkbox" checked={loopOn} onChange={(e) => setLoopOn(e.target.checked)} />
-            <span>{t("newagent.loop")}</span>
-            <span className="sub">{t("newagent.loop.hint")}</span>
-          </label>
-          {loopOn && (
-            <div className="loop-form">
-              <label className="field">{t("newagent.loop.label")}</label>
-              <textarea className="field" rows={3} value={loopText} onChange={(e) => setLoopText(e.target.value)} placeholder={t("newagent.loop.placeholder")} />
-              <div className="composer-row">
-                <select className="field" value={loopMode} onChange={(e) => setLoopMode(e.target.value as "interval" | "dynamic")}>
-                  <option value="interval">{t("newagent.loop.interval")}</option>
-                  <option value="dynamic">{t("loop.selfpaced")}</option>
-                </select>
-                {loopMode === "interval" && <input className="field" type="number" min={1} style={{ maxWidth: 110 }} value={loopMinutes} onChange={(e) => setLoopMinutes(e.target.value)} aria-label={t("newagent.loop.minutes")} />}
-                <input className="field" type="number" min={1} style={{ maxWidth: 130 }} placeholder={t("newagent.loop.max")} value={loopMax} onChange={(e) => setLoopMax(e.target.value)} aria-label={t("newagent.loop.max")} />
-              </div>
-              <div className="sub">{t("newagent.loop.note")}</div>
-            </div>
-          )}
-          <ToolPicker off={toolsOff} onChange={setToolsOff} note={t("newagent.tools.note")} />
-        </div>
-      )}
-      <div className="sheet-foot">
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" onClick={create} disabled={busy || !title.trim() || (loopOn && !loopText.trim())}>
-          {t("common.create")}
-        </button>
-      </div>
-    </Sheet>
-  );
 }
 
 export function useSessionTitles(): Record<string, string> {

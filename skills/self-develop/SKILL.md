@@ -1,6 +1,7 @@
 ---
 name: self-develop
 description: How to change your own code (host or core) safely: worktree, tests, then a pull request or an apply-and-restart.
+requires: self_development
 ---
 # Self-development workflow
 

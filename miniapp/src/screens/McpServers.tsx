@@ -7,6 +7,7 @@ import { api } from "../api";
 import { t } from "../i18n";
 import { confirmAsync, errorText } from "../ui";
 import { Segmented } from "../ui/components";
+import { McpQuickAdd, policyOptions, type McpPolicy } from "../mcpquickadd";
 
 
 type OAuthView = { scopes: string[]; issuer: string; client_id: string; client_secret: string; linked: boolean; redirect_uri: string };
@@ -14,7 +15,7 @@ export type McpServerView = {
   name: string; transport: "stdio" | "http"; command: string; args: string[]; url: string; description: string;
   headers: Record<string, string>; env: Record<string, string>; oauth: OAuthView | null;
   approval: string; tool_approval: Record<string, string>;
-  state: string; error: string | null; tools: string[];
+  state: string; error: string | null; tools: string[]; remote_tools?: string[]; stderr?: string; runs_in?: string;
 };
 type Probe = { state: string; error: string | null; tools: string[] };
 type Draft = {
@@ -121,6 +122,17 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
       toast(errorText(error));
     } finally { setBusy(null); }
   }
+  // The server's policy and its tools' own, saved with the rest of the card as it stands (its keys
+  // go back masked, and the host keeps the stored ones).
+  async function setPolicy(s: McpServerView, approval: string, toolApproval: Record<string, string>) {
+    setBusy(s.name);
+    try {
+      const answer = await api.put<{ servers: McpServerView[] }>(`/api/mcp/servers/${enc(s.name)}`, { ...body(draftOf(s)), approval, tool_approval: toolApproval });
+      setServers(answer.servers);
+    } catch (error) {
+      toast(errorText(error));
+    } finally { setBusy(null); }
+  }
   async function signOut(name: string) {
     setBusy(name);
     try {
@@ -216,11 +228,31 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
             <div className="dt-hint mono">{s.transport === "stdio" ? [s.command, ...s.args].join(" ") : s.url}</div>
             {s.description && <div className="dt-hint">{s.description}</div>}
             {s.error && <div className="dt-hint" data-tone="bad">{s.error}</div>}
-            {s.tools.length > 0 && <div className="dt-hint">{t("settings.mcp.tools", { n: s.tools.length })}</div>}
+            {s.stderr && s.state !== "ready" && <details className="mcp-stderr"><summary>{t("mcp.quick.stderr")}</summary><pre className="mono">{s.stderr}</pre></details>}
+            {s.runs_in && <div className="dt-hint quiet">{t(`mcp.where.${s.runs_in}`)}</div>}
+            <div className="mcp-policy" data-mcp-policy={s.approval}>
+              <span className="sub">{t("mcp.policy")}</span>
+              <Segmented value={s.approval as McpPolicy} label={t("mcp.policy")} options={policyOptions()} onChange={(approval) => void setPolicy(s, approval, s.tool_approval)} />
+            </div>
+            {(s.remote_tools ?? []).length > 0 && (
+              <details className="mcp-tools">
+                <summary>{t("settings.mcp.tools", { n: s.remote_tools!.length })}</summary>
+                {s.remote_tools!.map((tool) => (
+                  <label key={tool} className="mcp-tool-row" data-mcp-tool={tool}>
+                    <span className="mono grow truncate">{tool}</span>
+                    <select className="field" value={s.tool_approval[tool] ?? "auto"} disabled={!!busy} aria-label={t("mcp.policy.tool", { tool })}
+                      onChange={(e) => void setPolicy(s, s.approval, { ...s.tool_approval, [tool]: e.target.value })}>
+                      {policyOptions().map((option) => <option key={option.id} value={option.id}>{option.id === "auto" ? t("mcp.policy.tool.auto") : option.label}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </details>
+            )}
           </div>
         ))}
       </div>
-      {draft && !editing ? form : !draft && <button type="button" className="btn" style={{ marginTop: 10 }} onClick={() => setDraft(blank())}>{t("settings.mcp.new")}</button>}
+      {!draft && <McpQuickAdd toast={toast} onAdded={() => load()} />}
+      {draft && !editing ? form : !draft && <button type="button" className="btn ghost small" style={{ marginTop: 10 }} onClick={() => setDraft(blank())}>{t("settings.mcp.new")}</button>}
       <div className="sub" style={{ marginTop: 8 }}>{t("settings.mcp.apply")}</div>
     </div>
   );

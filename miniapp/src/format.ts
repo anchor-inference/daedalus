@@ -153,6 +153,17 @@ export function usd(value: number | null | undefined): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** A call's or a turn's length, short: "640 ms", "4.1 s", "43 s". */
+export function fmtMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
+}
+
+/** A rate as it reads at a glance: whole tokens past ten a second, one decimal below. Usage's speed
+ *  table and the speed under a turn say it the same way, so the two can be compared by eye. */
+export function fmtRate(rate: number): string {
+  return rate >= 10 ? String(Math.round(rate)) : rate.toFixed(1);
+}
+
 export function int(value: number | null | undefined): string {
   return num(value ?? 0);
 }

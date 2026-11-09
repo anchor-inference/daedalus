@@ -95,7 +95,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     # From an answer in a conversation: the Markdown link, then the bare address.
     for index, how in ((0, "markdown link"), (1, "bare address")):
         page.goto(f"{BASE}/agents/{S2}?token=t&lang={lang}")
-        page.wait_for_selector(".composer textarea", timeout=15000)
+        page.wait_for_selector(".composer .composer-field", timeout=15000)
         links = page.locator(f'a[data-app-link][href="{ADDRESS}"]')
         try:
             links.nth(1).wait_for(timeout=8000)
@@ -107,7 +107,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
         landed(page, say, how, marker=True)
         page.go_back()
         try:
-            page.wait_for_selector(".composer textarea", timeout=8000)
+            page.wait_for_selector(".composer .composer-field", timeout=8000)
         except Exception:  # noqa: BLE001
             say(f"{how}: Back did not return to the conversation ({page.evaluate('location.pathname')})")
 

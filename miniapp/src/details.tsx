@@ -20,6 +20,10 @@ import { contextSegments, contextTone, quotaTone } from "./detailsmodel";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
+import { ServerGrantButton, StandingGrants, type Standing } from "./servergrant";
+import { McpQuickAdd } from "./mcpquickadd";
+import { SessionSubagentModels } from "./subagentmodels";
+import type { SubagentModelsView } from "./api";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
 import { MoveLive, useFolderMove } from "./project/moves";
@@ -62,7 +66,7 @@ export type SessionDetailsProps = {
   focusKey?: number;
 };
 
-type PageId = "origin" | "context" | "usage" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
+type PageId = "origin" | "context" | "usage" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "grants" | "helpers" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
 
 /** One line of the inspector: what it opens, its icon and name, and its state in a few words. */
 type Prop = { id: PageId; icon: IconName; label: string; value?: ReactNode; title?: string; attn?: boolean; body: () => ReactNode };
@@ -73,7 +77,11 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   const sessionFolder = detail.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail.project?.folders?.[0] ?? null;
   const folderMove = useFolderMove(sessionFolder?.id);
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
-  const mcp = useMcp(id, toast);
+  // Bumped when the MCP page grants a server, so the standing grants reload beside it.
+  const [grantsTick, setGrantsTick] = useState(0);
+  const mcp = useMcp(id, toast, () => setGrantsTick((n) => n + 1));
+  const grants = useStanding(id, grantsTick);
+  const helpers = useHelperModels(id);
   const [page, setPage] = useState<PageId | null>(null);
   // The line a page was opened from, so Back puts the keyboard where it was.
   const from = useRef<PageId | null>(null);
@@ -114,7 +122,19 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
     { key: "uses", props: [
       { id: "mcp", icon: "plug", label: t("session.mcp"), attn: !!mcp.data?.servers.some((s) => s.error && mcp.data!.enabled.includes(s.name)),
         value: mcp.data ? (mcp.data.servers.length ? t("details.prop.of", { n: mcp.data.enabled.filter((name) => mcp.data!.servers.some((s) => s.name === name)).length, of: mcp.data.servers.length }) : <span className="quiet">{t("details.prop.none")}</span>) : undefined,
-        body: () => <McpPanel mcp={mcp} /> },
+        body: () => <McpPanel sessionId={id} toast={toast} mcp={mcp} /> },
+      // What stands granted in this session ("Allow similar", "Allow all from a server"), each with its time
+      // left and revocable; reloaded when the MCP page grants a server.
+      { id: "grants", icon: "shield", label: t("grant.section"),
+        value: grants === null ? undefined : grants.length ? String(grants.length) : <span className="quiet">{t("details.prop.none")}</span>,
+        body: () => <>
+          <p className="dt-hint">{t("grant.section.sub")}</p>
+          <StandingGrants sessionId={id} toast={toast} refresh={grantsTick} />
+        </> },
+      // Which models this session's helpers may run on; its own choice, or the default from Settings.
+      ...(helpers ? [{ id: "helpers" as const, icon: "spawn" as IconName, label: t("subm.title"),
+        value: helpers.inherited ? <span className="quiet">{t("subm.inherited")}</span> : helpers.mode === "chosen" ? t("details.prop.models", { n: helpers.presets.length }) : t(`subm.mode.${helpers.mode}`),
+        body: () => <SessionSubagentModels sessionId={id} toast={toast} /> }] : []),
       { id: "toolgroups", icon: "skill", label: t("session.toolgroups"), body: () => <SessionToolGroups sessionId={id} toast={toast} /> },
       ...(!conductor ? [{ id: "tools" as const, icon: "wrench" as IconName, label: t("session.tools"),
         value: (detail.tools_off?.length ?? 0) > 0 ? t("details.prop.off", { n: detail.tools_off!.length }) : <span className="quiet">{t("details.prop.allon")}</span>,
@@ -594,10 +614,10 @@ function useToolTiming(sessionId: string): ToolTime[] {
 
 type McpServer = { name: string; description: string; connected: boolean; error: string | null; tools: string[]; state: "disabled" | "connecting" | "ready" | "auth_required" | "unavailable" | "draining"; catalog_revision: number; last_error_code: string | null; in_flight: number };
 
-type Mcp = { data: { enabled: string[]; servers: McpServer[] } | null; busy: string | null; toggle: (server: string, enabled: boolean) => Promise<void> };
+type Mcp = { data: { enabled: string[]; servers: McpServer[] } | null; busy: string | null; load: () => void; toggle: (server: string, enabled: boolean) => Promise<void>; grant: (server: string, hours: number) => Promise<void> };
 
 /** The session's MCP servers, read once for both the line of the list (how many are on) and the page. */
-function useMcp(sessionId: string, toast: (t: string) => void): Mcp {
+function useMcp(sessionId: string, toast: (t: string) => void, onGranted: () => void): Mcp {
   const [data, setData] = useState<{ enabled: string[]; servers: McpServer[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => {
@@ -618,13 +638,44 @@ function useMcp(sessionId: string, toast: (t: string) => void): Mcp {
       setBusy(null);
     }
   };
-  return { data, busy, toggle };
+  const grant = async (server: string, hours: number) => {
+    try {
+      await api.post(`/api/sessions/${sessionId}/policy/grant-server`, { server, hours });
+      onGranted();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  };
+  return { data, busy, load, toggle, grant };
 }
 
-function McpPanel({ mcp }: { mcp: Mcp }) {
-  const { data, busy, toggle } = mcp;
+/** The session's standing grants, for the count on their line; the page lists and revokes them itself. */
+function useStanding(sessionId: string, refresh: number): Standing[] | null {
+  const [rows, setRows] = useState<Standing[] | null>(null);
+  useEffect(() => {
+    api.get<{ standing: Standing[] }>(`/api/sessions/${sessionId}/policy/standing`).then((r) => setRows(Array.isArray(r?.standing) ? r.standing : [])).catch(() => setRows(null));
+  }, [sessionId, refresh]);
+  return rows;
+}
+
+/** The session's helper models, for the state on their line; null leaves the line out, as the page would. */
+function useHelperModels(sessionId: string): SubagentModelsView | null {
+  const [view, setView] = useState<SubagentModelsView | null>(null);
+  useEffect(() => {
+    let current = true;
+    api.get<SubagentModelsView>(`/api/sessions/${encodeURIComponent(sessionId)}/subagent-models`)
+      .then((v) => { if (current) setView(Array.isArray(v?.allowed) && Array.isArray(v?.options) ? v : null); })
+      .catch(() => undefined);
+    return () => { current = false; };
+  }, [sessionId]);
+  return view;
+}
+
+function McpPanel({ sessionId, toast, mcp }: { sessionId: string; toast: (t: string) => void; mcp: Mcp }) {
+  const { data, busy, toggle, grant, load } = mcp;
   if (!data) return <div className="empty">…</div>;
-  if (data.servers.length === 0) return <div className="empty">{t("session.mcp.none")}</div>;
+  const quick = <McpQuickAdd sessionId={sessionId} toast={toast} onAdded={load} />;
+  if (data.servers.length === 0) return <><div className="empty">{t("session.mcp.none")}</div>{quick}</>;
   return (
     <div className="dt-mcp">
       <p className="dt-hint">{t("session.mcp.sub")}</p>
@@ -643,9 +694,11 @@ function McpPanel({ mcp }: { mcp: Mcp }) {
             <div className={`dt-hint${s.description ? "" : " quiet"}`}>{s.description || t("session.mcp.nodesc")}</div>
             {s.error && <Note tone="bad">{t("session.mcp.error", { error: s.error }).replace(/^ · /, "")}</Note>}
             {s.tools.length > 0 && <div className="dt-tags">{s.tools.map((tool) => <span key={tool} className="dt-tag mono">{tool}</span>)}</div>}
+            {on && s.state === "ready" && <div className="dt-server-grant"><ServerGrantButton server={s.name} onGrant={(hours) => void grant(s.name, hours)} /></div>}
           </div>
         );
       })}
+      {quick}
     </div>
   );
 }

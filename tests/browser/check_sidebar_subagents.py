@@ -64,7 +64,7 @@ def run() -> int:
         main_plus_error = centres(page, ".start .iconbtn.plus")
         if main_plus_error > 1:
             problems.append(f"the start composer plus is {main_plus_error:.1f}px off centre")
-        page.locator(".start textarea").fill("The login form rejects a correct password")
+        page.locator(".start .composer-field").fill("The login form rejects a correct password")
         page.locator(".start .roundbtn.primary").click()
         page.wait_for_url(f"**/agents/{S1}")
         if not posted or posted[0].get("autotitle") is not True or "login form" not in str(posted[0].get("title")):
@@ -168,7 +168,7 @@ def run() -> int:
         page.locator(f'.sidebar [data-session="{S1}"] .sb-subs').click()
         expect(page.locator(".sidebar .sb-sub")).to_have_count(0)
 
-        # A phone's rows carry no "+" of their own: a new chat in a project is the first command of
+        # A phone's rows carry no "+" of their own: a new agent in a project is the first command of
         # the project's sheet (its section's ⋮) and of each of its rows' sheets.
         phone = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         phone.route("**/api/**", stub)
@@ -180,10 +180,10 @@ def run() -> int:
             section = page_.locator(".ph-chats section[data-project]").first
             name = section.locator(".ph-sec-t").inner_text()
             section.locator(".ph-sec-act .ph-ib").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New chat in {name}")
+            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
             section.locator(".ph-row-more").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New chat in {name}")
+            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
             if width != 390:
                 page_.close()

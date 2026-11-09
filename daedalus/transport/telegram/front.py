@@ -40,8 +40,10 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
+from daedalus.host import subagent_models
 from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.events import AppEvent, EventFilter
+from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
 from daedalus.host.session_runner import TENANT, Attachment, SessionManager, SessionState
@@ -466,6 +468,13 @@ APPROVAL_KEY_RE = re.compile(r"Approval key: ([0-9a-f]{12})")
 HANDOFF_MARK = "Handed to the operator:"
 """How :func:`daedalus.host.action_rules.handoff_text` begins: the refusal of an action the operator keeps."""
 """How a policy refusal names its key in the tool result; the button under it grants exactly that call."""
+
+
+def server_grant_rows(session_id: str, key: str, server: str) -> list[list[tuple[str, str]]]:
+    """The "Allow all from <server>" buttons under a refusal: the default span on its own, the others in a row."""
+    hours = [h for h in SERVER_GRANT_HOURS if h != SERVER_GRANT_DEFAULT_HOURS]
+    return [[(f"🔓 All from {server[:24]} · {SERVER_GRANT_DEFAULT_HOURS} h", f"ps:{session_id}:{key}:{SERVER_GRANT_DEFAULT_HOURS}")],
+            [(f"{h} h" if h else "∞ ⚠️", f"ps:{session_id}:{key}:{h}") for h in hours]]
 
 
 class TelegramFront:
@@ -1514,6 +1523,32 @@ class TelegramFront:
         if query.message is not None:
             await query.message.edit_text(f"✅ Allowed once ({key}): {what}. The agent retries it on its next step; the grant expires in {result['expires_in_minutes']} minutes.", reply_markup=None)
 
+    async def _on_server_grant(self, query: CallbackQuery, data: list[str]) -> None:
+        """"Allow all from <server>" pressed under a refusal: ``ps:<session>:<key>:<hours>``, 0 for the whole session.
+
+        The same grant as the app's button, read by the same rules: it stands in this session only,
+        a guest's turn and a run touched by another agent's text use none of it, and it ends on time."""
+        if len(data) != 4:
+            await query.answer("stale button")
+            return
+        _, session_id, key, hours = data
+        state = await self.manager.get_state(session_id)
+        if state is None or key not in (state.metadata.get("policy_pending") or {}):
+            await query.answer("this request is closed")
+            if query.message is not None:
+                await query.message.edit_text("This request is closed: it was answered or its run is over. The agent asks again if it still needs it.", reply_markup=None)
+            return
+        try:
+            result = await self.manager.grant_server(session_id, key, hours=float(hours), via="telegram")
+        except (KeyError, ValueError) as exc:
+            await query.answer(str(exc)[:180])
+            return
+        span = "for the rest of this session" if float(hours) == 0 else f"for {hours} h"
+        await query.answer("allowed")
+        if query.message is not None:
+            warning = " ⚠️ With no end: take it back in the session's settings when you are done." if float(hours) == 0 else ""
+            await query.message.edit_text(f"🔓 Every tool of {result['server']} runs without asking in this session {span}.{warning}", reply_markup=None)
+
     async def _on_close_decision(self, query: CallbackQuery, data: list[str]) -> None:
         if len(data) != 3:
             await query.answer("stale button")
@@ -2336,6 +2371,9 @@ class TelegramFront:
         if data[0] == "pa":
             await self._on_policy_decision(query, data)
             return
+        if data[0] == "ps":
+            await self._on_server_grant(query, data)
+            return
         if data[0] == "hc":
             await self._on_clear_decision(query, data)
             return
@@ -2574,8 +2612,12 @@ class TelegramFront:
                 pending = (state.metadata.get("policy_pending") or {}).get(match.group(1)) if state is not None else None
                 what = f"{pending['tool']}: {pending['text']}" if pending else "a call the policy wants approved"
                 if outbox is not None:
+                    key = match.group(1)
+                    rows = [[("✅ Allow once", f"pa:{session_id}:{key}"), ("✖ Leave refused", f"pa:{session_id}:{key}:no")]]
+                    if pending and pending.get("server"):
+                        rows.extend(server_grant_rows(session_id, key, str(pending["server"])))
                     try:
-                        await self.send_choice(outbox, f"🛂 The policy stopped {what}\n\nAllow it once? The agent retries on its next step.", [[("✅ Allow once", f"pa:{session_id}:{match.group(1)}"), ("✖ Leave refused", f"pa:{session_id}:{match.group(1)}:no")]])
+                        await self.send_choice(outbox, f"🛂 The policy stopped {what}\n\nAllow it once? The agent retries on its next step.", rows)
                     except Exception:  # noqa: BLE001
                         logger.warning("could not post the approval buttons", exc_info=True)
 
@@ -2759,6 +2801,16 @@ class TelegramFront:
             metadata["tools_off"] = sorted(set(tools_off))
         project = await self.manager.project_of(session_id)
         parent = await self.manager.get_state(session_id)
+        if parent is not None:
+            # The session's list of helper models holds for an agent it spawns as much as for a subagent:
+            # otherwise SpawnAgent is the way round it. The new agent runs on the default preset when none
+            # is named, so that is the one checked, and it keeps the list as its own.
+            allowed = self.manager.subagent_allowance(parent.metadata, await self.manager.live.load(session_id))
+            if preset and preset not in self.manager.config.presets:
+                raise ValueError(f"unknown model preset {preset!r}")
+            if allowed.limited:
+                allowed.check(preset or self.manager.session_preset_id({}))
+                metadata[subagent_models.KEY] = allowed.inherited()
         # A site session's child stays on the site. Opening it a topic would put the bot's
         # words back into Telegram for a chat the operator started in the Mini App.
         if parent is not None and parent.metadata.get("telegram_detached"):

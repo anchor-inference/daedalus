@@ -32,7 +32,16 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, GATES, Unhandled, expect_app, folders, fulfil_shared, reveal_composer  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    GATES,
+    Unhandled,
+    expect_app,
+    field_text,
+    folders,
+    fulfil_shared,
+    reveal_composer,
+)
 from event_feed import EventFeed  # noqa: E402
 
 UNHANDLED = Unhandled()
@@ -81,6 +90,7 @@ class Host:
         # The request "Allow similar" has a family for, and the other open ones that family answers.
         self.similar_key = ""
         self.covered: list[str] = []
+        self.server_key = ""
         # The keys of the requests the host still holds open; the app offers a refusal only while its
         # key is here, as the real host's detail says.
         self.open: list[str] = []
@@ -182,6 +192,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []
             HOST.answered(*resolved)
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "similar": {"label": "rm*"}, "resolved": resolved, "approves": [], "standing": []}))
+        if rel == f"/api/sessions/{SESSION}/policy/grant-server":
+            key = str((data or {}).get("key") or "")
+            HOST.answered(key)
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "server": "mobile-mcp", "resolved": [key], "approves": [], "standing": []}))
         if rel in (f"/api/sessions/{SESSION}/policy/grant", f"/api/sessions/{SESSION}/policy/refuse"):
             HOST.answered(str((data or {}).get("key") or ""))
             return route.fulfill(status=200, content_type="application/json", body="{}")
@@ -223,7 +237,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         body = HOST.detail()
     elif rel.startswith(f"/api/sessions/{SESSION}/policy/similar/"):
         key = rel.rsplit("/", 1)[1]
-        body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None}
+        body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None,
+                "server": {"name": "mobile-mcp", "hours": [1, 2, 6, 12, 0], "default_hours": 6} if key == HOST.server_key else None}
     elif rel.startswith(f"/api/sessions/{SESSION}/"):
         body = []
     elif rel == "/api/settings":
@@ -254,7 +269,7 @@ def primary(page: Page) -> str:
 
 
 def field(page: Page):  # type: ignore[no-untyped-def]
-    return page.locator(".composer textarea")
+    return page.locator(".composer .composer-field")
 
 
 def posts(kind: str, method: str | None = None) -> list[tuple[str, str, dict | None]]:
@@ -334,8 +349,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).type("first line")
     page.keyboard.press("Shift+Enter")
     field(page).type("second line")
-    if field(page).input_value() != "first line\nsecond line":
-        problems.append(f"Shift+Enter did not insert a line ({field(page).input_value()!r})")
+    if field_text(field(page)) != "first line\nsecond line":
+        problems.append(f"Shift+Enter did not insert a line ({field_text(field(page))!r})")
     if primary(page) != "send" or page.locator(".composer .roundbtn.primary").is_disabled():
         problems.append("with a draft the circle is not an enabled Send")
     two = page.locator(".composer-box").bounding_box()
@@ -350,20 +365,20 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if stored != "first line\nsecond line":
         problems.append(f"the draft was not remembered ({stored!r})")
     page.reload()
-    page.wait_for_selector(".composer textarea", timeout=15000)
+    page.wait_for_selector(".composer .composer-field", timeout=15000)
     page.wait_for_timeout(300)
-    if field(page).input_value() != "first line\nsecond line":
-        problems.append(f"the draft did not come back after a reload ({field(page).input_value()!r})")
+    if field_text(field(page)) != "first line\nsecond line":
+        problems.append(f"the draft did not come back after a reload ({field_text(field(page))!r})")
     field(page).click()
     page.keyboard.press("Enter")
     reached(page, "/messages", 0, "Enter", problems)
-    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
+    page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === ''")
     sent = posts("/messages")
     print("sent:", sent)
     first_id = sent[0][2].get("client_message_id") if len(sent) == 1 else None
     if len(sent) != 1 or sent[0][2].get("text") != "first line\nsecond line" or not first_id or len(first_id) > 64:
         problems.append(f"Enter did not send the draft as a message ({sent})")
-    if field(page).input_value() != "":
+    if field_text(field(page)) != "":
         problems.append("the field was not cleared after sending")
     if page.evaluate("() => localStorage.getItem('daedalus.draft.sess-1')"):
         problems.append("the stored draft was not cleared after sending")
@@ -447,9 +462,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         edit.click()
         reached(page, f"/steer/{edited_id}", 0, "the card's Edit", problems, method="DELETE")
         try:
-            page.wait_for_function("() => document.querySelector('.composer textarea')?.value === 'rename the column first'", timeout=3000)
+            page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === 'rename the column first'", timeout=3000)
         except Exception:  # noqa: BLE001
-            problems.append(f"Edit did not put the words back in the field ({field(page).input_value()!r})")
+            problems.append(f"Edit did not put the words back in the field ({field_text(field(page))!r})")
         if page.locator(".composer .steer").count():
             problems.append("the card stayed after Edit")
         page.wait_for_timeout(300)
@@ -479,7 +494,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     before_queue = len(posts("/messages"))
     page.locator(".composer .roundbtn.primary").click()
     reached(page, "/messages", before_queue, "the circle during a run", problems)
-    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
+    page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === ''")
     queued = posts("/messages")[-1][2]
     if queued.get("follow_up") is not True or queued.get("steer") is True:
         problems.append(f"the circle during a run did not queue a follow-up ({queued})")
@@ -578,6 +593,35 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     HOST.similar_key = ""
     HOST.covered = []
 
+    # An MCP server's tool asking: "Allow all from <server>" with six hours chosen, and a span changed
+    # before the press is the span that reaches the host.
+    HOST.messages = HOST.messages[:2]
+    HOST.server_key = "3c3c3c3c3c3c"
+    HOST.messages = HOST.messages + [
+        message(107, "assistant", "", tool_calls=[{"id": "c_tap", "name": "Mcp_MobileMcp_mobile_click_on_screen_at_coordinates", "arguments": {"x": 10, "y": 20}}]),
+        message(108, "tool", "", tool_results=[{"id": "c_tap", "content": "needs the operator's approval: an MCP tool that may change or reach the outside world.\nApproval key: 3c3c3c3c3c3c", "is_error": True}]),
+    ]
+    HOST.open.append("3c3c3c3c3c3c")
+    page.reload()
+    page.wait_for_selector(".composer .dock.approval [data-action='allow-server']", timeout=15000)
+    grant = page.locator(".composer .dock.approval [data-action='allow-server']")
+    print("allow all:", grant.inner_text())
+    if "Allow all from mobile-mcp" not in grant.inner_text():
+        problems.append(f"the server button does not name the server ({grant.inner_text()!r})")
+    if grant.locator("select").input_value() != "6":
+        problems.append("six hours is not the span chosen at first")
+    grant.locator("select").select_option("2")
+    before = len(posts("/policy/grant-server"))
+    grant.locator("button").click()
+    reached(page, "/policy/grant-server", before, "Allow all from the server", problems)
+    asked = posts("/policy/grant-server")
+    if not asked or asked[-1][2] != {"key": "3c3c3c3c3c3c", "hours": 2}:
+        problems.append(f"Allow all did not reach the host with the key and the span ({asked})")
+    page.wait_for_timeout(200)
+    if page.locator(".composer .dock.approval").count():
+        problems.append("the dock came back for a request the server grant answered")
+    HOST.server_key = ""
+
     # Refusing tells the host as well, so the request is closed wherever else it is shown.
     HOST.messages = HOST.messages[:2]
     HOST.refuse("abcdef012345")
@@ -668,8 +712,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).fill("/web")
     page.wait_for_selector(".palette .palette-skill", timeout=5000)
     page.locator(".palette .palette-skill").first.click()
-    if not field(page).input_value().startswith(("Use the web-design-reviewer skill", "Используй навык web-design-reviewer")):
-        problems.append(f"picking a skill did not name it in the draft ({field(page).input_value()!r})")
+    if not field_text(field(page)).startswith(("Use the web-design-reviewer skill", "Используй навык web-design-reviewer")):
+        problems.append(f"picking a skill did not name it in the draft ({field_text(field(page))!r})")
     field(page).fill("")
 
     # The model list: opens from the pill, names the presets with their kind, a pick reaches the host.
@@ -799,7 +843,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("phone: the model selector crowds the idle row")
     if page.locator(".composer .effort-select").count():
         problems.append("phone: effort still occupies a separate composer control")
-    fs = page.evaluate("() => getComputedStyle(document.querySelector('.composer textarea')).fontSize")
+    fs = page.evaluate("() => getComputedStyle(document.querySelector('.composer .composer-field')).fontSize")
     if fs != "16px":
         problems.append(f"phone: the field is {fs}, which Safari would zoom into")
     field(page).click()
@@ -896,7 +940,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
             for state in ("idle", "running", "waiting"):
                 HOST.status = state
                 page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang={language}")
-                page.wait_for_selector(".composer textarea")
+                page.wait_for_selector(".composer .composer-field")
                 page.wait_for_timeout(150)
                 # A phone's composer rests as one row and opens onto its toolbar under the finger;
                 # the rows measured here are the open shape's (phone() measures the resting one).
@@ -906,7 +950,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                 measure = page.evaluate("""() => {
                   const one = s => document.querySelector(s);
                   const rect = el => { const r = el.getBoundingClientRect(); return {x:r.x, y:r.y, w:r.width, h:r.height, bottom:r.bottom, right:r.right}; };
-                  const field = one('.composer textarea'), cs = getComputedStyle(field);
+                  const field = one('.composer .composer-field'), cs = getComputedStyle(field);
                   const row = one('.composer-row');
                   const controls = [...row.querySelectorAll('button, .composer-mode')].filter(el => el.getBoundingClientRect().width > 0);
                   return {field:rect(field), card:rect(one('.composer-box')), row:rect(row),
@@ -959,7 +1003,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
             page.evaluate("""() => {
               const pasted = new DataTransfer();
               pasted.items.add(new File(['pasted'], 'paste.txt', {type:'text/plain'}));
-              document.querySelector('.composer textarea').dispatchEvent(new ClipboardEvent('paste', {clipboardData:pasted, bubbles:true, cancelable:true}));
+              document.querySelector('.composer .composer-field').dispatchEvent(new ClipboardEvent('paste', {clipboardData:pasted, bubbles:true, cancelable:true}));
               const dropped = new DataTransfer();
               dropped.items.add(new File(['dropped'], 'drop.txt', {type:'text/plain'}));
               document.querySelector('.chat').dispatchEvent(new DragEvent('drop', {dataTransfer:dropped, bubbles:true, cancelable:true}));

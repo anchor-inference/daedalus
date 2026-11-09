@@ -11,6 +11,7 @@ hand off work and end its turn; the result arrives on its own.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -19,10 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from protocore.contracts.types import MessageRole, TextBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolUseBlock
 
 from daedalus.config import REASONING_EFFORTS
+from daedalus.host import subagent_models
 from daedalus.host.prompts import split_headline
+from daedalus.host.session_runner import BUDGET_WAY_OUT, PROVIDER_OUTAGE_KINDS
 from daedalus.tools._common import idle_words
 
 if TYPE_CHECKING:
@@ -37,6 +40,27 @@ TASK_KEPT_CHARS = 400
 TITLE_CHARS = 160
 REMINDER_ANSWER_CHARS = 200
 NO_ANSWER = "(the subagent's run ended without a final reply; see its session)"
+BUDGET_POLL_SECONDS = 30.0
+"""How often the budget watch looks whether a held report can go and a parked helper can go on.
+The supervisor itself rereads the day's spend once a minute, so a shorter wait would find nothing new."""
+PROGRESS_TEXT_CHARS = 1500
+PROGRESS_FILES = 8
+WRITING_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
+
+CAP_KINDS = frozenset({"spending_cap", "run_cap", "run_tokens", "run_minutes", "session_cap", "provider_cap", "total_cap"})
+"""The error kinds a host cap ends a run with: the work did not fail, a limit stopped it."""
+
+PARKED_KEY = "subagent_parked"
+"""On a helper the daily cap stopped: why and when, until it is driven on. The panel draws it as parked."""
+HELD_KEY = "subagent_reports_held"
+"""On a helper whose report its leader could not take: the reports, in order, until each is delivered."""
+NOTICE_KEY = "daedalus.subagent_notice"
+"""On the line in the leader's chat that says a helper is parked or its report waits, for the app to draw."""
+
+CONTINUE_NOTE = (
+    "[the daily spending cap that stopped your previous run is open again: continue the task from where it "
+    "stopped — your files and history are as you left them — and end with your complete final reply]"
+)
 
 
 EFFORTS = ("off", *REASONING_EFFORTS)
@@ -82,6 +106,48 @@ def no_answer(state: Any) -> str:
     """The missing reply, with the error that ended the run when the host recorded one."""
     kind = str(getattr(state, "last_error_kind", "") or "")
     return f"(the subagent's run ended without a final reply: {kind}; see its session)" if kind else NO_ANSWER
+
+
+def stop_of(state: Any, status: str, *, retry_limit: int) -> tuple[str, str]:
+    """Why a helper's run ended, as ``(cause, detail)``.
+
+    ``cause`` is ``completed``; ``budget`` (the daily cap: it is parked and goes on by itself when the
+    cap reopens); ``outage`` (the provider failed and the host drives the run again after a wait);
+    ``cap`` (another cap, which someone has to raise); ``cancelled``; or ``failed``. A cap is read off
+    the error kind before the status, because the per-run caps stop the loop cooperatively and the run
+    then ends as cancelled, which alone would read as somebody pressing Stop.
+    """
+    kind = str(getattr(state, "last_error_kind", "") or "")
+    detail = " ".join(str(getattr(state, "last_error_message", "") or "").split())[:400]
+    if kind == "spending_cap" and "daily" in detail.lower():
+        return "budget", detail
+    if kind in CAP_KINDS:
+        return "cap", detail
+    if status == "completed":
+        return "completed", ""
+    if status == "cancelled":
+        return "cancelled", detail
+    if kind in PROVIDER_OUTAGE_KINDS and not getattr(state, "last_error_permanent", False) and int(getattr(state, "outage_streak", 0) or 0) < retry_limit:
+        return "outage", detail
+    return "failed", detail or kind
+
+
+def stop_header(name: str, cause: str, detail: str) -> str:
+    """The first line of a report from a helper that ended without its own: what happened and what comes next."""
+    keep = f"It is kept: SubAgentSend({name!r}, …) continues it, SubAgentDelete({name!r}) drops it."
+    if cause == "budget":
+        return (
+            f"[subagent {name!r} paused by the daily spending cap; it is parked, not removed. It goes on by itself once "
+            f"{BUDGET_WAY_OUT}, and its final report comes then, once. Meanwhile you can wait for it, carry on without it "
+            f"(SubAgentDelete({name!r}) drops it), or tell the operator.]"
+        )
+    if cause == "outage":
+        return f"[subagent {name!r} stopped: the model provider failed ({detail or 'no detail'}). The host drives it again after a wait, and its final report comes when it finishes. SubAgentDelete({name!r}) drops it.]"
+    if cause == "cap":
+        return f"[subagent {name!r} stopped by a cap before its report: {detail or 'a spending cap'}. {keep}]"
+    if cause == "cancelled":
+        return f"[subagent {name!r} was stopped before it finished; it wrote no report. {keep}]"
+    return f"[subagent {name!r} failed before its report: {detail or 'no detail recorded'}. {keep}]"
 
 TASK_HEADER = (
     "[task from your leader session {leader} via SubAgent — you work in the leader's workspace; "
@@ -202,13 +268,22 @@ class Subagents:
         self._removing: set[str] = set()
         """Subagents a removal was scheduled for: finished and on their way out, so never "lingering"."""
         self._reminders: set[asyncio.Task[None]] = set()
+        self._watching = True
+        """Whether some helper may hold a report or be parked, so the budget watch has to look. True at
+        start, because both are stored on the helper and outlive a restart; set again whenever one is."""
 
-    async def models(self) -> list[str]:
-        """Preset ids a subagent can run on: those whose provider is configured."""
+    async def allowance(self, leader_id: str) -> Any:
+        """The presets this leader's helpers may run on: those whose provider is configured, narrowed
+        by the session's (or the global) choice of helper models."""
         manager = self.app.manager
         assert manager is not None
-        available = set(manager.providers.available())
-        return [pid for pid, preset in self.app.config.presets.items() if preset.provider in available and preset.model]
+        leader = await manager.get_state(leader_id)
+        if leader is None:
+            raise ValueError("unknown leader session")
+        return manager.subagent_allowance(leader.metadata, await manager.live.load(leader_id))
+
+    async def models(self, leader_id: str) -> list[str]:
+        return list((await self.allowance(leader_id)).presets)
 
     async def spawn(
         self,
@@ -252,11 +327,12 @@ class Subagents:
                 "set in Settings → Limits → Subagents at once, config subagents.max_active); wait for their reports"
             )
         effort = check_effort(effort)
-        models = await self.models()
+        allowed = await self.allowance(leader_id)
         if model is not None:
             model = model.strip()
-            if model not in models:
-                raise ValueError(f"unknown model {model!r}; choose one of: {', '.join(models)}")
+            if model not in allowed.presets and (model not in self.app.config.presets or not allowed.limited):
+                raise ValueError(f"unknown model {model!r}; choose one of: {', '.join(allowed.presets)}")
+        allowed.check(model)
         # Withholding runs down the tree, not just one level: a subagent that keeps SubAgent would
         # otherwise hand a grandchild the very tool its leader took away from it, and tools_off would
         # be a request rather than the enforcement it is sold as. Names the leader carries are already
@@ -286,6 +362,8 @@ class Subagents:
         }
         if withheld:
             metadata["tools_off"] = withheld
+        if allowed.inherited() is not None:
+            metadata[subagent_models.KEY] = allowed.inherited()
         if leader.metadata.get("mcp") is not None:
             metadata["mcp"] = leader.metadata["mcp"]
         # A subagent works beside its leader, which in a project means inside the project: the same
@@ -381,6 +459,15 @@ class Subagents:
                 if state is None:
                     raise RuntimeError("the subagent session disappeared")
                 if not state.running and state.pending is None and not unfinished_jobs(manager, cid):
+                    cause, detail = stop_of(state, "failed" if state.last_error_kind else "completed", retry_limit=self.app.config.ops.provider_retry_max_attempts)
+                    if cause != "completed":
+                        # A helper the cap or the provider stopped is not done, and removing it lost the
+                        # work it had under way: it stays, and the leader is told what it had done.
+                        name = str(state.metadata.get("subagent_name") or cid)
+                        result["answer"] = stop_header(name, cause, detail) + "\n\n" + contract_verdict(state, await self.progress(cid))
+                        if cause == "budget":
+                            await self._park(cid, run_id=str(state.run_id or result.get("run_id") or ""), detail=detail, mode="stopped")
+                        return result
                     result["answer"] = contract_verdict(state, await self.answer(cid) or no_answer(state))
                     if not state.metadata.get("subagent_keep"):
                         self._remove_later(cid)
@@ -408,6 +495,9 @@ class Subagents:
             raise RuntimeError(f"subagent {name!r} is waiting on a question; it cannot take a message now")
         if effort is not None:
             await set_effort(manager, cid, effort)
+        if state.metadata.get(PARKED_KEY) and not state.running:
+            # The leader continues it by hand: the budget watch must not start a second run on top.
+            await self._set_meta(cid, {PARKED_KEY: None})
         if state.running:
             await manager.submit(cid, FOLLOW_UP_HEADER.format(leader=leader_id) + text, steer=True, as_answer=False, origin=f"subagent-task:{leader_id}")
             return {"session_id": cid, "name": match["name"], "delivered": "steer", "answer": None}
@@ -470,11 +560,18 @@ class Subagents:
             meta = row["metadata"]
             state = await manager.get_state(row["id"])
             task = str(meta.get("subagent_task") or "").strip()
+            status = status_of(state) if state is not None else row["status"]
+            parked = meta.get(PARKED_KEY) if isinstance(meta.get(PARKED_KEY), dict) else None
+            if parked and status in ("idle", "failed"):
+                # Not a failure and not done: the cap stopped it and the host drives it on when it reopens.
+                status = "parked"
             out.append({
                 "session_id": row["id"],
                 "name": meta.get("subagent_name"),
                 "title": (task.splitlines()[0] if task else "")[:TITLE_CHARS],
-                "status": status_of(state) if state is not None else row["status"],
+                "status": status,
+                "parked": {"reason": str(parked.get("reason") or "budget"), "at": str(parked.get("at") or "")} if parked else None,
+                "reports_held": len(meta.get(HELD_KEY) or ()),
                 "running": bool(state and state.running),
                 "model": await model_label(state) if model_label is not None and state is not None else "",
                 "kept": bool(meta.get("subagent_keep")),
@@ -484,7 +581,7 @@ class Subagents:
                 "run_started_at": run_started_at(state) if state is not None else None,
             })
         out.sort(key=lambda view: view["last_activity_at"] or "", reverse=True)
-        out.sort(key=lambda view: view["status"] not in ("running", "waiting"))
+        out.sort(key=lambda view: view["status"] not in ("running", "waiting", "parked"))
         return out
 
     async def _match(self, leader_id: str, name: str) -> dict[str, Any]:
@@ -558,19 +655,27 @@ class Subagents:
         if state is None:
             return
         if state.metadata.get("subagent_of") and status != "awaiting":
-            await self._deliver_report(session_id, state, status)
+            await self._deliver_report(session_id, state, status, run_id)
         if status == "completed":
             try:
                 await self._remind_lingering(session_id, state)
             except Exception:  # noqa: BLE001 — a reminder is a courtesy; the run is over either way
                 logger.exception("could not check the idle subagents of %s", session_id)
 
-    async def _deliver_report(self, session_id: str, state: Any, status: str) -> None:
+    async def _deliver_report(self, session_id: str, state: Any, status: str, run_id: str) -> None:
+        """Tell the leader how the helper's run ended: its reply, or what stopped it and what it had done.
+
+        A helper that ended without its own reply — the daily cap, a provider failure, a crash, a Stop —
+        used to be reported as "finished: failed" over "(no final reply)" and then deleted, so the leader
+        learned nothing of the work under way and the operator saw the helper vanish. It is kept now, and
+        the report says what happened, what it had done, and whether it goes on by itself.
+        """
         manager = self.app.manager
         assert manager is not None
-        if session_id in self._waited:
-            return  # the leader's tool call collects the answer itself
-        if status == "completed" and unfinished_jobs(manager, session_id):
+        if session_id in self._waited or session_id in self._removing:
+            return  # the leader's tool call collects the answer itself, or the leader deleted it
+        cause, detail = stop_of(state, status, retry_limit=self.app.config.ops.provider_retry_max_attempts)
+        if cause == "completed" and unfinished_jobs(manager, session_id):
             # Not done: the job's end starts the subagent's next run, and that run's end reports.
             return
         leader_id = str(state.metadata["subagent_of"])
@@ -579,17 +684,227 @@ class Subagents:
             logger.warning("subagent %s finished but its leader %s is gone", session_id, leader_id)
             return
         name = str(state.metadata.get("subagent_name") or session_id)
-        answer = await self.answer(session_id) if status == "completed" else None
-        body = contract_verdict(state, answer or no_answer(state))
         kept = bool(state.metadata.get("subagent_keep"))
-        fate = f"It stays for follow-ups: SubAgentSend({name!r}, …)." if kept else "It has been removed; its files are in your workspace."
-        report = f"[subagent {name!r} finished: {status}. {fate}]\n\n{body}"
-        try:
-            await manager.submit(leader_id, report, as_answer=False, origin=f"subagent:{name}")
-        except Exception:  # noqa: BLE001
-            logger.exception("could not deliver subagent %s report to %s", session_id, leader_id)
-        if not kept:
+        if cause == "completed":
+            body = contract_verdict(state, await self.answer(session_id) or no_answer(state))
+            fate = f"It stays for follow-ups: SubAgentSend({name!r}, …)." if kept else "It has been removed; its files are in your workspace."
+            report = f"[subagent {name!r} finished: {status}. {fate}]\n\n{body}"
+            if state.metadata.get(PARKED_KEY):
+                await self._set_meta(session_id, {PARKED_KEY: None})
+        else:
+            report = stop_header(name, cause, detail) + "\n\n" + contract_verdict(state, await self.progress(session_id))
+            if cause == "budget":
+                await self._park(session_id, run_id=run_id, detail=detail, mode="stopped", report=False)
+        delivered = await self._to_leader(session_id, leader_id, name, report, f"subagent-report:{session_id}:{run_id}")
+        if cause == "budget" or not delivered:
+            await self._note_parked(leader_id, session_id, name, cause=cause, detail=detail, delivered=delivered)
+        if cause == "completed" and not kept and delivered:
             self._remove_later(session_id)
+
+    async def progress(self, session_id: str) -> str:
+        """What a helper that ended without its reply had done: its steps, the files it wrote, its last words.
+
+        Read from its transcript, which outlives the run: the leader decides from this whether to wait
+        for the helper, take over from the files, or start another."""
+        manager = self.app.manager
+        assert manager is not None
+        steps = 0
+        files: list[str] = []
+        last = ""
+        for message in await manager.sessions.list_transcript(session_id):
+            if message.role is not MessageRole.assistant:
+                continue
+            for block in message.content_blocks:
+                if isinstance(block, ToolUseBlock):
+                    steps += 1
+                    if block.name in WRITING_TOOLS:
+                        try:
+                            args = json.loads(block.arguments_json or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        path = str(args.get("path") or args.get("file_path") or "") if isinstance(args, dict) else ""
+                        if path and path not in files:
+                            files.append(path)
+                elif isinstance(block, TextBlock) and block.text.strip():
+                    last = block.text.strip()
+        lines = [f"What it had done: {steps} tool call{'s' if steps != 1 else ''}"]
+        if files:
+            shown = files[-PROGRESS_FILES:]
+            more = f" and {len(files) - len(shown)} more" if len(files) > len(shown) else ""
+            lines[0] += "; files it wrote: " + ", ".join(shown) + more
+        lines[0] += "."
+        if last:
+            last = split_headline(last)[0]
+            if len(last) > PROGRESS_TEXT_CHARS:
+                last = "…" + last[-PROGRESS_TEXT_CHARS:].lstrip()
+            lines.append("Its last words:\n" + last)
+        else:
+            lines.append("It had written nothing yet.")
+        return "\n".join(lines)
+
+    async def _set_meta(self, session_id: str, changes: dict[str, Any]) -> None:
+        """Change a helper's metadata where the live state and the stored row both see it; ``None`` removes a key."""
+        manager = self.app.manager
+        assert manager is not None
+        state = await manager.get_state(session_id)
+        if state is None:
+            return
+        for metadata in (state.metadata, state.session.metadata):
+            for key, value in changes.items():
+                if value is None:
+                    metadata.pop(key, None)
+                else:
+                    metadata[key] = value
+        await manager.sessions.update_metadata(session_id, state.session.metadata)
+
+    async def _park(self, session_id: str, *, run_id: str, detail: str, mode: str, report: bool = True) -> None:
+        """Mark a helper as stopped by the daily cap, to be driven on when it reopens.
+
+        ``mode`` says how it goes on: ``stopped`` (its run ended; a new run continues it) or ``snapshot``
+        (boot recovery kept its unfinished run, which the host resumes itself). ``report`` tells the
+        leader now — the path for a helper found parked at start, which no run end announces."""
+        manager = self.app.manager
+        assert manager is not None
+        self._watching = True
+        await self._set_meta(session_id, {PARKED_KEY: {"reason": "budget", "mode": mode, "run_id": run_id, "detail": detail, "at": datetime.now(UTC).isoformat()}})
+        if not report:
+            return
+        state = await manager.get_state(session_id)
+        leader_id = str(state.metadata.get("subagent_of") or "") if state is not None else ""
+        if state is None or not leader_id or await manager.get_state(leader_id) is None:
+            return
+        name = str(state.metadata.get("subagent_name") or session_id)
+        text = stop_header(name, "budget", detail) + "\n\n" + contract_verdict(state, await self.progress(session_id))
+        delivered = await self._to_leader(session_id, leader_id, name, text, f"subagent-parked:{session_id}:{run_id}")
+        await self._note_parked(leader_id, session_id, name, cause="budget", detail=detail, delivered=delivered)
+
+    async def _to_leader(self, child_id: str, leader_id: str, name: str, text: str, key: str) -> bool:
+        """Hand a report to the leader, or hold it on the helper when the leader cannot take it now.
+
+        A leader on a paid model cannot start a run while the daily cap is closed, and the report a
+        free helper finished with was dropped: the refusal was logged, the helper deleted, and the work
+        reached nobody. A refused report is now kept on the helper, which therefore stays, and the
+        budget watch delivers it as soon as the leader can run. The key is the input receipt, so a
+        delivery repeated after a crash or a race is the same message, never a second one. Reports
+        go in the order they were written: one held is never overtaken by a later one."""
+        manager = self.app.manager
+        assert manager is not None
+        state = await manager.get_state(child_id)
+        held = list(state.metadata.get(HELD_KEY) or ()) if state is not None else []
+        if held and not await self._flush_held(child_id):
+            held = list((await manager.get_state(child_id)).metadata.get(HELD_KEY) or ())  # type: ignore[union-attr]
+            if all(entry.get("key") != key for entry in held):
+                held.append({"leader_id": leader_id, "name": name, "text": text, "key": key, "at": datetime.now(UTC).isoformat(), "reason": "an earlier report is still waiting"})
+                await self._set_meta(child_id, {HELD_KEY: held})
+            return False
+        try:
+            await manager.submit(leader_id, text, as_answer=False, origin=f"subagent:{name}", client_message_id=key)
+            return True
+        except Exception as exc:  # noqa: BLE001 — whatever refused it, the report is kept, not lost
+            logger.warning("subagent %s report to %s is held: %s", child_id, leader_id, exc)
+            self._watching = True
+            if state is not None:
+                await self._set_meta(child_id, {HELD_KEY: [{"leader_id": leader_id, "name": name, "text": text, "key": key, "at": datetime.now(UTC).isoformat(), "reason": str(exc)[:400]}]})
+            return False
+
+    async def _flush_held(self, child_id: str) -> bool:
+        """Deliver a helper's held reports in order; whether none is left. Removes a finished one-off helper once they are out."""
+        manager = self.app.manager
+        assert manager is not None
+        state = await manager.get_state(child_id)
+        if state is None:
+            return True
+        held = list(state.metadata.get(HELD_KEY) or ())
+        while held:
+            entry = held[0]
+            if await manager.get_state(str(entry.get("leader_id") or "")) is None:
+                held.pop(0)  # the leader is gone: nobody is left to read it
+                continue
+            try:
+                await manager.submit(str(entry["leader_id"]), str(entry["text"]), as_answer=False, origin=f"subagent:{entry.get('name') or child_id}", client_message_id=str(entry["key"]))
+            except Exception as exc:  # noqa: BLE001 — still refused; the next look tries again
+                logger.debug("held report of subagent %s still refused: %s", child_id, exc)
+                break
+            held.pop(0)
+        await self._set_meta(child_id, {HELD_KEY: held or None})
+        if held:
+            return False
+        state = await manager.get_state(child_id)
+        if state is not None and not state.metadata.get("subagent_keep") and not state.metadata.get(PARKED_KEY) and not state.running and state.pending is None and not state.last_error_kind:
+            self._remove_later(child_id)
+        return True
+
+    async def _note_parked(self, leader_id: str, child_id: str, name: str, *, cause: str, detail: str, delivered: bool) -> None:
+        """Say in the leader's chat that a helper is parked by the daily cap, or that its report waits.
+
+        The toast about the cap disappears, and the leader on a paid model cannot say anything itself
+        while the cap is closed: without this line the operator watching the leader saw helpers go
+        quiet and nothing anywhere said why or what would bring them back. The line is the transcript's
+        only; the model's history does not carry it."""
+        manager = self.app.manager
+        assert manager is not None
+        state = "parked" if cause == "budget" else "held"
+        exceeded = bool(manager.budget_exceeded())
+        if state == "parked":
+            text = f"Subagent {name!r} is parked by the daily spending cap. It goes on by itself once {BUDGET_WAY_OUT}, and its report follows."
+            if not delivered:
+                text += " What it had done so far waits for the agent too, which cannot run before then."
+        else:
+            ended = "finished" if cause == "completed" else f"stopped ({cause})"
+            why = f" the daily spending cap is closed and {BUDGET_WAY_OUT}" if exceeded else " the agent cannot start a run now"
+            text = f"Subagent {name!r} {ended}, but its report cannot reach the agent yet:{why}. The report is held and delivered then, once."
+        notice = {"state": state, "cause": cause, "name": name, "session_id": child_id, "detail": detail, "budget": exceeded or cause == "budget", "held": not delivered}
+        message = Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)], metadata={"daedalus.origin": f"subagent:{name}", NOTICE_KEY: notice})
+        try:
+            await manager.note_in_chat(leader_id, message)
+        except Exception:  # noqa: BLE001 — the report itself is delivered or held either way
+            logger.warning("could not note subagent %s in the chat of %s", child_id, leader_id, exc_info=True)
+
+    async def budget_tick(self) -> None:
+        """What the daily cap held back, looked at again: reports go to leaders that can run now, helpers
+        parked by the cap go on once it is open, and a helper found parked at start is reported."""
+        manager = self.app.manager
+        assert manager is not None
+        if manager.shutting_down or manager.recovering:
+            return
+        if not self._watching and not manager.budget_parked:
+            return
+        exceeded = manager.budget_exceeded()
+        if exceeded:
+            for run_id, session_id in list(manager.budget_parked.items()):
+                state = await manager.get_state(session_id)
+                if state is not None and state.metadata.get("subagent_of") and not state.metadata.get(PARKED_KEY):
+                    await self._park(session_id, run_id=run_id, detail=f"daily budget exceeded ({exceeded})", mode="snapshot")
+        self._watching = False
+        for row in await manager.list_sessions(limit=500):
+            metadata = row.get("metadata") or {}
+            if not metadata.get("subagent_of"):
+                continue
+            cid = str(row["id"])
+            if metadata.get(HELD_KEY) and not await self._flush_held(cid):
+                self._watching = True
+            if metadata.get(PARKED_KEY):
+                if exceeded or not await self._go_on(cid, metadata[PARKED_KEY]):
+                    self._watching = True
+
+    async def _go_on(self, child_id: str, parked: dict[str, Any]) -> bool:
+        """Drive on a helper the daily cap parked, now that it is open; exactly one run continues it.
+        Whether it is on its way again (or gone); ``False`` leaves it for the next look."""
+        manager = self.app.manager
+        assert manager is not None
+        state = await manager.get_state(child_id)
+        if state is None:
+            return True
+        if str(parked.get("run_id") or "") in manager.budget_parked:
+            return False  # its saved run is resumed by the host itself first
+        if not (state.running or state.pending is not None):
+            try:
+                await manager.submit(child_id, CONTINUE_NOTE, as_answer=False, origin=f"subagent-task:{state.metadata.get('subagent_of')}", client_message_id=f"subagent-continue:{child_id}:{parked.get('run_id') or ''}")
+            except Exception as exc:  # noqa: BLE001 — still refused (the flag lags the ledger); the next look tries again
+                logger.debug("parked subagent %s could not go on yet: %s", child_id, exc)
+                return False
+        await self._set_meta(child_id, {PARKED_KEY: None})
+        return True
 
     async def _remind_lingering(self, leader_id: str, leader: Any) -> None:
         """Ask the leader, once per helper, about subagents it left idle for a long while.
@@ -611,6 +926,8 @@ class Subagents:
             cid = row["id"]
             if cid in reminded or cid in self._removing or cid in self._waited:
                 continue
+            if row["metadata"].get(PARKED_KEY) or row["metadata"].get(HELD_KEY):
+                continue  # not forgotten: the cap holds it, and the host moves it on when the cap reopens
             child = await manager.get_state(cid)
             if child is None or child.running or child.pending is not None or child.compacting or unfinished_jobs(manager, cid):
                 continue
@@ -669,7 +986,7 @@ class Subagents:
         if op == "spawn":
             return await self.spawn(**kwargs)
         if op == "models":
-            return await self.models()
+            return await self.models(kwargs["leader_id"])
         if op == "personas":
             return self.personas()
         if op == "children":

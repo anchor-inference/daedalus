@@ -38,6 +38,14 @@ def test_the_line_says_there_is_no_answer_why_and_which_tier_gave_out() -> None:
     assert note.endswith("It had taken 176 steps, the last one Write.")
 
 
+def test_a_provider_stop_keeps_the_engine_class_of_the_failure() -> None:
+    # The line's technical details name the provider's failure by the class the engine gave it, beside
+    # the kind: "llm_provider_error" alone does not tell an unreachable host from a refused key.
+    outcome = run_outcome("failed", error_kind="llm_provider_error", error_reason="connection", error_message="transport error")
+    assert outcome is not None and outcome["reason"] == "connection" and outcome["cause"] == "provider"
+    assert run_outcome("failed", error_kind="hook_denied")["reason"] == ""  # type: ignore[index]
+
+
 def test_the_closing_line_is_a_transcript_row_the_app_can_draw() -> None:
     outcome = run_outcome("failed", error_kind="llm_rate_limit", error_message="429 from the provider")
     assert outcome is not None
@@ -59,11 +67,13 @@ async def test_a_failed_run_writes_its_closing_line_to_the_transcript_only(setti
         state.last_error_kind = "llm_context_window_exceeded"
         state.last_error_message = "reactive force_compaction exhausted retries"
         state.last_compaction = {"outcome": "at_floor", "tier2_failures": {"transport": 2}}
+        state.last_error_reason = "context_overflow"
         await manager._close_without_answer(state, "tick-189", "failed")
         rows = await manager.sessions.list_transcript(state.session.id)
         closing = [row for row in rows if row.metadata.get(OUTCOME_METADATA_KEY)]
         assert len(closing) == 1 and closing[0].metadata["daedalus.run_id"] == "tick-189"
         assert state.last_outcome is not None and state.last_outcome["cause"] == "context"
+        assert closing[0].metadata[OUTCOME_METADATA_KEY]["reason"] == "context_overflow"
         # Not in the working history the model reads.
         history = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
         assert not [m for m in history if m.metadata.get(OUTCOME_METADATA_KEY)]

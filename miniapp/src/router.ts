@@ -127,6 +127,12 @@ function withQuery(path: string, query?: Record<string, string | null | undefine
   return s ? `${path}?${s}` : path;
 }
 
+/** The new-chat screen with its composer in Agent mode, starting in `project` when one is named: where
+ *  every "New agent" leads, since the composer took over what the new-agent window asked. */
+export function newAgentPath(project?: string | null): string {
+  return pathFor("agents", null, { agent: "1", in: project || undefined });
+}
+
 export function sessionPath(id: string, beside?: string | null): string {
   return pathFor("agents", id, { with: beside ?? undefined });
 }

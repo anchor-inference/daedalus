@@ -30,7 +30,7 @@ from typing import Any, Literal, get_args
 from protocore.contracts.tool_registry import ToolVisibilityPolicy
 from protocore.contracts.types import Message, MessageRole, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
-from daedalus.config import BTW_TOOLS, keyproxy_upstream
+from daedalus.config import BTW_TOOLS
 from daedalus.host import prompts
 from daedalus.memory.privacy import MEMORY_TOOLS, TALK_TOOL
 from daedalus.security.untrusted import fenced
@@ -92,15 +92,6 @@ WROTE_NOTE = (
 HOST_NOTES_REMOVED = "[left out of a guest's turn]"
 FOLDER_RULES_RE = re.compile(r"\[rules from (?P<name>[^\]\n]+), for the work under .*?\[end of (?P=name)\]\n*", re.DOTALL)
 """What :func:`daedalus.host.nested_rules.rules_note` puts at the head of a tool result."""
-LOGIN_UPSTREAMS = ("codex", "grok", "claude")
-"""The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
-
-
-def login_route(base_url: str) -> bool:
-    """Whether ``base_url`` is a CLI login behind the key proxy: a plan, not a price nobody knows."""
-    return keyproxy_upstream(base_url) in LOGIN_UPSTREAMS
-
-
 class GuestTurnBusy(RuntimeError):
     """The chat is doing something else; the guest's message waits for it to finish."""
 
@@ -260,5 +251,5 @@ def turn_note(turn: GuestTurn) -> str:
 
 __all__ = [
     "ALL_TOOLS", "ANSWER_MARK", "DEFAULT_TOOLS", "FOLDER_TOOLS", "GUEST_TOOLS", "GuestTools", "GuestTurn", "GuestTurnBusy", "LATER_TURN_NOTE", "MAX_ITERATIONS", "METADATA_KEY", "NO_TOOL",
-    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TOUCHED_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "login_route", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
+    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TOUCHED_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
 ]

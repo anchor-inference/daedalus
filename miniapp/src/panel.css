@@ -113,3 +113,8 @@
   .panel-sheet .dt-drillhead { margin: 0 0 8px; padding: 0; top: 0; }
   .panel-sheet .file-tab-name { font-size: var(--fs-13); }
 }
+/* A phone narrower than 400 px: the quota windows keep their figures and drop their bars, which pushed
+   the second window's percent past the edge of the line. */
+@media (max-width: 399px) {
+  .dt-window .dt-mini { display: none; }
+}

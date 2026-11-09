@@ -11,9 +11,12 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import secrets
-from collections import OrderedDict
+import shutil
+import threading
+from collections import OrderedDict, deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -28,7 +31,7 @@ from protocore.contracts.tool_registry import IToolRegistry
 from protocore.contracts.tools import Tool, ToolContext
 from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolResult
 
-from daedalus.config import McpServerConfig
+from daedalus.config import McpServerConfig, inherited_environment
 from daedalus.mcp.content import McpAnswer, read_content
 from daedalus.mcp.oauth import MCPOAuthClient, NeedsAuthorization
 from daedalus.security import operator_secrets, redact
@@ -122,8 +125,8 @@ def loosen_for_refs(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 def annotation_approval(annotations: Any, *, server: str = "auto", tool: str = "auto") -> str:
-    """``allow`` or ``ask`` for one MCP tool: the operator's rule for the tool, else for its server,
-    else what the tool's annotations say.
+    """``allow``, ``ask`` or ``deny`` for one MCP tool: the operator's rule for the tool, else for its
+    server, else what the tool's annotations say (which never deny).
 
     The annotations are read with the protocol's own defaults, and those are the cautious ones: a
     hint left out means the tool *may* destroy and *may* reach the world, so a server that annotates
@@ -132,7 +135,7 @@ def annotation_approval(annotations: Any, *, server: str = "auto", tool: str = "
     ``read_only_hint`` settles it the other way, because a destructive hint means nothing for a tool
     that only reads."""
     for rule in (tool, server):
-        if rule in ("allow", "ask"):
+        if rule in ("allow", "ask", "deny"):
             return rule
     def hint(name: str) -> bool | None:
         value = getattr(annotations, name, None) if annotations is not None else None
@@ -153,11 +156,16 @@ class McpToolProxy(Tool):
         self._definition = definition
         self.server = connection.name
         self.approval = approval
-        """``allow`` or ``ask``: what the policy answers for a call no other rule decides (:func:`annotation_approval`)."""
+        """``allow``, ``ask`` or ``deny``: what the policy answers for a call no other rule decides (:func:`annotation_approval`)."""
 
     @property
     def name(self) -> str:
         return self._definition.name
+
+    @property
+    def remote_name(self) -> str:
+        """The tool's own name on its server, which the operator's per-tool rule is keyed by."""
+        return self._remote
 
     @property
     def definition(self) -> ToolDefinition:
@@ -259,6 +267,80 @@ def _safe_slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name) or "server"
 
 
+STDERR_LINES = 40
+"""How many of a stdio server's last standard-error lines are kept to show with its state."""
+
+PASSED_ENVIRONMENT = ("UV_CACHE_DIR", "UV_PYTHON", "UV_PYTHON_DOWNLOADS", "UV_TOOL_DIR", "npm_config_cache", "NPM_CONFIG_CACHE",
+                      "PLAYWRIGHT_BROWSERS_PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT")
+"""What a stdio server inherits beyond the MCP library's short list (home, path, shell, user). The
+library passes nothing else, so a ``uv`` started for a server did not see where the installation keeps
+its interpreter and cache and fetched a second CPython on the first start, and a server that finds its
+tools through one of these looked in the wrong place. A value in the server's own ``env`` wins."""
+
+
+class StderrTail:
+    """The last lines a stdio server wrote to its standard error, read off a pipe by a small thread.
+
+    The library sends a server's standard error to the host's own, which in Docker is the container
+    log: a server that failed to start said why there and nowhere the operator or the agent looked,
+    and the only error they saw was the protocol's "Connection closed". The lines are kept here to be
+    shown with the server's state, and still logged."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.lines: deque[str] = deque(maxlen=STDERR_LINES)
+        read_fd, write_fd = os.pipe()
+        self.sink = os.fdopen(write_fd, "w")
+        self._source = os.fdopen(read_fd, "r", errors="replace")
+        self._thread = threading.Thread(target=self._read, name=f"mcp-stderr:{name}", daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        with self._source:
+            for line in self._source:
+                line = line.rstrip()
+                if line:
+                    self.lines.append(line[:500])
+                    logger.info("mcp server %s stderr: %s", self.name, redact.redact(line[:500]))
+
+    def close(self, *, settle: float = 0.5) -> None:
+        """Let go of the host's end of the pipe and give the reader a moment to take the last lines:
+        a server that exited has closed its end, so the reader reaches the end at once."""
+        try:
+            self.sink.close()
+        except OSError:
+            pass
+        self._thread.join(settle)
+
+    def text(self, last: int = STDERR_LINES) -> str:
+        return "\n".join(list(self.lines)[-last:])
+
+
+def resolve_command(command: str, args: Sequence[str], env: dict[str, str]) -> tuple[str, list[str]]:
+    """The program a stdio server is started with, as it can be started where the host runs.
+
+    ``uvx`` is ``uv tool run`` under another name, and the container image keeps ``uv`` but not the
+    alias, so a server pasted from a README as ``uvx some-server`` failed with "No such file or
+    directory". A command that is not there at all fails here, with words that say where it was looked
+    for, instead of as an exception about a file."""
+    path = env.get("PATH") or inherited_environment(("PATH",)).get("PATH", "")
+    if shutil.which(command, path=path) is not None:
+        return command, list(args)
+    if command == "uvx" and shutil.which("uv", path=path) is not None:
+        return "uv", ["tool", "run", *args]
+    raise FileNotFoundError(f"the command {command!r} is not installed where MCP servers start ({runs_in()})")
+
+
+WHERE = ["machine"]
+"""Where a stdio server's process starts: ``container`` in Docker — the host's own container, which
+is not the machine a session's host-folder Exec runs on — or ``machine``. Set once at start; the app
+says it in its own words from this, the model reads :func:`runs_in`."""
+
+
+def runs_in() -> str:
+    return "the Daedalus container, not the host machine" if WHERE[0] == "container" else "this machine"
+
+
 CONNECT_DEADLINE_SECONDS = 30.0
 """How long a caller waits for a server to connect before it is told the server is still starting."""
 RECONNECT_DEADLINE_SECONDS = 10.0
@@ -315,10 +397,16 @@ class McpConnection:
         self._catalog_changed = catalog_changed
         self.config_digest = _config_digest(config)
         self._started_at = 0.0
+        self.stderr: StderrTail | None = None
+        """The running (or last) stdio process's standard error; ``None`` for an HTTP server."""
 
     def describe(self, exc: BaseException) -> str:
         """The failure as the app and the model may see it, with this server's secrets masked."""
         return mask_server_secrets(self.config, _describe(exc))
+
+    def stderr_text(self, last: int = STDERR_LINES) -> str:
+        """What the stdio process last wrote to its standard error, with this server's secrets masked."""
+        return mask_server_secrets(self.config, self.stderr.text(last)) if self.stderr is not None else ""
 
     @property
     def starting(self) -> bool:
@@ -353,9 +441,16 @@ class McpConnection:
     async def _run(self) -> None:
         try:
             if self.config.transport == "stdio":
-                params = StdioServerParameters(command=self.config.command, args=list(self.config.args), env=dict(self.config.env) or None)
-                async with stdio_client(params) as (read, write):
-                    await self._serve(read, write)
+                self.stderr = None
+                env = inherited_environment(PASSED_ENVIRONMENT) | dict(self.config.env)
+                command, args = resolve_command(self.config.command, self.config.args, env)
+                params = StdioServerParameters(command=command, args=args, env=env or None)
+                self.stderr = StderrTail(self.name)
+                try:
+                    async with stdio_client(params, errlog=self.stderr.sink) as (read, write):
+                        await self._serve(read, write)
+                finally:
+                    self.stderr.close()
             else:
                 headers = dict(self.config.headers)
                 if self.oauth is not None:
@@ -380,6 +475,10 @@ class McpConnection:
                         await self._serve(streams[0], streams[1])
         except BaseException as exc:  # noqa: BLE001 — anyio wraps transport failures in groups
             self.error = self.describe(exc)
+            said = self.stderr_text(last=6) if self.stderr is not None else ""
+            if said and not isinstance(exc, asyncio.CancelledError):
+                # "Connection closed" says only that the process went away; its last words say why.
+                self.error += f" · the server wrote: {said}"
             self.last_error_code = "authorization_required" if _looks_like_auth_failure(exc) else "connection_failed"
             self.state = "auth_required" if self.last_error_code == "authorization_required" else "unavailable"
             logger.warning("mcp server %s failed: %s", self.name, self.error)
@@ -689,6 +788,31 @@ class McpManager:
         """Every live MCP tool's default answer, by the name a session calls it, for the policy."""
         return {name: tool.approval for catalog in self._registered_tools.values() for name, tool in catalog.items()}
 
+    def servers_by_tool(self) -> dict[str, str]:
+        """Which server each live MCP tool belongs to, by the name a session calls it, so that a grant
+        for "every tool of this server" is matched by the server and not by a sanitised name prefix
+        two servers can share."""
+        return {name: server for server, catalog in self._registered_tools.items() for name in catalog}
+
+    async def trial(self, name: str, config: McpServerConfig, *, deadline: float) -> dict[str, Any]:
+        """Start a server that is not saved, list its tools, say what its process wrote, and stop it.
+
+        What the app shows before the operator adds a pasted command: nothing is registered and
+        nothing is kept, so a command that fails leaves no server behind to be removed."""
+        connection = McpConnection(name, config)
+        try:
+            await connection.start(deadline=deadline)
+            state, error = "ready", None
+        except McpStillStarting as exc:
+            state, error = "connecting", str(exc)
+        except Exception as exc:  # noqa: BLE001 — the failure is the answer
+            state, error = connection.state if connection.state != "connecting" else "unavailable", connection.error or connection.describe(exc)
+        tools = [{"name": tool.remote_name, "description": (tool.definition.description or "").removeprefix(f"[MCP {name}] ")[:300],
+                  "approval": tool.approval} for tool in connection.tools]
+        stderr = connection.stderr_text()
+        await connection.stop()
+        return {"name": name, "state": state, "error": error, "tools": tools, "stderr": stderr, "runs_in": WHERE[0]}
+
     def all_tool_names(self) -> set[str]:
         return {name for catalog in self._registered_tools.values() for name in catalog}
 
@@ -798,6 +922,7 @@ class McpManager:
                     "catalog_revision": connection.catalog_revision if connection and not stale else 0,
                     "last_error_code": connection.last_error_code if connection and not stale else None,
                     "in_flight": connection.in_flight if connection and not stale else 0,
+                    "stderr": connection.stderr_text(last=12) if connection and not stale else "",
                 }
             )
         return out
@@ -809,4 +934,4 @@ def blocked_for(manager: McpManager, enabled: Sequence[str]) -> set[str]:
     return {name for name in manager.all_tool_names() if not any(name in manager.tool_names(s) for s in enabled_set)}
 
 
-__all__ = ["McpConnection", "McpManager", "McpStillStarting", "McpToolProxy", "mask_server_secrets", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]
+__all__ = ["WHERE", "runs_in", "McpConnection", "McpManager", "McpStillStarting", "McpToolProxy", "mask_server_secrets", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]

@@ -113,7 +113,7 @@ def test_the_browser_and_node_are_the_launchers_natively_and_an_image_tag_in_a_c
 def test_a_component_a_skill_declares_names_the_skills_it_holds_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     skills = tmp_path / "data" / "daedalus" / "skills"
     (skills / "web-thing").mkdir(parents=True)
-    (skills / "web-thing" / "SKILL.md").write_text("---\nname: web-thing\nrequires: browser, node\n---\nbody\n", encoding="utf-8")
+    (skills / "web-thing" / "SKILL.md").write_text("---\nname: web-thing\nrequires: browser, playwright, npx\n---\nbody\n", encoding="utf-8")
     (skills / "writing").mkdir()
     (skills / "writing" / "SKILL.md").write_text("---\nname: writing\n---\nbody\n", encoding="utf-8")
     monkeypatch.setattr(toolchain, "status", lambda name: "not here")
@@ -126,7 +126,7 @@ def test_a_component_a_skill_declares_names_the_skills_it_holds_back(tmp_path: P
 def test_an_installed_component_does_not_list_skills_as_held_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     skills = tmp_path / "data" / "daedalus" / "skills"
     (skills / "web-thing").mkdir(parents=True)
-    (skills / "web-thing" / "SKILL.md").write_text("---\nrequires: browser\n---\n", encoding="utf-8")
+    (skills / "web-thing" / "SKILL.md").write_text("---\nrequires: playwright\n---\n", encoding="utf-8")
     monkeypatch.setattr(toolchain, "status", lambda name: "ok")
     present(monkeypatch, set())
     registry = components.Registry(settings_for(tmp_path, native=True), RuntimeConfig())
@@ -605,6 +605,10 @@ class FakeManager:
         @staticmethod
         def available() -> list[str]:
             return []
+
+        @staticmethod
+        def price_view(*_: Any, **__: Any) -> dict[str, Any]:
+            return {}
 
         @staticmethod
         async def close_retired() -> None:

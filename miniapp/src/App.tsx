@@ -5,7 +5,7 @@ import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
 import type { OnboardingState } from "./screens/AddModel";
-import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
@@ -582,7 +582,7 @@ export function App() {
     // orchestration mode, a lens is Agents mode's, and each item says which by where it leads.
     const orchestratedIds = new Set(projectList.filter((p) => p.settings.orchestrator?.enabled).map((p) => p.id));
     return [
-      { id: "new-agent", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(pathFor("agents", null, { new: "1" })) },
+      { id: "new-agent", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(newAgentPath(project)) },
       { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
       { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
       { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },

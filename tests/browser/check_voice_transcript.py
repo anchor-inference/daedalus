@@ -207,7 +207,7 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
     # which is on the page whichever view is in the middle.
     check(page.locator(".voice-crumbs .voice-compose-btn.hangup").count() == 1, "the call can be ended from the agent's strip")
 
-    composer = page.locator(".voice-read .composer textarea")
+    composer = page.locator(".voice-read .composer .composer-field")
     check(composer.count() == 1 and composer.is_visible(), "an agent's own composer is there, because typing to it is the point")
     composer.fill("redo the two with the wrong VAT line, please")
     composer.press("Control+Enter")
@@ -239,9 +239,9 @@ def check_the_phone(browser, check) -> None:  # type: ignore[no-untyped-def]
     check(read["width"] >= 388, f"and the transcript has the whole width of the screen ({read['width']:.0f}px)")
     page.locator(".companion-agents-key").click()
     page.locator(".voice-agents-sheet .voice-agent").first.click()
-    page.wait_for_selector(".voice-read .composer textarea")
+    page.wait_for_selector(".voice-read .composer .composer-field")
     for height in (844, 480):
-        page.locator(".voice-read .composer textarea").focus()
+        page.locator(".voice-read .composer .composer-field").focus()
         page.set_viewport_size({"width": 390, "height": height})
         page.wait_for_timeout(300)
         bounds = page.evaluate("""() => {

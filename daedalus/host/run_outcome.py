@@ -38,6 +38,7 @@ def run_outcome(
     status: str,
     *,
     error_kind: str = "",
+    error_reason: str = "",
     error_message: str = "",
     compaction: dict[str, Any] | None = None,
     steps: int = 0,
@@ -47,6 +48,8 @@ def run_outcome(
 
     ``compaction`` is the last ``compaction_completed`` payload the run emitted: when the run died of
     size, it is what says which tier gave out — the summariser failing, the floor reached.
+    ``error_reason`` is the engine's class for a provider failure (``connection``, ``rate_limit``):
+    the provider's own code for the stop, which the app lists in the line's technical details.
     """
     if status not in ("failed", "cancelled"):
         return None
@@ -64,6 +67,7 @@ def run_outcome(
         "status": status,
         "cause": cause,
         "error_kind": error_kind,
+        "reason": error_reason,
         "detail": " ".join(error_message.split())[:DETAIL_CHARS],
         "steps": steps,
         "last_tool": last_tool,

@@ -132,6 +132,9 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
         expect(drill, f"{where}: the {section} page").to_have_count(1)
         if section == "mcp":
             page.wait_for_selector(f"{scope} [data-mcp-server]")
+        if section == "usage":
+            # The tools' time arrives on a request of its own, made when the page opens.
+            page.wait_for_selector(f"{scope} [data-usage-table] tbody tr:nth-child(5)")
         words = text_of(page, f"{scope} .dt-drill")
         for fact in facts:
             assert fact.replace(" ", " ") in words.replace(" ", " ").replace(" ", " "), f"{where}: {section} lacks {fact!r}: {words[:600]}"

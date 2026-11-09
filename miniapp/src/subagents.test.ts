@@ -4,7 +4,9 @@
 
 import { describe, expect, it } from "vitest";
 import type { SessionList, SubagentView } from "./api";
+import { t } from "./i18n";
 import { listedLeaderOf, subagentIdFor, subagentLine, subagentPath, subagentState, touchesSubagents } from "./subagents";
+import { systemNote } from "./turns";
 
 const child = (over: Partial<SubagentView> = {}): SubagentView => ({ session_id: "c1", name: "triage", running: false, status: "idle", model: "GPT", kept: true, ...over });
 
@@ -58,10 +60,33 @@ describe("how a helper's state reads", () => {
     expect(subagentState(child({ status: "failed" }))).toBe("failed");
     expect(subagentState(child())).toBe("idle");
   });
+  it("reads a helper the daily cap stopped as parked, not failed and not gone", () => {
+    const parked = child({ status: "parked", parked: { reason: "budget", at: "2026-11-09T20:01:02Z" }, kept: false });
+    expect(subagentState(parked)).toBe("parked");
+    expect(subagentState(child({ status: "failed", parked: { reason: "budget", at: "" } }))).toBe("parked");
+    expect(subagentLine(parked, Date.now())).toContain(t("subagents.parked"));
+    // Its run going on again outranks the mark the host clears a moment later.
+    expect(subagentState(child({ running: true, status: "running", parked: { reason: "budget", at: "" } }))).toBe("running");
+  });
+  it("says when its report waits for the leader", () => {
+    expect(subagentLine(child({ reports_held: 1 }), Date.now())).toContain(t("subagents.held"));
+    expect(subagentLine(child(), Date.now())).not.toContain(t("subagents.held"));
+  });
   it("says for how long it has worked, and on which model", () => {
     const now = Date.parse("2026-10-13T12:05:00Z");
     const line = subagentLine(child({ running: true, status: "running", run_started_at: "2026-10-13T12:02:00Z" }), now);
     expect(line).toContain("3");
     expect(line).toContain("GPT");
+  });
+});
+
+describe("the leader's chat says a helper is parked", () => {
+  it("carries the host's notice on the helper's line", () => {
+    const notice = { state: "parked" as const, cause: "budget", name: "cand-a", session_id: "c1", budget: true, held: true };
+    const note = systemNote({ role: "user", text: "Subagent 'cand-a' is parked by the daily spending cap.", origin: "subagent:cand-a", subagent_notice: notice });
+    expect(note?.kind).toBe("subagent");
+    expect(note?.origin).toBe("cand-a");
+    expect(note?.notice?.state).toBe("parked");
+    expect(systemNote({ role: "user", text: "report", origin: "subagent:cand-a" })?.notice).toBeUndefined();
   });
 });

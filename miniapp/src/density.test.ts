@@ -145,7 +145,7 @@ function covered(selector: string, allowed: string[]): boolean {
 
 /** Where text is allowed to be larger than the UI: running prose, headings, numbers meant to be read from across a room (a
  *  Details card opens on its one headline number, the reason that card exists), and glyphs. */
-const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
+const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box .composer-field", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
   // The task dialog's title is edited where it stands, so its field is drawn at the heading's size;
   // at 14 px the title shrank under the cursor the moment Edit was pressed.
   ".ptask-title-input",
