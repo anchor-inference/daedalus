@@ -272,7 +272,7 @@ class Application:
             await self.notice(f"⚠️ The bot started without {len(self.extension_failures)} subsystem(s): {broken}. The inbox has the error for each.", kind="extension", tone="error")
         exceeded = self.manager.budget_exceeded() if self.manager else None
         if exceeded:
-            await self.notice(f"💸 Daily budget exceeded ({exceeded}). New runs are refused until tomorrow or /budget reset.", kind="budget", tone="warning", category="spend")
+            await self.notice(f"💸 Daily budget exceeded ({exceeded}). Paid runs are refused and wait: the daily cap reopens at 00:00 UTC, or sooner if you raise it (USD_PER_DAY).", kind="budget", tone="warning", category="spend")
 
     async def _install_extensions(self) -> None:
         """Scheduler, balance monitor, self-development, API — each attaches here."""

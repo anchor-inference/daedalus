@@ -460,6 +460,8 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .sysnote-head .ic { color:var(--fg-3); flex:none; }
 .sysnote-head:hover { color:var(--fg); }
 .sysnote.loop .sysnote-head .ic { color:var(--ok); }
+.sysnote.notice .sysnote-head, .sysnote.notice .sysnote-head .ic { color:var(--warn); }
+.sysnote-way { margin:0; padding-left:22px; font-size:var(--fs-12); color:var(--fg-2); }
 .sysnote-body { padding:8px 12px; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
 .sysnote-body p { margin:0 0 8px; }
 .sysnote-body p:last-child { margin-bottom:0; }
@@ -3602,6 +3604,7 @@ input.field[type="range"] {
 .sub-dot.running { background:var(--info); box-shadow:none; animation:pulse 1.2s ease-in-out infinite; }
 .sub-dot.waiting { background:var(--warn); box-shadow:none; }
 .sub-dot.failed { background:var(--bad); box-shadow:none; }
+.sub-dot.parked { background:var(--warn); box-shadow:none; opacity:.55; }
 /* The Subagents tab: the list, then one helper's conversation under a head that stays in place. */
 .panel-body.tab-subagents { padding-top:0; }
 .subagents { font-size:var(--fs-13); }

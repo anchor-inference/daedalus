@@ -7,7 +7,7 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, ToolImage } from "./api";
+import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, SubagentNotice, ToolImage } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
@@ -412,6 +412,8 @@ export type SystemNote = {
   cadence?: string;
   /** The standing instruction, without the host's framing around it. */
   body: string;
+  /** The host's word that the helper is parked by the daily cap, or that its report waits for the leader. */
+  notice?: SubagentNotice;
 };
 
 const LOOP_HEAD_RE = /^\s*\[Loop iteration (\d+)(?: of (\d+))?\s*[—-]\s*([^.\]]+)[^\]]*\]/;
@@ -426,7 +428,7 @@ const CONTEXT_RE = /<(turn_context|heartbeat)>\s*([\s\S]*?)\s*<\/\1>/;
  * message, and stays a card with its source on it. A guest's (`guest:<link>`) is one too, and no
  * text inside it can make it anything else.
  */
-export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent">): SystemNote | null {
+export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent" | "subagent_notice">): SystemNote | null {
   if (m.role !== "user" || m.internal) return null;
   const origin = m.origin ?? "";
   // Before any test of the text's shape: a stranger can write a loop header, a heartbeat or a turn
@@ -446,7 +448,7 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   // A custom page's message: the operator's request (a button, the page's composer) is their bubble
   // with the page named on it; the page reporting on its own is a note.
   if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;
-  if (origin.startsWith("subagent:")) return { kind: "subagent", origin: origin.slice(9), body: text };
+  if (origin.startsWith("subagent:")) return { kind: "subagent", origin: origin.slice(9), body: text, ...(m.subagent_notice ? { notice: m.subagent_notice } : {}) };
   if (origin === "subagents") return { kind: "subagents", origin, body: text };
   // The operator's answers to the agent's side questions, carried in as one message: the operator
   // wrote them in the panel, so the chat folds them into a line rather than draw them as a bubble.

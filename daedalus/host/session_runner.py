@@ -203,6 +203,9 @@ COMPUTER_LIVE_SECONDS = 3.0
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
+BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it (USD_PER_DAY)"
+"""What lifts the daily cap, in the words every refusal and notice uses. They used to point at a
+``/budget reset`` that no front has ever had, so the operator was sent to look for a command."""
 RECOVERY_REASONS = frozenset({"transient_llm_error_retry", "model_fallback_triggered", "soft_stop_notified", "llm_context_window_exceeded", "context_window_recovered", "reasoning_length_cut_retry", "continue_prompt_injected", "max_output_token_recovery"})
 """The state changes worth a log line: each is a round the run had to recover from, and the log is where the reason survives."""
 MODEL_METADATA_KEY = "daedalus.model"
@@ -267,6 +270,8 @@ class HostEventType(StrEnum):
     Not a state change: the session goes on running or waiting for the operator meanwhile."""
     REMOTE_OUTPUT = "remote_output"
     """A command running on the operator's terminal printed something: ``{tool_call_id, delta}``, live only."""
+    TRANSCRIPT_NOTE = "transcript_note"
+    """The host wrote a line into the conversation outside any run: the app reads the end of it again."""
 
 
 @dataclass(slots=True)
@@ -949,6 +954,10 @@ class SessionManager:
         over: what the run left open for the operator (its side questions) goes with it."""
         self.shutting_down = False
         self._update_parked_run_ids: set[str] = set()
+        self.budget_parked: dict[str, str] = {}
+        """Unfinished runs boot recovery left alone because the daily cap was closed, run id to session
+        id. They used to stay parked until some later restart happened to find the cap open; the budget
+        watch hands them to ``resume_budget_parked`` the moment it reopens."""
         self.recovering = True
         """True from construction until boot recovery has decided the fate of every run the previous process left behind."""
         self.unloadable_sessions: dict[str, str] = {}
@@ -3980,7 +3989,7 @@ class SessionManager:
                         provider_id = None
                 exceeded = self.budget_exceeded()
                 if exceeded and not self.provider_costs_nothing(provider_id, cap_model):
-                    raise RuntimeError(f"daily budget exceeded ({exceeded}); runs resume tomorrow or after /budget reset")
+                    raise RuntimeError(f"daily budget exceeded ({exceeded}); {BUDGET_WAY_OUT}")
                 breach = await self.cap_breach(state, provider_id, cap_model)
                 if breach is not None:
                     raise RuntimeError(breach[1])
@@ -7962,6 +7971,7 @@ class SessionManager:
                         free = False
                     if state is not None and not free:
                         parked.append(entry["run_id"])
+                        self.budget_parked[entry["run_id"]] = session_id
                         continue
                 await self._resume_one(entry, resumed)
                 if entry["run_id"] not in resumed:
@@ -7975,6 +7985,27 @@ class SessionManager:
         finally:
             self.recovering = False
         return resumed
+
+    async def resume_budget_parked(self) -> list[str]:
+        """Drive on the runs boot recovery parked for the daily cap, once it is open again; the resumed ids."""
+        if not self.budget_parked or self.budget_exceeded() or self.shutting_down:
+            return []
+        waiting = set(self.budget_parked)
+        self.budget_parked = {k: v for k, v in self.budget_parked.items() if k not in waiting}
+        return await self.resume_unfinished(waiting)
+
+    async def note_in_chat(self, session_id: str, message: Message) -> None:
+        """Put a host line into a conversation outside any run, and have the app read it.
+
+        A run's own lines reach the app with the run's events; a line written while nothing runs —
+        a helper parked by the budget, a report that cannot reach its leader yet — has no event to
+        ride, and the chat would show it only on the next full read."""
+        await self.sessions.append_transcript(session_id, [message])
+        state = self._states.get(session_id)
+        try:
+            await self._notify_sinks(session_id, HostEvent(HostEventType.TRANSCRIPT_NOTE, (state.run_id if state is not None else "") or "", {"session_id": session_id}))
+        except Exception:  # noqa: BLE001 — the line is written; a front that missed the event sees it on its next read
+            logger.warning("could not announce a note in session %s", session_id, exc_info=True)
 
     async def _settle_stale_runs(self, resumed: list[str], parked: list[str] | None = None) -> None:
         """A run row still 'running' that nobody drives is a leftover of the previous process: closed as cancelled."""
