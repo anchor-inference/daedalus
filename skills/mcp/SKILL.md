@@ -1,6 +1,7 @@
 ---
 name: mcp
 description: Using MCP servers (external tool providers) in a session: when to enable one, how, and what to expect.
+requires: mcp
 ---
 # MCP servers
 

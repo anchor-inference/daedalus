@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flowIcon, parseFlow, parseNode } from "./flow";
+import { FLOW_OPEN_RE, flowIcon, parseFlow, parseNode } from "./flow";
 import { renderMarkdown } from "./md";
 
 const PILOT = [
@@ -141,12 +141,33 @@ describe("a mermaid fence", () => {
   });
 });
 
-describe("the skill that teaches the syntax", () => {
-  it("promises line icons only for emoji the app draws as one", async () => {
-    const skill = (await import("../../skills/rich-answers/SKILL.md?raw")).default as string;
-    const at = skill.indexOf("emoji as line icons");
-    const listed = skill.slice(at, skill.indexOf("\n- ", at)).match(/\p{Extended_Pictographic}/gu) ?? [];
-    expect(listed.length).toBeGreaterThan(20);
-    expect(listed.filter((emoji) => !flowIcon(emoji))).toEqual([]);
+describe("the syntax the system prompt teaches", () => {
+  // The model copies the card and the flow of its system prompt; one the app could not draw would
+  // teach every session a broken block. Read from the prompt's own source, as the model reads it.
+  const example = async (opener: string): Promise<string[]> => {
+    const prompt = (await import("../../daedalus/host/prompts.py?raw")).default as string;
+    const lines = prompt.slice(prompt.indexOf(`    ${opener}`)).split("\n");
+    return lines.slice(0, lines.indexOf("    :::") + 1).map((line) => line.replace(/^ {4}/, ""));
+  };
+
+  it("draws its card with every key it shows", async () => {
+    const card = await example(":::card");
+    const html = renderMarkdown(card.join("\n"));
+    expect(html).toContain('class="rcards"');
+    for (const text of ["1. Name", "My pick", "price · licence · rating", "one caveat", ">Shop<"]) expect(html).toContain(text);
+    expect(html).not.toContain(":::");
+  });
+
+  it("draws its flow with the rows, the labelled step, the key node and line icons", async () => {
+    const [opener, ...rest] = await example(":::flow");
+    const flow = parseFlow((opener.match(FLOW_OPEN_RE) as RegExpMatchArray)[1], rest.slice(0, -1));
+    expect(flow.title).toBe("Title");
+    expect(flow.note).toBe("a caption");
+    expect(flow.rows.map((row) => row.nodes.length)).toEqual([1, 2]);
+    expect(flow.steps[0].label).toBe("cannot answer");
+    expect(flow.rows[1].nodes.map((node) => node.mark)).toEqual([true, false]);
+    const emoji = [flow.icon, ...flow.rows.flatMap((row) => row.nodes.map((node) => node.icon))];
+    expect(emoji.filter((one) => !flowIcon(one))).toEqual([]);
+    expect(renderMarkdown([opener, ...rest].join("\n"))).toContain('<figure class="flow">');
   });
 });

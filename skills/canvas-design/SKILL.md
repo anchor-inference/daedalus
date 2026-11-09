@@ -1,7 +1,7 @@
 ---
 name: canvas-design
 description: Create original static visual art as .png or .pdf (posters, art pieces, identity sheets) from a written design philosophy; never copy an existing artist's work.
-requires: browser
+requires: python:PIL, ImageView
 ---
 These are instructions for creating design philosophies - aesthetic movements that are then EXPRESSED VISUALLY. Output only .md files, .pdf files, and .png files.
 

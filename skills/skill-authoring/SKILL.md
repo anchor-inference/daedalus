@@ -74,6 +74,13 @@ Use this placement model:
 
 Provenance belongs in `README.md` unless the agent needs it to perform the task.
 
+A skill that works with tools or programs names them in its front matter, one line:
+`requires: browser, ImageView, playwright, python:PIL`. A capitalised name is a tool, a group's name
+(`browser`, `services`, `calendar`…) is a tool group, `python:<module>` is a module the shell's `python3`
+imports, any other name is a program. Loading the skill loads those tools and groups into the run at
+once and says which program is missing. In the host repository, `python scripts/lint_skills.py` fails a
+skill that names a tool which does not exist or one its `requires:` does not load.
+
 ## Description Requirements
 
 The description decides whether the skill ever loads. Write it for discovery.

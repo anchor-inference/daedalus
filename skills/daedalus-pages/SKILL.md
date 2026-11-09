@@ -1,6 +1,7 @@
 ---
 name: daedalus-pages
 description: Build the operator's own screens inside the Daedalus app (dashboards, tools, viewers, forms, embedded web apps, anything) with the Page tools, make them native on phone and desktop, check, publish and put them on the rail.
+requires: pages, services
 ---
 # Custom pages
 

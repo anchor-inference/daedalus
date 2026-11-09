@@ -372,6 +372,9 @@ class FakeProviders:
     def available(self) -> list[str]:
         return ["local"]
 
+    def price_view(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {}
+
     async def close_retired(self) -> None:
         return None
 

@@ -327,6 +327,10 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .thinking-head:hover .worked, .thinking-head:hover .families { color:var(--fg); }
 .chev { display:inline-flex; align-items:center; color:var(--fg-3); transition:transform .14s var(--ease-out); flex:none; }
 .thinking-head .chev, .summary-head .chev { margin-left:2px; }
+/* A block of steps holding a request that waits on the operator: open, and marked in the warning
+   colour, so the refusal under it is not mistaken for the end of the turn. */
+.thinking-head.awaiting .worked { color:var(--fg); }
+.awaiting-badge { flex:none; padding:0 var(--space-2); border-radius:var(--radius-pill); border:1px solid color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 12%, transparent); color:var(--warn); font-size:var(--fs-12); line-height:20px; white-space:nowrap; }
 .chev.down { transform:rotate(90deg); }
 .thinking-head .steps { color:var(--muted); font-size:var(--fs-13); }
 .activity { display:flex; flex-direction:column; padding-left:2px; border-left:2px solid var(--line); margin-left:8px; padding-left:12px; }
@@ -692,6 +696,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* When the message was sent or the answer given. It lives in the row that is already there, so a turn
    is no taller for it, and it shows when the row does: on hover on a desk, always on touch. */
 .msg-time { padding-inline:var(--space-2); font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
+/* How fast the turn generated, beside its time and as quiet as it: a figure to glance at, not to read. */
+.msg-speed { padding-inline:var(--space-1) var(--space-2); font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
 /* The one undoing action turns red when it is pointed at, not before: red at rest it was the loudest
    mark in a row of grey ones and read as an alert with no word to explain it. The confirmation it
    opens says what it removes. */
@@ -2571,6 +2577,15 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
 .settings-name-field { width: 220px; padding: 6px 10px; }
 .mpanel-rows { margin-top: 8px; border-top: 1px solid var(--line); }
+/* A model's price: three rates side by side wherever they fit, which on a phone is still one line each. */
+.model-price { border-top: 1px solid var(--line); }
+.model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
+.model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* A session's helper models: the choice, then the list it allows, under the model line of Details. */
+.dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
+/* Its own title rather than the 64px label of the lines above, which broke it into a word a line. */
+.dt-subagent-models-title { color: var(--fg-2); min-width: 0; }
+.subagent-models { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
@@ -3450,6 +3465,17 @@ input.field[type="range"] {
 .run-outcome-more { margin-top:2px; }
 .run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--muted); cursor:pointer; }
 .run-outcome-more summary:hover { color:var(--fg); }
+.run-outcome-count { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.run-outcome-failures { margin:2px 0 0; padding:0; list-style:none; }
+/* Recovered: a later turn answered, so the stop is history. One neutral line in the run's quiet grey
+   that opens onto its details; the red card is kept for a stop nothing has answered yet. */
+.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--muted); }
+.run-outcome.recovered .run-outcome-line { display:flex; align-items:center; gap:var(--space-2); width:fit-content; max-width:100%; min-height:var(--row-h-dense); cursor:pointer; list-style:none; }
+.run-outcome.recovered .run-outcome-line::-webkit-details-marker { display:none; }
+.run-outcome.recovered .run-outcome-line:hover { color:var(--fg); }
+.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--muted); }
+.run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
+.run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
 /* Composer card: the text owns its row; controls never compete with its width. */
 .composer { gap:var(--space-2); }

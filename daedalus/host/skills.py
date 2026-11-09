@@ -12,9 +12,10 @@ import mimetypes
 import os
 import re
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from protocore.contracts.skills import (
     ISkillStore,
@@ -25,6 +26,8 @@ from protocore.contracts.skills import (
     SkillUpsertInput,
 )
 from protocore.contracts.types import SkillManifest
+
+from daedalus.tools import TOOL_GROUPS
 
 ENTRY = "SKILL.md"
 DISABLED_MARKER = ".disabled"
@@ -223,9 +226,10 @@ class DirectorySkillStore(ISkillStore):
         return _csv(self._meta_of(skill_id).get("params", ""))
 
     def requires_of(self, skill_id: str) -> list[str]:
-        """What a skill declares it cannot work without (``requires: browser``). The Skill tool turns an
-        unmet requirement into the first line of the skill, so the model reads "not installed" before the
-        instructions that would have it call a tool this installation does not have."""
+        """What a skill declares it cannot work without (``requires: browser, ImageView, playwright``), as
+        written; :func:`classify_requirement` says what each item is. The Skill tool loads the tools and
+        groups named and puts an unmet program first in the skill, so the model reads "not installed"
+        before the instructions that would have it run something this installation does not have."""
         return _csv(self._meta_of(skill_id).get("requires", ""))
 
     async def load_file(self, tenant_id: str, skill_id: str, path: str) -> bytes | None:
@@ -367,15 +371,39 @@ class ScopedSkillStore:
 # The static contract a skill must meet before the operator may activate it; also what SkillDraft
 # reports on a draft, so it lives beside the parser both use.
 SKILL_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
-TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
+TOOL_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]{0,79}$")
+PROGRAM_NAME = re.compile(r"^[a-z0-9][a-z0-9._+-]{0,63}$")
+MODULE_NAME = re.compile(r"^python:[A-Za-z_][A-Za-z0-9_.]{0,63}$")
 
 
-def skill_declarations(markdown: str) -> tuple[list[str], list[str]]:
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """One item of a skill's ``requires:``. Its kind is read off its form, so the front matter stays one
+    line a person writes without a schema: ``ImageView`` (a capital) is a tool, ``browser`` (a declared
+    group's name) is a tool group, ``python:PIL`` is a module the shell's ``python3`` imports, and any
+    other lowercase name (``playwright``, ``npx``, ``ffmpeg``) is a program the shell runs."""
+
+    kind: Literal["tool", "group", "module", "program"]
+    name: str
+
+
+def classify_requirement(item: str, groups: Collection[str]) -> Requirement | None:
+    """What ``item`` of a ``requires:`` line is; ``None`` for a name no form fits."""
+    if MODULE_NAME.fullmatch(item):
+        return Requirement("module", item)
+    if TOOL_NAME.fullmatch(item):
+        return Requirement("tool", item)
+    if item in groups:
+        return Requirement("group", item)
+    if PROGRAM_NAME.fullmatch(item):
+        return Requirement("program", item)
+    return None
+
+
+def skill_declarations(markdown: str) -> list[str]:
+    """The ``requires:`` line of a skill's front matter, item by item, as written."""
     meta, _ = parse_skill_markdown(markdown)
-    return (
-        [item.strip() for item in meta.get("requires", "").split(",") if item.strip()],
-        [item.strip() for item in meta.get("tools", "").split(",") if item.strip()],
-    )
+    return _csv(meta.get("requires", ""))
 
 
 def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]], *, directory: Path | None = None) -> dict[str, Any]:
@@ -392,11 +420,9 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]], *, 
         errors.append("name and descriptive purpose are required")
     if "## When to use" not in body or "## Procedure" not in body or "## Checks" not in body:
         errors.append("usage, procedure and checks sections are required")
-    requirements, tools = skill_declarations(markdown)
-    if len(requirements) > 8 or len(set(requirements)) != len(requirements) or any(item not in {"browser", "node"} for item in requirements):
-        errors.append("requires must name unique supported host components")
-    if len(tools) > 32 or len(set(tools)) != len(tools) or any(not TOOL_NAME.fullmatch(item) for item in tools):
-        errors.append("tools must name unique registered tool identifiers")
+    requirements = skill_declarations(markdown)
+    if len(requirements) > 32 or len(set(requirements)) != len(requirements) or any(classify_requirement(item, TOOL_GROUPS) is None for item in requirements):
+        errors.append("requires must name unique tools, tool groups, programs or python: modules")
     if not isinstance(dependencies, list) or len(dependencies) > 16:
         errors.append("too many dependencies")
     else:
@@ -461,6 +487,6 @@ def save_skill_draft(
 
 
 __all__ = [
-    "DRAFTS_DIR", "DirectorySkillStore", "assess", "draft_slug", "handed_markdown", "handover_files", "parse_skill_markdown",
+    "DRAFTS_DIR", "DirectorySkillStore", "Requirement", "assess", "classify_requirement", "draft_slug", "handed_markdown", "handover_files", "parse_skill_markdown",
     "referenced_files", "render_skill_markdown", "save_skill_draft", "skill_declarations",
 ]

@@ -1176,8 +1176,14 @@ export type RunOutcome = {
   steps?: number;
   last_tool?: string;
   answered?: boolean;
+  /** The provider failure's class as the engine classified it (``connection``, ``rate_limit``, ``server_error``). */
+  reason?: string;
   compaction?: { outcome: string; reason?: string; prompt_after?: number; trigger?: number; summariser_failures?: Record<string, number>; floor_dropped?: number } | null;
 };
+
+/** A run's generation speed: its streamed output, the time the calls took to produce it at their measured
+ *  rates, that rate, and the model that wrote most of it. */
+export type RunSpeed = { tokens: number; ms: number; rate: number; calls: number; model: string };
 
 /** A message of the chat another one answers: its seq, and the words quoted from it. */
 export type ReplyRef = { seq: number; excerpt: string };
@@ -1298,6 +1304,9 @@ export type SessionDetail = {
   pending: { questions: Question[]; answered?: PendingAnswered } | null;
   /** The approval requests still waiting on the operator, by key: a refusal in the transcript is offered only while its key is here. */
   open_approvals?: string[];
+  /** How fast each run on the page generated, by run id (``run_speeds`` on the host): absent for a run
+   *  with no timed call or under twenty tokens. */
+  run_speeds?: Record<string, RunSpeed>;
   model: string;
   provider?: string;
   /** Session override, else the preset: whether the next call thinks, and how hard. */
@@ -2033,6 +2042,39 @@ export type ProviderConf = {
   billing?: "metered" | "subscription";
 };
 
+/** Per million tokens; null where nothing knows the rate. */
+export type Rates = { input: number | null; output: number | null; cache_hit: number | null };
+
+/** One model's price as the host reports it: the operator's own (`manual`) or the default, and why. */
+export type PriceView = Rates & {
+  manual: boolean;
+  /** Paid for up front: recorded at $0 and never counted against a cap. */
+  plan: boolean;
+  plan_default: boolean;
+  /** Why it is a plan without the operator saying so: the provider's billing, a CLI login, a local model. */
+  plan_source: "" | "provider" | "login" | "local";
+  /** The provider or the hardware decides, not this model's setting. */
+  plan_locked: boolean;
+  /** The endpoint states the real charge of each call, which is booked over any price here. */
+  states_bill: boolean;
+  default: Rates & { source: "route" | "config" | "builtin" | "catalog" | null };
+};
+
+export type SubagentModelsMode = "all" | "session" | "chosen";
+export type SubagentModelsChoice = { mode: SubagentModelsMode; presets: string[] };
+
+/** A session's list of models its helpers may run on (`/api/sessions/{id}/subagent-models`). */
+export type SubagentModelsView = SubagentModelsChoice & {
+  /** The session has no choice of its own and follows the default from Settings. */
+  inherited: boolean;
+  /** Set by the session that started this one. */
+  from_parent: boolean;
+  allowed: string[];
+  default: SubagentModelsChoice;
+  session_preset: string | null;
+  options: { id: string; label: string }[];
+};
+
 export type ContextWindowSource = "manual" | "provider" | "catalog" | "table" | "error" | "default";
 
 /** What each source knows about one preset's window; null where it knows nothing. */
@@ -2078,6 +2120,8 @@ export type Settings = {
   on_demand_defaults?: Record<string, boolean>;
   /** Per preset, what every context-window source says, so the settings can explain the number. */
   context_window_sources?: Record<string, ContextWindowSources>;
+  /** What each preset costs and where that comes from, by preset id. */
+  prices?: Record<string, PriceView>;
   providers: Record<string, ProviderConf>;
   provider_kinds?: string[];
   prompt: { rules: string; default_rules?: string };
@@ -2092,7 +2136,7 @@ export type Settings = {
   };
   self_change: { approval: string; auto_rebuild: boolean };
   limits: { max_iterations: number; tool_timeout_seconds: number; usd_per_run: number; usd_total: number; usd_total_per_provider: Record<string, number>; total_since: string };
-  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number };
+  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice };
   usd_per_day?: number;
   balance: { enabled: boolean; poll_seconds: number; thresholds_usd: number[] };
   scheduler: { topic_mode: string; catch_up_missed: boolean; require_approval?: boolean };
