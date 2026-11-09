@@ -40,6 +40,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
+from daedalus.host import subagent_models
 from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
@@ -2759,6 +2760,16 @@ class TelegramFront:
             metadata["tools_off"] = sorted(set(tools_off))
         project = await self.manager.project_of(session_id)
         parent = await self.manager.get_state(session_id)
+        if parent is not None:
+            # The session's list of helper models holds for an agent it spawns as much as for a subagent:
+            # otherwise SpawnAgent is the way round it. The new agent runs on the default preset when none
+            # is named, so that is the one checked, and it keeps the list as its own.
+            allowed = self.manager.subagent_allowance(parent.metadata, await self.manager.live.load(session_id))
+            if preset and preset not in self.manager.config.presets:
+                raise ValueError(f"unknown model preset {preset!r}")
+            if allowed.limited:
+                allowed.check(preset or self.manager.session_preset_id({}))
+                metadata[subagent_models.KEY] = allowed.inherited()
         # A site session's child stays on the site. Opening it a topic would put the bot's
         # words back into Telegram for a chat the operator started in the Mini App.
         if parent is not None and parent.metadata.get("telegram_detached"):

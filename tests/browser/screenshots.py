@@ -548,6 +548,18 @@ SETTINGS = {
         "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "context_window_source": "provider", "max_output_tokens": 4096},
     },
     "on_demand_defaults": {"deepseek-flash": True, "claude-opus-5": True, "gpt-5.6-luna": True, "qwen-local": False},
+    # What each model costs: DeepSeek's built-in price overridden by hand, Claude's login a plan at zero,
+    # Luna on a prepaid provider, the local model with no price at all.
+    "prices": {
+        "deepseek-flash": {"input": 0.25, "output": 1.0, "cache_hit": 0.005, "manual": True, "plan": False, "plan_default": False, "plan_source": "", "plan_locked": False, "states_bill": False,
+                           "default": {"input": 0.3, "output": 1.2, "cache_hit": 0.006, "source": "builtin"}},
+        "claude-opus-5": {"input": 0.0, "output": 0.0, "cache_hit": 0.0, "manual": False, "plan": True, "plan_default": True, "plan_source": "login", "plan_locked": False, "states_bill": False,
+                          "default": {"input": 0.0, "output": 0.0, "cache_hit": 0.0, "source": "config"}},
+        "gpt-5.6-luna": {"input": None, "output": None, "cache_hit": None, "manual": False, "plan": True, "plan_default": True, "plan_source": "provider", "plan_locked": True, "states_bill": False,
+                         "default": {"input": None, "output": None, "cache_hit": None, "source": None}},
+        "qwen-local": {"input": None, "output": None, "cache_hit": None, "manual": False, "plan": False, "plan_default": False, "plan_source": "", "plan_locked": False, "states_bill": False,
+                       "default": {"input": None, "output": None, "cache_hit": None, "source": None}},
+    },
     # What each source says about each window: the settings explain the number with it.
     "context_window_sources": {
         "deepseek-flash": {"provider": None, "catalog": None, "table": 128000, "error": None},
@@ -906,6 +918,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return None
     # The Notes tab's writes, uploads and files are the shared host's (notes_stub.py), which keeps them.
     if (rel.startswith("/api/notes/") or (rel.startswith("/api/sessions/") and "/notes" in rel)) and fulfil_shared(route):
+        return None
+    # A session's helper models: the shared host's answer, the choice it was given, for reads and writes.
+    if rel.startswith("/api/sessions/") and rel.endswith("/subagent-models") and fulfil_shared(route):
         return None
     if request.method != "GET":
         return respond(route, {"ok": True})

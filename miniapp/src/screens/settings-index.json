@@ -555,6 +555,12 @@
       "synonyms": ["subagents", "subagent limit", "parallel agents", "concurrency", "max active", "helpers", "субагенты", "лимит субагентов", "параллельные агенты"]
     },
     {
+      "section": "limits", "anchor": "subagents.models", "config": "subagents.models",
+      "title": { "en": "Models for subagents", "ru": "Модели для субагентов" },
+      "about": { "en": "Which models a session's helpers may run on: all, only the session's own, or a chosen few. A session's own choice in its Details wins.", "ru": "На каких моделях могут работать помощники сессии: на всех, только на модели сессии или на выбранных. Выбор в деталях сессии важнее." },
+      "synonyms": ["subagent models", "helper models", "allowed models", "SubAgent model", "модели субагентов", "модели помощников", "разрешённые модели"]
+    },
+    {
       "section": "limits", "anchor": "limits.usd_per_run", "config": "limits.usd_per_run",
       "title": { "en": "Spend cap per run", "ru": "Потолок трат за запуск" },
       "about": { "en": "The most one run may spend in USD; 0 means no cap.", "ru": "Сколько USD может потратить один запуск; 0 — без лимита." },

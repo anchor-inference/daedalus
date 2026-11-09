@@ -1622,6 +1622,15 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "subagent-models":
+        # Every session's Details shows which models its helpers may run on: the default here, every model;
+        # a change answers the choice it was given. check_model_settings.py draws the others.
+        chosen = body if method.upper() == "PUT" and isinstance(body, dict) else {}
+        mode = chosen.get("mode") or "all"
+        options = [{"id": "default", "label": "Test model"}, {"id": "fast", "label": "Fast model"}]
+        allowed = [o["id"] for o in options] if mode == "all" else ["default"] if mode == "session" else [p for p in chosen.get("presets") or [] if p in ("default", "fast")]
+        return 200, "application/json", json.dumps({"mode": mode, "presets": list(chosen.get("presets") or []), "inherited": not chosen.get("mode"), "from_parent": False, "allowed": allowed,
+                                                    "default": {"mode": "all", "presets": []}, "session_preset": "default", "options": options})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "tool-groups":
         # Every session's Details lists its tool groups; a change or a "Load now" answers the same list.
         return 200, "application/json", json.dumps(session_tool_groups())

@@ -107,6 +107,11 @@ mode = "auto"                # auto | off | local | server — see docs/SELF-DEV
 wip_limit = 3                # tasks one agent (with its subagents) may hold in 'doing' at once
 stale_hours = 6              # a 'doing' task whose session went quiet this long is handed back
 
+[subagents.models]           # which presets a session's helpers may run on, unless the session chooses
+mode = "all"                 # all | session (only the session's own model) | chosen (the list below);
+presets = []                 # held for SubAgent, SpawnAgent and a Daedalus member hired from the session,
+                             # and handed to each child as its own, so it cannot reach further
+
 [harness]                    # command-line agents hired as staff
 max_output_tokens = 64000    # one call's output ceiling for OpenCode and Claude Code members, whose
                              # defaults of about 32k cut a large file written in one call; 0 = theirs

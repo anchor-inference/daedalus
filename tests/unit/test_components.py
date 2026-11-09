@@ -607,6 +607,10 @@ class FakeManager:
             return []
 
         @staticmethod
+        def price_view(*_: Any, **__: Any) -> dict[str, Any]:
+            return {}
+
+        @staticmethod
         async def close_retired() -> None:
             return None
 

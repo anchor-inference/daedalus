@@ -173,6 +173,22 @@ async def _catalog_problem(orch: Orchestrators, harness: str, env: str, folder: 
 # -- hiring, editing, dismissing ------------------------------------------------------------------------
 
 
+async def _helper_model(orch: Orchestrators, session_id: str, model: str) -> None:
+    """A Daedalus member's preset, held to the hiring session's list of helper models like a subagent's.
+
+    Only a named preset is checked: an empty one is the project's or the installation's own choice, made by
+    the operator, and a command-line agent's model is not a preset at all.
+    """
+    manager = orch.manager
+    state = await manager.get_state(session_id)
+    if not model or state is None:
+        return
+    try:
+        manager.subagent_allowance(state.metadata, await manager.live.load(session_id)).check(model)
+    except ValueError as exc:
+        raise Refused(str(exc)) from exc
+
+
 async def hire(
     orch: Orchestrators,
     project: Project,
@@ -220,6 +236,8 @@ async def hire(
         raise Refused(f"{_label(harness)} staff cannot run in the {where} now: {available.reason}")
     if harness != "daedalus":
         await _catalog_problem(orch, harness, where, target, {"agent": agent, "model": model, "permission_mode": permission_mode, "effort": effort})
+    else:
+        await _helper_model(orch, session_id, model)
     if isolation is None or isolation == "":
         home = target or project.primary
         isolation = "worktree" if home is not None and home.is_git and not home.readonly else "shared"
@@ -324,6 +342,8 @@ async def staff_edit(
     if member.harness != "daedalus":
         where = env or member.env or (target.env if target is not None else orch.manager.projects.local_env)
         await _catalog_problem(orch, member.harness, where, target, {k: str(changes[k]) for k in ("agent", "model", "permission_mode", "effort") if k in changes})
+    elif model:
+        await _helper_model(orch, session_id, model)
     try:
         updated = await orch.manager.staff.update(member.id, **changes)
     except StaffError as exc:
