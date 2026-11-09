@@ -78,7 +78,10 @@ def _site(url: str) -> str:
 def _card_text(kind: str, rest: str, lines: list[str]) -> list[str]:
     """One card as the lines a chat reads: the title linked and the badge beside it, then the meta,
     the body as written, the links and the note. The picture is left out: a chat message has no
-    place for it, and the link under the title leads to the page that shows it."""
+    place for it, and the link under the title leads to the page that shows it. The badge and the
+    note are set in ``*…*``, which both of Telegram's ways of taking an answer read as italics: the
+    ``_…_`` written here before reached a chat on the HTML fallback (:func:`markdown_to_html`, used
+    when rich Markdown is refused) as literal underscores."""
     fields = {"title": rest.strip()}
     body: list[str] = []
     fenced = False
@@ -97,12 +100,12 @@ def _card_text(kind: str, rest: str, lines: list[str]) -> list[str]:
     if head:
         head = f"**{head}**" if kind == "card" else f"### {head}"
     if fields.get("badge"):
-        head = f"{head} · _{fields['badge']}_" if head else f"_{fields['badge']}_"
+        head = f"{head} · *{fields['badge']}*" if head else f"*{fields['badge']}*"
     out = [part for part in (head, fields.get("meta", "")) if part]
     text = "\n".join(body).strip()
     if text:
         out.append(text)
-    out += [part for part in (fields.get("links", ""), f"_{fields['note']}_" if fields.get("note") else "") if part]
+    out += [part for part in (fields.get("links", ""), f"*{fields['note']}*" if fields.get("note") else "") if part]
     return out
 
 
@@ -138,7 +141,7 @@ def _flow_text(rest: str, lines: list[str]) -> list[str]:
         out.append(row)
         pending = ""
     head = [f"**{title}**"] if title else []
-    return head + out + ([f"_{note}_"] if note else [])
+    return head + out + ([f"*{note}*"] if note else [])
 
 
 def flatten_rich(text: str) -> str:
