@@ -3407,9 +3407,13 @@ function ToolCard({ item }: { item: ToolItem }) {
   if (item.name === "Exec") parts.push(<RawHtml key="c" html={codeBlock(String(a.command ?? ""), "bash")} />);
   else if (item.name === "Write") parts.push(<RawHtml key="c" html={codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? "")))} />);
   else if (item.name === "Edit") {
-    const before = String(a.old_string ?? a.old ?? "");
-    const after = String(a.new_string ?? a.new ?? "");
-    const patch = [...before.split("\n").map((l) => `-${l}`), ...after.split("\n").map((l) => `+${l}`)].join("\n");
+    // An Edit carries one replacement or a batch of them (edits=[…]); both are drawn as one diff.
+    const pairs = Array.isArray(a.edits)
+      ? (a.edits as Record<string, unknown>[]).map((e) => [String(e?.old_string ?? ""), String(e?.new_string ?? "")])
+      : [[String(a.old_string ?? a.old ?? ""), String(a.new_string ?? a.new ?? "")]];
+    const before = pairs.map(([old]) => old).join("\n…\n");
+    const after = pairs.map(([, now]) => now).join("\n…\n");
+    const patch = pairs.flatMap(([old, now]) => [...old.split("\n").map((l) => `-${l}`), ...now.split("\n").map((l) => `+${l}`)]).join("\n");
     // The same head as the written file and the command beside it — a label and a copy button —
     // so the three expanded steps read as one kind of block; the copy takes the change as a patch.
     parts.push(

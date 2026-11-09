@@ -51,7 +51,7 @@ run because the turn an approval continues is another run, and it must not come 
 
 FREE_TOOLS = frozenset({*READ_TOOLS, TOOL, "AskUser", "ToolSearch"})
 """What a touched run does without anyone being asked. ``AskUser`` because the operator is who it should turn to."""
-HELD_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "Exec", "Verify", "WebFetch", "WebSearch"})
+HELD_TOOLS = frozenset({"Write", "Edit", "Exec", "Verify", "WebFetch", "WebSearch"})
 """What goes on a card in a touched run. Everything else is refused. ``WebFetch`` and ``WebSearch`` are here
 for what they carry out in an address or a query, not for what they read."""
 QUIET_TOOLS = frozenset({TOOL, "AskUser", "ToolSearch"})

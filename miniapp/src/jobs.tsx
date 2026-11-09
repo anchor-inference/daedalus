@@ -16,6 +16,7 @@ import { PreviewSource, fileGlyph, previewKind, sessionBase } from "./preview";
 import { DiffView } from "./previewparts";
 import { looksLikeDiff } from "./diff";
 import { t } from "./i18n";
+import { sentPath } from "./turnfiles";
 
 export type Verification = { id: number; criterion: string; command: string; exit_code: number; passed: number; output_head: string; duration_ms: number; at: string; sandboxed: number; dependencies: string; tests_run: number | null };
 
@@ -60,7 +61,7 @@ export function sentFiles(messages: MessageView[]): SentFile[] {
   for (const m of messages) {
     for (const call of m.tool_calls ?? []) {
       if (call.name !== "SendFile" || typeof call.arguments?.path !== "string") continue;
-      const path = call.arguments.path;
+      const path = sentPath(call.name, call.arguments);
       out.push({ callId: call.id, path, name: path.split("/").filter(Boolean).pop() ?? path, caption: typeof call.arguments.caption === "string" ? call.arguments.caption : "", at: m.created_at });
     }
   }

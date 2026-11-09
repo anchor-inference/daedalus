@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import tempfile
+import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -9,20 +14,89 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.deliverables import secret_part
 from daedalus.host.services import NO_CHAT_BOUND
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import error, local_copy, ok, refuse_protected, services_for
 
+ZIP_MAX_BYTES = 100 << 20
+"""The most a folder sent as a .zip may hold, before compression: a chat refuses far less, and a folder
+larger than this is a build tree or a dataset, which the operator would rather be told about."""
+ZIP_MAX_FILES = 5000
+
+
+class ZipRefused(Exception):
+    """Why a folder was not archived, in words the model reads."""
+
+
+def archive_path(folder: Path) -> Path:
+    """Where ``SendFile(zip=true)`` puts a folder's archive: beside it, named after it.
+
+    Fixed by the folder's path alone, because the app's card finds the file it serves from the call's
+    arguments and nothing else; a name with a number on it would leave the card pointing nowhere.
+    """
+    return folder.with_name(folder.name + ".zip")
+
+
+async def zip_folder(services: Any, folder: Path) -> tuple[Path, int, list[str]]:
+    """Archive ``folder`` as :func:`archive_path` names it, replacing an earlier one; ``(archive, files
+    in it, what was left out)``.
+
+    Read through the session's filesystem, so a session working on the host archives the folder there
+    and the archive lands there too. What the file pane never shows stays out: the repository's
+    metadata, the usual homes of credentials and ``.env`` files, and the folders every project rebuilds
+    (``node_modules``, ``.venv``, ``__pycache__``, which the file search skips). A link that leads out
+    of the project's walls is left out too, rather than followed into a file the session may not read.
+    """
+    fs = services.fs
+    archive = services.resolve(str(archive_path(folder)), write=True)
+    if services.is_protected(archive):
+        raise ZipRefused(f"{archive} is protected and cannot be written by tools")
+    names = await fs.find(folder, "*", ZIP_MAX_FILES + 1)
+    if len(names) > ZIP_MAX_FILES:
+        raise ZipRefused(f"{folder} holds more than {ZIP_MAX_FILES} files; send a smaller folder, or make the archive with Exec")
+    left_out: list[str] = []
+    total = 0
+    spool = Path(tempfile.gettempdir()) / f"daedalus-sendzip-{uuid.uuid4().hex}.zip"
+    try:
+        with zipfile.ZipFile(spool, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            kept = 0
+            for rel in names:
+                entry = folder / rel
+                real = entry if fs.remote else Path(os.path.realpath(entry))
+                if secret_part(rel) is not None or services.is_protected(real) or not services.contains(real):
+                    left_out.append(rel)
+                    continue
+                try:
+                    data = await fs.read_bytes(entry, limit=ZIP_MAX_BYTES - total)
+                except FileNotFoundError:
+                    continue
+                except ValueError:
+                    raise ZipRefused(f"{folder} holds more than {ZIP_MAX_BYTES >> 20} MiB; send a smaller folder, or make the archive with Exec") from None
+                total += len(data)
+                await asyncio.to_thread(bundle.writestr, rel.replace(os.sep, "/"), data)
+                kept += 1
+        if not kept:
+            raise ZipRefused(f"{folder} has no file to send")
+        if fs.remote:
+            await fs.write_bytes(archive, await asyncio.to_thread(spool.read_bytes))
+        else:
+            await asyncio.to_thread(os.replace, spool, archive)
+    finally:
+        await asyncio.to_thread(spool.unlink, missing_ok=True)
+    return archive, kept, left_out
+
 
 @search_hint(
-    "send file to operator chat share document archive report deliver upload attach grab "
-    "отправить отправь скинуть скинь прислать пришли приложить файл документ архив отчет чат"
+    "send file to operator chat share document archive report deliver upload attach grab folder zip "
+    "отправить отправь скинуть скинь прислать пришли приложить файл документ архив отчет чат папку"
 )
 @tool(
     name="SendFile",
     description=(
         "Push a file from the workspace (or any path) to the operator's Telegram chat, with an "
-        "optional caption; the app shows it as a card under the turn. Not every session has a chat "
+        "optional caption; the app shows it as a card under the turn. A folder with zip=true is sent as "
+        "<folder>.zip, written beside it. Not every session has a chat "
         "bound, so to put a deliverable — a report, a document, a spreadsheet, an archive — into your "
         "answer use AttachMedia instead, which places it there as a file card whether or not a chat is "
         "bound and sends the chat a copy when one is. Chat replies themselves are Markdown and render "
@@ -30,18 +104,35 @@ from daedalus.tools._common import error, local_copy, ok, refuse_protected, serv
         "answers need no file."
     ),
 )
-async def send_file(context: ToolContext, path: str, caption: str | None = None) -> ToolResult:
+async def send_file(context: ToolContext, path: str, caption: str | None = None, zip: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name
     services = services_for(context)
     deliver = services.extra.get("deliver")
     if deliver is not None:
+        if zip:
+            return error(context, "an orchestrator sends files one at a time; ask a member to make the archive")
         return await _send_delivered(context, services, deliver, path, caption)
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "sent"):
         return refusal
+    note = ""
     try:
+        if await services.fs.is_dir(target):
+            if not zip:
+                return error(context, f"{target} is a folder: pass zip=true to send it as {archive_path(target).name}")
+            if path.strip().rstrip("/\\") in ("", ".") or target == services.workspace_dir:
+                # Its archive would land outside the folder the session works in, where the card cannot follow.
+                return error(context, "name a folder inside the workspace; the workspace itself is not archived whole")
+            target, kept, left_out = await zip_folder(services, target)
+            note = f" — {kept} files" + (f"; left out {len(left_out)}: {', '.join(left_out[:10])}{' …' if len(left_out) > 10 else ''}" if left_out else "")
+        elif zip:
+            return error(context, f"zip=true sends a folder, and {target} is not one")
         if not await services.fs.is_file(target):
             return error(context, f"no such file: {target}")
         size = await services.fs.size(target)
+    except PermissionError as exc:
+        return error(context, f"the archive goes beside the folder, and that place is not writable: {exc}")
+    except ZipRefused as exc:
+        return error(context, str(exc))
     except OSError as exc:
         return error(context, str(exc))
     # The app draws every SendFile as a card the operator downloads from the session's files, so the
@@ -49,7 +140,7 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
     # That copy is fetched lazily: a session on the host reads it over the daemon, which is wasted when
     # nothing is bound, and a failed read there once turned a file the app showed into an error.
     if services.send_file is None:
-        return ok(context, f"shown {target.name} ({size} bytes) to the operator as a file card in the app")
+        return ok(context, f"shown {target.name} ({size} bytes){note} to the operator as a file card in the app")
     try:
         # A session working on the host names a file there; the chat is sent a copy fetched here.
         result = await services.send_file(lambda: local_copy(services, target), caption)
@@ -58,8 +149,8 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
     except (OSError, ValueError) as exc:
         return error(context, str(exc))
     if result == NO_CHAT_BOUND:
-        return ok(context, f"shown {target.name} ({size} bytes) to the operator as a file card in the app; no Telegram chat is bound to this session, so nothing went there")
-    return ok(context, f"sent {target.name} ({size} bytes): {result}")
+        return ok(context, f"shown {target.name} ({size} bytes){note} to the operator as a file card in the app; no Telegram chat is bound to this session, so nothing went there")
+    return ok(context, f"sent {target.name} ({size} bytes){note}: {result}")
 
 
 async def _send_delivered(context: ToolContext, services: Any, deliver: Any, path: str, caption: str | None) -> ToolResult:

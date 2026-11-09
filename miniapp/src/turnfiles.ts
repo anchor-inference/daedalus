@@ -95,6 +95,15 @@ export function placeOf(path: string, workspace: string, folders: readonly Pick<
   return best;
 }
 
+/**
+ * The file a call put in front of the operator. A folder sent with `zip` arrives as the archive the host
+ * writes beside it under the folder's name, so the card names and opens that, not the folder.
+ */
+export function sentPath(name: string, args: Record<string, unknown> | undefined): string {
+  const path = typeof args?.path === "string" ? args.path : "";
+  return name === "SendFile" && path && args?.zip === true ? `${path.replace(/[\\/]+$/, "")}.zip` : path;
+}
+
 function nameOf(path: string): string {
   const p = normal(path);
   return p.split("/").filter(Boolean).pop() ?? p;
@@ -114,7 +123,7 @@ export function turnFiles(items: readonly Activity[], workspace = "", folders: r
   for (const a of items) {
     if (a.kind !== "tool" || a.running || a.error) continue;
     if (a.name !== "SendFile" && !WRITERS.has(a.name)) continue;
-    const path = typeof a.args.path === "string" ? a.args.path : "";
+    const path = sentPath(a.name, a.args);
     if (!path) continue;
     const place = placeOf(path, workspace, folders);
     const key = keyOf(path, place);

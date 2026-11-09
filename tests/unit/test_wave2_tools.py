@@ -1,4 +1,4 @@
-"""Edit's loose matching, MultiEdit, background jobs, plan mode, run budgets, workspace notes and memory ranking."""
+"""Edit's loose matching and its batch, background jobs, plan mode, run budgets, workspace notes and memory ranking."""
 
 from __future__ import annotations
 
@@ -44,21 +44,43 @@ def test_apply_edit_matches_exactly_then_loosely_and_keeps_the_file_indentation(
     assert "return x" in nearest_window(text, "    return y")
 
 
-async def test_multi_edit_is_atomic_and_write_reports_a_broken_python_file(tmp_path: Path) -> None:
-    from daedalus.tools.files import multi_edit, write_file
+async def test_an_edit_batch_is_atomic_and_write_reports_a_broken_python_file(tmp_path: Path) -> None:
+    from daedalus.tools.files import edit_file, write_file
 
     locator.register(SessionServices(session_id="w2-files", workspace_dir=tmp_path))
     ctx = ToolContext(tenant_id="t", run_id="r", session_id="w2-files", metadata={"tool_call_id": "c"})
     try:
         (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n", encoding="utf-8")
-        result = await multi_edit().invoke(ctx, {"path": "m.py", "edits": [{"old_string": "a = 1", "new_string": "a = 10"}, {"old_string": "zzz", "new_string": "y"}]})
+        result = await edit_file().invoke(ctx, {"path": "m.py", "edits": [{"old_string": "a = 1", "new_string": "a = 10"}, {"old_string": "zzz", "new_string": "y"}]})
         assert result.is_error and "edit 2 of 2 failed" in result.content and (tmp_path / "m.py").read_text() == "a = 1\nb = 2\nc = 3\n"
-        result = await multi_edit().invoke(ctx, {"path": "m.py", "edits": [{"old_string": "a = 1", "new_string": "a = 10"}, {"old_string": "c = 3", "new_string": "c = 30"}]})
+        result = await edit_file().invoke(ctx, {"path": "m.py", "edits": [{"old_string": "a = 1", "new_string": "a = 10"}, {"old_string": "c = 3", "new_string": "c = 30"}]})
         assert not result.is_error and (tmp_path / "m.py").read_text() == "a = 10\nb = 2\nc = 30\n"
         result = await write_file().invoke(ctx, {"path": "bad.py", "content": "def broken(:\n    pass\n"})
         assert not result.is_error and "does not compile" in result.content
     finally:
         locator.unregister("w2-files")
+
+
+async def test_edit_takes_one_replacement_or_a_batch_and_says_which_shape_it_wants(tmp_path: Path) -> None:
+    """The call a session sent: ``Edit(edits=[…])``, which used to be refused as an unknown argument."""
+    from daedalus.tools.files import edit_file
+
+    locator.register(SessionServices(session_id="w2-shape", workspace_dir=tmp_path))
+    ctx = ToolContext(tenant_id="t", run_id="r", session_id="w2-shape", metadata={"tool_call_id": "c"})
+    try:
+        (tmp_path / "m.txt").write_text("one two three\n", encoding="utf-8")
+        both = await edit_file().invoke(ctx, {"path": "m.txt", "old_string": "one", "new_string": "1", "edits": [{"old_string": "two", "new_string": "2"}]})
+        assert both.is_error and "not both" in both.content
+        neither = await edit_file().invoke(ctx, {"path": "m.txt"})
+        assert neither.is_error and "edits=" in neither.content
+        empty = await edit_file().invoke(ctx, {"path": "m.txt", "edits": []})
+        assert empty.is_error and "empty" in empty.content
+        assert (tmp_path / "m.txt").read_text(encoding="utf-8") == "one two three\n"
+        batch = await edit_file().invoke(ctx, {"path": "m.txt", "edits": [{"old_string": "one", "new_string": "1"}, {"old_string": "three", "new_string": "3", "replace_all": True}]})
+        assert not batch.is_error and "in 2 edits" in batch.content
+        assert (tmp_path / "m.txt").read_text(encoding="utf-8") == "1 two 3\n"
+    finally:
+        locator.unregister("w2-shape")
 
 
 async def test_background_jobs_start_report_and_die(tmp_path: Path) -> None:
