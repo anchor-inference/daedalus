@@ -217,7 +217,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project, ProjectError
-from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed
+from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed, run_speeds
 from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
@@ -2619,6 +2619,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "first_seq": first_seq,
             "has_older": bool(first_seq and oldest and first_seq > oldest),
             "usage": dict(usage) if usage else {},
+            # How fast each run on this page generated, by run id, for the speed under its turn. The
+            # runs of the page only, so a poll that reads one message asks about one run.
+            "run_speeds": await run_speeds(app.db, session_id, (str(v["run_id"]) for v in messages if v.get("run_id"))),
         }
 
     @api.get("/api/sessions/{session_id}/subagents")

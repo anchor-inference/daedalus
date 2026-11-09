@@ -1,10 +1,10 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
-import { absDate, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
+import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
 import { PrivateBadge, isPrivate } from "../privatechat";
@@ -16,7 +16,8 @@ import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
-import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, answerTime, applyLive, buildTurns, closingText, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { Activity, LiveStore, RunFailure, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, answerTime, applyLive, buildTurns, closingText, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { mergeSpeeds, speedWords } from "../turnspeed";
 import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -347,8 +348,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // route is not asked again.
   const [queuedInput, setQueuedInput] = useState<QueuedMessage[]>([]);
   const steerRoute = useRef<"unknown" | "ok" | "none">("unknown");
-  // Approval keys the operator has spent or waved away, so the dock does not offer them twice.
-  const [seenKeys, setSeenKeys] = useState<Set<string>>(() => new Set());
+  // The refused calls the operator has answered here, by call id, so the dock does not offer them
+  // twice; a later refusal of the same action is a new call and is offered (see `pendingApproval`).
+  const [seenCalls, setSeenCalls] = useState<Set<string>>(() => new Set());
+  // How fast each run generated, by run id, kept across reads (see `mergeSpeeds`).
+  const [speeds, setSpeeds] = useState<Record<string, RunSpeed>>(NO_SPEEDS);
 
   async function loopAction(a: string) {
     try {
@@ -459,6 +463,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         // The older pages the reader went back to stay; see `withOlder`.
         msgs.current = withOlder(msgs.current, next.messages);
         historyReadSeq.current = mine;
+        setSpeeds((held) => mergeSpeeds(held, next.run_speeds));
         setDetail({ ...next, messages: msgs.current });
         setOffline(false);
       } catch (e) {
@@ -474,6 +479,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // and an answer still on its way belongs to the one that was left.
   useEffect(() => {
     msgs.current = [];
+    setSpeeds(NO_SPEEDS);
     setSendingMessages([]);
     historyReadSeq.current = ++readSeq.current;
     return () => forgetDisclosed(id);
@@ -490,6 +496,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (kind === "state" && mine !== readSeq.current) return;
         if (kind === "tail" && mine < historyReadSeq.current) return;
         setOffline(false);
+        setSpeeds((held) => mergeSpeeds(held, next.run_speeds));
         if (kind === "state") {
           setDetail((prev) => (prev ? { ...next, messages: prev.messages } : next));
           return;
@@ -562,6 +569,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       const el = scroller.current;
       keepFromEnd.current = el ? el.scrollHeight - el.scrollTop : null;
       msgs.current = prepend(msgs.current, page.messages);
+      setSpeeds((held) => mergeSpeeds(held, page.run_speeds));
       setDetail((prev) => (prev ? { ...prev, messages: msgs.current } : prev));
       setOlder(page.messages.length < OLDER_PAGE ? "done" : "more");
     } catch {
@@ -717,19 +725,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // A tool call the policy refused, waiting on the operator: the dock above the pill offers it once.
   const approval = useMemo(
-    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
-    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+    () => pendingApproval(detail?.messages ?? [], seenCalls, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenCalls, detail?.open_approvals, detail?.run_id],
   );
   // A request answered somewhere else — another device, Telegram, the Chrome panel — or closed by the
   // host leaves this screen at once: the session's own stream does not carry the answer, and an idle
-  // screen reads nothing on its own. A new request has the host's list of open keys read again too.
+  // screen reads nothing on its own. A new request has the end of the conversation read, not only the
+  // host's list of open keys: the list alone named a key whose refusal this screen had not read yet,
+  // and the dock waited for the next step of the run to show it.
   useEvent(["permission.pending", "permission.resolved"], (event) => {
     if (event.session_id !== id) return;
     if (event.type === "permission.resolved") {
       const key = String(event.payload.request_id ?? "");
       setDetail((prev) => (prev?.open_approvals?.includes(key) ? { ...prev, open_approvals: prev.open_approvals.filter((k) => k !== key) } : prev));
+      refreshSoon("state");
+      return;
     }
-    refreshSoon("state");
+    refreshSoon("tail");
   }, [id, refreshSoon]);
   // A remote chat's computer connecting, dropping, being renamed or holding the turn changes the
   // header and the paused banner; the host says so on the global stream, and the session's own
@@ -744,7 +756,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     async (a: Approval) => {
       try {
         await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
-        setSeenKeys((k) => new Set(k).add(a.key));
+        setSeenCalls((k) => new Set(k).add(a.callId));
       } catch (e) {
         toast(errorText(e));
       }
@@ -774,7 +786,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         const r = await api.post<{ resolved?: unknown; similar?: { label?: unknown } }>(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
         const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
-        setSeenKeys((k) => new Set([...k, a.key, ...answered]));
+        setSeenCalls((k) => new Set(k).add(a.callId));
+        // The other requests the family answered are closed on the host; until the next read says so,
+        // they are taken off the list here, so the dock does not move on to one of them.
+        if (answered.length) setDetail((prev) => (prev ? { ...prev, open_approvals: (prev.open_approvals ?? []).filter((k) => !answered.includes(k)) } : prev));
       } catch (e) {
         toast(errorText(e));
       }
@@ -784,7 +799,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // Refusing tells the host too, so the request stops being open on every other front that shows it.
   const deny = useCallback(
     async (a: Approval) => {
-      setSeenKeys((k) => new Set(k).add(a.key));
+      setSeenCalls((k) => new Set(k).add(a.callId));
       try {
         await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
       } catch (e) {
@@ -1826,6 +1841,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 </div>
               )}
               <SessionContext.Provider value={sessionCtx}>
+                <AwaitingCall.Provider value={approval?.callId ?? ""}>
+                <RunSpeeds.Provider value={speeds}>
                 <SubagentOpener.Provider value={openSubagentRef}>
                 <Windowed
                   keys={turnKeys}
@@ -1846,6 +1863,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                     its Steer and × are; the bubble here would be the same words a second time. */}
                 {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><UserWords text={pending.text} /></div></div></div></div>)}
                 </SubagentOpener.Provider>
+                </RunSpeeds.Provider>
+                </AwaitingCall.Provider>
               </SessionContext.Provider>
               {flow}
               {/* The agent waiting in its browser is said in the conversation too, with Open, so the
@@ -2285,7 +2304,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // turn ended on a step, the last reply before it.
   const closing = closingText(turn, segments, live);
   const answered = answerTime(turn, closing, live);
-  const answeredStamp = answered ? <MessageTime at={answered.at} took={answered.took} /> : undefined;
+  // The time and the speed go together: both belong to a turn that finished with an answer.
+  const answeredStamp = answered ? <><MessageTime at={answered.at} took={answered.took} /><TurnSpeed runId={turn.runId} /></> : undefined;
   const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
@@ -2399,7 +2419,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
-      {turn.outcome && !live && <RunOutcomeLine outcome={turn.outcome} />}
+      {turn.outcome && !live && <RunOutcomeLine outcome={turn.outcome} failures={turn.failures ?? []} recovered={!!turn.recovered} />}
     </div>
   );
 });
@@ -2412,7 +2432,11 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
  */
 function WorkBlock({ disclosure, items, live, elapsed, imported, current, waiting, orchestrator, onRetry }: { disclosure: string; items: Activity[]; live: boolean; elapsed: number | null; imported?: string; current: string; waiting: boolean; orchestrator: boolean; onRetry?: (seq: number) => void }) {
   const always = useContext(StepsOpen);
-  const [open, setOpen] = useDisclosed(disclosure, always);
+  const awaiting = useContext(AwaitingCall);
+  const [folded, setOpen] = useDisclosed(disclosure, always);
+  const holds = !!awaiting && items.some((item) => item.kind === "tool" && item.id === awaiting);
+  // Open while it holds the request, whatever was remembered, and back to that once it is answered.
+  const open = folded || holds;
   const wasLive = useRef(live);
   useEffect(() => {
     // Activity is opt-in, including during streaming; completion folds the details away — except
@@ -2427,7 +2451,7 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
     : steps > 0 ? plural("session.part.steps", steps) : t("session.reasoning");
   return (
     <>
-      <button className="thinking-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className={`thinking-head ${holds ? "awaiting" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className={`dots ${live ? "on" : ""}`}>
           <i />
           <i />
@@ -2437,6 +2461,7 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
         {current && <span className="activity-current truncate">{current}</span>}
         {elapsed !== null && steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
         {families && <span className="families truncate" title={families}>· {families}</span>}
+        {holds && <span className="awaiting-badge" data-awaiting>{t("session.awaiting")}</span>}
         <Chevron open={open} />
       </button>
       {open && (
@@ -2497,18 +2522,63 @@ function UserBubble({ children }: { children: ReactNode }) {
 }
 
 /** The closing line of a run that produced no answer: that there is none, why the run stopped, and which
- *  step or compaction tier gave out. Part of the turn, so a "Context summary" drawn after it cannot hide it. */
-function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
+ *  step or compaction tier gave out. Part of the turn, so a "Context summary" drawn after it cannot hide it.
+ *
+ *  One line however many runs stopped the same way in a row: the host drives a turn again after an
+ *  outage, and each attempt that failed used to add a red card of its own. Once a later turn answered,
+ *  it is one quiet line: four red cards that stayed red above a working answer read as a current fault. */
+function RunOutcomeLine({ outcome, failures, recovered }: { outcome: RunOutcome; failures: RunFailure[]; recovered: boolean }) {
   const pass = outcome.compaction;
-  const failures = Object.entries(pass?.summariser_failures ?? {})
+  const summariser = Object.entries(pass?.summariser_failures ?? {})
     .map(([kind, count]) => `${kind} ${count}`)
     .join(", ");
+  const count = Math.max(1, failures.length);
+  const first = failures[0]?.at;
+  const last = failures.at(-1)?.at;
+  const span = count > 1 && first && last ? (clock(first) === clock(last) ? clock(first) : `${clock(first)}–${clock(last)}`) : "";
+  const repeated = count > 1 ? [t("run.outcome.times", { n: count }), span].filter(Boolean).join(" · ") : "";
+  // Each stop with what finds it again: when, the engine's word and the provider's class for the
+  // failure, and the run's id, which the host's log and its request records are searched by.
+  const details = (
+    <>
+      <ul className="run-outcome-failures">
+        {failures.map((f, i) => (
+          <li key={f.seq ?? i} className="run-outcome-detail" data-failure title={f.at ? fullTime(f.at) : undefined}>
+            {[f.at ? absTime(f.at) : "", [f.errorKind, f.reason].filter(Boolean).join(" · "), f.runId ? t("run.outcome.run", { id: f.runId }) : ""].filter(Boolean).join(" — ")}
+          </li>
+        ))}
+      </ul>
+      {outcome.detail && <div className="run-outcome-detail">{failures.at(-1)?.detail || outcome.detail}</div>}
+      {pass && (
+        <div className="run-outcome-detail">
+          {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
+          {summariser && <>{" · "}{t("run.outcome.failures", { list: summariser })}</>}
+          {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
+        </div>
+      )}
+    </>
+  );
+  if (recovered) {
+    // The line is its own disclosure: one row however narrow the column, the details under it on a click.
+    return (
+      <details className={`run-outcome recovered cause-${outcome.cause}`} data-recovered>
+        <summary className="run-outcome-line" title={t("run.outcome.more")}>
+          <Icon name="check" size={14} />
+          <span className="truncate">{t(outcome.cause === "provider" ? "run.outcome.recovered.provider" : "run.outcome.recovered")}</span>
+          {repeated && <span className="run-outcome-count">{repeated}</span>}
+          <span className="chev" aria-hidden><Icon name="forward" size={12} /></span>
+        </summary>
+        <div className="run-outcome-body">{details}</div>
+      </details>
+    );
+  }
   return (
     <div className={`run-outcome cause-${outcome.cause}`} role="status" aria-label={t("run.outcome.title")}>
       {/* An alert, not a question mark: on the red card a "?" read as a glyph that failed to load. */}
       <Icon name="alert" size={14} />
       <div>
         <b>{t("run.outcome.title")}</b> — {t(`run.outcome.cause.${outcome.cause}`)}
+        {repeated && <> · <span className="run-outcome-count">{repeated}</span></>}
         {!!outcome.steps && (
           <div className="run-outcome-detail">
             {outcome.last_tool ? t("run.outcome.steps.last", { n: outcome.steps, tool: outcome.last_tool }) : t("run.outcome.steps", { n: outcome.steps })}
@@ -2516,19 +2586,10 @@ function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
         )}
         {/* The engine's own words ("force_compaction", "at_floor") are for whoever debugs the run;
             the sentence above is the explanation, and these wait behind a disclosure. */}
-        {(outcome.detail || pass) && (
-          <details className="run-outcome-more">
-            <summary>{t("run.outcome.more")}</summary>
-            {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
-            {pass && (
-              <div className="run-outcome-detail">
-                {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
-                {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
-                {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
-              </div>
-            )}
-          </details>
-        )}
+        <details className="run-outcome-more">
+          <summary>{t("run.outcome.more")}</summary>
+          {details}
+        </details>
       </div>
     </div>
   );
@@ -2573,7 +2634,7 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
  * its own: the extension's side panel. The same turns the chat draws, from the same pieces, so the
  * panel never grows a second way of showing a step. The page keys it by the session's id.
  */
-export function TranscriptView({ detail, live, onPreview, toast, onRender }: { detail: SessionDetail; live: LiveStore; onPreview: (src: PreviewSource) => void; toast: (text: string) => void; onRender?: () => void }) {
+export function TranscriptView({ detail, live, onPreview, toast, onRender, awaiting = "" }: { detail: SessionDetail; live: LiveStore; onPreview: (src: PreviewSource) => void; toast: (text: string) => void; onRender?: () => void; awaiting?: string }) {
   const id = detail.id;
   const status = (detail.status ?? "idle") as Status;
   const busy = status === "running" || status === "waiting";
@@ -2599,8 +2660,12 @@ export function TranscriptView({ detail, live, onPreview, toast, onRender }: { d
   return (
     <div className="timeline panel-chat">
       <SessionContext.Provider value={ctx}>
+        <AwaitingCall.Provider value={awaiting}>
+        <RunSpeeds.Provider value={detail.run_speeds ?? NO_SPEEDS}>
         {settled.map((turn) => <Safe key={turn.key}><TurnView turn={turn} live={false} /></Safe>)}
         {busy && <LiveTurn base={tail} live={live} onRender={onRender} />}
+        </RunSpeeds.Provider>
+        </AwaitingCall.Provider>
       </SessionContext.Provider>
     </div>
   );
@@ -3352,6 +3417,25 @@ const SubagentOpener = createContext<((ref: { id?: string; name?: string } | nul
 /** Whether the steps of a turn are drawn open and stay open when the run ends: a helper's conversation
  *  beside its leader is read for what it did, where the leader's own chat folds the work away. */
 const StepsOpen = createContext(false);
+
+/** The refused call the operator's decision is awaited on (empty: none). The block of steps that holds
+ *  it opens and says so until the decision: the dock above the composer is the place to answer, and a
+ *  folded "Worked for 1m 42s" over the refusal read as a finished turn whose "press Allow" had no button. */
+const AwaitingCall = createContext("");
+
+const NO_SPEEDS: Record<string, RunSpeed> = {};
+/** Each run's generation speed by run id, read by the label under a turn's answer and by nothing else, so
+ *  a speed that arrives re-renders those labels and not the turns around them, which are memoised. */
+const RunSpeeds = createContext<Record<string, RunSpeed>>(NO_SPEEDS);
+
+/** "≈ 87 tok/s" in the row under a finished turn's answer, with its output, generation time and model on
+ *  hover; nothing for a run the host has no speed for. */
+function TurnSpeed({ runId }: { runId?: string }) {
+  const speed = useContext(RunSpeeds)[runId ?? ""];
+  if (!speed) return null;
+  const { label, title } = speedWords(speed);
+  return <span className="msg-speed" title={title} aria-label={title} data-speed>{label}</span>;
+}
 
 /** A tool's path as the workspace knows it: absolute paths inside the workspace become relative, others stay unreachable. */
 function workspaceRelative(path: string, workspace: string): string | null {

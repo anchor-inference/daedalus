@@ -195,3 +195,28 @@ async def test_allowing_one_of_two_open_requests_leaves_the_other_to_be_answered
             assert refused.status_code == 200 and refused.json()["refuses"]["tool"] == "Exec"
     finally:
         await manager.close()
+
+
+async def test_a_chat_whose_turn_ended_on_a_request_waits_on_the_operator_in_the_lists(settings: Settings, db: Database) -> None:
+    # The turn ended on the refusal, and the list called the chat idle: nothing outside the open chat
+    # said a decision was waited on.
+    provider = ScriptedProvider([])
+    manager = await _manager(settings, db, provider)
+    try:
+        sid, key = await _refused_in_a_run(manager, provider)
+
+        async def listed() -> tuple[str, bool]:
+            row = next(r for r in await manager.session_catalog() if r["id"] == sid)
+            return row["status"], row["needs_attention"]
+
+        assert await listed() == ("waiting", True)
+        state = await manager.get_state(sid)
+        assert state is not None and not state.running and state.pending is None
+        async with _client(settings, db, manager) as client:
+            # The session itself still reads idle: a message sent now is a message, not an answer.
+            detail = (await client.get(f"/api/sessions/{sid}", headers={"x-daedalus-token": "tok"})).json()
+            assert detail["status"] == "idle" and detail["open_approvals"] == [key]
+            await client.post(f"/api/sessions/{sid}/policy/refuse", json={"key": key}, headers={"x-daedalus-token": "tok"})
+        assert (await listed())[0] == "idle"
+    finally:
+        await manager.close()

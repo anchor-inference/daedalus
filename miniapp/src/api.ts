@@ -1171,8 +1171,14 @@ export type RunOutcome = {
   steps?: number;
   last_tool?: string;
   answered?: boolean;
+  /** The provider failure's class as the engine classified it (``connection``, ``rate_limit``, ``server_error``). */
+  reason?: string;
   compaction?: { outcome: string; reason?: string; prompt_after?: number; trigger?: number; summariser_failures?: Record<string, number>; floor_dropped?: number } | null;
 };
+
+/** A run's generation speed: its streamed output, the time the calls took to produce it at their measured
+ *  rates, that rate, and the model that wrote most of it. */
+export type RunSpeed = { tokens: number; ms: number; rate: number; calls: number; model: string };
 
 /** A message of the chat another one answers: its seq, and the words quoted from it. */
 export type ReplyRef = { seq: number; excerpt: string };
@@ -1293,6 +1299,9 @@ export type SessionDetail = {
   pending: { questions: Question[]; answered?: PendingAnswered } | null;
   /** The approval requests still waiting on the operator, by key: a refusal in the transcript is offered only while its key is here. */
   open_approvals?: string[];
+  /** How fast each run on the page generated, by run id (``run_speeds`` on the host): absent for a run
+   *  with no timed call or under twenty tokens. */
+  run_speeds?: Record<string, RunSpeed>;
   model: string;
   provider?: string;
   /** Session override, else the preset: whether the next call thinks, and how hard. */

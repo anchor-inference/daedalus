@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Skeleton } from "../ui/index";
-import { absTime, clock, dayLabel, int, planName, tokens, untilShort, usd } from "../format";
+import { absTime, clock, dayLabel, fmtMs, fmtRate, int, planName, tokens, untilShort, usd } from "../format";
 import { PageHeader, screenTitle } from "../ui/index";
 import { useQuery } from "../store";
 import { DICT, plural, t } from "../i18n";
@@ -47,14 +47,6 @@ function level(used: number): string {
   return used >= 85 ? "bad" : used >= 60 ? "attn" : "";
 }
 
-function fmtMs(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
-}
-
-/** A rate as it reads at a glance: whole tokens past ten a second, one decimal below. */
-export function fmtRate(rate: number): string {
-  return rate >= 10 ? String(Math.round(rate)) : rate.toFixed(1);
-}
 
 const SPEED_WINDOWS = [24, 24 * 7, 24 * 30] as const;
 

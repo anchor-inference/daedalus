@@ -402,6 +402,8 @@ class SessionState:
     """The text of that error, masked, as the fronts were shown it: what the inbox entry quotes."""
     last_error_permanent: bool = False
     """The provider's verdict on that error said asking again cannot help (a refused request, key or model)."""
+    last_error_reason: str = ""
+    """The engine's class for a provider failure (``connection``, ``rate_limit`` …), for the closing line's details."""
     run_outcome: RunOutcome | None = None
     """How the core says the current run ended, from its terminal ``message_stop``; ``None`` until it has."""
     run_cause: RunCause | None = None
@@ -1934,6 +1936,11 @@ class SessionManager:
                 continue
             state = self._states.get(session.id)
             status = _status_word(state) if state is not None else "idle"
+            if status in ("idle", "failed") and (state.metadata if state is not None else session.metadata).get("policy_pending"):
+                # A turn that ended on a refusal waits on the operator as surely as one parked on a
+                # question, and the lists are where they look for what waits on them. Only here: the
+                # session's own status keeps meaning a question, which a message sent now would answer.
+                status = "waiting"
             out.append(
                 {
                     "id": session.id,
@@ -2975,6 +2982,7 @@ class SessionManager:
             state.last_error_kind = ""
             state.last_error_message = ""
             state.last_error_permanent = False
+            state.last_error_reason = ""
             state.run_outcome = None
             state.run_cause = None
             result = {"seq": seq, "through": through, "dropped": dropped, "workspace_restored": restored, "untouched": untouched, "kept": len(kept)}
@@ -5239,6 +5247,7 @@ class SessionManager:
         state.last_error_kind = ""
         state.last_error_message = ""
         state.last_error_permanent = False
+        state.last_error_reason = ""
         state.run_outcome = None
         state.run_cause = None
         state.last_compaction = None
@@ -5910,6 +5919,7 @@ class SessionManager:
         outcome = run_outcome(
             status,
             error_kind=state.last_error_kind,
+            error_reason=state.last_error_reason,
             error_message=state.last_error_message or (state.run_cause.detail if state.run_cause is not None else ""),
             compaction=state.last_compaction,
             steps=steps,
@@ -6352,6 +6362,7 @@ class SessionManager:
             state.last_error_kind = str(p.get("kind") or state.last_error_kind)
             state.last_error_message = p["message"]
             state.last_error_permanent = p.get("retryable") is False
+            state.last_error_reason = str(p.get("classified_reason") or "")
             logger.warning("run error in session %s (%s): %s", getattr(getattr(state, "session", None), "id", "?"), p.get("kind") or "-", p["message"][:500])
         elif event.type is EventType.COMPACTION_COMPLETED:
             state.last_compaction = dict(p)
