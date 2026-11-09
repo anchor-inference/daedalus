@@ -15,7 +15,7 @@ import { peek, useQuery } from "../store";
 import { FILTERS, groupTerminals, headerCounts, matches, type TerminalFilter } from "../terminal/preview";
 import { TerminalCard } from "../terminal/phonecard";
 import { Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
-import { containerFolder, LIST_KEY, openFreeTerminal } from "./Terminals";
+import { FreeTerminalPicker, LIST_KEY } from "./Terminals";
 
 const LOAD_POLL_MS = 10000;
 
@@ -82,7 +82,7 @@ export function PhoneTerminals({ toast, project, projects }: { toast: (text: str
         </ChipBar>
       )}
       <div className={`ph-page-body ${rows.length > 0 ? "list" : ""}`}>{body}</div>
-      {sheet === "new" && <NewTerminalSheet envs={envs} lens={lens} projects={projects} toast={toast} onClose={() => setSheet(null)} />}
+      {sheet === "new" && <FreeTerminalPicker envs={envs} lens={lens} projects={projects} toast={toast} anchor={null} phone onClose={() => setSheet(null)} />}
       {sheet === "capacity" && load.data && <CapacitySheet load={load.data} onClose={() => setSheet(null)} />}
     </div>
   );
@@ -146,67 +146,6 @@ function CapacitySheet({ load, onClose }: { load: TerminalLoad; onClose: () => v
         <div className="ph-kv"><span>{t("ph.term.cap.limit")}</span><span>{plural("ph.term.cap.limit.v", f.cap)}</span></div>
         {f.level !== "ok" && <Banner tone={f.level === "bad" ? "bad" : "warn"} icon="alert">{f.supported !== null ? plural("load.over", f.supported) : t("load.over.memory")}</Banner>}
         <button type="button" className="ph-btn" onClick={() => { onClose(); navigate(pathFor("settings", "environments")); }}>{t("ph.term.cap.change")}</button>
-      </div>
-    </BottomSheet>
-  );
-}
-
-/**
- * A new terminal: where it runs (the container, or the host with what that means said beside it) and
- * the folder it starts in, typed, picked from the projects' folders, or browsed for on the desktop app.
- */
-function NewTerminalSheet({ envs, lens, projects, toast, onClose }: { envs: TerminalEnv[]; lens: Project | null; projects: Project[]; toast: (text: string) => void; onClose: () => void }) {
-  const env = (name: TerminalEnvName) => envs.find((e) => e.env === name);
-  const sessions = peek<SessionList>("/api/sessions")?.sessions ?? [];
-  const here = containerFolder(lens, sessions);
-  const [where, setWhere] = useState<TerminalEnvName>(env("container")?.available ? "container" : "host");
-  const start = (name: TerminalEnvName) => (name === "container" ? here?.path ?? "" : env("host")?.home ?? "");
-  const [path, setPath] = useState(() => start(where));
-  const [busy, setBusy] = useState(false);
-  const pick = window.daedalus?.pickFolder;
-  const suggestions = projects.flatMap((p) => p.folders.filter((f) => f.env === where).map((f) => ({ path: f.path, project: p })));
-  const chosenProject = suggestions.find((s) => s.path === path.trim())?.project.id ?? (where === "container" && path.trim() === here?.path ? here?.projectId ?? null : null);
-  const choose = (name: TerminalEnvName) => { setWhere(name); setPath(start(name)); };
-  const go = async () => {
-    setBusy(true);
-    await openFreeTerminal(where, path.trim() || undefined, chosenProject, toast);
-    setBusy(false);
-    onClose();
-  };
-  const option = (name: TerminalEnvName, title: string, sub: string) => {
-    const e = env(name);
-    return (
-      <button type="button" role="radio" aria-checked={where === name} className={`ph-opt ${where === name ? "on" : ""} ${name}`} data-choice={name} disabled={!e?.available} onClick={() => choose(name)}>
-        <span className="ph-radio" aria-hidden />
-        <span className="ph-opt-main"><span className="ph-opt-t">{title}</span><span className="ph-opt-m">{e?.available ? sub : t(`term.unavailable.${name}`)}</span></span>
-        <Icon name={name === "host" ? "lock" : "terminal"} size={18} />
-      </button>
-    );
-  };
-  return (
-    <BottomSheet title={t("term.new")} onClose={onClose} className="ph-newterm"
-      footer={<button type="button" className="ph-btn primary block" disabled={busy || !env(where)?.available} onClick={() => void go()}>{t("term.new.open")}</button>}>
-      <div className="ph-sheet-pad">
-        <div role="radiogroup" aria-label={t("term.new.where")} className="ph-opts">
-          {option("container", t("term.new.in.container"), t("ph.term.new.container"))}
-          {option("host", t("term.new.on.host"), t("ph.term.new.host"))}
-        </div>
-        <label className="ph-label" htmlFor="ph-term-path">{t("ph.term.folder")}</label>
-        <div className="ph-foot-row">
-          <input id="ph-term-path" className="ph-field mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder={where === "container" ? t("term.new.container.home") : t("term.new.host.home")} list="ph-term-suggestions" autoCapitalize="off" spellCheck={false} />
-          {pick && <button type="button" className="ph-btn" onClick={() => void pick().then((picked) => picked && setPath(picked))}>{t("term.new.browse")}</button>}
-        </div>
-        <datalist id="ph-term-suggestions">{suggestions.map((s) => <option key={`${s.project.id}:${s.path}`} value={s.path}>{s.project.name}</option>)}</datalist>
-        {suggestions.length > 0 && (
-          <div className="ph-tags">
-            {suggestions.slice(0, 6).map((s) => (
-              <button key={`${s.project.id}:${s.path}`} type="button" className={`ph-chip ${path === s.path ? "on" : ""}`} aria-pressed={path === s.path} title={s.path} onClick={() => setPath(s.path)}>
-                {/* A project with two folders here names the folder too, or its two chips read the same. */}
-                <span className="ph-chip-l">{suggestions.filter((o) => o.project.id === s.project.id).length > 1 ? `${s.project.name} · ${s.path.split("/").filter(Boolean).pop() ?? s.path}` : s.project.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </BottomSheet>
   );

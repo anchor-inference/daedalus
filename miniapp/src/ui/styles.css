@@ -4002,19 +4002,64 @@ button.staff-row:hover { background: var(--surface-2); }
 .term-card-foot .btn.small { flex: none; }
 .term-group + .term-group { margin-top: var(--space-2); }
 
-.term-new-options { display: grid; gap: var(--space-1); }
-.term-new-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-h-touch); padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-.term-new-row:hover:not(:disabled) { background: var(--surface-2); }
-.term-new-row:disabled { opacity: .5; cursor: default; }
-.term-new-row > .ic { flex: none; color: var(--accent); }
-.term-new-row.host > .ic { color: var(--warn); }
-.term-new-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.term-new-text .sub { font-size: var(--fs-12); font-family: var(--mono); }
-.term-new-folder .segmented { margin-bottom: var(--space-2); }
 .term-new-path { display: flex; gap: var(--space-2); align-items: center; }
 .term-new-path .field { flex: 1; min-width: 0; font-family: var(--mono); }
 .term-new-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2); }
 .term-new-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* Where a new terminal runs (terminal/picker.tsx): a popover from the "+" on a desktop, a sheet on a
+   phone. The host is amber, as every host terminal is; the place chosen last carries a quiet tag. */
+.menu.pop.term-pick-pop { width: min(360px, calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); padding: 4px; }
+.term-pick { display: flex; flex-direction: column; }
+.term-pick-title { padding: 6px 10px 4px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.menu .term-pick-row, .term-pick-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-touch); padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.term-pick-row:hover:not(:disabled), .term-pick-row:focus-visible { background: var(--surface-3); outline: none; }
+.term-pick-row:disabled { opacity: .5; cursor: default; }
+.term-pick-row > .ic { flex: none; color: var(--accent); }
+.term-pick-row.host > .ic { color: var(--warn); }
+.term-pick-row.sandbox > .ic { color: var(--fg-2); }
+.term-pick-text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.term-pick-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); }
+.term-pick-sub { font-size: var(--fs-12); color: var(--fg-2); }
+.term-pick-sub.mono { font-family: var(--mono); }
+.term-pick-sub.why { white-space: normal; }
+.term-pick-tag { flex: none; padding: 0 6px; border-radius: 999px; font-size: var(--fs-11); line-height: 18px; }
+.term-pick-tag.ok { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.term-pick-tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.term-pick-last { margin-left: auto; flex: none; color: var(--fg-3); font-size: var(--fs-11); }
+.term-pick-key { flex: none; min-width: 18px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-11); text-align: center; }
+.term-pick-row .menu-check { margin-left: auto; flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
+.term-pick-row .menu-check.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.term-pick-folder { display: grid; gap: var(--space-2); padding: 8px; }
+.term-pick-folder .term-new-actions { margin-top: var(--space-1); }
+.term-pick-folder .segmented .ic { margin-right: 4px; }
+.term-pick-sheet .term-pick { padding: 0 var(--space-2) var(--space-3); }
+.term-pick-sheet .term-pick-folder { padding: 0 var(--space-3) var(--space-3); }
+
+/* Clean-up on the Overview: a terminal's End beside Open, the selection, the group's End all, and the
+   question that lists what each one stops. */
+.term-card { position: relative; }
+.term-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.term-card.stale:not(.selected) { border-style: dashed; }
+.term-card-status[data-level="stale"] { color: var(--warn); }
+.term-card-check { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; padding: 4px; border-radius: var(--radius-xs); }
+.term-card.selecting .term-card-head { padding-left: 36px; }
+.term-card-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+/* Red words, no red frame: a row of framed red buttons read as an alarm over every card. */
+.term-card-foot .term-card-end { border-color: transparent; }
+.term-card-end .ic { margin-right: 4px; }
+.term-group-title { display: flex; align-items: center; gap: var(--space-2); }
+.term-group-end { margin-left: auto; }
+.term-group-end .ic, .tp-overview .pagehead .btn.small .ic { margin-right: 4px; }
+.pagehead .btn.small .num { margin-left: 4px; color: var(--fg-2); }
+.pagehead .btn[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-strong); }
+.term-select-bar { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0 2px; }
+.term-bulk-list { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; max-height: 40vh; overflow: auto; }
+.term-bulk-list li { overflow-wrap: anywhere; }
+.term-bulk-title { font-family: var(--mono); font-size: var(--fs-13); }
+/* What stops in it, under its title: the command line or the member's session. */
+.term-bulk-note { display: block; color: var(--warn); font-size: var(--fs-12); background: none; padding: 0; }
+.term-phone-end { color: var(--bad); }
 
 .pagehead .loadbar { margin: 6px 0 2px; }
 

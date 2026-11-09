@@ -159,7 +159,7 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
         problems.append(f"an unwatched terminal says {status['k4htop000000']!r}")
     if not status["k6psql000000"].startswith("code 1 · 20m ago"):
         problems.append(f"a finished terminal says {status['k6psql000000']!r}")
-    answer = page.locator("[data-terminal='k3staff00000'] .term-card-foot .btn").inner_text().strip()
+    answer = page.locator("[data-terminal='k3staff00000'] .term-card-foot .btn:not([data-action='end'])").inner_text().strip()
     if answer != "Answer":
         problems.append(f"the staff card's action is {answer!r}, not its activity's Answer")
 
@@ -173,7 +173,7 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
         problems.append("the removed card is still listed")
 
     # Open goes to the full-screen view of that terminal.
-    page.locator("[data-terminal='k1tests00000'] .term-card-foot .btn").click()
+    page.locator("[data-terminal='k1tests00000'] .term-card-foot .btn:not([data-action='end'])").click()
     page.wait_for_selector(".tp-ws .term-view[data-terminal-view='k1tests00000']", timeout=10000)
     if not page.url.split("?")[0].endswith("/app/terminals/k1tests00000"):
         problems.append(f"Open went to {page.url}")
@@ -187,8 +187,8 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     def create(choice: str, then=None) -> dict | None:  # type: ignore[no-untyped-def]
         before = len(stub_requests(term, "POST", "/api/terminals"))
         page.locator(".term-new-button").click()
-        page.wait_for_selector(".term-new-sheet", timeout=5000)
-        page.locator(f".term-new-row[data-choice='{choice}']").click()
+        page.wait_for_selector(".term-pick-pop", timeout=5000)
+        page.locator(f".term-pick-pop [data-choice='{choice}']").click()
         if then:
             then()
         page.wait_for_url("**/app/terminals/new*", timeout=10000)
@@ -207,9 +207,9 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
         problems.append(f"a host terminal was asked for with {body}")
 
     def choose() -> None:
-        page.locator(".term-new-folder .segmented button", has_text="Host").click()
-        page.locator(".term-new-path .field").fill("/srv/scratch")
-        page.locator(".term-new-actions .btn.primary").click()
+        page.locator(".term-pick-folder .segmented button", has_text="Host").click()
+        page.locator(".term-pick-folder .term-new-path .field").fill("/srv/scratch")
+        page.locator(".term-pick-folder .term-new-actions .btn.primary").click()
 
     body = create("folder", choose)
     print("chosen folder:", body)
@@ -220,7 +220,7 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     term.cap = term.running()
     before = len(stub_requests(term, "POST", "/api/terminals"))
     page.locator(".term-new-button").click()
-    page.locator(".term-new-row[data-choice='container']").click()
+    page.locator(".term-pick-pop [data-choice='container']").click()
     page.wait_for_selector(".dialog", timeout=5000)
     question = page.locator(".dialog").inner_text().replace("\n", " | ")
     print("over the cap:", question)

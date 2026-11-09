@@ -28,7 +28,7 @@ export function TerminalCard({ row, projectName, toast }: { row: TerminalRow; pr
   const action = live ? row.activity?.action : undefined;
   // A request the operator answers: the host names it, or says the terminal waits in amber.
   const asks = live && !!action && (action.kind === "answer" || row.activity?.level === "warn" || row.activity?.level === "bad");
-  const { items, layer } = useTerminalCommands(row, toast);
+  const { items, layer, end } = useTerminalCommands(row, toast);
   const open = () => navigate(pathFor("terminals", row.id));
   const press = useLongPress(() => setMenu(true));
   const lines = previewRows(row.preview, 4);
@@ -59,6 +59,9 @@ export function TerminalCard({ row, projectName, toast }: { row: TerminalRow; pr
         <span className="ph-tcard-st" data-level={status.level}>{status.text}</span>
         {asks && <button type="button" className="ph-btn sm warn" disabled={offline} onClick={answer}>{action?.kind === "answer" || !action?.label ? t("term.card.answer") : action.label}</button>}
         {live && action && !asks && <button type="button" className="ph-btn sm" onClick={() => navigate(action.path)}>{action.label}</button>}
+        {/* Ending is on the card, not only behind the long press: cleaning up a forgotten terminal
+            should not need the gesture nobody finds. The same question as everywhere comes first. */}
+        {live && !offline && <button type="button" className="ph-btn sm ghost danger ph-tcard-end" data-action="end" aria-label={t("term.close")} onClick={() => void end()}>{t("term.end")}</button>}
       </div>
       {menu && (
         <ActionSheet onClose={() => setMenu(false)}

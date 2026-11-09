@@ -58,7 +58,7 @@ import { DICT, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
-import { dockShortcut, insideTerminal, isMac } from "../terminal/keys";
+import { dockShortcut, insideTerminal, isMac, terminalCommandKey } from "../terminal/keys";
 import { tabsFor, type PanelTab } from "../panel";
 import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQuote, StepsCard, currentReply, setReply, stepDescription, useAnsweredMark, useFocusChat } from "../project/chat";
 import { GoalStrip } from "../project/goalstrip";
@@ -1513,6 +1513,27 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return () => document.removeEventListener("keydown", onKey);
   }, [phone, pane, toggleDock]);
 
+  // Ctrl+Shift+` asks where to open a new terminal, from anywhere in the session; Ctrl+Shift+W ends
+  // the terminal in front (the dock's active tab, or the maximised one) as its ✕ does — only while
+  // the focus is in the terminals, so the key never ends a terminal the operator is not looking at.
+  const { ask: askTerminal, close: closeTerminal } = terminalDock;
+  const frontTerminal = terminalDock.full ?? terminalDock.state.active;
+  useEffect(() => {
+    if (phone || pane === "right") return;
+    const onKey = (e: KeyboardEvent) => {
+      const command = terminalCommandKey(e);
+      if (command === "new") {
+        e.preventDefault();
+        askTerminal();
+      } else if (command === "close" && frontTerminal && (e.target as HTMLElement | null)?.closest?.(".term-dock, .term-full")) {
+        e.preventDefault();
+        void closeTerminal(frontTerminal);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [phone, pane, askTerminal, closeTerminal, frontTerminal]);
+
   // Where this chat lives, for a link to one of its messages. The orchestrator's chat and a project's
   // sessions are opened in orchestration mode; a link to their plain address took a detour through
   // the Agents screen and a redirect before it arrived.
@@ -2021,7 +2042,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       </div>
 
       <TerminalFull dock={terminalDock} phone={phone} workspace={detail?.workspace} fileOpener={openTerminalFile} />
-      <TerminalSheet dock={terminalDock} />
+      <TerminalSheet dock={terminalDock} workspace={detail?.workspace} />
 
       {commandResult && (
         <Overlay><div className="sheet-backdrop" onClick={() => setCommandResult(null)}>

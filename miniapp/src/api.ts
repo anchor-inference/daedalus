@@ -651,6 +651,11 @@ export type TerminalView = {
   /** The git branch of the folder it is in, read by the host at most every ten seconds; absent or
    *  null when the folder is no repository, the read has not finished, or the terminal ended. */
   git?: { branch: string; detached: boolean; dirty: boolean } | null;
+  /** True only when the host is sure the terminal is a shell at its prompt: ending it stops nothing.
+   *  False whenever it cannot tell, so the app asks first. */
+  at_prompt?: boolean;
+  /** What runs in it when known: a busy shell's command line, a program's argv, an agent's kind. */
+  running?: string | null;
 };
 
 /** What the status line says about the agent in a terminal. Every field but `kind` can be missing:

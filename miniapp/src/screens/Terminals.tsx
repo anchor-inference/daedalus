@@ -12,9 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { api, Project, SessionList, TerminalEnv, TerminalEnvName, TerminalList, TerminalLoad, TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/index";
-import { Sheet } from "../ui/dialogs";
 import { primaryFolder } from "../folders";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { LoadBar } from "../loadbar";
 import { navigate, pathFor } from "../router";
@@ -27,9 +26,10 @@ import { useTerminalCommands } from "../terminal/rowmenu";
 import { loadView, loadWorkspace, openingView, saveView } from "../terminal/workspacestate";
 import { invalidate, peek, useQuery } from "../store";
 import { errorText } from "../ui";
-import { createTerminalConfirmed } from "../terminal/actions";
+import { createTerminalConfirmed, endTerminals, removeTerminals } from "../terminal/actions";
+import { TerminalPicker } from "../terminal/picker";
 import { EnvPill } from "../envpill";
-import { cardStatus, FILTERS, groupTerminals, headerCounts, matches, ownerLine, previewRows, runStyle, running, TerminalFilter } from "../terminal/preview";
+import { cardStatus, FILTERS, groupTerminals, headerCounts, idleUnwatched, matches, ownerLine, previewRows, runStyle, running, staleFor, TerminalFilter } from "../terminal/preview";
 import { TerminalStatusLine } from "../terminal/statusline";
 
 /** How often the load bar asks again: the daemon measures at most every ten seconds anyway. */
@@ -52,10 +52,10 @@ export function containerFolder(project: Project | null, sessions: SessionList["
 }
 
 /** Opens a free terminal (asking at the cap) and goes to it; the shared path for this screen and the palette. */
-export async function openFreeTerminal(env: TerminalEnvName, cwd: string | undefined, projectId: string | null, toast: (text: string) => void): Promise<void> {
+export async function openFreeTerminal(env: TerminalEnvName, cwd: string | undefined, projectId: string | null, toast: (text: string) => void, sandbox = false): Promise<void> {
   let row: TerminalRow | null;
   try {
-    row = await createTerminalConfirmed({ env, owner_kind: "free", cwd: cwd || undefined, project_id: projectId || undefined });
+    row = await createTerminalConfirmed({ env, owner_kind: "free", cwd: cwd || undefined, project_id: projectId || undefined, ...(sandbox ? { sandbox: true } : {}) });
   } catch (error) {
     toast(errorText(error));
     return;
@@ -63,6 +63,26 @@ export async function openFreeTerminal(env: TerminalEnvName, cwd: string | undef
   if (!row) return;
   invalidate("/api/terminals");
   navigate(terminalPath(row.id));
+}
+
+/** The "where?" question for a free terminal, on this screen, its Workspace and a phone: the folder
+ *  the operator works in inside the container, their home on the host, or a folder they choose. */
+export function FreeTerminalPicker({ envs, lens, projects, toast, anchor, phone, onClose }: { envs: TerminalEnv[]; lens: Project | null; projects: Project[]; toast: (text: string) => void; anchor: HTMLElement | null; phone: boolean; onClose: () => void }) {
+  const sessions = peek<SessionList>("/api/sessions")?.sessions ?? [];
+  const here = containerFolder(lens, sessions);
+  const home = envs.find((e) => e.env === "host")?.home || null;
+  return (
+    <TerminalPicker
+      envs={envs}
+      folders={{ container: { path: here?.path ?? null, projectId: here?.projectId ?? null }, host: { path: home } }}
+      projects={projects}
+      lens={lens}
+      anchor={anchor}
+      phone={phone}
+      onPick={(picked) => openFreeTerminal(picked.env, picked.cwd, picked.projectId ?? null, toast, picked.sandbox)}
+      onClose={onClose}
+    />
+  );
 }
 
 export function TerminalsScreen(props: { detail: string | null; query: URLSearchParams; toast: (text: string) => void; project: string; projects: Project[] }) {
@@ -93,7 +113,9 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
     navigate(pathFor("terminals", null, { view: "workspace" }));
   };
   const [filter, setFilter] = useState<TerminalFilter>("all");
-  const [creating, setCreating] = useState(false);
+  const [picking, setPicking] = useState<HTMLElement | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   // The host says how often a preview is worth refreshing; the environments come with the listing.
   const [pollMs, setPollMs] = useState(3000);
   const list = useQuery<TerminalList>(LIST_KEY, { pollMs, staleMs: 1000 });
@@ -122,6 +144,37 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
     refresh();
   };
 
+  // Clean-up: several terminals at once, each after one question that lists them all.
+  const endMany = async (targets: TerminalRow[], title?: string) => {
+    const ended = await endTerminals(targets, toast, title);
+    refresh();
+    return ended;
+  };
+  const idle = rows.filter(idleUnwatched);
+  const finished = rows.filter((r) => !running(r));
+  const endIdle = () => {
+    if (!idle.length) toast(t("term.bulk.idle.none"));
+    else void endMany(idle, plural("term.bulk.idle.title", idle.length));
+  };
+  const removeFinished = async () => {
+    await removeTerminals(finished.map((r) => r.id), toast);
+    refresh();
+  };
+  const toggleSelected = (id: string) => setSelected((all) => {
+    const next = new Set(all);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const chosen = rows.filter((r) => selected.has(r.id));
+  const endSelected = async () => {
+    const ended = await endMany(chosen.filter(running));
+    if (ended !== null) {
+      setSelected(new Set());
+      setSelecting(false);
+    }
+  };
+
   // On a phone the chips run past the edge; the row fades there so "Finished" reads as a swipe away.
   const filterRow = useRef<HTMLDivElement>(null);
   useEdgeFade(filterRow, rows.length);
@@ -136,7 +189,26 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
         actions={
           <>
           <ViewSwitch view="overview" onChange={(v) => { if (v === "workspace") toWorkspace(); }} />
-          <button className="btn primary small term-new-button" onClick={() => setCreating(true)} disabled={list.data ? !envs.some((e) => e.available) : false}>
+          {rows.some(running) && (
+            <button className={`btn small ${selecting ? "on" : ""}`} aria-pressed={selecting} data-action="select" onClick={() => { setSelecting((on) => !on); setSelected(new Set()); }}>
+              <Icon name="check" size={14} />
+              <span>{t(selecting ? "term.select.done" : "term.select")}</span>
+            </button>
+          )}
+          {idle.length > 0 && !selecting && (
+            <button className="btn small" data-action="end-idle" title={t("term.bulk.idle.hint")} onClick={endIdle}>
+              <Icon name="stop" size={14} />
+              <span>{t("term.bulk.idle")}</span>
+              <span className="num">{idle.length}</span>
+            </button>
+          )}
+          {filter === "finished" && finished.length > 0 && !selecting && (
+            <button className="btn small" data-action="remove-finished" onClick={() => void removeFinished()}>
+              <Icon name="trash" size={14} />
+              <span>{t("term.bulk.finished")}</span>
+            </button>
+          )}
+          <button className="btn primary small term-new-button" onClick={(e) => setPicking(e.currentTarget)} aria-haspopup="menu" aria-expanded={!!picking} disabled={list.data ? !envs.some((e) => e.available) : false}>
             <Icon name="plus" size={16} />
             <span>{t("term.new")}</span>
           </button>
@@ -144,6 +216,15 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
         }
       >
         {load.data && <LoadBar load={load.data} compact />}
+        {selecting && (
+          <div className="term-select-bar" role="toolbar" aria-label={t("term.select")}>
+            <span className="sub num">{t("term.select.n", { n: chosen.length })}</span>
+            <button className="btn small danger" data-action="end-selected" disabled={!chosen.some(running)} onClick={() => void endSelected()}>
+              <Icon name="stop" size={14} />
+              <span>{t("term.select.end")}</span>
+            </button>
+          </div>
+        )}
         <div ref={filterRow} className="chips term-filters" role="group" aria-label={t("term.filter.label")}>
           {FILTERS.map((f) => {
             const n = rows.filter((r) => matches(r, f)).length;
@@ -174,41 +255,54 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
         {list.data && rows.length > 0 && shown.length === 0 && <div className="empty"><b>{t("term.screen.none")}</b></div>}
         {groups.map((group) => (
           <section key={group.key || "none"} className="term-group" data-group={group.key || "none"}>
-            <div className="section-title">
+            <div className="section-title term-group-title">
               <span>{group.name ?? t("term.screen.noproject")}</span>
               <span className="n">{group.rows.length}</span>
+              {group.rows.filter(running).length > 1 && !selecting && (
+                <button className="btn small ghost term-group-end" data-action="end-group" onClick={() => void endMany(group.rows.filter(running), plural("term.bulk.group.title", group.rows.filter(running).length, { name: group.name ?? t("term.screen.noproject") }))}>
+                  <Icon name="stop" size={14} />
+                  <span>{t("term.bulk.group")}</span>
+                </button>
+              )}
             </div>
             <div className="term-cards">
               {group.rows.map((row) => (
-                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} home={homes.get(row.env) ?? null} onRemove={() => void remove(row)} toast={toast} />
+                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} home={homes.get(row.env) ?? null} onRemove={() => void remove(row)} toast={toast}
+                  selection={selecting && running(row) ? { on: selected.has(row.id), toggle: () => toggleSelected(row.id) } : null} />
               ))}
             </div>
           </section>
         ))}
       </div>
-      {creating && <NewTerminalSheet envs={envs} lens={lens} projects={projects} toast={toast} onClose={() => setCreating(false)} />}
+      {picking && <FreeTerminalPicker envs={envs} lens={lens} projects={projects} toast={toast} anchor={picking} phone={false} onClose={() => setPicking(null)} />}
     </div>
   );
 }
 
-function TerminalCard({ row, projectName, home, onRemove, toast }: { row: TerminalRow; projectName: string | null; home: string | null; onRemove: () => void; toast: (text: string) => void }) {
+function TerminalCard({ row, projectName, home, onRemove, toast, selection }: { row: TerminalRow; projectName: string | null; home: string | null; onRemove: () => void; toast: (text: string) => void; selection: { on: boolean; toggle: () => void } | null }) {
   const status = cardStatus(row);
   const live = running(row);
   const open = () => navigate(terminalPath(row.id));
   const action = live && row.activity?.action;
   const card = useRef<HTMLElement>(null);
-  // Rename (and End) are the list row's own commands, with the same sheet and the same questions.
+  const stale = staleFor(row);
+  // Rename and End are the list row's own commands, with the same sheet and the same questions.
   const commands = useTerminalCommands(row, toast);
   const rename = commands.items[0];
   useContextActions(card, [
     { label:t("term.card.open"), icon:"terminal", onSelect:open },
     ...(action ? [{ label:action.kind === "answer" ? t("term.card.answer") : action.label, onSelect:() => navigate(action.path) }] : []),
     ...(rename !== "-" ? [rename] : []),
-    ...(!live ? [{ label:t("term.remove"), icon:"trash" as const, onSelect:onRemove }] : []),
+    ...(live ? ["-" as const, { label:t("term.end"), icon:"stop" as const, danger:true, onSelect:() => void commands.end() }] : [{ label:t("term.remove"), icon:"trash" as const, onSelect:onRemove }]),
   ]);
   return (
-    <article ref={card} className={`term-card ${row.env === "host" ? "host" : ""} ${live ? "" : "finished"}`} data-terminal={row.id}>
-      <button className="term-card-open" onClick={open} aria-label={t("term.open", { title: row.title })}>
+    <article ref={card} className={`term-card ${row.env === "host" ? "host" : ""} ${live ? "" : "finished"} ${stale ? "stale" : ""} ${selection ? "selecting" : ""} ${selection?.on ? "selected" : ""}`} data-terminal={row.id} data-stale={stale ? "1" : undefined}>
+      {selection && (
+        <label className="term-card-check" title={t("term.select.one", { title: row.title || t("term.untitled") })}>
+          <input type="checkbox" checked={selection.on} onChange={selection.toggle} aria-label={t("term.select.one", { title: row.title || t("term.untitled") })} />
+        </label>
+      )}
+      <button className="term-card-open" onClick={selection ? selection.toggle : open} aria-label={t("term.open", { title: row.title })}>
         <div className="term-card-head">
           <span className="term-card-title truncate">{row.title || t("term.untitled")}</span>
           <EnvPill env={row.env} />
@@ -228,109 +322,26 @@ function TerminalCard({ row, projectName, home, onRemove, toast }: { row: Termin
       </button>
       <div className="term-card-foot">
         <StateDot status={paneState(row)} className="term-card-dot" />
-        <span className="term-card-status sub truncate" data-level={status.level}>{status.text}</span>
+        <span className="term-card-status sub truncate" data-level={stale ? "stale" : status.level} title={stale ? t("term.card.stale", { t: stale }) : undefined}>{status.text}</span>
         {!live ? (
           <button className="btn small ghost" onClick={onRemove}>{t("term.remove")}</button>
-        ) : action ? (
-          <button className={`btn small ${row.activity?.level === "warn" || row.activity?.level === "bad" ? "warn" : ""}`} onClick={() => navigate(action.path)}>{action.kind === "answer" ? t("term.card.answer") : action.label}</button>
         ) : (
-          <button className="btn small" onClick={open}>{t("term.card.open")}</button>
+          <>
+            {/* Ending is beside opening, not behind a menu: a terminal left running for a week is
+                cleaned up from here, and the same question as everywhere is asked when anything runs. */}
+            <button className="btn small ghost danger term-card-end" data-action="end" onClick={() => void commands.end()} title={t("term.close")}>
+              <Icon name="stop" size={14} />
+              <span>{t("term.end")}</span>
+            </button>
+            {action ? (
+              <button className={`btn small ${row.activity?.level === "warn" || row.activity?.level === "bad" ? "warn" : ""}`} onClick={() => navigate(action.path)}>{action.kind === "answer" ? t("term.card.answer") : action.label}</button>
+            ) : (
+              <button className="btn small" onClick={open}>{t("term.card.open")}</button>
+            )}
+          </>
         )}
       </div>
       {commands.layer}
     </article>
-  );
-}
-
-/**
- * The three ways to open a free terminal: in the container at the folder the operator is working in,
- * on the host at their home, or anywhere they choose. The host choice is marked amber and carries no
- * extra question — the operator decided that a marker is enough.
- */
-export function NewTerminalSheet({ envs, lens, projects, toast, onClose }: { envs: TerminalEnv[]; lens: Project | null; projects: Project[]; toast: (text: string) => void; onClose: () => void }) {
-  const env = (name: TerminalEnvName) => envs.find((e) => e.env === name);
-  const container = env("container");
-  const host = env("host");
-  const sessions = peek<SessionList>("/api/sessions")?.sessions ?? [];
-  const here = containerFolder(lens, sessions);
-  const [choosing, setChoosing] = useState(false);
-  const [where, setWhere] = useState<TerminalEnvName>(container?.available ? "container" : "host");
-  const [path, setPath] = useState("");
-  const [busy, setBusy] = useState(false);
-  const pick = window.daedalus?.pickFolder;
-
-  const go = async (name: TerminalEnvName, cwd: string | undefined, projectId: string | null) => {
-    setBusy(true);
-    await openFreeTerminal(name, cwd, projectId, toast);
-    setBusy(false);
-    onClose();
-  };
-
-  // Suggestions are the projects' folders in the chosen environment: a container path means nothing
-  // on the host and the other way round.
-  const suggestions = projects.flatMap((p) => p.folders.filter((f) => f.env === where).map((f) => ({ path: f.path, project: p })));
-  // A folder may belong to several projects: the one in view wins, then the first that has it.
-  const matching = suggestions.filter((s) => s.path === path.trim());
-  const chosenProject = (matching.find((s) => s.project.id === lens?.id) ?? matching[0])?.project.id ?? null;
-  const browse = async () => {
-    const picked = await pick?.();
-    if (picked) setPath(picked);
-  };
-
-  return (
-    <Sheet title={t("term.new")} onClose={onClose} size="narrow" className="term-new-sheet">
-      {!choosing ? (
-        <div className="term-new-options">
-          <button className="term-new-row" disabled={!container?.available || busy} data-choice="container" onClick={() => void go("container", here?.path, here?.projectId ?? null)}>
-            <Icon name="terminal" />
-            <span className="term-new-text">
-              <span>{t("term.new.in.container")}</span>
-              <span className="sub truncate">{container?.available ? here?.path ?? t("term.new.container.home") : t("term.unavailable.container")}</span>
-            </span>
-          </button>
-          <button className="term-new-row host" disabled={!host?.available || busy} data-choice="host" onClick={() => void go("host", host?.home || undefined, null)}>
-            <Icon name="lock" />
-            <span className="term-new-text">
-              <span>{t("term.new.on.host")}</span>
-              <span className="sub truncate">{host?.available ? host.home || t("term.new.host.home") : t("term.unavailable.host")}</span>
-            </span>
-          </button>
-          <button className="term-new-row" disabled={busy || !envs.some((e) => e.available)} data-choice="folder" onClick={() => setChoosing(true)}>
-            <Icon name="folder" />
-            <span className="term-new-text">
-              <span>{t("term.new.choose")}</span>
-            </span>
-          </button>
-        </div>
-      ) : (
-        <form className="term-new-folder" onSubmit={(e) => { e.preventDefault(); if (path.trim()) void go(where, path.trim(), chosenProject); }}>
-          <div className="segmented inline" role="radiogroup" aria-label={t("term.new.where")}>
-            {(["container", "host"] as TerminalEnvName[]).map((name) => (
-              <button key={name} type="button" role="radio" aria-checked={where === name} className={where === name ? "on" : ""} disabled={!env(name)?.available} onClick={() => setWhere(name)}>
-                {t(`term.env.${name}`)}
-              </button>
-            ))}
-          </div>
-          <div className="term-new-path">
-            <input className="field" autoFocus value={path} onChange={(e) => setPath(e.target.value)} placeholder={t("term.new.path")} aria-label={t("term.new.path")} list="term-new-suggestions" />
-            {pick && <button type="button" className="btn small" onClick={() => void browse()}>{t("term.new.browse")}</button>}
-          </div>
-          <datalist id="term-new-suggestions">
-            {suggestions.map((s) => <option key={`${s.project.id}:${s.path}`} value={s.path}>{s.project.name}</option>)}
-          </datalist>
-          {suggestions.length > 0 && (
-            <div className="term-new-suggest">
-              {suggestions.slice(0, 6).map((s) => (
-                <button key={`${s.project.id}:${s.path}`} type="button" className="chip select" aria-pressed={path === s.path} onClick={() => setPath(s.path)} title={s.path}>{s.project.name}</button>
-              ))}
-            </div>
-          )}
-          <div className="term-new-actions">
-            <button type="button" className="btn ghost" onClick={() => setChoosing(false)}>{t("shell.back")}</button>
-            <button type="submit" className="btn primary" disabled={!path.trim() || busy}>{t("term.new.open")}</button>
-          </div>
-        </form>
-      )}
-    </Sheet>
   );
 }

@@ -1,8 +1,8 @@
 """Drive the terminal sandbox toggle in a real browser and refuse what does not behave.
 
-The dock's menu carries a "Sandbox" checkbox: ticking it keeps the menu open, is remembered on the
-device, and makes the next terminal ask the host for the sandbox; an environment that cannot give one
-offers no terminal while it is ticked, and says why. A sandboxed terminal wears a shield on its tab,
+The "+"'s question of where to open a terminal carries a "Sandbox" checkbox: ticking it keeps the
+question open, is remembered on the device, and makes the next terminal ask the host for the
+sandbox; an environment that cannot give one is offered disabled while it is ticked, and says why. A sandboxed terminal wears a shield on its tab,
 in the full view and in the phone's list. A running terminal is restarted with or without the
 sandbox from the same menu, and what the sandbox left read-only is told in a toast. Where no
 environment can sandbox, the checkbox is disabled with the daemon's reason and does not apply.
@@ -31,7 +31,14 @@ from terminal_stub import DEBUG, ENVS, TerminalStub, dock_state, open_session, s
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 MENU = ".term-tabs button[aria-label='More terminals']"
-TOGGLE = ".menu button[role='menuitemcheckbox']"
+PLUS = ".term-tabs button[aria-label='New terminal']"
+PICKER = ".term-pick-pop"
+TOGGLE = ".term-pick-pop [data-choice='sandbox']"
+
+
+def open_picker(page) -> None:  # type: ignore[no-untyped-def]
+    page.locator(PLUS).click()
+    page.wait_for_selector(PICKER, timeout=5000)
 
 
 def open_menu(page) -> None:  # type: ignore[no-untyped-def]
@@ -67,28 +74,34 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     if marks != {"t1aaaaaaaaaa": True, "t2bbbbbbbbbb": False}:
         problems.append(f"the shield is not on exactly the sandboxed tab: {marks}")
 
-    # The checkbox: off, offered (the container can sandbox), and it keeps the menu open.
+    # The menu no longer switches the sandbox: that is the "+"'s question now.
     open_menu(page)
+    if any(i.strip() == "Sandbox" for i in page.locator(".menu button").all_inner_texts()):
+        problems.append("the menu still carries a Sandbox checkbox")
+    close_menu(page)
+
+    # The checkbox: off, offered (the container can sandbox), and it keeps the question open.
+    open_picker(page)
     toggle = page.locator(TOGGLE)
-    if toggle.count() != 1 or toggle.inner_text().strip() != "Sandbox":
-        problems.append(f"the menu has no Sandbox checkbox: {page.locator('.menu button').all_inner_texts()}")
+    if toggle.count() != 1 or not toggle.inner_text().strip().startswith("Sandbox"):
+        problems.append(f"the question has no Sandbox checkbox: {page.locator(PICKER + ' button').all_inner_texts()}")
     if toggle.get_attribute("aria-checked") != "false" or toggle.is_disabled():
         problems.append("the Sandbox checkbox is not an enabled, unticked box")
     toggle.click()
     page.wait_for_timeout(150)
-    if not page.locator(".menu").count():
-        problems.append("ticking the checkbox closed the menu")
+    if not page.locator(PICKER).count():
+        problems.append("ticking the checkbox closed the question")
     if page.locator(TOGGLE).get_attribute("aria-checked") != "true":
         problems.append("the checkbox did not tick")
     # The host cannot sandbox here: with the box ticked it offers no terminal, and says why.
-    host = page.locator(".menu button", has_text="New terminal on the host")
+    host = page.locator(f"{PICKER} [data-choice='host']")
     title = host.get_attribute("title") or ""
     print("host item:", host.is_disabled(), title)
     if not host.is_disabled() or "not available" not in title or "Permission denied" not in title:
         problems.append(f"the host item is not disabled with the daemon's reason: {host.is_disabled()} {title!r}")
 
     term.skipped = [{"path": "/srv/worktrees/bakery", "reason": "missing"}]
-    page.locator(".menu button", has_text="New terminal in the container").click()
+    page.locator(f"{PICKER} [data-choice='container']").click()
     page.wait_for_timeout(400)
     made = stub_requests(term, "POST", "/api/terminals")
     print("created:", made)
@@ -103,9 +116,12 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
         problems.append(f"what the sandbox left read-only was not told: {toast}")
     term.skipped = []
 
-    # The "+" button follows the checkbox too.
+    # The next question keeps the tick, and its keyboard choice follows it too.
     before = len(stub_requests(term, "POST", "/api/terminals"))
-    page.locator(".term-tabs button[aria-label='New terminal']").click()
+    open_picker(page)
+    if page.locator(TOGGLE).get_attribute("aria-checked") != "true":
+        problems.append("the next question forgot the tick")
+    page.keyboard.press("1")
     page.wait_for_timeout(400)
     plus = stub_requests(term, "POST", "/api/terminals")[before:]
     if len(plus) != 1 or plus[0].get("sandbox") is not True:
@@ -116,7 +132,7 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     page.close()
     page = open_session(context, term, stub, BASE, S1)
     page.wait_for_selector(".term-tab", timeout=15000)
-    open_menu(page)
+    open_picker(page)
     if page.locator(TOGGLE).get_attribute("aria-checked") != "true":
         problems.append("the choice was not remembered across a reload")
     close_menu(page)
@@ -166,18 +182,21 @@ def nowhere(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     context.add_init_script("try { localStorage.setItem('daedalus.term.sandbox', '1'); } catch (e) {}")
     page = open_session(context, term, stub, BASE, S1)
     wait_live(page, "t1aaaaaaaaaa")
-    open_menu(page)
+    open_picker(page)
     toggle = page.locator(TOGGLE)
     title = toggle.get_attribute("title") or ""
     print("toggle:", toggle.is_disabled(), toggle.get_attribute("aria-checked"), title)
     if not toggle.is_disabled() or "bwrap is not installed" not in title or toggle.get_attribute("aria-checked") != "false":
         problems.append(f"the checkbox is not disabled with the reason: {toggle.is_disabled()} {title!r}")
+    close_menu(page)
+    open_menu(page)
     if not page.locator(".menu button", has_text="Restart in the sandbox").is_disabled():
         problems.append("restarting into a sandbox that is not there is offered")
     close_menu(page)
     # The box shows unavailable, so it does not apply: + still opens an ordinary terminal.
     before = len(stub_requests(term, "POST", "/api/terminals"))
-    page.locator(".term-tabs button[aria-label='New terminal']").click()
+    open_picker(page)
+    page.locator(f"{PICKER} [data-choice='container']").click()
     page.wait_for_timeout(400)
     made = stub_requests(term, "POST", "/api/terminals")[before:]
     if len(made) != 1 or "sandbox" in made[0]:
