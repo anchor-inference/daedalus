@@ -37,7 +37,9 @@ one deliverable by relative path, and leave logs, downloads and one-off experime
 already given the operator stays where it is.
 - Disk is shared and finite. Put throwaway copies and experiments under one scratch/ directory and delete \
 each as soon as its check is done. Never copy a whole repository per test case: use git worktree, hard links \
-or a small fixture. Use the shared package cache; never point UV_CACHE_DIR or the npm cache at a private directory.
+or a small fixture. uv, npm and Playwright already use one shared, writable package cache (UV_CACHE_DIR, \
+npm_config_cache, PLAYWRIGHT_BROWSERS_PATH are set): run `uv init`, `uv add`, `npx`, `playwright install` as they are, \
+and never point those variables at a directory of your own.
 - When a task grows beyond a few steps (several files, a plan, decisions to remember), create \
 AGENTS.md in the workspace root: goal, current state, decisions, file map, how to continue. Keep it \
 current as you work. If AGENTS.md already exists in the workspace, read it before doing anything else.

@@ -15,7 +15,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.host.filesystem import FileTooLarge, NotRegularFile
+from daedalus.host.filesystem import FileTooLarge, LocalFS, NotRegularFile
 from daedalus.host.guest_turns import WROTE_KEY
 from daedalus.host.nested_rules import rules_note
 from daedalus.host.services import PathOutsideProject
@@ -177,6 +177,10 @@ async def read_file(
     if refusal is not None:
         return refusal
     assert target is not None
+    if services.exec_backend is not None and _is_skill_file(services, target):
+        # The skills are on this machine whatever machine the session's files are on: Skill printed this
+        # path, and asked of the operator's host it named nothing.
+        fs = LocalFS()
     target = await _as_spelled(fs, target)
     if not await fs.exists(target):
         return error(context, f"no such file: {target}")
@@ -229,6 +233,17 @@ async def read_file(
         footer += f"\n[{remaining}; continue with offset={end + 1}]"
     body = clip(numbered, room)
     return ok(context, rules + header + body + footer, total_lines=total)
+
+
+def _is_skill_file(services: Any, target: Path) -> bool:
+    manager = services.extra.get("manager")
+    skills = getattr(getattr(manager, "settings", None), "skills_dir", None)
+    if skills is None:
+        return False
+    try:
+        return Path(target).resolve().is_relative_to(Path(skills).resolve())
+    except OSError:
+        return False
 
 
 def _binary_refusal(target: Path, size: int) -> str:

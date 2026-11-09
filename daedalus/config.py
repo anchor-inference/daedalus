@@ -43,6 +43,31 @@ def native_mode() -> bool:
     return os.environ.get("DAEDALUS_NATIVE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def package_cache_root() -> Path:
+    """The folder of the package caches every operator command shares (:mod:`daedalus.tools.package_cache`).
+
+    ``DAEDALUS_PACKAGE_CACHE`` when set; in a container ``/srv/cache``, a volume of its own; natively this
+    platform's cache folder. Read from the environment for the reason :func:`native_mode` is: a command's
+    environment is built where no configuration is at hand.
+    """
+    if configured := os.environ.get("DAEDALUS_PACKAGE_CACHE", "").strip():
+        return Path(configured)
+    if not native_mode():
+        return Path("/srv/cache")
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "daedalus-packages"
+
+
+def installed_browsers() -> str:
+    """The read-only folder of Playwright browsers this installation came with (``PLAYWRIGHT_BROWSERS_PATH``), or empty."""
+    return os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+
+
 def native_sandbox_default() -> str:
     """Whether Exec is confined by default on this installation.
 

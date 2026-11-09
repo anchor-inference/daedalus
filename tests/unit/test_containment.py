@@ -25,7 +25,7 @@ from daedalus.host.services import PathOutsideProject, SessionServices, locator
 from daedalus.host.session_runner import Attachment, SessionManager
 from daedalus.stores.database import Database
 from daedalus.stores.projects import FolderSpec, Project, ProjectFolder
-from daedalus.tools import shell
+from daedalus.tools import package_cache, shell
 
 HEADERS = {"X-Daedalus-Token": "tok"}
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -214,7 +214,8 @@ async def test_the_sandbox_binds_exactly_the_writable_walls(tree: SimpleNamespac
     services.writable.append(opened)
     argv, sandboxed = await shell.sandbox_argv("touch x", ExecToolsConfig(sandbox="workspace"), writable=services.sandbox_writable())
     binds = [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"]
-    assert sandboxed and binds == [str(tree.code), str(tree.assets), str(opened)]
+    # Then the shared package caches, the one writable thing a command gets outside its walls.
+    assert sandboxed and binds == [str(tree.code), str(tree.assets), str(opened), *map(str, package_cache.writable_dirs())]
     # A session working in the read-only folder does not get its own workspace bound behind the walls' back.
     reader = SessionServices(session_id="c-3", workspace_dir=tree.docs, walls=walls_for(tree.project, folder_id="f-docs", directory=None, local_env="container"))
     argv, _ = await shell.sandbox_argv("touch x", ExecToolsConfig(sandbox="workspace"), writable=reader.sandbox_writable())

@@ -187,7 +187,7 @@ async def test_sandbox_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     # whenever ``_bwrap_probed_at`` is stale, so injecting the state alone made this test depend on
     # the machine — it asserted the fail-closed path only where bwrap genuinely does not work.
     monkeypatch.setattr(shell, "bwrap_status", lambda: "bwrap cannot create namespaces here")
-    with pytest.raises(shell.SandboxUnavailable, match="configured .* but unavailable"):
+    with pytest.raises(shell.SandboxUnavailable, match="bwrap cannot create namespaces here"):
         await shell.sandbox_argv("ls", ExecToolsConfig(sandbox="workspace"), writable=[ws])
 
 
@@ -263,14 +263,15 @@ def test_flatten_payload_stays_linear_on_wide_dicts() -> None:
 
 async def test_sandbox_never_widens_to_the_working_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from daedalus.config import ExecToolsConfig
-    from daedalus.tools import shell
+    from daedalus.tools import package_cache, shell
 
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setattr(shell, "bwrap_path", lambda: "/usr/bin/bwrap")
     monkeypatch.setattr(shell, "_bwrap_state", "ok")
     argv, sandboxed = await shell.sandbox_argv("ls", ExecToolsConfig(sandbox="workspace"), writable=[ws])
-    assert sandboxed and argv.count("--bind") == 1 and argv[argv.index("--bind") + 1] == str(ws)
+    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"]
+    assert sandboxed and binds == [str(ws), *map(str, package_cache.writable_dirs())]
     with pytest.raises(ValueError):
         ExecToolsConfig(sandbox_extra_writable=["/"])
     with pytest.raises(ValueError):

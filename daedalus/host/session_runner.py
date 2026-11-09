@@ -3432,6 +3432,7 @@ class SessionManager:
             # every local folder of the project to read, the ones not marked read-only to write, or
             # the session's own directory alone when it has one.
             walls=self.walls_of(state),
+            read_only_everywhere=(self.settings.skills_dir,),
             extra={"skill_store": self.skills_for(state), "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
         )
         host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)

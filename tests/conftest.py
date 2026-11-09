@@ -75,6 +75,16 @@ async def db(settings: Settings) -> Database:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def package_cache_of_the_suite(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The shared package caches every command is pointed at, made in a folder of the suite's own.
+
+    Without it a test running a command would make the installation's cache folder (``/srv/cache`` in a
+    container, the user's cache folder natively) and link the machine's browsers into it.
+    """
+    os.environ["DAEDALUS_PACKAGE_CACHE"] = str(tmp_path_factory.mktemp("package-cache"))
+
+
+@pytest.fixture(scope="session", autouse=True)
 def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
     """Every new database in the suite starts as a copy of one migrated once, not as an empty file.
 

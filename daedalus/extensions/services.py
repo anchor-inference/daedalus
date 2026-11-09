@@ -22,9 +22,11 @@ and not at its loopback; the container's edge is what is published, and ``compos
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import secrets
+import signal
 import socket
 import subprocess
 from datetime import UTC, datetime
@@ -35,7 +37,8 @@ from daedalus import public_address
 from daedalus.extensions.notifications import Draft
 from daedalus.processes import end_tree, pid_alive
 from daedalus.stores import pairing
-from daedalus.tools.shell import sandbox_argv, shell_environment
+from daedalus.tools import sandbox_health
+from daedalus.tools.shell import SandboxUnavailable, bwrap_status, invalidate_bwrap, sandbox_argv, shell_environment
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -267,9 +270,12 @@ class Services:
         env = shell_environment(session_id, {"PORT": str(chosen)} if chosen else None, cwd=workdir)
         env["HOST"] = self.bind_host
         # The same wall Exec has: a service is a long-lived command, not a way around the sandbox.
-        argv, _sandboxed = await sandbox_argv(
-            command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace], session_id=session_id,
-        )
+        try:
+            argv, sandboxed = await sandbox_argv(
+                command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace], session_id=session_id,
+            )
+        except SandboxUnavailable as exc:
+            raise RuntimeError(sandbox_health.agent_text(await sandbox_health.report_down(str(exc)))) from exc
         with open(log_path, "ab") as log:
             log.write(f"\n=== {_now()} start: {command}\n".encode())
             proc = subprocess.Popen(argv, cwd=str(workdir), env=env, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)  # noqa: S603
@@ -288,6 +294,16 @@ class Services:
         if proc.poll() is not None:
             await self.app.db.execute("UPDATE services SET status = 'dead', note = ?, stopped_at = ? WHERE session_id = ? AND name = ?", (f"exited with code {proc.returncode} right after start", _now(), session_id, name))
             tail = await self.logs(session_id, name, 40)
+            started = tail.rsplit(f" start: {command}\n", 1)[-1].strip()
+            if sandboxed and started.startswith("bwrap: ") and len(started.splitlines()) <= 3:
+                # bubblewrap refused before the service ran: the machine's fault, said as such, with the probe
+                # dropped so the next command finds out afresh. Its child is left blocked in the group: ended here.
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                invalidate_bwrap()
+                status = await asyncio.to_thread(bwrap_status)
+                reason = status if status != "ok" else f"commands fail in bwrap itself although its probe passes: {started.splitlines()[0]}"
+                raise RuntimeError(sandbox_health.agent_text(await sandbox_health.report_down(reason)))
             raise RuntimeError(f"service {name!r} exited with code {proc.returncode} right after start. Log:\n{tail}")
         return self.view(await self.get(session_id, name) or {})
 

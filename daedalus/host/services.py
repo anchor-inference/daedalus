@@ -90,6 +90,9 @@ class SessionServices:
     """Where the host writes this session's command logs when that is not its workspace: the
     :func:`session_scratch_dir` of a session whose folder is read-only, readable through ``walls`` and
     exempt from the seal on the state directory, never writable by the agent. ``None`` is the workspace."""
+    read_only_everywhere: tuple[Path, ...] = ()
+    """Folders every session reads beside its walls and none writes: the skills. Skill hands out the absolute
+    paths of a skill's files and the skill says to Read them; refused, the agent read them with `cat` in Exec."""
     remote_readonly: bool = False
     """A session driving the host whose folder (or staff isolation) is read-only. It has no walls of
     this process to say so, so ``resolve`` refuses its writes by this flag instead."""
@@ -170,13 +173,18 @@ class SessionServices:
             return True
         if self.walls.root_of(path, write=write) is not None:
             return True
+        if not write and Walls(readable=self.read_only_everywhere, writable=()).root_of(path) is not None:
+            return True
         return Walls(readable=tuple(self.writable), writable=tuple(self.writable)).root_of(path, write=write) is not None
 
     def refusal(self, path: Path, *, write: bool = False) -> str:
         """Why ``path`` is refused, in words that name the folder and the way the session may use it."""
-        if write and self.walls is not None and (root := self.walls.root_of(path)) is not None:
+        if write and self.walls is not None and (root := self.walls.root_of(path) or Walls(readable=self.read_only_everywhere, writable=()).root_of(path)) is not None:
             return f"{path} is in {root}, a folder this session may read but not write: it is read-only here."
-        return f"{path} is outside this project. This session works in {self.where()} and everything it reads or writes stays there."
+        return (
+            f"{path} is outside this project. This session works in {self.where()} and everything it reads or writes stays there. "
+            "Do not reach it another way (cat or cp in Exec): if the task needs it, ask the operator to add its folder to the project."
+        )
 
     def where(self) -> str:
         """The folders this session may read, as a sentence names them."""
