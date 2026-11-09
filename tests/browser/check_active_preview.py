@@ -38,7 +38,7 @@ def main() -> int:
 
         context.route("**/api/private", private)
         page.goto(f"{BASE}/agents/sess-lev?token=t&lang=en")
-        expect(page.locator(".composer textarea")).to_be_visible()
+        expect(page.locator(".composer .composer-field")).to_be_visible()
         page.wait_for_timeout(800)
         for name, mime, body in SAMPLES:
             page.locator(".composer input[type=file]").first.set_input_files({"name": name, "mimeType": mime, "buffer": body if isinstance(body, bytes) else body.encode()})

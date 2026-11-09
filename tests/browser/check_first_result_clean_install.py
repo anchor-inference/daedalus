@@ -204,7 +204,7 @@ def scenario(language: str, width: int) -> None:
         else:
             raise AssertionError("coordinator did not become ready for the operator message")
         page.goto(f"{base}/app/orchestration/project/{project_id}?token={token}&lang={language}")
-        page.locator(".composer textarea").fill("Assign the first task to the menu worker now.")
+        page.locator(".composer .composer-field").fill("Assign the first task to the menu worker now.")
         use_current = page.get_by_role("button", name="Got it" if language == "en" else "Понятно")
         expect(use_current).to_have_count(0)
         send = page.locator(".composer .roundbtn.primary")

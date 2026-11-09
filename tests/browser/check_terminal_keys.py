@@ -18,7 +18,7 @@ from pathlib import Path
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, field_text  # noqa: E402
 from screenshots import S1, UNHANDLED, stub  # noqa: E402
 from terminal_stub import DEBUG, TerminalStub, dock_state, open_session, text, wait_live  # noqa: E402
 
@@ -133,7 +133,7 @@ def main() -> int:
             problems.append(f"Ctrl+J did not reach the terminal as a line feed: {since(term, mark)!r}")
         if not page.locator(".term-dock.open").count():
             problems.append("Ctrl+J inside the terminal hid the dock")
-        field = page.locator(".composer textarea")
+        field = page.locator(".composer .composer-field")
         field.click()
         field.fill("a draft")
         page.keyboard.press("Control+j")
@@ -141,8 +141,8 @@ def main() -> int:
             expect(page.locator(".term-dock.open")).to_have_count(0, timeout=3000)
         except AssertionError:
             problems.append("Ctrl+J in the composer did not hide the dock")
-        if field.input_value() != "a draft":
-            problems.append(f"Ctrl+J changed the draft: {field.input_value()!r}")
+        if field_text(field) != "a draft":
+            problems.append(f"Ctrl+J changed the draft: {field_text(field)!r}")
         page.keyboard.press("Control+j")
         try:
             expect(page.locator(".term-dock.open")).to_have_count(1, timeout=3000)

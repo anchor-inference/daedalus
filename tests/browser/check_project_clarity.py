@@ -45,7 +45,7 @@ def main() -> int:
                 assert send.bounding_box()["y"] + send.bounding_box()["height"] <= 560
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "home overflow")
 
-                draft = page.locator(".composer textarea")
+                draft = page.locator(".composer .composer-field")
                 draft.fill("Keep this draft until I send it")
                 page.locator(".composer input[type='file']").first.set_input_files({"name": "evidence.txt", "mimeType": "text/plain", "buffer": b"checked artifact"})
                 expect(page.locator(".composer .attachments")).to_contain_text("evidence.txt")
@@ -60,7 +60,7 @@ def main() -> int:
                     };
                   })""")
                 page.reload()
-                expect(page.locator(".composer textarea")).to_have_value("Keep this draft until I send it")
+                expect(page.locator(".composer .composer-field")).to_have_text("Keep this draft until I send it")
                 expect(page.locator(".composer .attachments")).to_contain_text("evidence.txt")
 
                 bar.locator("button[data-tab='more']").click()

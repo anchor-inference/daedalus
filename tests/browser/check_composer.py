@@ -32,7 +32,16 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, GATES, Unhandled, expect_app, folders, fulfil_shared, reveal_composer  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    GATES,
+    Unhandled,
+    expect_app,
+    field_text,
+    folders,
+    fulfil_shared,
+    reveal_composer,
+)
 from event_feed import EventFeed  # noqa: E402
 
 UNHANDLED = Unhandled()
@@ -254,7 +263,7 @@ def primary(page: Page) -> str:
 
 
 def field(page: Page):  # type: ignore[no-untyped-def]
-    return page.locator(".composer textarea")
+    return page.locator(".composer .composer-field")
 
 
 def posts(kind: str, method: str | None = None) -> list[tuple[str, str, dict | None]]:
@@ -334,8 +343,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).type("first line")
     page.keyboard.press("Shift+Enter")
     field(page).type("second line")
-    if field(page).input_value() != "first line\nsecond line":
-        problems.append(f"Shift+Enter did not insert a line ({field(page).input_value()!r})")
+    if field_text(field(page)) != "first line\nsecond line":
+        problems.append(f"Shift+Enter did not insert a line ({field_text(field(page))!r})")
     if primary(page) != "send" or page.locator(".composer .roundbtn.primary").is_disabled():
         problems.append("with a draft the circle is not an enabled Send")
     two = page.locator(".composer-box").bounding_box()
@@ -350,20 +359,20 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if stored != "first line\nsecond line":
         problems.append(f"the draft was not remembered ({stored!r})")
     page.reload()
-    page.wait_for_selector(".composer textarea", timeout=15000)
+    page.wait_for_selector(".composer .composer-field", timeout=15000)
     page.wait_for_timeout(300)
-    if field(page).input_value() != "first line\nsecond line":
-        problems.append(f"the draft did not come back after a reload ({field(page).input_value()!r})")
+    if field_text(field(page)) != "first line\nsecond line":
+        problems.append(f"the draft did not come back after a reload ({field_text(field(page))!r})")
     field(page).click()
     page.keyboard.press("Enter")
     reached(page, "/messages", 0, "Enter", problems)
-    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
+    page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === ''")
     sent = posts("/messages")
     print("sent:", sent)
     first_id = sent[0][2].get("client_message_id") if len(sent) == 1 else None
     if len(sent) != 1 or sent[0][2].get("text") != "first line\nsecond line" or not first_id or len(first_id) > 64:
         problems.append(f"Enter did not send the draft as a message ({sent})")
-    if field(page).input_value() != "":
+    if field_text(field(page)) != "":
         problems.append("the field was not cleared after sending")
     if page.evaluate("() => localStorage.getItem('daedalus.draft.sess-1')"):
         problems.append("the stored draft was not cleared after sending")
@@ -447,9 +456,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         edit.click()
         reached(page, f"/steer/{edited_id}", 0, "the card's Edit", problems, method="DELETE")
         try:
-            page.wait_for_function("() => document.querySelector('.composer textarea')?.value === 'rename the column first'", timeout=3000)
+            page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === 'rename the column first'", timeout=3000)
         except Exception:  # noqa: BLE001
-            problems.append(f"Edit did not put the words back in the field ({field(page).input_value()!r})")
+            problems.append(f"Edit did not put the words back in the field ({field_text(field(page))!r})")
         if page.locator(".composer .steer").count():
             problems.append("the card stayed after Edit")
         page.wait_for_timeout(300)
@@ -479,7 +488,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     before_queue = len(posts("/messages"))
     page.locator(".composer .roundbtn.primary").click()
     reached(page, "/messages", before_queue, "the circle during a run", problems)
-    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
+    page.wait_for_function("() => document.querySelector('.composer .composer-field')?.textContent === ''")
     queued = posts("/messages")[-1][2]
     if queued.get("follow_up") is not True or queued.get("steer") is True:
         problems.append(f"the circle during a run did not queue a follow-up ({queued})")
@@ -668,8 +677,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).fill("/web")
     page.wait_for_selector(".palette .palette-skill", timeout=5000)
     page.locator(".palette .palette-skill").first.click()
-    if not field(page).input_value().startswith(("Use the web-design-reviewer skill", "Используй навык web-design-reviewer")):
-        problems.append(f"picking a skill did not name it in the draft ({field(page).input_value()!r})")
+    if not field_text(field(page)).startswith(("Use the web-design-reviewer skill", "Используй навык web-design-reviewer")):
+        problems.append(f"picking a skill did not name it in the draft ({field_text(field(page))!r})")
     field(page).fill("")
 
     # The model list: opens from the pill, names the presets with their kind, a pick reaches the host.
@@ -799,7 +808,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("phone: the model selector crowds the idle row")
     if page.locator(".composer .effort-select").count():
         problems.append("phone: effort still occupies a separate composer control")
-    fs = page.evaluate("() => getComputedStyle(document.querySelector('.composer textarea')).fontSize")
+    fs = page.evaluate("() => getComputedStyle(document.querySelector('.composer .composer-field')).fontSize")
     if fs != "16px":
         problems.append(f"phone: the field is {fs}, which Safari would zoom into")
     field(page).click()
@@ -896,7 +905,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
             for state in ("idle", "running", "waiting"):
                 HOST.status = state
                 page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang={language}")
-                page.wait_for_selector(".composer textarea")
+                page.wait_for_selector(".composer .composer-field")
                 page.wait_for_timeout(150)
                 # A phone's composer rests as one row and opens onto its toolbar under the finger;
                 # the rows measured here are the open shape's (phone() measures the resting one).
@@ -906,7 +915,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                 measure = page.evaluate("""() => {
                   const one = s => document.querySelector(s);
                   const rect = el => { const r = el.getBoundingClientRect(); return {x:r.x, y:r.y, w:r.width, h:r.height, bottom:r.bottom, right:r.right}; };
-                  const field = one('.composer textarea'), cs = getComputedStyle(field);
+                  const field = one('.composer .composer-field'), cs = getComputedStyle(field);
                   const row = one('.composer-row');
                   const controls = [...row.querySelectorAll('button, .composer-mode')].filter(el => el.getBoundingClientRect().width > 0);
                   return {field:rect(field), card:rect(one('.composer-box')), row:rect(row),
@@ -959,7 +968,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
             page.evaluate("""() => {
               const pasted = new DataTransfer();
               pasted.items.add(new File(['pasted'], 'paste.txt', {type:'text/plain'}));
-              document.querySelector('.composer textarea').dispatchEvent(new ClipboardEvent('paste', {clipboardData:pasted, bubbles:true, cancelable:true}));
+              document.querySelector('.composer .composer-field').dispatchEvent(new ClipboardEvent('paste', {clipboardData:pasted, bubbles:true, cancelable:true}));
               const dropped = new DataTransfer();
               dropped.items.add(new File(['dropped'], 'drop.txt', {type:'text/plain'}));
               document.querySelector('.chat').dispatchEvent(new DragEvent('drop', {dataTransfer:dropped, bubbles:true, cancelable:true}));

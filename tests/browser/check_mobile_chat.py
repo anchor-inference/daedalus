@@ -17,14 +17,14 @@ def run() -> None:
             page = open_page(context, phone=True)
             assert page.locator(".thinking-head").last.get_attribute("aria-expanded") == "false"
             assert page.locator(".activity").count() == 0
-            assert page.locator(".composer textarea").get_attribute("placeholder") == "Message for after this turn…"
+            assert page.locator(".composer .composer-field").get_attribute("placeholder") == "Message for after this turn…"
             assert page.locator(".composer .model-select").count() == 0
             assert page.locator(".composer .effort-select").count() == 0
             assert page.locator(".head-actions > button[aria-pressed]").count() == 0
             page.locator(".thinking-head").last.click()
             assert page.locator(".activity").last.is_visible()
             page.locator(".thinking-head").last.click()
-            page.locator(".composer textarea").fill("Please use fewer files.")
+            page.locator(".composer .composer-field").fill("Please use fewer files.")
             # Written during a run, the circle queues it at once and Stop stays beside it.
             assert page.locator('.composer [data-action="queue"]').is_enabled()
             assert page.locator('.composer [aria-label="Message actions"]').count() == 0
@@ -45,7 +45,7 @@ def run() -> None:
             HOST.status = "idle"
             page.reload()
             page.wait_for_selector(".composer .model-select")
-            page.locator(".composer textarea").fill("")
+            page.locator(".composer .composer-field").fill("")
             assert page.locator(".composer-box").bounding_box()["height"] <= 130
             page.locator(".composer .model-select").click()
             # Effort is one row of five choices in the phone's model sheet, each drawn 32 px tall and

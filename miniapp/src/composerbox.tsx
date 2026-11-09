@@ -1,7 +1,7 @@
 // A growing full-width field above one row of controls. Drafts belong to the session;
 // actions are supplied by the parent so the card also works inside the voice page.
 
-import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
@@ -28,7 +28,6 @@ import {
   draftTargetChanged,
   composerKey,
   dockKey,
-  fieldHeight,
   composerContext,
   ComposerPlace,
   answeredTitle,
@@ -46,6 +45,7 @@ import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 import { raiseFromError } from "./settinglink";
 import { AskCard, type AskCardHandle } from "./questions/AskCard";
+import { CodeField, type CodeFieldHandle } from "./codefield";
 import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
 import { clearQuoteReplies, removeQuoteReply, replyPreview, serialiseReplies, useQuoteReplies } from "./quotereply";
@@ -169,7 +169,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const focus = useComposerFocus(phone);
   const focused = focus.focused;
   const offline = useOffline();
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const textarea = useRef<CodeFieldHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const photosInput = useRef<HTMLInputElement>(null);
@@ -223,30 +223,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     },
     [sessionId, files, savedTarget, currentTarget],
   );
-
-  // Measure the placeholder too, and refit when a panel or viewport changes the width.
-  const fit = useCallback(() => {
-    const el = textarea.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const cs = getComputedStyle(el);
-    const line = parseFloat(cs.lineHeight);
-    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    el.style.height = `${fieldHeight(el.scrollHeight, line, pad, 1, phone ? 5 : undefined)}px`;
-  }, [phone]);
-  useLayoutEffect(fit, [draft, fit, status, props.questions]);
-  useEffect(() => {
-    const el = textarea.current;
-    if (!el) return;
-    let width = 0;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry.contentRect.width === width) return;
-      width = entry.contentRect.width;
-      fit();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [fit]);
 
   // A secret this draft made goes when its chip does: nothing else asked for it. One attached again from
   // the chat's list stays where it was.
@@ -435,7 +411,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   };
 
   // ── keys ──
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length + skillItems.length > 0, ghost: !!ghost });
     if (intent === "accept") {
@@ -478,7 +454,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (insideTerminal(e.target)) return;
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      if (typing && target === textarea.current) return;
+      if (typing && target === textarea.current?.element) return;
       if (typing) return;
       const intent = composerKey(e, { enterSends: false, paletteOpen: false });
       if (intent === "model") {
@@ -680,19 +656,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {secrets.map((secret) => <SecretChip key={secret.id} name={secret.name} scope={secret.scope} onRemove={() => { if (!sending) void unattachSecret(secret); }} />)}
           </div>
         )}
-        <textarea
+        <CodeField
           hidden={voiceBar}
           className={ghost ? "ghost" : undefined}
-          data-suggestion={ghost || undefined}
+          suggestion={ghost || undefined}
           ref={textarea}
           value={draft}
           disabled={sending || fileReadySession !== sessionId}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
           placeholder={ghost ? ghost : phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
-          rows={1}
           onPaste={onPaste}
           onKeyDown={onKeyDown}
-          aria-label={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
+          ariaLabel={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
         />
         {ghost && <button type="button" className="composer-ghost-accept" onClick={acceptGhost} title={t("composer.suggest.accept")}>
           {phone ? t("composer.suggest.use") : <kbd>Tab</kbd>}
@@ -802,7 +777,7 @@ export function useComposerFocus(enabled: boolean) {
       window.removeEventListener("pointercancel", up, true);
     };
   }, [enabled]);
-  const onFocus = useCallback((event: React.FocusEvent<HTMLElement>) => { if (event.target instanceof HTMLTextAreaElement) setFocused(true); }, []);
+  const onFocus = useCallback((event: React.FocusEvent<HTMLElement>) => { if (event.target instanceof HTMLElement && event.target.classList.contains("composer-field")) setFocused(true); }, []);
   const onBlur = useCallback((event: React.FocusEvent<HTMLElement>) => {
     const root = event.currentTarget;
     if (root.contains(event.relatedTarget as Node | null)) return;

@@ -27,7 +27,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, field_text  # noqa: E402
 from browser_stub import VIEWPORT, BrowserStub, open_page, render_scenes, wait_frames  # noqa: E402
 from screenshots import S1, UNHANDLED, stub  # noqa: E402
 
@@ -81,7 +81,7 @@ def marks(page) -> int:  # type: ignore[no-untyped-def]
 
 
 def draft_text(page) -> str:  # type: ignore[no-untyped-def]
-    return page.locator(".composer-box textarea").input_value()
+    return field_text(page.locator(".composer-box .composer-field"))
 
 
 def keep(page, name: str) -> None:  # type: ignore[no-untyped-def]

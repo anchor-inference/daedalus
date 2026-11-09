@@ -1866,11 +1866,21 @@ def open_projects(page) -> None:  # type: ignore[no-untyped-def]
     page.locator(".ph-drawer-root.open [data-nav='projects']").click()
 
 
+FIELD_TEXT = "el => [...el.querySelectorAll('[data-line]')].map(line => line.textContent).join('\\n')"
+"""The composer field's text as the composer holds it: its lines joined, the code card's copy button left
+out. The field is an editable element, not a textarea, so it has no value to read."""
+
+
+def field_text(locator) -> str:  # type: ignore[no-untyped-def]
+    """The text in a composer field, given its locator."""
+    return locator.evaluate(FIELD_TEXT)
+
+
 def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
     """On a phone the composer rests as one row; the model, the mode and the context ring are in the
     toolbar it opens onto when its field has the reader. A no-op where they already show."""
     if not page.locator(".composer .model-select, .composer .composer-mode").first.is_visible():
-        page.locator(".composer textarea").first.click()
+        page.locator(".composer .composer-field").first.click()
         page.wait_for_timeout(150)
 
 

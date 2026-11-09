@@ -11,8 +11,6 @@ import {
   draftTargetChanged,
   dockKey,
   draftKey,
-  fieldHeight,
-  MAX_ROWS,
   pendingApproval,
   placeholderKey,
   primaryAction,
@@ -105,13 +103,6 @@ describe("keys in the field", () => {
     expect(dockKey(key({ key: "n", code: "KeyN" }), false)).toBe("deny");
     expect(dockKey(key({ key: "y", code: "KeyY" }), true)).toBeNull();
     expect(dockKey(key({ key: "y", code: "KeyY", ctrlKey: true }), false)).toBeNull();
-  });
-});
-
-describe("the field's height", () => {
-  it("follows the text up to eight lines and no further", () => {
-    expect(fieldHeight(40, 21, 20)).toBe(41);
-    expect(fieldHeight(600, 21, 20)).toBe(21 * MAX_ROWS + 20);
   });
 });
 
@@ -312,12 +303,6 @@ describe("the agent's questions", () => {
 });
 
 describe("the card layout", () => {
-  it("reserves one phone line, grows, then scrolls after five", () => {
-    expect(fieldHeight(0, 22.4, 16, 1, 5)).toBe(39);
-    expect(fieldHeight(83, 22.4, 16, 1, 5)).toBe(83);
-    expect(fieldHeight(900, 22.4, 16, 1, 5)).toBe(128);
-  });
-
   it("uses the physical Enter keys with either alphabet", () => {
     for (const code of ["Enter", "NumpadEnter"]) {
       expect(composerKey(key({ key: "Unidentified", code }), { enterSends: true, paletteOpen: false })).toBe("send");

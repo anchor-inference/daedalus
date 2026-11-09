@@ -122,7 +122,7 @@ def desktop(page: Page, lang: str) -> None:
 
     # The reports it was woken with are a card too.
     expect(page.locator(".event-card")).to_contain_text("Garden closed dispatch dg4h1x")
-    expect(page.locator(".composer textarea, .composer [contenteditable]").first).to_have_attribute("placeholder", words["placeholder"])
+    expect(page.locator(".composer .composer-field, .composer [contenteditable]").first).to_have_attribute("placeholder", words["placeholder"])
     fits(page, f"{lang} main chat")
 
     # Answer one with an option and one in words, and send them together to the main chat's route: the

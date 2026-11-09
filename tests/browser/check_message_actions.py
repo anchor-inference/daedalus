@@ -195,7 +195,7 @@ def orchestrator(page: Page, name: str, width: int, lang: str) -> list[str]:
     line.hover()
     reply.click()
     chip.wait_for(timeout=5000)
-    chat.locator(".composer textarea").fill(QUESTION)
+    chat.locator(".composer .composer-field").fill(QUESTION)
     chat.locator(".composer .roundbtn.primary").click()
     for _ in range(50):
         if focus.posted:
