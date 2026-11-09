@@ -59,7 +59,7 @@ PASTE = """async ([w, h, kind, name]) => {
   const blob = await (""" + PICTURE + """)([w, h, kind]);
   const dt = new DataTransfer();
   dt.items.add(new File([blob], name, { type: kind }));
-  const field = document.querySelector('.composer-box textarea');
+  const field = document.querySelector('.composer-box .composer-field');
   field.focus();
   field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   return blob.size;
@@ -140,7 +140,7 @@ def open_composer(browser, lang: str, scheme: str, **context_args):  # type: ign
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents/{S1}?token=t&scheme={scheme}&lang={lang}")
     # Enabled once the saved draft's files are back: a paste before that is overwritten by the restore.
-    page.wait_for_selector(".composer-box textarea:not([disabled])", timeout=20000)
+    page.wait_for_selector(".composer-box .composer-field", timeout=20000)
     return context, page
 
 
