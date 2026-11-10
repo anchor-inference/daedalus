@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import ctypes
 import errno
-import fcntl
 import json
 import os
 import shutil
@@ -492,6 +491,8 @@ def keep(upper_path: str, folder: str, limits: dict[str, int]) -> str:
     Whole or nothing, so a folder at its limit is never left with half of what a command built. The check and the
     copy hold one lock across the installation's folders: two chats at once must not both spend the same room.
     """
+    import fcntl  # Lazy: POSIX only. Imported at the top, it stopped a native Windows host from starting at all.
+
     guard = os.open(os.path.dirname(folder.rstrip("/")) or "/", os.O_RDONLY)
     upper = os.open(upper_path, OPEN_DIRECTORY)
     real = os.open(folder, OPEN_DIRECTORY)
