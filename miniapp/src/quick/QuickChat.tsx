@@ -16,12 +16,14 @@
 // leave an empty chat behind for every refusal.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { applyAppearance } from "../appearance";
 import { api, ApiError, type AsrStatus, type Project, type SessionList, type SkillEntry } from "../api";
 import { Icon } from "../icons";
 import { t, useLang } from "../i18n";
 import { sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
+import { CodeField, type CodeFieldHandle } from "../codefield";
 import { COMPUTER, refusalText, type ComputerState } from "../computer";
 import { ComputerScopePicker, type ScopeChoice } from "../computerpicker";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
@@ -79,7 +81,8 @@ export function QuickChat() {
   // The `@` or `$` the operator closed with Esc: the list stays shut until the text changes.
   const [dismissed, setDismissed] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
+  // The main composer's field, so a fenced block typed or pasted here is drawn as the same code card.
+  const field = useRef<CodeFieldHandle>(null);
   // Computer mode: on, the picker kept mounted until its closing transition ends, and its choice.
   const [computer, setComputer] = useState(false);
   const [pickerMounted, setPickerMounted] = useState(false);
@@ -96,6 +99,21 @@ export function QuickChat() {
   const list = sessions.data?.sessions ?? [];
   const last = useMemo(() => lastSession(list, companion?.session_id ?? ""), [list, companion]);
   const shown: TargetKind = target ?? DEFAULT_TARGET;
+
+  // The window is painted as the operator set the app up: until this was here it was always dark,
+  // whatever their scheme, because only the main app's shell applied the appearance. A change made in
+  // the main window reaches this one as a storage event, the system's switch as the media query.
+  useEffect(() => {
+    const apply = () => applyAppearance();
+    apply();
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    mq?.addEventListener("change", apply);
+    window.addEventListener("storage", apply);
+    return () => {
+      mq?.removeEventListener("change", apply);
+      window.removeEventListener("storage", apply);
+    };
+  }, []);
 
   useEffect(() => {
     api.get("/api/auth/me").then(() => setAuthed(true)).catch((e) => setAuthed(e instanceof ApiError && (e.status === 401 || e.status === 403) ? false : true));
@@ -236,17 +254,13 @@ export function QuickChat() {
   // The caret after a completion is put in place in the same frame the text changes: set a moment
   // later, it landed after the first letters typed next and split the word.
   const placeCaret = useRef<number | null>(null);
-  // The field grows with what is typed, up to a few lines, and the window grows with it.
+  // The field grows with what is typed up to a cap set in quick.css, and the window grows with it.
   useLayoutEffect(() => {
     const el = field.current;
-    if (!el) return;
-    if (placeCaret.current !== null) {
-      el.focus();
-      el.setSelectionRange(placeCaret.current, placeCaret.current);
-      placeCaret.current = null;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    if (!el || placeCaret.current === null) return;
+    el.focus();
+    el.setSelectionRange(placeCaret.current, placeCaret.current);
+    placeCaret.current = null;
   }, [text, recording]);
 
   function complete(item: ContextItem | SkillEntry) {
@@ -263,7 +277,9 @@ export function QuickChat() {
     bridge()?.hide();
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  // The field has handled a plain Enter inside a code block (the code's next line) before this is
+  // called, so Enter here sends only from outside code, as in the main composer.
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     if (options && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
@@ -554,15 +570,14 @@ export function QuickChat() {
       <VoiceNoteFailed note={note} />
       <div className="quick-box">
         {recording ? <VoiceBar note={note} /> : (
-          <textarea
+          <CodeField
             ref={field}
             className="quick-field"
-            rows={1}
             value={text}
             placeholder={t(computer ? "quick.computer.placeholder" : "quick.placeholder")}
-            aria-label={t(computer ? "quick.computer.placeholder" : "quick.placeholder")}
-            onChange={(e) => edit(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+            ariaLabel={t(computer ? "quick.computer.placeholder" : "quick.placeholder")}
+            onChange={(value) => edit(value, field.current?.selectionStart ?? value.length)}
+            onSelect={() => setCaret(field.current?.selectionStart ?? 0)}
             onKeyDown={onKeyDown}
           />
         )}
