@@ -32,7 +32,10 @@ func runClient(ctx context.Context, t *Tunnel, binary string, args, env []string
 	cmd.WaitDelay = stopGrace
 	clientAttributes(cmd)
 	if err := cmd.Start(); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		// Windows looks a path up with each of its program extensions and, finding none, says
+		// exec.ErrNotFound rather than ErrNotExist: without the second test a missing client there
+		// was retried for ever instead of waiting for a person.
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
 			return fatal(CodeNoClient, "%s is not there", binary)
 		}
 		// Refused by the system: on Windows this is Defender holding the file.

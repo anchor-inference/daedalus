@@ -98,7 +98,23 @@ func (s *statusFile) write() {
 		s.logf("the status file: %v", err)
 		return
 	}
-	if err := os.Rename(scratch, s.path); err != nil {
+	if err := replaceFile(scratch, s.path); err != nil {
 		s.logf("the status file: %v", err)
+	}
+}
+
+// replaceFile renames from over to, waiting out a reader that holds to open. On Windows a reader
+// that opened the file without sharing its deletion (os.ReadFile does not) makes the rename fail
+// with "Access is denied" until it closes it, and the launcher reads this file while tunneld writes
+// it: a state lost that way stayed lost until the next change, which for a failure needing a
+// person may never come. A read takes microseconds; a second is far more than one needs.
+func replaceFile(from, to string) error {
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := os.Rename(from, to)
+		if err == nil || !heldByReader(err) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

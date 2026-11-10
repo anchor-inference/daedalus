@@ -499,3 +499,32 @@ func TestAProviderThatHandsOverConnectionsOpensNoPort(t *testing.T) {
 		t.Fatalf("%d", answer.StatusCode)
 	}
 }
+
+// A reader holding the status file open delays the write and does not lose it: on Windows the
+// rename over a file open for reading is refused until the reader closes it, and the launcher reads
+// this file while tunneld writes it.
+func TestAStatusWriteWaitsOutAReader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "status.json")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := path + ".tmp"
+	if err := os.WriteFile(scratch, []byte("after"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- replaceFile(scratch, path) }()
+	time.Sleep(50 * time.Millisecond)
+	reader.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := os.ReadFile(path); string(body) != "after" {
+		t.Fatalf("%q", body)
+	}
+}
