@@ -1,0 +1,129 @@
+/* Settings: a dialog over the app on a desktop, a two-level stack on a phone. The rows inside are
+   settingsrow.tsx's and keep their own rules in ui/styles.css, since other screens draw them too;
+   this file is the frame around them and what is Settings' alone (the changed-value mark, the search). */
+
+/* ── a row that knows its default ───────────────────────────────────────────────────────── */
+.settings-changed { display: inline-block; width: 6px; height: 6px; margin: 0 7px 0 0; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.settings-default { color: var(--fg-3); white-space: nowrap; }
+.settings-reset.btn { display: inline-flex; align-items: center; gap: 4px; min-height: var(--ctl-h-sm); padding: 0 8px; border-color: transparent; background: transparent; color: var(--fg-2); font-size: var(--fs-12); }
+.settings-reset.btn:hover, .settings-reset.btn:focus-visible { background: var(--surface-2); color: var(--fg); }
+
+/* ── the list of sections and the search, at every width ────────────────────────────────── */
+.settings-index { display: flex; flex-direction: column; gap: 1px; }
+.settings-group-block { display: flex; flex-direction: column; gap: 1px; }
+.settings-group { margin: 14px 8px 4px; color: var(--fg-3); font-size: var(--fs-11); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.settings-link { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 8px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; }
+.settings-link .ic { color: var(--fg-2); }
+.settings-link:hover { background: var(--surface-2); }
+.settings-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-link.active { background: var(--surface-3); }
+.settings-link.active .ic { color: var(--fg); }
+.settings-link-text { display: flex; flex-direction: column; min-width: 0; }
+.settings-link-text b { overflow: hidden; font-weight: 400; font-size: var(--fs-14); text-overflow: ellipsis; white-space: nowrap; }
+.settings-link-text .sub { display: none; }
+/* The icon set's chevron points down; a row that leads somewhere points the way it goes. */
+.settings-link .chev { display: none; color: var(--fg-3); transform: rotate(-90deg); }
+.settings-link { position: relative; }
+.settings-link > .settings-mark { position: absolute; top: 50%; right: 10px; margin-top: -4px; }
+/* A row a search found by one of its names, under its section: indented to the section's words so
+   it reads as part of it. */
+.settings-field-hit { display: block; margin: 0 0 1px 34px; padding: 5px 8px; border-radius: var(--radius-xs); color: var(--fg-2); font-size: var(--fs-13); text-decoration: none; overflow-wrap: anywhere; }
+.settings-field-hit:hover { background: var(--surface-2); color: var(--fg); }
+.settings-field-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-count { margin-top: 4px; }
+.settings-empty { padding: 12px 8px; }
+
+.settings-search-box { position: relative; display: flex; align-items: center; }
+.settings-search-box > .ic { position: absolute; left: 10px; color: var(--fg-3); pointer-events: none; }
+.settings-search-box .settings-search { width: 100%; min-height: var(--ctl-h); margin: 0; padding: 0 34px 0 32px; border-radius: var(--radius-sm); background: var(--bg); }
+.settings-search-key { position: absolute; right: 8px; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--fg-3); font: var(--fs-11)/16px var(--font); text-align: center; pointer-events: none; }
+.settings-search-clear { position: absolute; right: 4px; }
+
+/* What a search found, as the sections' own controls: everything else in a section's body is hidden
+   (settingsdialog.tsx marks it), so a found row is the same control it is on its page. */
+.settings-hit-section + .settings-hit-section { margin-top: 22px; }
+.settings-hit-head { margin: 0 0 8px; font-size: var(--fs-12); font-weight: 600; color: var(--fg-2); }
+.settings-hit-head a { color: inherit; text-decoration: none; }
+.settings-hit-head a:hover { color: var(--fg); text-decoration: underline; }
+.settings-hit-body [data-search-off] { display: none !important; }
+.settings-hit-body > .section-title:first-child, .settings-hit-body .card > .section-title:first-child { margin-top: 0; }
+.settings-hit-body .section-title { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.settings-hit-links { display: flex; flex-direction: column; padding: 0; }
+.settings-hit-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; color: var(--fg); text-decoration: none; }
+.settings-hit-link + .settings-hit-link { border-top: 1px solid var(--line); }
+.settings-hit-link b { font-weight: 500; }
+.settings-hit-link:hover { background: var(--surface-2); }
+
+h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 650; letter-spacing: -.01em; line-height: 1.25; overflow-wrap: anywhere; }
+.settings-about { margin: 4px 0 0; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+
+/* ── the dialog (a desktop) ──────────────────────────────────────────────────────────────── */
+@media (min-width: 1024px) {
+  .settings-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 2); display: grid; place-items: center; background: var(--scrim, rgba(0, 0, 0, .45)); animation: settings-fade var(--t-fast, 120ms) var(--ease-out); }
+  /* Claude's proportions: nine tenths of the window up to 1100 × 760, so the screen it was opened
+     from stays visible round it and closing it is plainly going back there. */
+  .settings-dialog { width: min(90vw, 1100px); height: min(100vh - 64px, 760px); overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--bg); box-shadow: var(--shadow-pop); outline: none; animation: settings-rise 180ms var(--ease-out); }
+  .settings-stage { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; }
+  .settings-nav { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 16px 10px 0; border-right: 1px solid var(--line); background: var(--surface-1); }
+  h2.settings-dialog-title { margin: 2px 8px 4px; font-size: var(--fs-17); font-weight: 650; }
+  .settings-nav .settings-index { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -10px; padding: 0 10px 8px; }
+  .settings-foot { display: flex; justify-content: space-between; gap: 8px; margin: 0 -10px; padding: 10px 14px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+  .settings-foot > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  .settings-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .settings-head { display: flex; align-items: flex-start; gap: 16px; padding: 20px 20px 14px 28px; border-bottom: 1px solid var(--line); }
+  .settings-head-text { flex: 1; min-width: 0; }
+  .settings-close { flex: none; margin: -4px -4px 0 0; }
+  .settings-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* The content takes the pane's whole width: the dialog is already the reading width, and a narrower
+     column inside it put rows' words and controls a long way apart for nothing. */
+  .settings-dialog .settings-col { padding: 20px 28px 32px; }
+  .settings-dialog .settings-col > .card:first-child, .settings-dialog .settings-col > .section-title:first-child { margin-top: 0; }
+
+  /* 1024–1180 px: the list is a column of icons with the names in tooltips, so the section keeps its
+     width; the search button opens the list out over the section while it is in use. */
+  .settings-stage.icons { grid-template-columns: 56px minmax(0, 1fr); }
+  .settings-stage.icons .settings-nav { align-items: stretch; padding: 14px 8px 0; }
+  .settings-stage.icons:not(.opened) .settings-dialog-title,
+  .settings-stage.icons:not(.opened) .settings-search-box,
+  .settings-stage.icons:not(.opened) .settings-group,
+  .settings-stage.icons:not(.opened) .settings-link-text,
+  .settings-stage.icons:not(.opened) .settings-foot { display: none; }
+  .settings-stage.icons:not(.opened) .settings-link { grid-template-columns: 1fr; justify-items: center; padding: 0; }
+  .settings-stage.icons:not(.opened) .settings-group-block + .settings-group-block { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .settings-stage.icons:not(.opened) .settings-index { margin: 0 -8px; padding: 0 8px 8px; }
+  .settings-search-open { align-self: center; }
+  /* Opened, the list takes its full width back and the section narrows beside it rather than going
+     under it: the search's results are live controls on the right, and covered they could not be used. */
+  .settings-stage.icons.opened { grid-template-columns: 248px minmax(0, 1fr); }
+  .settings-stage.icons.opened .settings-nav { padding: 16px 10px 0; }
+  /* The Components mark sits on the icon's corner when the name is hidden. */
+  .settings-stage.icons:not(.opened) .settings-link > .settings-mark { top: 5px; right: 7px; }
+}
+@keyframes settings-fade { from { opacity: 0; } }
+@keyframes settings-rise { from { opacity: 0; transform: translateY(6px) scale(.99); } }
+@media (prefers-reduced-motion: reduce) { .settings-backdrop, .settings-dialog { animation: none; } }
+
+/* ── the stack (a phone) ─────────────────────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .settings-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
+  .settings-phone-back { display: inline-flex; align-items: center; gap: 2px; min-height: var(--tap); margin-left: -6px; padding: 0 8px 0 2px; border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-16); cursor: pointer; }
+  .settings-phone h1.settings-title { margin-top: 4px; font-size: var(--fs-22); }
+  .settings-phone .settings-about { margin-bottom: var(--space-2); }
+  .settings-phone .settings-search-box { margin: 4px 0 var(--space-2); }
+  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-pill); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
+  .settings-phone .settings-search-box > .ic { left: 14px; }
+  /* Grouped cards, as the phone's own settings draw them: a grey label over each group, rows 2 px
+     apart, the first and last of a group rounded. */
+  .settings-phone .settings-index { gap: 0; }
+  .settings-phone .settings-group-block { gap: 2px; }
+  .settings-phone .settings-group { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--fg-2); }
+  .settings-phone .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border-radius: var(--radius-xs); background: var(--surface-1); }
+  .settings-phone .settings-link .ic { color: var(--fg); }
+  .settings-phone .settings-link-text b { font-size: var(--fs-15); white-space: normal; }
+  .settings-phone .settings-link .chev { display: inline-flex; }
+  .settings-phone .settings-group + .settings-link { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .settings-phone .settings-group-block > .settings-link:last-child,
+  .settings-phone .settings-group-block > .settings-link:has(+ .settings-field-hit) { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .settings-phone .settings-field-hit { margin: 2px 0 6px 0; padding: 10px var(--space-4); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font-size: var(--fs-15); }
+  .settings-phone .settings-link + .settings-field-hit { margin-top: 6px; }
+}

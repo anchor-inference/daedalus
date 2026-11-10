@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -31,6 +32,13 @@ from daedalus.slugs import is_page_slug
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def inherited_environment(names: Iterable[str]) -> dict[str, str]:
+    """The named variables of this process's environment that are set, to hand on to a child
+    process (an MCP server) that would otherwise not see them. Read here, the one place the
+    environment is read, rather than by the caller."""
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def native_mode() -> bool:
@@ -152,6 +160,15 @@ def keyproxy_upstream(url: str) -> str:
         return ""
     tail = url[len(keyproxy_base()) :].strip("/")
     return tail.split("/", 1)[0] if tail else ""
+
+
+LOGIN_UPSTREAMS = ("codex", "grok", "claude")
+"""The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
+
+
+def login_route(base_url: str) -> bool:
+    """Whether ``base_url`` is a CLI login behind the key proxy: a plan, not a price nobody knows."""
+    return keyproxy_upstream(base_url) in LOGIN_UPSTREAMS
 
 
 def _runtime_paths() -> list[str]:
@@ -610,7 +627,7 @@ class ProviderConfig(BaseModel):
     ToolSearch, MCP servers first, rather than send a request the endpoint refuses."""
     pricing: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-model USD per 1M tokens overriding the built-in table (``daedalus.providers.pricing``):
-    ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
+    ``{"model": {"input", "output", "cache_hit"[, "cache_write", "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
     reasoning_replay: Literal["never", "when_present", "required"] | None = None
     """Whether an assistant turn's reasoning text (``reasoning_content``) goes back to this endpoint on later
@@ -788,6 +805,8 @@ class WebToolsConfig(BaseModel):
     """HTTP(S)/SOCKS proxy URL for WebFetch and the directly scraped search backends, e.g. ``socks5://127.0.0.1:1080``; empty = direct."""
     user_agent: str = "Mozilla/5.0 (X11; Linux x86_64) Daedalus/0.1"
     fetch_max_chars: int = Field(default=40_000, ge=1_000, le=500_000)
+    download_max_bytes: int = Field(default=200 << 20, ge=1 << 20, le=2 << 30)
+    """The largest file WebFetch saves with ``save_to``; a larger answer is cut off and nothing is kept."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
@@ -943,7 +962,7 @@ class McpOAuthConfig(BaseModel):
     """That client's secret, when the server issued one."""
 
 
-McpApproval = Literal["auto", "ask", "allow"]
+McpApproval = Literal["auto", "ask", "allow", "deny"]
 
 
 class McpServerConfig(BaseModel):
@@ -961,7 +980,9 @@ class McpServerConfig(BaseModel):
     """Whether a call to this server's tools is asked about first. ``auto`` reads each tool's own
     annotations (:func:`daedalus.mcp.manager.annotation_approval`): a tool that says it only reads
     runs, and one that may destroy or reach the outside world — or says nothing, which by the
-    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server."""
+    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server, and
+    ``deny`` refuses every call to it without asking: the server stays connected for the tools the
+    operator allows one by one in ``tool_approval``."""
     tool_approval: dict[str, McpApproval] = Field(default_factory=dict)
     """The same, for one tool by its name on the server; it beats ``approval``, and ``auto`` here
     hands the tool back to the server's setting."""
@@ -1779,7 +1800,18 @@ class EditBoardConfig(BaseModel):
     and after this long the agent may well have lost it."""
 
 
+class SubagentModels(BaseModel):
+    """Which presets a session's helpers may run on, unless the session chooses for itself
+    (:mod:`daedalus.host.subagent_models`)."""
+
+    mode: Literal["all", "session", "chosen"] = "all"
+    """``all`` is every preset that can run; ``session`` only the leader's own model; ``chosen`` the list below."""
+    presets: list[str] = Field(default_factory=list)
+    """For ``chosen``. A preset deleted later drops out of it rather than making the setting invalid."""
+
+
 class SubagentsConfig(BaseModel):
+    models: SubagentModels = Field(default_factory=SubagentModels)
     max_active: int = Field(default=10, ge=1, le=32)
     """Running subagents one leader may have at a time. Settings → Limits edits it, and the next
     SubAgent call reads the new value. Four turned out too few for a leader fanning one task out, and
@@ -3218,6 +3250,26 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     return changed
 
 
+def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
+    """The Diagrams screen became Canvas. Wherever the operator placed ``diagrams`` in the navigation,
+    ``canvas`` takes its place, so the screen keeps its spot instead of falling back to where a new one
+    ships; a custom icon goes with it."""
+    navigation = raw.get("navigation")
+    if not isinstance(navigation, dict):
+        return False
+    changed = False
+    for field in ("rail", "more", "drawer", "hidden"):
+        items = navigation.get(field)
+        if isinstance(items, list) and "diagrams" in items:
+            navigation[field] = list(dict.fromkeys("canvas" if item == "diagrams" else item for item in items))
+            changed = True
+    icons = navigation.get("icons")
+    if isinstance(icons, dict) and "diagrams" in icons:
+        icons.setdefault("canvas", icons.pop("diagrams"))
+        changed = True
+    return changed
+
+
 def _drop_session_modes(raw: dict[str, Any]) -> bool:
     """Session modes and the per-message depth sort are gone; their tables leave the file.
 
@@ -3251,6 +3303,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_web_search(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
+    changed = _migrate_diagrams_to_canvas(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):

@@ -29,8 +29,10 @@ def run() -> None:
     def stub(route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
         path = urlsplit(request.url).path
-        if path == "/api/diagrams" and "session_id=" in urlsplit(request.url).query:
-            return route.fulfill(status=200, content_type="application/json", body='[{"id":"0123456789abcdef0123456789abcdef","title":"Flow"}]')
+        if path == "/api/canvases" and "session_id=" in urlsplit(request.url).query:
+            item = {"id": "0123456789abcdef0123456789abcdef", "title": "Flow", "version": 1, "created_at": "2020-01-01T00:00:00Z", "updated_at": "2020-01-01T00:00:00Z", "updated_by": "agent",
+                    "shared": False, "scope": "chat", "scope_id": shots.S1, "scope_name": "Chat", "owner_session_id": shots.S1, "nodes": 1, "edges": 0}
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"scopes": [{"kind": "chat", "id": shots.S1, "name": "Chat"}], "items": [item]}))
         if path == f"/api/sessions/{shots.S1}/messages" and request.method == "POST":
             sent.append({"text": request.post_data_json["text"], "id": request.post_data_json["client_message_id"]})
             return route.fulfill(status=200, content_type="application/json", body='{"run_id":"slow-run"}')
@@ -62,8 +64,8 @@ def run() -> None:
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{shots.S1}?token=t&lang=en")
         expect(page.locator(".chat-title")).to_be_visible()
-        expect(page.get_by_role("link", name="Session diagrams (1)")).to_be_visible()
-        page.locator(".composer textarea").fill(WORDS)
+        expect(page.get_by_role("link", name="Chat canvases (1)")).to_be_visible()
+        page.locator(".composer .composer-field").fill(WORDS)
         page.locator(".composer [data-action=send]").click()
         expect(page.locator(".timeline .msg.user").last).to_contain_text(WORDS, timeout=1000)
         expect(page.locator(".timeline .msg.user").last).to_be_in_viewport(timeout=1000)
@@ -72,7 +74,7 @@ def run() -> None:
         assert len(sent) == 1 and sent[0]["text"] == WORDS
         expect(page.locator(".timeline .msg.user").filter(has_text=WORDS)).to_have_count(1, timeout=8000)
         page.locator('.composer input[type="file"]').first.set_input_files({"name": "sample.txt", "mimeType": "text/plain", "buffer": b"example"})
-        page.locator(".composer textarea").fill(UPLOAD_WORDS)
+        page.locator(".composer .composer-field").fill(UPLOAD_WORDS)
         page.locator(".composer [data-action=send]").click()
         expect(page.locator(".timeline .msg.user").filter(has_text=UPLOAD_WORDS)).to_have_count(1, timeout=8000)
         assert len(sent) == 2 and sent[1]["id"] != sent[0]["id"]
@@ -84,13 +86,13 @@ def run() -> None:
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         if page.get_by_role("dialog", name="Project files panel").is_visible():
             page.keyboard.press("Escape")
-        # A phone keeps the session's diagrams as a counted tile of the bar's ⋮ sheet.
+        # A phone keeps the chat's canvases as a counted tile of the bar's ⋮ sheet.
         page.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
-        tile = page.locator(".ph-session-menu [data-tile='diagrams']")
+        tile = page.locator(".ph-session-menu [data-tile='canvas']")
         expect(tile).to_be_in_viewport()
         expect(tile).to_contain_text("1")
         tile.click()
-        expect(page.locator(".diagrams-screen")).to_contain_text("Flow")
+        expect(page.locator(".canvas-screen")).to_contain_text("Flow")
         browser.close()
     assert not shots.UNHANDLED.report()
 

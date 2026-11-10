@@ -27,11 +27,14 @@ def run() -> None:
                 page = context.new_page()
                 page.route("**/api/**", metrics_stub)
                 page.goto(f"{BASE}/agents/{S1}?panel=details&token=t&scheme=dark&lang={language}")
-                page.wait_for_selector(".tool-timing")
+                # The inspector opens one section at a time: the context's page, then the usage's.
+                page.locator("[data-prop='context']").click()
                 panel = page.locator(".details")
-                copy = panel.inner_text()
-                assert ("Estimated after history changes" if language == "en" else "Оценка после изменения истории") in copy
-                assert ("Totals across all runs" if language == "en" else "Суммарно по всем запускам") in copy
+                assert ("Estimated after history changes" if language == "en" else "Оценка после изменения истории") in panel.inner_text()
+                page.locator(".dt-back").click()
+                page.locator("[data-prop='usage']").click()
+                page.wait_for_selector(".tool-timing")
+                assert ("Totals across all runs" if language == "en" else "Суммарно по всем запускам") in panel.inner_text()
                 assert not page.locator(".tool-timing").evaluate("el => el.open")
                 summary = page.locator(".tool-timing summary")
                 # The sheet's entry translation can round a 44px box to 43.999999px.

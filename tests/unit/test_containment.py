@@ -180,8 +180,8 @@ def test_a_session_in_a_read_only_folder_does_not_write_its_workspace(tree: Simp
     assert services.sandbox_writable() == [tree.code, tree.assets]
 
 
-async def test_write_edit_and_multiedit_refuse_a_read_only_folder_while_read_works(tree: SimpleNamespace) -> None:
-    from daedalus.tools.files import edit_file, multi_edit, read_file, search_files, write_file
+async def test_write_and_edit_and_its_batch_refuse_a_read_only_folder_while_read_works(tree: SimpleNamespace) -> None:
+    from daedalus.tools.files import edit_file, read_file, search_files, write_file
 
     (tree.docs / "guide.md").write_text("hello docs\n", encoding="utf-8")
     locator.register(_services(tree, "c-tools"))
@@ -192,7 +192,7 @@ async def test_write_edit_and_multiedit_refuse_a_read_only_folder_while_read_wor
         for tool, args in (
             (write_file, {"path": str(tree.docs / "planted.md"), "content": "x"}),
             (edit_file, {"path": str(tree.docs / "guide.md"), "old_string": "hello", "new_string": "bye"}),
-            (multi_edit, {"path": str(tree.docs / "guide.md"), "edits": [{"old_string": "hello", "new_string": "bye"}]}),
+            (edit_file, {"path": str(tree.docs / "guide.md"), "edits": [{"old_string": "hello", "new_string": "bye"}]}),
         ):
             result = await tool().invoke(ctx, args)
             assert result.is_error and "read-only" in result.content and str(tree.docs) in result.content

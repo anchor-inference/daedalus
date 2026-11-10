@@ -74,19 +74,13 @@ export function AppearancePanel() {
 
   return (
     <>
-      <p className="sub">{t("theme.lead")}</p>
+      {/* The language and the companion live here, not in the More menu: they are settings of this
+          browser like the theme, and a menu of places had grown two switches nobody looked for there. */}
+      <div className="section-title">{t("settings.group.langtheme")}</div>
       <div className="card">
-        {/* Here as well as at the top of the list of sections: a link to the language has to land on a
-            row that a phone draws once the section is open, and the list is not drawn then. */}
         <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language"><LangPicker /></Row>
-        <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
-        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
-          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
-            <option value="">{t("pet.model.off")}</option>
-            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
-          </select>
-        </Row>}
       </div>
+      <p className="sub">{t("theme.lead")}</p>
       <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
         {THEMES.map((item) => (
           <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
@@ -109,6 +103,17 @@ export function AppearancePanel() {
             </Row>
           </>
         )}
+      </div>
+
+      <div className="section-title">{t("settings.group.companion")}</div>
+      <div className="card">
+        <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
+        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
+          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
+            <option value="">{t("pet.model.off")}</option>
+            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
+          </select>
+        </Row>}
       </div>
 
       <div className="section-title">{t("theme.colors")}</div>

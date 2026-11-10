@@ -282,21 +282,40 @@ async def write_file(context: ToolContext, path: str, content: str) -> ToolResul
 
 
 @search_hint(
-    "edit change replace fix typo modify patch line update value version string "
-    "поменять поменяй заменить замени исправить исправь поправить поправь изменить измени опечатка правка обновить значение"
+    "edit change replace fix typo modify patch line update value version string several edits batch multiple replacements "
+    "поменять поменяй заменить замени исправить исправь поправить поправь изменить измени опечатка правка обновить значение несколько правок"
 )
 @tool(
     name="Edit",
     description=(
         "Replace a substring in a text file. old_string must match once unless replace_all is true; an "
         "exact match is tried first, then one ignoring trailing whitespace, then one ignoring indentation "
-        "(the file's indentation is kept). On a miss the error shows the closest lines. For several "
-        "changes to one file use MultiEdit."
+        "(the file's indentation is kept). On a miss the error shows the closest lines. Several changes to "
+        "one file: edits=[{old_string, new_string, replace_all?}, …] instead, applied in order, all or none."
     ),
 )
 async def edit_file(
-    context: ToolContext, path: str, old_string: str, new_string: str, replace_all: bool = False
+    context: ToolContext, path: str, old_string: str | None = None, new_string: str | None = None, replace_all: bool = False,
+    edits: list[dict[str, Any]] | None = None,
 ) -> ToolResult:
+    """One replacement, or a batch of them that lands whole or not at all.
+
+    The batch is this tool's and not a second one's: with ``Edit`` and ``MultiEdit`` side by side, models
+    sent ``Edit(edits=[…])``, were told the argument was unknown, and failed twice more before they
+    found the other name. One tool with both shapes has nothing to confuse."""
+    if edits is not None and (old_string is not None or new_string is not None):
+        return error(context, "pass either old_string and new_string, or edits, not both")
+    if edits is None:
+        if old_string is None or new_string is None:
+            return error(context, "Edit needs old_string and new_string, or edits=[{old_string, new_string}, …]")
+        edits = [{"old_string": old_string, "new_string": new_string, "replace_all": replace_all}]
+        single = True
+    else:
+        single = False
+        if not edits:
+            return error(context, "edits is empty")
+        if not all(isinstance(edit, dict) for edit in edits):
+            return error(context, "each item of edits is an object {old_string, new_string, replace_all?}")
     services = services_for(context)
     target, refusal = _resolve_path(context, services, path, "edited")
     if refusal is not None:
@@ -310,16 +329,23 @@ async def edit_file(
         text = await fs.read_text(target)
     except (OSError, ValueError) as exc:
         return error(context, _unreadable_for_edit(target, exc))
+    total, how = 0, "exactly"
+    for index, edit in enumerate(edits, 1):
+        old, new = str(edit.get("old_string", "")), str(edit.get("new_string", ""))
+        try:
+            text, count, how = edit_keeping_newlines(text, old, new, replace_all=bool(edit.get("replace_all", False)))
+        except EditMiss as miss:
+            return error(context, str(miss) if single else f"edit {index} of {len(edits)} failed, file unchanged: {miss}")
+        total += count
     try:
-        updated, count, how = edit_keeping_newlines(text, old_string, new_string, replace_all=replace_all)
-    except EditMiss as miss:
-        return error(context, str(miss))
-    try:
-        await fs.write_text(target, updated)
+        await fs.write_text(target, text)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
-    note = f" (matched {how})" if how != "exactly" else ""
-    return ok(context, await folder_rules(context, services, target) + f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+    if single:
+        said = f"edited {target}: {total} replacement(s)" + (f" (matched {how})" if how != "exactly" else "")
+    else:
+        said = f"edited {target}: {total} replacement(s) in {len(edits)} edits"
+    return ok(context, await folder_rules(context, services, target) + said + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 def _unreadable_for_edit(target: Path, exc: Exception) -> str:
@@ -418,48 +444,6 @@ def apply_edit(text: str, old: str, new: str, *, replace_all: bool = False) -> t
         replacement = _reindent(new, old, body) if how == "ignoring indentation" else new
         lines[i : i + n] = [replacement + ending]
     return "".join(lines), len(chosen), f"{how} at line {hits[0] + 1}" + (f" and {len(chosen) - 1} more" if len(chosen) > 1 else "")
-
-
-@search_hint(
-    "several edits many changes one file batch replace atomic multiple replacements "
-    "несколько правок много замен одном файле пачкой внести внеси правки сразу"
-)
-@tool(
-    name="MultiEdit",
-    description=(
-        "Apply several edits to one file atomically: edits is a list of {old_string, new_string[, replace_all]} "
-        "applied in order, each seeing the result of the previous ones; if any edit fails the file is left unchanged and the error names it."
-    ),
-)
-async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]]) -> ToolResult:
-    services = services_for(context)
-    target, refusal = _resolve_path(context, services, path, "edited")
-    if refusal is not None:
-        return refusal
-    assert target is not None
-    fs = services.fs
-    target = await _as_spelled(fs, target)
-    if not await fs.is_file(target):
-        return error(context, f"no such file: {target}")
-    if not edits:
-        return error(context, "edits is empty")
-    try:
-        text = await fs.read_text(target)
-    except (OSError, ValueError) as exc:
-        return error(context, _unreadable_for_edit(target, exc))
-    total = 0
-    for index, edit in enumerate(edits, 1):
-        old, new = str(edit.get("old_string", "")), str(edit.get("new_string", ""))
-        try:
-            text, count, _ = edit_keeping_newlines(text, old, new, replace_all=bool(edit.get("replace_all", False)))
-        except EditMiss as miss:
-            return error(context, f"edit {index} of {len(edits)} failed, file unchanged: {miss}")
-        total += count
-    try:
-        await fs.write_text(target, text)
-    except (OSError, ControlConflict, ControlDenied) as exc:
-        return error(context, f"could not write {target}: {exc}")
-    return ok(context, await folder_rules(context, services, target) + f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 async def board_note(context: ToolContext, services: Any, target: Path) -> str:
@@ -583,6 +567,6 @@ async def search_files(
     return ok(context, rules + clip("\n".join(rel), services.max_tool_output_chars), count=len(rel))
 
 
-TOOLS = [read_file, write_file, edit_file, multi_edit, find_files, search_files]
+TOOLS = [read_file, write_file, edit_file, find_files, search_files]
 
 __all__ = ["TOOLS"]

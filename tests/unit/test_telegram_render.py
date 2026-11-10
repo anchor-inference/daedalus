@@ -176,8 +176,8 @@ def test_cards_and_citations_read_as_tidy_text_in_a_chat() -> None:
     )
     flat = flatten_evidence(answer)
     assert ":::" not in flat and "image:" not in flat and "title:" not in flat
-    assert "**[1. Pantum P2500NW](https://kaspi.kz/p/1)** · _My pick_\n≈ 45 000 ₸ · mono laser\n- 22 pages a minute\n" in flat
-    assert "[Kaspi](https://kaspi.kz/p/1) · [DNS](https://dns.example/p)\n_check delivery_" in flat
+    assert "**[1. Pantum P2500NW](https://kaspi.kz/p/1)** · *My pick*\n≈ 45 000 ₸ · mono laser\n- 22 pages a minute\n" in flat
+    assert "[Kaspi](https://kaspi.kz/p/1) · [DNS](https://dns.example/p)\n*check delivery*" in flat
     assert "### [Anchor Inference](https://example.org)\nAI systems · Astana" in flat
     assert "Order it. ([kaspi.kz](https://kaspi.kz/p/1), [DNS](https://www.dns-shop.kz/x))" in flat
     assert "`[^](https://a.example)`" in flat
@@ -194,7 +194,7 @@ def test_a_flow_reads_as_rows_and_arrows_in_a_chat() -> None:
     flat = flatten_evidence(answer)
     assert flat == (
         "The plan:\n\n**💡 Pilot project**\n💬 Customer — writes in the chat\n↓\n🤖 **AI assistant** — answers\n"
-        "↓ when it cannot answer\n✅ Solved → 🎧 Operator · 📊 Report\n↓\nDone\n_Two weeks_\n\nAfter."
+        "↓ when it cannot answer\n✅ Solved → 🎧 Operator · 📊 Report\n↓\nDone\n*Two weeks*\n\nAfter."
     )
 
 

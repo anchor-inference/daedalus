@@ -127,9 +127,11 @@ export function duration(ms: number): string {
   return t("fmt.dur.d", { n: d }) + (h % 24 ? ` ${t("fmt.dur.h", { n: h % 24 })}` : "");
 }
 
-/** Compact token counts: 71.1M, 28k, 950. */
+/** Compact token counts: 1.21B, 71.1M, 28k, 950. Billions have a unit of their own: a long session's
+ *  cache reads ran past a thousand million and read as "1214.9M", a number to count digits in. */
 export function tokens(n: number | null | undefined): string {
   const v = n ?? 0;
+  if (v >= 1_000_000_000) return t("fmt.tok.b", { n: (v / 1_000_000_000).toFixed(2) });
   if (v >= 1_000_000) return t("fmt.tok.m", { n: (v / 1_000_000).toFixed(1) });
   if (v >= 10_000) return t("fmt.tok.k", { n: Math.round(v / 1000) });
   return num(v);
@@ -149,6 +151,17 @@ export function usd(value: number | null | undefined): string {
   if (value === 0) return "$0";
   if (value < 0.01) return "< $0.01";
   return `$${value.toFixed(2)}`;
+}
+
+/** A call's or a turn's length, short: "640 ms", "4.1 s", "43 s". */
+export function fmtMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
+}
+
+/** A rate as it reads at a glance: whole tokens past ten a second, one decimal below. Usage's speed
+ *  table and the speed under a turn say it the same way, so the two can be compared by eye. */
+export function fmtRate(rate: number): string {
+  return rate >= 10 ? String(Math.round(rate)) : rate.toFixed(1);
 }
 
 export function int(value: number | null | undefined): string {

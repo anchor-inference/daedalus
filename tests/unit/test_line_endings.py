@@ -8,7 +8,7 @@ from protocore.contracts.tools import ToolContext
 
 from daedalus.host.filesystem import LocalFS
 from daedalus.host.services import SessionServices, locator
-from daedalus.tools.files import edit_file, multi_edit, read_file, write_file
+from daedalus.tools.files import edit_file, read_file, write_file
 
 
 def _ctx(session_id: str) -> ToolContext:
@@ -37,7 +37,7 @@ async def test_a_crlf_file_stays_crlf_after_an_edit(tmp_path: Path) -> None:
         result = await edit_file().invoke(ctx, {"path": "dos.txt", "old_string": "alpha\nbeta", "new_string": "alpha\nBETA\nextra"})
         assert not result.is_error, result.content
         assert target.read_bytes() == b"alpha\r\nBETA\r\nextra\r\ngamma\r\n"
-        result = await multi_edit().invoke(ctx, {"path": "dos.txt", "edits": [{"old_string": "gamma", "new_string": "g1\ng2"}]})
+        result = await edit_file().invoke(ctx, {"path": "dos.txt", "edits": [{"old_string": "gamma", "new_string": "g1\ng2"}]})
         assert not result.is_error, result.content
         assert target.read_bytes() == b"alpha\r\nBETA\r\nextra\r\ng1\r\ng2\r\n"
     finally:

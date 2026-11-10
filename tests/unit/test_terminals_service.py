@@ -227,6 +227,30 @@ async def test_a_shells_commands_are_mirrored_and_listed(service: Terminals, dae
     assert stored["command"] == "make" and stored["exit_code"] == 2
 
 
+async def test_a_view_says_whether_ending_it_stops_anything(service: Terminals, daemon: FakePtyd) -> None:
+    shell = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp"))
+    program = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp", argv=["htop", "-d", "5"]))
+    plain = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp", argv=["cmd.exe"]))
+    # A shell at its prompt ends at once; a program is the work itself, whatever it is doing.
+    view = await service.get(shell["id"])
+    assert view["at_prompt"] is True and view["running"] is None
+    view = await service.get(program["id"])
+    assert view["at_prompt"] is False and view["running"] == "htop -d 5"
+    # A busy shell names the command its marks opened.
+    daemon.terminals[shell["id"]].busy = True
+    daemon.terminals[shell["id"]].commands = [{"n": 1, "command": "npm test", "cwd": "/tmp", "exit_code": None, "finished_at": None}]
+    view = await service.get(shell["id"])
+    assert view["at_prompt"] is False and view["running"] == "npm test"
+    # A shell without marks is known idle only where the daemon reads the foreground group: not on Windows.
+    assert (await service.get(plain["id"]))["at_prompt"] is True
+    service.links["container"].info["os"] = "windows"
+    view = await service.get(plain["id"])
+    assert view["at_prompt"] is False and view["running"] is None
+    # An ended terminal stops nothing more, and says nothing runs.
+    await service.kill(program["id"])
+    assert (await service.get(program["id"]))["at_prompt"] is False
+
+
 async def _status(db: Database, terminal_id: str) -> str:
     row = await db.fetchone("SELECT status FROM terminals WHERE id = ?", (terminal_id,))
     return str(row["status"]) if row else ""

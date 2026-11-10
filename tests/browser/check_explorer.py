@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from urllib.parse import urlsplit
 
@@ -37,34 +38,40 @@ def folders(browser, width: int) -> None:  # type: ignore[no-untyped-def]
 
     page.route("**/api/**", route)
     page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&panel=files")
-    # On a phone the route opens the same pane as a full-height sheet.
-    switcher = page.get_by_role("combobox", name="Folder", exact=True)
+    # On a phone the route opens the same pane as a full-height sheet. The folders are a menu off the
+    # header's chevron, each with its environment and, where it applies, read-only.
+    switcher = page.get_by_role("button", name="Folder", exact=True)
     expect(switcher).to_be_visible()
+    expect(page.locator(".explorer-where")).to_have_attribute("title", HOME["path"])
     tree = page.locator(".explorer-tree")
     expect(tree.locator('[data-path="src"]')).to_be_visible()
     expect(page.get_by_role("button", name="upload", exact=True)).to_be_visible()
-    switcher.select_option("f-docs")
+    switcher.click()
+    expect(page.locator(".menu [role=menuitem]", has_text="Docs").locator(".explorer-readonly")).to_have_text("read-only")
+    page.locator(".menu [role=menuitem]", has_text="Docs").click()
     expect(tree.locator('[data-path="guide.md"]')).to_be_visible()
     expect(tree.locator('[data-path="src"]')).to_have_count(0)
     assert any(r.startswith(f"/api/sessions/{S1}/folders/f-docs/files") for r in requests), requests
-    lock = page.locator(".explorer-folders .chip", has_text="read-only")
+    lock = page.locator(".explorer-head .explorer-readonly", has_text="read-only")
     expect(lock).to_be_visible()
     expect(lock.locator("svg")).to_have_count(1)
     # Where the folder lives is the shared environment pill, spelt as on every other screen.
-    expect(page.locator(".explorer-folders .term-env.container")).to_have_text("Container")
+    expect(page.locator(".explorer-head .term-env.container")).to_have_text("Container")
     # A folder the session may not write offers no upload.
     expect(page.get_by_role("button", name="upload", exact=True)).to_have_count(0)
-    expect(page.locator(".explorer-crumbs .crumb").first).to_have_text("Docs")
+    # The header names the folder by where it is on disk, not by its label.
+    expect(page.locator(".explorer-where")).to_have_attribute("title", DOCS["path"])
+    expect(page.locator(".explorer-where-tail")).to_have_text("bakery-docs")
     tree.locator('[data-path="guide.md"]').click()
     expect(page.locator(".preview-doc")).to_contain_text("How the bakery site is put together")
     assert any(r.startswith(f"/api/sessions/{S1}/folders/f-docs/download") for r in requests), requests
     overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
     assert overflow <= 0, f"the page scrolls sideways by {overflow}px at {width}px"
     page.locator('[data-tab="files"]').click()
-    switcher = page.get_by_role("combobox", name="Folder", exact=True)
-    switcher.select_option("f-bakery")
+    page.get_by_role("button", name="Folder", exact=True).click()
+    page.locator(".menu [role=menuitem]", has_text="bakery").click()
     expect(tree.locator('[data-path="src"]')).to_be_visible()
-    expect(page.locator(".explorer-folders .chip", has_text="read-only")).to_have_count(0)
+    expect(page.locator(".explorer-head .explorer-readonly")).to_have_count(0)
     print(f"{width}px: the pane switched to the read-only folder, read and previewed it, offered no upload, and switched back")
     context.close()
 
@@ -118,9 +125,32 @@ def run() -> int:
         assert sum("files?path=src" in r for r in requests) > before_refresh, "settling did not refresh an open folder"
         tree.locator('[data-path="data"]').click()
         expect(tree.locator('[data-path="data/menu.json"] .written-badge')).to_be_visible()
+        # Rows are 28 px with a thin border that only the selected one shows.
         height = src.evaluate("e => e.getBoundingClientRect().height")
-        assert height == 32, height
-        assert src.evaluate("e => getComputedStyle(e).borderTopWidth") == "0px"
+        assert height == 28, height
+        src.focus()
+        expect(src).to_have_class(re.compile(r"\bselected\b"))
+        assert src.evaluate("e => getComputedStyle(e).borderTopColor") != "rgba(0, 0, 0, 0)"
+        assert tree.locator('[data-path="NOTES.md"]').evaluate("e => getComputedStyle(e).borderTopColor") == "rgba(0, 0, 0, 0)"
+        # The status line says what is selected; a folder in it reveals that folder.
+        tree.locator('[data-path="src/main.py"]').click()
+        expect(page.locator(".explorer-status-path")).to_have_text("src/main.py")
+        page.locator('[data-tab="files"]').click()
+        page.locator(".explorer-status-path button", has_text="src").click()
+        expect(src).to_have_class(re.compile(r"\bselected\b"))
+        # Collapse all closes every folder and keeps the listings: reopening reads nothing again.
+        listed = sum("files?path=src" in r for r in requests)
+        page.get_by_role("button", name="Folder options", exact=True).click()
+        page.get_by_role("menuitem", name="Collapse all").click()
+        expect(child).to_have_count(0)
+        src.click()
+        expect(child).to_be_visible()
+        assert sum("files?path=src" in r for r in requests) == listed, "collapse all forgot a listing"
+        # The header is the folder's real path, copied on a press.
+        where = page.locator(".explorer-where")
+        assert "Copy" in (where.get_attribute("aria-label") or "")
+        where.click()
+        assert page.evaluate("navigator.clipboard.readText()") == where.get_attribute("title")
         src.focus()
         page.keyboard.press("ArrowRight")
         expect(tree.locator('[data-path="src/helper.ts"]')).to_be_focused()
@@ -135,19 +165,25 @@ def run() -> int:
         page.keyboard.press("Enter")
         expect(page.locator(".preview-doc")).to_be_visible()
         page.locator('[data-tab="files"]').click()
-        page.get_by_role("switch", name="Show hidden and ignored", exact=True).click()
+        # Showing hidden files is a switch in the tab's menu, which stays open while it is flipped.
+        page.get_by_role("button", name="Folder options", exact=True).click()
+        page.get_by_role("menuitemcheckbox", name="Show hidden and ignored").click()
         assert "dim" in tree.locator('[data-path=".env"]').get_attribute("class")
         expect(tree.locator('[data-path="node_modules"]')).to_be_visible()
-        page.get_by_role("switch", name="Show hidden and ignored", exact=True).click()
+        page.get_by_role("menuitemcheckbox", name="Show hidden and ignored").click()
         expect(tree.locator('[data-path=".env"]')).to_have_count(0)
-        search = page.get_by_role("searchbox", name="Search files…")
+        page.keyboard.press("Escape")
+        search = page.get_by_role("searchbox", name="Filter files")
         search.fill("helper")
         expect(tree.locator('[data-path="src/helper.ts"]')).to_be_visible()
         assert any("files/search?q=helper" in r for r in requests)
-        page.get_by_label("Search mode", exact=True).select_option("content")
+        page.get_by_role("radio", name="text", exact=True).click()
         search.fill("return")
-        hit = tree.locator('[data-path="src/main.py"]')
-        expect(hit.locator(".grep-snippet")).to_contain_text("return")
+        # A content hit is its file with a count, and the file's lines under it with the match marked.
+        expect(tree.locator('[data-path="src/main.py"]:not([data-line]) .explorer-count')).to_be_visible()
+        hit = tree.locator('[data-path="src/main.py"][data-line]').first
+        expect(hit.locator(".grep-snippet mark").first).to_have_text("return")
+        expect(page.locator(".explorer-note")).to_contain_text(re.compile(r"\d+ match(es)? in \d+ files?"))
         hit.click()
         expect(page.locator('.source-view .cited[data-line="5"]')).to_be_visible()
         assert "lines=5" in page.url
@@ -160,7 +196,7 @@ def run() -> int:
         expect(page.locator(".explorer-note")).to_contain_text("matching names")
         expect(tree.locator('[data-path="src/main.py"]')).to_be_visible()
         status["search"] = 404
-        page.get_by_label("Search mode", exact=True).select_option("name")
+        page.get_by_role("radio", name="names", exact=True).click()
         search.fill("helper")
         expect(page.locator(".explorer-note")).to_contain_text("loaded folders only")
         expect(tree.locator('[data-path="src/helper.ts"]')).to_be_visible()
@@ -181,19 +217,17 @@ def run() -> int:
         page.get_by_role("menuitem", name="preview", exact=True).click()
         expect(page.locator(".preview-doc")).to_be_visible()
         page.locator('[data-tab="details"]').click()
-        assert page.locator(".details > .dt-section").evaluate_all("els => els.every(e => e.tagName === 'DETAILS')")
-        provider = page.locator("[id$='-info-provider']")
-        provider.locator("summary").click()
-        expect(provider).not_to_have_attribute("open", "")
-        session = page.locator("[id$='-info-session']")
-        session.locator("summary").click()
-        expect(session).not_to_have_attribute("open", "")
+        # Details is an inspector: one line a section, a section's page opened in place of the list and left
+        # with Back; the list is what a reload comes back to.
+        provider = page.locator("[data-prop='provider']")
+        provider.click()
+        expect(page.locator(".dt-drill[data-page='provider']")).to_be_visible()
+        page.locator(".dt-back").click()
+        expect(provider).to_be_focused()
         page.reload()
-        expect(page.locator("[id$='-info-session']")).not_to_have_attribute("open", "")
-        expect(page.locator("[id$='-info-provider']")).not_to_have_attribute("open", "")
-        page.locator("[id$='-info-cron']").scroll_into_view_if_needed()
-        expect(page.locator("[id$='-info-cron'] summary")).to_be_in_viewport()
-        print(f"tree row: {height}px; lazy reads, keyboard, search, fallbacks, context actions and disclosures: passed")
+        expect(page.locator("[data-prop='provider']")).to_be_visible()
+        expect(page.locator("[data-prop='cron']")).to_be_in_viewport()
+        print(f"tree row: {height}px; lazy reads, keyboard, search, fallbacks, context actions and the inspector: passed")
         context.close()
         context = browser.new_context(viewport={"width": 2560, "height": 1400})
         page = context.new_page()

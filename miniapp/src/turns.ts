@@ -7,7 +7,7 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, ToolImage } from "./api";
+import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, SubagentNotice, ToolImage } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
@@ -62,9 +62,18 @@ export type Turn = {
   lastActivityAt?: number | null;
   /** The run ended without an answer: why, and where. Drawn as the turn's closing line. */
   outcome?: RunOutcome;
+  /** Every stop the closing line stands for, the first one included: the runs the host drove again
+   *  after an outage that stopped the same way are folded into it rather than drawn as lines of their own. */
+  failures?: RunFailure[];
+  /** A later turn answered: the stop is history, drawn as one quiet line rather than as an alarm. */
+  recovered?: boolean;
   /** The program this turn was imported from, when it was: its work is that program's, not Daedalus's. */
   imported?: string;
 };
+
+/** One stopped run, for the closing line's technical details: when, the engine's word for it, and the
+ *  run's id, which is what the host's log and the request records are searched by. */
+export type RunFailure = { at: number; runId?: string; seq?: number; errorKind: string; reason: string; detail: string };
 
 export type ActivityPhase = "preparing_call" | "reading" | "editing" | "testing" | "waiting_provider" | "waiting_user" | "compacting" | "responding";
 export type ActivitySummary = { phase: ActivityPhase; steps: number; lastActivityAt: number | null; staleSeconds: number };
@@ -168,12 +177,24 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
           break;
         }
       }
+      const failure: RunFailure = { at, runId: m.run_id || undefined, seq: m.seq ?? undefined, errorKind: m.outcome.error_kind ?? "", reason: m.outcome.reason ?? "", detail: m.outcome.detail ?? "" };
       if (index < 0) {
+        // A run with nothing of its own to show — the host driving the turn again after an outage, its
+        // note to the model hidden — that stopped the way the line just above it says: one more count
+        // on that line. Each such run wrote a red card of its own, four in a row for one outage.
+        let last = turns.length - 1;
+        while (last >= 0 && turns[last].summary) last--;
+        if (last >= 0 && turns[last].outcome?.cause === m.outcome.cause) {
+          turns[last].failures = [...(turns[last].failures ?? []), failure];
+          sigs[last].push(`o${m.seq ?? i}`);
+          return;
+        }
         current = open(`o${m.seq ?? i}`, at);
         current.runId = m.run_id || undefined;
         index = turns.length - 1;
       }
       turns[index].outcome = m.outcome;
+      turns[index].failures = [failure];
       sigs[index].push(`o${m.seq ?? i}:${m.outcome.cause}`);
       return;
     }
@@ -248,6 +269,16 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}${r.images?.length ?? ""}${r.attachments?.length ? `+${r.attachments.length}` : ""}` : "-"}`);
     }
   });
+  // A stop is recovered once a later turn answers. Read from the history, not from what this screen
+  // saw happen, so a reload draws it the same way.
+  let answeredLater = false;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn.outcome) {
+      turn.recovered = answeredLater;
+      if (answeredLater) sigs[i].push("recovered");
+    } else if (turn.answer) answeredLater = true;
+  }
   const before = new Map<string, Turn>();
   for (const t of previous) before.set(t.key, t);
   return turns.map((t, i) => {
@@ -412,6 +443,8 @@ export type SystemNote = {
   cadence?: string;
   /** The standing instruction, without the host's framing around it. */
   body: string;
+  /** The host's word that the helper is parked by the daily cap, or that its report waits for the leader. */
+  notice?: SubagentNotice;
 };
 
 const LOOP_HEAD_RE = /^\s*\[Loop iteration (\d+)(?: of (\d+))?\s*[—-]\s*([^.\]]+)[^\]]*\]/;
@@ -426,7 +459,7 @@ const CONTEXT_RE = /<(turn_context|heartbeat)>\s*([\s\S]*?)\s*<\/\1>/;
  * message, and stays a card with its source on it. A guest's (`guest:<link>`) is one too, and no
  * text inside it can make it anything else.
  */
-export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent">): SystemNote | null {
+export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent" | "subagent_notice">): SystemNote | null {
   if (m.role !== "user" || m.internal) return null;
   const origin = m.origin ?? "";
   // Before any test of the text's shape: a stranger can write a loop header, a heartbeat or a turn
@@ -446,7 +479,7 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   // A custom page's message: the operator's request (a button, the page's composer) is their bubble
   // with the page named on it; the page reporting on its own is a note.
   if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;
-  if (origin.startsWith("subagent:")) return { kind: "subagent", origin: origin.slice(9), body: text };
+  if (origin.startsWith("subagent:")) return { kind: "subagent", origin: origin.slice(9), body: text, ...(m.subagent_notice ? { notice: m.subagent_notice } : {}) };
   if (origin === "subagents") return { kind: "subagents", origin, body: text };
   // The operator's answers to the agent's side questions, carried in as one message: the operator
   // wrote them in the panel, so the chat folds them into a line rather than draw them as a bubble.

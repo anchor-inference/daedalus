@@ -30,7 +30,7 @@ from typing import Any, Literal, get_args
 from protocore.contracts.tool_registry import ToolVisibilityPolicy
 from protocore.contracts.types import Message, MessageRole, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
-from daedalus.config import BTW_TOOLS, keyproxy_upstream
+from daedalus.config import BTW_TOOLS
 from daedalus.host import prompts
 from daedalus.memory.privacy import MEMORY_TOOLS, TALK_TOOL
 from daedalus.security.untrusted import fenced
@@ -52,7 +52,7 @@ READ_TOOLS = tuple(BTW_TOOLS)
 """What ``read`` means: the same read-only set a side question has. ``WebFetch`` is left out because a URL is
 a way to send something somewhere, and the searches over other chats because a link belongs to one chat."""
 
-ALL_TOOLS = (*READ_TOOLS, "Write", "Edit", "MultiEdit", "Exec", "WebSearch")
+ALL_TOOLS = (*READ_TOOLS, "Write", "Edit", "Exec", "WebSearch")
 """What ``all`` means. ``WebFetch`` stays out here too: it runs in the host's own process, outside any
 sandbox, and would reach the key proxy and the app by name. ``Exec`` runs only in the foreground."""
 
@@ -60,7 +60,7 @@ REPLY_TOOLS = (TALK_TOOL,)
 """What a turn started by a reply has: the conversation itself. Reading a file on a stranger's prompt with nobody
 watching is the first half of sending it to them."""
 
-FOLDER_TOOLS = frozenset({*READ_TOOLS, "Write", "Edit", "MultiEdit"})
+FOLDER_TOOLS = frozenset({*READ_TOOLS, "Write", "Edit"})
 """The file tools, which run in the host's process and so are held to the chat's folder by the policy gate."""
 
 NO_TOOL = "\0guest-turn-has-no-tools"
@@ -92,15 +92,6 @@ WROTE_NOTE = (
 HOST_NOTES_REMOVED = "[left out of a guest's turn]"
 FOLDER_RULES_RE = re.compile(r"\[rules from (?P<name>[^\]\n]+), for the work under .*?\[end of (?P=name)\]\n*", re.DOTALL)
 """What :func:`daedalus.host.nested_rules.rules_note` puts at the head of a tool result."""
-LOGIN_UPSTREAMS = ("codex", "grok", "claude")
-"""The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
-
-
-def login_route(base_url: str) -> bool:
-    """Whether ``base_url`` is a CLI login behind the key proxy: a plan, not a price nobody knows."""
-    return keyproxy_upstream(base_url) in LOGIN_UPSTREAMS
-
-
 class GuestTurnBusy(RuntimeError):
     """The chat is doing something else; the guest's message waits for it to finish."""
 
@@ -260,5 +251,5 @@ def turn_note(turn: GuestTurn) -> str:
 
 __all__ = [
     "ALL_TOOLS", "ANSWER_MARK", "DEFAULT_TOOLS", "FOLDER_TOOLS", "GUEST_TOOLS", "GuestTools", "GuestTurn", "GuestTurnBusy", "LATER_TURN_NOTE", "MAX_ITERATIONS", "METADATA_KEY", "NO_TOOL",
-    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TOUCHED_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "login_route", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
+    "ORIGIN_PREFIX", "READ_TOOLS", "REPLY_TOOLS", "TALK_MARK", "TOUCHED_MARK", "TURN_USD", "WROTE_KEY", "WROTE_NOTE", "body_for", "for_guest", "guest_runs", "is_guest", "marked", "narrowed", "stranger_runs", "talk_runs", "turn_note",
 ]

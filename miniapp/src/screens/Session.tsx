@@ -1,10 +1,10 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
-import { absDate, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
+import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
 import { PrivateBadge, isPrivate } from "../privatechat";
@@ -16,7 +16,8 @@ import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
-import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, answerTime, applyLive, buildTurns, closingText, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { Activity, LiveStore, RunFailure, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, answerTime, applyLive, buildTurns, closingText, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { mergeSpeeds, speedWords } from "../turnspeed";
 import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -58,7 +59,7 @@ import { DICT, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
-import { dockShortcut, insideTerminal, isMac } from "../terminal/keys";
+import { dockShortcut, insideTerminal, isMac, terminalCommandKey } from "../terminal/keys";
 import { tabsFor, type PanelTab } from "../panel";
 import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQuote, StepsCard, currentReply, setReply, stepDescription, useAnsweredMark, useFocusChat } from "../project/chat";
 import { GoalStrip } from "../project/goalstrip";
@@ -101,6 +102,9 @@ import { SelectionReply, SentReplies, revealPassage } from "../replyselect";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
+import { MoveFolderSheet, movable } from "../project/MoveFolder";
+import { PanelStrip } from "../panelstrip";
+import type { ProjectEnvironments } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
 // The Notes tab's editor and renderer are a chunk of their own, fetched the first time the tab opens.
@@ -189,7 +193,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const { data: sessionDiagrams } = useQuery<{ id: string; title: string }[]>(`/api/diagrams?session_id=${encodeURIComponent(id)}`, { pollMs: 5000, staleMs: 0 });
+  const sessionCanvases = useQuery<{ items: { id: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
   const [sendingMessages, setSendingMessages] = useState<{ id: string; text: string }[]>([]);
   // The streaming turn's state is not React state: a token must repaint the turn it belongs to,
   // not the screen. The components that show it subscribe; everything else never hears about it.
@@ -309,7 +313,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The session's terminals: the dock under the conversation on a desktop, a sheet and a full-screen
   // view on a phone. Listed here because the header's button, the dock and the delete dialog all count them.
   const sessionTerminals = useSessionTerminals(id);
-  const [detailsFocus, setDetailsFocus] = useState<string | null>(null);
+  // The Details section a chip, the strip or a menu item asked for, with a counter so asking for the same
+  // section again (after going back to the list) opens it again.
+  const [detailsFocus, setFocusRequest] = useState<{ page: string; n: number } | null>(null);
+  const setDetailsFocus = useCallback((page: string) => setFocusRequest((was) => ({ page, n: (was?.n ?? 0) + 1 })), []);
+  // The session's folder carried between the host and the container, from the session's menu.
+  const [movingFolder, setMovingFolder] = useState(false);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
   const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | null>(null);
@@ -347,8 +356,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // route is not asked again.
   const [queuedInput, setQueuedInput] = useState<QueuedMessage[]>([]);
   const steerRoute = useRef<"unknown" | "ok" | "none">("unknown");
-  // Approval keys the operator has spent or waved away, so the dock does not offer them twice.
-  const [seenKeys, setSeenKeys] = useState<Set<string>>(() => new Set());
+  // The refused calls the operator has answered here, by call id, so the dock does not offer them
+  // twice; a later refusal of the same action is a new call and is offered (see `pendingApproval`).
+  const [seenCalls, setSeenCalls] = useState<Set<string>>(() => new Set());
+  // How fast each run generated, by run id, kept across reads (see `mergeSpeeds`).
+  const [speeds, setSpeeds] = useState<Record<string, RunSpeed>>(NO_SPEEDS);
 
   async function loopAction(a: string) {
     try {
@@ -459,6 +471,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         // The older pages the reader went back to stay; see `withOlder`.
         msgs.current = withOlder(msgs.current, next.messages);
         historyReadSeq.current = mine;
+        setSpeeds((held) => mergeSpeeds(held, next.run_speeds));
         setDetail({ ...next, messages: msgs.current });
         setOffline(false);
       } catch (e) {
@@ -474,6 +487,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // and an answer still on its way belongs to the one that was left.
   useEffect(() => {
     msgs.current = [];
+    setSpeeds(NO_SPEEDS);
     setSendingMessages([]);
     historyReadSeq.current = ++readSeq.current;
     return () => forgetDisclosed(id);
@@ -490,6 +504,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (kind === "state" && mine !== readSeq.current) return;
         if (kind === "tail" && mine < historyReadSeq.current) return;
         setOffline(false);
+        setSpeeds((held) => mergeSpeeds(held, next.run_speeds));
         if (kind === "state") {
           setDetail((prev) => (prev ? { ...next, messages: prev.messages } : next));
           return;
@@ -562,6 +577,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       const el = scroller.current;
       keepFromEnd.current = el ? el.scrollHeight - el.scrollTop : null;
       msgs.current = prepend(msgs.current, page.messages);
+      setSpeeds((held) => mergeSpeeds(held, page.run_speeds));
       setDetail((prev) => (prev ? { ...prev, messages: msgs.current } : prev));
       setOlder(page.messages.length < OLDER_PAGE ? "done" : "more");
     } catch {
@@ -717,19 +733,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // A tool call the policy refused, waiting on the operator: the dock above the pill offers it once.
   const approval = useMemo(
-    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
-    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+    () => pendingApproval(detail?.messages ?? [], seenCalls, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenCalls, detail?.open_approvals, detail?.run_id],
   );
   // A request answered somewhere else — another device, Telegram, the Chrome panel — or closed by the
   // host leaves this screen at once: the session's own stream does not carry the answer, and an idle
-  // screen reads nothing on its own. A new request has the host's list of open keys read again too.
+  // screen reads nothing on its own. A new request has the end of the conversation read, not only the
+  // host's list of open keys: the list alone named a key whose refusal this screen had not read yet,
+  // and the dock waited for the next step of the run to show it.
   useEvent(["permission.pending", "permission.resolved"], (event) => {
     if (event.session_id !== id) return;
     if (event.type === "permission.resolved") {
       const key = String(event.payload.request_id ?? "");
       setDetail((prev) => (prev?.open_approvals?.includes(key) ? { ...prev, open_approvals: prev.open_approvals.filter((k) => k !== key) } : prev));
+      refreshSoon("state");
+      return;
     }
-    refreshSoon("state");
+    refreshSoon("tail");
   }, [id, refreshSoon]);
   // A remote chat's computer connecting, dropping, being renamed or holding the turn changes the
   // header and the paused banner; the host says so on the global stream, and the session's own
@@ -744,7 +764,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     async (a: Approval) => {
       try {
         await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
-        setSeenKeys((k) => new Set(k).add(a.key));
+        setSeenCalls((k) => new Set(k).add(a.callId));
       } catch (e) {
         toast(errorText(e));
       }
@@ -754,15 +774,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // What "Allow similar" would grant for the request in the dock, asked of the host because only it
   // still holds the refused call's arguments; the button says it before it is pressed.
   const [similar, setSimilar] = useState<{ key: string; label: string } | null>(null);
+  // The MCP server "Allow all from <server>" would allow, asked in the same call.
+  const [grantServer, setGrantServer] = useState<{ key: string; name: string } | null>(null);
   const approvalKey = approval?.key ?? "";
   useEffect(() => {
     setSimilar(null);
+    setGrantServer(null);
     if (!approvalKey) return;
     let gone = false;
-    api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approvalKey}`)
+    api.get<{ similar?: { label?: unknown } | null; server?: { name?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approvalKey}`)
       .then((r) => {
         const label = r?.similar?.label;
         if (!gone && typeof label === "string" && label) setSimilar({ key: approvalKey, label });
+        const name = r?.server?.name;
+        if (!gone && typeof name === "string" && name) setGrantServer({ key: approvalKey, name });
       })
       .catch(() => undefined);
     return () => {
@@ -774,17 +799,35 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         const r = await api.post<{ resolved?: unknown; similar?: { label?: unknown } }>(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
         const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
-        setSeenKeys((k) => new Set([...k, a.key, ...answered]));
+        setSeenCalls((k) => new Set(k).add(a.callId));
+        // The other requests the family answered are closed on the host; until the next read says so,
+        // they are taken off the list here, so the dock does not move on to one of them.
+        if (answered.length) setDetail((prev) => (prev ? { ...prev, open_approvals: (prev.open_approvals ?? []).filter((k) => !answered.includes(k)) } : prev));
       } catch (e) {
         toast(errorText(e));
       }
     },
     [id, toast, similar],
   );
+  const approveServer = useCallback(
+    async (a: Approval, hours: number) => {
+      try {
+        const r = await api.post<{ resolved?: unknown }>(`/api/sessions/${id}/policy/grant-server`, { key: a.key, hours });
+        const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
+        setSeenCalls((k) => new Set(k).add(a.callId));
+        // Every request of this server the grant answered is closed on the host; until the next read
+        // says so they leave the list here, so the dock does not move on to one of them.
+        if (answered.length) setDetail((prev) => (prev ? { ...prev, open_approvals: (prev.open_approvals ?? []).filter((k) => !answered.includes(k)) } : prev));
+      } catch (e) {
+        toast(errorText(e));
+      }
+    },
+    [id, toast],
+  );
   // Refusing tells the host too, so the request stops being open on every other front that shows it.
   const deny = useCallback(
     async (a: Approval) => {
-      setSeenKeys((k) => new Set(k).add(a.key));
+      setSeenCalls((k) => new Set(k).add(a.callId));
       try {
         await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
       } catch (e) {
@@ -879,7 +922,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (settled.length) setSendingMessages((current) => current.filter((pending) => !settled.includes(pending.id)));
         if (p.reason === "returned") takeReturned(readReturned(p.returned), p.cause);
         if (p.reason === "consumed") refreshSoon("tail");
-      } else if (event === "compaction_completed") refreshSoon("tail");
+      } else if (event === "compaction_completed" || event === "transcript_note") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
     }
     return stop;
@@ -1513,6 +1556,27 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return () => document.removeEventListener("keydown", onKey);
   }, [phone, pane, toggleDock]);
 
+  // Ctrl+Shift+` asks where to open a new terminal, from anywhere in the session; Ctrl+Shift+W ends
+  // the terminal in front (the dock's active tab, or the maximised one) as its ✕ does — only while
+  // the focus is in the terminals, so the key never ends a terminal the operator is not looking at.
+  const { ask: askTerminal, close: closeTerminal } = terminalDock;
+  const frontTerminal = terminalDock.full ?? terminalDock.state.active;
+  useEffect(() => {
+    if (phone || pane === "right") return;
+    const onKey = (e: KeyboardEvent) => {
+      const command = terminalCommandKey(e);
+      if (command === "new") {
+        e.preventDefault();
+        askTerminal();
+      } else if (command === "close" && frontTerminal && (e.target as HTMLElement | null)?.closest?.(".term-dock, .term-full")) {
+        e.preventDefault();
+        void closeTerminal(frontTerminal);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [phone, pane, askTerminal, closeTerminal, frontTerminal]);
+
   // Where this chat lives, for a link to one of its messages. The orchestrator's chat and a project's
   // sessions are opened in orchestration mode; a link to their plain address took a detour through
   // the Agents screen and a redirect before it arrived.
@@ -1592,7 +1656,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return null;
   })();
   // The phone's tile shows how many notes the chat has; a desktop has the tab itself for that.
-  const notesListing = useQuery<NotesListing>(phone && id && !pane ? notesKey(id) : null, { staleMs: 30000 }).data;
+  const notesListing = useQuery<NotesListing>(id && !pane && !bare && !embedded ? notesKey(id) : null, { staleMs: 30000 }).data;
   const notesCount = (notesListing?.chat?.notes?.length ?? 0) + (detail?.project && isProject(detail.project) ? notesListing?.project_scope?.notes?.length ?? 0 : 0);
   const lastSeq = detail?.messages.reduce<number | null>((last, message) => (typeof message.seq === "number" ? message.seq : last), null) ?? null;
   // The phone's bar and its ⋮ sheet hold the same commands as the desktop header above; a command
@@ -1613,16 +1677,63 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("notes") ? [{ id: "notes", icon: "note" as IconName, label: t("panel.tab.notes"), count: notesCount || undefined, onSelect: () => panel.open("notes") }] : []),
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
-    ...(sessionDiagrams?.length ? [{ id: "diagrams", icon: "pen" as IconName, label: t("session.phone.diagrams"), count: sessionDiagrams.length, onSelect: () => navigate(pathFor("diagrams", null, { session: id })) }] : []),
+    ...(sessionCanvases?.length ? [{ id: "canvas", icon: "grid" as IconName, label: t("session.phone.canvas"), count: sessionCanvases.length, onSelect: () => navigate(pathFor("canvas", null, { session: id })) }] : []),
   ] : [];
   const contextPct = detail?.context?.window ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   // A chat that is still alone in a project of its own can become a project from its own menu too.
   const makeProject = makeProjectCommand(detail?.project, () => setPromoting(true));
   // A link is made from an ordinary chat: not the main chat, a project's orchestrator or a helper's own.
   const guestable = !!detail && !main && !orchestrating && !detail.subagent_of;
+  // The folder the chat works in, and whether it can be carried between the host and the container.
+  const sessionFolder = detail?.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail?.project?.folders?.[0] ?? null;
+  const environments = useQuery<ProjectEnvironments>(sessionFolder && !focus && !main && !orchestrating ? "/api/project-environments" : null, { staleMs: 60000 }).data;
+  const folderMovable = !!sessionFolder && !focus && !main && !orchestrating && movable(sessionFolder, environments);
+  const copySessionId = async () => {
+    const ok = await copyText(id);
+    if (!ok) toast(id);
+    return ok;
+  };
+  // The session's menu: one list for the chat header's ⋯ and the panel strip's ⋯, so what one does to the
+  // session is found in the same place from either side. The rare things the Details tab used to carry
+  // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
+  const sessionMenu: MenuItem[] = [
+    { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
+    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: openPicker }] : []),
+    // A session in a project's focus mode stays in its project; the orchestrator's chat has no
+    // files or jobs of its own to show.
+    ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
+    ...(folderMovable ? [{ label: t(sessionFolder!.env === "container" ? "move.tohost" : "move.tocontainer"), icon: "forward" as IconName, onSelect: () => setMovingFolder(true) }] : []),
+    ...(!focus && makeProject ? [makeProject] : []),
+    "-",
+    ...(hasDetails
+      ? [
+          { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
+          ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
+          ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
+          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+          ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
+          { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
+        ]
+      : []),
+    ...(onSplit ? [{ label: t("session.split"), icon: "split" as IconName, onSelect: onSplit }] : []),
+    // This chat's schedules over the chat; the dialog's switch reaches everyone else's.
+    ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
+    "-",
+    { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
+    ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
+    ...(agentTalks.length ? [{ label: t("session.talks"), icon: "link" as IconName, onSelect: () => setTalking({ first: null }) }] : []),
+    { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
+    { label: t("session.copyid"), icon: "copy", ticks: true, onSelect: copySessionId },
+    { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
+    ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
+    "-",
+    { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
+    { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
+  ];
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
+    ...(folderMovable ? [{ icon: "forward" as IconName, label: t(sessionFolder!.env === "container" ? "move.tohost" : "move.tocontainer"), onSelect: () => setMovingFolder(true) }] : []),
     ...(!focus && makeProject ? [{ icon: makeProject.icon!, label: makeProject.label, onSelect: makeProject.onSelect }] : []),
     // A helper's own chat leads back to its leader; a leader's helpers are a tile of the panel above.
     ...(detail?.subagent_of ? [{ icon: "back" as IconName, label: t("session.leader.word"), value: detail.leader_title ?? undefined, onSelect: () => onOpen?.(detail.subagent_of!) }] : []),
@@ -1632,6 +1743,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(guestable ? [{ icon: "link" as IconName, label: t("session.guest"), onSelect: () => setGuesting(true) }] : []),
     ...(agentTalks.length ? [{ icon: "link" as IconName, label: t("session.talks"), onSelect: () => setTalking({ first: null }) }] : []),
     { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
+    { icon: "copy", label: t("session.copyid"), onSelect: () => void copySessionId() },
     ...(revealer && hasDetails ? [{ icon: "external" as IconName, label: revealer.label, onSelect: revealWorkspace }] : []),
     { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
     ...(detail?.telegram_linked ? [{ icon: "unlink" as IconName, label: t("session.telegram.detach"), onSelect: detachTelegram }] : []),
@@ -1756,46 +1868,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
           <ChatSearch sessionId={id} onPick={openMessage} />
-          {!!sessionDiagrams?.length && <a className="btn small" href={pathFor("diagrams", null, { session: id })} aria-label={`${t("diagrams.session")} (${sessionDiagrams.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("diagrams", null, { session: id })); }}><Icon name="pen" size={16} /> {phone ? sessionDiagrams.length : `${t("diagrams.session")} (${sessionDiagrams.length})`}</a>}
+          {!!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
           <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />
           <TerminalButton dock={terminalDock} phone={phone} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
           </button>}
-          <OverflowMenu
-            label={t("session.actions")}
-            items={[
-              { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
-              // A session in a project's focus mode stays in its project; the orchestrator's chat has no
-              // files or jobs of its own to show.
-              ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
-              ...(!focus && makeProject ? [makeProject] : []),
-              "-",
-              ...(hasDetails
-                ? [
-                    { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
-                    ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
-                    ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
-                    ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
-                    ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
-                    { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
-                  ]
-                : []),
-              ...(onSplit ? [{ label: t("session.split"), icon: "split" as IconName, onSelect: onSplit }] : []),
-              // This chat's schedules over the chat; the dialog's switch reaches everyone else's.
-              ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
-              "-",
-              { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
-              ...(guestable ? [{ label: t("session.guest"), icon: "link" as IconName, onSelect: () => setGuesting(true) }] : []),
-              ...(agentTalks.length ? [{ label: t("session.talks"), icon: "link" as IconName, onSelect: () => setTalking({ first: null }) }] : []),
-              { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
-              { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
-              ...(detail?.telegram_linked ? [{ label: t("session.telegram.detach"), icon: "unlink" as IconName, onSelect: detachTelegram }] : []),
-              "-",
-              { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
-              { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
-            ]}
-          />
+          <OverflowMenu label={t("session.actions")} items={sessionMenu} />
         </div>
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
       </div>}
@@ -1826,6 +1905,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 </div>
               )}
               <SessionContext.Provider value={sessionCtx}>
+                <AwaitingCall.Provider value={approval?.callId ?? ""}>
+                <RunSpeeds.Provider value={speeds}>
                 <SubagentOpener.Provider value={openSubagentRef}>
                 <Windowed
                   keys={turnKeys}
@@ -1846,6 +1927,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                     its Steer and × are; the bubble here would be the same words a second time. */}
                 {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><UserWords text={pending.text} /></div></div></div></div>)}
                 </SubagentOpener.Provider>
+                </RunSpeeds.Provider>
+                </AwaitingCall.Provider>
               </SessionContext.Provider>
               {flow}
               {/* The agent waiting in its browser is said in the conversation too, with Open, so the
@@ -1941,6 +2024,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onApprove={approve}
             similar={similar && similar.key === approval?.key ? similar.label : null}
             onApproveSimilar={approveSimilar}
+            server={grantServer && grantServer.key === approval?.key ? grantServer.name : null}
+            onApproveServer={approveServer}
             onDeny={deny}
             onPreviewFile={(file) => setPreview({ file })}
             phone={phone}
@@ -1963,6 +2048,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             sheetSub={[detail.project?.name, detail.context?.messages ? plural("session.phone.messages", detail.context.messages) : null].filter(Boolean).join(" · ")}
             drag={dragPanel}
             tabs={panelTabs}
+            pinned={panel.pinned}
+            onPin={phone ? undefined : panel.togglePin}
+            onShowEntry={panel.showEntry}
+            onCloseEntry={panel.closeEntry}
+            strip={hasDetails ? <PanelStrip
+              model={detail.fallback?.to ?? detail.model}
+              effort={effortText}
+              context={detail.context ?? null}
+              usage={detail.usage}
+              menu={sessionMenu}
+              onModel={orchestrating ? undefined : openPicker}
+              onContext={detail.context ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
+              onUsage={() => { setDetailsFocus("usage"); panel.open("details"); }}
+            /> : undefined}
             pages={{
               ...(focus ? {
                 board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
@@ -1983,7 +2082,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
               />,
             }}
-            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}) }}
+            // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
+            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
             marks={browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : undefined}
             details={hasDetails ? (ids) =>
               <SessionDetails
@@ -1998,7 +2098,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 onOpen={onOpen}
                 toast={toast}
                 reload={load}
-                focus={detailsFocus}
+                focus={detailsFocus?.page}
+                focusKey={detailsFocus?.n}
                 on={{
                   rename,
                   openPicker,
@@ -2014,14 +2115,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 }}
               />
             : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
+            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
             jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} /> : undefined}
           />
         )}
       </div>
 
       <TerminalFull dock={terminalDock} phone={phone} workspace={detail?.workspace} fileOpener={openTerminalFile} />
-      <TerminalSheet dock={terminalDock} />
+      <TerminalSheet dock={terminalDock} workspace={detail?.workspace} />
 
       {commandResult && (
         <Overlay><div className="sheet-backdrop" onClick={() => setCommandResult(null)}>
@@ -2036,6 +2137,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       )}
 
       {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
+      {movingFolder && detail && sessionFolder && <MoveFolderSheet projectId={detail.project.id} folder={sessionFolder} onClose={() => setMovingFolder(false)} toast={toast} />}
       {moving && detail && <MoveSessionSheet sessionId={id} current={detail.project.id} currentOwn={!!detail.workspace_own} onClose={() => setMoving(false)} onMoved={() => load(true)} toast={toast} />}
 
       {guesting && <GuestLinksSheet sessionId={id} toast={toast} onClose={() => setGuesting(false)} />}
@@ -2205,6 +2307,7 @@ function noteTitle(note: SystemNote): string {
     return [head, note.cadence, t("turn.note.instruction")].filter(Boolean).join(" · ");
   }
   if (note.kind === "other") return t("turn.note.other", { origin: note.origin });
+  if (note.kind === "subagent" && note.notice) return t(`turn.note.subagent.${note.notice.state}`, { name: note.origin });
   if (note.kind === "subagent") return t("turn.note.subagent", { name: note.origin });
   if (note.kind === "page") return t("turn.note.page", { slug: note.origin });
   return t(`turn.note.${note.kind}`);
@@ -2216,8 +2319,10 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
   const [open, setOpen] = useState(note.kind === "task");
   const openSubagent = useContext(SubagentOpener);
   const subagentLink = openSubagent && (note.kind === "subagent" || note.kind === "subagents");
+  // Said where the operator looks, not folded: a helper the cap holds back, and what lets it go on.
+  const way = note.notice?.budget ? t("subagents.budget.way") : "";
   return (
-    <div className={`sysnote ${note.kind}`}>
+    <div className={`sysnote ${note.kind}${note.notice ? " notice" : ""}`}>
       <div className="sysnote-row">
       <button type="button" className="sysnote-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : note.kind === "subagent" || note.kind === "subagents" || note.kind === "task" ? "spawn" : note.kind === "answers" ? "ask" : "compact"} size={14} />
@@ -2229,6 +2334,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
         <span>{t(run.folded ? "turn.run.show" : "turn.run.hide")}</span><Chevron open={!run.folded} />
       </button>}
       </div>
+      {way && <p className="sysnote-way">{way}</p>}
       {open && <Md className="sysnote-body" text={note.body} cacheKey={cacheKey} />}
     </div>
   );
@@ -2285,7 +2391,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // turn ended on a step, the last reply before it.
   const closing = closingText(turn, segments, live);
   const answered = answerTime(turn, closing, live);
-  const answeredStamp = answered ? <MessageTime at={answered.at} took={answered.took} /> : undefined;
+  // The time and the speed go together: both belong to a turn that finished with an answer.
+  const answeredStamp = answered ? <><MessageTime at={answered.at} took={answered.took} /><TurnSpeed runId={turn.runId} /></> : undefined;
   const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
@@ -2399,7 +2506,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
-      {turn.outcome && !live && <RunOutcomeLine outcome={turn.outcome} />}
+      {turn.outcome && !live && <RunOutcomeLine outcome={turn.outcome} failures={turn.failures ?? []} recovered={!!turn.recovered} />}
     </div>
   );
 });
@@ -2412,7 +2519,11 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
  */
 function WorkBlock({ disclosure, items, live, elapsed, imported, current, waiting, orchestrator, onRetry }: { disclosure: string; items: Activity[]; live: boolean; elapsed: number | null; imported?: string; current: string; waiting: boolean; orchestrator: boolean; onRetry?: (seq: number) => void }) {
   const always = useContext(StepsOpen);
-  const [open, setOpen] = useDisclosed(disclosure, always);
+  const awaiting = useContext(AwaitingCall);
+  const [folded, setOpen] = useDisclosed(disclosure, always);
+  const holds = !!awaiting && items.some((item) => item.kind === "tool" && item.id === awaiting);
+  // Open while it holds the request, whatever was remembered, and back to that once it is answered.
+  const open = folded || holds;
   const wasLive = useRef(live);
   useEffect(() => {
     // Activity is opt-in, including during streaming; completion folds the details away — except
@@ -2427,7 +2538,7 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
     : steps > 0 ? plural("session.part.steps", steps) : t("session.reasoning");
   return (
     <>
-      <button className="thinking-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className={`thinking-head ${holds ? "awaiting" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className={`dots ${live ? "on" : ""}`}>
           <i />
           <i />
@@ -2437,6 +2548,7 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
         {current && <span className="activity-current truncate">{current}</span>}
         {elapsed !== null && steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
         {families && <span className="families truncate" title={families}>· {families}</span>}
+        {holds && <span className="awaiting-badge" data-awaiting>{t("session.awaiting")}</span>}
         <Chevron open={open} />
       </button>
       {open && (
@@ -2497,18 +2609,63 @@ function UserBubble({ children }: { children: ReactNode }) {
 }
 
 /** The closing line of a run that produced no answer: that there is none, why the run stopped, and which
- *  step or compaction tier gave out. Part of the turn, so a "Context summary" drawn after it cannot hide it. */
-function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
+ *  step or compaction tier gave out. Part of the turn, so a "Context summary" drawn after it cannot hide it.
+ *
+ *  One line however many runs stopped the same way in a row: the host drives a turn again after an
+ *  outage, and each attempt that failed used to add a red card of its own. Once a later turn answered,
+ *  it is one quiet line: four red cards that stayed red above a working answer read as a current fault. */
+function RunOutcomeLine({ outcome, failures, recovered }: { outcome: RunOutcome; failures: RunFailure[]; recovered: boolean }) {
   const pass = outcome.compaction;
-  const failures = Object.entries(pass?.summariser_failures ?? {})
+  const summariser = Object.entries(pass?.summariser_failures ?? {})
     .map(([kind, count]) => `${kind} ${count}`)
     .join(", ");
+  const count = Math.max(1, failures.length);
+  const first = failures[0]?.at;
+  const last = failures.at(-1)?.at;
+  const span = count > 1 && first && last ? (clock(first) === clock(last) ? clock(first) : `${clock(first)}–${clock(last)}`) : "";
+  const repeated = count > 1 ? [t("run.outcome.times", { n: count }), span].filter(Boolean).join(" · ") : "";
+  // Each stop with what finds it again: when, the engine's word and the provider's class for the
+  // failure, and the run's id, which the host's log and its request records are searched by.
+  const details = (
+    <>
+      <ul className="run-outcome-failures">
+        {failures.map((f, i) => (
+          <li key={f.seq ?? i} className="run-outcome-detail" data-failure title={f.at ? fullTime(f.at) : undefined}>
+            {[f.at ? absTime(f.at) : "", [f.errorKind, f.reason].filter(Boolean).join(" · "), f.runId ? t("run.outcome.run", { id: f.runId }) : ""].filter(Boolean).join(" — ")}
+          </li>
+        ))}
+      </ul>
+      {outcome.detail && <div className="run-outcome-detail">{failures.at(-1)?.detail || outcome.detail}</div>}
+      {pass && (
+        <div className="run-outcome-detail">
+          {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
+          {summariser && <>{" · "}{t("run.outcome.failures", { list: summariser })}</>}
+          {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
+        </div>
+      )}
+    </>
+  );
+  if (recovered) {
+    // The line is its own disclosure: one row however narrow the column, the details under it on a click.
+    return (
+      <details className={`run-outcome recovered cause-${outcome.cause}`} data-recovered>
+        <summary className="run-outcome-line" title={t("run.outcome.more")}>
+          <Icon name="check" size={14} />
+          <span className="truncate">{t(outcome.cause === "provider" ? "run.outcome.recovered.provider" : "run.outcome.recovered")}</span>
+          {repeated && <span className="run-outcome-count">{repeated}</span>}
+          <span className="chev" aria-hidden><Icon name="forward" size={12} /></span>
+        </summary>
+        <div className="run-outcome-body">{details}</div>
+      </details>
+    );
+  }
   return (
     <div className={`run-outcome cause-${outcome.cause}`} role="status" aria-label={t("run.outcome.title")}>
       {/* An alert, not a question mark: on the red card a "?" read as a glyph that failed to load. */}
       <Icon name="alert" size={14} />
       <div>
         <b>{t("run.outcome.title")}</b> — {t(`run.outcome.cause.${outcome.cause}`)}
+        {repeated && <> · <span className="run-outcome-count">{repeated}</span></>}
         {!!outcome.steps && (
           <div className="run-outcome-detail">
             {outcome.last_tool ? t("run.outcome.steps.last", { n: outcome.steps, tool: outcome.last_tool }) : t("run.outcome.steps", { n: outcome.steps })}
@@ -2516,19 +2673,10 @@ function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
         )}
         {/* The engine's own words ("force_compaction", "at_floor") are for whoever debugs the run;
             the sentence above is the explanation, and these wait behind a disclosure. */}
-        {(outcome.detail || pass) && (
-          <details className="run-outcome-more">
-            <summary>{t("run.outcome.more")}</summary>
-            {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
-            {pass && (
-              <div className="run-outcome-detail">
-                {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
-                {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
-                {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
-              </div>
-            )}
-          </details>
-        )}
+        <details className="run-outcome-more">
+          <summary>{t("run.outcome.more")}</summary>
+          {details}
+        </details>
       </div>
     </div>
   );
@@ -2573,7 +2721,7 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
  * its own: the extension's side panel. The same turns the chat draws, from the same pieces, so the
  * panel never grows a second way of showing a step. The page keys it by the session's id.
  */
-export function TranscriptView({ detail, live, onPreview, toast, onRender }: { detail: SessionDetail; live: LiveStore; onPreview: (src: PreviewSource) => void; toast: (text: string) => void; onRender?: () => void }) {
+export function TranscriptView({ detail, live, onPreview, toast, onRender, awaiting = "" }: { detail: SessionDetail; live: LiveStore; onPreview: (src: PreviewSource) => void; toast: (text: string) => void; onRender?: () => void; awaiting?: string }) {
   const id = detail.id;
   const status = (detail.status ?? "idle") as Status;
   const busy = status === "running" || status === "waiting";
@@ -2599,8 +2747,12 @@ export function TranscriptView({ detail, live, onPreview, toast, onRender }: { d
   return (
     <div className="timeline panel-chat">
       <SessionContext.Provider value={ctx}>
+        <AwaitingCall.Provider value={awaiting}>
+        <RunSpeeds.Provider value={detail.run_speeds ?? NO_SPEEDS}>
         {settled.map((turn) => <Safe key={turn.key}><TurnView turn={turn} live={false} /></Safe>)}
         {busy && <LiveTurn base={tail} live={live} onRender={onRender} />}
+        </RunSpeeds.Provider>
+        </AwaitingCall.Provider>
       </SessionContext.Provider>
     </div>
   );
@@ -3255,9 +3407,13 @@ function ToolCard({ item }: { item: ToolItem }) {
   if (item.name === "Exec") parts.push(<RawHtml key="c" html={codeBlock(String(a.command ?? ""), "bash")} />);
   else if (item.name === "Write") parts.push(<RawHtml key="c" html={codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? "")))} />);
   else if (item.name === "Edit") {
-    const before = String(a.old_string ?? a.old ?? "");
-    const after = String(a.new_string ?? a.new ?? "");
-    const patch = [...before.split("\n").map((l) => `-${l}`), ...after.split("\n").map((l) => `+${l}`)].join("\n");
+    // An Edit carries one replacement or a batch of them (edits=[…]); both are drawn as one diff.
+    const pairs = Array.isArray(a.edits)
+      ? (a.edits as Record<string, unknown>[]).map((e) => [String(e?.old_string ?? ""), String(e?.new_string ?? "")])
+      : [[String(a.old_string ?? a.old ?? ""), String(a.new_string ?? a.new ?? "")]];
+    const before = pairs.map(([old]) => old).join("\n…\n");
+    const after = pairs.map(([, now]) => now).join("\n…\n");
+    const patch = pairs.flatMap(([old, now]) => [...old.split("\n").map((l) => `-${l}`), ...now.split("\n").map((l) => `+${l}`)]).join("\n");
     // The same head as the written file and the command beside it — a label and a copy button —
     // so the three expanded steps read as one kind of block; the copy takes the change as a patch.
     parts.push(
@@ -3352,6 +3508,25 @@ const SubagentOpener = createContext<((ref: { id?: string; name?: string } | nul
 /** Whether the steps of a turn are drawn open and stay open when the run ends: a helper's conversation
  *  beside its leader is read for what it did, where the leader's own chat folds the work away. */
 const StepsOpen = createContext(false);
+
+/** The refused call the operator's decision is awaited on (empty: none). The block of steps that holds
+ *  it opens and says so until the decision: the dock above the composer is the place to answer, and a
+ *  folded "Worked for 1m 42s" over the refusal read as a finished turn whose "press Allow" had no button. */
+const AwaitingCall = createContext("");
+
+const NO_SPEEDS: Record<string, RunSpeed> = {};
+/** Each run's generation speed by run id, read by the label under a turn's answer and by nothing else, so
+ *  a speed that arrives re-renders those labels and not the turns around them, which are memoised. */
+const RunSpeeds = createContext<Record<string, RunSpeed>>(NO_SPEEDS);
+
+/** "≈ 87 tok/s" in the row under a finished turn's answer, with its output, generation time and model on
+ *  hover; nothing for a run the host has no speed for. */
+function TurnSpeed({ runId }: { runId?: string }) {
+  const speed = useContext(RunSpeeds)[runId ?? ""];
+  if (!speed) return null;
+  const { label, title } = speedWords(speed);
+  return <span className="msg-speed" title={title} aria-label={title} data-speed>{label}</span>;
+}
 
 /** A tool's path as the workspace knows it: absolute paths inside the workspace become relative, others stay unreachable. */
 function workspaceRelative(path: string, workspace: string): string | null {

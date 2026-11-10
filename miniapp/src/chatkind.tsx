@@ -311,19 +311,29 @@ export function KindMark({ s, size = 12 }: { s: Pick<SessionSummary, "kind" | "c
 }
 
 const MODE_ICON: Record<ChatKind, IconName> = { chat: "bots", computer: "monitor", chrome: "globe", remote: "laptop" };
+const AGENT_ICON: IconName = "user";
 
 /**
- * The new chat's mode: an ordinary chat, a chat about this computer, or one in the operator's Chrome;
- * a remote chat is listed too, never offered, with the terminal command that starts one.
+ * The new chat's mode: an ordinary chat, an agent (an ordinary chat given a name, options, or no first
+ * task), a chat about this computer, or one in the operator's Chrome; a remote chat is listed too,
+ * never offered, with the terminal command that starts one. Agent is offered only where `onAgent` is:
+ * the new-chat composer, which took over what the new-agent window used to ask.
  * A kind this installation cannot start stays in the list, greyed, with the reason under its name, so
  * the operator learns where it would be offered rather than wondering why it is missing.
  */
-export function KindSelect({ kind, offers, onChoose, sheet, className = "" }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; sheet: boolean; className?: string }) {
+export function KindSelect({ kind, offers, onChoose, sheet, className = "", agent = false, onAgent }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; sheet: boolean; className?: string; agent?: boolean; onAgent?: (on: boolean) => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const asAgent = agent && kind === "chat" && !!onAgent;
   const pick = (k: ChatKind) => {
     setOpen(false);
+    if (asAgent) onAgent?.(false);
     if (k !== kind) onChoose(k);
+  };
+  const pickAgent = () => {
+    setOpen(false);
+    if (kind !== "chat") onChoose("chat");
+    onAgent?.(true);
   };
   const hint = (k: ChatKind) => {
     if (!offers[k].ok) return offers[k].reason;
@@ -333,25 +343,41 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "" }: { 
   const list = (
     <div className="mode-list kind-list" role="menu" aria-label={t("kind.mode.label")}>
       {!sheet && <div className="menu-heading sub">{t("kind.mode.label")}</div>}
-      {KINDS.map((k) => (
-        <button key={k} type="button" role="menuitemradio" aria-checked={k === kind} disabled={!offers[k].ok} data-kind={k}
-          className={`model-row mode-row kind-row ${k === kind ? "on" : ""}`} onClick={() => pick(k)} title={offers[k].ok ? undefined : offers[k].reason}>
-          <span className={`kind-row-icon kind-${k}`}><Icon name={MODE_ICON[k]} size={16} /></span>
-          <span className="grow model-text">
-            <span className="truncate">{t(`kind.mode.${k}`)}</span>
-            <span className="sub clamp-2">{hint(k)}</span>
-          </span>
-          {k === kind && <Icon name="check" size={16} />}
-        </button>
-      ))}
+      {KINDS.flatMap((k) => {
+        const on = k === kind && !asAgent;
+        const row = (
+          <button key={k} type="button" role="menuitemradio" aria-checked={on} disabled={!offers[k].ok} data-kind={k}
+            className={`model-row mode-row kind-row ${on ? "on" : ""}`} onClick={() => pick(k)} title={offers[k].ok ? undefined : offers[k].reason}>
+            <span className={`kind-row-icon kind-${k}`}><Icon name={MODE_ICON[k]} size={16} /></span>
+            <span className="grow model-text">
+              <span className="truncate">{t(`kind.mode.${k}`)}</span>
+              <span className="sub clamp-2">{hint(k)}</span>
+            </span>
+            {on && <Icon name="check" size={16} />}
+          </button>
+        );
+        if (k !== "chat" || !onAgent) return [row];
+        return [row, (
+          <button key="agent" type="button" role="menuitemradio" aria-checked={asAgent} data-kind="agent"
+            className={`model-row mode-row kind-row ${asAgent ? "on" : ""}`} onClick={pickAgent}>
+            <span className="kind-row-icon kind-agent"><Icon name={AGENT_ICON} size={16} /></span>
+            <span className="grow model-text">
+              <span className="truncate">{t("kind.mode.agent")}</span>
+              <span className="sub clamp-2">{t("kind.mode.agent.hint")}</span>
+            </span>
+            {asAgent && <Icon name="check" size={16} />}
+          </button>
+        )];
+      })}
     </div>
   );
-  const label = t(`kind.mode.${kind}`);
+  const label = asAgent ? t("kind.mode.agent") : t(`kind.mode.${kind}`);
+  const shown = asAgent ? "agent" : kind;
   return (
     <>
-      <button ref={trigger} type="button" className={`composer-mode kind-select kind-${kind} ${open ? "on" : ""} ${className}`} data-kind={kind}
+      <button ref={trigger} type="button" className={`composer-mode kind-select kind-${shown} ${open ? "on" : ""} ${className}`} data-kind={shown}
         onClick={() => setOpen(!open)} title={`${t("kind.mode.label")}: ${label}`} aria-label={`${t("kind.mode.label")}: ${label}`} aria-haspopup="menu" aria-expanded={open}>
-        <Icon name={MODE_ICON[kind]} size={14} />
+        <Icon name={asAgent ? AGENT_ICON : MODE_ICON[kind]} size={14} />
         <span className="truncate">{label}</span>
         <Icon name="chevron" size={12} />
       </button>

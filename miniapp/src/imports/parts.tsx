@@ -95,7 +95,7 @@ function useModelLabel(value: string): string {
   const settings = useQuery<Settings>("/api/settings", { staleMs: 60000 });
   const preset = (settings.data?.presets ?? {})[value] as Preset | undefined;
   if (preset) return preset.label || `${preset.provider}/${preset.model}`;
-  return value || t("newagent.model.default");
+  return value || t("start.model.default");
 }
 
 function choiceValue(choice: ModelChoice): string {

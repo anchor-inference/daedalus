@@ -16,7 +16,7 @@ from daedalus.stores.control import ControlConflict, ControlDenied, canonical
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.writer_leases import WriterLeases
-from daedalus.tools.files import edit_file, multi_edit, write_file
+from daedalus.tools.files import edit_file, write_file
 from tests.unit.test_writer_leases import _attempt, _owner
 
 
@@ -247,7 +247,7 @@ async def test_native_file_tools_share_one_claimed_mutation_frontier(db: Databas
         assert services.fs is fs
         written = await write_file().invoke(context, {"path": "note.txt", "content": "one two"})
         edited = await edit_file().invoke(context, {"path": "note.txt", "old_string": "one", "new_string": "three"})
-        multiple = await multi_edit().invoke(context, {"path": "note.txt", "edits": [
+        multiple = await edit_file().invoke(context, {"path": "note.txt", "edits": [
             {"old_string": "three", "new_string": "four"},
             {"old_string": "two", "new_string": "five"},
         ]})

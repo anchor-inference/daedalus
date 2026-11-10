@@ -97,6 +97,7 @@ from daedalus.host import (
     prompt_coach,
     prompts,
     standing,
+    subagent_models,
     summaries,
     summary_calls,
     tool_groups,
@@ -117,7 +118,19 @@ from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
-from daedalus.host.policy import ASK, Decision, Policy, Rule, approval_key, canonical, similar_covers, similar_grant
+from daedalus.host.policy import (
+    ASK,
+    SERVER_GRANT_HOURS,
+    Decision,
+    Policy,
+    Rule,
+    approval_key,
+    canonical,
+    server_grant,
+    similar_covers,
+    similar_grant,
+    standing_alive,
+)
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.rules_gate import RulesGate
@@ -135,6 +148,7 @@ from daedalus.host.setting_refs import (
 from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
+from daedalus.mcp import manager as mcp_manager
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
 from daedalus.memory import privacy
@@ -203,6 +217,9 @@ COMPUTER_LIVE_SECONDS = 3.0
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
+BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it (USD_PER_DAY)"
+"""What lifts the daily cap, in the words every refusal and notice uses. They used to point at a
+``/budget reset`` that no front has ever had, so the operator was sent to look for a command."""
 RECOVERY_REASONS = frozenset({"transient_llm_error_retry", "model_fallback_triggered", "soft_stop_notified", "llm_context_window_exceeded", "context_window_recovered", "reasoning_length_cut_retry", "continue_prompt_injected", "max_output_token_recovery"})
 """The state changes worth a log line: each is a round the run had to recover from, and the log is where the reason survives."""
 MODEL_METADATA_KEY = "daedalus.model"
@@ -267,6 +284,8 @@ class HostEventType(StrEnum):
     Not a state change: the session goes on running or waiting for the operator meanwhile."""
     REMOTE_OUTPUT = "remote_output"
     """A command running on the operator's terminal printed something: ``{tool_call_id, delta}``, live only."""
+    TRANSCRIPT_NOTE = "transcript_note"
+    """The host wrote a line into the conversation outside any run: the app reads the end of it again."""
 
 
 @dataclass(slots=True)
@@ -402,6 +421,8 @@ class SessionState:
     """The text of that error, masked, as the fronts were shown it: what the inbox entry quotes."""
     last_error_permanent: bool = False
     """The provider's verdict on that error said asking again cannot help (a refused request, key or model)."""
+    last_error_reason: str = ""
+    """The engine's class for a provider failure (``connection``, ``rate_limit`` …), for the closing line's details."""
     run_outcome: RunOutcome | None = None
     """How the core says the current run ended, from its terminal ``message_stop``; ``None`` until it has."""
     run_cause: RunCause | None = None
@@ -881,6 +902,10 @@ class SessionManager:
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
         )
+        # In Docker a stdio server starts inside this container, which is not the machine a session
+        # working in a host folder runs its Exec on: what the agent checks there (adb, a paired phone,
+        # an installed CLI) is not what the server sees. Every error and the app say where it ran.
+        mcp_manager.WHERE[0] = "machine" if settings.native else "container"
         self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp",
                               redirect_default=lambda: mcp_callback_url(settings.miniapp_public_url))
         # A server's catalogue can change under running sessions — a re-listing, a reconnect, another
@@ -949,6 +974,10 @@ class SessionManager:
         over: what the run left open for the operator (its side questions) goes with it."""
         self.shutting_down = False
         self._update_parked_run_ids: set[str] = set()
+        self.budget_parked: dict[str, str] = {}
+        """Unfinished runs boot recovery left alone because the daily cap was closed, run id to session
+        id. They used to stay parked until some later restart happened to find the cap open; the budget
+        watch hands them to ``resume_budget_parked`` the moment it reopens."""
         self.recovering = True
         """True from construction until boot recovery has decided the fate of every run the previous process left behind."""
         self.unloadable_sessions: dict[str, str] = {}
@@ -1934,6 +1963,11 @@ class SessionManager:
                 continue
             state = self._states.get(session.id)
             status = _status_word(state) if state is not None else "idle"
+            if status in ("idle", "failed") and (state.metadata if state is not None else session.metadata).get("policy_pending"):
+                # A turn that ended on a refusal waits on the operator as surely as one parked on a
+                # question, and the lists are where they look for what waits on them. Only here: the
+                # session's own status keeps meaning a question, which a message sent now would answer.
+                status = "waiting"
             out.append(
                 {
                     "id": session.id,
@@ -2975,6 +3009,7 @@ class SessionManager:
             state.last_error_kind = ""
             state.last_error_message = ""
             state.last_error_permanent = False
+            state.last_error_reason = ""
             state.run_outcome = None
             state.run_cause = None
             result = {"seq": seq, "through": through, "dropped": dropped, "workspace_restored": restored, "untouched": untouched, "kept": len(kept)}
@@ -3073,7 +3108,7 @@ class SessionManager:
             trimmed = sorted(source.engine.trimmed_tool_result_ids) if source.engine is not None else []
             pinned = {"workspace": str(self.work_dir(source)),
                       "project": source.project.name if source.project is not None else "",
-                      "notes": self.notes_for(source, window=int(source.context_window or 0)),
+                      "notes": self.notes_for(source, window=int(source.context_window or 0), overrides=await self.live.load(source_id)),
                       "trimmed": trimmed, "cache_key": source_id}
         copied = {key: source.metadata[key] for key in FORK_COPIED_KEYS if key in source.metadata}
         for meta in (target.metadata, target.session.metadata):
@@ -3981,7 +4016,7 @@ class SessionManager:
                         provider_id = None
                 exceeded = self.budget_exceeded()
                 if exceeded and not self.provider_costs_nothing(provider_id, cap_model):
-                    raise RuntimeError(f"daily budget exceeded ({exceeded}); runs resume tomorrow or after /budget reset")
+                    raise RuntimeError(f"daily budget exceeded ({exceeded}); {BUDGET_WAY_OUT}")
                 breach = await self.cap_breach(state, provider_id, cap_model)
                 if breach is not None:
                     raise RuntimeError(breach[1])
@@ -4228,7 +4263,7 @@ class SessionManager:
             return None
         provider, model = rungs[0]
         endpoint = provider.endpoint
-        if getattr(endpoint, "subscription", False) or guest_turns.login_route(str(getattr(endpoint, "base_url", ""))) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
+        if endpoint.plan_for(model) or endpoint.kind == "llamacpp" or model.endswith((":free", "-free")):
             return 0.0, 0.0
         pricing = endpoint.pricing_for(model) if hasattr(endpoint, "pricing_for") else endpoint.pricing.get(model)
         if pricing is None or pricing.input is None or pricing.output is None:
@@ -4869,7 +4904,7 @@ class SessionManager:
             reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
-            extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
+            extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0), overrides=overrides),
             tool_visibility_policy=self.tool_policy_for(state),
             role="companion" if self.is_companion(state) else "coach" if self.is_prompt_coach(state) else "btw" if self.is_btw(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
@@ -5240,6 +5275,7 @@ class SessionManager:
         state.last_error_kind = ""
         state.last_error_message = ""
         state.last_error_permanent = False
+        state.last_error_reason = ""
         state.run_outcome = None
         state.run_cause = None
         state.last_compaction = None
@@ -5911,6 +5947,7 @@ class SessionManager:
         outcome = run_outcome(
             status,
             error_kind=state.last_error_kind,
+            error_reason=state.last_error_reason,
             error_message=state.last_error_message or (state.run_cause.detail if state.run_cause is not None else ""),
             compaction=state.last_compaction,
             steps=steps,
@@ -6353,6 +6390,7 @@ class SessionManager:
             state.last_error_kind = str(p.get("kind") or state.last_error_kind)
             state.last_error_message = p["message"]
             state.last_error_permanent = p.get("retryable") is False
+            state.last_error_reason = str(p.get("classified_reason") or "")
             logger.warning("run error in session %s (%s): %s", getattr(getattr(state, "session", None), "id", "?"), p.get("kind") or "-", p["message"][:500])
         elif event.type is EventType.COMPACTION_COMPLETED:
             state.last_compaction = dict(p)
@@ -7054,7 +7092,85 @@ class SessionManager:
         await self.refresh_on_demand_groups(state)
         return self.tool_group_states(state)
 
-    def notes_for(self, state: SessionState, *, window: int = 0) -> str:
+    def session_preset_id(self, overrides: dict[str, Any]) -> str | None:
+        """The preset a session runs on: its chosen one, else the default; ``None`` for a provider and model picked by hand."""
+        if overrides.get("preset") in self.config.presets:
+            return str(overrides["preset"])
+        if overrides.get("provider") and overrides.get("model_name"):
+            return None
+        default = self.config.default_preset()
+        return default[0] if default else None
+
+    def subagent_allowance(self, metadata: dict[str, Any], overrides: dict[str, Any]) -> subagent_models.Allowance:
+        """The presets this session's helpers may run on (:mod:`daedalus.host.subagent_models`)."""
+        available = set(self.providers.available())
+        ready = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
+        mode, chosen, _ = subagent_models.choice(metadata, self.config.subagents.models)
+        return subagent_models.allowance(mode, chosen, available=ready, session_preset=self.session_preset_id(overrides))
+
+    async def set_subagent_models(self, session_id: str, mode: str | None, presets: list[str]) -> None:
+        """The session's own choice of helper models; ``mode=None`` returns it to the global default.
+        It reaches the environment at the next run, the one place the list is written for the model."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        for meta in (state.metadata, state.session.metadata):
+            if mode is None:
+                meta.pop(subagent_models.KEY, None)
+            else:
+                meta[subagent_models.KEY] = {"mode": mode, "presets": list(dict.fromkeys(presets))}
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+
+    async def tools_for_skill(self, session_id: str, names: Sequence[str]) -> tuple[dict[str, list[str]], list[str]]:
+        """Load what a skill names in ``requires:`` (tools and tool groups) into the session's run, now.
+
+        ``({group: tools loaded}, [names this session cannot call])``. A tool of a group loads its whole
+        group, as a direct call of it would: the rules are the group's, and the next step usually wants a
+        sibling. A group already on the surface, or loaded whole, is left as it is. Loaded in the run in
+        progress when there is one, so the request after the Skill call already offers them; queued for
+        the next run otherwise. Without this a model told by a skill to use BrowserLook spent its next
+        steps searching for it, or worked around it in the shell.
+        """
+        state = self._states.get(session_id)
+        if state is None:
+            return {}, []
+        registry = self.registry_for(state)
+        policy = self.tool_policy_for(state)
+        declared = registry.tool_groups()
+        admitted = self._admitted_groups(state)
+        wanted: list[str] = []
+        missing: list[str] = []
+        for name in names:
+            if name in TOOL_GROUPS or name in admitted:
+                if admitted.get(name):
+                    wanted.append(name)
+                else:
+                    missing.append(name)
+                continue
+            tool = registry.get(name)
+            if tool is None or not policy_admits(policy, name):
+                missing.append(name)
+            elif group := tool_group_of(tool, declared):
+                wanted.append(group)
+        engine = state.engine if state.running else None
+        loaded_now = set(engine.context_manager.discovered_tool_names()) if engine is not None else set()
+        loads: dict[str, list[str]] = {}
+        for group in dict.fromkeys(wanted):
+            if state.tool_group_surface.get(group) == "advertised":
+                continue
+            tools = [name for name in admitted[group] if name not in loaded_now]
+            if tools:
+                loads[group] = tools
+        if not loads:
+            return {}, missing
+        if engine is not None:
+            tool_groups.load_into_run(engine, loads)
+        else:
+            for group in loads:
+                await self._queue_group_load(state, group)
+        return loads, missing
+
+    def notes_for(self, state: SessionState, *, window: int = 0, overrides: dict[str, Any] | None = None) -> str:
         """What the system prompt says about this session beyond the environment: the brief it was created
         with, and what an imported session carries from the program it came from (loaded beforehand into
         ``state.standing`` by :func:`standing.load`)."""
@@ -7063,10 +7179,14 @@ class SessionManager:
         if note is not None and state.services is not None:
             # The sandbox line of the environment section describes this process's commands, not these.
             parts.append(note(state.services.workspace_dir))
-        available = set(self.providers.available())
-        models = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
-        if models:
-            parts.append("- Models SubAgent accepts (preset ids): " + ", ".join(models))
+        allowed = self.subagent_allowance(state.metadata, overrides or {})
+        if allowed.presets:
+            parts.append("- Models SubAgent accepts (preset ids): " + ", ".join(allowed.presets)
+                         + ("" if allowed.leader_model else "; your own model is not among them, so always name one"))
+        elif allowed.limited and allowed.leader_model:
+            parts.append("- SubAgent runs only on your own model in this session: do not pass `model`")
+        elif allowed.limited:
+            parts.append("- No model is allowed for helpers in this session: SubAgent and SpawnAgent will refuse")
         loop_note = str(state.metadata.get("loop_note") or "").strip()
         if loop_note:
             parts.append(loop_note)
@@ -7187,6 +7307,7 @@ class SessionManager:
             # is read as the file it names rather than as a word with no slash at the front.
             base_dir=base_dir,
             mcp_approvals=self.mcp.approvals(),
+            mcp_servers=self.mcp.servers_by_tool(),
         )
 
     def sealed_ports(self) -> tuple[int, ...]:
@@ -7286,7 +7407,9 @@ class SessionManager:
             now = time.time()
             # What the operator allowed for their own work is theirs: a guest neither spends nor inherits it.
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None and turn is None else set()
-            similar = list(state.metadata.get("policy_similar") or []) if state is not None and turn is None else []
+            # A grant made for a span ("every tool of this server, for six hours") stops answering at
+            # its end, and the next call is asked again like the first.
+            similar = [g for g in state.metadata.get("policy_similar") or [] if standing_alive(g, now)] if state is not None and turn is None else []
             if touch is not None:
                 # Only what the operator allowed knowing about the reply: a grant a touched turn could
                 # spend from before would answer a question nobody was shown, and so would a standing one.
@@ -7363,9 +7486,15 @@ class SessionManager:
         # The family "Allow similar" would grant, worked out now: the arguments are gone by the
         # time the operator answers, and the pending entry keeps only a redacted preview.
         # A touched run's questions have no family: "allow the like" is exactly what a stranger would ask for.
-        family = similar_grant(tool, arguments, decision.rule) if agent_talk.touch_of(state.metadata) is None else None
+        touched = agent_talk.touch_of(state.metadata) is not None
+        server = self.mcp.servers_by_tool().get(tool, "") if decision.rule == "mcp.annotations" else ""
+        family = similar_grant(tool, arguments, decision.rule, server=server) if not touched else None
         if family is not None:
             pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
+        if server and not touched:
+            # What "Allow all from <server>" would grant. A touched run has none, for the reason it has
+            # no family, and a guest's turn never gets this far: its questions are refusals.
+            pending[decision.key]["server"] = server
         for meta in (state.metadata, state.session.metadata):
             meta["policy_pending"] = dict(list(pending.items())[-20:])
         if fresh:
@@ -7666,6 +7795,94 @@ class SessionManager:
         family = refused.get("similar")
         return dict(family) if isinstance(family, dict) else None
 
+    def server_of(self, session_id: str, key: str) -> str | None:
+        """The MCP server "Allow all from <server>" would allow for an open request, if it offers one."""
+        state = self._states.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        refused = (state.metadata.get("policy_pending") or {}).get(self._approval_key(key)) or {}
+        server = refused.get("server")
+        return str(server) if server else None
+
+    async def grant_server(self, session_id: str, key: str = "", *, server: str = "", hours: float | None = None,
+                           seconds: float | None = None, via: str) -> dict[str, Any]:
+        """The operator allows every tool of the MCP server an open request came from, in this session, for a span.
+
+        One of :data:`SERVER_GRANT_HOURS` (0: until the session ends); ``seconds`` is for a test that
+        cannot wait an hour. It stands beside the "Allow similar" grants and is read the same way: a
+        guest's turn and a run touched by another agent's text use none of them, and the run whose
+        reply woke it cannot be given one either, since the request it would answer may be the
+        stranger's. When it ends the policy asks again, and the operator can take it back sooner from
+        the session's settings. Every open request of the server is answered with it.
+
+        Named by an open request's ``key`` (the approval card) or by the ``server`` itself (the
+        session's MCP panel, before anything has asked)."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        if agent_talk.touch_of(state.metadata) is not None or state.guest_turn is not None:
+            raise ValueError("another agent's or a guest's text reached this run, so nothing standing is granted in it; allow the call once instead")
+        if key:
+            key = self._approval_key(key)
+            server = self.server_of(session_id, key) or ""
+            if not server:
+                raise ValueError("this request is not an MCP server's tool asking to run; allow it once instead")
+        elif server not in self.mcp_visible(state):
+            raise ValueError(f"no MCP server {server!r} in this session")
+        if seconds is None:
+            span = SERVER_GRANT_HOURS[2] if hours is None else hours
+            if span not in SERVER_GRANT_HOURS:
+                raise ValueError(f"the span is one of {', '.join(str(h) for h in SERVER_GRANT_HOURS)} hours (0: for the whole session)")
+            seconds = span * 3600.0
+        grant = server_grant(server, seconds=seconds)
+        standing = [g for g in (state.metadata.get("policy_similar") or [])
+                    if standing_alive(g) and not (g.get("kind") == "server" and g.get("value") == server)]
+        standing.append(grant)
+        resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items() if refused.get("server") == server]
+        approves = [self._drop_pending(state, k) for k in resolved]
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_similar"] = standing[-20:]
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        for k in resolved:
+            await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via})
+        if via != "orchestrator":
+            await self._resume_after_grant(session_id, [item for item in approves if item])
+        return {"key": key, "server": server, "grant": grant, "resolved": resolved, "approves": approves, "standing": self.standing(state)}
+
+    @staticmethod
+    def _standing_id(grant: dict[str, Any]) -> str:
+        """A standing grant's name for taking it back: a digest of what it is, so none has to be stored."""
+        body = {k: v for k, v in grant.items() if k != "id"}
+        return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+    def standing(self, state: SessionState) -> list[dict[str, Any]]:
+        """The session's standing grants that still stand, each with its id and the seconds it has left (``None``: no end)."""
+        now = time.time()
+        out = []
+        for grant in state.metadata.get("policy_similar") or []:
+            if not standing_alive(grant, now):
+                continue
+            until = float(grant.get("until") or 0)
+            out.append({"id": self._standing_id(grant), "kind": grant.get("kind"), "tool": grant.get("tool"), "rule": grant.get("rule"),
+                        "label": grant.get("label"), "server": grant.get("value") if grant.get("kind") == "server" else None,
+                        "at": grant.get("at"), "until": until or None, "left_seconds": max(0, int(until - now)) if until else None})
+        return out
+
+    async def revoke_standing(self, session_id: str, grant_id: str, *, via: str) -> list[dict[str, Any]]:
+        """Take one standing grant back; the next call it would have answered is asked again."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        before = list(state.metadata.get("policy_similar") or [])
+        kept = [g for g in before if standing_alive(g) and self._standing_id(g) != grant_id]
+        if len(kept) == len([g for g in before if standing_alive(g)]):
+            raise KeyError(f"no standing grant {grant_id!r} in this session")
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_similar"] = kept
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        logger.info("session %s: standing grant %s revoked via %s", session_id, grant_id, via)
+        return self.standing(state)
+
     async def grant_similar(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
         """The operator allows calls like a refused one for the rest of the session.
 
@@ -7681,7 +7898,9 @@ class SessionManager:
         family = self.similar_of(session_id, key)
         if family is None:
             raise ValueError("this request has no narrower family of calls to allow; allow it once instead")
-        standing = [g for g in (state.metadata.get("policy_similar") or []) if g != family]
+        family = {**family, "at": time.time()}
+        standing = [g for g in (state.metadata.get("policy_similar") or [])
+                    if standing_alive(g) and {k: v for k, v in g.items() if k != "at"} != {k: v for k, v in family.items() if k != "at"}]
         standing.append(family)
         resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items()
                     if isinstance(refused.get("similar"), dict)
@@ -7963,6 +8182,7 @@ class SessionManager:
                         free = False
                     if state is not None and not free:
                         parked.append(entry["run_id"])
+                        self.budget_parked[entry["run_id"]] = session_id
                         continue
                 await self._resume_one(entry, resumed)
                 if entry["run_id"] not in resumed:
@@ -7976,6 +8196,27 @@ class SessionManager:
         finally:
             self.recovering = False
         return resumed
+
+    async def resume_budget_parked(self) -> list[str]:
+        """Drive on the runs boot recovery parked for the daily cap, once it is open again; the resumed ids."""
+        if not self.budget_parked or self.budget_exceeded() or self.shutting_down:
+            return []
+        waiting = set(self.budget_parked)
+        self.budget_parked = {k: v for k, v in self.budget_parked.items() if k not in waiting}
+        return await self.resume_unfinished(waiting)
+
+    async def note_in_chat(self, session_id: str, message: Message) -> None:
+        """Put a host line into a conversation outside any run, and have the app read it.
+
+        A run's own lines reach the app with the run's events; a line written while nothing runs —
+        a helper parked by the budget, a report that cannot reach its leader yet — has no event to
+        ride, and the chat would show it only on the next full read."""
+        await self.sessions.append_transcript(session_id, [message])
+        state = self._states.get(session_id)
+        try:
+            await self._notify_sinks(session_id, HostEvent(HostEventType.TRANSCRIPT_NOTE, (state.run_id if state is not None else "") or "", {"session_id": session_id}))
+        except Exception:  # noqa: BLE001 — the line is written; a front that missed the event sees it on its next read
+            logger.warning("could not announce a note in session %s", session_id, exc_info=True)
 
     async def _settle_stale_runs(self, resumed: list[str], parked: list[str] | None = None) -> None:
         """A run row still 'running' that nobody drives is a leftover of the previous process: closed as cancelled."""

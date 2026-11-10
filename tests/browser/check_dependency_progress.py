@@ -10,6 +10,9 @@ from api_stub import GATES
 from check_composer import BASE, CHROMIUM, UNHANDLED, stub
 from playwright.sync_api import expect, sync_playwright
 
+# The maintenance notice's sheet. Named as one: the page under it is Settings, a dialog itself now.
+NOTICE = ".sheet[role='dialog']"
+
 
 def run() -> None:
     with sync_playwright() as playwright:
@@ -60,13 +63,13 @@ def run() -> None:
                 assert tab.evaluate("document.documentElement.scrollWidth <= innerWidth")
             if directory := os.environ.get("DEPENDENCY_SCREENSHOTS"):
                 other.screenshot(path=f"{directory}/dependency-notice-{width}-{language}.png")
-            page.get_by_role("dialog").locator(".btn.primary").click()
+            page.locator(NOTICE).locator(".btn.primary").click()
             expect(page.locator(".maintenance-strip")).to_be_visible()
-            expect(page.get_by_role("dialog")).to_have_count(0)
+            expect(page.locator(NOTICE)).to_have_count(0)
             # A client-side route change must not reset dismissal or lose the countdown.
             page.evaluate("history.pushState({}, '', location.pathname.replace('/dependencies', '')); window.dispatchEvent(new PopStateEvent('popstate'))")
             expect(page.locator(".maintenance-strip")).to_be_visible()
-            expect(page.get_by_role("dialog")).to_have_count(0)
+            expect(page.locator(NOTICE)).to_have_count(0)
             connection["offline"] = True
             page.wait_for_timeout(3500)
             expect(page.locator(".maintenance-strip")).to_be_visible()
@@ -74,7 +77,7 @@ def run() -> None:
             connection["offline"] = False
             maintenance["notice"] = None
             expect(page.locator(".maintenance-strip")).to_have_count(0, timeout=8000)
-            expect(other.get_by_role("dialog")).to_have_count(0, timeout=8000)
+            expect(other.locator(NOTICE)).to_have_count(0, timeout=8000)
             context.close()
             print(f"{width} {language}: planner journal, installation output, reload, two-page warning, navigation and outage passed")
         browser.close()

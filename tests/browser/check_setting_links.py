@@ -78,7 +78,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     page = browser.new_context(viewport=viewport, color_scheme="dark", **context).new_page()
     page.route("**/api/**", route)
     page.goto(f"{BASE}/agents/{S2}?token=t&lang={lang}")
-    page.wait_for_selector(".composer textarea", timeout=15000)
+    page.wait_for_selector(".composer .composer-field", timeout=15000)
 
     # The session's own notice: a warning line with the way to the vision model.
     inline = page.locator('.setting-notice[data-setting-notice="vision.preset"]')
@@ -95,7 +95,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
             say(f"the line has no button to the setting: {inline.inner_text()!r}")
 
     # A /compact refused about the summary model.
-    field = page.locator(".composer textarea").first
+    field = page.locator(".composer .composer-field").first
     field.click()
     field.fill("/compact")
     # Enter is a new line on a phone; the circle sends there, and on a desktop as well.
@@ -137,7 +137,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
 
     # Back to the conversation; its warning line goes to the vision model's row.
     page.go_back()
-    page.wait_for_selector(".composer textarea", timeout=15000)
+    page.wait_for_selector(".composer .composer-field", timeout=15000)
     inline = page.locator('.setting-notice[data-setting-notice="vision.preset"]')
     inline.wait_for(timeout=8000)
     inline.locator('[data-setting-go="vision.preset"]').click()

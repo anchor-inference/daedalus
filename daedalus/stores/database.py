@@ -40,6 +40,8 @@ from daedalus.memory.taxonomy import (
 )
 from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
 from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
+from daedalus.stores.canvas_schema import SQL as CANVAS_SQL
+from daedalus.stores.canvas_schema import convert_diagrams
 from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
 from daedalus.stores.companion_schema import MIGRATION as COMPANION_MIGRATION
@@ -1969,9 +1971,9 @@ CREATE INDEX planner_tasks_scheduled ON planner_tasks(scheduled_start) WHERE sch
 """, True))
 
 async def _diagram_history(conn: aiosqlite.Connection) -> None:
-    from daedalus.stores.diagrams import repair_history  # Lazy: the store imports this module.
-
-    await repair_history(conn)
+    """Once repaired the labels and sources of the Excalidraw diagrams written before revisions had
+    them. Diagrams are now converted into canvases by the last migration, and the repair went with
+    the Excalidraw code; a database that never ran it holds no diagram that needed it."""
 
 
 MIGRATIONS.append(DataMigration("""
@@ -3710,6 +3712,9 @@ CREATE TABLE IF NOT EXISTS agent_talk_messages (
 );
 CREATE INDEX IF NOT EXISTS agent_talk_messages_by_talk ON agent_talk_messages(talk_id, id);
 """)
+
+# Canvases replace the Excalidraw diagrams, which this converts and drops (see canvas_schema).
+MIGRATIONS.append(DataMigration(CANVAS_SQL, convert_diagrams))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

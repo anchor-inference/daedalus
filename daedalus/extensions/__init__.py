@@ -34,6 +34,7 @@ EXTENSIONS = (
     "daedalus.extensions.peers",
     "daedalus.extensions.side_questions",
     "daedalus.extensions.subagents",
+    "daedalus.extensions.budget_watch",
     "daedalus.extensions.jobs",
     "daedalus.extensions.disk_guard",
     "daedalus.extensions.tunnel_address",

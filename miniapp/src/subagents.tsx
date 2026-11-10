@@ -59,10 +59,12 @@ export function touchesSubagents(event: { type: string; session_id: string | nul
   return !!event.session_id && children.has(event.session_id);
 }
 
-/** The state a helper's dot shows: working, waiting on a question, failed, or at rest. */
-export function subagentState(child: SubagentView): "running" | "waiting" | "failed" | "idle" {
+/** The state a helper's dot shows: working, waiting on a question, parked by the daily cap, failed, or at rest. */
+export function subagentState(child: SubagentView): "running" | "waiting" | "parked" | "failed" | "idle" {
   if (child.status === "waiting") return "waiting";
   if (child.running || child.status === "running" || child.status === "compacting") return "running";
+  // Before failed: a helper the cap stopped did not fail, and it goes on by itself when the cap reopens.
+  if (child.status === "parked" || child.parked) return "parked";
   return child.status === "failed" ? "failed" : "idle";
 }
 
@@ -74,8 +76,11 @@ export function subagentLine(child: SubagentView, now: number): string {
     ? [t("subagents.working"), Number.isNaN(since) ? "" : duration(Math.max(0, now - since))].filter(Boolean).join(" ")
     : state === "idle"
       ? [child.kept || child.idle_start ? t("subagents.waits") : statusWord("done"), child.last_activity_at ? relTime(child.last_activity_at, now) : ""].filter(Boolean).join(" · ")
-      : statusWord(state).toLowerCase();
-  return [word, child.model].filter(Boolean).join(" · ");
+      : state === "parked"
+        ? t("subagents.parked")
+        : statusWord(state).toLowerCase();
+  const held = child.reports_held ? t("subagents.held") : "";
+  return [word, held, child.model].filter(Boolean).join(" · ");
 }
 
 export function SubagentsTab({ leaderId, selected, onSelect, onOpenFull, chat, toast }: {

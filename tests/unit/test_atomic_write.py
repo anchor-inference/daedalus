@@ -1,4 +1,4 @@
-"""Write, Edit and MultiEdit replace a file atomically: a write that fails part way leaves the old content
+"""Write and Edit (one replacement or a batch) replace a file atomically: a write that fails part way leaves the old content
 whole, here and through a shell on another machine, and the file keeps its mode, its links and its owner."""
 
 from __future__ import annotations

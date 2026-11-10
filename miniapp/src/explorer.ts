@@ -260,3 +260,56 @@ export function typeAhead(rows: Row[], index: number, text: string): number {
   }
   return index;
 }
+
+/** Every folder closed but the root, listings kept: Collapse all is a view change, not a reload. */
+export function collapseAll(tree: Tree): Tree {
+  return Object.fromEntries(Object.entries(tree).map(([p, f]) => [p, p === "" || !f.open ? f : { ...f, open: false }]));
+}
+
+/**
+ * A path cut before its last part, so the header can elide the middle and keep the folder's own name
+ * readable: `/srv/workspaces/s_example` → `["/srv/workspaces/", "s_example"]`. A trailing separator
+ * is dropped first, or the last part would be empty and the name the reader looks for would vanish.
+ */
+export function splitPath(path: string): [string, string] {
+  const trimmed = path.length > 1 ? path.replace(/[\\/]+$/, "") : path;
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut < 0 || cut === trimmed.length - 1 ? ["", trimmed] : [trimmed.slice(0, cut + 1), trimmed.slice(cut + 1)];
+}
+
+/** One content hit's file, with its lines under it in the order the host found them. */
+export type GrepGroup = { path: string; hits: GrepHit[] };
+
+export function groupGrep(hits: GrepHit[]): GrepGroup[] {
+  const groups = new Map<string, GrepGroup>();
+  for (const hit of hits) {
+    const group = groups.get(hit.path) ?? { path: hit.path, hits: [] };
+    group.hits.push(hit);
+    groups.set(hit.path, group);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * A found line, split where the query matches, for highlighting. The line is trimmed and, when the
+ * first match sits far along it, started a little before the match behind an ellipsis: the snippet is
+ * one line clipped at the panel's edge, and a match past the clip showed a line with nothing found in it.
+ * The match is literal and ignores case; a query that does not occur leaves the line unmarked.
+ */
+export function markMatches(line: string, query: string, lead = 24): { text: string; hit: boolean }[] {
+  let text = line.trim();
+  const q = query.trim().toLocaleLowerCase();
+  if (!q) return [{ text, hit: false }];
+  const first = text.toLocaleLowerCase().indexOf(q);
+  if (first > lead + 8) text = `…${text.slice(first - lead)}`;
+  const lower = text.toLocaleLowerCase();
+  const out: { text: string; hit: boolean }[] = [];
+  let at = 0;
+  for (let i = lower.indexOf(q); i >= 0; i = lower.indexOf(q, i + q.length)) {
+    if (i > at) out.push({ text: text.slice(at, i), hit: false });
+    out.push({ text: text.slice(i, i + q.length), hit: true });
+    at = i + q.length;
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+  return out;
+}

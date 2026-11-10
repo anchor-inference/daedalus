@@ -143,7 +143,7 @@ async def test_dropping_data_stops_and_talking_about_it_does_not(work: Path) -> 
 async def test_a_write_outside_the_folder_stops(work: Path) -> None:
     assert await kinds(work, ("Write", {"path": "/var/tmp/notes.md", "content": "x"})) == ["write_outside"]
     assert await kinds(work, ("Edit", {"path": "../sibling/a.py", "old_string": "a", "new_string": "b"})) == ["write_outside"]
-    assert await kinds(work, ("Write", {"path": "notes.md", "content": "x"}), ("MultiEdit", {"path": str(work / "a.py"), "edits": []})) == []
+    assert await kinds(work, ("Write", {"path": "notes.md", "content": "x"}), ("Edit", {"path": str(work / "a.py"), "edits": []})) == []
 
 
 # -- migrations ------------------------------------------------------------------------------------

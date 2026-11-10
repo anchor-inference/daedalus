@@ -29,6 +29,7 @@ async def test_calendar_history_replays_missing_orchestration_migrations(tmp_pat
                      " VALUES ('diagram','Plan','{}','2026-01-01','2026-01-01')")
         conn.execute("INSERT INTO diagram_revisions(diagram_id,version,title,scene_json,saved_at)"
                      " VALUES ('diagram',1,'Plan','{}','2026-01-01')")
+        conn.execute("INSERT INTO projects(id,name,created_at) VALUES ('home','Home','2026-01-01')")
         conn.execute("UPDATE schema_version SET version = ?", (schema.BRANCH_BASE_SCHEMA + 2,))
 
     monkeypatch.setattr(schema, "MIGRATIONS", migrations)
@@ -37,15 +38,16 @@ async def test_calendar_history_replays_missing_orchestration_migrations(tmp_pat
     assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == len(migrations)
     assert (await db.fetchone("SELECT name FROM calendar_accounts WHERE id = 'account'"))["name"] == "Work"
     assert (await db.fetchone("SELECT title FROM calendar_events WHERE id = 'event'"))["title"] == "Review"
-    assert (await db.fetchone("SELECT title FROM diagrams WHERE id = 'diagram'"))["title"] == "Plan"
-    assert (await db.fetchone("SELECT count(*) AS n FROM diagram_revisions WHERE diagram_id = 'diagram'"))["n"] == 1
+    # The diagram outlived the replay and was then carried into a canvas by the last migration.
+    assert (await db.fetchone("SELECT title FROM canvases WHERE id = 'diagram'"))["title"] == "Plan"
+    assert not await db.fetchone("SELECT name FROM sqlite_master WHERE name = 'diagrams'")
     assert await db.fetchone("SELECT name FROM sqlite_master WHERE name = 'domain_collection_revisions'")
     assert [tuple(row) for row in await db.fetchall("PRAGMA integrity_check")] == [("ok",)]
     assert await db.fetchall("PRAGMA foreign_key_check") == []
     await db.close()
     db = schema.Database(path)
     await db.open()
-    assert (await db.fetchone("SELECT count(*) AS n FROM diagram_revisions WHERE diagram_id = 'diagram'"))["n"] == 1
+    assert (await db.fetchone("SELECT count(*) AS n FROM canvas_revisions WHERE canvas_id = 'diagram'"))["n"] == 1
     await db.close()
 
 
@@ -61,7 +63,7 @@ async def test_orchestration_history_adds_calendar_schema(tmp_path: Path, monkey
     db = schema.Database(path)
     await db.open()
     assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == len(migrations)
-    for name in ("calendar_accounts", "calendar_events", "diagrams", "diagram_revisions"):
+    for name in ("calendar_accounts", "calendar_events", "canvases", "canvas_revisions"):
         assert await db.fetchone("SELECT name FROM sqlite_master WHERE name = ?", (name,))
     assert [tuple(row) for row in await db.fetchall("PRAGMA integrity_check")] == [("ok",)]
     assert await db.fetchall("PRAGMA foreign_key_check") == []
@@ -79,6 +81,7 @@ async def test_planner_history_is_not_migrated_twice(tmp_path: Path, monkeypatch
     monkeypatch.setattr(schema, "MIGRATIONS", main_line)
     db = schema.Database(path)
     await db.open()
+    await db.execute("INSERT INTO projects(id,name,created_at) VALUES ('home','Home','2026-01-01')")
     await db.execute("INSERT INTO diagrams(id,title,scene_json,created_at,updated_at,updated_by)"
                      " VALUES ('diagram','Plan','{}','2026-01-01','2026-01-01','agent')")
     assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == schema.BRANCH_BASE_SCHEMA + 4
@@ -88,7 +91,7 @@ async def test_planner_history_is_not_migrated_twice(tmp_path: Path, monkeypatch
     db = schema.Database(path)
     await db.open()
     assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == len(migrations)
-    assert (await db.fetchone("SELECT updated_by FROM diagrams WHERE id = 'diagram'"))["updated_by"] == "agent"
+    assert (await db.fetchone("SELECT updated_by FROM canvases WHERE id = 'diagram'"))["updated_by"] == "agent"
     assert await db.fetchone("SELECT name FROM sqlite_master WHERE name = 'domain_collection_revisions'")
     assert [tuple(row) for row in await db.fetchall("PRAGMA integrity_check")] == [("ok",)]
     await db.close()

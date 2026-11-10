@@ -135,6 +135,9 @@ class FakeProviders:
     async def close_retired(self) -> None:
         self.retired_closed += 1
 
+    def price_view(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {}
+
 
 class FakeManager:
     def __init__(self) -> None:

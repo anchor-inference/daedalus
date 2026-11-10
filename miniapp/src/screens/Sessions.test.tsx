@@ -149,8 +149,8 @@ describe("the sidebar", () => {
     expect(document.querySelector(".menu [role=menuitem]")).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-newsplit .sb-new-more")!.click());
     const items = Array.from(document.querySelectorAll<HTMLButtonElement>(".menu [role=menuitem]"));
-    expect(items.map((b) => b.textContent)).toEqual(["New chat", "Import session"]);
-    await act(async () => items[1].click());
+    expect(items.map((b) => b.textContent)).toEqual(["New chat", "New agent", "Import session"]);
+    await act(async () => items[2].click());
     expect(importer.open).toHaveBeenCalledWith();
   });
 

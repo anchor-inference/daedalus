@@ -95,7 +95,7 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     check(composer.locator("[data-action='voice'], .roundbtn.voice").count() == 0, f"{where}: an empty field offers no voice conversation")
     send = composer.locator(".roundbtn[data-action='send']")
     check(send.count() == 1 and send.is_disabled(), f"{where}: an empty field's Send waits for words")
-    composer.locator("textarea").fill("Bake the menu")
+    composer.locator(".composer-field").fill("Bake the menu")
     circle = send.bounding_box()
     check(send.is_visible() and send.is_enabled(), f"{where}: text makes Send live")
     check(bool(circle) and abs(circle["width"] - circle["height"]) < 1, f"{where}: the primary is a circle ({circle})")

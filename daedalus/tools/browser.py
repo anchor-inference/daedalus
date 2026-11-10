@@ -12,6 +12,7 @@ The tools are registered only on an installation that has a browser daemon (``ca
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import uuid
 from pathlib import Path
@@ -21,11 +22,11 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.browser.agent import LOOK_INSTRUCTION, SWITCH_ASK, BrowserAgent, Caller, SensitiveAsk
+from daedalus.browser.agent import LOOK_INSTRUCTION, SWITCH_ASK, UPLOAD_MAX_BYTES, BrowserAgent, Caller, SensitiveAsk
 from daedalus.browser.model import EnvUnavailable, Forbidden, NotFound, Owner
 from daedalus.host.filesystem import ShellFS
 from daedalus.host.services import SessionServices
-from daedalus.stores.files import FileRefused, human_size, parse_handle, safe_name
+from daedalus.stores.files import FileRefused, parse_handle, safe_name, saved_report
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import FETCH_MAX_BYTES, FRAME_CHARS, error, ok, output_limit, services_for
 from daedalus.tools.vision import VisionUnavailable, look
@@ -142,12 +143,12 @@ class SessionFiles:
             target = await _write_new_remote(fs, target, data, keep=to is not None)
         else:
             target = await asyncio.to_thread(_write_new, target, data, keep=to is not None)
-        said = f"Saved {clean} ({human_size(len(data))}) to {target}."
+        said = f"Saved {clean} to {target}.\n" + saved_report(str(target), len(data), hashlib.sha256(data).hexdigest(), source="a site, through the browser") + "\n"
         store = getattr(self.manager, "files", None)
         if store is not None and self.owner.project_id:
             try:
                 stored = await store.add(data, name=clean, origin="browser", origin_ref=f"{self.owner.kind}:{self.owner.id}", scope=self.owner.project_id, actor=f"agent:{self.owner.id}")
-                said += f" It is also kept as {stored.handle}, which passes to the team by handle."
+                said += f"It is also kept as {stored.handle}, which passes to the team by handle."
             except FileRefused:
                 pass  # past the store's size: the copy in the workspace is what there is
         return said
@@ -383,8 +384,8 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "Act on the page by ref from BrowserSnapshot. action: click, double_click, right_click, hover, type (text; "
         "submit=true presses Enter after), press (keys: 'Enter', 'Tab', 'Escape', 'Ctrl+A'), select (option by label), "
         "check, uncheck, scroll (a ref into view; direction 'up', 'down', 'left' or 'right' scrolls the page, or with a "
-        "ref the pane it is in; text scrolls to the first place that says it), drag (to to_ref), upload (paths of files "
-        "in your workspace, or file handles). element is required: say in words what you act on ('the Add to cart "
+        "ref the pane it is in; text scrolls to the first place that says it), drag (to to_ref), upload (paths of any "
+        f"files in your workspace, of any type up to {UPLOAD_MAX_BYTES >> 20} MiB, or file handles, into a file input). element is required: say in words what you act on ('the Add to cart "
         "button'). x and y (CSS pixels of the viewport) click or hover at a point instead of a ref, where the operator "
         "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "

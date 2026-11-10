@@ -1,4 +1,4 @@
-"""The services door: a listener of its own that answers ``/s/`` and nothing else.
+"""The services door: a listener of its own that answers ``/s/`` (shared services) and ``/f/`` (canvas frames) and nothing else.
 
 A shared service runs pages an agent wrote. On the app's origin such a page holds everything the
 operator's browser holds there: its script reads the API with the session cookie, however carefully
@@ -50,7 +50,7 @@ LAN_MINUTES = 60
 
 
 class ServicesDoor:
-    """The whole application of the door's listener: ``/s/`` reaches the API's routes, nothing else does.
+    """The whole application of the door's listener: ``/s/`` and ``/f/`` reach the API's routes, nothing else does.
 
     A WebSocket under ``/s/`` goes the same way: a hot reload and a live app need it, and its route holds
     it to the same rules as a page. Anywhere else one is closed before it opens.
@@ -64,7 +64,8 @@ class ServicesDoor:
         if scope["type"] == "websocket" and not path.startswith("/s/"):
             await WebSocketClose(code=1008)(scope, receive, send)
             return
-        if path.startswith("/s/"):
+        if path.startswith(("/s/", "/f/")):
+            # /f/ is a canvas's live frame, which runs a page the agent wrote for the same reason.
             scope[SCOPE_KEY] = True
             await self.api(scope, receive, send)
         elif path == "/robots.txt":

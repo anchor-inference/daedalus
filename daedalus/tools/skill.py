@@ -10,9 +10,9 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.host.services import locator
-from daedalus.host.skills import save_skill_draft
+from daedalus.host.skills import classify_requirement, save_skill_draft
 from daedalus.host.toolchain import status as toolchain_status
-from daedalus.tools import search_hint, tool_group
+from daedalus.tools import TOOL_GROUPS, search_hint, tool_group
 from daedalus.tools._common import error, ok
 
 
@@ -45,7 +45,7 @@ async def load_skill(context: ToolContext, skill: str, args: dict[str, Any] | No
             body = body.replace("{{" + name + "}}", value)
         if missing:
             body = f"[This skill takes parameters: {', '.join(params)}. Not given: {', '.join(missing)} — their {{{{placeholders}}}} are left as they are.]\n\n" + body
-    for note in _unmet(store, bundle.manifest.id):
+    for note in await _requirements(context, store, bundle.manifest.id):
         body = f"[{note}]\n\n" + body
     files = [f for f in await store.list_files(context.tenant_id, bundle.manifest.id) if f.path != "SKILL.md"]
     listing = _listing(files)
@@ -57,15 +57,34 @@ async def load_skill(context: ToolContext, skill: str, args: dict[str, Any] | No
     return ok(context, text, skill_id=bundle.manifest.id)
 
 
-def _unmet(store: Any, skill_id: str) -> list[str]:
-    """The requirements this installation does not meet, said before the skill body rather than
-    discovered halfway through it by an import that fails."""
+async def _requirements(context: ToolContext, store: Any, skill_id: str) -> list[str]:
+    """Meet what the skill's ``requires:`` names, and say in a line what could not be met.
+
+    The tools and groups it names are loaded into this run at once, so the instructions that follow can
+    be carried out with them on the next step rather than after a search. A program or module it names
+    is looked for, and one that is missing is said before the skill body rather than discovered halfway
+    through it by a command that fails three times."""
     requires = store.requires_of(skill_id) if hasattr(store, "requires_of") else []
-    notes = []
-    for requirement in requires:
-        state = toolchain_status(requirement)
+    notes: list[str] = []
+    tools: list[str] = []
+    for item in requires:
+        requirement = classify_requirement(item, TOOL_GROUPS)
+        if requirement is None:
+            continue
+        if requirement.kind in ("tool", "group"):
+            tools.append(requirement.name)
+            continue
+        state = toolchain_status(requirement.name)
         if state != "ok":
             notes.append(f"This skill needs something this installation does not have: {state} Say so rather than following instructions that cannot work here.")
+    manager = locator.get(context.session_id).extra.get("manager")
+    if tools and manager is not None and hasattr(manager, "tools_for_skill"):
+        loaded, missing = await manager.tools_for_skill(context.session_id, tools)
+        if missing:
+            notes.append(f"This skill names tools this session cannot call: {', '.join(missing)}. Do without them, or say what is missing.")
+        if loaded:
+            names = ", ".join(name for group in loaded.values() for name in group)
+            notes.append(f"Loaded for this skill, callable from your next step: {names}.")
     return notes
 
 

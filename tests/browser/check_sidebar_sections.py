@@ -67,7 +67,7 @@ def main() -> int:
             check(live == [shots.S1], f"{lang}: the collapsed project still shows its working chat and nothing idle ({live})")
 
             # The keyboard: / to search, arrows down the rows, right to open a project, left to close it.
-            page.locator(".start textarea").blur()
+            page.locator(".start .composer-field").blur()
             page.mouse.click(900, 860)
             page.keyboard.press("/")
             check(page.evaluate("document.activeElement?.closest('.sb-search') !== null"), f"{lang}: / reaches the search")

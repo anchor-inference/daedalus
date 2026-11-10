@@ -135,7 +135,7 @@ def open_page(browser, lang: str, phone: bool, native: bool = True, scheme: str 
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents/{CHAT}?token=t&scheme={scheme}&lang={lang}")
-    page.wait_for_selector(".composer textarea", timeout=15000)
+    page.wait_for_selector(".composer .composer-field", timeout=15000)
     return context, page, errors
 
 

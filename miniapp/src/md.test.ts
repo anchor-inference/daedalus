@@ -11,7 +11,7 @@ describe("renderMarkdown", () => {
   });
   it("opens a place in the app through the router without accepting arbitrary paths", () => {
     const id = "0123456789abcdef0123456789abcdef";
-    expect(renderMarkdown(`[Open diagram](/app/diagrams/${id})`)).toContain(`<a href="/app/diagrams/${id}" data-app-link>Open diagram</a>`);
+    expect(renderMarkdown(`[Open canvas](/app/canvas/${id})`)).toContain(`<a href="/app/canvas/${id}" data-app-link>Open canvas</a>`);
     expect(renderMarkdown("[Orders](/app/p/orders)")).toContain('<a href="/app/p/orders" data-app-link>Orders</a>');
     expect(renderMarkdown("[Draft](/app/p/orders?draft=1)")).toContain('<a href="/app/p/orders?draft=1" data-app-link>Draft</a>');
     expect(renderMarkdown("[Bad](/app/p/../api/settings)")).not.toContain("<a");
