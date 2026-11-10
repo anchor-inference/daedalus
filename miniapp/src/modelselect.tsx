@@ -37,6 +37,11 @@ export type ModelSelectProps = {
   effort?: string;
   thinking?: boolean;
   onChooseEffort?: (effort: string) => void;
+  /** A control elsewhere that opened the list, such as the panel strip's model chip: the popover hangs
+   *  below it, aligned to its left edge. Null hangs it from this component's own pill. */
+  anchor?: HTMLElement | null;
+  /** Whether the pill itself is drawn; the list can still be opened from an outside anchor without it. */
+  pill?: boolean;
 };
 
 /** Whether a preset is the one the session is set to: by its label, or by its provider/model pair. */
@@ -45,7 +50,7 @@ function isCurrent(id: string, p: Preset, model: string): boolean {
   return model === id || model === p.label || model === p.model || model === `${p.provider}/${p.model}`;
 }
 
-export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, thinking, onChooseEffort }: ModelSelectProps) {
+export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, thinking, onChooseEffort, anchor = null, pill = true }: ModelSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -86,14 +91,13 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
   return (
     <>
-      <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
+      {pill && <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open && !anchor ? "on" : ""}`} onClick={() => onOpenChange(!(open && !anchor))} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open && !anchor}>
         {fallback ? <span className="model-dot" aria-hidden /> : <Icon name="model" size={14} />}
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
         {onChooseEffort && <span className="model-effort">{effortWord(effort, thinking)}</span>}
-
-      </ControlTrigger>
+      </ControlTrigger>}
       {open && sheet && (
         <Sheet title={t("session.model")} onClose={() => onOpenChange(false)} className="model-sheet"
           head={cat ? <span className="model-sheet-sub">{t("composer.model.forchat", { n: num(Object.keys(cat.presets).length) })}</span> : undefined}>
@@ -101,7 +105,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         </Sheet>
       )}
       {open && !sheet && (
-        <Popover anchor={trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align="right" label={t("session.model.for")}>
+        <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align={anchor ? "left" : "right"} label={t("session.model.for")}>
           {list}
         </Popover>
       )}

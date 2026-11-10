@@ -1416,7 +1416,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
-  const openPicker = () => composer.current?.openModel();
+  // The picker hangs from the control that opened it. The panel strip's chip used to call this bare, and
+  // the list opened beside the composer's pill at the far side of the window from the chip.
+  const openPicker = (anchor?: HTMLElement | null) => composer.current?.openModel(anchor);
+  const stripModel = useRef<HTMLButtonElement>(null);
 
   async function chooseModel(body: ModelChoice) {
     try {
@@ -1696,9 +1699,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The session's menu: one list for the chat header's ⋯ and the panel strip's ⋯, so what one does to the
   // session is found in the same place from either side. The rare things the Details tab used to carry
   // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
-  const sessionMenu: MenuItem[] = [
+  // The strip's copy differs in one thing: its "Change model" opens the picker under the strip's own chip,
+  // not under the composer's pill on the other side of the window.
+  const sessionMenuFrom = (modelAnchor?: { current: HTMLElement | null }): MenuItem[] => [
     { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
-    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: openPicker }] : []),
+    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
     // A session in a project's focus mode stays in its project; the orchestrator's chat has no
     // files or jobs of its own to show.
     ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
@@ -1730,6 +1735,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
     { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
   ];
+  const sessionMenu = sessionMenuFrom();
+  const stripMenu = sessionMenuFrom(stripModel);
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
@@ -2057,7 +2064,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               effort={effortText}
               context={detail.context ?? null}
               usage={detail.usage}
-              menu={sessionMenu}
+              menu={stripMenu}
+              modelRef={stripModel}
               onModel={orchestrating ? undefined : openPicker}
               onContext={detail.context ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
               onUsage={() => { setDetailsFocus("usage"); panel.open("details"); }}

@@ -3,6 +3,7 @@
 // first cards of a long column, so on Files or Preview the two numbers the operator watches were a tab
 // and a scroll away; here they stay in sight whatever the panel shows.
 
+import type { Ref } from "react";
 import type { SessionDetail } from "./api";
 import { Icon } from "./icons";
 import { OverflowMenu, type MenuItem } from "./ui/dialogs";
@@ -19,13 +20,16 @@ export type PanelStripProps = {
   context: SessionDetail["context"] | null;
   usage: SessionDetail["usage"];
   menu: MenuItem[];
-  /** The model chip opens the picker; the context and the cost open their pages in Details. */
-  onModel?: () => void;
+  /** The model chip opens the picker under itself, so it hands itself over as the anchor; the context
+   *  and the cost open their pages in Details. */
+  onModel?: (anchor: HTMLElement) => void;
+  /** The chip, for the strip's menu to hang the picker from when "Change model" is chosen there. */
+  modelRef?: Ref<HTMLButtonElement>;
   onContext?: () => void;
   onUsage?: () => void;
 };
 
-export function PanelStrip({ model, effort, context, usage, menu, onModel, onContext, onUsage }: PanelStripProps) {
+export function PanelStrip({ model, effort, context, usage, menu, onModel, modelRef, onContext, onUsage }: PanelStripProps) {
   const percent = context && context.window > 0 ? Math.round((100 * context.tokens) / context.window) : null;
   const tone = percent !== null ? contextTone(percent) : null;
   const segments = context?.breakdown ? contextSegments(context.breakdown, context.window) : null;
@@ -38,7 +42,7 @@ export function PanelStrip({ model, effort, context, usage, menu, onModel, onCon
     <div className="panel-strip" data-panel-strip>
       <div className="panel-strip-row">
         {onModel ? (
-          <button type="button" className="panel-strip-model" onClick={onModel} title={t("strip.model.title", { model: modelName })} aria-label={t("strip.model.title", { model: modelName })}>
+          <button ref={modelRef} type="button" className="panel-strip-model" onClick={(e) => onModel(e.currentTarget)} aria-haspopup="menu" title={t("strip.model.title", { model: modelName })} aria-label={t("strip.model.title", { model: modelName })}>
             <Icon name="model" size={14} />
             <span className="truncate">{shortModel(modelName, 40)}</span>
             <Icon name="chevron" size={12} />

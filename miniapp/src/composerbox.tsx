@@ -62,8 +62,10 @@ export type ComposerHandle = {
   insert: (text: string, focus?: boolean) => void;
   /** Attach files from outside the pill: a drop on the conversation. */
   addFiles: (files: Iterable<File>) => void;
-  /** Open the model list, from wherever "change the model" is offered. */
-  openModel: () => void;
+  /** Open the model list, from wherever "change the model" is offered. `anchor` is the control that asked:
+   *  the list hangs from it and gives the keyboard back to it. Without one it hangs from the composer's
+   *  own model pill. A second call from the same control closes the list again. */
+  openModel: (anchor?: HTMLElement | null) => void;
   /** Put text in the field instead of whatever is there: the prompt coach's prompt replaces the draft it improved. */
   replace: (text: string) => void;
 };
@@ -161,6 +163,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  // The control outside the composer that opened the model list, or null for the composer's own pill.
+  // The panel's strip once called the bare opener and its list appeared beside the composer pill, at
+  // the far side of the window from the chip that was pressed.
+  const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
@@ -258,13 +264,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (focus) textarea.current?.focus();
       },
       addFiles,
-      openModel: () => setModelOpen(true),
+      openModel: (anchor) => {
+        const from = anchor ?? null;
+        if (modelOpen && modelAnchor === from) { setModelOpen(false); return; }
+        setModelAnchor(from);
+        setModelOpen(true);
+      },
       replace: (text) => {
         setDraft(text);
         textarea.current?.focus();
       },
     }),
-    [draft, setDraft, addFiles],
+    [draft, setDraft, addFiles, modelOpen, modelAnchor],
   );
 
   // ── the slash palette ──
@@ -440,6 +451,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       else void send();
     } else if (intent === "model") {
       e.preventDefault();
+      setModelAnchor(null);
       setModelOpen((o) => !o);
     } else if (intent === "stop") {
       if (status === "running") {
@@ -469,6 +481,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const intent = composerKey(e, { enterSends: false, paletteOpen: false });
       if (intent === "model") {
         e.preventDefault();
+        setModelAnchor(null);
         setModelOpen((o) => !o);
         return;
       }
@@ -749,8 +762,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
-            {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
+            {/* A running phone composer has no room for the pill, but the list still opens from the panel's
+                strip: without the component mounted that chip did nothing at all while a turn ran. */}
+            <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={(o) => { if (o) setModelAnchor(null); setModelOpen(o); }} onChoose={props.onChooseModel} sheet={phone}
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} anchor={modelAnchor} pill={!phone || status !== "running"} />
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />
