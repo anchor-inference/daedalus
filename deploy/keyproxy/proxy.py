@@ -60,10 +60,13 @@ from claude import (
     chat_to_messages,
     claude_header_windows,
     claude_usage_view,
+    forced_choice_refused,
     key_betas,
+    learn_unforceable,
     messages_events_to_chunks,
     prefix_locked,
     request_betas,
+    steers_tool_choice,
     without_thinking,
 )
 from multidict import CIMultiDict, CIMultiDictProxy
@@ -893,6 +896,7 @@ async def serve_messages(request: web.Request, name: str, headers: dict[str, str
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
     payload, names = chat_to_messages(body, login=login)
+    steered = steers_tool_choice(body)
     headers["anthropic-beta"] = request_betas(payload) if login else key_betas(payload)
     url = CLAUDE_API + ("/v1/messages?beta=true" if login else "/v1/messages")
     meter = not login and bool(AGENT_API) and METERED_HEADER not in request.headers
@@ -914,6 +918,17 @@ async def serve_messages(request: web.Request, name: str, headers: dict[str, str
         timing.report("refused")
         raw = raw_bytes.decode("utf-8", "replace")
         await response.aclose()
+        if not steered and forced_choice_refused(response.status_code, raw):
+            # A model the translation did not yet know to refuse a forced tool_choice. It is remembered,
+            # so the refusal costs one round trip per model and process, and this request is built again
+            # with the call asked for in words.
+            learn_unforceable(str(body.get("model") or ""))
+            steered = steers_tool_choice(body)
+            if steered:
+                logger.warning("%s refused a forced tool_choice for %s; asking for the call in the prompt from now on", name, body.get("model"))
+                payload, names = chat_to_messages(body, login=login)
+                headers["anthropic-beta"] = request_betas(payload) if login else key_betas(payload)
+                continue
         locked, first = prefix_locked(response.status_code, raw, response.headers)
         if locked and not healed:
             # Thinking signed over a prefix the bot has since rewritten is refused before any output on an
@@ -938,7 +953,7 @@ async def serve_messages(request: web.Request, name: str, headers: dict[str, str
         await clients.verify("claude", response.status_code)
         if windows := claude_header_windows(response.headers):
             _claude_header_snapshot.update(windows=windows, at=time.monotonic())
-    chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
+    chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names, keep_thinking=not steered)
     served = served_headers(name, str(payload.get("model") or model))
     captured = bytearray()
     try:
