@@ -32,9 +32,8 @@ KEYPROXY_PORT=13201
 DAEDALUS_SUPERVISOR_PORT=18769
 SERVICES_PORT_RANGE=18100-18119
 SERVICES_PUBLIC_HOST=127.0.0.1
-USD_PER_DAY=20
 "@ | Set-Content -Encoding ascii (Join-Path $data '.env')
-'KEYPROXY_USD_PER_DAY=20' | Set-Content -Encoding ascii (Join-Path $data 'daedalus-secrets\keyproxy.env')
+Set-Content -Encoding ascii -Value '' (Join-Path $data 'daedalus-secrets\keyproxy.env')
 
 # Not Daedalus: a listener of this script's own on the port the env file names for the app.
 $foreign = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $ApiPort)

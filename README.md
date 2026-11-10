@@ -203,7 +203,7 @@ RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2
 The installer prints that key's fingerprint before it installs anything — it must read
 `f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285`, the SHA-256 of the line above —
 and [desktop/SIGNING.md](desktop/SIGNING.md) shows how to check a release by hand. Open it, choose **native** (no Docker, about 100 MB, 4 s warm) or **Docker**, give it a provider
-key and a daily cap, and it hands you the app. [desktop/README.md](desktop/README.md) has the rest.
+key, and it hands you the app; a daily spending cap is set there, in Settings → Limits. [desktop/README.md](desktop/README.md) has the rest.
 
 | | **Native** — no Docker | **Docker** |
 |---|---|---|

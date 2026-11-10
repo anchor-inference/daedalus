@@ -459,12 +459,6 @@ export function reactionFor(path, S) {
     if (S.local.test === "ok") return { say: "say.test.ok", mood: "happy" };
     if (S.local.test === "fail") return { say: "say.test.fail", mood: "worry" };
   }
-  if (path === "limit") {
-    const v = Number(S.limit);
-    if (v && v <= 5) return { say: "say.limit.low", mood: "nod" };
-    if (v >= 100) return { say: "say.limit.high", mood: "happy" };
-    return { mood: "nod" };
-  }
   if (path === "adv.open" || path === "speech.choice") return { mood: "nod" };
   if (path && path.indexOf("keys.") === 0) {
     const v = S.keys[S.provider] || "";

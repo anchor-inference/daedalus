@@ -114,7 +114,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 		"lang": {"ru"}, "mode": {"native"}, "kind": {"local"}, "handoff": {"1"},
 		"deepseek": {"sk-deepseek-0123456789"}, "openai": {"sk-openai-0123456789"}, "anthropic": {"sk-ant-0123456789abcd"},
 		"local_url": {"http://127.0.0.1:11434/v1/"}, "local_key": {"local-secret-key-1234"}, "local_model": {"qwen-local"},
-		"usd_per_day": {"35"}, "bot_token": {"123456:ABCDEFGHIJKLMNOPQRSTUVWX"}, "owner_id": {"424242"},
+		"bot_token": {"123456:ABCDEFGHIJKLMNOPQRSTUVWX"}, "owner_id": {"424242"},
 		"api_id": {"777"}, "api_hash": {"hash-0123456789abcdef"},
 		"login": {"on"}, "browser": {"on"}, "voice": {"local"}, "stt_model": {"gigaam-ru"}, "port": {"18765"},
 	})
@@ -133,7 +133,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	env := readEnv(readFile(paths.Env))
 	keys := readEnv(readFile(paths.KeyproxyEnv))
 	for name, want := range map[string]string{
-		"DAEDALUS_LOCAL_MODEL": "qwen-local", "DAEDALUS_VOICE": "local", "DAEDALUS_STT_MODEL": "gigaam-ru", "USD_PER_DAY": "35",
+		"DAEDALUS_LOCAL_MODEL": "qwen-local", "DAEDALUS_VOICE": "local", "DAEDALUS_STT_MODEL": "gigaam-ru",
 		"API_PORT": "18765", "DAEDALUS_FIXED_PORTS": "API_PORT", "OWNER_USER_ID": "424242",
 	} {
 		if env[name] != want {
@@ -143,7 +143,6 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	for name, want := range map[string]string{
 		"OPENAI_API_KEY": "sk-openai-0123456789", "ANTHROPIC_API_KEY": "sk-ant-0123456789abcd",
 		"KEYPROXY_UPSTREAM_LOCAL": "http://127.0.0.1:11434/v1", "KEYPROXY_KEY_LOCAL": "local-secret-key-1234",
-		"KEYPROXY_USD_PER_DAY": "35",
 	} {
 		if keys[name] != want {
 			t.Errorf("keyproxy.env %s = %q, want %q", name, keys[name], want)
@@ -175,7 +174,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	if boot.Kept["keys.deepseek"] != "••••6789" || boot.Kept["keys.anthropic"] != "••••abcd" || boot.Kept["tg.token"] != "••••UVWX" || boot.Kept["local.key"] != "••••1234" {
 		t.Errorf("the masks are %v", boot.Kept)
 	}
-	if boot.Limit != "35" || boot.TG.Owner != "424242" || boot.TG.APIID != "777" || boot.Adv.PortsAuto || boot.Adv.Port != "18765" || !boot.Adv.Login || boot.Speech.Choice != "gigaam-ru" {
+	if boot.TG.Owner != "424242" || boot.TG.APIID != "777" || boot.Adv.PortsAuto || boot.Adv.Port != "18765" || !boot.Adv.Login || boot.Speech.Choice != "gigaam-ru" {
 		t.Errorf("the page does not show the answers back: %+v", boot)
 	}
 	if boot.Adv.Data != paths.Data || !boot.CLIs["codex"] || boot.CLIs["grok"] {
@@ -183,12 +182,12 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	}
 
 	// Run again with nothing typed into the secret fields: everything stored stays.
-	code, body = postSetup(t, server, url.Values{"mode": {"native"}, "kind": {"cloud"}, "usd_per_day": {"40"}, "login": {"off"}})
+	code, body = postSetup(t, server, url.Values{"mode": {"native"}, "kind": {"cloud"}, "login": {"off"}})
 	if code != http.StatusOK {
 		t.Fatalf("the second post answered %d: %s", code, body)
 	}
 	again := CurrentSetup(paths)
-	if again.DeepseekKey != "sk-deepseek-0123456789" || again.LocalKey != "local-secret-key-1234" || again.BotToken != "123456:ABCDEFGHIJKLMNOPQRSTUVWX" || again.LocalModel != "qwen-local" || again.USDPerDay != "40" {
+	if again.DeepseekKey != "sk-deepseek-0123456789" || again.LocalKey != "local-secret-key-1234" || again.BotToken != "123456:ABCDEFGHIJKLMNOPQRSTUVWX" || again.LocalModel != "qwen-local" {
 		t.Errorf("a re-run without the secrets lost some of them: %+v", again)
 	}
 	if login.on {
@@ -280,7 +279,6 @@ func TestTheWizardsPostIsCheckedAgain(t *testing.T) {
 		field string
 		form  url.Values
 	}{
-		{"limit", url.Values{"usd_per_day": {"5000"}}},
 		{"tg.owner", url.Values{"owner_id": {"12ab"}}},
 		{"adv.port", url.Values{"port": {"80"}}},
 		{"local.url", url.Values{"kind": {"local"}, "local_url": {"ftp://127.0.0.1/"}, "local_model": {"m"}}},
@@ -294,8 +292,8 @@ func TestTheWizardsPostIsCheckedAgain(t *testing.T) {
 	}
 	paths := setupTempInstall(t)
 	server := startedServer(t, paths)
-	code, body := postSetup(t, server, url.Values{"usd_per_day": {"0"}})
-	if code != http.StatusBadRequest || !strings.Contains(body, `"field":"limit"`) || paths.Configured() {
+	code, body := postSetup(t, server, url.Values{"owner_id": {"12ab"}})
+	if code != http.StatusBadRequest || !strings.Contains(body, `"field":"tg.owner"`) || paths.Configured() {
 		t.Fatalf("a refused answer answered %d %s and configured=%v", code, body, paths.Configured())
 	}
 }

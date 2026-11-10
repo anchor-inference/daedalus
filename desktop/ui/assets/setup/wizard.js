@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var STEPS = ['welcome', 'runs', 'model', 'limit', 'telegram', 'speech', 'search', 'advanced', 'summary', 'start'];
+  var STEPS = ['welcome', 'runs', 'model', 'telegram', 'speech', 'search', 'advanced', 'summary', 'start'];
   var CLIS = [
     { id: 'codex', name: 'Codex' },
     { id: 'claude', name: 'Claude Code' },
@@ -43,7 +43,6 @@
     down: '<path d="m6 9 6 6 6-6"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
-    coin: '<circle cx="12" cy="12" r="8.5"/><path d="M14.6 9.3c-.5-.9-1.5-1.3-2.6-1.3-1.5 0-2.6.8-2.6 2s1.1 1.6 2.6 2 2.7.8 2.7 2.1-1.2 2-2.7 2c-1.2 0-2.2-.5-2.7-1.4M12 6.5V8M12 16.8v1.4"/>',
     send: '<path d="M21 3 3 10.5l7 2.5 2.5 7Z"/><path d="m21 3-11 10"/>',
     sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>',
@@ -77,7 +76,6 @@
     scanning: false,
     local: { url: BL.url || 'http://127.0.0.1:11434/v1', key: '', model: BL.model || '', models: BL.model ? [BL.model] : [], test: BL.model ? 'kept' : null, ms: 0 },
     free: { provider: BF.provider || 'kilo', model: BF.model || '', key: '', test: BF.model ? 'kept' : null, error: '', catalog: [], loading: false },
-    limit: B.limit || '20',
     tg: { token: '', owner: BT.owner || '', apiid: BT.apiid || '', apihash: '', more: !!(BT.apiid || (B.kept && B.kept['tg.apihash'])), skip: false },
     adv: { open: false, data: BA.data || '', portsAuto: BA.portsAuto !== false, port: BA.port || '8765', login: !!BA.login, browser: !!BA.browser },
     // speech: off, cloud, or a local model's id; all: the whole catalogue shown rather than the models
@@ -262,18 +260,6 @@
       }
       return head('model') + '<div class="s-body"><div class="st">' + tabs + '</div><div class="panel" data-panel>' + body + '</div></div>';
     },
-    limit: function () {
-      var n = Number(S.limit) || 0;
-      return head('limit', { tip: 'tip.limit' }) + '<div class="s-body limit">' +
-        '<div class="limit-big st" data-field="limit"><span class="cur">$</span>' +
-        '<input class="limit-num" data-bind="limit" data-k="limit" inputmode="decimal" aria-label="' + esc(t('limit.field')) + '" aria-describedby="e-limit" value="' + esc(S.limit) + '" style="width:' + numWidth(S.limit) + 'ch">' +
-        '<span class="per">' + esc(t('limit.per')) + '</span></div>' +
-        '<input class="range st" type="range" min="1" max="200" step="1" data-bind="limit" data-k="limit-range" aria-label="' + esc(t('limit.field')) + '" value="' + Math.min(200, Math.max(1, n || 1)) + '" style="--v:' + (Math.min(200, Math.max(1, n || 1)) - 1) / 199 + '">' +
-        '<div class="presets st">' + [5, 20, 50, 100].map(function (v) {
-          return '<button type="button" class="chip" data-k="preset-' + v + '" data-set="limit=' + v + '" aria-pressed="' + (n === v) + '">$' + v + '</button>';
-        }).join('') + '</div>' +
-        '<p class="err center" id="e-limit" data-err="limit" aria-live="polite"></p></div>';
-    },
     telegram: function () {
       // The how-to sits above the fields it fills: the two answers come from two bots, and the
       // field labels alone sent people looking for both.
@@ -386,7 +372,6 @@
       return head('summary') + '<div class="s-body"><ul class="sum">' +
         row('runs', S.mode === 'native' ? 'laptop' : 'cube', esc(t('runs.' + S.mode))) +
         row('model', S.kind === 'cloud' ? 'key' : S.kind === 'cli' ? 'term' : 'server', modelSummary()) +
-        row('limit', 'coin', esc(t('sum.perday', { v: S.limit }))) +
         row('telegram', 'send', S.tg.skip || !(S.tg.token || S.kept['tg.token']) ? '<em>' + esc(t('sum.skipped')) + '</em>' : 'bot ' + (S.tg.token ? mask(S.tg.token) : esc(S.kept['tg.token'])) + ' · id ' + esc(S.tg.owner)) +
         row('speech', 'mic', speechSummary()) +
         row('search', 'globe', S.search.skip ? '<em>' + esc(t('sum.skipped')) + '</em>' : esc(searchOrder().join(' → '))) +
@@ -456,7 +441,6 @@
   function provider() {
     return PROVIDERS.filter(function (x) { return x.id === S.provider; })[0] || PROVIDERS[0];
   }
-  function numWidth(v) { return (Math.max(1, String(v).length) + .1).toFixed(1); }
   function modelSummary() {
     if (S.kind === 'cloud') {
       var p = provider();
@@ -493,10 +477,6 @@
         if (!/^https?:\/\/[^\s/]+/i.test(S.local.url.trim())) e['local.url'] = t('err.url');
         else if (S.local.test !== 'ok' && S.local.test !== 'kept') e['local.model'] = t('err.test');
       }
-    }
-    if (id === 'limit') {
-      var v = Number(String(S.limit).replace(',', '.'));
-      if (!(v >= 1 && v <= 1000)) e.limit = t('err.limit');
     }
     if (id === 'telegram' && !tgEmpty()) {
       if ((S.tg.token.trim() || !S.kept['tg.token']) && !/^\d{5,12}:[\w-]{20,}$/.test(S.tg.token.trim())) e['tg.token'] = t('err.token');
@@ -790,7 +770,6 @@
       f.set('free_provider', S.free.provider); f.set('free_model', S.free.model);
       if (S.free.key.trim()) f.set('free_key', S.free.key.trim());
     }
-    f.set('usd_per_day', String(S.limit).replace(',', '.'));
     if (!S.tg.skip) {
       [['bot_token', S.tg.token], ['owner_id', S.tg.owner], ['api_id', S.tg.apiid], ['api_hash', S.tg.apihash]].forEach(function (pair) {
         if (String(pair[1] || '').trim()) f.set(pair[0], String(pair[1]).trim());
@@ -920,7 +899,6 @@
       var path = parts[0], value = coerce(parts[1]);
       setPath(path, value);
       if (path === 'kind' && value === 'free' && !S.free.loading && !S.free.catalog.length) loadFreeCatalog();
-      if (path === 'limit') S.limit = String(value);
       var pop = path === 'kind' ? '.panel' : path === 'adv.portsAuto' ? '.adv' : null;
       if (path === 'lang') { renderAll(); persistLang(); } else refresh({ pop: pop });
       if (hooks.onChange) hooks.onChange(path, S);
@@ -959,17 +937,6 @@
       // The order line follows the keys as they are typed, without redrawing the field under the cursor.
       var line = currentEl().querySelector('[data-k=search-order]');
       if (line) line.textContent = t('search.order', { order: searchOrder().join(' → ') });
-    }
-    if (path === 'limit') {
-      var step = currentEl();
-      var n = Number(String(v).replace(',', '.'));
-      var num = step.querySelector('.limit-num');
-      if (el.type === 'range' && num) num.value = v;
-      if (num) num.style.width = numWidth(num.value) + 'ch';
-      if (el.type !== 'range') { var rg = step.querySelector('.range'); if (rg && n >= 1) { rg.value = Math.min(200, n); } }
-      var r = step.querySelector('.range');
-      if (r) r.style.setProperty('--v', (Number(r.value) - 1) / 199);
-      step.querySelectorAll('.presets .chip').forEach(function (c) { c.setAttribute('aria-pressed', String('limit=' + n === c.getAttribute('data-set'))); });
     }
     if (el.getAttribute('data-reset') === 'test' && S.local.test) {
       S.local.test = null; S.local.models = []; S.local.model = '';

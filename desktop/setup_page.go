@@ -109,8 +109,7 @@ type setupBoot struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
 	} `json:"free"`
-	Limit string `json:"limit"`
-	TG    struct {
+	TG struct {
 		Owner string `json:"owner"`
 		APIID string `json:"apiid"`
 	} `json:"tg"`
@@ -288,7 +287,6 @@ func (s *Server) setupBoot(ctx context.Context, lang Lang, status Status, sugges
 	if current.FreeModel != "" {
 		b.Kind = "free"
 	}
-	b.Limit = firstSet(current.USDPerDay, "20")
 	if current.BotToken != "" {
 		b.Kept["tg.token"] = mask(current.BotToken)
 	}
@@ -359,18 +357,12 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		OwnerID:       get("owner_id"),
 		APIID:         get("api_id"),
 		APIHash:       get("api_hash"),
-		USDPerDay:     strings.ReplaceAll(get("usd_per_day"), ",", "."),
 		ModelKind:     get("kind"),
 		Clear:         clearedFields(form["clear"]),
 	}
 	for _, provider := range providerKeyVars {
 		if key := get(provider[0]); key != "" {
 			s.ProviderKeys[provider[0]] = key
-		}
-	}
-	if s.USDPerDay != "" {
-		if v, err := strconv.ParseFloat(s.USDPerDay, 64); err != nil || v < 1 || v > 1000 {
-			return s, nil, &setupError{"limit", "from 1 to 1000"}
 		}
 	}
 	if s.OwnerID != "" && strings.Trim(s.OwnerID, "0123456789") != "" {

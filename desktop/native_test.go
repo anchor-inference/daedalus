@@ -141,7 +141,7 @@ func TestTheSupervisorIsGivenThisInstallationsPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := envMap(supervisorEnv(paths, nil, map[string]string{"API_PORT": "19985", "SERVICES_PORT_RANGE": "19170-19179", "SERVICES_DOOR_PORT": "19986", "USD_PER_DAY": "20"}))
+	env := envMap(supervisorEnv(paths, nil, map[string]string{"API_PORT": "19985", "SERVICES_PORT_RANGE": "19170-19179", "SERVICES_DOOR_PORT": "19986"}))
 	for key, want := range map[string]string{
 		"DAEDALUS_NATIVE":        "1",
 		"DAEDALUS_BOT_REPO":      paths.Bot,

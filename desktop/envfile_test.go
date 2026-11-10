@@ -4,19 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestMergeEnvReplacesInPlaceAndKeepsTheRest(t *testing.T) {
-	existing := "# a comment\nUSD_PER_DAY=5\n\nMY_OWN=keep-me\nexport SEARXNG_SECRET=old\n"
+	existing := "# a comment\nKEYPROXY_PORT=5\n\nMY_OWN=keep-me\nexport SEARXNG_SECRET=old\n"
 	got := mergeEnv(existing, []envVar{
-		{"USD_PER_DAY", "20"},
+		{"KEYPROXY_PORT", "20"},
 		{"SEARXNG_SECRET", "new"},
 		{"API_PORT", "8765"},
 	})
-	want := "# a comment\nUSD_PER_DAY=20\n\nMY_OWN=keep-me\nSEARXNG_SECRET=new\nAPI_PORT=8765\n"
+	want := "# a comment\nKEYPROXY_PORT=20\n\nMY_OWN=keep-me\nSEARXNG_SECRET=new\nAPI_PORT=8765\n"
 	if got != want {
 		t.Fatalf("merged file is\n%q\nwant\n%q", got, want)
 	}
@@ -68,8 +67,8 @@ func TestEnvUpdatesPointAtTheDataFolderAndLoopback(t *testing.T) {
 	if env["MINIAPP_PUBLIC_URL"] != "" {
 		t.Fatalf("a desktop install has no public address: %q", env["MINIAPP_PUBLIC_URL"])
 	}
-	if env["USD_PER_DAY"] != "20" {
-		t.Fatalf("the default cap is 20, got %q", env["USD_PER_DAY"])
+	if _, capped := env["USD_PER_DAY"]; capped {
+		t.Fatal("the daily cap is the agent's own setting, with none until the operator names one")
 	}
 	if env["DAEDALUS_SECRETS_FILE"] != paths.KeyproxyEnv || env["DAEDALUS_SSH_DIR"] != paths.SSH {
 		t.Fatalf("the secrets are not where the launcher put them: %v", env)
@@ -81,7 +80,7 @@ func TestEnvUpdatesPointAtTheDataFolderAndLoopback(t *testing.T) {
 
 func TestWriteSetupKeepsProviderKeysOutOfTheCheckout(t *testing.T) {
 	paths := setupTempInstall(t)
-	setup := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", ProviderKeys: map[string]string{"kimi_coding": "sk-kimi"}, BotToken: "123:abc", OwnerID: "42", USDPerDay: "7"}
+	setup := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", ProviderKeys: map[string]string{"kimi_coding": "sk-kimi"}, BotToken: "123:abc", OwnerID: "42"}
 	if err := WriteSetup(paths, setup, ModeDocker); err != nil {
 		t.Fatal(err)
 	}
@@ -90,14 +89,14 @@ func TestWriteSetupKeepsProviderKeysOutOfTheCheckout(t *testing.T) {
 		t.Fatal("a provider key reached .env, which is mounted into the agent container")
 	}
 	keys := readEnv(readFile(paths.KeyproxyEnv))
-	if keys["DEEPSEEK_API_KEY"] != "sk-deepseek" || keys["KIMI_CODING_API_KEY"] != "sk-kimi" || keys["KEYPROXY_USD_PER_DAY"] != "7" {
+	if keys["DEEPSEEK_API_KEY"] != "sk-deepseek" || keys["KIMI_CODING_API_KEY"] != "sk-kimi" {
 		t.Fatalf("the key proxy's file is wrong: %v", keys)
 	}
-	if info, err := os.Stat(paths.KeyproxyEnv); err != nil {
-		t.Fatal(err)
-	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		// Windows has no permission bits for Go to report: every writable file reads 0666 there.
-		t.Fatalf("the secrets file is %v, want 0600", info.Mode().Perm())
+	// The mode here, the access list on Windows, which has no permission bits for Go to report.
+	for _, secret := range []string{paths.Env, paths.KeyproxyEnv, paths.BotEnv, paths.Secrets} {
+		if problem := privateProblem(secret); problem != "" {
+			t.Fatalf("%s is not this user's alone: %s", secret, problem)
+		}
 	}
 	if readFile(paths.BotEnv) != env {
 		t.Fatal("the checkout's .env is not the one compose reads for the container")
@@ -128,7 +127,7 @@ func TestWriteSetupKeepsTheSearxngSecretAndUntypedKeys(t *testing.T) {
 // that did not fill a password field back in — must leave them as they are.
 func TestWriteSetupLeavesAloneWhatTheFormDidNotCarry(t *testing.T) {
 	paths := setupTempInstall(t)
-	full := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", BotToken: "123:abc", OwnerID: "42", APIID: "7", APIHash: "hash", USDPerDay: "9"}
+	full := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", BotToken: "123:abc", OwnerID: "42", APIID: "7", APIHash: "hash"}
 	if err := WriteSetup(paths, full, ModeDocker); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +135,7 @@ func TestWriteSetupLeavesAloneWhatTheFormDidNotCarry(t *testing.T) {
 	if err := os.WriteFile(paths.Env, []byte(readFile(paths.Env)+"MINIAPP_PUBLIC_URL=https://example.test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSetup(paths, Setup{USDPerDay: "9"}, ModeDocker); err != nil {
+	if err := WriteSetup(paths, Setup{}, ModeDocker); err != nil {
 		t.Fatal(err)
 	}
 	got := CurrentSetup(paths)
@@ -149,8 +148,55 @@ func TestWriteSetupLeavesAloneWhatTheFormDidNotCarry(t *testing.T) {
 	if url := readEnv(readFile(paths.Env))["MINIAPP_PUBLIC_URL"]; url != "https://example.test" {
 		t.Fatalf("the public address the operator set by hand is now %q", url)
 	}
-	if cap := readEnv(readFile(paths.KeyproxyEnv))["KEYPROXY_USD_PER_DAY"]; cap != "9" {
-		t.Fatalf("the key proxy's cap is %q", cap)
+}
+
+// The daily cap is the agent's own setting now, and a cap an earlier launcher left in either file
+// would read as one still in force: a setup run and a start both take it out, and nothing else.
+func TestARetiredDailyCapLeavesBothFiles(t *testing.T) {
+	paths := setupTempInstall(t)
+	if err := WriteSetup(paths, Setup{DeepseekKey: "sk-deepseek"}, ModeDocker); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(readFile(paths.Env)+readFile(paths.KeyproxyEnv), "USD_PER_DAY") {
+		t.Fatal("a setup run wrote a daily cap")
+	}
+	for _, f := range []struct{ path, line string }{{paths.Env, "USD_PER_DAY=20\n"}, {paths.KeyproxyEnv, "export KEYPROXY_USD_PER_DAY=20\n"}} {
+		if err := os.WriteFile(f.path, []byte(f.line+readFile(f.path)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	envBefore, keysBefore := readEnv(readFile(paths.Env)), readEnv(readFile(paths.KeyproxyEnv))
+	if err := retireEnv(paths); err != nil {
+		t.Fatal(err)
+	}
+	env, keys := readEnv(readFile(paths.Env)), readEnv(readFile(paths.KeyproxyEnv))
+	delete(envBefore, "USD_PER_DAY")
+	delete(keysBefore, "KEYPROXY_USD_PER_DAY")
+	if !reflect.DeepEqual(env, envBefore) || !reflect.DeepEqual(keys, keysBefore) {
+		t.Fatalf("a start took more or less than the cap: %v / %v", env, keys)
+	}
+	if problem := privateProblem(paths.KeyproxyEnv); problem != "" {
+		t.Fatalf("the rewritten key file: %s", problem)
+	}
+	if err := os.WriteFile(paths.Env, []byte("export USD_PER_DAY=5\n"+readFile(paths.Env)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSetup(paths, Setup{}, ModeDocker); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(readFile(paths.Env), "USD_PER_DAY") {
+		t.Fatal("a setup run kept a cap from before")
+	}
+}
+
+func TestDroppingEnvKeysKeepsEverythingElseAsItWas(t *testing.T) {
+	text := "# a comment\nA=1\n  USD_PER_DAY=3\nUSD_PER_DAY_NOT=4\n"
+	got, dropped := dropEnvKeys(text, retiredEnvKeys)
+	if !dropped || got != "# a comment\nA=1\nUSD_PER_DAY_NOT=4\n" {
+		t.Fatalf("%q %v", got, dropped)
+	}
+	if same, dropped := dropEnvKeys("A=1\n", retiredEnvKeys); dropped || same != "A=1\n" {
+		t.Fatalf("%q %v", same, dropped)
 	}
 }
 
@@ -171,20 +217,6 @@ func TestWriteSetupEmptiesOnlyWhatWasAskedFor(t *testing.T) {
 	}
 	if (Setup{BotToken: got.BotToken}).Telegram() {
 		t.Fatal("clearing the bot token must turn Telegram off")
-	}
-}
-
-// A desktop install keeps the default cap only until the operator names one, and never rewrites
-// their figure with it afterwards.
-func TestTheDailyCapFallsBackToWhatIsInForce(t *testing.T) {
-	if got := dailyCap("", ""); got != "20" {
-		t.Fatalf("a fresh install starts at %q", got)
-	}
-	if got := dailyCap("", "35"); got != "35" {
-		t.Fatalf("the cap in force became %q", got)
-	}
-	if got := dailyCap(" 12 ", "35"); got != "12" {
-		t.Fatalf("the cap the form carried became %q", got)
 	}
 }
 

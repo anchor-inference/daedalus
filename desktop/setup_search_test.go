@@ -84,7 +84,7 @@ func TestTheSearchKeysGoToTheKeyProxyAndTheOrderToTheApp(t *testing.T) {
 	}
 
 	// A run that skipped the step changes nothing about search.
-	if err := WriteSetup(paths, Setup{USDPerDay: "9"}, ModeNative); err != nil {
+	if err := WriteSetup(paths, Setup{}, ModeNative); err != nil {
 		t.Fatal(err)
 	}
 	if again := readEnv(readFile(paths.Env)); again["DAEDALUS_SEARCH_BACKEND"] != "keenable" || again["DAEDALUS_SEARCH_FALLBACK"] != "perplexity,duckduckgo" {

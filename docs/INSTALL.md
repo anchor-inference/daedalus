@@ -32,8 +32,8 @@ Open it and a page asks the one question that matters, with what each answer cos
 | Isolation | the policy rules, and bubblewrap on Linux where it can actually run — see [what each gives up](#what-each-gives-up) | the container's own edge |
 
 Then it opens a window of its own — the system's web view on macOS and Windows, a browser window
-with no tabs or address bar on Linux, the default browser if neither — asks for a provider key and a
-daily cap, and hands you the app. [desktop/README.md](../desktop/README.md) has the folder layout, the
+with no tabs or address bar on Linux, the default browser if neither — asks for a provider key, and
+hands you the app; a daily spending cap is set there, in Settings → Limits. [desktop/README.md](../desktop/README.md) has the folder layout, the
 window's three fallbacks, the disk each mode takes, projects in Docker mode, local self-development,
 release signing and uninstalling.
 
@@ -62,7 +62,7 @@ By hand instead: clone `protocore-exp` next to this repository, copy `deploy/env
 checkout, `chmod 600`), then `docker compose -f deploy/compose.yaml --env-file .env up -d --build`.
 
 Once the stack runs, nothing in that file needs editing by hand: Settings → Models & providers → Providers → *Key proxy*
-sets every key, upstream address, key header and the proxy's daily cap, and Settings → Tools & search → *Search keys*
+sets every key, upstream address and key header, and Settings → Tools & search → *Search keys*
 holds the keys of the paid search backends (Keenable, Serper, Tavily, Exa, Perplexity). The proxy reads the file
 again on each call, so a saved value holds from the next request with no restart.
 

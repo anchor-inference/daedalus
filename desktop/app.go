@@ -255,6 +255,9 @@ func (a *App) Start(ctx context.Context) error {
 }
 
 func (a *App) start(ctx context.Context) error {
+	if err := retireEnv(a.paths); err != nil {
+		return err
+	}
 	if a.Native() {
 		return a.startNative(ctx)
 	}

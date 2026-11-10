@@ -7,7 +7,7 @@ launcher's own test call; the CLI detection finds the one login this file leaves
 home. Only the start is played back: the status the page follows is answered from this file, because
 a real start brings a whole installation up.
 
-Every combination of language and window (1200×800 and 390×844) must get through all ten steps
+Every combination of language and window (1200×800 and 390×844) must get through all nine steps
 without a console error, a page error, a horizontal scroll or a frame that leaves the window. On the
 way it checks what the steps promise: the model tabs' labels are whole, the keys come in a
 pay-as-you-go group and a subscription plan group, the Telegram how-to links to the two bots in a new
@@ -256,9 +256,6 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
             problems.append(f"{tag}: the endpoint test did not list the model: {state}")
         step("model-local")
         next_step()
-        step("limit")
-        page.click("[data-k=preset-50]")
-        next_step()
         step("telegram")
         check_telegram_step(page, tag, problems)
         page.click(".f-foot [data-act=skip]")
@@ -349,7 +346,10 @@ def main() -> int:
         searched = (("DAEDALUS_SEARCH_BACKEND=searxng", env), ("DAEDALUS_SEARCH_FALLBACK=keenable,duckduckgo", env), ("KEYPROXY_KEY_KEENABLE=kn-test-0123456789", keys))
         if "kn-test-0123456789" in env:
             problems.append("the Keenable key reached the app's environment")
-        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), ("USD_PER_DAY=50", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys), *((line, env) for line in speech), *searched):
+        # The daily cap is the agent's own setting, set in the app: the wizard writes none.
+        if "USD_PER_DAY" in env + keys:
+            problems.append("the wizard wrote a daily cap into the env")
+        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys), *((line, env) for line in speech), *searched):
             if want not in text:
                 problems.append(f"the posted answers did not reach the files: {want!r} missing")
     finally:

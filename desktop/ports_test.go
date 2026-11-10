@@ -275,7 +275,7 @@ func TestAFirstSetupOnAMachineHoldingTheDefaultsWritesOthers(t *testing.T) {
 	}
 	// Setup again: the ports are written, and the second answer keeps them.
 	before := readFile(paths.Env)
-	if err := WriteSetup(paths, Setup{USDPerDay: "5"}, ModeNative); err != nil {
+	if err := WriteSetup(paths, Setup{}, ModeNative); err != nil {
 		t.Fatal(err)
 	}
 	if after := readEnv(readFile(paths.Env)); after["API_PORT"] != env["API_PORT"] || after["SERVICES_PORT_RANGE"] != env["SERVICES_PORT_RANGE"] {
@@ -292,7 +292,7 @@ func quietInstallation(t *testing.T) (Paths, int) {
 		t.Fatal(err)
 	}
 	os.MkdirAll(p.Data, 0o755)
-	env := fmt.Sprintf("API_PORT=%d\nKEYPROXY_PORT=%d\nSERVICES_PORT_RANGE=%d-%d\nUSD_PER_DAY=20\n", api, keyproxy, services, services+19)
+	env := fmt.Sprintf("API_PORT=%d\nKEYPROXY_PORT=%d\nSERVICES_PORT_RANGE=%d-%d\n", api, keyproxy, services, services+19)
 	if err := os.WriteFile(p.Env, []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}

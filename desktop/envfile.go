@@ -32,7 +32,6 @@ type Setup struct {
 	OwnerID       string
 	APIID         string
 	APIHash       string
-	USDPerDay     string
 
 	// The local or OpenAI-compatible endpoint. The address and its key go to the key proxy as an
 	// upstream of their own, like every other credential, and the app is told only the model: its
@@ -143,16 +142,54 @@ func answered(s Setup, current map[string]string) func(key, field, value string)
 	}
 }
 
-// dailyCap is the spending cap to write: what the form carried, else what is already in force, else
-// the figure a fresh install starts with.
-func dailyCap(given, existing string) string {
-	if given = clean(given); given != "" {
-		return given
+// retiredEnvKeys are what earlier launchers wrote and nothing reads any more. The daily spending
+// cap lives in the agent's own settings now ([limits] usd_per_day, set in Settings), where the
+// supervisor reads it and the host hands it to the key proxy; a cap left in the env would read as
+// one still in force.
+var retiredEnvKeys = []string{"USD_PER_DAY", "KEYPROXY_USD_PER_DAY"}
+
+// dropEnvKeys is text without the lines that set any of keys, and whether there were any.
+func dropEnvKeys(text string, keys []string) (string, bool) {
+	if text == "" {
+		return text, false
 	}
-	if existing != "" {
-		return existing
+	var kept []string
+	dropped := false
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		trimmed := strings.TrimPrefix(strings.TrimLeft(line, " \t"), "export ")
+		retired := false
+		for _, key := range keys {
+			if strings.HasPrefix(trimmed, key+"=") {
+				retired = true
+				break
+			}
+		}
+		if retired {
+			dropped = true
+			continue
+		}
+		kept = append(kept, line)
 	}
-	return "20"
+	if !dropped {
+		return text, false
+	}
+	if len(kept) == 0 {
+		return "", true
+	}
+	return strings.Join(kept, "\n") + "\n", true
+}
+
+// retireEnv drops retiredEnvKeys from the env file and the key proxy's, every start: an update
+// carries no step of its own, so the first start of a new launcher is where an old install loses them.
+func retireEnv(p Paths) error {
+	for _, path := range []string{p.Env, p.KeyproxyEnv} {
+		if text, dropped := dropEnvKeys(readFile(path), retiredEnvKeys); dropped {
+			if err := writePrivateFile(path, text); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // envUpdates is everything the launcher sets in <data>/.env. The three DAEDALUS_* paths are
@@ -186,7 +223,6 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"OWNER_USER_ID", answer("OWNER_USER_ID", "owner_id", s.OwnerID)},
 		{"TELEGRAM_API_ID", answer("TELEGRAM_API_ID", "api_id", s.APIID)},
 		{"TELEGRAM_API_HASH", answer("TELEGRAM_API_HASH", "api_hash", s.APIHash)},
-		{"USD_PER_DAY", dailyCap(s.USDPerDay, current["USD_PER_DAY"])},
 		{"DAEDALUS_LOCAL_MODEL", localModel},
 		{"DAEDALUS_FREE_PROVIDER", freeProvider},
 		{"DAEDALUS_FREE_MODEL", freeModel},
@@ -314,7 +350,7 @@ func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 		envVar{"KEYPROXY_UPSTREAM_KILO", "https://api.kilo.ai/api/gateway"},
 		envVar{"KEYPROXY_UPSTREAM_OPENCODE_ZEN", "https://opencode.ai/zen/v1"},
 	)
-	return append(updates, envVar{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])})
+	return updates
 }
 
 // containerReachable is the endpoint's address as the key proxy's container reaches it. Typed on
@@ -427,10 +463,12 @@ func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 			log("%s", move)
 		}
 	}
-	if err := os.WriteFile(p.Env, []byte(mergeEnv(readFile(p.Env), updates)), 0o600); err != nil {
+	env, _ := dropEnvKeys(readFile(p.Env), retiredEnvKeys)
+	if err := writePrivateFile(p.Env, mergeEnv(env, updates)); err != nil {
 		return err
 	}
-	if err := os.WriteFile(p.KeyproxyEnv, []byte(mergeEnv(readFile(p.KeyproxyEnv), keyUpdates)), 0o600); err != nil {
+	keyproxy, _ := dropEnvKeys(readFile(p.KeyproxyEnv), retiredEnvKeys)
+	if err := writePrivateFile(p.KeyproxyEnv, mergeEnv(keyproxy, keyUpdates)); err != nil {
 		return err
 	}
 	return SyncBotEnv(p, mode)
@@ -452,7 +490,7 @@ func SyncBotEnv(p Paths, mode Mode) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p.BotEnv, body, 0o600)
+	return writePrivateFile(p.BotEnv, string(body))
 }
 
 // CurrentSetup reads back what a previous run wrote, so the setup page opens with the values that
@@ -494,7 +532,6 @@ func CurrentSetup(p Paths) Setup {
 		OwnerID:       env["OWNER_USER_ID"],
 		APIID:         env["TELEGRAM_API_ID"],
 		APIHash:       env["TELEGRAM_API_HASH"],
-		USDPerDay:     env["USD_PER_DAY"],
 		LocalURL:      keys["KEYPROXY_UPSTREAM_LOCAL"],
 		LocalKey:      keys["KEYPROXY_KEY_LOCAL"],
 		LocalModel:    env["DAEDALUS_LOCAL_MODEL"],

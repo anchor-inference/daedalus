@@ -140,9 +140,10 @@ same move, and refuses the same way.
    own image in Docker mode, and with the runtime's own git in native mode. Each checkout is a real local history with
    no remote — an update is the next commit on top of it.
 3. The application's window shows the launcher's page (`http://127.0.0.1:8770`, or any free port):
-   a short wizard with Daedalus beside it — how it runs, a model, a daily spending limit, Telegram
-   (optional; without it you use the app in that window), the advanced settings, a summary, and the
-   start itself. The page is in English or Russian; the switch is in its corner and the choice is
+   a short wizard with Daedalus beside it — how it runs, a model, Telegram
+   (optional; without it you use the app in that window), speech, search, the advanced settings, a
+   summary, and the start itself. There is no spending cap until you set one in the app, in
+   Settings → Limits. The page is in English or Russian; the switch is in its corner and the choice is
    remembered.
 4. **Docker:** the image is pulled (or built, if there is no published image for your platform),
    the stack comes up, and the same window moves to the app. One image, two containers from it: the
@@ -682,7 +683,7 @@ page (default 8770, any free one when that is taken), `--setup` to ask the quest
 start, `--version`.
 
 On the setup page, **a field left empty keeps whatever is already in force** — re-running setup to
-change the daily cap does not blank the provider keys, and the public address set by hand in
+change the model does not blank the provider keys, and the public address set by hand in
 `data/.env` is never touched. A key is removed by deleting its line from
 `data/daedalus-secrets/keyproxy.env`.
 

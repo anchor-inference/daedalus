@@ -29,9 +29,8 @@ KEYPROXY_PORT=13201
 DAEDALUS_SUPERVISOR_PORT=18769
 SERVICES_PORT_RANGE=18100-18119
 SERVICES_PUBLIC_HOST=127.0.0.1
-USD_PER_DAY=20
 ENV
-echo "KEYPROXY_USD_PER_DAY=20" >"$data/daedalus-secrets/keyproxy.env"
+: >"$data/daedalus-secrets/keyproxy.env"
 
 # Not Daedalus: a plain HTTP server on the port the env file names for the app.
 mkdir -p "$root/foreign"

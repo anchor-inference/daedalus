@@ -71,10 +71,6 @@ export function makeActs(c) {
   d.overhead.add(gear); gear.position.y = 0.3; hide(gear);
   const aha = spark(1.6); d.overhead.add(aha); aha.position.y = 0.3;
 
-  // Spending: two bronze coins to juggle.
-  const coinGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.05, 32);
-  const coins = [0, 1].map(() => { const m = new THREE.Mesh(coinGeo, bronze); m.rotation.x = Math.PI / 2; d.bob.add(m); hide(m); return m; });
-
   // Telegram: a paper plane, held, then thrown at the card.
   const plane = (() => {
     const g = new THREE.BufferGeometry();
@@ -220,7 +216,7 @@ export function makeActs(c) {
     return tween(dur || 0.35, (k) => { const v = on ? s0 + (1 - s0) * ease.back(k) : s0 * (1 - k); o.scale.setScalar(Math.max(0.0001, v)); }, (k) => k).then(() => { if (!on) hide(o); });
   };
   function clearProps(keep) {
-    const all = [gear, wrench, bolt, scroll, ...coins];
+    const all = [gear, wrench, bolt, scroll];
     all.forEach((o) => { if (o !== keep && o.visible) pop(o, false, 0.25); });
     if (keep !== runsProps && runsProps.visible) {
       tween(0.25, (k) => { runsProps.scale.setScalar(Math.max(0.0001, 1 - k)); }).then(() => { runsProps.visible = false; runsProps.scale.setScalar(1); });
@@ -273,33 +269,6 @@ export function makeActs(c) {
         if (raw > 0.62) deliver(screenOf(aha));
         if (raw > 0.9) armsFree();
       }, (k) => k).then(() => { aha.material.opacity = 0; act.roll = 0; armsFree(); });
-    },
-    // two coins juggled hand to hand, the last one caught and held up
-    limit(S, deliver) {
-      // Low arcs in front of the body, at hand height: the first version tossed them over his face
-      // and they passed through the front of the head. Head: |x| < 1.0, y 1.86..3.6, z < 0.84.
-      const L = V(-0.6, 1.2, 1.1), R = V(0.6, 1.2, 1.1);
-      // placed in the hands before they are shown, so no frame has them at the body's centre
-      coins.forEach((m, j) => { m.position.copy(j ? R : L); m.visible = true; m.scale.setScalar(1); });
-      return tween(1.7, (k, raw) => {
-        const toss = 3 * raw; // three tosses
-        coins.forEach((m, j) => {
-          const ph = (toss + j * 0.5) % 1, dir = Math.floor(toss + j * 0.5) % 2;
-          const a = dir ? R : L, b = dir ? L : R;
-          m.position.lerpVectors(a, b, ph); m.position.y += Math.sin(ph * Math.PI) * 0.42;
-          m.rotation.y = toss * 6 + j;
-          if (raw > 0.82) { // the catch: both come to the right hand, one held up
-            const q = seg(raw, 0.82, 1);
-            m.position.lerp(V(1.5 + j * 0.06, 2.2 + j * 0.1, 0.9), q); // held up beside the head, clear of it
-          }
-        });
-        const up = (s) => Math.max(0, Math.sin(s * Math.PI * 2));
-        armTo(0, -1.1 - 0.7 * up(toss / 2), 0.25, raw < 0.82 ? 1 : 0.4);
-        armTo(1, -1.1 - 0.7 * up(toss / 2 + 0.5), 0.25, 1);
-        if (raw > 0.82) armTo(1, -2.3, 0.4, 1);
-        guide.gaze.y = 0.6; act.pitch = -0.25;
-        if (raw > 0.86) deliver(screenOf(coins[0]));
-      }, (k) => k).then(() => { armsFree(); act.pitch = 0; setTimeout(() => coins.forEach((m) => pop(m, false, 0.25)), 600); });
     },
     // folds back his arm and throws a paper plane; it glides to the card and the step opens there
     telegram(S, deliver) {
