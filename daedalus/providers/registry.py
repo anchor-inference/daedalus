@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from protocore.contracts.llm import LLMRequest
 from protocore.providers.openai_compat import ReasoningReplay
 
 from daedalus.config import (
@@ -29,6 +30,7 @@ from daedalus.providers.openai_compat import (
     ImageLoader,
     OpenAICompatibleProvider,
     ProviderEndpoint,
+    UnreachableNotice,
     UsageSink,
 )
 from daedalus.providers.pricing import (
@@ -94,6 +96,9 @@ class ProviderRegistry:
         """Told of every refusal that states a model's real window; set by the context-window service."""
         self.on_route_refusal: Callable[[str, str], None] | None = None
         """Told when none of a model's chosen OpenRouter providers could serve it; set by the routes service."""
+        self.on_unreachable: UnreachableNotice | None = None
+        """Told of every pause a request spends waiting for an endpoint that refused the connection, and of
+        its end; set by the session runner, which shows the wait on the run's screen."""
         self.reload(config)
 
     def _images_for(self, provider_id: str, model: str) -> bool:
@@ -117,6 +122,11 @@ class ProviderRegistry:
         if self.on_route_refusal is not None:
             self.on_route_refusal(provider_id, model)
 
+    async def _unreachable(self, provider_id: str, request: LLMRequest, retry_in: float | None) -> None:
+        # Late as well: the runner that listens is built around this registry.
+        if self.on_unreachable is not None:
+            await self.on_unreachable(provider_id, request, retry_in)
+
     def reload(self, config: RuntimeConfig) -> None:
         fresh: dict[str, OpenAICompatibleProvider] = {}
         for provider_id, pc in config.providers.items():
@@ -139,6 +149,7 @@ class ProviderRegistry:
                 images_for=lambda model, pid=provider_id: self._images_for(pid, model),
                 routing_for=lambda model, pid=provider_id: self._route_of(pid, model),
                 route_refusal=self._route_refusal,
+                on_unreachable=self._unreachable,
                 admission=self._admission,
                 context_refusal=self._context_refusal,
                 fitted_images=self._fitted_images,

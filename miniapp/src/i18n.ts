@@ -5992,6 +5992,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "turn.time.took": { en: "answered in {t}", ru: "ответ за {t}" },
   "session.status.preparing": { en: "Preparing the next step", ru: "Готовит следующий шаг" },
   "session.status.responding": { en: "Writing the answer", ru: "Пишет ответ" },
+  "session.status.providerWait": { en: "Waiting for the provider to come back", ru: "Ждём, пока провайдер снова ответит" },
   "session.status.stale": { en: "No new events for {n}s", ru: "Нет новых событий {n} с" },
   "session.retry.title": { en: "Regenerate this answer?", ru: "Перегенерировать этот ответ?" },
   "session.retry.body": { en: "This answer and all following messages will be permanently deleted, without a backup or a branch. The agent will answer again in this session. Workspace files stay unchanged.", ru: "Этот ответ и все последующие сообщения будут удалены навсегда, без резервной копии и ветки. Агент ответит заново в этой сессии. Файлы рабочей папки останутся без изменений." },

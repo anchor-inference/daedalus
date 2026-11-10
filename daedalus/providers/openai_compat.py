@@ -60,6 +60,7 @@ from daedalus.providers.image_fit import FittedImages, limits_for
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.openrouter_routes import refused_route, routing_body
 from daedalus.providers.pricing import ModelPricing, complete_usage, matching_key
+from daedalus.providers.reconnect import Patience, proxy_unreachable, unreachable
 from daedalus.providers.wire import (
     InlineFitter,
     arguments_cut,
@@ -299,6 +300,10 @@ CACHE_KEY_UPSTREAMS = ("codex", "openai")
 conversation reach the same prompt cache instead of whichever machine answers."""
 
 
+UnreachableNotice = Callable[[str, LLMRequest, float | None], Awaitable[None]]
+"""Told ``(endpoint id, request, retry_in)`` on every pause spent waiting for an unreachable endpoint,
+and with ``None`` once it answers again or the wait is given up."""
+
 CACHE_ROUTING: ContextVar[str | None] = ContextVar("daedalus_cache_routing", default=None)
 """The conversation a run's requests are routed by in place of its own session, set by the run.
 
@@ -526,6 +531,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         fitted_images: FittedImages | None = None,
         routing_for: Callable[[str], Sequence[str]] | None = None,
         route_refusal: Callable[[str, str], None] | None = None,
+        on_unreachable: UnreachableNotice | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
 
@@ -537,7 +543,11 @@ class OpenAICompatibleProvider(ILLMProvider):
 
         ``routing_for(model)`` names the OpenRouter providers that model is limited to, asked on every
         request so a change reaches a run already under way. ``route_refusal(endpoint id, model)`` hears that
-        none of them could serve it."""
+        none of them could serve it.
+
+        ``on_unreachable(endpoint id, request, retry_in)`` hears every pause spent waiting for an endpoint
+        that refused the connection (``retry_in`` seconds), and ``None`` once it answers again, so the
+        run's screen can say what it is waiting for rather than look stuck."""
         self.endpoint = endpoint
         self._context_refusal = context_refusal
         self._routing_for = routing_for or (lambda _model: ())
@@ -550,6 +560,9 @@ class OpenAICompatibleProvider(ILLMProvider):
         self._image_loader = image_loader
         self._fitted_images = fitted_images
         self._admission = admission
+        self._on_unreachable = on_unreachable
+        self._sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+        self._patience: Callable[[], Patience] = Patience
 
     # -- ILLMProvider -----------------------------------------------------------
 
@@ -584,8 +597,32 @@ class OpenAICompatibleProvider(ILLMProvider):
         details: list[dict[str, Any]] = []
         try:
             silent = 0
+            patience: Patience | None = None
             while True:
-                opened = await self._open_stream(request, body, silent)
+                refused: BaseException | httpx.Response | None = None
+                try:
+                    opened = await self._open_stream(request, body, silent)
+                except httpx.HTTPError as exc:
+                    if not unreachable(exc):
+                        raise
+                    opened, refused = None, exc
+                if opened is not None and await self._proxy_unreachable(opened[0]):
+                    refused = opened[0]
+                if refused is not None:
+                    patience = patience or self._patience()
+                    pause = await self._unreachable_pause(request, patience, refused)
+                    if pause is not None:
+                        # The core's idle watchdog counts from the last delta: said before every pause,
+                        # so two minutes of waiting is not cut as a stalled stream after ninety seconds.
+                        yield ProviderDelta(kind=ProviderDeltaKind.progress)
+                        await self._sleep(pause)
+                        continue
+                    if isinstance(refused, httpx.HTTPError):
+                        raise refused
+                    # The key proxy's 502 goes on as the refusal it is, with its body already read.
+                elif patience is not None:
+                    await self._answered_again(request, patience)
+                    patience = None
                 if opened is not None:
                     if await self._steered_after_refusal(body, opened[0]):
                         continue
@@ -1009,13 +1046,31 @@ class OpenAICompatibleProvider(ILLMProvider):
 
     async def _post(self, body: dict[str, Any], request: LLMRequest | None = None,
                     reservation: str | None = None) -> dict[str, Any]:
+        patience: Patience | None = None
         while True:
+            refused: BaseException | httpx.Response | None = None
             try:
                 response = await self._client.post(
                     self._url("/chat/completions"), json=body, headers=self._headers(request)
                 )
             except httpx.HTTPError as exc:
-                raise self._transport_failure(exc) from exc
+                if not unreachable(exc):
+                    raise self._transport_failure(exc) from exc
+                refused = exc
+            else:
+                if await self._proxy_unreachable(response):
+                    refused = response
+            if refused is not None:
+                patience = patience or self._patience()
+                pause = await self._unreachable_pause(request, patience, refused)
+                if pause is not None:
+                    await self._sleep(pause)
+                    continue
+                if isinstance(refused, httpx.HTTPError):
+                    raise self._transport_failure(refused) from refused
+            elif patience is not None:
+                await self._answered_again(request, patience)
+                patience = None
             if not await self._steered_after_refusal(body, response):
                 break
         if response.status_code >= 400:
@@ -1026,6 +1081,49 @@ class OpenAICompatibleProvider(ILLMProvider):
         if "error" in data and not data.get("choices"):
             self._raise_stream_error(data["error"])
         return data
+
+    async def _proxy_unreachable(self, response: httpx.Response) -> bool:
+        """Whether ``response`` is the key proxy reporting its upstream unreachable. The body is read
+        whole for it, which is harmless: such a body is a line of JSON, and an error body is read whole
+        anyway before it is raised."""
+        if response.status_code != 502:
+            return False
+        text = (await response.aread()).decode("utf-8", "replace")
+        if not proxy_unreachable(502, text):
+            return False
+        await response.aclose()
+        return True
+
+    async def _unreachable_pause(self, request: LLMRequest | None, patience: Patience,
+                                 refused: BaseException | httpx.Response) -> float | None:
+        """The pause before trying an unreachable endpoint again, or ``None`` when the wait is over.
+
+        Only connect-level failures come here, so another attempt cannot repeat anything: no byte of the
+        request reached the model. A stop cancels the task that is sleeping, so it ends the wait at once.
+        """
+        pause = patience.next_wait()
+        what = "HTTP 502 from the key proxy" if isinstance(refused, httpx.Response) else f"{type(refused).__name__}: {refused}"
+        if pause is None:
+            logger.warning("%s: still unreachable after %.0fs and %d attempt(s) (%s); giving up",
+                           self.endpoint.id, patience.elapsed, patience.attempts + 1, what)
+            await self._tell_unreachable(request, None)
+            return None
+        logger.warning("%s: unreachable (%s); trying again in %.1fs (attempt %d, %.0fs waited)",
+                       self.endpoint.id, what, pause, patience.attempts + 1, patience.elapsed)
+        await self._tell_unreachable(request, pause)
+        return pause
+
+    async def _answered_again(self, request: LLMRequest | None, patience: Patience) -> None:
+        logger.warning("%s: reachable again after %.1fs and %d attempt(s)", self.endpoint.id, patience.elapsed, patience.attempts + 1)
+        await self._tell_unreachable(request, None)
+
+    async def _tell_unreachable(self, request: LLMRequest | None, retry_in: float | None) -> None:
+        if self._on_unreachable is None or request is None:
+            return
+        try:
+            await self._on_unreachable(self.endpoint.id, request, retry_in)
+        except Exception:  # noqa: BLE001 — the notice is a courtesy to the screen; the wait goes on without it
+            logger.warning("could not report %s as unreachable", self.endpoint.id, exc_info=True)
 
     def _raise_stream_error(self, error: Any) -> None:
         """An error the provider reported inside a 200 (a stream chunk, or the key proxy's assembled body)."""

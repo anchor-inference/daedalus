@@ -20,7 +20,7 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
  */
 /** `stepAt` is when what the agent does now between tools began: the latest model message's start or
  *  tool result, which the live bar times a step by when no tool is running. */
-export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; stepAt?: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
+export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; stepAt?: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[]; /** The model endpoint refused the connection and the run waits for it to come back. */ providerWait?: boolean };
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, stepAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
 export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
@@ -60,6 +60,8 @@ export type Turn = {
   media?: MediaPresentation[];
   /** Last meaningful stream event. Transport keepalives never update this clock. */
   lastActivityAt?: number | null;
+  /** The run is waiting for its model endpoint to accept connections again (a key proxy restarting). */
+  providerWait?: boolean;
   /** The run ended without an answer: why, and where. Drawn as the turn's closing line. */
   outcome?: RunOutcome;
   /** Every stop the closing line stands for, the first one included: the runs the host drove again
@@ -357,6 +359,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   }
   t.endedAt = now;
   t.lastActivityAt = live.lastActivityAt;
+  t.providerWait = !!live.providerWait;
   return t;
 }
 
@@ -732,17 +735,20 @@ export function liveAfter(state: LiveState, event: string, p: Record<string, any
     state = { ...EMPTY_LIVE, runId: p.run_id };
   }
   if (event === "queue_update" && p.placed?.length) return { ...EMPTY_LIVE, runId: state.runId, model: state.model, fallback: state.fallback };
-  if (event === "message_start") return { ...state, text: "", thinking: "", ended: false, startedAt: state.startedAt ?? meaningful, stepAt: meaningful, lastActivityAt: meaningful };
+  // The host's word that the endpoint is being waited for, every pause, and that the wait is over. It counts
+  // as activity: the run is doing the one thing it can, and "no new events" would read as a hang.
+  if (event === "provider_wait") return { ...state, providerWait: p.retry_in != null, lastActivityAt: meaningful };
+  if (event === "message_start") return { ...state, providerWait: false, text: "", thinking: "", ended: false, startedAt: state.startedAt ?? meaningful, stepAt: meaningful, lastActivityAt: meaningful };
   // Which model is speaking, said before the message it belongs to. `fallback: false` is the run coming
   // back to the model it was configured with, and it takes the note away rather than leaving it standing.
   if (event === "model_changed") return { ...state, model: String(p.to ?? p.model_name ?? ""), fallback: p.fallback ? { from: String(p.configured ?? p.from ?? ""), to: String(p.to ?? ""), reason: String(p.reason ?? "") } : null, lastActivityAt: meaningful };
   if (event === "content_block_delta") {
     const d = p.delta ?? {};
-    if (d.type === "text_delta") return { ...state, text: state.text + (d.text ?? ""), lastActivityAt: meaningful };
-    if (d.type === "thinking_delta") return { ...state, thinking: state.thinking + (d.text ?? ""), lastActivityAt: meaningful };
+    if (d.type === "text_delta") return { ...state, providerWait: false, text: state.text + (d.text ?? ""), lastActivityAt: meaningful };
+    if (d.type === "thinking_delta") return { ...state, providerWait: false, thinking: state.thinking + (d.text ?? ""), lastActivityAt: meaningful };
     return state;
   }
-  if (event === "tool_use_start") return { ...state, tools: [...state.tools, { id: p.tool_call_id, name: p.tool_name, args: "", startedAt: meaningful }], lastActivityAt: meaningful };
+  if (event === "tool_use_start") return { ...state, providerWait: false, tools: [...state.tools, { id: p.tool_call_id, name: p.tool_name, args: "", startedAt: meaningful }], lastActivityAt: meaningful };
   if (event === "tool_use_stop") return { ...state, tools: state.tools.map((t) => (t.id === p.tool_call_id ? { ...t, args: JSON.stringify(p.final_input ?? {}) } : t)), lastActivityAt: meaningful };
   if (event === "tool_group_loaded") {
     const load: GroupLoad = { group: String(p.group ?? ""), tools: Array.isArray(p.tools) ? p.tools.length : 0, via: String(p.via ?? "") };

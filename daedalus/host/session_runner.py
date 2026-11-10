@@ -287,6 +287,9 @@ class HostEventType(StrEnum):
     """A command running on the operator's terminal printed something: ``{tool_call_id, delta}``, live only."""
     TRANSCRIPT_NOTE = "transcript_note"
     """The host wrote a line into the conversation outside any run: the app reads the end of it again."""
+    PROVIDER_WAIT = "provider_wait"
+    """The run's model endpoint refused the connection and the request waits for it: ``{provider, retry_in}``,
+    then ``retry_in: None`` once it answers or the wait is over. Live only."""
 
 
 @dataclass(slots=True)
@@ -903,6 +906,7 @@ class SessionManager:
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
         )
+        self.providers.on_unreachable = self._provider_unreachable
         # In Docker a stdio server starts inside this container, which is not the machine a session
         # working in a host folder runs its Exec on: what the agent checks there (adb, a paired phone,
         # an installed CLI) is not what the server sees. Every error and the app say where it ran.
@@ -4619,6 +4623,20 @@ class SessionManager:
         state = self._states.get(session_id)
         payload = {"session_id": session_id, "tool_call_id": tool_call_id, "message_id": tool_call_id, "block_id": "remote_output", "delta": text}
         await self._notify_sinks(session_id, HostEvent(HostEventType.REMOTE_OUTPUT, (state.run_id if state is not None else "") or "", payload))
+
+    async def _provider_unreachable(self, provider_id: str, request: LLMRequest, retry_in: float | None) -> None:
+        """Show on the run's screen that its model endpoint is being waited for, and when that is over.
+
+        Without it a deploy that restarts the key proxy left the screen saying nothing for up to two
+        minutes, which reads as a hung run and invites a Stop that throws the run away.
+        """
+        obs = request.observability
+        session_id = obs.session_id if obs is not None else None
+        state = self._states.get(session_id) if session_id else None
+        if state is None or not state.running:
+            return  # a title, a summary or a classifier call: no run screen is waiting on it
+        payload = {"provider": provider_id, "retry_in": None if retry_in is None else round(retry_in, 1)}
+        await self._notify_sinks(state.session.id, HostEvent(HostEventType.PROVIDER_WAIT, state.run_id or "", payload))
 
     async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         """One short request to a preset for a helper around the operator's messages.
