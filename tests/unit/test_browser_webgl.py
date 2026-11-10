@@ -47,7 +47,8 @@ async def daemon(base: Path) -> AsyncIterator[FakeBrowserd]:
 
 @pytest.fixture
 def runtime() -> RuntimeConfig:
-    return RuntimeConfig(browser=BrowserConfig(control_wait_seconds=0.2))
+    # The ask itself is what most of these test, so the rig asks; the default lets the GPU through.
+    return RuntimeConfig(browser=BrowserConfig(control_wait_seconds=0.2, webgl_allow="ask"))
 
 
 class Rig:
@@ -254,8 +255,9 @@ async def test_the_environment_listing_carries_what_the_daemon_offers(rig: Rig, 
     assert container["webgl"] == {"modes": ["off", "software"], "gpu": False, "gpu_reason": daemon.gpu[1]}
 
 
-def test_the_standing_permission_is_one_of_three_levels_and_asks_by_default() -> None:
-    assert BrowserConfig().webgl_allow == "ask"
+def test_the_standing_permission_is_one_of_three_levels_and_lets_the_gpu_through_by_default() -> None:
+    # The operator's choice: GPU WebGL for their agent's browser needs no question.
+    assert BrowserConfig().webgl_allow == "gpu"
     for level in ("ask", "software", "gpu"):
         assert BrowserConfig(webgl_allow=level).webgl_allow == level  # type: ignore[arg-type]
     with pytest.raises(ValidationError):
