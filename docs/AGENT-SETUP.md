@@ -58,7 +58,6 @@ Fill `.env` (secrets do NOT go here; it is mounted into the agent container):
 |---|---|
 | `TELEGRAM_BOT_TOKEN`, `OWNER_USER_ID`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | the Telegram answers, or leave empty |
 | `MINIAPP_PUBLIC_URL` | `https://<domain>` when there is one, else empty |
-| `USD_PER_DAY` | the cap |
 | `SEARXNG_SECRET` | any random string (`openssl rand -hex 16`) |
 | `DAEDALUS_COMPOSE_PROJECT_DIR`, `DAEDALUS_COMPOSE_FILE`, `DAEDALUS_CORE_PROJECT_DIR` | absolute paths: the `daedalus` checkout, its `deploy/compose.yaml`, the `protocore-exp` checkout |
 | `SERVICES_PUBLIC_HOST` | the server's LAN or public address (the operator opens agent-hosted services at `<host>:<port>`) |

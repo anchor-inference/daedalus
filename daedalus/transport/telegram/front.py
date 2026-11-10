@@ -1899,7 +1899,7 @@ class TelegramFront:
             f"model: {model_line}\n"
             f"fallback: {(', '.join(c.model.chain) or 'none') if c.model.auto_fallback else 'off'}\n"
             f"self-change approval: {c.self_change.approval}, auto_rebuild={c.self_change.auto_rebuild}\n"
-            f"limits: ${self.settings.usd_per_day}/day (env), {c.limits.max_iterations or 'no cap on'} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
+            f"limits: ${c.limits.usd_per_day}/day, {c.limits.max_iterations or 'no cap on'} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
             f"balance thresholds: {c.balance.thresholds_usd} (every {c.balance.poll_seconds}s)\n"
             f"verbosity: {c.telegram.verbosity}\n"
             + (

@@ -224,7 +224,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("owner_user_id", "api_port", "services_door_port", "guest_door_port", "usd_per_day", mode="before")
+    @field_validator("owner_user_id", "api_port", "services_door_port", "guest_door_port", mode="before")
     @classmethod
     def _blank_means_default(cls, value: object, info: Any) -> object:
         """``OWNER_USER_ID=`` in an env file is an unset value, not the number "".
@@ -390,9 +390,6 @@ class Settings(BaseSettings):
     """The run directory of the desktop daemon (``deskd``) the launcher starts in a native installation:
     its endpoint, the host's token and its socket. Unset or empty = no computer use. The operator's own
     token, the one that grants control, is never here: the launcher keeps it in its own state."""
-
-    usd_per_day: float = 20.0
-    """Daily spend cap. Enforced by the supervisor from its own environment, never from config.toml."""
 
     @property
     def supervisor_address(self) -> str:
@@ -1021,6 +1018,10 @@ class LimitsConfig(BaseModel):
     work is done, the operator stops it, or a spend, time or token cap below is reached. A default
     cap here once stopped real work part-way, which is why it is off unless the operator sets one."""
     tool_timeout_seconds: float = 900.0
+    usd_per_day: float = Field(default=0.0, ge=0)
+    """Cap on priced spend across the installation in one UTC day; 0 = none. Set in Settings → Limits
+    like every other cap. It once lived in the supervisor's environment, where the operator could not
+    change it from the app and a run stopped at a cap they believed they had raised."""
     usd_per_run: float = Field(default=5.0, ge=0)
     """Spend cap for one run; the run is stopped after the model call that crosses it. 0 = no cap.
     Calls without a known price (self-hosted models) cannot count towards it."""

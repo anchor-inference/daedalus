@@ -54,8 +54,9 @@ def config() -> RuntimeConfig:
 
 async def started(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch,
                   runtime: RuntimeConfig | None = None) -> tuple[SessionManager, list[httpx.Request]]:
-    settings.usd_per_day = 3.0
-    manager = SessionManager(settings, runtime or config(), db=db)
+    runtime = runtime or config()
+    runtime.limits.usd_per_day = 3.0
+    manager = SessionManager(settings, runtime, db=db)
     await manager.start(recovering=False)
     sent: list[httpx.Request] = []
     for adapter in manager.providers._providers.values():

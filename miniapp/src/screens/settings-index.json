@@ -561,6 +561,12 @@
       "synonyms": ["subagent models", "helper models", "allowed models", "SubAgent model", "модели субагентов", "модели помощников", "разрешённые модели"]
     },
     {
+      "section": "limits", "anchor": "limits.usd_per_day", "config": "limits.usd_per_day",
+      "title": { "en": "Daily spend cap", "ru": "Потолок трат в день" },
+      "about": { "en": "The most everything together may spend in one UTC day, in USD; 0 means no cap.", "ru": "Сколько USD может потратить всё вместе за сутки по UTC; 0 — без лимита." },
+      "synonyms": ["daily budget", "daily cap", "USD per day", "budget per day", "USD_PER_DAY", "дневной лимит", "лимит в день", "бюджет на день", "дневной бюджет"]
+    },
+    {
       "section": "limits", "anchor": "limits.usd_per_run", "config": "limits.usd_per_run",
       "title": { "en": "Spend cap per run", "ru": "Потолок трат за запуск" },
       "about": { "en": "The most one run may spend in USD; 0 means no cap.", "ru": "Сколько USD может потратить один запуск; 0 — без лимита." },
@@ -1177,12 +1183,6 @@
       "title": { "en": "Add a key proxy upstream", "ru": "Добавить upstream в key proxy" },
       "about": { "en": "Any HTTP API the agent should call without seeing its key: a name, an address and an optional key.", "ru": "Любой HTTP API, который агент вызывает, не видя ключа: имя, адрес и, если нужно, ключ." },
       "synonyms": ["KEYPROXY_UPSTREAM", "custom upstream", "свой upstream", "свой API", "добавить API"]
-    },
-    {
-      "section": "models", "anchor": "keyproxy.usd_per_day", "config": null, "tab": "providers",
-      "title": { "en": "Key proxy daily cap", "ru": "Дневной лимит key proxy" },
-      "about": { "en": "The dollar cap the key proxy itself enforces on paid model calls each day; 0 turns it off.", "ru": "Дневной лимит в долларах, который key proxy сам соблюдает для платных вызовов моделей; 0 выключает его." },
-      "synonyms": ["KEYPROXY_USD_PER_DAY", "daily budget", "budget", "лимит в день", "бюджет", "дневной бюджет"]
     },
     {
       "section": "tools", "anchor": "tools.web.search.keys", "config": null,

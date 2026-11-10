@@ -188,7 +188,7 @@ async def _config(ctx: DoctorContext) -> list[Check]:
         out.append(Check("exec sandbox details", True, "; ".join(f"{label}: {value}" for label, value in rows[1:]), "info", ""))
     out.append(await asyncio.to_thread(_local_speech, ctx))
     out.append(await asyncio.to_thread(_local_voice, ctx))
-    out.append(Check("per-run spend cap", cfg.limits.usd_per_run > 0, f"${cfg.limits.usd_per_run:.2f} per run, ${st.usd_per_day:.2f} per day" if cfg.limits.usd_per_run > 0 else f"no per-run cap (daily cap ${st.usd_per_day:.2f})", "ok" if cfg.limits.usd_per_run > 0 else "warn", "set limits.usd_per_run in Settings"))
+    out.append(Check("per-run spend cap", cfg.limits.usd_per_run > 0, f"${cfg.limits.usd_per_run:.2f} per run, ${cfg.limits.usd_per_day:.2f} per day" if cfg.limits.usd_per_run > 0 else f"no per-run cap (daily cap ${cfg.limits.usd_per_day:.2f})", "ok" if cfg.limits.usd_per_run > 0 else "warn", "set limits.usd_per_run in Settings"))
     return out
 
 
@@ -409,7 +409,7 @@ async def _state(ctx: DoctorContext) -> list[Check]:
     private = not st.secrets_dir.exists() or (st.secrets_dir.stat().st_mode & 0o077) == 0
     out.append(Check("secrets dir", private, "private" if private else f"{st.secrets_dir} is readable by others", "ok" if private else "warn", f"chmod 700 {st.secrets_dir}"))
     budget = st.state_dir / "BUDGET_EXCEEDED"
-    out.append(Check("daily budget", not budget.exists(), "within budget" if not budget.exists() else f"exceeded: {budget.read_text(encoding='utf-8').strip()[:120]}", "ok" if not budget.exists() else "warn", "runs resume at 00:00 UTC, or raise USD_PER_DAY"))
+    out.append(Check("daily budget", not budget.exists(), "within budget" if not budget.exists() else f"exceeded: {budget.read_text(encoding='utf-8').strip()[:120]}", "ok" if not budget.exists() else "warn", "runs resume at 00:00 UTC, or raise the daily cap in Settings → Limits"))
     if ctx.guard is not None:
         n = getattr(ctx.guard, "unclean_boots", 0)
         skipped = getattr(ctx.guard, "skip_recovery", False)

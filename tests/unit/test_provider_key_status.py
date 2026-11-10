@@ -377,7 +377,7 @@ def _keys_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str = "") 
 
 async def test_a_key_put_into_the_proxy_signs_the_next_call_without_a_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    path = _keys_file(monkeypatch, tmp_path, "OPENROUTER_API_KEY=\nKEYPROXY_USD_PER_DAY=5\n")
+    path = _keys_file(monkeypatch, tmp_path, "OPENROUTER_API_KEY=\nKEYPROXY_KEY_EXA=x\n")
     monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
     monkeypatch.setattr(proxy, "budget_exceeded", lambda: False)
     signed: list[str] = []
@@ -400,7 +400,7 @@ async def test_a_key_put_into_the_proxy_signs_the_next_call_without_a_restart(mo
         assert signed == ["Bearer sk-or-test"], "the call was not signed with the stored key"
         assert proxy.key_status()["openrouter"] == {"configured": True, "kind": "api_key"}
         # The launcher reads the same file at the next start, and every other line is as it was.
-        assert path.read_text(encoding="utf-8") == "OPENROUTER_API_KEY=sk-or-test\nKEYPROXY_USD_PER_DAY=5\n"
+        assert path.read_text(encoding="utf-8") == "OPENROUTER_API_KEY=sk-or-test\nKEYPROXY_KEY_EXA=x\n"
 
         forget = await client.delete("/keys/openrouter", headers={"x-daedalus-token": "tok"})
         assert forget.status == 200 and (await forget.json())["configured"] is False
@@ -602,9 +602,9 @@ async def test_a_search_key_saved_from_the_app_signs_the_next_search_in_its_own_
 
 
 async def test_every_value_of_the_keys_file_is_listed_and_written_without_a_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    for var in ("KEYPROXY_USD_PER_DAY", "KEYPROXY_UPSTREAM_MYLLM", "KEYPROXY_KEY_MYLLM", "KEYPROXY_KEY_EXA"):
+    for var in ("KEYPROXY_UPSTREAM_MYLLM", "KEYPROXY_KEY_MYLLM", "KEYPROXY_KEY_EXA"):
         monkeypatch.delenv(var, raising=False)
-    path = _keys_file(monkeypatch, tmp_path, "KEYPROXY_KEY_EXA=exa-secret\nKEYPROXY_USD_PER_DAY=20\n")
+    path = _keys_file(monkeypatch, tmp_path, "KEYPROXY_KEY_EXA=exa-secret\n")
     monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
     token = {"x-daedalus-token": "tok"}
     async with TestClient(TestServer(proxy.make_app())) as client:
@@ -616,12 +616,7 @@ async def test_every_value_of_the_keys_file_is_listed_and_written_without_a_rest
         assert rows["exa"]["group"] == "search" and rows["exa"]["key"] == {"name": "KEYPROXY_KEY_EXA", "secret": True, "set": True, "source": "file"}
         assert rows["keenable"]["header"]["default"] == "X-API-Key" and rows["keenable"]["address"]["default"] == "https://api.keenable.ai/v1"
         assert rows["opencode_zen"]["shares_key_with"] == "opencode"
-        assert view["budget"]["value"] == "20" and view["writable"] is True
-
-        # The daily cap holds from the next call.
-        assert proxy.budget_usd_per_day() == 20
-        assert (await client.put("/settings/KEYPROXY_USD_PER_DAY", json={"value": "7.5"}, headers=token)).status == 200
-        assert proxy.budget_usd_per_day() == 7.5
+        assert "budget" not in view and view["writable"] is True
 
         # An upstream of the operator's own, added and then keyed, is served at once.
         assert (await client.put("/settings/KEYPROXY_UPSTREAM_MYLLM", json={"value": "https://llm.example/v1"}, headers=token)).status == 200
@@ -630,14 +625,13 @@ async def test_every_value_of_the_keys_file_is_listed_and_written_without_a_rest
         listed = await (await client.get("/settings", headers=token)).json()
         assert next(row for row in listed["upstreams"] if row["upstream"] == "myllm")["group"] == "extra"
 
-        # Nothing outside keys, addresses, headers and the cap can be reached, and nonsense is refused.
-        for name in ("KEYPROXY_PORT", "KEYPROXY_KEYS_FILE", "KEYPROXY_AGENT_API", "PATH"):
+        # Nothing outside keys, addresses and headers can be reached, and nonsense is refused.
+        for name in ("KEYPROXY_PORT", "KEYPROXY_KEYS_FILE", "KEYPROXY_AGENT_API", "KEYPROXY_USD_PER_DAY", "PATH"):
             assert (await client.put(f"/settings/{name}", json={"value": "x"}, headers=token)).status == 404, name
         assert (await client.put("/settings/KEYPROXY_UPSTREAM_MYLLM", json={"value": "file:///etc/passwd"}, headers=token)).status == 400
         assert (await client.put("/settings/KEYPROXY_AUTH_MYLLM", json={"value": "X Bad: header"}, headers=token)).status == 400
-        assert (await client.put("/settings/KEYPROXY_USD_PER_DAY", json={"value": "-1"}, headers=token)).status == 400
         text = path.read_text(encoding="utf-8")
-        assert "KEYPROXY_PORT" not in text and "file://" not in text and "KEYPROXY_USD_PER_DAY=7.5" in text
+        assert "KEYPROXY_PORT" not in text and "file://" not in text
 
 
 def test_the_opencode_allowance_sees_a_key_saved_from_the_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -653,7 +647,7 @@ async def test_the_app_lists_and_writes_key_proxy_values_through_its_own_api(cli
         if request.headers.get("x-daedalus-token") != "tok":
             return httpx.Response(403, json={"error": "no"})
         if request.url.path == "/settings":
-            return httpx.Response(200, json={"writable": True, "upstreams": [], "cli_logins": [], "budget": {"name": "KEYPROXY_USD_PER_DAY", "value": "0"}})
+            return httpx.Response(200, json={"writable": True, "upstreams": [], "cli_logins": []})
         if request.url.path.startswith("/settings/"):
             name = request.url.path[len("/settings/"):]
             if name == "KEYPROXY_PORT":
@@ -693,3 +687,21 @@ async def test_the_key_proxys_card_is_told_when_a_command_could_read_its_keys(cl
     assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is False
     monkeypatch.setattr(app.settings, "native", False)
     assert (await client.get("/api/keyproxy", headers=H)).json()["keys_hidden"] is True, "in a container the keys are in the proxy's own"
+
+
+def test_the_proxy_reads_the_one_daily_cap_from_the_operators_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The proxy once kept a cap of its own in the keys file, and refused calls at $20 after the
+    # operator had lifted the cap they could see in Settings.
+    from daedalus.app import publish_spend_cap
+    from daedalus.config import RuntimeConfig
+
+    monkeypatch.setattr(proxy, "BUDGET_CONFIG", tmp_path / "spend-cap.json")
+    monkeypatch.setenv("KEYPROXY_USD_PER_DAY", "20")
+    assert proxy.budget_usd_per_day() == 0.0
+    config = RuntimeConfig()
+    config.limits.usd_per_day = 100
+    publish_spend_cap(tmp_path, config)
+    assert proxy.budget_usd_per_day() == 100.0
+    assert (tmp_path / "spend-cap.json").stat().st_mode & 0o777 == 0o644
+    (tmp_path / "spend-cap.json").write_text("{", encoding="utf-8")
+    assert proxy.budget_usd_per_day() == 0.0

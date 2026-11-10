@@ -1530,8 +1530,6 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <div className="card">
             <div className="section-title" style={{ marginTop: 0 }}>{t("settings.limits.title")}</div>
-            {/* Only where the environment sets one: without it the line read "daily cap: $undefined". */}
-            {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
@@ -1541,6 +1539,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
               />
             </Row>
+            <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
             <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>

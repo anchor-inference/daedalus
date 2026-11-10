@@ -79,8 +79,8 @@ async def test_create_session_honours_a_workspace_the_caller_names(app: Applicat
 
 def test_blank_telegram_values_in_the_env_file_mean_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A setup that writes every key leaves the Telegram ones empty; the bot must start on that, not fail to parse ""."""
-    for key, value in {"TELEGRAM_BOT_TOKEN": "", "OWNER_USER_ID": "", "API_PORT": "", "USD_PER_DAY": ""}.items():
+    for key, value in {"TELEGRAM_BOT_TOKEN": "", "OWNER_USER_ID": "", "API_PORT": ""}.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
     settings = Settings()
-    assert settings.owner_user_id == 0 and settings.api_port == 8765 and settings.usd_per_day == 20.0 and settings.telegram_bot_token == ""
+    assert settings.owner_user_id == 0 and settings.api_port == 8765 and settings.telegram_bot_token == ""

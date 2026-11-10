@@ -36,6 +36,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,8 +68,8 @@ REBUILDER_HEARTBEAT = "alive"
 REBUILDER_HEARTBEAT_SECONDS = 120.0
 """The sidecar touches the heartbeat every pass of its five-second loop; this is what tells a mounted
 volume with nobody behind it from a rebuilder that can really take the trigger."""
-USD_PER_DAY = float(os.environ.get("USD_PER_DAY", "0") or 0)
-"""Daily spend cap, from the supervisor's own environment — never from a file the bot can edit."""
+CONFIG = STATE / "config.toml"
+"""Where the operator's settings are kept; the daily cap is ``[limits] usd_per_day`` in it."""
 GOOD_DIR = STATE / "good"
 HISTORY = GOOD_DIR / "history.json"
 FAILED = GOOD_DIR / "FAILED"
@@ -1251,7 +1252,7 @@ class Supervisor:
             "known_good": load_history()[-3:],
             "failed": FAILED.read_text()[:2000] if FAILED.exists() else None,
             "last_rebuild": LAST_REBUILD.read_text()[-500:] if LAST_REBUILD.exists() else None,
-            "usd_per_day": USD_PER_DAY,
+            "usd_per_day": daily_cap(),
             "budget_exceeded": LIMIT_FLAG.exists(),
             "selfdev_mode": self.mode,
             "last_change": last_change(),
@@ -1382,8 +1383,11 @@ class Supervisor:
         while True:
             await asyncio.sleep(60)
             try:
-                cap = USD_PER_DAY
+                cap = daily_cap()
                 if cap <= 0 or not db_path.exists():
+                    # A cap lowered to none lifts a flag the old cap left, or runs would stay
+                    # refused until midnight with nothing in force.
+                    LIMIT_FLAG.unlink(missing_ok=True)
                     continue
                 spent = _spent_today(db_path)
                 if spent > cap and not LIMIT_FLAG.exists():
@@ -1393,6 +1397,23 @@ class Supervisor:
                     LIMIT_FLAG.unlink()
             except Exception as exc:  # noqa: BLE001
                 log(f"budget check failed: {exc}")
+
+
+def daily_cap() -> float:
+    """The daily cap the operator set in Settings → Limits, read afresh each pass; 0 = none.
+
+    It used to come from this process's environment, so raising it in the app did nothing until a
+    container was recreated by hand, and a run stopped at a cap the operator believed was gone. Agent
+    commands cannot write this file: the sandbox hides the state folder from them.
+    """
+    try:
+        limits = tomllib.loads(CONFIG.read_text(encoding="utf-8")).get("limits") or {}
+        return max(0.0, float(limits.get("usd_per_day", 0) or 0))
+    except FileNotFoundError:
+        return 0.0
+    except (OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as exc:
+        log(f"daily cap unreadable, none in force: {exc}")
+        return 0.0
 
 
 def _spent_today(db_path: Path) -> float:

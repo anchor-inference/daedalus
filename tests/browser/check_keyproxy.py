@@ -41,9 +41,6 @@ class Proxy:
 
     def write(self, name: str, value: str) -> None:
         self.writes.append((name, value))
-        if name == "KEYPROXY_USD_PER_DAY":
-            self.view["budget"] = keyproxy_var(name, value, "0", written=True)  # type: ignore[index]
-            return
         rows = self.view["upstreams"]  # type: ignore[index]
         if name.startswith("KEYPROXY_UPSTREAM_") and value:
             upstream = name[len("KEYPROXY_UPSTREAM_"):].lower()
@@ -125,12 +122,6 @@ def run(width: int) -> list[str]:
         if proxy.writes[-2:] != [("KEYPROXY_KEY_MYLLM", "my-key"), ("KEYPROXY_UPSTREAM_MYLLM", "https://llm.example/v1")]:
             problems.append(f"{width}: the new upstream was not written as key then address: {proxy.writes[-2:]}")
 
-        cap = card.locator('[data-setting="keyproxy.usd_per_day"] input')
-        cap.fill("7")
-        cap.press("Enter")
-        page.wait_for_timeout(200)
-        if ("KEYPROXY_USD_PER_DAY", "7") not in proxy.writes:
-            problems.append(f"{width}: the daily cap was not written: {proxy.writes}")
         if phone and (outside := page.evaluate(OUTSIDE)):
             problems.append(f"{width}: Models reaches past the screen: {outside}")
 

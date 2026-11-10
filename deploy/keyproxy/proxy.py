@@ -28,9 +28,10 @@ profile in ``clients.py``: ``GET /clients`` says, for the bot alone, which versi
 the newest release (asked of the registries every few hours), and ``POST /clients/<name>/update`` and
 ``/revert`` move it. The profile is stored in the keys file, so it holds from the next call.
 
-The budget is checked in two independent ways: the supervisor's flag file, and — when
-``KEYPROXY_USD_PER_DAY`` is set — the proxy's own read of today's spend from the read-only
-database, which nothing in the agent container can unlink.
+The budget is checked in two independent ways: the supervisor's flag file, and the proxy's own read
+of today's spend from the read-only database against the one daily cap the operator sets in
+Settings → Limits (the host copies it to ``spend-cap.json`` beside the database), which nothing in the agent container
+can unlink.
 """
 
 from __future__ import annotations
@@ -133,6 +134,9 @@ ANTHROPIC_VERSION = "2023-06-01"
 the OpenAI shape never sends it."""
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))
+BUDGET_CONFIG = BUDGET_DB.with_name("spend-cap.json")
+"""The operator's daily cap from Settings → Limits, written beside the database by the host. Not
+``config.toml`` itself: that file is readable by root alone, and this process is not root."""
 BUDGET_CACHE_SECONDS = 30.0
 BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",), ("endpoints",), ("endpoints", "zdr"))
 """Reading a balance, the model list or a model's providers spends nothing; only completions are refused over budget.
@@ -400,10 +404,19 @@ async def handle_set_key(request: web.Request) -> web.Response:
 
 
 def budget_usd_per_day() -> float:
-    """The proxy's own daily cap, read through the keys file so a change in Settings holds from the next call."""
+    """The operator's daily cap from Settings → Limits, read on each check; 0 = none.
+
+    The proxy once kept a cap of its own in the keys file, beside the supervisor's in the
+    environment: two numbers the operator did not see together, and raising the one in Settings left
+    calls refused by the other. There is one cap now: the supervisor reads it from ``config.toml``
+    and this process from the copy the host writes, since it cannot read that file.
+    """
     try:
-        return max(0.0, float(settings().get("KEYPROXY_USD_PER_DAY", "0") or 0))
-    except ValueError:
+        return max(0.0, float(json.loads(BUDGET_CONFIG.read_text(encoding="utf-8")).get("usd_per_day", 0) or 0))
+    except FileNotFoundError:
+        return 0.0
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        logger.warning("daily cap unreadable, none in force: %s", type(exc).__name__)
         return 0.0
 
 
@@ -418,7 +431,7 @@ def setting_writable(var: str) -> bool:
     Nothing else in the environment — the proxy's port, the paths it reads logins and the budget
     from — is reachable this way, so a request through the bot cannot point the proxy elsewhere.
     """
-    return var in SECRET_VARS or var == "KEYPROXY_USD_PER_DAY" or bool(SETTING_NAME.fullmatch(var))
+    return var in SECRET_VARS or bool(SETTING_NAME.fullmatch(var))
 
 
 def setting_secret(var: str) -> bool:
@@ -471,7 +484,7 @@ def settings_view() -> dict[str, Any]:
             "header": entry(f"KEYPROXY_AUTH_{name.upper()}"),
         })
     logins = [{"upstream": name, "configured": credential_readable(auth)} for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH))]
-    return {"writable": bool(KEYS_FILE), "upstreams": upstream_rows, "cli_logins": logins, "budget": entry("KEYPROXY_USD_PER_DAY", "0")}
+    return {"writable": bool(KEYS_FILE), "upstreams": upstream_rows, "cli_logins": logins}
 
 
 async def handle_settings(request: web.Request) -> web.Response:
@@ -505,12 +518,6 @@ async def handle_set_setting(request: web.Request) -> web.Response:
         return web.json_response({"error": "an upstream address starts with http:// or https://"}, status=400)
     if value and var.startswith("KEYPROXY_AUTH_") and not re.fullmatch(r"[A-Za-z0-9-]+", value):
         return web.json_response({"error": "a header name is letters, digits and dashes"}, status=400)
-    if value and var == "KEYPROXY_USD_PER_DAY":
-        try:
-            if float(value) < 0:
-                raise ValueError
-        except ValueError:
-            return web.json_response({"error": "the daily cap is a number of dollars, 0 for none"}, status=400)
     try:
         write_env_value(KEYS_FILE, var, value)
     except OSError as exc:
