@@ -2470,6 +2470,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         effort = overrides.get("reasoning_effort") or preset.reasoning_effort
         return {"thinking": thinking, "reasoning_effort": effort}
 
+    async def subagent_settings(state: Any) -> dict[str, Any]:
+        """What a subagent runs on, for its card: the model, the provider (for its mark), the effort and the window.
+
+        The effort is the one its next call uses, inherited from the leader or set for it alike, and
+        ``off`` when thinking is off: a card that said "medium" for a helper thinking not at all would
+        be the one wrong thing on it."""
+        thinking = await session_thinking(state)
+        try:
+            _, preset = manager.resolve_model(await manager.live.load(state.session.id))
+            window = int(state.context_window or preset.context_window or 0)
+        except Exception:  # noqa: BLE001 — a helper with no usable model shows no window, not an error
+            window = int(state.context_window or 0)
+        return {
+            "model": await session_model_label(state),
+            "provider": await session_provider(state),
+            "effort": str(thinking["reasoning_effort"] or "") if thinking["thinking"] else "off",
+            "window": window,
+        }
+
     async def session_provider(state: Any) -> str:
         """The provider id the session's next call goes to (for the usage card beside the chat)."""
         overrides = await manager.live.load(state.session.id)
@@ -2560,7 +2579,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         )
         context = await manager.context_status(state)
         leader = await manager.get_state(str(state.metadata["subagent_of"])) if state.metadata.get("subagent_of") else None
-        subagents = await app.extensions["subagents"].views(session_id, model_label=session_model_label) if "subagents" in app.extensions else []
+        subagents = await app.extensions["subagents"].views(session_id, describe=subagent_settings) if "subagents" in app.extensions else []
         return {
             "context": context,
             "id": session_id,
@@ -2651,7 +2670,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such session")
         if "subagents" not in app.extensions:
             return {"subagents": []}
-        return {"subagents": await app.extensions["subagents"].views(session_id, model_label=session_model_label)}
+        return {"subagents": await app.extensions["subagents"].views(session_id, describe=subagent_settings)}
 
     async def _subagent_models_view(session_id: str) -> dict[str, Any]:
         state = await manager.get_state(session_id)

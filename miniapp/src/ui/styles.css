@@ -3583,16 +3583,85 @@ input.field[type="range"] {
 /* The Subagents tab: the list, then one helper's conversation under a head that stays in place. */
 .panel-body.tab-subagents { padding-top:0; }
 .subagents { font-size:var(--fs-13); }
-.subagents .dt-section { padding-top:8px; }
-.subagent-row { align-items:flex-start; padding:6px 0; border-radius:var(--radius-xs); cursor:pointer; }
-.subagent-row > .sub-dot { margin-top:6px; }
-.subagent-row > .ic { align-self:center; color:var(--fg-3); }
-.subagent-row:hover .name { text-decoration:underline; }
-.subagent-copy { display:flex; flex-direction:column; gap:1px; min-width:0; }
-.subagent-copy .name { font-weight:600; }
-.subagent-title { color:var(--fg-2); font-size:var(--fs-12); }
-.subagent-copy .sub { font-size:var(--fs-12); }
 .subagents-loading { padding:12px 0; }
+/* The tab's first line: three tallies and the sum, figures only, read at a glance. A zero is dimmed
+   rather than hidden, so the line keeps its shape as helpers finish. */
+.subagents-summary { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:10px 0 8px; color:var(--fg-2); font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
+.subagents-tally { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.subagents-tally i { width:7px; height:7px; border-radius:50%; background:var(--fg-3); }
+.subagents-tally[data-tally="working"] i { background:var(--info); }
+.subagents-tally[data-tally="done"] i { background:var(--ok); }
+.subagents-tally[data-tally="failed"] i { background:var(--bad); }
+.subagents-tally[data-none] { color:var(--fg-3); }
+.subagents-tally[data-none] i { background:none; box-shadow:inset 0 0 0 1.5px var(--fg-3); }
+.subagents-total { color:var(--fg); font-size:var(--fs-13); font-weight:600; }
+.subagents-group { display:flex; flex-direction:column; gap:var(--space-2); padding:4px 0 12px; }
+.subagents-group .dt-label { margin:4px 0 0; }
+/* A helper's card is the inspector card of the Details tab, with one addition: a rail down its left
+   edge in its state's colour, so a column of cards reads as a column of states before a word is read. */
+.subagent-card { --rail:var(--fg-3); position:relative; display:flex; flex-direction:column; gap:6px; min-width:0; padding:8px 10px 6px 13px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-2); overflow:hidden; }
+.subagent-card::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--rail); }
+.subagent-card[data-phase="working"] { --rail:var(--info); }
+.subagent-card[data-phase="question"], .subagent-card[data-phase="parked"] { --rail:var(--warn); }
+.subagent-card[data-phase="failed"] { --rail:var(--bad); }
+.subagent-card[data-phase="done"] { --rail:var(--ok); }
+.subagent-card[data-phase="stopped"], .subagent-card[data-phase="standby"] { --rail:color-mix(in srgb, var(--fg) 22%, transparent); }
+.subagent-card-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:var(--ctl-h-sm); margin:-2px -4px 0; padding:0 4px; border:0; border-radius:var(--radius-xs); background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+.subagent-card-head:hover { background:color-mix(in srgb, var(--fg) 4%, transparent); }
+.subagent-card-head:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.subagent-card-head > .ic { flex:none; color:var(--fg-3); }
+.subagent-name { min-width:0; font-size:var(--fs-14); font-weight:600; }
+.subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:1px 7px 1px 6px; border:1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius:var(--radius-pill); background:color-mix(in srgb, var(--tone) 10%, transparent); color:var(--tone); font-size:var(--fs-11); font-weight:600; white-space:nowrap; }
+.subagent-chip .sub-dot { display:none; }
+.subagent-chip[data-phase="working"] { --tone:var(--info); }
+.subagent-chip[data-phase="working"] .sub-dot { display:inline-block; }
+.subagent-chip[data-phase="working"] .ic { display:none; }
+.subagent-chip[data-phase="question"], .subagent-chip[data-phase="parked"] { --tone:var(--warn); }
+.subagent-chip[data-phase="failed"] { --tone:var(--bad); }
+.subagent-chip[data-phase="done"] { --tone:var(--ok); }
+.subagent-chip[data-phase="stopped"], .subagent-chip[data-phase="standby"] { --tone:var(--fg-3); }
+.subagent-when { flex:none; color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
+.subagent-note { font-size:var(--fs-12); color:var(--fg-2); }
+.subagent-note.attn { color:var(--warn); }
+/* What a working helper does this second: the one line on the card that moves. */
+.subagent-now { display:flex; align-items:center; gap:8px; min-width:0; padding:5px 8px; border-radius:var(--radius-sm); background:color-mix(in srgb, var(--info) 9%, transparent); color:var(--fg); font-size:var(--fs-12); }
+.subagent-now code { min-width:0; font-family:var(--mono); font-size:var(--fs-12); color:var(--info); }
+.subagent-now-pulse { flex:none; width:6px; height:6px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
+.subagent-now-steps { flex:none; margin-left:auto; color:var(--fg-3); font-variant-numeric:tabular-nums; }
+.subagent-brief { display:block; width:100%; margin:0; padding:0; border:0; background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); line-height:1.4; text-align:left; white-space:pre-wrap; overflow-wrap:anywhere; cursor:pointer; }
+.subagent-brief.clamp-2 { display:-webkit-box; }
+.subagent-brief:hover { color:var(--fg); }
+.subagent-brief:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--radius-xs); }
+.subagent-report { display:flex; flex-direction:column; gap:4px; padding:6px 8px; border-left:2px solid color-mix(in srgb, var(--ok) 55%, transparent); border-radius:0 var(--radius-sm) var(--radius-sm) 0; background:var(--surface-1); }
+.subagent-report:not([data-cause="completed"]) { border-left-color:color-mix(in srgb, var(--bad) 55%, transparent); }
+.subagent-report[data-cause="budget"] { border-left-color:color-mix(in srgb, var(--warn) 55%, transparent); }
+.subagent-report[data-cause="cancelled"] { border-left-color:var(--line); }
+.subagent-report p { margin:0; color:var(--fg); font-size:var(--fs-13); line-height:1.4; overflow-wrap:anywhere; }
+.subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-delivery.ok .ic { color:var(--ok); }
+.subagent-delivery.wait { color:var(--warn); }
+.subagent-run { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; color:var(--fg-2); font-size:var(--fs-12); }
+.subagent-model { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; }
+.subagent-model .provider-mark { width:18px; height:18px; border-radius:var(--radius-xs); }
+.subagent-model .provider-mark svg { width:12px; height:12px; }
+.subagent-effort { display:inline-flex; flex:none; align-items:center; gap:3px; padding:0 6px; border:1px solid var(--line); border-radius:var(--radius-pill); color:var(--fg-2); font-size:var(--fs-11); line-height:16px; }
+.subagent-effort.off { color:var(--fg-3); }
+.subagent-spend { display:inline-flex; flex:none; align-items:baseline; gap:8px; color:var(--fg-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.subagent-spend b { color:var(--fg); font-weight:600; }
+.subagent-context { display:flex; align-items:center; gap:8px; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.subagent-bar { flex:1; height:4px; border-radius:var(--radius-pill); background:color-mix(in srgb, var(--fg) 10%, transparent); overflow:hidden; }
+.subagent-bar i { display:block; height:100%; background:var(--data-context); }
+.subagent-bar.attn i { background:var(--warn); }
+.subagent-bar.bad i { background:var(--bad); }
+.subagent-actions { display:flex; flex-wrap:wrap; gap:2px; margin:0 -6px; padding-top:2px; border-top:1px solid var(--line); }
+.subagent-actions .btn { gap:5px; padding:2px 6px; color:var(--fg-2); font-size:var(--fs-12); }
+.subagent-actions .subagent-stop { margin-left:auto; color:var(--bad); }
+/* No helpers: a mark, what the tab will hold, and nothing to press — a helper is started from the chat. */
+.subagents-empty { display:flex; flex-direction:column; align-items:center; gap:6px; max-width:300px; margin:40px auto 0; padding:0 16px; text-align:center; color:var(--fg-2); }
+.subagents-empty-mark { display:grid; place-items:center; width:var(--row-h); height:var(--row-h); margin-bottom:4px; border:1px dashed color-mix(in srgb, var(--fg) 25%, transparent); border-radius:50%; color:var(--fg-3); }
+.subagents-empty b { color:var(--fg); font-size:var(--fs-14); }
+.subagents-empty p { margin:0; font-size:var(--fs-13); line-height:1.45; }
+@media (prefers-reduced-motion: reduce) { .subagent-now-pulse { animation:none; } }
 .subagent-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:8px; margin:0 -12px; padding:6px 8px 6px 6px; border-bottom:1px solid var(--line); background:var(--bg); }
 .subagent-head-copy { display:flex; flex-direction:column; flex:1; min-width:0; }
 .subagent-head-copy b { font-size:var(--fs-13); }

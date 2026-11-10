@@ -34,6 +34,7 @@ export function PanelStrip({ model, effort, context, usage, menu, onModel, model
   const tone = percent !== null ? contextTone(percent) : null;
   const segments = context?.breakdown ? contextSegments(context.breakdown, context.window) : null;
   const today = usage.usd_today != null;
+  const todayText = stripToday(usage);
   const modelName = model || t("session.model.global");
   const contextText = context
     ? context.window > 0 ? t("strip.context.of", { used: fmtTok(context.tokens), window: fmtTok(context.window) }) : t("strip.context.used", { used: fmtTok(context.tokens) })
@@ -64,9 +65,9 @@ export function PanelStrip({ model, effort, context, usage, menu, onModel, model
             <span className="truncate">{contextText}</span>
           </button>
         ) : <span />}
-        <button type="button" className="panel-strip-cost" onClick={onUsage} disabled={!onUsage} data-strip-cost title={t("strip.cost.title")}>
+        <button type="button" className="panel-strip-cost" onClick={onUsage} disabled={!onUsage} data-strip-cost title={todayText.title}>
           <b>{fmtUsd(usage.usd)}</b>
-          {today && <span>{t("strip.cost.today", { sum: fmtUsd(usage.usd_today ?? 0) })}</span>}
+          {today && <span>{todayText.short}</span>}
         </button>
         {context && percent !== null && (
           segments ? (
@@ -80,4 +81,21 @@ export function PanelStrip({ model, effort, context, usage, menu, onModel, model
       </div>
     </div>
   );
+}
+
+/**
+ * The day's part beside the session's total. "$13.72 · today $0" on a chat that had worked all day read
+ * as a broken counter: the total came from yesterday's metered calls, and today's calls all went
+ * through a subscription route, which bills nothing per call. The numbers were right; the words did
+ * not say so. A day whose calls cost nothing says they were unmetered, and the title says where the
+ * total comes from and that the day is UTC's.
+ */
+export function stripToday(usage: PanelStripProps["usage"]): { short: string; title: string } {
+  const calls = usage.c_today ?? 0;
+  const spent = usage.usd_today ?? 0;
+  const unmetered = calls > 0 && spent === 0;
+  return {
+    short: unmetered ? t("strip.cost.today.unmetered") : t("strip.cost.today", { sum: fmtUsd(spent) }),
+    title: t(unmetered ? "strip.cost.title.unmetered" : "strip.cost.title.day", { total: fmtUsd(usage.usd), today: fmtUsd(spent), calls }),
+  };
 }

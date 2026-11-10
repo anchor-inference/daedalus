@@ -115,7 +115,7 @@ def run() -> int:
         expect(trigger.locator(".subagents-count")).to_have_text("3")
         trigger.click()
         expect(page.locator('.panel-tab[data-tab="subagents"].on')).to_be_visible()
-        rows = page.locator(".panel .subagent-row")
+        rows = page.locator(".panel .subagent-card")
         expect(rows).to_have_count(3)
         if "panel=subagents" not in page.url:
             problems.append(f"the Subagents tab is not in the address: {page.url}")
@@ -123,7 +123,7 @@ def run() -> int:
         expect(rows.first).to_contain_text("link-check")
         expect(rows.first).to_contain_text("Check every link")
         expect(page.locator('.panel-tab[data-tab="jobs"]')).to_be_visible()
-        rows.first.click()
+        rows.first.locator(".subagent-card-head").click()
         opened = page.locator(".panel .subagent-open")
         expect(opened.locator(".subagent-head")).to_contain_text("link-check")
         chat = opened.locator(".subagent-chat")
@@ -193,8 +193,8 @@ def run() -> int:
         phone.locator('.ph-session-menu .ph-tile[data-tile="subagents"]').click()
         phone_sheet = phone.locator(".panel-sheet")
         expect(phone_sheet.locator('.panel-tab[data-tab="subagents"].on')).to_be_visible()
-        expect(phone_sheet.locator(".subagent-row")).to_have_count(3)
-        phone_sheet.locator(".subagent-row").nth(1).click()
+        expect(phone_sheet.locator(".subagent-card")).to_have_count(3)
+        phone_sheet.locator(".subagent-card").nth(1).locator(".subagent-card-head").click()
         expect(phone_sheet.locator(".subagent-chat")).to_contain_text("alt text")
         phone_box = phone_sheet.bounding_box()
         assert phone_box
