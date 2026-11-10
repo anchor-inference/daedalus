@@ -192,6 +192,10 @@ func (p Paths) EnsureDirs() error {
 	if err := os.MkdirAll(p.Secrets, 0o700); err != nil {
 		return err
 	}
+	// The key proxy's keys and the SSH key are in here; on Windows the mode above means nothing.
+	if err := restrictToUser(p.Secrets); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(p.HostTerminals, 0o700); err != nil {
 		return err
 	}
@@ -210,6 +214,9 @@ func (p Paths) EnsureNativeDirs() error {
 		return err
 	}
 	if err := os.Chmod(p.Local, 0o700); err != nil {
+		return err
+	}
+	if err := restrictToUser(p.Local); err != nil {
 		return err
 	}
 	for _, dir := range []string{p.Runtime, p.RuntimeEnvs, p.RuntimeBin, p.RuntimeStamps, p.RuntimeLogs, p.Workspaces} {

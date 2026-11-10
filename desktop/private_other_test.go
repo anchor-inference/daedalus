@@ -7,13 +7,17 @@ import (
 	"os"
 )
 
-// privateDirProblem says how the folder is open to anyone but this user, or "" when it is not.
-func privateDirProblem(dir string) string {
-	info, err := os.Stat(dir)
+// privateProblem says how a folder or file is open to anyone but this user, or "" when it is not.
+func privateProblem(path string) string {
+	info, err := os.Stat(path)
 	if err != nil {
 		return err.Error()
 	}
-	if info.Mode().Perm() != 0o700 {
+	want := os.FileMode(0o600)
+	if info.IsDir() {
+		want = 0o700
+	}
+	if info.Mode().Perm() != want {
 		return fmt.Sprintf("mode %v", info.Mode().Perm())
 	}
 	return ""

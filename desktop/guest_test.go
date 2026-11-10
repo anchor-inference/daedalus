@@ -47,7 +47,7 @@ func TestADoorComesWithItsFront(t *testing.T) {
 	if door == nil || front == nil {
 		t.Fatal("both or neither")
 	}
-	if problem := privateDirProblem(guestTokenDir(p)); problem != "" {
+	if problem := privateProblem(guestTokenDir(p)); problem != "" {
 		t.Fatalf("the token's folder is this user's alone: %s", problem)
 	}
 	env := strings.Join(front.(*Process).Env, "\n")

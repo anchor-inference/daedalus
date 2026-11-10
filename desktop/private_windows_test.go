@@ -7,10 +7,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// privateDirProblem says what lets someone other than this user, the system or the administrators
-// into the folder, or "" when nobody else gets in: Windows' form of a 0o700 folder.
-func privateDirProblem(dir string) string {
-	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+// privateProblem says what lets someone other than this user, the system or the administrators
+// into a folder or file, or "" when nobody else gets in: Windows' form of 0o700 and 0o600.
+func privateProblem(path string) string {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err.Error()
 	}
@@ -19,7 +19,7 @@ func privateDirProblem(dir string) string {
 		return err.Error()
 	}
 	if control&windows.SE_DACL_PROTECTED == 0 {
-		return "the folder inherits its parent's access list: " + sd.String()
+		return "it inherits its parent's access list: " + sd.String()
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil || dacl == nil {

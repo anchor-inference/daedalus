@@ -359,7 +359,7 @@ func settlePorts(p Paths, mode Mode, ours func(key string, port int) bool, log f
 	if len(changed) == 0 {
 		return nil
 	}
-	if err := os.WriteFile(p.Env, []byte(mergeEnv(readFile(p.Env), changed)), 0o600); err != nil {
+	if err := writePrivateFile(p.Env, mergeEnv(readFile(p.Env), changed)); err != nil {
 		return fmt.Errorf("the ports this start chose could not be written down: %w", err)
 	}
 	return nil

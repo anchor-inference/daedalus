@@ -147,6 +147,12 @@ func writeTunnelJSON(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	// The folder and not the file: the file is renamed in from a scratch file, which takes the
+	// folder's entries when it is made. Docker mode never makes the local state's folder private
+	// (EnsureNativeDirs), so this folder is made so itself.
+	if err := restrictToUser(filepath.Dir(path)); err != nil {
+		return err
+	}
 	scratch := path + ".tmp"
 	if err := os.WriteFile(scratch, body, 0o600); err != nil {
 		return err
