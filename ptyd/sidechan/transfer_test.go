@@ -398,8 +398,11 @@ func TestAFinishedUnpackIsKeptUntilReleasedOrAborted(t *testing.T) {
 		t.Fatal("a released unpack lost its folder")
 	}
 
-	// More finished copies than there are slots: none of them stops a new transfer.
-	tf.Idle = 100 * time.Millisecond
+	// More finished copies than there are slots: none of them stops a new transfer. The idle time is
+	// short so that it passes within the test, and not shorter: at 100 ms a loaded machine running
+	// the race detector let one copy's begin and write drift apart by more than that, and the copy
+	// expired half-written (one run in fifty, under four busy loops on two cores).
+	tf.Idle = 400 * time.Millisecond
 	for i := 0; i < 5; i++ {
 		finished(fmt.Sprintf("slot-%d", i))
 	}
@@ -410,7 +413,7 @@ func TestAFinishedUnpackIsKeptUntilReleasedOrAborted(t *testing.T) {
 	if err := tf.UnpackRelease(running.Transfer); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a running unpack was released: %v", err)
 	}
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(4 * tf.Idle)
 	if _, err := os.Stat(filepath.Join(tr.home, "slot-0", "a.txt")); err != nil {
 		t.Fatal("a finished copy was removed when its idle time passed")
 	}
