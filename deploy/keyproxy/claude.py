@@ -101,6 +101,16 @@ which is what puts the block back exactly where the model wrote it (:func:`_assi
 # that names the first such block. Claude Code matches the same two phrases and reads the same header.
 _PREFIX_LOCK_PHRASES = ("not created in this conversation", "bound to a different conversation")
 PREFIX_MISMATCH_HEADER = "anthropic-thinking-prefix-mismatch"
+# The models that refuse a forced ``tool_choice`` (``any`` or one named tool) with a 400, whatever the
+# thinking setting: the newest Opus and Sonnet and the Fable and Mythos 5.1 line. The bot's loop forces a
+# tool when a run owes a call (a precondition, a read-back, the terminal answer), and each such step came
+# back as that 400 on both the login and the key. The list only saves the first refusal: a model missing
+# from it is learned from the refusal itself (:func:`forced_choice_refused`) and steered from then on.
+_UNFORCEABLE_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1")
+# The refusal reads 'tool_choice: type "tool" and "any" are not supported for this model.'; matched on the
+# two parts without quotes, because the body arrives as JSON and the quotes in it come escaped.
+_FORCED_CHOICE_REFUSAL = ("tool_choice", "are not supported for this model")
+_learned_unforceable: set[str] = set()
 
 
 def claude_betas() -> str:
@@ -555,6 +565,58 @@ def prefix_locked(status: int, text: str, headers: Any) -> tuple[bool, tuple[int
     return True, None
 
 
+def forces_tools(model: str) -> bool:
+    """Whether ``model`` takes a forced ``tool_choice``; ``False`` for one known or found to refuse it."""
+    return not (model.startswith(_UNFORCEABLE_MODELS) or model in _learned_unforceable)
+
+
+def forced_choice_refused(status: int, text: str) -> bool:
+    """Whether a refusal is the server saying this model takes no forced ``tool_choice``."""
+    return status == 400 and all(part in text for part in _FORCED_CHOICE_REFUSAL)
+
+
+def learn_unforceable(model: str) -> None:
+    """Remember for this process that ``model`` refuses a forced ``tool_choice``."""
+    _learned_unforceable.add(model)
+
+
+def forced_tool(body: dict[str, Any]) -> str | None:
+    """The tool a chat body forces, ``""`` when it forces some tool, ``None`` when it forces nothing."""
+    choice = body.get("tool_choice")
+    if isinstance(choice, dict):
+        name = (choice.get("function") or {}).get("name")
+        return str(name) if name else None
+    return "" if choice in ("required", "any") else None
+
+
+def steers_tool_choice(body: dict[str, Any]) -> bool:
+    """Whether :func:`chat_to_messages` asks for this body's forced call in words rather than in ``tool_choice``."""
+    return bool(body.get("tools")) and forced_tool(body) is not None and not forces_tools(str(body.get("model") or ""))
+
+
+def _steer_to_tool(items: list[dict[str, Any]], wire_name: str) -> None:
+    """Ask for the forced call in a closing line, for a model that refuses a forced ``tool_choice``.
+
+    The line goes after the cache breakpoints are placed, as the last block of the request, so the
+    cached prefix is the one an unforced step writes and the next request reads; ``tool_choice`` is left
+    out rather than set to ``auto``, which is what an unforced step sends too, since a change of
+    ``tool_choice`` alone starts the message cache over. The bot's loop is what makes this safe: a step
+    it forced admits only the call it asked for, drops the rest and asks again within its bound, so a
+    model that does something else costs a step, not a wrong action.
+    """
+    if wire_name:
+        text = f"Call the `{wire_name}` tool now. Reply with that tool call only: no other call and no prose."
+    else:
+        text = "Call one of the available tools now. Reply with tool calls only, no prose."
+    block = {"type": "text", "text": text}
+    last = items[-1] if items else None
+    if last is not None and last.get("role") == "user":
+        content = last.get("content")
+        last["content"] = [*content, block] if isinstance(content, list) else [{"type": "text", "text": str(content or "")}, block]
+    else:
+        items.append({"role": "user", "content": [block]})
+
+
 def chat_to_messages(body: dict[str, Any], *, login: bool = True) -> tuple[dict[str, Any], dict[str, str]]:
     """OpenAI chat-completions body → Anthropic ``/v1/messages`` plus wire-name → original-name.
 
@@ -630,11 +692,16 @@ def chat_to_messages(body: dict[str, Any], *, login: bool = True) -> tuple[dict[
     if tools:
         out["tools"] = tools
     choice = body.get("tool_choice")
-    forced = isinstance(choice, dict) and (choice.get("function") or {}).get("name")
-    if forced:
-        out["tool_choice"] = {"type": "tool", "name": _wire_tool_name(choice["function"]["name"], login)}
+    wanted = forced_tool(body) if tools else None
+    forced = False
+    if wanted is not None and not forces_tools(model):
+        _steer_to_tool(items, _wire_tool_name(wanted, login) if wanted else "")
+    elif wanted:
+        forced = True
+        out["tool_choice"] = {"type": "tool", "name": _wire_tool_name(wanted, login)}
     elif isinstance(choice, str) and choice in ("auto", "none", "any", "required"):
-        out["tool_choice"] = {"type": "any"} if choice == "required" else {"type": choice}
+        forced = choice in ("any", "required")
+        out["tool_choice"] = {"type": "any"} if forced else {"type": choice}
     if effort and not forced:
         # Omitted display keeps time-to-first-token low but makes the model think in silence for a
         # minute or more; messages_events_to_chunks forwards upstream liveness so the caller's idle
@@ -677,7 +744,7 @@ def _usage(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_wri
     }
 
 
-async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, names: dict[str, str] | None = None) -> AsyncIterator[str]:
+async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, names: dict[str, str] | None = None, keep_thinking: bool = True) -> AsyncIterator[str]:
     """Anthropic Messages SSE → chat-completion chunks.
 
     An upstream event that translates to no chunk (ping, the thinking block's start, its signature,
@@ -686,7 +753,11 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
     upstream stays silent and is still caught by the caller's idle watchdog.
 
     Each finished thinking or redacted_thinking block becomes one ``reasoning_details`` entry
-    (:func:`thinking_detail`), which the caller keeps on the assistant turn and sends back.
+    (:func:`thinking_detail`), which the caller keeps on the assistant turn and sends back. With
+    ``keep_thinking`` off none does: that reply's thinking is signed over a closing line the next request
+    will not carry (:func:`_steer_to_tool`), so replaying it would be an edited history, and on an account
+    the preserved-thinking check is enforced on every later request would be refused for it. A turn that
+    never carried thinking breaks no chain; the model loses that one step's reasoning.
 
     Only ``message_stop`` finishes the answer. A body that ends without it was cut in transit, and
     becomes a ``stream_truncated`` error with no ``[DONE]``; a ``tool_use`` block that never got its
@@ -734,7 +805,7 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
             open_calls.discard(index)
             block = thinking.pop(index, None)
             detail = thinking_detail(block, index, offsets.pop(index, 0)) if block is not None else None
-            if detail is not None:
+            if detail is not None and keep_thinking:
                 spoke = True
                 yield _chunk(completion_id, model, {"reasoning_details": [detail]})
         elif kind == "message_start":
@@ -880,9 +951,13 @@ __all__ = [
     "claude_betas",
     "claude_header_windows",
     "claude_usage_view",
+    "forced_choice_refused",
+    "forces_tools",
+    "learn_unforceable",
     "messages_events_to_chunks",
     "prefix_locked",
     "request_betas",
+    "steers_tool_choice",
     "thinking_detail",
     "without_thinking",
 ]

@@ -49,6 +49,13 @@ from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import stated_window
 from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
+from daedalus.providers.forced_choice import (
+    PROXY_TRANSLATED_UPSTREAMS,
+    forces_tools,
+    is_forced,
+    learn_from_refusal,
+    steer,
+)
 from daedalus.providers.image_fit import FittedImages, limits_for
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.openrouter_routes import refused_route, routing_body
@@ -580,6 +587,8 @@ class OpenAICompatibleProvider(ILLMProvider):
             while True:
                 opened = await self._open_stream(request, body, silent)
                 if opened is not None:
+                    if await self._steered_after_refusal(body, opened[0]):
+                        continue
                     break
                 silent += 1
                 if silent > self.endpoint.first_byte_retries:
@@ -919,7 +928,28 @@ class OpenAICompatibleProvider(ILLMProvider):
             route = self._routing_for(model)
             if route:
                 body["provider"] = routing_body(route)
+        if self._steers_forced_calls() and is_forced(body) and not forces_tools(model):
+            # Last, after the cache breakpoints: the closing message must not move one (forced_choice.steer).
+            steer(body)
         return body
+
+    def _steers_forced_calls(self) -> bool:
+        """Whether this adapter asks in words for a forced call the model refuses; the key proxy's Messages
+        translation does it itself for the Claude login and the Anthropic key."""
+        return keyproxy_upstream(self.endpoint.base_url) not in PROXY_TRANSLATED_UPSTREAMS
+
+    async def _steered_after_refusal(self, body: dict[str, Any], response: httpx.Response) -> bool:
+        """Whether ``response`` refused ``body``'s forced choice, so ``body`` is now steered and goes again.
+
+        Read here before any failure is recorded: a model learned this way is not a failing endpoint."""
+        if response.status_code != 400 or not self._steers_forced_calls() or not is_forced(body):
+            return False
+        text = (await response.aread()).decode("utf-8", "replace")
+        if not learn_from_refusal(body, response.status_code, text):
+            return False
+        await response.aclose()
+        logger.warning("%s refused a forced tool_choice for %s; asking for the call in the prompt from now on", self.endpoint.id, body.get("model"))
+        return True
 
     def accepts_images(self, model: str) -> bool:
         return self._image_loader is not None and bool(self._images_for(model))
@@ -979,12 +1009,15 @@ class OpenAICompatibleProvider(ILLMProvider):
 
     async def _post(self, body: dict[str, Any], request: LLMRequest | None = None,
                     reservation: str | None = None) -> dict[str, Any]:
-        try:
-            response = await self._client.post(
-                self._url("/chat/completions"), json=body, headers=self._headers(request)
-            )
-        except httpx.HTTPError as exc:
-            raise self._transport_failure(exc) from exc
+        while True:
+            try:
+                response = await self._client.post(
+                    self._url("/chat/completions"), json=body, headers=self._headers(request)
+                )
+            except httpx.HTTPError as exc:
+                raise self._transport_failure(exc) from exc
+            if not await self._steered_after_refusal(body, response):
+                break
         if response.status_code >= 400:
             if request is not None:
                 await self._observe_failure(request, reservation, response.status_code, response.text, response.headers)
