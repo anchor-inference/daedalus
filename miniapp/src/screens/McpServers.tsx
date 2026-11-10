@@ -7,7 +7,7 @@ import { api } from "../api";
 import { t } from "../i18n";
 import { confirmAsync, errorText } from "../ui";
 import { Segmented } from "../ui/components";
-import { McpQuickAdd, policyOptions, type McpPolicy } from "../mcpquickadd";
+import { McpQuickAdd, locationOptions, policyOptions, type McpHost, type McpLocation, type McpPolicy } from "../mcpquickadd";
 
 
 type OAuthView = { scopes: string[]; issuer: string; client_id: string; client_secret: string; linked: boolean; redirect_uri: string };
@@ -15,7 +15,7 @@ export type McpServerView = {
   name: string; transport: "stdio" | "http"; command: string; args: string[]; url: string; description: string;
   headers: Record<string, string>; env: Record<string, string>; oauth: OAuthView | null;
   approval: string; tool_approval: Record<string, string>;
-  state: string; error: string | null; tools: string[]; remote_tools?: string[]; stderr?: string; runs_in?: string;
+  state: string; error: string | null; tools: string[]; remote_tools?: string[]; stderr?: string; runs_in?: string; location?: McpLocation;
 };
 type Probe = { state: string; error: string | null; tools: string[] };
 type Draft = {
@@ -70,8 +70,10 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [host, setHost] = useState<McpHost | null>(null);
   const load = useCallback(() => {
-    api.get<{ servers: McpServerView[] }>("/api/mcp/servers").then((view) => setServers(view.servers)).catch((error) => toast(errorText(error)));
+    api.get<{ servers: McpServerView[]; host?: McpHost }>("/api/mcp/servers").then((view) => { setServers(view.servers); setHost(view.host ?? null); })
+      .catch((error) => toast(errorText(error)));
   }, [toast]);
   useEffect(load, [load]);
   // The sign-in comes back here with its outcome in the address; it is said once and taken off.
@@ -129,6 +131,18 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
     try {
       const answer = await api.put<{ servers: McpServerView[] }>(`/api/mcp/servers/${enc(s.name)}`, { ...body(draftOf(s)), approval, tool_approval: toolApproval });
       setServers(answer.servers);
+    } catch (error) {
+      toast(errorText(error));
+    } finally { setBusy(null); }
+  }
+  // Where a stdio server runs: moving it restarts its process in the other place on its next use,
+  // and the check that follows says at once whether it answers there.
+  async function setLocation(s: McpServerView, location: McpLocation) {
+    setBusy(s.name);
+    try {
+      const answer = await api.put<{ probe: Probe; servers: McpServerView[] }>(`/api/mcp/servers/${enc(s.name)}`, { ...body(draftOf(s)), location });
+      setServers(answer.servers);
+      said(s.name, answer.probe);
     } catch (error) {
       toast(errorText(error));
     } finally { setBusy(null); }
@@ -229,7 +243,16 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
             {s.description && <div className="dt-hint">{s.description}</div>}
             {s.error && <div className="dt-hint" data-tone="bad">{s.error}</div>}
             {s.stderr && s.state !== "ready" && <details className="mcp-stderr"><summary>{t("mcp.quick.stderr")}</summary><pre className="mono">{s.stderr}</pre></details>}
-            {s.runs_in && <div className="dt-hint quiet">{t(`mcp.where.${s.runs_in}`)}</div>}
+            {s.runs_in && <div className="dt-hint quiet" data-runs-in={s.runs_in}>{t(`mcp.where.${s.runs_in}`)}</div>}
+            {s.transport === "stdio" && host?.offered && (
+              <div className="mcp-policy" data-mcp-location={s.location ?? "server"}>
+                <span className="sub">{t("mcp.location")}</span>
+                <Segmented value={s.location ?? "server"} label={t("mcp.location")} options={locationOptions()} onChange={(location) => void setLocation(s, location)} />
+              </div>
+            )}
+            {s.transport === "stdio" && host?.offered && s.location === "host" && host.problem && (
+              <div className="dt-hint" data-tone="warn">{t("mcp.location.hostProblem", { problem: host.problem })}</div>
+            )}
             <div className="mcp-policy" data-mcp-policy={s.approval}>
               <span className="sub">{t("mcp.policy")}</span>
               <Segmented value={s.approval as McpPolicy} label={t("mcp.policy")} options={policyOptions()} onChange={(approval) => void setPolicy(s, approval, s.tool_approval)} />

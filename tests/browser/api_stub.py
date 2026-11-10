@@ -1676,25 +1676,29 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             {"name": "files", "transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"], "url": "",
              "description": "Read and write the shared data folder", "headers": {}, "env": {}, "oauth": None,
              "approval": "auto", "tool_approval": {"write_file": "ask"}, "remote_tools": ["list_directory", "read_file", "write_file"],
-             "runs_in": "container", "stderr": "",
+             "runs_in": "container", "location": "server", "stderr": "",
              "state": "ready", "error": None, "tools": ["Mcp_Files_read_file", "Mcp_Files_write_file", "Mcp_Files_list_directory"]},
             {"name": "tracker", "transport": "http", "command": "", "args": [], "url": "https://mcp.tracker.example/mcp",
              "description": "Issues and projects", "headers": {}, "env": {},
              "oauth": {"scopes": [], "issuer": "", "client_id": "", "client_secret": "", "linked": False, "redirect_uri": ""},
-             "approval": "auto", "tool_approval": {}, "remote_tools": [], "runs_in": "", "stderr": "",
+             "approval": "auto", "tool_approval": {}, "remote_tools": [], "runs_in": "", "location": "server", "stderr": "",
              "state": "auth_required", "error": None, "tools": []},
         ]
         probe = {"state": "ready", "error": None, "tools": ["Mcp_Files_read_file"]}
         if method.upper() == "GET" and path == "/api/mcp/servers":
-            return 200, "application/json", json.dumps({"servers": servers, "callback": "https://agent.example/api/mcp/oauth/callback"})
+            # A Docker installation whose host terminal can run a server on the machine.
+            return 200, "application/json", json.dumps({"servers": servers, "callback": "https://agent.example/api/mcp/oauth/callback",
+                                                         "host": {"offered": True, "problem": ""}})
         if method.upper() == "POST" and path.endswith("/oauth/begin"):
             return 200, "application/json", json.dumps({"auth_url": "about:blank"})
         if method.upper() == "POST" and path == "/api/mcp/try":
-            # A pasted command started once: it answers, and says on stderr what a phone server says without a device.
+            # A pasted command started once: it answers, and in the container says on stderr what a phone
+            # server says without a device; tried on the host, where the phone is paired, it finds it.
+            on_host = isinstance(body, dict) and body.get("location") == "host"
             return 200, "application/json", json.dumps({
                 "name": "mobile-mcp", "state": "ready", "error": None, "exists": False,
-                "runs_in": "container",
-                "stderr": "mobile-mcp server running on stdio\nadb: no devices/emulators found",
+                "runs_in": "host" if on_host else "container", "location": "host" if on_host else "server",
+                "stderr": "mobile-mcp server running on stdio" + ("" if on_host else "\nadb: no devices/emulators found"),
                 "spec": {"transport": "stdio", "command": "npx", "args": ["-y", "@mobilenext/mobile-mcp@latest"], "env": {}},
                 "tools": [{"name": "mobile_list_available_devices", "description": "List all available devices.", "approval": "allow"},
                           {"name": "mobile_take_screenshot", "description": "Take a screenshot of the mobile device.", "approval": "ask"},

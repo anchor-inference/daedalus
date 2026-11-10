@@ -17,6 +17,18 @@ headers = { Authorization = "Bearer ..." }
 
 Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app.
 
+In Docker a stdio server runs inside the Daedalus container unless it is set to run on the host machine, where your `adb`, paired devices, signed-in CLIs and files are. The host terminal starts it there and carries its stdin and stdout back; natively the two places are the same machine:
+
+```toml
+[mcp.servers.phone]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@mobilenext/mobile-mcp@latest"]
+location = "host"                        # "server" (the default) or "host"
+```
+
+The app's MCP settings offer the same choice per server. A host terminal installed before this needs updating once (`bash deploy/host-terminal.sh install` after the image is rebuilt); until then a server set to `host` fails with words that say so.
+
 A call to an MCP tool is asked about first unless the tool says it is safe. With no setting, the tool's own annotations decide: one marked read-only runs, and one that may destroy something or reach the outside world is asked about — and so is one that says nothing, because the protocol reads a missing hint as "it may". A server's `approval` (`auto`, `ask` or `allow`) decides all its tools at once, and `tool_approval` decides one tool by its name on the server, beating the server's setting:
 
 ```toml

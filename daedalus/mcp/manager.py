@@ -19,7 +19,7 @@ import threading
 from collections import OrderedDict, deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
@@ -33,10 +33,14 @@ from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolR
 
 from daedalus.config import McpServerConfig, inherited_environment
 from daedalus.mcp.content import McpAnswer, read_content
+from daedalus.mcp.host_stdio import host_stdio_client
 from daedalus.mcp.oauth import MCPOAuthClient, NeedsAuthorization
 from daedalus.security import operator_secrets, redact
 from daedalus.security.untrusted import fenced
 from daedalus.tools._common import clip
+
+if TYPE_CHECKING:
+    from daedalus.terminals.bridge import HostBridge
 
 logger = logging.getLogger(__name__)
 
@@ -284,33 +288,55 @@ class StderrTail:
     The library sends a server's standard error to the host's own, which in Docker is the container
     log: a server that failed to start said why there and nowhere the operator or the agent looked,
     and the only error they saw was the protocol's "Connection closed". The lines are kept here to be
-    shown with the server's state, and still logged."""
+    shown with the server's state, and still logged.
 
-    def __init__(self, name: str) -> None:
+    A server on the host machine has no pipe here: its standard error arrives in pieces over the host
+    daemon's stream, and ``pipe=False`` takes them through :meth:`feed` instead."""
+
+    def __init__(self, name: str, *, pipe: bool = True) -> None:
         self.name = name
         self.lines: deque[str] = deque(maxlen=STDERR_LINES)
-        read_fd, write_fd = os.pipe()
-        self.sink = os.fdopen(write_fd, "w")
-        self._source = os.fdopen(read_fd, "r", errors="replace")
-        self._thread = threading.Thread(target=self._read, name=f"mcp-stderr:{name}", daemon=True)
-        self._thread.start()
+        self._partial = ""
+        self.sink: Any = None
+        self._thread: threading.Thread | None = None
+        if pipe:
+            read_fd, write_fd = os.pipe()
+            self.sink = os.fdopen(write_fd, "w")
+            self._source = os.fdopen(read_fd, "r", errors="replace")
+            self._thread = threading.Thread(target=self._read, name=f"mcp-stderr:{name}", daemon=True)
+            self._thread.start()
 
     def _read(self) -> None:
         with self._source:
             for line in self._source:
-                line = line.rstrip()
-                if line:
-                    self.lines.append(line[:500])
-                    logger.info("mcp server %s stderr: %s", self.name, redact.redact(line[:500]))
+                self._line(line)
+
+    def _line(self, line: str) -> None:
+        line = line.rstrip()
+        if line:
+            self.lines.append(line[:500])
+            logger.info("mcp server %s stderr: %s", self.name, redact.redact(line[:500]))
+
+    def feed(self, text: str) -> None:
+        """A piece of standard error as it came, cut anywhere: whole lines are kept, the rest waits."""
+        lines = (self._partial + text).split("\n")
+        self._partial = lines.pop()[-2000:]
+        for line in lines:
+            self._line(line)
 
     def close(self, *, settle: float = 0.5) -> None:
         """Let go of the host's end of the pipe and give the reader a moment to take the last lines:
         a server that exited has closed its end, so the reader reaches the end at once."""
-        try:
-            self.sink.close()
-        except OSError:
-            pass
-        self._thread.join(settle)
+        if self._partial:
+            self._line(self._partial)
+            self._partial = ""
+        if self.sink is not None:
+            try:
+                self.sink.close()
+            except OSError:
+                pass
+        if self._thread is not None:
+            self._thread.join(settle)
 
     def text(self, last: int = STDERR_LINES) -> str:
         return "\n".join(list(self.lines)[-last:])
@@ -332,13 +358,30 @@ def resolve_command(command: str, args: Sequence[str], env: dict[str, str]) -> t
 
 
 WHERE = ["machine"]
-"""Where a stdio server's process starts: ``container`` in Docker — the host's own container, which
-is not the machine a session's host-folder Exec runs on — or ``machine``. Set once at start; the app
-says it in its own words from this, the model reads :func:`runs_in`."""
+"""Where a stdio server's process starts by default: ``container`` in Docker — the host's own
+container, which is not the machine a session's host-folder Exec runs on — or ``machine``. Set once
+at start; the app says it in its own words from this, the model reads :func:`runs_in`."""
 
 
-def runs_in() -> str:
-    return "the Daedalus container, not the host machine" if WHERE[0] == "container" else "this machine"
+def on_host(config: McpServerConfig) -> bool:
+    """Whether this server's process is started on the operator's machine through the host terminal
+    daemon. Only a stdio server set to ``host`` in a Docker installation: natively the machine is
+    where this process already runs, and a server set to ``host`` simply starts here."""
+    return config.transport == "stdio" and config.location == "host" and WHERE[0] == "container"
+
+
+def where_of(config: McpServerConfig | None = None) -> str:
+    """``host``, ``container`` or ``machine``: where this server's process runs, for the app."""
+    if config is not None and on_host(config):
+        return "host"
+    return WHERE[0]
+
+
+def runs_in(config: McpServerConfig | None = None) -> str:
+    where = where_of(config)
+    if where == "host":
+        return "the host machine, through the host terminal daemon"
+    return "the Daedalus container, not the host machine" if where == "container" else "this machine"
 
 
 CONNECT_DEADLINE_SECONDS = 30.0
@@ -370,8 +413,11 @@ class McpConnection:
         config: McpServerConfig,
         oauth: MCPOAuthClient | None = None,
         catalog_changed: Callable[[Sequence[McpToolProxy]], None] | None = None,
+        host_bridge: Callable[[], HostBridge | None] | None = None,
     ) -> None:
         self.vault = SecretVault()
+        self._host_bridge = host_bridge
+        """The host terminal bridge, looked up at each start: it is installed after the manager is made."""
         self.name = name
         self.config = config
         self.oauth = oauth
@@ -388,6 +434,8 @@ class McpConnection:
         """How many 401s the server answered on this connection, and the last one's ``WWW-Authenticate``."""
         self._ready = asyncio.Event()
         self._closing = asyncio.Event()
+        self._lost = asyncio.Event()
+        """Set when a host server's stream ends by itself, which ends the connection as a stop would."""
         self.error: str | None = None
         self.state = "disabled"
         self.last_error_code: str | None = None
@@ -426,6 +474,7 @@ class McpConnection:
             if self._task is None or self._task.done():
                 self._ready.clear()
                 self._closing.clear()
+                self._lost.clear()
                 self.error = None
                 self.last_error_code = None
                 self.state = "connecting"
@@ -440,7 +489,30 @@ class McpConnection:
 
     async def _run(self) -> None:
         try:
-            if self.config.transport == "stdio":
+            if on_host(self.config):
+                bridge = self._host_bridge() if self._host_bridge is not None else None
+                if bridge is None:
+                    raise ConnectionError("this installation has no host terminal bridge, which a server set to run on the host machine needs")
+                self.stderr = StderrTail(self.name, pipe=False)
+                ended: list[str] = []
+
+                def lost(why: str) -> None:
+                    ended.append(why)
+                    self._lost.set()
+
+                try:
+                    # Only the server's own env: the container's paths mean nothing on the machine, and
+                    # the daemon gives the program the operator's environment there, as a terminal has.
+                    async with host_stdio_client(bridge, self.config.command, self.config.args, dict(self.config.env),
+                                                 on_stderr=self.stderr.feed, on_end=lost, actor=f"mcp:{self.name}") as (read, write):
+                        await self._serve(read, write)
+                finally:
+                    self.stderr.close()
+                if ended and not self._closing.is_set():
+                    # The daemon restarted, the connection to it broke, or the server exited: the next
+                    # call starts it again, and until then the card says why it is not answering.
+                    raise ConnectionError(ended[0])
+            elif self.config.transport == "stdio":
                 self.stderr = None
                 env = inherited_environment(PASSED_ENVIRONMENT) | dict(self.config.env)
                 command, args = resolve_command(self.config.command, self.config.args, env)
@@ -503,7 +575,12 @@ class McpConnection:
             self.session = session
             self.state = "ready"
             self._ready.set()
-            await self._closing.wait()
+            closing, lost = asyncio.ensure_future(self._closing.wait()), asyncio.ensure_future(self._lost.wait())
+            try:
+                await asyncio.wait({closing, lost}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                closing.cancel()
+                lost.cancel()
 
     def _proxy(self, remote: Any) -> McpToolProxy:
         schema = getattr(remote, "input_schema", None) or getattr(remote, "inputSchema", None) or {}
@@ -620,6 +697,9 @@ class McpManager:
         self._oauth_clients: dict[str, MCPOAuthClient] = {}
         self._ensure_locks: dict[str, asyncio.Lock] = {}
         self._registered_tools: dict[str, dict[str, McpToolProxy]] = {}
+        self.host_bridge: Callable[[], HostBridge | None] = lambda: None
+        """The host terminal bridge, for the servers set to run on the operator's machine; the
+        session manager points it at its own once the terminals are installed."""
         self.catalog_listeners: list[Callable[[str], None]] = []
         """Called with the server's name, synchronously, whenever its proxies change in the registry.
 
@@ -799,7 +879,7 @@ class McpManager:
 
         What the app shows before the operator adds a pasted command: nothing is registered and
         nothing is kept, so a command that fails leaves no server behind to be removed."""
-        connection = McpConnection(name, config)
+        connection = McpConnection(name, config, host_bridge=lambda: self.host_bridge())
         try:
             await connection.start(deadline=deadline)
             state, error = "ready", None
@@ -811,7 +891,7 @@ class McpManager:
                   "approval": tool.approval} for tool in connection.tools]
         stderr = connection.stderr_text()
         await connection.stop()
-        return {"name": name, "state": state, "error": error, "tools": tools, "stderr": stderr, "runs_in": WHERE[0]}
+        return {"name": name, "state": state, "error": error, "tools": tools, "stderr": stderr, "runs_in": where_of(config)}
 
     def all_tool_names(self) -> set[str]:
         return {name for catalog in self._registered_tools.values() for name in catalog}
@@ -847,6 +927,7 @@ class McpManager:
                     self._configs[name],
                     oauth=self.oauth_client(name),
                     catalog_changed=lambda tools, server=name: self._replace_catalog(server, tools),
+                    host_bridge=lambda: self.host_bridge(),
                 )
                 self._connections[name] = connection
             connecting = connection.session is None and connection._task is not None and not connection._task.done()
@@ -923,6 +1004,7 @@ class McpManager:
                     "last_error_code": connection.last_error_code if connection and not stale else None,
                     "in_flight": connection.in_flight if connection and not stale else 0,
                     "stderr": connection.stderr_text(last=12) if connection and not stale else "",
+                    "runs_in": where_of(self._configs[name]) if self._configs[name].transport == "stdio" else "",
                 }
             )
         return out
@@ -934,4 +1016,4 @@ def blocked_for(manager: McpManager, enabled: Sequence[str]) -> set[str]:
     return {name for name in manager.all_tool_names() if not any(name in manager.tool_names(s) for s in enabled_set)}
 
 
-__all__ = ["WHERE", "runs_in", "McpConnection", "McpManager", "McpStillStarting", "McpToolProxy", "mask_server_secrets", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]
+__all__ = ["WHERE", "on_host", "runs_in", "where_of", "McpConnection", "McpManager", "McpStillStarting", "McpToolProxy", "mask_server_secrets", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]

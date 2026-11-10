@@ -91,19 +91,22 @@ def _admin(context: ToolContext):  # type: ignore[no-untyped-def]
         "with OAuth set oauth=true: the result carries the link the owner opens, and the sign-in completes "
         "by itself. `client_id`/`client_secret` only for a server that does not register clients itself. "
         "The result says whether it answers, and one that answers is enabled in this session at once "
-        "(its tools are then loaded as the result says); a failing one's result carries what it wrote to stderr."
+        "(its tools are then loaded as the result says); a failing one's result carries what it wrote to stderr. "
+        "location='host' runs a stdio server on the operator's machine through the host terminal daemon (where "
+        "their adb, phone, CLIs and files are); 'server' runs it where Daedalus runs (its container in Docker). "
+        "Left empty, a session working in a host folder gets 'host' and any other 'server'."
     ),
 )
 async def mcp_add(
     context: ToolContext, name: str, transport: str = "stdio", command: str = "", args: list[str] | None = None,
     url: str = "", env: dict[str, str] | None = None, headers: dict[str, str] | None = None, description: str = "",
-    oauth: bool = False, scopes: list[str] | None = None, client_id: str = "", client_secret: str = "",
+    oauth: bool = False, scopes: list[str] | None = None, client_id: str = "", client_secret: str = "", location: str = "",
 ) -> ToolResult:
     hook = _admin(context)
     if hook is None:
         return error(context, "MCP servers cannot be changed in this session")
     spec = {"transport": transport, "command": command, "args": args or [], "url": url, "env": env or {},
-            "headers": headers or {}, "description": description}
+            "headers": headers or {}, "description": description, "location": location}
     if oauth:
         spec["oauth"] = {"scopes": scopes or [], "client_id": client_id, "client_secret": client_secret}
     try:

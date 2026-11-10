@@ -27,6 +27,7 @@ from daedalus.terminals.model import (
 
 if TYPE_CHECKING:
     from daedalus.terminals.service import Terminals
+    from daedalus.terminals.sidechannels import ProcessStream
 
 HOST = "host"
 _T = TypeVar("_T")
@@ -74,6 +75,12 @@ OUTDATED_SESSIONS = ("the host terminal daemon is older than this version and ca
 
 OUTDATED_TRANSFER = ("the host terminal daemon is older than this version and cannot move folders; update it "
                      "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
+
+OUTDATED_STREAM = ("the host terminal daemon is older than this version and cannot run an MCP server on the host machine; update it "
+                   "(bash deploy/host-terminal.sh install after the image is rebuilt, which ends the open host terminals)")
+
+STREAM_VERSION = 1
+"""The version of the daemon's ``exec.stream`` (``capabilities.exec_stream``) this host speaks."""
 
 TRANSFER_VERSION = 1
 """The version of the daemon's folder moves (``capabilities.fs_transfer``) this host speaks."""
@@ -149,6 +156,34 @@ class HostBridge:
         except (TypeError, ValueError):
             version = 0
         return "" if version >= TRANSFER_VERSION else OUTDATED_TRANSFER
+
+    def stream_problem(self) -> str:
+        """Why a program cannot be run on the host with its streams kept open now — an MCP server the
+        operator set to run there — or ``""`` when it can: the bridge missing or not answering, or a
+        daemon from before ``exec.stream``, which is named as old rather than left to fail as an
+        unknown method halfway through a connect."""
+        service = self._terminals()
+        if service is None or not service.configured(HOST):
+            return "this installation has no host terminal bridge; bash deploy/setup.sh offers to install it"
+        if not service.available(HOST):
+            return "the host terminal bridge is not answering; start it (bash deploy/host-terminal.sh start) and try again"
+        capabilities = self.daemon_info().get("capabilities") or {}
+        try:
+            version = int(capabilities.get("exec_stream") or 0)
+        except (TypeError, ValueError):
+            version = 0
+        return "" if version >= STREAM_VERSION else OUTDATED_STREAM
+
+    async def exec_stream(self, argv: list[str], *, cwd: str = "", env_vars: dict[str, str] | None = None, actor: str = "system") -> ProcessStream:
+        """Start a program on the host that runs on with its streams bridged here (see
+        ``Terminals.exec_stream``). Every refusal is an ``OSError`` with words for the operator: the
+        bridge down is a ``ConnectionError``, an old daemon ``HostDaemonOutdated``."""
+        if problem := self.stream_problem():
+            raise (HostDaemonOutdated if problem == OUTDATED_STREAM else ConnectionError)(problem)
+        try:
+            return await self._side(lambda service: service.exec_stream(HOST, argv, cwd=cwd or None, env_vars=env_vars, actor=actor))
+        except _Outdated:
+            raise HostDaemonOutdated(OUTDATED_STREAM) from None
 
     async def unpack_begin(self, path: str, *, total_bytes: int, entries: int, actor: str = "operator") -> dict[str, Any]:
         """Take a new or empty folder inside the host's home to receive a folder (``fs.unpack_begin``)."""

@@ -33,26 +33,30 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.get("/api/mcp/servers")
     async def servers(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"servers": mcp_admin.describe(app), "callback": mcp_callback_url(app.settings.miniapp_public_url)}
+        return {"servers": mcp_admin.describe(app), "callback": mcp_callback_url(app.settings.miniapp_public_url),
+                "host": mcp_admin.host_status(app)}
 
     @api.post("/api/mcp/try")
     async def try_server(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Start what the operator pasted — a command, an address, a README's JSON block — once, unsaved:
-        ``{"input": "npx -y @x/y-mcp", "name": optional}``. The answer has the name and spec to add it
-        with, its state, tools, the last of what it wrote to stderr, and where it ran."""
+        ``{"input": "npx -y @x/y-mcp", "name": optional, "location": "server" | "host", "session_id": optional}``;
+        without a location, a session's panel tries it where that session works. The answer has the name and
+        spec to add it with, its state, tools, the last of what it wrote to stderr, and where it ran."""
         manager()
         try:
-            return await mcp_admin.trial(app, str(body.get("input") or ""), str(body.get("name") or ""))
+            return await mcp_admin.trial(app, str(body.get("input") or ""), str(body.get("name") or ""), _location(body),
+                                         str(body.get("session_id") or ""))
         except mcp_admin.McpAdminError as exc:
             raise HTTPException(422, str(exc)) from exc
 
     @api.post("/api/mcp/add")
     async def add_pasted(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Add what the operator pasted and tried: ``{"input": …, "name": …, "approval": "auto" | "ask" | "allow" | "deny",
-        "session_id": optional}``; with a session it is switched on there too."""
+        "location": "server" | "host", "session_id": optional}``; with a session it is switched on there too."""
         manager()
         try:
-            added = await mcp_admin.add_pasted(app, str(body.get("input") or ""), str(body.get("name") or ""), str(body.get("approval") or "auto"))
+            added = await mcp_admin.add_pasted(app, str(body.get("input") or ""), str(body.get("name") or ""), str(body.get("approval") or "auto"),
+                                               _location(body))
         except mcp_admin.McpAdminError as exc:
             raise HTTPException(422, str(exc)) from exc
         enabled = None
@@ -124,6 +128,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except Exception:  # noqa: BLE001 — the link is made; connecting again is the app's next step
             logger.exception("MCP server %s: linked but did not connect", name)
         return _back(name)
+
+
+def _location(body: dict[str, Any]) -> str:
+    location = str(body.get("location") or "")
+    if location not in ("", "server", "host"):
+        raise HTTPException(422, "location is 'server' or 'host'")
+    return location
 
 
 def _back(name: str | None, *, error: str = "") -> RedirectResponse:

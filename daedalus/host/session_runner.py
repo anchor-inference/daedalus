@@ -908,6 +908,9 @@ class SessionManager:
         mcp_manager.WHERE[0] = "machine" if settings.native else "container"
         self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp",
                               redirect_default=lambda: mcp_callback_url(settings.miniapp_public_url))
+        # A server the operator set to run on the host machine is started there through the host
+        # terminal daemon, which is installed after this; it is looked up at each start.
+        self.mcp.host_bridge = lambda: self.host_bridge
         # A server's catalogue can change under running sessions — a re-listing, a reconnect, another
         # session enabling it. Each session refuses the proxies of servers it did not enable by name, so
         # every session's policy is recomputed at once, not at the next thing that happens to refresh it.
@@ -7340,7 +7343,7 @@ class SessionManager:
 
     # -- tool policy ---------------------------------------------------------------
 
-    def policy(self, *, base_dir: Path | str = "") -> Policy:
+    def policy(self, *, base_dir: Path | str = "", drives_host: bool = False) -> Policy:
         cfg = self.config.policy
         rules = [Rule(id=r.id or f"config.{i}", tool=r.tool or "*", action=r.action, note=r.note, pattern=r.pattern, source="config") for i, r in enumerate(cfg.rules, 1)]
         return Policy(
@@ -7362,6 +7365,7 @@ class SessionManager:
             base_dir=base_dir,
             mcp_approvals=self.mcp.approvals(),
             mcp_servers=self.mcp.servers_by_tool(),
+            drives_host=drives_host,
         )
 
     def sealed_ports(self) -> tuple[int, ...]:
@@ -7457,7 +7461,8 @@ class SessionManager:
                 return Decision("deny", agent_talk.REFUSED_WHY, agent_talk.RULE)
             if state is not None and tool == "AskUser" and (asked := self._asks_about_pending(state, arguments)):
                 return asked
-            policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
+            policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id),
+                                 drives_host=state is not None and self.host_folder_of(state.session.id, state.session.metadata, state.project) is not None)
             now = time.time()
             # What the operator allowed for their own work is theirs: a guest neither spends nor inherits it.
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None and turn is None else set()
