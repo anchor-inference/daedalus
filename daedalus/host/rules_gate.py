@@ -11,7 +11,9 @@ session's calls meet that answer. It has three doors, because a call is judged i
 
 A handoff is announced like a policy question (``permission.pending``, kind ``handoff``), so every
 front that draws approval cards draws it; it is answered with *Done*, never with *Allow*. A review's
-question is a policy question in every respect — the same key, the same grant, the same buttons.
+question is a policy question in every respect — the same key, the same grant, the same buttons. A
+review's block is held the same way too (:meth:`RulesGate.hold_block`), marked as a block, so the
+operator can let that one call through anyway.
 """
 
 from __future__ import annotations
