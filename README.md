@@ -75,7 +75,7 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 </tr>
 <tr>
 <td><img src="docs/screenshots/canvas.png" alt="A canvas: the agent's menu page live in a frame beside the cards that plan it, the operator pointing at its heading with a note for the agent" /></td>
-<td><img src="docs/screenshots/session-mcp.png" alt="A chat's side panel: the model, context and spend over its tabs, and the inspector opened on MCP servers, with a button that allows all of a server's tools for six hours and a field that adds a server in one step" /></td>
+<td><img src="docs/screenshots/session-mcp.png" alt="A chat's side panel: the model, context and spend over its tabs, and the inspector opened on MCP servers, with a button that allows all of a server's tools for six hours, and a pasted command tried on the host machine before it is added" /></td>
 </tr>
 <tr>
 <td align="center"><sub>Canvas — the agent's page live on a board; point at what to change and say how</sub></td>
