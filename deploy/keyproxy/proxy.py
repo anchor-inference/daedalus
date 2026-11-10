@@ -30,7 +30,7 @@ the newest release (asked of the registries every few hours), and ``POST /client
 
 The budget is checked in two independent ways: the supervisor's flag file, and the proxy's own read
 of today's spend from the read-only database against the one daily cap the operator sets in
-Settings → Limits (``[limits] usd_per_day`` in ``config.toml``), which nothing in the agent container
+Settings → Limits (the host copies it to ``spend-cap.json`` beside the database), which nothing in the agent container
 can unlink.
 """
 
@@ -45,7 +45,6 @@ import secrets
 import sqlite3
 import sys
 import time
-import tomllib
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,8 +134,9 @@ ANTHROPIC_VERSION = "2023-06-01"
 the OpenAI shape never sends it."""
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))
-BUDGET_CONFIG = BUDGET_DB.with_name("config.toml")
-"""The operator's settings beside the database: the daily cap is ``[limits] usd_per_day`` in it."""
+BUDGET_CONFIG = BUDGET_DB.with_name("spend-cap.json")
+"""The operator's daily cap from Settings → Limits, written beside the database by the host. Not
+``config.toml`` itself: that file is readable by root alone, and this process is not root."""
 BUDGET_CACHE_SECONDS = 30.0
 BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",), ("endpoints",), ("endpoints", "zdr"))
 """Reading a balance, the model list or a model's providers spends nothing; only completions are refused over budget.
@@ -408,14 +408,14 @@ def budget_usd_per_day() -> float:
 
     The proxy once kept a cap of its own in the keys file, beside the supervisor's in the
     environment: two numbers the operator did not see together, and raising the one in Settings left
-    calls refused by the other. There is one cap now, and both read it from ``config.toml``.
+    calls refused by the other. There is one cap now: the supervisor reads it from ``config.toml``
+    and this process from the copy the host writes, since it cannot read that file.
     """
     try:
-        limits = tomllib.loads(BUDGET_CONFIG.read_text(encoding="utf-8")).get("limits") or {}
-        return max(0.0, float(limits.get("usd_per_day", 0) or 0))
+        return max(0.0, float(json.loads(BUDGET_CONFIG.read_text(encoding="utf-8")).get("usd_per_day", 0) or 0))
     except FileNotFoundError:
         return 0.0
-    except (OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
         logger.warning("daily cap unreadable, none in force: %s", type(exc).__name__)
         return 0.0
 

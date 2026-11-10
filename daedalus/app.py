@@ -9,7 +9,9 @@ and :meth:`Application.create_session` falls back to a plain session when there 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import signal
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ from daedalus.host.boot_guard import BootGuard
 from daedalus.host.component_install import Installer
 from daedalus.host.config_validation import ConfigConflict, config_revision
 from daedalus.host.events import EventBus
+from daedalus.host.filesystem import write_atomically
 from daedalus.host.session_runner import SessionManager, SessionState
 from daedalus.providers.llamacpp import describe_discovery, discover_llamacpp
 from daedalus.search.service import ConversationSearch
@@ -40,10 +43,29 @@ API_STOP_SECONDS = 10.0
 """How long a stop waits for the app's lifespan cleanup once the API server is down."""
 
 
+SPEND_CAP_NAME = "spend-cap.json"
+"""The daily cap for the key proxy, beside the database. ``config.toml`` is readable by root alone and the
+proxy runs as its own user, so it was left reading nothing and enforcing no cap at all."""
+
+
+def publish_spend_cap(state_dir: Path, config: RuntimeConfig) -> None:
+    """Put the operator's daily cap where the key proxy reads it on each call; a number, no secret."""
+    path = state_dir / SPEND_CAP_NAME
+    text = json.dumps({"usd_per_day": config.limits.usd_per_day}) + "\n"
+    try:
+        if path.exists() and path.read_text(encoding="utf-8") == text:
+            return
+        write_atomically(path, text.encode("utf-8"))
+        os.chmod(path, 0o644)
+    except OSError as exc:
+        logger.error("the key proxy's daily cap could not be written: %s", exc)
+
+
 class Application:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.config = RuntimeConfig.load(settings.config_path)
+        publish_spend_cap(settings.state_dir, self.config)
         self.db = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
         self.executions = ExecutionStore(self.db)
         self.resource_monitor = ResourceMonitor(self)
@@ -132,6 +154,7 @@ class Application:
             # the table has not heard of is one a stand-in stops answering on. Under the lock, so that two
             # saves cannot leave the older table standing.
             models_moved = guest_door.write_model_table(self)
+            publish_spend_cap(self.settings.state_dir, config)
         if models_moved:
             await guest_door.routes_changed(self)
 

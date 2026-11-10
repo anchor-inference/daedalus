@@ -692,11 +692,16 @@ async def test_the_key_proxys_card_is_told_when_a_command_could_read_its_keys(cl
 def test_the_proxy_reads_the_one_daily_cap_from_the_operators_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # The proxy once kept a cap of its own in the keys file, and refused calls at $20 after the
     # operator had lifted the cap they could see in Settings.
-    config = tmp_path / "config.toml"
-    monkeypatch.setattr(proxy, "BUDGET_CONFIG", config)
+    from daedalus.app import publish_spend_cap
+    from daedalus.config import RuntimeConfig
+
+    monkeypatch.setattr(proxy, "BUDGET_CONFIG", tmp_path / "spend-cap.json")
     monkeypatch.setenv("KEYPROXY_USD_PER_DAY", "20")
     assert proxy.budget_usd_per_day() == 0.0
-    config.write_text("[limits]\nusd_per_day = 100\n", encoding="utf-8")
+    config = RuntimeConfig()
+    config.limits.usd_per_day = 100
+    publish_spend_cap(tmp_path, config)
     assert proxy.budget_usd_per_day() == 100.0
-    config.write_text("[limits\n", encoding="utf-8")
+    assert (tmp_path / "spend-cap.json").stat().st_mode & 0o777 == 0o644
+    (tmp_path / "spend-cap.json").write_text("{", encoding="utf-8")
     assert proxy.budget_usd_per_day() == 0.0
