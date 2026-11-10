@@ -255,6 +255,18 @@ SERVICES_ALL = [
     {"name": "expense-ui", "command": "npm run dev -- --port $PORT", "cwd": "/srv/workspaces/f6a1b2c3d4e5", "port": 8102, "url": None, "pid": None, "status": "stopped", "restart": False, "note": "stopped by the operator", "started_at": ago(days=1), "stopped_at": ago(hours=20), "share": {"mode": "local", "slug": None, "key": None, "url": None, "public_base": "https://agent.example.com"}, "session_id": S6, "session_title": "Expense tracker"},
 ]
 
+SUBAGENT_RUNS = {
+    # What the host tells the panel beyond the session row: the provider and effort of its next call, its
+    # spend, its context, what it is doing now, and how its last run ended. Keyed by the helper's name.
+    "link-check": {"provider": "vllm", "effort": "medium", "usage": {"calls": 14, "input": 182_400, "output": 6_210, "cache_read": 120_000, "usd": 0.0, "unpriced": 0}, "context": {"tokens": 21_800, "window": 128_000},
+                   "activity": {"tool": "WebFetch", "last_tool": "Read", "steps": 14}},
+    "photo-alt": {"provider": "anthropic", "effort": "high", "usage": {"calls": 9, "input": 96_500, "output": 11_480, "cache_read": 71_000, "usd": 0.41, "unpriced": 0}, "context": {"tokens": 18_900, "window": 200_000},
+                  "report": {"cause": "completed", "summary": "Wrote alt text for all 24 photos into site/data/photos.json; the six cakes share a pattern the owner can follow.", "delivered": True}},
+    "price-audit": {"provider": "deepseek", "effort": "off", "usage": {"calls": 5, "input": 40_100, "output": 2_300, "cache_read": 12_000, "usd": 0.02, "unpriced": 0}, "context": {"tokens": 9_400, "window": 64_000},
+                    "report": {"cause": "failed", "summary": "The price list is a spreadsheet export it could not open: Exec was withheld for binaries.", "delivered": True}},
+}
+
+
 def subagents_of(leader: str) -> list[dict]:
     """``GET /api/sessions/<id>/subagents``, and the session detail's ``subagents``: the helpers the
     session list holds under this leader, working ones first, as the host lists them."""
@@ -264,10 +276,18 @@ def subagents_of(leader: str) -> list[dict]:
         if meta.get("subagent_of") != leader:
             continue
         running = s["status"] == "running"
+        extra = SUBAGENT_RUNS.get(meta.get("subagent_name") or "", {})
+        report = extra.get("report")
         out.append({
             "session_id": s["id"], "name": meta.get("subagent_name"), "running": running, "status": s["status"], "model": s["model"],
-            "kept": bool(meta.get("subagent_keep")), "title": meta.get("subagent_task", ""), "idle_start": False,
+            "provider": extra.get("provider", ""), "effort": extra.get("effort", "medium"),
+            "kept": bool(meta.get("subagent_keep")), "title": meta.get("subagent_task", ""), "brief": meta.get("subagent_task", ""), "idle_start": False,
             "created_at": s["created_at"], "last_activity_at": s["last_message_at"], "run_started_at": ago(minutes=3) if running else None,
+            "finished_at": None if running else s["last_message_at"],
+            "activity": extra.get("activity") if running else None,
+            "usage": extra.get("usage", {"calls": 0, "input": 0, "output": 0, "cache_read": 0, "usd": 0.0, "unpriced": 0}),
+            "context": extra.get("context", {"tokens": 0, "window": 0}),
+            "report": {**report, "at": s["last_message_at"], "delivered_at": s["last_message_at"] if report["delivered"] else None} if report else None,
         })
     return sorted(out, key=lambda c: (not c["running"], c["status"] != "waiting"))
 

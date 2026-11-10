@@ -1155,9 +1155,25 @@ export type SubagentView = {
   /** Reports its leader could not take yet, delivered once the leader can run. */
   reports_held?: number;
   model: string;
+  /** The provider its next call goes to, for the mark beside the model. */
+  provider?: string;
+  /** The reasoning effort its next call uses, its own or the leader's it inherited; ``off`` when it does not think. */
+  effort?: string;
   kept?: boolean;
   /** The first line of the task it was handed; empty for a standing helper or an old one. */
   title?: string;
+  /** The task as it was kept (its first few hundred characters). */
+  brief?: string;
+  /** When its last run ended; null while it works or before it ran. */
+  finished_at?: string | null;
+  /** While it works: the tool in flight, the last one done, and the steps of this run so far. */
+  activity?: { tool: string | null; last_tool: string | null; steps: number } | null;
+  /** Everything it has spent; ``unpriced`` counts calls with no known price, so ``usd`` is then a floor. */
+  usage?: { calls: number; input: number; output: number; cache_read: number; usd: number; unpriced: number };
+  /** Its last prompt against its window; window 0 when unknown. */
+  context?: { tokens: number; window: number };
+  /** How its last run ended, the gist of what it said, and whether its leader has it. */
+  report?: { at: string; cause: "completed" | "budget" | "outage" | "cap" | "cancelled" | "failed"; summary: string; delivered: boolean; delivered_at: string | null } | null;
   /** Started without a task, to wait for the leader's messages. */
   idle_start?: boolean;
   created_at?: string;

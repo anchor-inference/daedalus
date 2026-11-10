@@ -67,7 +67,7 @@ def look(page: Page, lang: str, scheme: str, phone: bool, problems: list[str]) -
             problems.append(f"{tag}: the chat scrolls sideways by {wide}px")
         return
     page.goto(f"{BASE}/agents/{S1}?token=t&lang={lang}&scheme={scheme}&panel=subagents", wait_until="networkidle")
-    row = page.locator(f'.panel .subagent-row[data-subagent="{S14}"]')
+    row = page.locator(f'.panel .subagent-card[data-subagent="{S14}"]')
     expect(row).to_contain_text(words["row"])
     expect(row).to_contain_text(words["held"])
     expect(row.locator(".sub-dot.parked")).to_have_count(1)
