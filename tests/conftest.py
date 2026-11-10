@@ -84,6 +84,15 @@ def package_cache_of_the_suite(tmp_path_factory: pytest.TempPathFactory) -> None
     os.environ["DAEDALUS_PACKAGE_CACHE"] = str(tmp_path_factory.mktemp("package-cache"))
 
 
+@pytest.fixture(autouse=True)
+def fresh_sandbox_probe() -> None:
+    """Each test asks for the sandbox afresh. The probe's answer lasts a minute, and one made while a test stood
+    in for ``bwrap_path`` ("not installed") would otherwise outlive it and fail the next test that uses the real one."""
+    from daedalus.tools import shell  # Lazy: the suite's environment is set before the tools are imported.
+
+    shell.invalidate_bwrap()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
     """Every new database in the suite starts as a copy of one migrated once, not as an empty file.
