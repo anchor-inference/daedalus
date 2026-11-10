@@ -1051,6 +1051,9 @@ class NotificationRouter:
         if p.get("kind") == "handoff":
             await self._handoff_pending(event)
             return
+        if isinstance(p.get("blocked"), dict):
+            await self._blocked_pending(event)
+            return
         actions = (
             Action("allow", render("allow", lang), "primary", quick=quick),
             Action("deny", render("deny", lang), "default", quick=quick),
@@ -1063,6 +1066,33 @@ class NotificationRouter:
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id, terminal_id=event.terminal_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)), actions=actions, request_ref=ref, dedupe_key=ref,
             source=str(p.get("kind") or "policy"), handled=self._telegram_handled(p),
+        ))
+
+    async def _blocked_pending(self, event: AppEvent) -> None:
+        """A call the auto-review blocked: what it was and the reviewer's reason, with "Allow anyway".
+
+        This entry was once only a notice. The agent then told the operator to press an "Allow" on it,
+        and there was nothing to press; now it is the block's own request, answered like any policy
+        request, and closed with it. Never a quick action: it overrides a check, so it is pressed with
+        the reason in front of the operator, not from a lock screen."""
+        p = event.payload
+        lang = self._lang()
+        tool = str(p.get("tool") or "")
+        text = str(p.get("text") or "")
+        reason = str((p.get("blocked") or {}).get("reason") or "")
+        ref = str(p["request_ref"])
+        body = (f"{tool}: {text}" if tool else text) + (f"\n\n{render('rules.reason', lang, reason=reason)}" if reason else "")
+        await self.service.post(Draft(
+            "permission", render("rules.blocked", lang, title=str(p.get("title") or event.session_id or "")), body.strip()[:BODY_MAX],
+            kind="rules_block", tone="warning", level="urgent",
+            session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
+            link=await self.service.link_for(ref, self._session_link(event.session_id)),
+            actions=(
+                Action("allow", render("allow.anyway", lang), "primary"),
+                Action("deny", render("rules.keep", lang), "default"),
+                Action("open", render("open", lang), "ghost"),
+            ),
+            request_ref=ref, dedupe_key=ref, source="rules", handled=self._telegram_handled(p),
         ))
 
     async def _handoff_pending(self, event: AppEvent) -> None:
@@ -1210,20 +1240,6 @@ def _handoff_resolver(manager: SessionManager) -> Resolver:
         return ActionOutcome("done")
 
     return resolve
-
-
-def rules_draft(payload: Mapping[str, Any], lang: str) -> Draft:
-    """The Inbox entry for an action the auto-review blocked: what it was, and the review's reason."""
-    session_id = str(payload.get("session_id") or "") or None
-    tool = str(payload.get("tool") or "")
-    text = str(payload.get("text") or "")
-    body = (f"{tool}: {text}" if tool else text) + f"\n\n{payload.get('reason') or ''}"
-    return Draft(
-        "system", render("rules.blocked", lang, title=str(payload.get("title") or session_id or "")), body.strip()[:BODY_MAX], kind="rules_block",
-        tone="warning", session_id=session_id, project_id=str(payload.get("project_id") or "") or None,
-        link=f"/app/agents/{session_id}" if session_id else "/app/settings/rules",
-        dedupe_key=f"review:{session_id}:{payload.get('key') or ''}", source="rules",
-    )
 
 
 def _policy_resolver(manager: SessionManager) -> Resolver:
@@ -1526,10 +1542,6 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     manager.service_hooks["setting_notice"] = setting_notice
 
-    async def rules_notice(payload: Mapping[str, Any]) -> None:
-        await service.post(rules_draft(payload, service.language()))
-
-    manager.service_hooks["rules_notice"] = rules_notice
     tasks = [
         manager.bus.on(EventFilter(types=ROUTED_EVENTS), router.handle, name="notifications"),
         asyncio.create_task(service.keep_holds(), name="notification-holds"),

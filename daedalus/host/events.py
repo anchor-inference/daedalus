@@ -176,6 +176,11 @@ class PermissionPending(TypedDict):
     """Whether it may be answered from a notification without opening the app."""
     telegram: bool
     expires_at: NotRequired[str]
+    routed_to: NotRequired[str]
+    """``operator`` for a request only the operator may answer, whatever a team's routing says."""
+    blocked: NotRequired[dict[str, str]]
+    """A call the auto-review blocked, held for the operator's "Allow anyway": the reviewer's
+    ``reason``, the ``category`` and its ``level``."""
 
 
 class PermissionResolved(TypedDict):

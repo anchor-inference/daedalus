@@ -1093,6 +1093,7 @@
      shape — a raised card with a 13 px label line, the content, and full-width 44 px answers. */
   .composer[data-shape] .ph-tray-head { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: var(--fs-13); font-weight: 600; color: var(--fg-2); }
   .composer[data-shape] .ph-tray-head.warn { color: var(--warn); }
+  .composer[data-shape] .ph-tray-head.bad { color: var(--bad); }
   .composer[data-shape] .steers .ph-tray-head { min-height: 36px; padding: 4px 14px 0; font-weight: 500; }
   .composer[data-shape] .steers .ph-tray-head + .steer { border-top: 0; }
   .composer[data-shape] .steer > .ic:first-child { display: none; }

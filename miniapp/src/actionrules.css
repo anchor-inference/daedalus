@@ -41,4 +41,5 @@
 .ar-verdict.allow { color:var(--ok); background:color-mix(in srgb, var(--ok) 12%, transparent); }
 .ar-verdict.block { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
 .ar-verdict.ask { color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent); }
+.ar-verdict.override { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
 .ar-log-link { justify-self:start; }

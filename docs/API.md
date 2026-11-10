@@ -109,7 +109,10 @@ prefix, folder or host, as `label`), or `null`; `POST …/policy/grant-similar` 
 that family until the session ends and answers every open request it covers. An action the
 operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
 `kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
-granted. `GET /api/action-rules` answers `{"categories", "levels", "defaults", "log"}` for Settings →
+granted. A call the auto-review blocked arrives as `permission.pending` with `blocked: {"reason",
+"category", "level"}` and `routed_to: "operator"`; `…/policy/grant` with its key is *Allow anyway*
+(once, logged as the verdict `override`; a second grant of the same key and an orchestrator's are
+refused with 400). `GET /api/action-rules` answers `{"categories", "levels", "defaults", "log"}` for Settings →
 Rules: the categories and levels the host knows, in order, and the auto-review's latest decisions
 (`limit=`, newest first); the levels themselves are the `action_rules` section of `/api/settings`.
 

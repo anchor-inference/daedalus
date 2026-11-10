@@ -230,10 +230,20 @@ def handoff_text(category: str, what: str) -> str:
     )
 
 
-def block_text(category: str, reason: str) -> str:
+def block_text(category: str, reason: str, key: str) -> str:
+    """What the agent is told when the review blocks a call.
+
+    It names the one thing the operator can do about it, because an agent left to guess once told the
+    operator to press an "Allow" button on a request that had none, and the operator went looking for
+    it. The block is a card in the chat and the Inbox with "Allow anyway"; pressing it lets this same
+    call through once and tells the agent so. The key is in the text because that is how the app finds
+    the call a card belongs to."""
     return (
-        f"Blocked by the auto-review: {reason} (rule review.{category}). The action was not taken and the operator has been told. "
-        "Do not retry it as it is; if the operator does want it, ask them with AskUser what they want instead."
+        f"Blocked by the auto-review: {reason} (rule review.{category}). The action was not taken. "
+        f"Approval key: {key}. The operator sees this call on a card in this chat and in the Inbox, with the reviewer's reason "
+        "and a button \"Allow anyway\"; that button is the only override. If they press it you are told, and then this same call, "
+        "unchanged, passes once. Do not retry it before that, and do not reach the same result another way. "
+        "Tell the operator in a sentence what was blocked and why, mention no other button, then continue with other work or end your turn."
     )
 
 
@@ -267,7 +277,7 @@ ACTION_CHARS = 2500
 @dataclass(frozen=True, slots=True)
 class Verdict:
     verdict: str
-    """``allow`` · ``block`` · ``ask``."""
+    """``allow`` · ``block`` · ``ask``; in the log also ``override``, the operator letting a blocked call through anyway."""
     reason: str
     failed: bool = False
     """The review gave no answer (a timeout, an error, neither word) and the verdict is the fail-closed ask."""

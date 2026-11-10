@@ -31,7 +31,7 @@ from daedalus.browser.monitor import PROMPT as INJECTION_PROMPT
 from daedalus.browser.monitor import SAMPLE_CHARS as INJECTION_SAMPLE_CHARS
 from daedalus.browser.monitor import TIMEOUT_SECONDS as INJECTION_TIMEOUT_SECONDS
 from daedalus.host import action_rules as rules
-from daedalus.host import prompts
+from daedalus.host import agent_talk, prompts
 from daedalus.host.engine_factory import TENANT, refusal_text
 from daedalus.host.policy import (
     ALLOW,
@@ -124,8 +124,12 @@ class RulesGate:
         if verdict.verdict == "allow":
             return None
         if verdict.verdict == "block":
-            await self._notice(state, session_id, tool, self.manager.redactor.redact(canonical(tool, arguments))[:300], ruled, verdict, key)
-            return HookResult(action=HookActionKind.DENY, reason=rules.block_text(ruled.category, verdict.reason))
+            if state is not None and state.guest_turn is not None:
+                # No card for a guest's turn (see hold_block), so none is promised to it either.
+                return HookResult(action=HookActionKind.DENY, reason=f"refused: the auto-review blocked this call ({verdict.reason})")
+            family = similar_grant(tool, arguments, f"review.{ruled.category}")
+            self.hold_block(state, key, tool, self.manager.redactor.redact(canonical(tool, arguments))[:300], ruled, verdict, family)
+            return HookResult(action=HookActionKind.DENY, reason=rules.block_text(ruled.category, verdict.reason, key))
         if tool == "AgentTalk" and state is not None:
             # This tool holds a message for the operator by itself, with the exact text on one card that
             # sends it. A refusal here would mean a second card and the agent saying it all over again.
@@ -170,8 +174,8 @@ class RulesGate:
         if verdict.verdict == "allow":
             return ask
         if verdict.verdict == "block":
-            await self._notice(state, session_id, ask.tool, what, ruled, verdict, decision.key)
-            return replace(ask, decision=Decision(DENY, verdict.reason, f"review.{ruled.category}", key=decision.key, told=rules.block_text(ruled.category, verdict.reason)))
+            self.hold_block(state, decision.key, ask.tool, what, ruled, verdict, None)
+            return replace(ask, decision=Decision(DENY, verdict.reason, f"review.{ruled.category}", key=decision.key, told=rules.block_text(ruled.category, verdict.reason, decision.key)))
         return replace(ask, decision=Decision(ASK, f"the auto-review asks: {verdict.reason}", f"review.{ruled.category}", key=decision.key))
 
     async def _review(self, state: Any, ruled: rules.Ruling, summary: rules.ActionSummary) -> rules.Verdict:
@@ -232,19 +236,39 @@ class RulesGate:
             logger.warning("could not record the review of %s in session %s", tool, session_id, exc_info=True)
         logger.warning("action review %s %s for %s in session %s: %s", verdict.verdict, ruled.category, tool, session_id, verdict.reason)
 
-    async def _notice(self, state: Any, session_id: str, tool: str, what: str, ruled: rules.Ruling, verdict: rules.Verdict, key: str) -> None:
-        hook = self.manager.service_hooks.get("rules_notice")
-        if hook is None:
+    def hold_block(self, state: Any, key: str, tool: str, what: str, ruled: rules.Ruling, verdict: rules.Verdict, family: dict[str, Any] | None) -> None:
+        """Keep a blocked call open for the operator's "Allow anyway", and announce it once.
+
+        A block is held the way a question is (``policy_pending``, the same key, the same card and grant)
+        so that pressing it is an ordinary one-time grant: the agent is woken, repeats the call unchanged,
+        and the gate lets that one call past the review and spends the grant. The alternative, the host
+        running the stored call itself, was rejected: the call would run outside the agent's turn, its
+        sandbox, hooks and result in history, and an Exec run that way could not be told apart from one
+        the agent made. The entry is marked ``blocked`` so the card says what the review said, only the
+        operator answers it, and the override goes into the review log. It closes like every request:
+        with the next run, a restart, or an answer.
+
+        A guest's turn gets no card: nothing standing is ever granted in it, so an Allow would grant a
+        call that cannot use it."""
+        if state is None or state.guest_turn is not None or not key:
             return
-        title = str(getattr(getattr(state, "session", None), "title", "") or "") if state is not None else ""
-        project = getattr(state, "project", None) if state is not None else None
-        try:
-            await hook({
-                "session_id": session_id, "project_id": getattr(project, "id", None), "title": title, "tool": tool, "text": what,
-                "category": ruled.category, "reason": verdict.reason, "key": key,
-            })
-        except Exception:  # noqa: BLE001
-            logger.warning("could not post the review's notice", exc_info=True)
+        pending = dict(state.metadata.get("policy_pending") or {})
+        fresh = key not in pending
+        blocked = {"reason": self.manager.redactor.redact(verdict.reason)[:300], "category": ruled.category, "level": ruled.level}
+        entry: dict[str, Any] = {"tool": tool, "text": what, "at": datetime.now(UTC).isoformat(), "blocked": blocked}
+        if family is not None and agent_talk.touch_of(state.metadata) is None:
+            entry["similar"] = {**family, "label": self.manager.redactor.redact(family["label"])[:200]}
+        pending[key] = entry
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = dict(list(pending.items())[-20:])
+        self.manager._spawn_background(self.manager.sessions.update_metadata(state.session.id, state.session.metadata), f"review-block:{state.session.id}")
+        if not fresh:
+            return  # the agent retrying the blocked call is the same request, already on its card
+        payload = self.manager._permission_payload(state, Decision(ASK, verdict.reason, f"review.{ruled.category}", key=key), entry)
+        # Answered in the app, never from a lock screen, and always by the operator: a staff member's
+        # block is not its orchestrator's to lift, whatever the team's autonomy says.
+        payload.update({"risk": "elevated", "quick": False, "routed_to": "operator", "blocked": blocked})
+        self.manager._publish_soon(state, "permission.pending", payload)
 
     @staticmethod
     def _grants(state: Any) -> set[str]:
