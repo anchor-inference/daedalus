@@ -24,6 +24,7 @@ from daedalus.host.hooks import DaedalusHookManager
 from daedalus.providers.openai_compat import OpenAICompatibleProvider
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.sqlite import SqliteEventStream
+from daedalus.tools.shell import chromium_gpu
 
 TENANT = "daedalus"
 
@@ -210,6 +211,7 @@ def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, workspace: Path,
             ssh_hosts=prompts.ssh_hosts(deps.ssh_config) if deps.ssh_config else (),
             selfdev_mode=deps.selfdev_mode,
             in_project=in_project,
+            gpu=chromium_gpu(),
         ),
     )
 

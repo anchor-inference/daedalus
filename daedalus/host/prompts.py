@@ -1107,6 +1107,7 @@ def environment_section(
     ssh_hosts: Sequence[tuple[str, str]] = (),
     selfdev_mode: str = "off",
     in_project: bool = False,
+    gpu: bool = False,
 ) -> str:
     # The session's and the project's names are not here: either can be renamed at any time, and a
     # rename that changed these bytes cost the provider's cache of the whole history after them. They
@@ -1163,6 +1164,12 @@ def environment_section(
         "own command line contains (it finds itself and never ends). To wait for a pid, a file, a log line or a port, use "
         "JobWait. A server goes to ServiceStart, or Exec(service=true) where services are unavailable"
     )
+    if gpu:
+        lines.append(
+            "- This machine has a GPU, and your commands have it (a guest's turn does not): a Chromium a script starts (Playwright's `p.chromium.launch()`) "
+            "draws WebGL on it by itself. The renderer string (WEBGL_debug_renderer_info) names the card; SwiftShader or llvmpipe "
+            "there means it fell back to the CPU, which is a fault to find (the webapp-testing skill says how), not a missing GPU"
+        )
     if sandboxed:
         lines.append("- Exec and Verify run in a sandbox: the filesystem is read-only outside the workspace, /tmp is private, and background processes end with the command")
     if extra_notes:

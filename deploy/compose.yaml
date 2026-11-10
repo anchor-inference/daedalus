@@ -106,6 +106,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     restart: unless-stopped
     env_file:
@@ -153,6 +156,9 @@ services:
       # The run directory of the daemon for the operator's own Chrome (the browser-user-run volume):
       # empty until that service runs. A paired Chrome reaches it through the app's /api/browser/relay.
       BROWSER_USER_DIR: /run/daedalus-browser-user
+      # Tells the image's wrapper around Playwright's Chromium to draw on the GPU when a render node is
+      # there (deploy/chromium-gpu.sh); with no device below it changes nothing.
+      DAEDALUS_CHROMIUM_GPU: "1"
       GITHUB_DAEDALUS_TOKEN: ${GITHUB_DAEDALUS_TOKEN:-}
       DAEDALUS_GITHUB_ORG: ${DAEDALUS_GITHUB_ORG:-}
       # Provider keys live in the key proxy, not here (see the note at the top of this file).
@@ -196,6 +202,17 @@ services:
       - guest-run:/run/daedalus-guest
       - guest-token:/run/daedalus-guest-token
     entrypoint: ["python3", "/opt/launcher/state_mount_guard.py", "--", "python3", "/opt/launcher/supervisor.py"]
+    # The GPU for the agent's own commands: a browser test a script runs draws WebGL on it rather than on
+    # the processor. Off unless .env names it: by default the device is /dev/null, which every container
+    # has already, and the group is root's. To pass it in, set AGENT_GPU_DEVICE=/dev/dri/renderD128 (the
+    # render node only), AGENT_GPU_GROUP to the host's group of that node (`stat -c %g
+    # /dev/dri/renderD128`) and BROWSER_GPU=1 for the drivers, rebuild the image and recreate this
+    # service. The sandbox binds the node into every command of the operator's sessions and never into a
+    # guest's; what that exposes is in SECURITY.md.
+    devices:
+      - ${AGENT_GPU_DEVICE:-/dev/null}:${AGENT_GPU_DEVICE:-/dev/null}
+    group_add:
+      - "${AGENT_GPU_GROUP:-0}"
     ports:
       - "127.0.0.1:${API_PORT:-8765}:${API_PORT:-8765}"
       # Services the agent hosts (ServiceStart) listen in this range; published on every interface so the
@@ -220,6 +237,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     restart: unless-stopped
     # Reaps what the terminals leave behind: a shell's orphaned background job is reparented to
@@ -362,6 +382,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     profiles: [browser]
     restart: unless-stopped
@@ -399,6 +422,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     profiles: [guest]
     restart: unless-stopped
@@ -453,6 +479,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     profiles: [guest]
     restart: unless-stopped
@@ -514,6 +543,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # The Vulkan drivers a GPU needs, the same as the browser's (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local
     restart: unless-stopped
     # The image's entrypoint is the supervisor, which is not what this container is; it is replaced

@@ -46,6 +46,48 @@ SANDBOX_FLAGS = ("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--t
 """What every sandboxed command starts with; the probe runs exactly these, so it answers for what Exec does."""
 
 
+DRI_DIR = Path("/dev/dri")
+"""Where the kernel puts a GPU's device nodes."""
+CHROMIUM_GPU_ENV = "DAEDALUS_CHROMIUM_GPU"
+"""Set to ``1`` in the agent's container when the operator passed a GPU into it. The image's wrapper around
+Playwright's Chromium (``deploy/chromium-gpu.sh``) reads it and starts that Chromium on the GPU; the browser
+service runs the same image without it, because there browserd chooses how its browser draws."""
+
+
+def render_nodes(dri: Path | None = None) -> list[Path]:
+    """The GPU render nodes this process can see: character devices named ``renderD*``, in order.
+
+    A render node is the half of a GPU that draws and computes. The other half, ``card*``, sets display modes,
+    and nothing a command does needs it: Mesa's Vulkan driver and Chromium on it open only the render node.
+    """
+    found: list[Path] = []
+    for node in sorted((dri or DRI_DIR).glob("renderD*")):
+        try:
+            if stat.S_ISCHR(node.stat().st_mode):
+                found.append(node)
+        except OSError:
+            continue
+    return found
+
+
+def gpu_binds(dri: Path | None = None) -> list[str]:
+    """What gives a sandboxed command the GPU: each render node bound in as a device.
+
+    ``--dev /dev`` gives the sandbox a fresh ``/dev`` with only the standard nodes, so a GPU the container was
+    given is not there unless it is bound back. Without it Chromium in a command fell back to SwiftShader, the CPU
+    renderer, and a three.js page with 40 000 points drew at 1 to 3 frames a second while other work held the
+    processors. Only nodes that exist are named: a bind of a missing node makes bubblewrap refuse every command.
+    Never for a guest's turn: that sandbox is built by :func:`guest_sandbox_args` and gets no device at all.
+    """
+    return [arg for node in render_nodes(dri) for arg in ("--dev-bind", str(node), str(node))]
+
+
+def chromium_gpu(dri: Path | None = None) -> bool:
+    """Whether a Chromium a command starts draws WebGL on the GPU: the image's wrapper is asked to
+    (:data:`CHROMIUM_GPU_ENV`) and there is a render node for it."""
+    return os.environ.get(CHROMIUM_GPU_ENV, "").strip() == "1" and bool(render_nodes(dri))
+
+
 class SandboxUnavailable(RuntimeError):
     """The configured sandbox cannot be created here; commands do not run unsandboxed instead."""
 
@@ -547,6 +589,7 @@ async def sandbox_argv(
     walls and the paths the host opened for it, from ``SessionServices.sandbox_writable``) and any
     configured extra path writable, gives the command a private /tmp and PID namespace, and dies
     with the parent so a timeout kill cannot leave it behind. Everything else is entered read-only.
+    The GPU's render nodes the container was given are bound in as devices (:func:`gpu_binds`).
 
     The session's workspace is not bound on its own account: a workspace in a folder marked
     read-only must stay read-only here too, and whether it is writable is the walls' answer.
@@ -599,7 +642,9 @@ async def sandbox_argv(
     bwrap = bwrap_path()
     if bwrap is None:
         raise SandboxUnavailable("no root-owned bwrap was found in " + ", ".join(BWRAP_LOCATIONS))
-    argv = [bwrap, *SANDBOX_FLAGS]
+    # The GPU right after the fresh /dev it would otherwise be missing from (gpu_binds): the operator passed it
+    # into the container for their agent's commands, so a browser test draws on it rather than on the CPU.
+    argv = [bwrap, *SANDBOX_FLAGS, *gpu_binds()]
     # The shared package caches are writable here and nowhere else: uv, npm and Playwright write their
     # cache on every install, and with the root bound read-only `uv add` failed on ~/.cache/uv.
     paths = [*writable, *package_cache.writable_dirs(), *[Path(p) for p in getattr(exec_config, "sandbox_extra_writable", [])]]

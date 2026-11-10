@@ -183,6 +183,15 @@ of its own, which the watch would report. With a key it could spend from anywher
 With the API token it could call the app as the operator. The key proxy's own port stays open to a command in
 every case: it can use a key it cannot read, as far as the proxy's budget lets it.
 
+**The GPU in the agent's commands.** When the operator passes a render node into the agent's container
+(`AGENT_GPU_DEVICE` in `.env`), the sandbox binds it into every command of the operator's own sessions, so a browser
+test a script starts draws WebGL on the card instead of the processor. That is a door to the kernel's GPU driver
+from any program the agent runs, and from any page that
+program's browser loads, with the agent's root behind it: a fault in the driver can hang the card for the whole
+machine, and a flaw in it is a way out of the container. It was the operator's choice, made because tests of 3D
+pages on the CPU ran at a few frames a second. A guest's command never gets the node, the agent's own browser starts
+without WebGL until the agent asks for it, and leaving `AGENT_GPU_DEVICE` unset takes the door away.
+
 - A model that is determined to misuse the container's own resources (CPU, disk, the agent's GitHub
   organisation) can do so within the policy's limits; the policy catches the accidental and the lazy case.
 - Anything you mount into the container is the agent's. Mount only what it should have.

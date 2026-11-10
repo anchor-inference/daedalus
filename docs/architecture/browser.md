@@ -861,6 +861,20 @@ The screencast and screenshots draw in every mode. Mesa's llvmpipe was faster th
 but exists only where Mesa does and is reached only headed, so software mode stays on the renderer
 every build has.
 
+**The Chromium an agent's own script starts** (Playwright in Exec, not this daemon) gets the GPU too
+when the agent's container is given the render node (`AGENT_GPU_DEVICE`, `AGENT_GPU_GROUP` and
+`BROWSER_GPU=1` for the drivers). The sandbox binds the node into the operator's commands after its
+fresh `/dev`, never into a guest's (`daedalus/tools/shell.py`, `gpu_binds`), and the image puts
+`deploy/chromium-gpu.sh` where each of Playwright's Chromium binaries was: with
+`DAEDALUS_CHROMIUM_GPU=1`, which only the agent's service sets, and a render node it can open, it adds
+`--use-angle=vulkan --ignore-gpu-blocklist` ahead of the script's own switches. A plain
+`p.chromium.launch()` then reports Mesa's NVK. On the same card a headless 40 000-point three.js swarm
+at 1280×720, measured in that sandbox on a loaded machine: 60 fps on the GPU (the display's rate) using
+a third of a core; on SwiftShader 50 fps taking eight cores, 24 when held to four and 11 to two. Heavy
+fill (2560×1440, large points, three passes) ran at 7-8 fps on the GPU and 6-7 on SwiftShader with every
+core, 2.9 with four and 1.3 with two: nouveau leaves this card
+at its lowest clocks, so it wins on the processors it leaves free, not on fill rate.
+
 ## Limits
 
 | Name | Default | |
@@ -1407,7 +1421,7 @@ the daemon's private figure under the cost profile `browser`, beside the termina
 `record_max_mb`, `lan_allow`, `watch_mode` and `watch_domains`, `injection_monitor` and
 `injection_monitor_preset`, `extract_preset` (the model `BrowserText(query=…)` reads with) and
 `point_clicks` (off by default: whether the agent may act at a point of the viewport) and `webgl_allow`
-(`ask`, `software` or `gpu`: which WebGL the agent may turn on without asking). The host gives the daemon its part with `limits.set` and `net.configure`
+(`ask`, `software` or `gpu`: which WebGL the agent may turn on without asking; `gpu` by default). The host gives the daemon its part with `limits.set` and `net.configure`
 on every connection and within two seconds of a change.
 
 - **Watch mode.** With `watch_mode` on, on a host `watch_domains` names (`mail.example.com`, or
@@ -1432,7 +1446,10 @@ on every connection and within two seconds of a change.
   the agent with the browser's own report; their no wakes it with the refusal; nothing changes while
   it waits. `webgl=off` never asks. A browser closed with the reason `relaunch` leaves its group rows
   open: the daemon reopens them under the same ids, and the host writes the new browser into them.
-  `gpu` where the daemon offers none is refused before anything is asked, with its reason.
+  `gpu` where the daemon offers none is refused before anything is asked, with its reason. With the
+  default `webgl_allow = "gpu"` nothing is asked: the operator chose to let their agent's browser draw
+  on the GPU. A profile still starts with WebGL off until the agent asks for a mode, so a page it only
+  reads does not reach the GPU's kernel driver.
 
 ### The network wall's rules and asks
 
