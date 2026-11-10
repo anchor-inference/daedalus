@@ -42,6 +42,8 @@ type Props = {
   onKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   /** Called first; a paste it prevents (files) is not inserted as text. */
   onPaste?: (event: React.ClipboardEvent<HTMLDivElement>) => void;
+  /** The selection moved, by a key, a click or an edit: Quick Chat follows the caret for its `@` and `$`. */
+  onSelect?: () => void;
   suggestion?: string;
 };
 
@@ -423,6 +425,7 @@ export const CodeField = forwardRef<CodeFieldHandle, Props>(function CodeField(p
       onCompositionEnd={() => { composing.current = false; sync(); }}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
+      onSelect={props.onSelect}
       onMouseDown={(event) => {
         // The copy button keeps the caret where it was; the page's handler (md.ts) copies.
         if ((event.target as Element).closest("[data-skip]")) event.preventDefault();

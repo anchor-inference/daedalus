@@ -108,7 +108,16 @@ def main() -> int:
                 expect(sheet).to_be_visible(timeout=15000)
                 if main_run:
                     check("pair-device" not in page.url, f"{lang}: the link's code is taken out of the address ({page.url})")
-                    check("build-box" in sheet.inner_text(), f"{lang}: the link opens the sheet for its own request")
+                    # The sheet opens at once and says Loading until the server answers about the code;
+                    # reading its text the moment it appeared failed whenever the machine was loaded,
+                    # which read as a pairing race. It waits for the request, then checks it is this one.
+                    named = sheet.locator("[data-pair-name]")
+                    try:
+                        expect(named).to_have_text("build-box", timeout=10000)
+                        own = sheet.locator("[data-pair-code]").inner_text() == "KXQP-LMNR"
+                    except AssertionError:
+                        own = False
+                    check(own, f"{lang}: the link opens the sheet for its own request ({sheet.inner_text()!r})")
                 sheet.get_by_role("button", name=words["deny"]).click()
                 expect(sheet).to_have_count(0, timeout=5000)
                 if main_run:

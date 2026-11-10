@@ -668,13 +668,13 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
         )
         panel = await opening
         frame = panel.frame_locator("#frame")
-        await frame.locator(".sp-new .composer textarea").wait_for(timeout=20000)
+        await frame.locator(".sp-new .composer .composer-field").wait_for(timeout=20000)
         assert "Fixture shop" in await frame.locator(".sp-new-tab").inner_text()
         assert "signed in as you" in await frame.locator(".sp-consent").inner_text()
 
         # A new conversation from the panel: the operator's words, and the tab in front of them.
-        await frame.locator(".sp-new .composer textarea").fill("What does this shop sell?")
-        await frame.locator(".sp-new .composer textarea").press("Enter")
+        await frame.locator(".sp-new .composer .composer-field").fill("What does this shop sell?")
+        await frame.locator(".sp-new .composer .composer-field").press("Enter")
         # The panel moves to the conversation (the model names it as it likes after the first turn).
         await frame.locator(".sp-body").wait_for(timeout=20000)
         sessions = await service.choices.using_user()
@@ -704,7 +704,7 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
             await until(lambda: _two_connected(service), "the second Chrome beside the first", timeout=30)
             theirs = await until(lambda: second.worker.evaluate("async () => (await chrome.storage.session.get('panelGrant')).panelGrant"), "the second Chrome's credential")
             assert theirs["token"] != grant["token"]
-            await second.panel.frame_locator("#frame").locator(".sp-new .composer textarea").wait_for(timeout=20000)
+            await second.panel.frame_locator("#frame").locator(".sp-new .composer .composer-field").wait_for(timeout=20000)
             async with httpx.AsyncClient(base_url=theirs["base"]) as client:
                 own = {"authorization": f"Panel {grant['token']}"}
                 other = {"authorization": f"Panel {theirs['token']}"}

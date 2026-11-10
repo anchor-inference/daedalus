@@ -22,6 +22,9 @@ the shell, and the API answers what the companion's contract says. What is check
   that monitor to it for 60 minutes, sends the words and asks the shell to show the chat, the window
   growing in steps as the picker unfolds;
 - signed out, the page says so and offers the main window; the words follow ?lang=ru;
+- the field is the main composer's: a fenced block typed in it is drawn as a code card with a copy
+  button, Enter inside the code is its next line rather than Send, and the message carries the fences
+  as typed; in English and Russian, dark and light;
 - Settings → Desktop app is listed only in the desktop window, records a shortcut from the physical
   key and shows the Wayland note; the app in the main window reports what runs to the tray, does the
   tray's Pause, and moves to the conversation Quick Chat's "open" names.
@@ -156,6 +159,47 @@ def calls(page, name: str) -> list:  # type: ignore[no-untyped-def]
     return [c for c in page.evaluate("window.__calls") if c[0] == name]
 
 
+def code_card(browser, api: Api) -> None:  # type: ignore[no-untyped-def]
+    """A fenced block in Quick Chat: the same card the main composer draws, copy and Enter included."""
+    for lang in ("en", "ru"):
+        for scheme in ("dark", "light"):
+            where = f"quick code card {lang} {scheme}"
+            ctx = browser.new_context(viewport={"width": 680, "height": 520}, color_scheme=scheme)
+            ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+            ctx.add_init_script(BRIDGE)
+            page = ctx.new_page()
+            page.route("**/api/**", api)
+            page.goto(f"{BASE}/quick?lang={lang}&scheme={scheme}")
+            field = page.locator(".quick-field")
+            expect(field).to_be_focused()
+            page.keyboard.type("Why does this fail?")
+            page.keyboard.press("Shift+Enter")
+            page.keyboard.type("```python")
+            page.keyboard.press("Enter")
+            page.keyboard.type("def add(a, b):")
+            page.keyboard.press("Enter")
+            posted = len(api.posts)
+            page.keyboard.type("return a - b")
+            card = field.locator(".cf-card[data-lang='python']")
+            expect(card).to_be_visible()
+            assert len(api.posts) == posted, f"{where}: Enter inside the code sent the message: {api.posts[posted:]}"
+            assert card.locator(".tk-k").count() >= 1, f"{where}: the code is not coloured"
+            card.locator("button[data-copy]").click()
+            copied = page.evaluate("() => navigator.clipboard.readText()")
+            assert copied == "def add(a, b):\nreturn a - b", f"{where}: copy takes the code alone ({copied!r})"
+            page.wait_for_timeout(300)
+            page.locator(".quick").screenshot(path=str(SHOTS / f"quick-code-{lang}-{scheme}.png"))
+            # Out of the code, below the card, Enter sends what was typed, fences and all.
+            for _ in range(3):
+                page.keyboard.press("ArrowDown")
+            page.keyboard.press("Enter")
+            expect(page.locator(".quick-status")).to_contain_text("Sent" if lang == "en" else "Отправлено")
+            _, sent = api.last("/api/sessions/s-new/messages")
+            assert sent["text"] == "Why does this fail?\n```python\ndef add(a, b):\nreturn a - b\n```", f"{where}: {sent['text']!r}"
+            expect(field.locator(".cf-card")).to_have_count(0)
+            ctx.close()
+
+
 def run() -> int:
     expect_app(BASE)
     SHOTS.mkdir(parents=True, exist_ok=True)
@@ -273,7 +317,7 @@ def run() -> int:
         page.screenshot(path=str(SHOTS / "quick-voice.png"))
         page.wait_for_timeout(600)
         page.evaluate("window.__voice = true; window.__shown({ voice: true })")
-        expect(page.locator(".quick-field")).to_have_value(re.compile("hello from the stub"))
+        expect(page.locator(".quick-field")).to_have_text(re.compile("hello from the stub"))
         assert len(api.posts) == posted, f"dictation sent the words by itself: {api.posts[posted:]}"
         assert api.transcribed == 1, api.transcribed
         # A host that cannot transcribe says so instead of ignoring the press.
@@ -400,6 +444,8 @@ def run() -> int:
         known = screenshots.SESSIONS[0]["id"]
         main.evaluate(f"window.__navigate('/app/agents/{known}')")
         main.wait_for_url(f"**/app/agents/{known}*")
+
+        code_card(browser, api)
 
         # A plain browser lists no desktop section.
         plain = browser.new_context(viewport={"width": 1180, "height": 820})
