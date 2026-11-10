@@ -501,6 +501,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.effort.short": { en: "Effort", ru: "Рассуждения" },
   "composer.model.providers": { en: "Choose a provider", ru: "Выберите провайдера" },
   "composer.model.free": { en: "Free", ru: "Бесплатные" },
+  "provider.name.claude": { en: "Anthropic · subscription", ru: "Anthropic · подписка" },
+  "provider.name.anthropic": { en: "Anthropic · API key", ru: "Anthropic · API-ключ" },
   "composer.model.free.sub": { en: "Free models by provider", ru: "Бесплатные модели по провайдерам" },
   "composer.model.count": { en: "Models: {n}", ru: "Моделей: {n}" },
   "composer.model.add": { en: "Add model", ru: "Добавить модель" },

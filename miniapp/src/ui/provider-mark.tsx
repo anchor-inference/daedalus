@@ -1,4 +1,5 @@
 import type { ProviderConf } from "../api";
+import { t } from "../i18n";
 
 const NAMES: Record<string, string> = {
   anthropic:"Anthropic", claude:"Anthropic", openai:"OpenAI", deepseek:"DeepSeek",
@@ -15,8 +16,13 @@ function family(id: string, kind?: string): string {
   return known ?? (kind && kind !== "openai" ? kind : "endpoint");
 }
 
+/** Anthropic is reached two ways, and both were called plain "Anthropic": the picker listed two rows of
+ *  one name, one the `claude` subscription login and one the `anthropic` key. They say which they are. */
+const WORDED: Record<string, string> = { claude: "provider.name.claude", anthropic: "provider.name.anthropic" };
+
 export function providerName(id: string, conf?: ProviderConf): string {
-  return conf?.name || NAMES[id.toLowerCase()] || id;
+  const key = id.toLowerCase();
+  return conf?.name || (WORDED[key] ? t(WORDED[key]) : NAMES[key]) || id;
 }
 
 /** The tile's letter: the first letter or digit of the name the operator sees. */
