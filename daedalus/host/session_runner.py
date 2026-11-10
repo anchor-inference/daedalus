@@ -218,7 +218,7 @@ COMPUTER_LIVE_SECONDS = 3.0
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
-BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it (USD_PER_DAY)"
+BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it in Settings → Limits"
 """What lifts the daily cap, in the words every refusal and notice uses. They used to point at a
 ``/budget reset`` that no front has ever had, so the operator was sent to look for a command."""
 RECOVERY_REASONS = frozenset({"transient_llm_error_retry", "model_fallback_triggered", "soft_stop_notified", "llm_context_window_exceeded", "context_window_recovered", "reasoning_length_cut_retry", "continue_prompt_injected", "max_output_token_recovery"})

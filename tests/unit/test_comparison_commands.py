@@ -98,7 +98,7 @@ async def pair_app(tmp_path: Path):
                                                                input_limit=1000, limit_source="provider")})
     manager = SimpleNamespace(db=db, bus=EventBus(db),
                               config=SimpleNamespace(presets={"standard": SimpleNamespace(max_output_tokens=100)},
-                                                     limits=SimpleNamespace(total_since="", usd_total=0,
+                                                     limits=SimpleNamespace(total_since="", usd_total=0, usd_per_day=0,
                                                                             usd_total_per_provider={})),
                               settings=SimpleNamespace(usd_per_day=0),
                               resolve_model=lambda _overrides: ([(SimpleNamespace(endpoint=endpoint), "model")],

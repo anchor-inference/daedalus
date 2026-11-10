@@ -573,7 +573,6 @@ KEYPROXY_VIEW: dict[str, object] = {
         keyproxy_upstream("perplexity", "search", "https://api.perplexity.ai", "KEYPROXY_KEY_PERPLEXITY"),
     ],
     "cli_logins": [{"upstream": "codex", "configured": True}, {"upstream": "grok", "configured": False}, {"upstream": "claude", "configured": False}],
-    "budget": keyproxy_var("KEYPROXY_USD_PER_DAY", "20", "0", written=True),
 }
 """What the key proxy holds, as /api/keyproxy answers it: keys only as set or not."""
 

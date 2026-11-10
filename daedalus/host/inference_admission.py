@@ -114,8 +114,8 @@ class HostInferenceAdmission:
         limits = manager.config.limits
         result = []
         today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        if manager.settings.usd_per_day > 0:
-            result.append(Constraint(f"daily:{today}", microusd(manager.settings.usd_per_day), since=today))
+        if limits.usd_per_day > 0:
+            result.append(Constraint(f"daily:{today}", microusd(limits.usd_per_day), since=today))
         since = limits.total_since or None
         if limits.usd_total > 0:
             result.append(Constraint(f"total:{since or 'all'}", microusd(limits.usd_total), since=since))

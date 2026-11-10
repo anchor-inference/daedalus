@@ -6432,7 +6432,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data = app.config.model_dump(mode="json")
         data["revision"] = config_revision(app.config)
         data["providers_available"] = list(manager.providers.available())
-        data["usd_per_day"] = settings.usd_per_day
         data["prompt"]["default_rules"] = DEFAULT_RULES.strip()
         data["search_backends"] = websearch.catalogue()
         # What an empty orchestrator preset means, so the setting can show it preselected.

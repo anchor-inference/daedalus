@@ -72,8 +72,7 @@ while true; do
     *) say "Choose 1–10, or Enter to finish." ;;
   esac
 done
-ask KEYPROXY_USD_PER_DAY "Daily spend cap for the key proxy, USD" "" "$SECRETS_FILE"
-say "Calls with no known model price do not count toward a USD cap; subscriptions also have their own provider quotas."
+say "The daily spend cap is set in the app, Settings → Limits. Calls with no known model price do not count toward it; subscriptions also have their own provider quotas."
 
 say "3/6 Web search — optional. DuckDuckGo always answers last, with nothing to set up."
 say "Recommended: SearXNG, a free metasearch that runs as a container of its own beside the agent (about 380 MB),"
@@ -120,7 +119,6 @@ PY
 say "4/6 GitHub and the app"
 ask GITHUB_TOKEN "Fine-grained GitHub token for the two agent repositories (pull requests + contents); empty disables self-development" secret
 ask MINIAPP_PUBLIC_URL "Public HTTPS address of the app (a reverse proxy in front of port 8765); empty for LAN only"
-ask USD_PER_DAY "Daily spend cap enforced by the supervisor, USD"
 if [ -z "$(current SEARXNG_SECRET "$ENV_FILE")" ]; then
   python3 - "$ENV_FILE" <<'PY'
 import sys, pathlib, secrets, re

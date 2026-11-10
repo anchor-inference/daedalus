@@ -29,7 +29,7 @@ async def test_capped_coordinator_enables_on_an_unpriced_subscription_model(sett
     r = await rig(settings, db, tmp_path)
     try:
         r.manager.config.limits.usd_per_run = 5.0
-        r.manager.settings.usd_per_day = 3.0
+        r.manager.config.limits.usd_per_day = 3.0
         r.manager.config.presets["subscription"] = ModelPresetConfig(provider="proxy", model="claude")
         r.manager.config.orchestrator.preset = "subscription"
         r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai_compat", base_url="http://127.0.0.1:1",
@@ -136,7 +136,7 @@ async def test_uncapped_coordinator_keeps_unpriced_model_behavior(settings: Sett
                                                                  tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
-        r.manager.settings.usd_per_day = 0
+        r.manager.config.limits.usd_per_day = 0
         r.manager.config.limits.usd_per_run = 0
         r.manager.config.limits.usd_total = 0
         r.manager.config.limits.usd_total_per_provider = {}

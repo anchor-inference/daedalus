@@ -61,7 +61,7 @@ async def prepared(settings: Settings, db: Database, handler, *, approve: bool =
     }
     config.model.preset = "held"
     config.model.chain = ["fallback"]
-    settings.usd_per_day = 0
+    config.limits.usd_per_day = 0
     manager = SessionManager(settings, config, db=db)
     await manager.start()
     seen = attach_adapters(manager, handler)

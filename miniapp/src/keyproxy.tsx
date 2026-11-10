@@ -23,7 +23,6 @@ export type KeyproxySettings = {
   writable?: boolean;
   upstreams?: KeyproxyUpstream[];
   cli_logins?: { upstream: string; configured: boolean }[];
-  budget?: KeyproxyVar;
   /** False where a command the agent runs could read the keys saved here: no sandbox hides them. */
   keys_hidden?: boolean;
 };
@@ -344,11 +343,6 @@ export function KeyproxyCard({ toast, onChanged }: { toast: (text: string) => vo
           <div className="section-title">{t("keyproxy.group.extra")}</div>
           {group("extra").length ? <div className="mlist">{group("extra").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div> : <div className="sub">{t("keyproxy.extra.none")}</div>}
           <AddUpstream write={write} writable={writable} taken={rows.map((row) => row.upstream)} />
-          {data.budget && (
-            <Row title={t("keyproxy.budget")} desc={t("keyproxy.budget.sub")} stack data-setting="keyproxy.usd_per_day">
-              <NumInput label={t("keyproxy.budget")} unit="USD" step="1" min={0} value={Number(data.budget.value || 0)} onSave={(v) => void write(data.budget!.name, String(v))} />
-            </Row>
-          )}
           {!!data.cli_logins?.length && (
             <Row title={t("keyproxy.logins")} desc={t("keyproxy.logins.sub")}>
               <span className="sub">{data.cli_logins.map((login) => `${login.upstream}: ${t(login.configured ? "keyproxy.login.on" : "keyproxy.login.off")}`).join(" · ")}</span>
