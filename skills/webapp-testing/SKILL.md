@@ -89,8 +89,8 @@ print('renderer:', renderer)   # the GPU: "ANGLE (NVIDIA, Vulkan … NVK …)"; 
 Never tell the operator there is no video card from that. Find out why instead:
 - `ls -l /dev/dri` in Exec: no `renderD…` node means the GPU is not passed into the agent's commands
   (`AGENT_GPU_DEVICE` in the installation's `.env`). Say exactly that, and test with what you have.
-- `echo $DAEDALUS_CHROMIUM_GPU` is not `1`, or you launched a Chromium the image did not install (your own
-  `playwright install`, `executable_path=…`, another `PLAYWRIGHT_BROWSERS_PATH`): pass the switches yourself,
+- `echo $DAEDALUS_CHROMIUM_GPU` is not `1`, or you launched a Chromium the image did not install (one you downloaded,
+  `executable_path=…`, another `PLAYWRIGHT_BROWSERS_PATH`): pass the switches yourself,
   `p.chromium.launch(args=["--use-angle=vulkan", "--ignore-gpu-blocklist"])`.
 - Your own `args` put `--use-angle=swiftshader` or `--disable-gpu`: take them out.
 
