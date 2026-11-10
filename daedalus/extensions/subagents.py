@@ -54,6 +54,9 @@ PARKED_KEY = "subagent_parked"
 """On a helper the daily cap stopped: why and when, until it is driven on. The panel draws it as parked."""
 HELD_KEY = "subagent_reports_held"
 """On a helper whose report its leader could not take: the reports, in order, until each is delivered."""
+REPORT_KEY = "subagent_report"
+"""On a helper whose run ended: how, the gist of what it said, and whether its leader has it yet. The panel draws it."""
+REPORT_SUMMARY_CHARS = 600
 NOTICE_KEY = "daedalus.subagent_notice"
 """On the line in the leader's chat that says a helper is parked or its report waits, for the app to draw."""
 
@@ -547,16 +550,22 @@ class Subagents:
             out.append({"session_id": row["id"], "name": row["metadata"].get("subagent_name"), "running": bool(state and state.running), "status": row["status"], "kept": bool(row["metadata"].get("subagent_keep"))})
         return out
 
-    async def views(self, leader_id: str, *, model_label: Callable[[Any], Awaitable[str]] | None = None) -> list[dict[str, Any]]:
+    async def views(self, leader_id: str, *, describe: Callable[[Any], Awaitable[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
         """The leader's subagents as the app's Subagents panel draws them, the active ones first.
 
-        ``model_label`` names the model a session answers on; the API passes the label its session
-        detail uses, so the panel and the header never disagree. Without it the model is left empty.
+        ``describe`` names what a session answers on — ``model``, ``provider``, ``effort`` (``off``
+        when thinking is off) and the context ``window`` — from the same settings the session detail
+        reads, so the panel and the header never disagree. Without it they are left empty rather than
+        guessed. The spend, the live step and the last report are read here, in a few grouped queries
+        for all the helpers at once: the tab asks again every few seconds while one works.
         """
         manager = self.app.manager
         assert manager is not None
+        rows = await self._child_rows(leader_id)
+        ids = [row["id"] for row in rows]
+        spend = await self._spend(ids)
         out = []
-        for row in await self._child_rows(leader_id):
+        for row in rows:
             meta = row["metadata"]
             state = await manager.get_state(row["id"])
             task = str(meta.get("subagent_task") or "").strip()
@@ -565,24 +574,82 @@ class Subagents:
             if parked and status in ("idle", "failed"):
                 # Not a failure and not done: the cap stopped it and the host drives it on when it reopens.
                 status = "parked"
+            settings = await describe(state) if describe is not None and state is not None else {}
+            report = meta.get(REPORT_KEY) if isinstance(meta.get(REPORT_KEY), dict) else None
             out.append({
                 "session_id": row["id"],
                 "name": meta.get("subagent_name"),
                 "title": (task.splitlines()[0] if task else "")[:TITLE_CHARS],
+                "brief": task,
                 "status": status,
                 "parked": {"reason": str(parked.get("reason") or "budget"), "at": str(parked.get("at") or "")} if parked else None,
                 "reports_held": len(meta.get(HELD_KEY) or ()),
                 "running": bool(state and state.running),
-                "model": await model_label(state) if model_label is not None and state is not None else "",
+                "model": str(settings.get("model") or ""),
+                "provider": str(settings.get("provider") or ""),
+                "effort": str(settings.get("effort") or ""),
                 "kept": bool(meta.get("subagent_keep")),
                 "idle_start": bool(meta.get("subagent_idle")),
                 "created_at": row["created_at"],
                 "last_activity_at": row["last_message_at"],
                 "run_started_at": run_started_at(state) if state is not None else None,
+                "finished_at": await self._finished_at(row["id"]) if state is None or not (state.running or state.pending is not None) else None,
+                "activity": await self._activity(state) if state is not None and state.running else None,
+                "usage": spend.get(row["id"]) or {"calls": 0, "input": 0, "output": 0, "cache_read": 0, "usd": 0.0, "unpriced": 0},
+                "context": {"tokens": await self._prompt_size(row["id"], state), "window": int(settings.get("window") or 0)},
+                "report": {key: report.get(key) for key in ("at", "cause", "summary", "delivered", "delivered_at")} if report else None,
             })
         out.sort(key=lambda view: view["last_activity_at"] or "", reverse=True)
         out.sort(key=lambda view: view["status"] not in ("running", "waiting", "parked"))
         return out
+
+    async def _spend(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        """What each helper has cost so far, every call of every run: tokens in, out and from the cache, and dollars.
+
+        ``unpriced`` counts the calls with no known price, so a total over them is said to be partial
+        rather than passed off as the whole."""
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = await self.app.db.fetchall(
+            "SELECT session_id, count(*) calls, sum(input_tokens) input, sum(output_tokens) output, sum(cache_read_tokens) cache_read,"
+            f" sum(cost_usd) usd, sum(cost_usd IS NULL) unpriced FROM usage_events WHERE session_id IN ({marks}) GROUP BY session_id",
+            tuple(ids),
+        )
+        return {
+            str(row["session_id"]): {
+                "calls": int(row["calls"] or 0), "input": int(row["input"] or 0), "output": int(row["output"] or 0),
+                "cache_read": int(row["cache_read"] or 0), "usd": float(row["usd"] or 0.0), "unpriced": int(row["unpriced"] or 0),
+            }
+            for row in rows
+        }
+
+    async def _prompt_size(self, session_id: str, state: Any) -> int:
+        """The helper's last prompt as the provider counted it: the live engine's figure, else the newest call's."""
+        live = int(getattr(getattr(state, "engine", None), "last_observed_prompt_tokens", 0) or 0)
+        if live:
+            return live
+        row = await self.app.db.fetchone("SELECT input_tokens FROM usage_events WHERE session_id = ? AND purpose = 'stream' ORDER BY seq DESC LIMIT 1", (session_id,))
+        return int(row["input_tokens"] or 0) if row else 0
+
+    async def _activity(self, state: Any) -> dict[str, Any]:
+        """What a working helper does now: the tool in flight (the newest, when several run at once) and the
+        steps of this run, each finished tool call one, the ones in flight counted with them."""
+        in_flight = sorted(state.tool_starts.values(), key=lambda started: started[0])
+        row = await self.app.db.fetchone(
+            "SELECT count(*) n, (SELECT name FROM tool_calls WHERE run_id = ? ORDER BY rowid DESC LIMIT 1) last FROM tool_calls WHERE run_id = ?",
+            (state.run_id, state.run_id),
+        ) if state.run_id else None
+        return {
+            "tool": in_flight[-1][1] if in_flight else None,
+            "last_tool": str(row["last"]) if row and row["last"] else None,
+            "steps": (int(row["n"] or 0) if row else 0) + len(in_flight),
+        }
+
+    async def _finished_at(self, session_id: str) -> str | None:
+        """When the helper's last run ended; ``None`` before it ran at all."""
+        row = await self.app.db.fetchone("SELECT updated_at FROM runs WHERE session_id = ? ORDER BY created_at DESC LIMIT 1", (session_id,))
+        return str(row["updated_at"]) if row else None
 
     async def _match(self, leader_id: str, name: str) -> dict[str, Any]:
         """One of the leader's subagents by name or session id; the error lists the ones it has."""
@@ -685,8 +752,10 @@ class Subagents:
             return
         name = str(state.metadata.get("subagent_name") or session_id)
         kept = bool(state.metadata.get("subagent_keep"))
+        reply: str | None = None
         if cause == "completed":
-            body = contract_verdict(state, await self.answer(session_id) or no_answer(state))
+            reply = await self.answer(session_id)
+            body = contract_verdict(state, reply or no_answer(state))
             fate = f"It stays for follow-ups: SubAgentSend({name!r}, …)." if kept else "It has been removed; its files are in your workspace."
             report = f"[subagent {name!r} finished: {status}. {fate}]\n\n{body}"
             if state.metadata.get(PARKED_KEY):
@@ -695,7 +764,16 @@ class Subagents:
             report = stop_header(name, cause, detail) + "\n\n" + contract_verdict(state, await self.progress(session_id))
             if cause == "budget":
                 await self._park(session_id, run_id=run_id, detail=detail, mode="stopped", report=False)
-        delivered = await self._to_leader(session_id, leader_id, name, report, f"subagent-report:{session_id}:{run_id}")
+        key = f"subagent-report:{session_id}:{run_id}"
+        delivered = await self._to_leader(session_id, leader_id, name, report, key)
+        # The panel's account of the run: how it ended, the gist, and whether the leader has it. A report
+        # held for the cap is marked delivered when ``_flush_held`` gets it through, under the same key.
+        summary = (reply if cause == "completed" else detail) or ""
+        now = datetime.now(UTC).isoformat()
+        await self._set_meta(session_id, {REPORT_KEY: {
+            "key": key, "at": now, "cause": cause, "summary": summary[:REPORT_SUMMARY_CHARS],
+            "delivered": delivered, "delivered_at": now if delivered else None,
+        }})
         if cause == "budget" or not delivered:
             await self._note_parked(leader_id, session_id, name, cause=cause, detail=detail, delivered=delivered)
         if cause == "completed" and not kept and delivered:
@@ -826,6 +904,9 @@ class Subagents:
                 logger.debug("held report of subagent %s still refused: %s", child_id, exc)
                 break
             held.pop(0)
+            report = state.metadata.get(REPORT_KEY)
+            if isinstance(report, dict) and report.get("key") == entry.get("key"):
+                await self._set_meta(child_id, {REPORT_KEY: {**report, "delivered": True, "delivered_at": datetime.now(UTC).isoformat()}})
         await self._set_meta(child_id, {HELD_KEY: held or None})
         if held:
             return False

@@ -271,3 +271,26 @@ async def test_a_note_written_between_runs_tells_the_app_to_read_the_chat_again(
     # The model never reads it: the line is the transcript's, not the working history's.
     history = await manager.sessions.list_messages(leader.session.id, "daedalus", limit=100)
     assert all(NOTICE_KEY not in m.metadata for m in history)
+
+
+async def test_the_panel_says_whether_a_report_reached_the_leader_and_marks_it_once_a_held_one_goes(app: Any) -> None:
+    """A kept helper stays after its report, so its card is the one place the operator reads whether the leader has it."""
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    gate = Gate(manager, paid={leader.session.id})
+    cid = (await subs.spawn(leader_id=leader.session.id, task="build candidate c", name="cand-c", keep=True))["session_id"]
+    gate.close()
+    await _say(manager, cid, "candidate c is ready: redesign/c/README.md")
+    await subs.on_run_finished(cid, "run-1", "completed")
+    view = next(v for v in await subs.views(leader.session.id) if v["session_id"] == cid)
+    assert view["report"]["cause"] == "completed" and view["report"]["delivered"] is False and view["report"]["delivered_at"] is None
+    assert view["report"]["summary"] == "candidate c is ready: redesign/c/README.md"
+    gate.open()
+    await subs.budget_tick()
+    view = next(v for v in await subs.views(leader.session.id) if v["session_id"] == cid)
+    assert view["reports_held"] == 0 and view["report"]["delivered"] is True and view["report"]["delivered_at"]
+    # A failed run's card carries what stopped it, delivered at once to a leader that can take it.
+    await subs.on_run_finished(cid, "run-2", "failed")
+    view = next(v for v in await subs.views(leader.session.id) if v["session_id"] == cid)
+    assert view["report"]["cause"] == "failed" and view["report"]["delivered"] is True

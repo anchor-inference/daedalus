@@ -304,28 +304,48 @@ async def test_the_views_carry_what_the_panel_draws_and_put_the_active_ones_firs
     assert state is not None
     assert state.metadata["subagent_task"] == long_task[:400]
 
-    async def label(s: Any) -> str:
-        return f"model-of-{s.session.metadata['subagent_name']}"
+    async def describe(s: Any) -> dict[str, Any]:
+        return {"model": f"model-of-{s.session.metadata['subagent_name']}", "provider": "claude", "effort": "high", "window": 200_000}
 
-    views = await subs.views(leader.session.id, model_label=label)
+    views = await subs.views(leader.session.id, describe=describe)
     assert [v["name"] for v in views] == ["analyst", "auditor"]  # newest activity first while none runs
     analyst = views[0]
     assert set(analyst) >= {"session_id", "name", "title", "status", "running", "model", "kept", "idle_start", "created_at", "last_activity_at", "run_started_at"}
     assert analyst["title"] == "" and analyst["idle_start"] is True and analyst["kept"] is True and analyst["status"] == "idle"
     assert analyst["model"] == "model-of-analyst" and analyst["run_started_at"] is None
+    assert analyst["provider"] == "claude" and analyst["effort"] == "high" and analyst["context"] == {"tokens": 0, "window": 200_000}
+    assert analyst["usage"]["calls"] == 0 and analyst["activity"] is None and analyst["report"] is None
     # A running helper goes first whatever its age, and says when its run began.
     state.run_active_since = time.monotonic() - 90
+    state.run_id = "run-a"
     _running(state)
+    wid = worker["session_id"]
+    for at, cost, prompt in (("2026-11-10T10:00:00+00:00", 0.25, 1200), ("2026-11-10T10:01:00+00:00", None, 3400)):
+        await db.execute(
+            "INSERT INTO usage_events(at, provider_id, model, purpose, run_id, session_id, input_tokens, output_tokens, cache_read_tokens, cost_usd, raw)"
+            " VALUES (?, 'claude', 'm', 'stream', 'run-a', ?, ?, 50, 1000, ?, '{}')",
+            (at, wid, prompt, cost),
+        )
+    for n, tool in enumerate(("Read", "Exec")):
+        await db.execute("INSERT INTO tool_calls(session_id, run_id, tool_call_id, name, at, duration_ms) VALUES (?, 'run-a', ?, ?, ?, 10)", (wid, f"c{n}", tool, f"2026-11-10T10:0{n}:00+00:00"))
+    state.tool_starts["c9"] = (time.monotonic(), "Grep")
     try:
         views = await subs.views(leader.session.id)
         auditor = views[0]
+        # What it does now and how far it got: the tool in flight, and the steps counting that one.
+        assert auditor["activity"] == {"tool": "Grep", "last_tool": "Exec", "steps": 3}
+        # The spend of every call, with the call of no known price counted apart; the newest prompt is its context.
+        assert auditor["usage"] == {"calls": 2, "input": 4600, "output": 100, "cache_read": 2000, "usd": 0.25, "unpriced": 1}
+        assert auditor["context"]["tokens"] == 3400 and auditor["finished_at"] is None
+        assert auditor["brief"] == long_task[:400]
         assert auditor["name"] == "auditor" and auditor["status"] == "running" and auditor["running"] is True
         assert auditor["title"] == "audit the logs for errors" and auditor["idle_start"] is False and auditor["kept"] is False
-        assert auditor["model"] == ""  # no label given: left empty rather than guessed
+        assert auditor["model"] == "" and auditor["effort"] == ""  # nothing to describe it with: left empty rather than guessed
         began = datetime.fromisoformat(auditor["run_started_at"])
         assert abs((datetime.now(UTC) - began).total_seconds() - 90) < 5
     finally:
         _stopped(state)
+        state.tool_starts.clear()
     state.last_error_kind = "llm_error"
     assert {v["name"]: v["status"] for v in await subs.views(leader.session.id)}["auditor"] == "failed"
 
@@ -347,6 +367,9 @@ async def test_the_subagents_route_answers_with_the_views(app: Any) -> None:
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
         body = (await client.get(f"/api/sessions/{leader.session.id}/subagents", headers=headers)).json()
         assert [v["name"] for v in body["subagents"]] == ["analyst"] and body["subagents"][0]["model"]
+        # Its run settings as its next call uses them, inherited from the leader here (no provider is configured in a test).
+        assert "provider" in body["subagents"][0] and body["subagents"][0]["effort"] in ("off", "low", "medium", "high", "xhigh")
+        assert body["subagents"][0]["context"]["window"] >= 0
         assert (await client.get("/api/sessions/nope/subagents", headers=headers)).status_code == 404
         assert (await client.get(f"/api/sessions/{leader.session.id}/subagents")).status_code in (401, 403)
         detail = (await client.get(f"/api/sessions/{leader.session.id}", headers=headers)).json()
