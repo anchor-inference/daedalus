@@ -202,6 +202,9 @@ func serve(args []string) error {
 	ep.Release()
 	_ = ep.Listener.Close()
 	registry.Shutdown(cfg.Limits.KillGrace)
+	// The streamed programs too, before the connections close: on a Mac nothing ties them to the
+	// daemon, and an MCP server whose host is gone must not run on unseen.
+	side.Exec.EndStreams()
 	srv.Close()
 	log.Info("ptyd stopped")
 	return serveErr

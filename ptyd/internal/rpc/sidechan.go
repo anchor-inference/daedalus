@@ -38,6 +38,7 @@ func (d *Daemon) registerSide(srv *server.Server) {
 		return
 	}
 	srv.Handle("exec.run", d.execRun)
+	srv.Handle("exec.stream", d.execStream)
 	srv.Handle("fs.stat", d.fsStat)
 	srv.Handle("fs.list", d.fsList)
 	srv.Handle("fs.browse", d.fsBrowse)
@@ -84,7 +85,7 @@ func (d *Daemon) sideInfo() map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{"exec_allow": d.Side.Exec.Allowed(), "fs_roots": d.Side.FS.Roots(), "state_dir": d.Side.StateDir,
-		"fs_transfer": d.Side.Transfers != nil}
+		"fs_transfer": d.Side.Transfers != nil, "exec_streams": d.Side.Exec.Streams()}
 }
 
 // sideError gives the side channels' errors their protocol codes.

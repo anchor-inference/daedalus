@@ -154,6 +154,9 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 			// The version of the folder moves (fs.unpack_*, fs.pack_*): 0 for a daemon without them,
 			// so the host can say "update the host terminal" before it starts a move, not halfway.
 			"fs_transfer": d.transferVersion(),
+			// exec.stream: a program kept running with its streams on a channel, which is how the host
+			// runs an MCP server on this machine. 0 for a daemon without side channels.
+			"exec_stream": d.streamVersion(),
 			// The sandbox hides the paths a create names in sandbox.hide besides the daemon's own
 			// directories; a host sends them only to a daemon that says so, since an older one refuses
 			// a field it does not know and would start no sandboxed terminal at all.
@@ -192,6 +195,14 @@ func (d *Daemon) transferVersion() int {
 		return 0
 	}
 	return 2
+}
+
+// streamVersion is the exec.stream version this daemon speaks; 0 when it has no side channels.
+func (d *Daemon) streamVersion() int {
+	if d.Side == nil {
+		return 0
+	}
+	return StreamVersion
 }
 
 // integrations lists the shells whose integration the daemon has installed.
