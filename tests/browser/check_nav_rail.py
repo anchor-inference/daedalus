@@ -34,12 +34,12 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
-ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules", "menu", "settings"]
+ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules", "menu", "settings"]
 WORDS = {
     "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "calendar": "Calendar", "diagrams": "Diagrams", "changes": "Changes", "companion": "Companion", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
+           "calendar": "Calendar", "canvas": "Canvas", "changes": "Changes", "companion": "Companion", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
     "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "calendar": "Календарь", "diagrams": "Схемы", "changes": "Изменения", "companion": "Компаньон", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
+           "calendar": "Календарь", "canvas": "Холсты", "changes": "Изменения", "companion": "Компаньон", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
 }
 # The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).

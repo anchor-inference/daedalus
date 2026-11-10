@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from daedalus.config import package_cache_root
+from daedalus.tools import package_cache
 from daedalus.tools.shell import shell_environment
 
 
@@ -58,9 +60,10 @@ def test_git_authentication_is_inherited(host_env) -> None:  # type: ignore[no-u
     assert env["GH_TOKEN"] == "github_pat_example"
 
 
-def test_the_browser_store_is_inherited(host_env) -> None:  # type: ignore[no-untyped-def]
+def test_the_browser_store_is_the_shared_cache_and_the_browser_is_inherited(host_env) -> None:  # type: ignore[no-untyped-def]
     env = shell_environment("sess-1")
-    assert env["PLAYWRIGHT_BROWSERS_PATH"] == "/opt/pw-browsers" and env["CHROME_PATH"] == "/usr/local/bin/chromium"
+    assert env["PLAYWRIGHT_BROWSERS_PATH"] == str(package_cache.folders(package_cache_root())["PLAYWRIGHT_BROWSERS_PATH"])
+    assert env["CHROME_PATH"] == "/usr/local/bin/chromium"
     assert env["GIT_CONFIG_COUNT"] == "1" and env["GIT_CONFIG_KEY_0"] == "credential.helper" and "GH_TOKEN" in env["GIT_CONFIG_VALUE_0"]
 
 
@@ -89,7 +92,7 @@ async def test_the_sandbox_opens_the_paths_the_host_named_for_the_session(tmp_pa
     assert sandboxed
     binds = [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"]
     # The missing path, the symlink and the duplicate are left out; the sandbox still runs.
-    assert binds == [str(workspace), str(worktree)]
+    assert binds == [str(workspace), str(worktree), *map(str, package_cache.writable_dirs())]
 
 
 def test_a_worktree_opens_its_git_metadata_but_not_the_whole_repository(tmp_path) -> None:

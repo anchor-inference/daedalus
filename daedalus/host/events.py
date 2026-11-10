@@ -736,6 +736,17 @@ class NotesChanged(TypedDict):
     """The note's version after the change, so an open editor can tell its own save from another's."""
 
 
+class CanvasChanged(TypedDict):
+    canvas_id: str
+    scope: Literal["chat", "project"]
+    scope_id: str
+    change: str
+    """``created`` · ``updated`` · ``deleted`` · ``moved`` · ``shared``."""
+    by: Literal["operator", "agent"]
+    version: NotRequired[int]
+    """The canvas's version after the change, so an open board can tell its own save from another's."""
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -829,6 +840,8 @@ REGISTRY: dict[str, EventSpec] = {
     # Live only: an open panel reads its notes again, and one opened or reconnected later reads anyway.
     # Stored, an editor's autosave would write a row about every second of typing.
     "notes.changed": EventSpec(NotesChanged, persist=False),
+    # Live only, for the same reason: an open board reads the canvas again, one opened later reads anyway.
+    "canvas.changed": EventSpec(CanvasChanged, persist=False),
 }
 
 GAP = "bus.gap"

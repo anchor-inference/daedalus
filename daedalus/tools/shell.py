@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -10,9 +11,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from collections import deque
 from collections.abc import Sequence
@@ -27,7 +30,7 @@ from protocore.tools.decorator import tool
 from daedalus.host.filesystem import machine_of
 from daedalus.processes import end_tree, read_until_exit
 from daedalus.security import operator_secrets
-from daedalus.tools import guest_box, search_hint
+from daedalus.tools import guest_box, package_cache, sandbox_health, search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, plain_output, services_for, tool_config
 from daedalus.tools.job_guard import WAIT_TIMED_OUT, orphan_note, self_match_reason, wait_script
 
@@ -35,8 +38,12 @@ _warned_missing_bwrap = False
 _bwrap_state: str | None = None
 """Cached result of :func:`bwrap_status`: "ok", or the reason the sandbox cannot run here."""
 _bwrap_probed_at = 0.0
-PROBE_RETRY_SECONDS = 300.0
-"""A failed probe is repeated after this long; a successful one is kept for the life of the process."""
+PROBE_SECONDS = 60.0
+"""How long a probe's answer is kept, either way. A success used to be kept for the life of the process,
+and when the container's /proc was swapped from outside every command failed for hours while the host
+still called the sandbox fine. A command that fails in bubblewrap itself drops the answer at once."""
+SANDBOX_FLAGS = ("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--unshare-pid", "--die-with-parent", "--new-session")
+"""What every sandboxed command starts with; the probe runs exactly these, so it answers for what Exec does."""
 
 
 class SandboxUnavailable(RuntimeError):
@@ -145,15 +152,15 @@ def bwrap_status() -> str:
     """Whether bubblewrap can create namespaces here: "ok", or why not.
 
     In a container the usual answer is Docker's default seccomp profile; on a machine it is a kernel
-    that forbids unprivileged user namespaces, which Ubuntu 24.04 and Debian 13 do out of the box.
-    The probe runs the sandbox's own flags, so what it answers is what the sandbox would do, and the
-    answer is cached — once when it works, for five minutes when it does not, so that a machine given
-    namespaces later picks them up without a restart.
+    that forbids unprivileged user namespaces, which Ubuntu 24.04 and Debian 13 do out of the box. A
+    third is a ``/proc`` that is not this process's own (:mod:`daedalus.tools.sandbox_health`), which is
+    checked first and, in the agent's container, put right. The probe runs the sandbox's own flags, so
+    what it answers is what the sandbox would do, and the answer is kept for :data:`PROBE_SECONDS`.
 
     Blocking (it runs a subprocess): call it through ``asyncio.to_thread`` from the event loop.
     """
     global _bwrap_state, _bwrap_probed_at
-    if _bwrap_state == "ok" or (_bwrap_state is not None and time.monotonic() - _bwrap_probed_at < PROBE_RETRY_SECONDS):
+    if _bwrap_state is not None and time.monotonic() - _bwrap_probed_at < PROBE_SECONDS:
         return _bwrap_state
     _bwrap_probed_at = time.monotonic()
     if not sys.platform.startswith("linux"):
@@ -166,17 +173,61 @@ def bwrap_status() -> str:
     if bwrap is None:
         _bwrap_state = "bwrap is not installed (looked for a root-owned one in " + ", ".join(BWRAP_LOCATIONS) + ")"
         return _bwrap_state
-    try:
-        probe = subprocess.run([bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "true"], capture_output=True, text=True, timeout=20)
-        remedy = (
-            "this machine restricts unprivileged user namespaces, so a fresh installation starts with tools.exec.sandbox = off; allowing them (sysctl kernel.apparmor_restrict_unprivileged_userns=0) and setting it back to workspace is what turns the sandbox on"
-            if _native()
-            else "the container needs cap_add SYS_ADMIN and an unconfined seccomp profile"
-        )
-        _bwrap_state = "ok" if probe.returncode == 0 else f"bwrap cannot create namespaces here: {(probe.stderr or probe.stdout).strip()[:120]} ({remedy})"
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        _bwrap_state = f"bwrap probe failed: {type(exc).__name__}"
+    if sandbox_health.proc_view_problem():
+        repaired = sandbox_health.repair_proc_view()
+        if problem := sandbox_health.proc_view_problem():
+            # Not left to the probe: with a foreign /proc it passes whenever the child's number happens
+            # to be a live process of the other namespace, and fails the next command.
+            _bwrap_state = problem + (f"; {repaired}" if repaired else "")
+            return _bwrap_state
+    code, output = _probe([bwrap, *SANDBOX_FLAGS, "true"], timeout=20)
+    if code == 0:
+        _bwrap_state = "ok"
+        return _bwrap_state
+    remedy = (
+        "this machine restricts unprivileged user namespaces, so a fresh installation starts with tools.exec.sandbox = off; allowing them (sysctl kernel.apparmor_restrict_unprivileged_userns=0) and setting it back to workspace is what turns the sandbox on"
+        if _native()
+        else "the container needs cap_add SYS_ADMIN and an unconfined seccomp profile"
+    )
+    _bwrap_state = f"bwrap probe failed: {output}" if code is None else f"bwrap cannot create namespaces here: {output.strip()[:160]} ({remedy})"
     return _bwrap_state
+
+
+def _probe(argv: list[str], *, timeout: float) -> tuple[int | None, str]:
+    """Run a sandbox once and return its exit code (None when it could not run or hung) and its output.
+
+    In a group of its own, with the output in a file and the group killed afterwards: a bubblewrap that
+    dies half-way leaves its child blocked and holding whatever it was given, and a probe reading a pipe
+    would wait for it to the timeout and then leave it behind.
+    """
+    with tempfile.TemporaryFile() as output:
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)  # noqa: S603
+        except OSError as exc:
+            return None, type(exc).__name__
+        try:
+            code: int | None = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            code = None
+        finally:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+        output.seek(0)
+        text = output.read(4000).decode("utf-8", "replace")
+    return code, text if code is not None else f"TimeoutExpired after {timeout:.0f}s {text}".strip()
+
+
+def invalidate_bwrap() -> None:
+    """Forget the probe's answer, so the next caller probes again."""
+    global _bwrap_state
+    _bwrap_state = None
+
+
+def mark_bwrap_broken(reason: str) -> None:
+    """Remember that a real command failed in bubblewrap itself, whatever the last probe said, for one probe period."""
+    global _bwrap_state, _bwrap_probed_at
+    _bwrap_state, _bwrap_probed_at = reason, time.monotonic()
 
 
 def operator_git_dirs(checkouts: Sequence[Path] | None = None) -> list[Path]:
@@ -462,7 +513,7 @@ async def sandbox_argv(
         if limits != "ok":
             raise SandboxUnavailable(f"a guest's turn runs commands only within its limits: {limits}")
         return [*guest_box_argv(bwrap, writable=writable, readable=readable), *plain], True
-    if getattr(exec_config, "sandbox", "off") != "workspace":
+    if getattr(exec_config, "sandbox", "off") != "workspace" or sandbox_health.suspended:
         return plain, False
     status = await asyncio.to_thread(bwrap_status)
     if status != "ok":
@@ -470,13 +521,16 @@ async def sandbox_argv(
             logging.getLogger(__name__).warning("tools.exec.sandbox=workspace but the sandbox is unavailable (%s); commands are refused until it is", status)
             _warned_missing_bwrap = True
         # Fail closed: a sandbox the operator asked for and did not get is not a warning, it is a missing wall.
-        where = "allow unprivileged user namespaces on this machine" if _native() else "enable namespaces for the container"
-        raise SandboxUnavailable(f"the sandbox is configured (tools.exec.sandbox=workspace) but unavailable: {status}. The operator can switch it off in Settings → Tools or {where}.")
+        await sandbox_health.report_down(status)
+        raise SandboxUnavailable(status)
+    await sandbox_health.report_up()
     bwrap = bwrap_path()
     if bwrap is None:
-        raise SandboxUnavailable("the sandbox is configured (tools.exec.sandbox=workspace) but no root-owned bwrap was found in " + ", ".join(BWRAP_LOCATIONS))
-    argv = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--unshare-pid", "--die-with-parent", "--new-session"]
-    paths = [*writable, *[Path(p) for p in getattr(exec_config, "sandbox_extra_writable", [])]]
+        raise SandboxUnavailable("no root-owned bwrap was found in " + ", ".join(BWRAP_LOCATIONS))
+    argv = [bwrap, *SANDBOX_FLAGS]
+    # The shared package caches are writable here and nowhere else: uv, npm and Playwright write their
+    # cache on every install, and with the root bound read-only `uv add` failed on ~/.cache/uv.
+    paths = [*writable, *package_cache.writable_dirs(), *[Path(p) for p in getattr(exec_config, "sandbox_extra_writable", [])]]
     bound: set[str] = set()
     for path in paths:
         # A bind needs a real directory at both ends: a symlink or a file here makes bubblewrap refuse the
@@ -556,6 +610,9 @@ def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, c
     read the parent's environment through ``/proc``. A caller that needs a specific value passes
     it through the tool's ``env`` parameter.
 
+    The package caches are the shared ones of :mod:`daedalus.tools.package_cache`, outside every
+    workspace and writable in the sandbox; a guest's turn gets none of them.
+
     ``UV_PROJECT_ENVIRONMENT`` names the bot's own virtualenv and goes only to a command running in
     the bot's own checkouts (``cwd``). Handed to every command, it made ``uv add`` in any workspace
     project install into that virtualenv instead of the project's ``.venv``, which the sandbox
@@ -573,6 +630,9 @@ def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, c
     env = {k: v for k, v in env.items() if not k.startswith(operator_secrets.ENV_PREFIX)}
     if (store := operator_secrets.shared()) is not None:
         env.update(store.environment(session_id))
+    # Over whatever the host was started with: the image's browser folder and the launcher's own uv
+    # cache are read-only to a command, and a cache a command cannot write is one `uv add` fails on.
+    env.update(package_cache.environment())
     env.update(extra or {})
     if agent_bin := os.environ.get("DAEDALUS_AGENT_BIN", ""):
         env["PATH"] = agent_bin + os.pathsep + env.get("PATH", "")
@@ -709,7 +769,59 @@ GUEST_RAN_OUT_NOTE = "[this command ran past its {seconds:.0f} seconds and was s
 
 
 async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
-    """One command in the foreground, to its end, or to its foreground time and on as a job of ``kind``."""
+    """One command in the foreground, to its end, or to its foreground time and on as a job of ``kind``.
+
+    A command bubblewrap itself refused never started, so it is safe to run again: the probe is dropped,
+    asked again, and when it passes the command is run once more. A second refusal, or a probe that fails,
+    is the sandbox being down, and the agent is told so in place of a failed command — a raw ``bwrap:``
+    line with ``exit_code=1`` read as its own mistake, and sent one model off converting a video in a
+    browser for dozens of steps because "the shell is broken".
+    """
+    result = await _run_once(context, command, cwd, timeout_seconds, env, kind=kind, label=label)
+    reason = bwrap_refusal(command, result)
+    if reason is None or is_guest_turn(context.session_id):
+        return result
+    invalidate_bwrap()
+    if await asyncio.to_thread(bwrap_status) == "ok":
+        result = await _run_once(context, command, cwd, timeout_seconds, env, kind=kind, label=label)
+        if (again := bwrap_refusal(command, result)) is None:
+            return result
+        reason = again
+    status = await asyncio.to_thread(bwrap_status)
+    if status == "ok":
+        # The probe passes and the command still cannot be walled in: kept as the answer for a while, so
+        # the next commands are refused at once rather than each paying for two failed attempts.
+        mark_bwrap_broken(f"commands fail in bwrap itself although its probe passes: {reason}")
+        status = await asyncio.to_thread(bwrap_status)
+    return await sandbox_unavailable(context, status)
+
+
+def bwrap_refusal(command: str, result: ToolResult) -> str | None:
+    """The line bubblewrap died with, when a sandboxed command failed in bubblewrap before it ran; else None.
+
+    Everything bubblewrap says of its own is one ``bwrap: …`` line, written before the command is started.
+    A command that runs bubblewrap itself is the one case where such a line can be the command's, and it is
+    left alone.
+    """
+    if not result.is_error or "bwrap" in command:
+        return None
+    header, _, body = result.content.partition("\n")
+    if "sandbox=workspace" not in header or not header.startswith("exit_code="):
+        return None
+    lines = [line for line in body.strip().splitlines() if line.strip()]
+    if not lines or not lines[0].startswith("bwrap: ") or len(lines) > 3:
+        return None
+    return lines[0].strip()
+
+
+async def sandbox_unavailable(context: ToolContext, reason: str) -> ToolResult:
+    """The agent's answer when no command can be walled in: not a failed command, and what to do instead."""
+    outage = await sandbox_health.report_down(reason)
+    return error(context, sandbox_health.agent_text(outage), sandbox_unavailable=True)
+
+
+async def _run_once(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
+    """:func:`_run` without the second attempt."""
     services = services_for(context)
     workdir = services.resolve(cwd)
     command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
@@ -726,7 +838,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     try:
         argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
     except SandboxUnavailable as exc:
-        return error(context, str(exc))
+        return error(context, str(exc)) if guest else await sandbox_unavailable(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(workdir),
@@ -882,7 +994,14 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
         header = _moved_header(elapsed, workdir, job, where=" sandbox=workspace" if sandboxed else "")
         return ok(context, f"{header}\n{body}".rstrip(), job_id=job.id, pid=proc.pid, handed_over=True, running=True)
     header = f"exit_code={proc.returncode} elapsed={elapsed:.1f}s cwd={workdir}" + (" sandbox=workspace" if sandboxed else "")
-    if not output_ended:
+    if not output_ended and sandboxed:
+        # Nothing the command started can outlive it in the sandbox: its PID namespace ends with it. What
+        # still holds the output is bubblewrap's own child, left blocked when bubblewrap died before
+        # letting it go, and it is in this group because it never got as far as a session of its own. It
+        # was once named to the agent as "a background process it started", which it had not.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    elif not output_ended:
         body = (body + "\n" if body else "") + BACKGROUND_HOLDER_NOTE.format(group=proc.pid)
     if ran_out:
         body = (body + "\n" if body else "") + GUEST_RAN_OUT_NOTE.format(seconds=after)
@@ -1350,7 +1469,7 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
     try:
         argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
     except SandboxUnavailable as exc:
-        return error(context, str(exc))
+        return error(context, str(exc)) if is_guest_turn(context.session_id) else await sandbox_unavailable(context, str(exc))
     fh = log.open("wb")
     try:
         process = await asyncio.create_subprocess_exec(

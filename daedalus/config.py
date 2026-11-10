@@ -51,6 +51,31 @@ def native_mode() -> bool:
     return os.environ.get("DAEDALUS_NATIVE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def package_cache_root() -> Path:
+    """The folder of the package caches every operator command shares (:mod:`daedalus.tools.package_cache`).
+
+    ``DAEDALUS_PACKAGE_CACHE`` when set; in a container ``/srv/cache``, a volume of its own; natively this
+    platform's cache folder. Read from the environment for the reason :func:`native_mode` is: a command's
+    environment is built where no configuration is at hand.
+    """
+    if configured := os.environ.get("DAEDALUS_PACKAGE_CACHE", "").strip():
+        return Path(configured)
+    if not native_mode():
+        return Path("/srv/cache")
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "daedalus-packages"
+
+
+def installed_browsers() -> str:
+    """The read-only folder of Playwright browsers this installation came with (``PLAYWRIGHT_BROWSERS_PATH``), or empty."""
+    return os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+
+
 def native_sandbox_default() -> str:
     """Whether Exec is confined by default on this installation.
 
@@ -3225,6 +3250,26 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     return changed
 
 
+def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
+    """The Diagrams screen became Canvas. Wherever the operator placed ``diagrams`` in the navigation,
+    ``canvas`` takes its place, so the screen keeps its spot instead of falling back to where a new one
+    ships; a custom icon goes with it."""
+    navigation = raw.get("navigation")
+    if not isinstance(navigation, dict):
+        return False
+    changed = False
+    for field in ("rail", "more", "drawer", "hidden"):
+        items = navigation.get(field)
+        if isinstance(items, list) and "diagrams" in items:
+            navigation[field] = list(dict.fromkeys("canvas" if item == "diagrams" else item for item in items))
+            changed = True
+    icons = navigation.get("icons")
+    if isinstance(icons, dict) and "diagrams" in icons:
+        icons.setdefault("canvas", icons.pop("diagrams"))
+        changed = True
+    return changed
+
+
 def _drop_session_modes(raw: dict[str, Any]) -> bool:
     """Session modes and the per-message depth sort are gone; their tables leave the file.
 
@@ -3258,6 +3303,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_web_search(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
+    changed = _migrate_diagrams_to_canvas(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):

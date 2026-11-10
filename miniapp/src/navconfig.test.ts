@@ -13,7 +13,7 @@ describe("with nothing configured", () => {
   const nav = resolveNav({ config: null, pages: null, selfdev: "server" });
 
   it("draws the rail the app has always drawn", () => {
-    expect(ids(nav.rail)).toEqual(["inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules"]);
+    expect(ids(nav.rail)).toEqual(["inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules"]);
   });
 
   it("puts the rest under More, in their groups", () => {
@@ -28,7 +28,7 @@ describe("with nothing configured", () => {
   it("gives each mode its own phone drawer and one More sheet", () => {
     expect(ids(nav.drawer.agents)).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
     expect(ids(nav.drawer.orchestration)).toEqual(["inbox", "terminals", "usage"]);
-    expect(ids(nav.phoneMore)).toEqual(["calendar", "diagrams", "changes", "schedules", "services", "memory", "harnesses", "health"]);
+    expect(ids(nav.phoneMore)).toEqual(["calendar", "canvas", "changes", "schedules", "services", "memory", "harnesses", "health"]);
   });
 
   it("is the same answer for an empty section as for a missing one", () => {
@@ -60,7 +60,7 @@ describe("what the installation has", () => {
 describe("the operator's layout", () => {
   it("orders the rail as listed, and an unlisted shipped place keeps its spot after them", () => {
     const nav = resolveNav({ config: { rail: ["terminals", "inbox", "memory"] }, selfdev: "server" });
-    expect(ids(nav.rail)).toEqual(["terminals", "inbox", "memory", "board", "calendar", "diagrams", "changes", "companion", "schedules"]);
+    expect(ids(nav.rail)).toEqual(["terminals", "inbox", "memory", "board", "calendar", "canvas", "changes", "companion", "schedules"]);
     expect(nav.more.find((g) => g.key === "knowledge")).toBeUndefined();
   });
 
@@ -91,7 +91,7 @@ describe("the operator's layout", () => {
     const nav = resolveNav({ config: { drawer: ["board", "inbox"] }, selfdev: "server" });
     expect(ids(nav.drawer.agents)).toEqual(["board", "inbox"]);
     expect(ids(nav.drawer.orchestration)).toEqual(["board", "inbox"]);
-    expect(ids(nav.phoneMore)).toEqual(["companion", "calendar", "diagrams", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
+    expect(ids(nav.phoneMore)).toEqual(["companion", "calendar", "canvas", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
   });
 
   it("draws an icon chosen in place of the item's own", () => {
@@ -173,7 +173,7 @@ describe("the More launcher", () => {
 
   it("lists everything shown, what the rail holds first and marked, never what is hidden", () => {
     const desk = launcherLayout(nav, nav.rail);
-    expect(ids(desk.catalogue)).toEqual(["inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules", "harnesses", "services", "memory", "usage", "page:dosing"]);
+    expect(ids(desk.catalogue)).toEqual(["inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules", "harnesses", "services", "memory", "usage", "page:dosing"]);
     expect([...desk.placed]).toEqual(ids(nav.rail));
   });
 

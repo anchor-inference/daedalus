@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,7 +31,8 @@ from daedalus.security.redact import redact as redact_text
 from daedalus.terminals.client import PtydClient, Unavailable
 from daedalus.terminals.update import BY_HAND
 from daedalus.terminals.wire import RpcError
-from daedalus.tools.shell import bwrap_status, native_sandbox_note
+from daedalus.tools import sandbox_health
+from daedalus.tools.shell import bwrap_path, bwrap_status, native_sandbox_note
 
 try:  # the core's compiled token estimator, which an older core does not carry
     from protocore.runtime import token_counting
@@ -175,7 +177,15 @@ async def _config(ctx: DoctorContext) -> list[Check]:
     # An unavailable sandbox that was asked for is not a degraded one: Exec is refused outright, and
     # a row saying commands run unsandboxed would send the operator looking for the wrong problem.
     detail = f"{sandbox} (available: {status})" if sandbox == "off" else ("workspace" if usable else f"requested but unavailable — every Exec is refused until it is off or it works: {status}")
+    if sandbox == "workspace" and sandbox_health.suspended:
+        detail = f"switched off by the operator until the agent restarts (available now: {status})"
     out.append(Check("exec sandbox", sandbox == "off" or usable, detail, "ok" if sandbox == "off" or usable else "fail", sandbox_fix))
+    if sys.platform.startswith("linux"):
+        # What the sandbox stands on, shown whatever the verdict: the row above says whether, this one says
+        # what to look at when the answer changes under a running agent (it once did, when a proc of the host
+        # was mounted over the container's /proc).
+        rows = await asyncio.to_thread(sandbox_health.diagnostics, bwrap_path(), status)
+        out.append(Check("exec sandbox details", True, "; ".join(f"{label}: {value}" for label, value in rows[1:]), "info", ""))
     out.append(await asyncio.to_thread(_local_speech, ctx))
     out.append(await asyncio.to_thread(_local_voice, ctx))
     out.append(Check("per-run spend cap", cfg.limits.usd_per_run > 0, f"${cfg.limits.usd_per_run:.2f} per run, ${st.usd_per_day:.2f} per day" if cfg.limits.usd_per_run > 0 else f"no per-run cap (daily cap ${st.usd_per_day:.2f})", "ok" if cfg.limits.usd_per_run > 0 else "warn", "set limits.usd_per_run in Settings"))

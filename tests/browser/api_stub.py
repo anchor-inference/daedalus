@@ -674,7 +674,9 @@ GATES: dict[str, object] = {
     # Inbox entry, so every screen reads this. Approval is off, the host's default, so an Accept lasts
     # the standing horizon. A harness that needs real schedules uses schedule_stub.ScheduleStub.
     "/api/recurring/proposals": {"entries": [], "collection_revisions": {"global:global": 1}, "require_approval": False, "approval_days": 3650},
-    "/api/diagrams": [],
+    # No canvas anywhere: the chat header shows no canvas button. `canvas_stub.py` answers every
+    # canvas route for a harness that opens one.
+    "/api/canvases": {"scopes": [], "items": []},
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
     "/api/sessions": {"sessions": [], "projects": []},
@@ -1710,10 +1712,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "GET" and len(parts) == 5 and parts[3] == "provider" and parts[2] == "usage":
         # The provider card in Details: a day with nothing spent, no subscription read.
         return 200, "application/json", json.dumps({"provider": parts[4], "today": {}, "subscription": None, "balance": None})
-    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "diagrams" and parts[4] == "preview":
-        # The diagram list draws a thumbnail per card; a diagram a harness listed but drew nothing
-        # for has an empty canvas, which the card shows as its placeholder. `diagram_stub.py`
-        # answers every diagram route for a harness that opens one.
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "canvases" and parts[4] == "preview":
+        # The canvas list draws a thumbnail per card; a canvas a harness listed but drew nothing for
+        # shows the card's placeholder.
         return 200, "application/json", json.dumps({"version": 1, "svg": ""})
     if method.upper() == "GET" and path == "/api/files":
         # Handles a harness did not invent name no file: the chat draws no card for them.

@@ -136,6 +136,34 @@ so a public service's page can use a visitor's phone pass or key cookie for anot
 plain http on a home network: it opens one service for one phone by that door only, is spent once within ten
 minutes, and has a table of its own so that it cannot be taken for a way into the app.
 
+A canvas shows agent-written pages as live frames, under `/f/` on the same door and nowhere else: on the app's
+origin the route does not exist, an https app with no services address shows a card instead of the page, and so
+does a native Windows host, which cannot open the page's files without following links.
+A frame's address is signed with one key for all canvases (`canvas_frame_key` in the database), names one frame
+and a random secret that changes whenever the page is shown again, taken off the board or retired, expires in
+twelve hours, and names the app as the only page that may frame it. The door strips no cookie on `/f/`; the route
+reads none and the page could not use one. Every answer is sandboxed without `allow-same-origin`, with no dialogs,
+popups, downloads or navigation of the window around it, so the page runs with no origin, no cookie and no storage
+of anyone's. Its content security policy lets it load its own address prefix on the door (not the rest of the door,
+where shared services and other frames live) and only the origins the operator allowed: "this time" holds only
+while the board that allowed it stays open, "always" until it is taken back. Anything else is refused by the
+browser and reported to the board. Files are opened from `/` down without following any link, so a folder swapped
+for a link after the page was shown reaches nothing; a file with a second hard link is refused too.
+
+The board believes a frame's words only under a nonce the door gave the document its iframe loaded, confirmed by
+the host once, and takes a picked element only as the answer to a click it saw on the glass it lays over a frame
+in comment mode. What a page sends into the chat is fenced as the page's data, the server accepts only selectors
+of the bridge's own grammar, and the message goes only if it is still exactly what the operator saw. A still copy
+for a shared view is taken only while the canvas is shared, from the page's markup and never from what was typed
+into it, and is deleted when the share ends.
+
+What a page can still do: read every file under its root (its own folder unless the agent names a wider one
+inside the workspace, never the workspace itself) and send it to an allowed origin; navigate its own frame
+somewhere else, which the board notices and answers by blanking the frame and retiring its address, though a
+request already sent is sent, and a navigation answered with 204 leaves the page in place and is not noticed at
+all, so what it carried in its address is gone unseen; open a WebRTC connection, which no policy governs in the browsers of today; and
+resolve names in ways a browser may still prefetch despite the page being told not to.
+
 **What the installation keeps on a native install.** A provider's token, the launcher's token, the keys in
 `keyproxy.env`, the Telegram bot token and API hash in the launcher's `.env`, and the state folder with the database
 that holds the app's API token are all files of this user. The policy refuses a command that names them, by matching

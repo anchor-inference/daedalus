@@ -27,7 +27,14 @@ from daedalus.processes import end_tree
 from daedalus.security import redact
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
-from daedalus.tools.shell import SandboxUnavailable, _with_secrets, sandbox_argv, shell_environment
+from daedalus.tools.shell import (
+    SandboxUnavailable,
+    _with_secrets,
+    is_guest_turn,
+    sandbox_argv,
+    sandbox_unavailable,
+    shell_environment,
+)
 
 OUTPUT_HEAD_CHARS = 2000
 #: How much of a model-written string the receipt line repeats. The criterion
@@ -377,7 +384,7 @@ async def verify(context: ToolContext, criterion: str, command: str, cwd: str | 
     try:
         argv, sandboxed = await sandbox_argv("set -o pipefail\n" + command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
     except SandboxUnavailable as exc:
-        return error(context, str(exc))
+        return error(context, str(exc)) if is_guest_turn(context.session_id) else await sandbox_unavailable(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
         *argv, cwd=str(workdir), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         env=shell_environment(context.session_id, env, cwd=workdir), start_new_session=True,
