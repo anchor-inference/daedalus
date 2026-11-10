@@ -326,11 +326,15 @@ func guestFrontCommand(wall guestWall, p Paths, env []string, python string) []s
 }
 
 // ensureGuestDirs makes the door's folders, private to this user. The model folder is the key proxy's
-// to write and the token folder the agent's; the door reads both.
+// to write and the token folder the agent's; the door reads both. The mode means nothing on Windows,
+// where restrictToUser is what keeps the token from another account on the same machine.
 func ensureGuestDirs(p Paths) error {
 	for _, dir := range []string{guestStateDir(p), guestRunDir(p), guestFrontDir(p), guestTokenDir(p), guestModelDir(p)} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
+		}
+		if err := restrictToUser(dir); err != nil {
+			return fmt.Errorf("making %s private: %w", dir, err)
 		}
 	}
 	return nil

@@ -30,7 +30,16 @@ const helperEnv = "DAEDALUS_TEST_HELPER"
 // returns when the mode is not its own.
 var platformTestHelper func(mode string)
 
+// fakeOpenWall, as this test binary's first argument, makes it a guest wall that reports the network
+// open (guest_test.go). An argument and not helperEnv: the wall's probe runs with an environment
+// built from nothing.
+const fakeOpenWall = "fake-open-wall"
+
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == fakeOpenWall {
+		fmt.Println("open")
+		os.Exit(0)
+	}
 	useTestReleaseKey()
 	if platformTestHelper != nil {
 		platformTestHelper(os.Getenv(helperEnv))

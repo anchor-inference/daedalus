@@ -47,9 +47,8 @@ func TestADoorComesWithItsFront(t *testing.T) {
 	if door == nil || front == nil {
 		t.Fatal("both or neither")
 	}
-	info, err := os.Stat(guestTokenDir(p))
-	if err != nil || info.Mode().Perm() != 0o700 {
-		t.Fatalf("the token's folder is this user's alone: %v %v", info, err)
+	if problem := privateDirProblem(guestTokenDir(p)); problem != "" {
+		t.Fatalf("the token's folder is this user's alone: %s", problem)
 	}
 	env := strings.Join(front.(*Process).Env, "\n")
 	for _, want := range []string{"GUEST_HOST=127.0.0.1", "GUEST_DOOR_PORT=9101", "GUEST_TRUSTED_PROXIES=127.0.0.1", "GUEST_LISTEN="} {
@@ -175,7 +174,8 @@ func TestAHygieneSeatbeltDeniesHomeBeforeGivingBackTheDoorsFolders(t *testing.T)
 	p := guestPaths(t)
 	profile := hygieneSeatbelt(p, "/Users/someone")
 	deny := strings.Index(profile, `(deny file-read* file-write* (subpath "/Users/someone"))`)
-	allow := strings.Index(profile, guestStateDir(p))
+	// The folder as the profile spells it: quoted, which doubles a Windows path's separators.
+	allow := strings.Index(profile, sbpl(guestStateDir(p)))
 	if deny < 0 || allow < deny {
 		t.Fatalf("the last matching rule wins, so the denial comes first:\n%s", profile)
 	}
@@ -205,12 +205,14 @@ func TestAWallThatCannotBeProvedIsNotUsed(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(p.Bot, "deploy"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(t.TempDir(), "open")
-	// A wrapper that runs and reports the network open: exactly what must not be believed.
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho open\n"), 0o755); err != nil {
+	// A wrapper that runs and reports the network open: exactly what must not be believed. It is
+	// this test binary (TestMain), not a shell script, so that it runs on Windows too, and it is
+	// chosen by its argument because the probe's environment is built from nothing.
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := proveGuestWall(context.Background(), guestWall{name: "seatbelt", argv: []string{script}}, p, "python"); err == nil || !strings.Contains(err.Error(), "still be reached") {
+	if err := proveGuestWall(context.Background(), guestWall{name: "seatbelt", argv: []string{exe, fakeOpenWall}}, p, "python"); err == nil || !strings.Contains(err.Error(), "still be reached") {
 		t.Fatalf("got %v", err)
 	}
 }
