@@ -64,7 +64,8 @@ MAX_DEPTH = 128
 
 MS_NOSUID, MS_NODEV, MS_NOEXEC, MS_REMOUNT, MS_BIND, MS_RELATIME = 2, 4, 8, 32, 4096, 1 << 21
 PR_SET_PDEATHSIG = 1
-OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+OPEN_DIRECTORY = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+"""Both flags are POSIX; Windows has neither, and naming them bare at import stopped the host there."""
 
 
 class BoxError(RuntimeError):
