@@ -212,6 +212,18 @@ describe("the step in progress", () => {
     const named = liveAfter(resumed, "tool_use_start", { run_id: "r", tool_call_id: "nav", tool_name: "BrowserNavigate" });
     expect(currentStep(applyLive(base, named, Date.now()), named).tool?.id).toBe("nav");
   });
+
+  it("says the run waits for its model provider while the host reports the endpoint unreachable, and stops when it answers", () => {
+    let state = liveAfter(EMPTY_LIVE, "message_start", { run_id: "r" });
+    state = liveAfter(state, "provider_wait", { run_id: "r", provider: "anthropic", retry_in: 4 });
+    const base = liveBase(buildTurns([user(1, "go")]));
+    expect(applyLive(base, state, Date.now()).providerWait).toBe(true);
+    // Each notice counts as activity, so the bar never claims the run went quiet during the wait.
+    expect(state.lastActivityAt).not.toBeNull();
+    expect(applyLive(base, liveAfter(state, "provider_wait", { run_id: "r", provider: "anthropic", retry_in: null }), Date.now()).providerWait).toBe(false);
+    const spoke = liveAfter(state, "content_block_delta", { run_id: "r", delta: { type: "text_delta", text: "Hi" } });
+    expect(applyLive(base, spoke, Date.now()).providerWait).toBe(false);
+  });
 });
 
 describe("applyLive", () => {

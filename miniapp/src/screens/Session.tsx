@@ -2366,7 +2366,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const summary = activitySummary(turn, live, Date.now());
   const activeTool = live ? [...turn.activity].reverse().find((item) => item.kind === "tool" && item.running) as ToolItem | undefined : undefined;
   const activeAction = activeTool ? describe(activeTool) : null;
-  const currentAction = summary.staleSeconds >= 30
+  const currentAction = live && turn.providerWait
+    ? t("session.status.providerWait")
+    : summary.staleSeconds >= 30
     ? t("session.status.stale", { n: summary.staleSeconds })
     : activeAction
       ? `${activeAction.verb}${activeAction.detail ? ` · ${activeAction.detail}` : ""}`

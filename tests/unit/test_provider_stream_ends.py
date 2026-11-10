@@ -25,6 +25,7 @@ from protocore.contracts.llm import (
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
+from daedalus.providers.reconnect import Patience
 
 
 def _frames(chunks: list[dict[str, Any]]) -> str:
@@ -169,6 +170,9 @@ async def test_an_endpoint_that_cannot_be_reached_carries_the_cores_connection_v
 
     endpoint = ProviderEndpoint(id="direct", kind="openai_compat", base_url="https://x.test", api_key="k")
     provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    # The adapter first waits a refused endpoint out (test_provider_reconnect); with no patience left the
+    # failure it then raises is the one asserted here.
+    provider._patience = lambda: Patience(budget=0)
     with pytest.raises(LLMProviderError) as caught:
         await _drain(provider)
     assert_adapter_failure(caught.value)
