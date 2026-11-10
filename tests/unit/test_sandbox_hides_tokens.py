@@ -65,10 +65,11 @@ def test_nothing_is_asked_for_a_path_that_is_not_there(installation: Path, monke
     assert hidden_installation() == []
 
 
-def test_a_container_has_none_of_this(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_container_has_none_of_the_launchers_files(installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launcher's handover file and local folder are native things; the state folder is covered in a container too."""
     monkeypatch.delenv("DAEDALUS_LOCAL", raising=False)
     monkeypatch.setattr(shell, "_native", lambda: False)
-    assert hidden_installation() == []
+    assert hidden_installation() == ["--tmpfs", str(installation / "state")]
 
 
 @pytest.mark.skipif(shutil.which("bwrap") is None, reason="a real sandbox")
@@ -88,7 +89,7 @@ def test_a_real_command_that_builds_the_path_reads_nothing(installation: Path, m
     output = run()
     assert "the-token" not in output and "the-launcher-token" not in output
     # The control: without the two covers the same command reads both, which is what this test is about.
-    monkeypatch.setattr(shell, "hidden_installation", lambda _writable=(): [])
+    monkeypatch.setattr(shell, "hidden_installation", lambda _writable=(), _readable=(): [])
     output = run()
     assert "the-token" in output and "the-launcher-token" in output
 
@@ -119,10 +120,10 @@ def test_the_keys_folder_is_covered_and_the_file_has_no_cover_of_its_own(keys: P
     assert argv[argv.index(str(keys.parent)) - 1] == "--tmpfs" and str(keys) not in argv
 
 
-def test_a_container_keeps_nothing_of_this_though_the_names_are_set(keys: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_container_has_no_launchers_keys_though_the_names_are_set(keys: Path, installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shell, "_native", lambda: False)
     monkeypatch.delenv("DAEDALUS_LOCAL")
-    assert hidden_installation() == []
+    assert hidden_installation() == ["--tmpfs", str(installation / "state")]
 
 
 def test_the_default_place_of_the_keys_is_covered_too(installation: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,6 +272,7 @@ def test_a_real_command_that_builds_the_path_reads_neither_the_database_nor_the_
     assert API_TOKEN not in output and TELEGRAM not in output and "daedalus.sqlite" not in output
     # The control: uncovered, the same command reads both.
     monkeypatch.setattr(shell, "hidden_installation_paths", lambda _state: ([], []))
+    monkeypatch.setattr(shell, "hidden_everywhere", lambda _state: ([], [], []))
     output = run()
     assert API_TOKEN in output and TELEGRAM in output
 

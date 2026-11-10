@@ -174,8 +174,11 @@ folder moved elsewhere is covered where it is. A terminal the agent drives in it
 its terminal daemon is new enough to hide what the app names; an older one hides only its own folders until it is
 updated. On a Mac, on Windows, or with the sandbox off, there is no such wall: a command that builds the path reads
 them all, and the key proxy's card and the public address form say so. A team member's CLI and a terminal outside the
-sandbox read them everywhere. In the container the keys are in the key proxy's container and there is no `.env` to
-read; the state volume is mounted, and a command there can read it. The agent with such a token could raise a tunnel
+sandbox read them everywhere. In the container the keys are in the key proxy's container. The state volume is mounted
+for the app, and with the sandbox on a command is shown an empty folder there, as natively; so are the daemons' run
+folders with their tokens, the supervisor's socket and the Bot API server's files, and the checkout's `.env` is an
+empty file. A command still reads its own job logs and the skill drafts in the state volume, read-only, and with the
+sandbox off it reads everything the container holds. The agent with such a token could raise a tunnel
 of its own, which the watch would report. With a key it could spend from anywhere, past the proxy's budget and ledger.
 With the API token it could call the app as the operator. The key proxy's own port stays open to a command in
 every case: it can use a key it cannot read, as far as the proxy's budget lets it.

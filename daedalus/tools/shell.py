@@ -439,14 +439,66 @@ def hidden_installation_paths(state: str) -> tuple[list[Path], list[Path]]:
     return folders, files
 
 
-def hidden_installation(writable: Sequence[str] = ()) -> list[str]:
-    """What covers the launcher's private files in a command's sandbox. Natively only: in a container they
-    are not on this filesystem, and nothing here may fail a command over a path that is not there.
+DAEMON_RUN_DIRS = ("TERMINALS_CONTAINER_DIR", "TERMINALS_HOST_DIR", "BROWSER_CONTAINER_DIR", "BROWSER_HOST_DIR", "BROWSER_USER_DIR", "COMPUTER_HOST_DIR", "GUEST_RUN_DIR", "GUEST_TOKEN_DIR")
+"""The environment names of the daemons' run directories, the set :attr:`daedalus.config.Settings.sealed_everywhere`
+reads, named again because that module imports this one. Each holds a token: a terminal daemon's opens a shell (on
+the host environment, one on the operator's machine), a browser daemon's drives browsers with their logins, the
+desktop daemon's sees the screens, the guest door's admits strangers."""
+CONTAINER_PRIVATE_FOLDERS = ("/var/lib/telegram-bot-api",)
+"""What the agent's container holds that no command of it needs: the local Bot API server's files, in a folder
+named after the bot's token. The host copies a file it was sent from there into the workspace's inbox itself."""
+STATE_SHOWN_BACK = ("skill-drafts",)
+"""Folders of the state folder a sandboxed command is shown again, read-only, under the cover: the skill drafts
+(:data:`daedalus.host.skills.DRAFTS_DIR`), which SkillDraft writes there and then tells the agent to copy into a
+worktree. They are the agent's own writing, already redacted, and the copy is a ``cp -r`` in Exec."""
+
+
+def hidden_everywhere(state: str) -> tuple[list[Path], list[Path], list[Path]]:
+    """What no sandboxed command sees, in the agent's container as natively: folders covered by an empty one,
+    files covered by an empty file, and folders inside the covers shown again read-only. Resolved, and only what
+    is there, for the reasons :func:`folders_with_keys` gives.
+
+    In the container the agent runs as root beside the state volume, so a file mode protects nothing and the
+    policy's reading of a command's words was all that stood between a command and ``daedalus.sqlite`` with
+    the app's API token, its journal, ``config.toml``, ``supervisor.token`` and ``secrets/``. The state folder
+    is covered whole, as natively, because the database and its journal are written by rename and by new files.
+    Beside it: the daemons' run directories and their tokens; the supervisor's socket, which restarts and
+    rebuilds the installation and is the host's to dial; the Bot API server's files; and the checkouts'
+    ``.env``, where compose keeps the Telegram token and the GitHub tokens. That one is a file in the checkout
+    the agent reads, so it can only be covered as a file. Natively the launcher's own file is
+    ``DAEDALUS_ENV_FILE`` (:func:`hidden_installation_paths`).
+    """
+    folders: list[Path] = []
+    files: list[Path] = []
+    shown: list[Path] = []
+    if state and Path(state).is_dir():
+        folders.append(Path(state).resolve())
+        shown += [Path(state).resolve() / name for name in STATE_SHOWN_BACK if (Path(state) / name).is_dir()]
+    named = [os.environ.get(name, "").strip() for name in DAEMON_RUN_DIRS]
+    if not _native():
+        # Natively the supervisor is the launcher, reached over loopback with a token in the state folder, and
+        # a socket's folder there could be the operator's whole runtime directory. The container's is its own.
+        socket = os.environ.get("SUPERVISOR_SOCKET", "").strip()
+        parent = Path(socket).parent if socket else None
+        named += [str(parent) if parent is not None and parent not in (Path("/"), Path("/run"), Path("/var/run"), Path("/tmp")) else "", *CONTAINER_PRIVATE_FOLDERS]
+    folders += [Path(raw).resolve() for raw in named if raw and Path(raw).is_absolute() and Path(raw).is_dir()]
+    for checkout in (os.environ.get("BOT_REPO_DIR", "").strip(), os.environ.get("CORE_REPO_DIR", "").strip()):
+        if checkout and (Path(checkout) / ".env").is_file():
+            files.append((Path(checkout) / ".env").resolve())
+    return list(dict.fromkeys(folders)), list(dict.fromkeys(files)), shown
+
+
+def hidden_installation(writable: Sequence[str] = (), readable: Sequence[str] = ()) -> list[str]:
+    """What covers the installation's private files in a command's sandbox: :func:`hidden_everywhere` always,
+    and natively the launcher's files beside it (:func:`hidden_installation_paths`). Nothing here may fail a
+    command over a path that is not there, so each one is named only when it is.
 
     ``writable`` is what the sandbox bound writable before this: a path of it inside a hidden folder is bound
     again after the cover, because the host opened it for the command, and a cover laid over it would leave
     the command an empty directory where its work is. None is inside the keys' folders or the real state
-    folder, which the policy seals; a benchmark's state folder holds its own workspaces."""
+    folder, which the policy seals; a benchmark's state folder holds its own workspaces. ``readable`` goes the
+    same way read-only: a session whose folder is read-only has its command logs in the state folder
+    (:func:`daedalus.host.services.session_scratch_dir`), and its commands read them there."""
     argv: list[str] = []
     local = os.environ.get("DAEDALUS_LOCAL", "").strip()
     if local and Path(local).is_dir():
@@ -455,18 +507,35 @@ def hidden_installation(writable: Sequence[str] = ()) -> list[str]:
     handover = Path(state).parent / "launcher.json" if state else None
     if _native() and handover is not None and handover.is_file():
         argv += ["--ro-bind", "/dev/null", str(handover)]
-    if _native():
-        folders, files = hidden_installation_paths(state)
-        for folder in folders:
-            argv += ["--tmpfs", str(folder)]
-        for file in files:
-            argv += ["--ro-bind", "/dev/null", str(file)]
-        keys = folders_with_keys(state)
-        for raw in writable:
-            path = Path(raw).resolve()
-            if any(path == f or f in path.parents for f in folders) and not any(path == k or k in path.parents for k in keys):
-                argv += ["--bind", str(path), str(path)]
+    folders, files = hidden_installation_paths(state) if _native() else ([], [])
+    everywhere, covered, shown = hidden_everywhere(state)
+    folders = list(dict.fromkeys([*folders, *everywhere]))
+    files = list(dict.fromkeys([*files, *covered]))
+    for folder in folders:
+        argv += ["--tmpfs", str(folder)]
+    for file in files:
+        argv += ["--ro-bind", "/dev/null", str(file)]
+    keys = folders_with_keys(state)
+
+    def under_a_cover(path: Path) -> bool:
+        return any(path == f or f in path.parents for f in folders) and not any(path == k or k in path.parents for k in keys)
+
+    # Read-only first, so that a writable path inside a read-only one is bound over it and stays writable.
+    for path in [*shown, *(Path(raw).resolve() for raw in readable)]:
+        if under_a_cover(path) and path.is_dir():
+            argv += ["--ro-bind", str(path), str(path)]
+    for raw in writable:
+        path = Path(raw).resolve()
+        if under_a_cover(path):
+            argv += ["--bind", str(path), str(path)]
     return argv
+
+
+def _readable(services: Any) -> list[Path]:
+    """What a session's command reads beside the root: its workspace, and its command logs where the host keeps
+    them for a read-only folder, in the state folder the sandbox otherwise covers."""
+    log_root = getattr(services, "log_root", None)
+    return [services.workspace_dir, *([log_root] if log_root is not None else [])]
 
 
 async def sandbox_argv(
@@ -498,7 +567,10 @@ async def sandbox_argv(
     holds the tokens of the public address and of the daemons, the second a token that runs the
     installation, the third ``keyproxy.env``, the fourth the database with the app's API token, the last
     the Telegram token. The policy refuses a command that names them, by matching words, and a command
-    that builds the path is not one it can read. Here there is simply nothing at that path.
+    that builds the path is not one it can read. Here there is simply nothing at that path. In the agent's
+    container the state volume, the daemons' run directories, the supervisor's socket and the checkouts'
+    ``.env`` are covered the same way (:func:`hidden_everywhere`); the policy there does not even read the
+    words for the state folder.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
@@ -548,7 +620,7 @@ async def sandbox_argv(
         for scope in store.scope_dirs(session_id or ""):
             if scope.is_dir():
                 argv += ["--ro-bind", str(scope), str(scope)]
-    return argv + hidden_installation(sorted(bound)) + shell_argv(command), True
+    return argv + hidden_installation(sorted(bound), [str(path) for path in readable]) + shell_argv(command), True
 
 
 # Environment names a tool's subprocess may inherit. Everything else —
@@ -836,7 +908,7 @@ async def _run_once(context: ToolContext, command: str, cwd: str | None, timeout
     started = time.monotonic()
     environment = shell_environment(context.session_id, env, cwd=workdir)
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=_readable(services))
     except SandboxUnavailable as exc:
         return error(context, str(exc)) if guest else await sandbox_unavailable(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
@@ -1467,7 +1539,7 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
     log.parent.mkdir(parents=True, exist_ok=True)
     _prune_spills(log.parent)  # the same bound as the spill directory: the newest logs stay
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=[services.workspace_dir])
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id, readable=_readable(services))
     except SandboxUnavailable as exc:
         return error(context, str(exc)) if is_guest_turn(context.session_id) else await sandbox_unavailable(context, str(exc))
     fh = log.open("wb")
