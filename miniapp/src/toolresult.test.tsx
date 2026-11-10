@@ -96,4 +96,27 @@ describe("the whole of a tool result", () => {
     expect(toast).not.toHaveBeenCalled();
     expect(button(/Copy all/)!.querySelector("svg")).not.toBeNull();
   });
+
+  it("puts the auto-review's block on its row with the reviewer's reason and Allow anyway, in both languages", async () => {
+    const told = "Blocked by the auto-review: nobody asked for a release (rule review.publish). The action was not taken. Approval key: 0123456789ab. The operator sees this call on a card.";
+    const post = vi.spyOn(api, "post").mockResolvedValueOnce({ grants: {} }).mockRejectedValueOnce(new Error("this blocked call was already allowed once"));
+    const toast = vi.fn();
+    const blocked = item({ error: true, result: told, clipped: false });
+    await act(async () => root.render(<ToolResultView sessionId="s1" item={blocked} toast={toast} initial={null} keep={() => {}} />));
+    const card = host.querySelector("[data-blocked]")!;
+    expect(card.textContent).toContain("Blocked by the auto-review");
+    expect(card.textContent).toContain("Reviewer: nobody asked for a release");
+    expect(button(/Allow once/)).toBeUndefined();
+    await act(async () => button(/^Allow anyway$/)!.click());
+    expect(post).toHaveBeenCalledWith("/api/sessions/s1/policy/grant", { key: "0123456789ab" });
+    expect(button(/Allowed; the agent repeats it/)!.disabled).toBe(true);
+    act(() => root.unmount());
+    root = createRoot(host);
+    setLang("ru");
+    await act(async () => root.render(<ToolResultView sessionId="s1" item={blocked} toast={toast} initial={null} keep={() => {}} />));
+    expect(host.querySelector("[data-blocked]")!.textContent).toContain("Проверка: nobody asked for a release");
+    // A second press after the grant was spent is the host's refusal, said aloud.
+    await act(async () => button(/^Разрешить всё равно$/)!.click());
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("already allowed once"));
+  });
 });

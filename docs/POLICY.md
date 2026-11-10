@@ -83,8 +83,12 @@ agent did before the rules existed, except paying, which asks.
 **Auto-review.** Before an action of a reviewed category runs at *auto* — and every action at *on
 command* — a small model (`review_preset`, empty is a middle preset of the table) reads your recent
 messages, the session's brief and the action, and answers *allow*, *block* or *ask*. A block comes back
-to the agent as a tool error with the reason and puts a notice in the Inbox; an ask is an ordinary
-approval request. The review **fails closed**: a timeout (`review_timeout_seconds`), an error or an
+to the agent as a tool error with the reason, and to you as a card under the blocked call, above the
+composer and in the Inbox (and Telegram, when the chat is bound there): what was blocked, the reviewer's
+reason, and **Allow anyway**. Pressing it is your decision, logged as an *override*: the agent is told
+(or woken, if its run had ended) and repeats the same call unchanged, which passes once. The card closes
+with the next run, a restart or a second answer, a second press grants nothing, and a team's
+orchestrator cannot press it. An ask is an ordinary approval request. The review **fails closed**: a timeout (`review_timeout_seconds`), an error or an
 answer that is neither word asks you. It never sees a secret: everything it reads goes through the
 redactor first, so it reads `«secret:…»` placeholders, not values. Every decision is logged and shown
 under Settings → Rules for ninety days. It is on by default for `message`, `publish` and `payment`.

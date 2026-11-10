@@ -477,13 +477,16 @@ def server_grant_rows(session_id: str, key: str, server: str) -> list[list[tuple
             [(f"{h} h" if h else "∞ ⚠️", f"ps:{session_id}:{key}:{h}") for h in hours]]
 
 
-def approval_rows(session_id: str, key: str, server: str | None) -> list[list[tuple[str, str]]]:
+def approval_rows(session_id: str, key: str, server: str | None, *, blocked: bool = False) -> list[list[tuple[str, str]]]:
     """The buttons under a refused call: what the app's card offers for it, and nothing it does not.
 
     ``server`` is the host's answer to "Allow all from which server?" (:meth:`SessionManager.server_of`), the one
     the app's card asks; it is ``None`` for a run another agent's words reached, which is answered one call at a
     time. Read from the request as it was recorded, a server named before the touch was offered here still.
     """
+    if blocked:
+        # A call the auto-review blocked: the app's card says "Allow anyway", and so does this one.
+        return [[("✅ Allow anyway", f"pa:{session_id}:{key}"), ("✖ Keep blocked", f"pa:{session_id}:{key}:no")]]
     rows = [[("✅ Allow once", f"pa:{session_id}:{key}"), ("✖ Leave refused", f"pa:{session_id}:{key}:no")]]
     if server:
         rows.extend(server_grant_rows(session_id, key, server))
@@ -2684,8 +2687,13 @@ class TelegramFront:
                         server = None
                     touched = state is not None and agent_talk.touch_of(state.metadata) is not None
                     why = "\n\nAnother agent's words reached this run: this allows this one call and nothing more." if touched else ""
+                    blocked = pending.get("blocked") if pending else None
+                    if isinstance(blocked, dict):
+                        text = f"🛑 The auto-review blocked {what}\n\nThe reviewer: {blocked.get('reason') or ''}{why}\n\nAllow it anyway? The agent repeats it once, unchanged."
+                    else:
+                        text = f"🛂 The policy stopped {what}{why}\n\nAllow it once? The agent retries on its next step."
                     try:
-                        await self.send_choice(outbox, f"🛂 The policy stopped {what}{why}\n\nAllow it once? The agent retries on its next step.", approval_rows(session_id, key, server))
+                        await self.send_choice(outbox, text, approval_rows(session_id, key, server, blocked=isinstance(blocked, dict)))
                     except Exception:  # noqa: BLE001
                         logger.warning("could not post the approval buttons", exc_info=True)
 

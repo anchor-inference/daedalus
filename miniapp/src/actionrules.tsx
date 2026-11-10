@@ -32,7 +32,8 @@ export type ReviewEntry = {
   tool: string;
   category: string;
   level: string;
-  verdict: "allow" | "block" | "ask";
+  /** ``override``: the operator let a call the review blocked through anyway. */
+  verdict: "allow" | "block" | "ask" | "override";
   reason: string;
   failed: boolean;
   summary: string;

@@ -386,6 +386,10 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .toolcard .result-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:var(--fs-13); }
 .toolcard .result-note { color:var(--muted); font-size:var(--fs-13); }
 .toolcard .result-note.error { color:var(--bad); }
+/* the auto-review's block under its call: what the reviewer said, and the one override there is */
+.toolcard .result-blocked { display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:8px 10px; border:1px solid color-mix(in srgb, var(--bad) 40%, var(--line)); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bad) 6%, var(--card)); }
+.toolcard .result-blocked-head { display:flex; align-items:center; gap:6px; font-size:var(--fs-13); font-weight:600; color:var(--bad); }
+.toolcard .result-blocked-reason { font-size:var(--fs-13); color:var(--fg-2); overflow-wrap:anywhere; }
 .diff pre { margin:0; padding:8px 10px; font-family:var(--mono); font-size:var(--fs-mono); white-space:pre-wrap; word-break:break-word; }
 .diff .del { background:rgba(248,113,113,.14); border-radius:var(--radius-md) var(--radius-md) 0 0; color:#fca5a5; }
 .diff .add { background:rgba(74,222,128,.12); border-radius:0 0 var(--radius-md) var(--radius-md); color:#86efac; }
@@ -850,6 +854,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .dock-title kbd { font:inherit; font-size:var(--fs-11); color:var(--fg-3); white-space:nowrap; }
 .dock-detail { font-size:var(--fs-mono); color:var(--fg-2); padding:6px 8px; background:var(--surface-1); border-radius:var(--radius-sm); }
 .dock-actions { display:flex; gap:6px; }
+/* a blocked call overrides a check, not a question: the edge and the shield say so */
+.dock.approval[data-kind="blocked"] { border-color:color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.dock.approval[data-kind="blocked"] .dock-title .ic { color:var(--bad); }
+.dock.approval [data-blocked-reason] { font-size:var(--fs-13); overflow-wrap:anywhere; }
 /* a question settled elsewhere waits on nobody: no warning edge, and the answer reads as words, not code */
 .dock.answered { border-color:var(--line); }
 .dock.answered .dock-title .ic { color:var(--fg-3); }

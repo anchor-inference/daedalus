@@ -11,6 +11,7 @@ import {
   draftTargetChanged,
   dockKey,
   draftKey,
+  blockedReason,
   pendingApproval,
   placeholderKey,
   primaryAction,
@@ -240,6 +241,16 @@ describe("the approval dock", () => {
   const refusal = (id: string, key: string, run_id?: string) => ({ run_id, tool_calls: [], tool_results: [{ id, content: `refused by policy.\nApproval key: ${key}`, is_error: true }] });
   const call = (id: string, name: string, args: Record<string, unknown>, run_id?: string) => ({ run_id, tool_calls: [{ id, name, arguments: args }], tool_results: [] });
   const open = (...keys: string[]) => ({ open: keys });
+
+  it("marks a call the auto-review blocked with the reviewer's reason, and only that one", () => {
+    const told = "Blocked by the auto-review: the operator asked to fix a test, not to publish a release (rule review.publish). The action was not taken. Approval key: 0123456789ab. The operator sees this call on a card.";
+    const blocked = { tool_calls: [], tool_results: [{ id: "c1", content: told, is_error: true }] };
+    const a = pendingApproval([call("c1", "Exec", { command: "gh release edit v1" }), blocked], new Set(), open("0123456789ab"));
+    expect(a).toEqual({ key: "0123456789ab", callId: "c1", tool: "Exec", detail: "gh release edit v1", blocked: "the operator asked to fix a test, not to publish a release" });
+    expect(blockedReason(told)).toBe("the operator asked to fix a test, not to publish a release");
+    expect(blockedReason("needs approval: x (rule review.publish). Approval key: 0123456789ab")).toBeNull();
+    expect(pendingApproval([call("c1", "Exec", { command: "rm -rf build" }), refusal("c1", "0123456789ab")], new Set(), open("0123456789ab"))?.blocked).toBeUndefined();
+  });
 
   it("names the refused call and its key", () => {
     const a = pendingApproval([call("c1", "Exec", { command: "rm -rf build" }), refusal("c1", "0123456789ab")], new Set(), open("0123456789ab"));

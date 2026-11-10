@@ -197,6 +197,22 @@ async def test_a_permission_request_is_urgent_and_quick_only_when_the_request_al
         await host.close()
 
 
+async def test_a_blocked_call_is_an_inbox_entry_with_allow_anyway(settings: Settings, db: Database) -> None:
+    host, service = await host_with(settings, db)
+    router = NotificationRouter(service, host.manager)
+    try:
+        blocked = {**permission_payload("s1", quick=False), "routed_to": "operator",
+                   "blocked": {"reason": "nobody asked for a release.", "category": "publish", "level": "auto"}}
+        await router.handle(event("permission.pending", blocked, session_id="s1"))
+        (entry,) = await entries(service)
+        assert (entry["category"], entry["kind"], entry["level"], entry["needs_you"]) == ("permission", "rules_block", "urgent", True)
+        assert entry["title"] == "The auto-review stopped an action of Bakery"
+        assert entry["body"] == "Exec: curl https://other.example/\n\nThe reviewer: nobody asked for a release."
+        assert [(a["id"], a["label"], a["quick"]) for a in entry["actions"]] == [("allow", "Allow anyway", False), ("deny", "Keep blocked", False), ("open", "Open", False)]
+    finally:
+        await host.close()
+
+
 async def test_the_operator_can_forbid_quick_answers_altogether(settings: Settings, db: Database) -> None:
     host, service = await host_with(settings, db)
     try:

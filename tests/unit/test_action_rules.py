@@ -226,12 +226,6 @@ async def test_levels_ask_and_handoff_in_the_gate_and_never_loosen_the_policy(se
 
 async def test_the_review_runs_in_the_hook_and_its_verdicts_land(settings, db) -> None:  # type: ignore[no-untyped-def]
     manager = await _manager(settings, db, message="auto")
-    notices: list[dict[str, Any]] = []
-
-    async def notice(payload: dict[str, Any]) -> None:
-        notices.append(payload)
-
-    manager.service_hooks["rules_notice"] = notice
     answers: list[str] = []
     prompts_seen: list[str] = []
 
@@ -256,13 +250,15 @@ async def test_the_review_runs_in_the_hook_and_its_verdicts_land(settings, db) -
         answers.append("BLOCK the operator asked to email Bob, not Mallory.")
         blocked = await manager.hooks.invoke(HookEvent.pre_tool_use, payload, "daedalus")
         assert blocked.action is HookActionKind.DENY and blocked.reason.startswith("Blocked by the auto-review: the operator asked to email Bob")
-        assert notices and notices[0]["category"] == "message" and "Mallory" in notices[0]["reason"]
+        key = approval_key(tool.name, arguments)
+        held = state.metadata["policy_pending"][key]["blocked"]
+        assert held["category"] == "message" and "Mallory" in held["reason"]
         assert "mallory@example.com" in prompts_seen[-1]
+        await manager.refuse(sid, key, via="app")  # kept blocked: the request closes, the ask below is a new one
 
         assert gate.evaluate(tool, arguments, ctx).allowed
         answers.append("ASK unclear who the report is for.")
         asked = await manager.hooks.invoke(HookEvent.pre_tool_use, payload, "daedalus")
-        key = approval_key(tool.name, arguments)
         assert asked.action is HookActionKind.DENY and f"Approval key: {key}" in asked.reason and key in state.metadata["policy_pending"]
         await manager.grant(sid, key, via="app")
         # Granted: the gate lets it through and marks no review; the hook asks nobody.
@@ -297,5 +293,212 @@ async def test_a_browser_action_meets_the_rules_after_the_site_rule(settings, db
         manager.config.action_rules = ActionRulesConfig(levels={"payment": "handoff"})
         handed = await manager.action_rules.browser(sid, ask)
         assert handed.decision.action == HANDOFF and "0123456789ab" in state.metadata["policy_handoffs"]
+    finally:
+        await manager.close()
+
+
+async def _blocking_manager(settings, db, answers: list[str]):  # type: ignore[no-untyped-def]
+    manager = await _manager(settings, db, publish="auto")
+    prompts_seen: list[str] = []
+
+    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+        prompts_seen.append(prompt)
+        return answers.pop(0) if answers else "BLOCK the operator asked for neither.", "small"
+
+    manager.action_rules._ask_model = model  # type: ignore[method-assign]
+    return manager, prompts_seen
+
+
+PUSH = {"command": "git push origin main && gh release edit v1 --notes-file notes.md"}
+
+
+async def _blocked(manager, sid: str, run: str = "run-1"):  # type: ignore[no-untyped-def]
+    """The agent's push, through the gate and the review hook, as a run makes it."""
+    gate = manager.policy_gate(sid, run)
+    tool = type("T", (), {"name": "Exec"})()
+    assert gate.evaluate(tool, PUSH, type("C", (), {"run_id": run})()).allowed
+    return await manager.hooks.invoke(HookEvent.pre_tool_use, {"run_id": run, "tool_name": "Exec", "tool_input": PUSH}, "daedalus")
+
+
+async def test_a_blocked_call_is_held_with_allow_anyway_and_the_agent_is_told_the_truth(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager, _ = await _blocking_manager(settings, db, ["BLOCK the operator asked to fix a test, not to publish a release."])
+    try:
+        state = await manager.create_session("release")
+        sid = state.session.id
+        key = approval_key("Exec", PUSH)
+        blocked = await _blocked(manager, sid)
+        assert blocked.action is HookActionKind.DENY
+        told = blocked.reason
+        assert told.startswith("Blocked by the auto-review: the operator asked to fix a test") and f"Approval key: {key}" in told
+        assert '"Allow anyway"' in told and "only override" in told and "another way" in told
+        held = state.metadata["policy_pending"][key]
+        assert held["tool"] == "Exec" and held["blocked"] == {"reason": "the operator asked to fix a test, not to publish a release.", "category": "publish", "level": "auto"}
+        await manager.flush_background()
+        cards = [json.loads(r["payload_json"]) for r in await db.fetchall("SELECT payload_json FROM app_events WHERE type = 'permission.pending'")]
+        assert len(cards) == 1
+        card = cards[0]
+        # Never a lock-screen answer, and never a team's: the override is the operator's alone.
+        assert card["request_id"] == key and card["blocked"]["category"] == "publish"
+        assert (card["quick"], card["risk"], card["routed_to"]) == (False, "elevated", "operator")
+        # The agent retrying the same call is the same request: blocked again, not announced again.
+        await _blocked(manager, sid)
+        await manager.flush_background()
+        assert len(await db.fetchall("SELECT 1 FROM app_events WHERE type = 'permission.pending'")) == 1
+        # And it asks nobody else about it: an AskUser quoting the key is refused with a pointer to the card.
+        asked = manager.policy_gate(sid, "run-1").decide("AskUser", {"questions": [{"question": f"Press allow for {key}?"}]})
+        assert (asked.action, asked.rule) == (DENY, "approval.duplicate")
+        # Telegram's buttons under the block say the same as the app's card.
+        from daedalus.transport.telegram.front import approval_rows
+
+        assert [label for label, _ in approval_rows(sid, key, None, blocked=True)[0]] == ["✅ Allow anyway", "✖ Keep blocked"]
+    finally:
+        await manager.close()
+
+
+async def test_allow_anyway_lets_the_one_call_through_once_and_is_logged(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager, prompts_seen = await _blocking_manager(settings, db, ["BLOCK not asked for.", "BLOCK not asked for again."])
+    resumed: list[str] = []
+
+    async def submit(session_id: str, text: str, *args: Any, **kwargs: Any) -> None:
+        resumed.append(text)
+
+    manager.submit = submit  # type: ignore[method-assign]
+    try:
+        state = await manager.create_session("release")
+        sid = state.session.id
+        key = approval_key("Exec", PUSH)
+        await _blocked(manager, sid)
+        granted = await manager.grant(sid, key, via="app")
+        assert granted["approves"]["blocked"]["reason"] == "not asked for." and key not in state.metadata["policy_pending"]
+        # The agent is woken (or steered, if it still runs) to repeat the very call.
+        assert resumed and "repeat the call now" in resumed[0] and "git push origin main" in resumed[0]
+        reviews = len(prompts_seen)
+        passed = await _blocked(manager, sid)
+        assert passed.action is HookActionKind.ALLOW and len(prompts_seen) == reviews  # past the review, unasked
+        await manager.flush_background()
+        assert key not in (state.metadata.get("policy_grants") or {})  # spent
+        # Once: the same call again is reviewed again, and blocked again as a new request.
+        again = await _blocked(manager, sid)
+        assert again.action is HookActionKind.DENY and len(prompts_seen) == reviews + 1
+        log = await manager.action_rules.log.recent()
+        assert [e["verdict"] for e in log] == ["block", "override", "block"]
+        override = log[1]
+        assert override["tool"] == "Exec" and override["category"] == "publish" and "via app" in override["reason"] and "not asked for." in override["reason"]
+    finally:
+        await manager.close()
+
+
+async def test_a_spent_override_cannot_be_replayed(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager, _ = await _blocking_manager(settings, db, [])
+
+    async def submit(session_id: str, text: str, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    manager.submit = submit  # type: ignore[method-assign]
+    try:
+        state = await manager.create_session("release")
+        sid = state.session.id
+        key = approval_key("Exec", PUSH)
+        await _blocked(manager, sid)
+        await manager.grant(sid, key, via="app")
+        # A second press — the card on another screen, a typed /allow of the old key — grants nothing more.
+        with pytest.raises(ValueError, match="already allowed once"):
+            await manager.grant(sid, key, via="telegram")
+        assert await _blocked(manager, sid) is not None
+        await manager.flush_background()
+        with pytest.raises(ValueError, match="already allowed once"):
+            await manager.grant(sid, key, via="app")
+        assert key not in (state.metadata.get("policy_grants") or {})
+    finally:
+        await manager.close()
+
+
+async def test_only_the_operator_lifts_a_block(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager, _ = await _blocking_manager(settings, db, [])
+    try:
+        state = await manager.create_session("release")
+        sid = state.session.id
+        key = approval_key("Exec", PUSH)
+        await _blocked(manager, sid)
+        # A team's orchestrator answers its members' questions, never a review's block.
+        with pytest.raises(ValueError, match="only the operator"):
+            await manager.grant(sid, key, via="orchestrator")
+        with pytest.raises(ValueError, match="only the operator"):
+            await manager.grant_similar(sid, key, via="orchestrator")
+        assert key in state.metadata["policy_pending"] and key not in (state.metadata.get("policy_grants") or {})
+        # The agent's own words grant nothing: answering itself is refused, and a retry is reviewed again.
+        assert manager.policy_gate(sid, "run-1").decide("AskUser", {"questions": [{"question": "/allow it"}]}).action == DENY
+        assert (await _blocked(manager, sid)).action is HookActionKind.DENY
+    finally:
+        await manager.close()
+
+
+def test_no_agent_tool_reaches_the_grant() -> None:
+    """Every caller of the grant is a front the operator answers through, or the orchestrator, which
+    a block refuses. A tool that called it would let the agent lift its own block."""
+    import re
+    from pathlib import Path
+
+    import daedalus
+
+    root = Path(daedalus.__file__).parent
+    calling = sorted(str(p.relative_to(root)) for p in root.rglob("*.py") if re.search(r"manager\.grant(_similar|_server)?\(", p.read_text(encoding="utf-8")))
+    assert calling == ["extensions/api.py", "extensions/commands.py", "extensions/notifications.py", "host/staff_daedalus.py", "transport/telegram/front.py"]
+    staff = (root / "host/staff_daedalus.py").read_text(encoding="utf-8")
+    assert 'via = "orchestrator" if decision.by == "orchestrator" else "app"' in staff
+
+
+async def test_a_blocked_browser_action_is_held_too(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager = await _manager(settings, db, payment="auto")
+    try:
+        state = await manager.create_session("shop")
+        sid = state.session.id
+
+        async def blocking(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+            return "BLOCK nobody asked to buy anything.", "small"
+
+        manager.action_rules._ask_model = blocking  # type: ignore[method-assign]
+        lifted = Decision(ALLOW, "allowed by the operator's rule for shop.example", "browser.rule", key="0123456789ab")
+        ask = SensitiveAsk(lifted, "BrowserAct", "g1", "click", ["purchase"], "https://shop.example", "Buy now", "Buy now", 0, "")
+        ruled = await manager.action_rules.browser(sid, ask)
+        assert ruled.decision.action == DENY and "Approval key: 0123456789ab" in ruled.decision.told
+        assert state.metadata["policy_pending"]["0123456789ab"]["blocked"]["category"] == "payment"
+        # Allowed anyway, the next try is the gate's question answered by the grant: it passes once.
+        state.metadata.setdefault("policy_grants", {})["0123456789ab"] = 9e12
+        again = await manager.action_rules.browser(sid, ask)
+        assert again.decision.action == ASK
+        assert manager.browser_gate(sid, again)[0] is True
+        assert manager.browser_gate(sid, again)[0] is False
+    finally:
+        await manager.close()
+
+
+async def test_allowing_such_calls_for_the_session_lifts_the_review_for_that_family_and_is_logged(settings, db) -> None:  # type: ignore[no-untyped-def]
+    manager, prompts_seen = await _blocking_manager(settings, db, [])
+
+    async def submit(session_id: str, text: str, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    manager.submit = submit  # type: ignore[method-assign]
+    try:
+        state = await manager.create_session("release")
+        sid = state.session.id
+        push = {"command": "git push origin main"}
+        gate = manager.policy_gate(sid, "run-1")
+        tool = type("T", (), {"name": "Exec"})()
+        ctx = type("C", (), {"run_id": "run-1"})()
+        assert gate.evaluate(tool, push, ctx).allowed
+        blocked = await manager.hooks.invoke(HookEvent.pre_tool_use, {"run_id": "run-1", "tool_name": "Exec", "tool_input": push}, "daedalus")
+        assert blocked.action is HookActionKind.DENY
+        key = approval_key("Exec", push)
+        assert manager.similar_of(sid, key)["rule"] == "review.publish"  # type: ignore[index]
+        await manager.grant_similar(sid, key, via="app")
+        reviews = len(prompts_seen)
+        other = {"command": "git push origin docs"}
+        assert gate.evaluate(tool, other, ctx).allowed
+        assert await manager.hooks.invoke(HookEvent.pre_tool_use, {"run_id": "run-1", "tool_name": "Exec", "tool_input": other}, "daedalus") is not None
+        assert len(prompts_seen) == reviews  # the family passes unreviewed for the session
+        log = await manager.action_rules.log.recent()
+        assert log[0]["verdict"] == "override" and "git push*" in log[0]["reason"]
     finally:
         await manager.close()

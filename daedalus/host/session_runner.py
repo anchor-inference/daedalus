@@ -88,6 +88,7 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.host import (
+    action_rules,
     agent_talk,
     attached_files,
     capabilities,
@@ -7794,6 +7795,7 @@ class SessionManager:
             raise KeyError(session_id)
         key = self._approval_key(key)
         carry_out = self._carried_out(state, key, via)
+        blocked = self._overridable(state, key, via)
         # Answered, so off the open list: the same call refused again after the grant is spent is a
         # new request, and is announced as one.
         approves = self._drop_pending(state, key)
@@ -7810,11 +7812,48 @@ class SessionManager:
             grants = {k: v for k, v in (meta.get("policy_grants") or {}).items() if float(v) > time.time()}
             grants[key] = until
             meta["policy_grants"] = dict(list(grants.items())[-20:])
+            if blocked:
+                meta["review_overridden"] = dict(list({**(meta.get("review_overridden") or {}), key: time.time()}.items())[-20:])
         await self.sessions.update_metadata(session_id, state.session.metadata)
         await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": "allow", "via": via})
+        if blocked and approves:
+            await self._log_override(state, [approves], "allowed it once anyway", via)
         if via != "orchestrator":  # the orchestrator's grant tells the member itself, with its basis
             await self._resume_after_grant(session_id, [approves] if approves else [])
         return {"key": key, "approves": approves, "grants": list(state.metadata["policy_grants"]), "expires_in_minutes": GRANT_TTL_SECONDS // 60}
+
+    def _overridable(self, state: SessionState, key: str, via: str) -> bool:
+        """Whether the request is a call the auto-review blocked, and so the operator's alone to let through.
+
+        Refused to an orchestrator, as :meth:`_carried_out` refuses it what the operator alone decides:
+        the review stood between the call and the world, and a team's autonomy is not the operator's
+        word that it is wanted. Refused too once the override was given and the request is closed: a
+        second press of a card still on another screen, or a typed ``/allow`` of the old key, would
+        otherwise write a second grant and let the same blocked call run twice. The agent making the
+        call again is reviewed again, and a new block is a new card."""
+        refused = (state.metadata.get("policy_pending") or {}).get(key) or {}
+        if refused.get("blocked"):
+            if via == "orchestrator":
+                raise ValueError("only the operator lets a call the auto-review blocked through")
+            return True
+        if key in (state.metadata.get("review_overridden") or {}):
+            raise ValueError("this blocked call was already allowed once; if the agent makes it again, it is reviewed again")
+        return False
+
+    async def _log_override(self, state: SessionState, approved: Sequence[dict[str, Any]], what: str, via: str) -> None:
+        """The operator's override in the review log beside the block it lifted, for Settings → Rules."""
+        for item in approved:
+            blocked = item.get("blocked") if isinstance(item, dict) else None
+            if not isinstance(blocked, dict):
+                continue
+            verdict = action_rules.Verdict("override", f"the operator {what} (via {via}); the review had said: {blocked.get('reason') or ''}")
+            try:
+                await self.action_rules.log.record(
+                    session_id=state.session.id, run_id=str(state.run_id or ""), tool=str(item.get("tool") or ""), category=str(blocked.get("category") or ""),
+                    level=str(blocked.get("level") or ""), verdict=verdict, summary=str(item.get("text") or ""),
+                )
+            except Exception:  # noqa: BLE001 — the log is the operator's record, not a condition of the grant
+                logger.warning("could not record the override in session %s", state.session.id, exc_info=True)
 
     async def _resume_after_grant(self, session_id: str, approved: Sequence[dict[str, Any]]) -> None:
         """Tell the agent the calls it was refused may go through now, which starts its turn if it ended.
@@ -7955,6 +7994,7 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         key = self._approval_key(key)
+        self._overridable(state, key, via)
         family = self.similar_of(session_id, key)
         if family is None:
             raise ValueError("this request has no narrower family of calls to allow; allow it once instead")
@@ -7971,6 +8011,7 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         for k in resolved:
             await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via})
+        await self._log_override(state, [item for item in approves if item], f"allowed calls like it for this session ({family.get('label')})", via)
         if via != "orchestrator":
             await self._resume_after_grant(session_id, [item for item in approves if item])
         return {"key": key, "similar": family, "resolved": resolved, "approves": approves,

@@ -265,6 +265,9 @@ export type Approval = {
   /** The agent's ask to work in the operator's Chrome: the name of that Chrome and the agent's reason.
    *  The operator's yes switches the conversation, so the card says that rather than "allow once". */
   chrome?: { name: string; reason: string };
+  /** A call the auto-review blocked, held for the operator's "Allow anyway": the reviewer's reason.
+   *  Its Allow overrides a check rather than answering a question, so the card says so. */
+  blocked?: string;
 };
 
 /** The tool by which the agent asks for the operator's Chrome; its card is the switch, not a grant. */
@@ -272,6 +275,13 @@ export const CHROME_ASK_TOOL = "BrowserAskOperatorChrome";
 
 const APPROVAL_RE = /Approval key: ([0-9a-f]{12})/;
 const REASON_RE = /needs (?:the operator's )?approval: (.+?) \(rule /;
+const BLOCKED_RE = /Blocked by the auto-review: (.+?) \(rule review\.[a-z_]+\)/s;
+
+/** The reviewer's reason when a tool result is the auto-review's block (``block_text`` on the host), else null. */
+export function blockedReason(content: string): string | null {
+  const reason = BLOCKED_RE.exec(content)?.[1]?.trim();
+  return reason ? reason.slice(0, 300) : null;
+}
 
 type CallLike = { id: string; name: string; arguments: Record<string, unknown> };
 type MessageLike = { run_id?: string | null; tool_calls: CallLike[]; tool_results: { id: string; content: string; is_error: boolean }[] };
@@ -319,7 +329,8 @@ export function pendingApproval(messages: readonly MessageLike[], seen: Readonly
       // ("this would submit a form on …") is what says what Allow lets through.
       const said = typeof a.command === "string" ? a.command : typeof a.path === "string" ? a.path : typeof a.url === "string" ? a.url : "";
       const detail = said || (REASON_RE.exec(r.content)?.[1] ?? "");
-      return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160) };
+      const blocked = blockedReason(r.content);
+      return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160), ...(blocked ? { blocked } : {}) };
     }
   }
   return null;

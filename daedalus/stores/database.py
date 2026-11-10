@@ -3716,6 +3716,32 @@ CREATE INDEX IF NOT EXISTS agent_talk_messages_by_talk ON agent_talk_messages(ta
 # Canvases replace the Excalidraw diagrams, which this converts and drops (see canvas_schema).
 MIGRATIONS.append(DataMigration(CANVAS_SQL, convert_diagrams))
 
+# The operator's "Allow anyway" on a call the auto-review blocked goes into the review log beside the
+# block it lifted, as the verdict ``override``. SQLite cannot widen a CHECK in place, so the table is
+# rebuilt with its rows and ids.
+MIGRATIONS.append("""
+CREATE TABLE action_reviews_rebuilt (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    tool TEXT NOT NULL,
+    category TEXT NOT NULL,
+    level TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('allow', 'block', 'ask', 'override')),
+    reason TEXT NOT NULL DEFAULT '',
+    failed INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    elapsed_ms INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO action_reviews_rebuilt(id, at, session_id, run_id, tool, category, level, verdict, reason, failed, summary, model, elapsed_ms)
+SELECT id, at, session_id, run_id, tool, category, level, verdict, reason, failed, summary, model, elapsed_ms FROM action_reviews;
+DROP TABLE action_reviews;
+ALTER TABLE action_reviews_rebuilt RENAME TO action_reviews;
+CREATE INDEX action_reviews_at ON action_reviews(at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

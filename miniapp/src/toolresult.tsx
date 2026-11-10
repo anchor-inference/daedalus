@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "./api";
-import { CHROME_ASK_TOOL } from "./composer";
+import { CHROME_ASK_TOOL, blockedReason } from "./composer";
 import { Icon } from "./icons";
 import { fmtInt, useCopied } from "./ui/components";
 import { t } from "./i18n";
@@ -68,6 +68,9 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
     if (!(await copy(text))) toast(t("session.result.copy.failed"));
   }
   const approval = item.error ? /Approval key: ([0-9a-f]{12})/.exec(text) : null;
+  // The auto-review's block names the one override there is, so the row carries it: the reviewer's
+  // reason and "Allow anyway", where the operator reads the red error the agent was given.
+  const blocked = approval ? blockedReason(text) : null;
   const [granted, setGranted] = useState(false);
   // "Allow similar" in two presses: the first asks the host what the family is and puts it on the
   // button, the second grants it. A history of old refusals then costs no request until one is pressed.
@@ -94,8 +97,10 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
     try {
       await api.post(`/api/sessions/${sessionId}/policy/grant`, { key: approval[1] });
       setGranted(true);
-    } catch {
+    } catch (e) {
       setGranted(false);
+      // A block already allowed once, or closed with its run, says so rather than doing nothing.
+      if (blocked) toast(errorText(e));
     }
   }
   return (
@@ -111,7 +116,16 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
       )}
       {/* Focusable once whole, so a long result can be scrolled to its end from the keyboard too. */}
       <pre className={`result ${item.error ? "error" : ""} ${full !== null ? "full" : ""}`} tabIndex={full !== null ? 0 : undefined}>{text}</pre>
-      {approval && (
+      {approval && blocked && (
+        <div className="result-blocked" data-blocked>
+          <div className="result-blocked-head"><Icon name="shield" size={13} />{t("session.blocked.title")}</div>
+          <div className="result-blocked-reason">{t("composer.blocked.reason", { reason: blocked })}</div>
+          <button type="button" className="btn small primary" data-action="allow-anyway" onClick={allowOnce} disabled={granted} title={t("session.blocked.allow.title")}>
+            {granted ? <><Icon name="check" size={13} />{t("session.blocked.allowed")}</> : t("composer.allowAnyway")}
+          </button>
+        </div>
+      )}
+      {approval && !blocked && (
         <button type="button" className="btn small" onClick={allowOnce} disabled={granted} title={t("session.allow.title")}>
           {t(granted ? "session.allowed.once" : "session.allow.once", { key: approval[1] })}
         </button>
