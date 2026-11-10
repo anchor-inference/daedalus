@@ -127,7 +127,7 @@ class Door:
                     nonce = secrets.token_urlsafe(12) if self.headers.get("Sec-Fetch-Dest") in (None, "iframe") else ""
                     if nonce:
                         door.stub.nonces.add((data["canvas"], data["node"], nonce))
-                    return self.reply(200, "text/html; charset=utf-8", inject(PAGE.encode(), token, door.app_origin, nonce), headers)
+                    return self.reply(200, "text/html; charset=utf-8", inject(door.stub.page.encode(), token, door.app_origin, nonce), headers)
                 return self.reply(404, "text/plain", b"not found", headers)
 
             def reply(self, status: int, mime: str, body: bytes, headers: dict[str, str]) -> None:
@@ -171,6 +171,8 @@ class CanvasStub:
         self.nonces: set[tuple[str, str, str]] = set()
         self.nonce_checks: list[tuple[str, bool]] = []
         self.heartbeats = 0
+        self.page = PAGE
+        """What a frame's address serves: the checks' shop page, or the screenshots' own."""
 
     def add(self, title: str, doc: dict[str, Any], *, scope: str = "chat", source: str = "operator", minutes_ago: float = 5, shared: bool = False, history: list[tuple[dict[str, Any], str, float]] | None = None) -> str:
         self.counter += 1

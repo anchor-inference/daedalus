@@ -180,6 +180,9 @@ code {
 .seg button[aria-pressed="true"] { background: var(--s3); color: var(--text); }
 
 label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+/* A checkbox reads with its words on one line; the column above is for a field under its name, and
+   it stood the autostart box alone over its sentence on the status page. */
+.note label { flex-direction: row; align-items: center; gap: 8px; }
 input[type="text"], input[type="password"] {
   background: var(--s2);
   border: 1px solid var(--line);

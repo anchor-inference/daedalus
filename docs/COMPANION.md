@@ -8,21 +8,24 @@ to a real agent session with `Delegate` and says so at once, so the conversation
 four-minute tool call. Several things asked at once become several agents, running in parallel. When
 an agent finishes, the report arrives in the conversation and the companion summarises it.
 
-The page has a header — the companion's face, its name, what it is doing, **Pause** and **Call** — and
-seven tabs:
+The page has a header — the companion's face, its name, what it is doing and how many agents it has
+running — and four tabs:
 
-- **Conversation** — the transcript, a field to type in, and the agents it started beside it. Typed
-  messages and spoken turns are one history. **Call** puts the orb in the middle and opens the
-  microphone; answers are read aloud only on a call.
-- **Goals** — what it owns over time (below). Add, pause, finish or delete one from here too.
-- **Schedule** — its own schedules, the ones waiting for your approval, and its goals' cadences.
+- **Chat** — the transcript, a field to type in, and the agents it started beside it. Typed
+  messages and spoken turns are one history. The microphone button beside the field starts a call, which is how
+  voice mode works: the orb moves to the middle and answers are read aloud, only on a call.
+- **Goals** — what it owns over time (below), with its own schedules, the ones waiting for your
+  approval and its goals' cadences. Add, pause, finish or delete a goal from here too.
 - **Activity** — what it did, in order: delegations, agents' results and questions, goal checks and reports.
 - **Computer** — its agents' browsers, live, with **Take control** and **Give back**. The companion
   has no browser of its own.
-- **Tools** — what it may call itself, and what its agents may use.
-- **Memory** — what it remembers across conversations (`Remember`): the global memory every chat outside a project shares; forget a note from here.
 
-The face and the name are yours to choose (the cog in the header): a shape, a colour, eyes and an
+The header's menu holds the rest: **Pause**, a new conversation, how much of the mascot to show,
+**Tools** (what it may call itself, and what its agents may use), **Memory** (what it remembers across
+conversations with `Remember`: the global memory every chat outside a project shares; forget a note
+from there) and its settings.
+
+The face and the name are yours to choose (the menu's edit item): a shape, a colour, eyes and an
 accessory, drawn from four parameters wherever the companion is shown — the header, the Agents list,
 and `GET /api/companion` for any other client.
 

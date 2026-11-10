@@ -21,6 +21,21 @@ than something in a container:
 - **a path in your home folder, outside every project and outside the installation, asks.** Inside a
   project, a workspace or the checkouts it does not — that is where the work is.
 
+The first of those reads words, so a command that builds the path in pieces gets past it. What really
+hides the keys is the sandbox: on Linux with `tools.exec.sandbox = workspace`, the provider keys' folder,
+the launcher's files, the state folder and the backups that copy them are covered with empty ones in a
+command's filesystem, so a command sees nothing there. On a Mac, on Windows or with the sandbox off no such
+cover exists, and the key proxy's card and the public address's form say so where the keys are typed
+(`keys_hidden` in `GET /api/keyproxy`).
+
+**The installation's own containers are not the agent's to enter.** A command run on the host that
+goes into one of this stack's containers — `docker exec`, `docker cp`, `attach`, `stop` or `rm` on a
+container named after the compose project, `nsenter` into another process, or a new container joined
+to one of ours with `--pid`, `--network` or `--volumes-from` — is refused (`host.own_containers`): those
+containers hold the state, the keys and the database. Like the tunnel rule below it reads command
+lines, so a script or a renamed binary is beyond it; it is a guard against the agent's own reach, not a
+wall.
+
 **A public tunnel is yours to open, not the agent's.** `ngrok`, a Cloudflare tunnel, `tailscale
 funnel`, `frpc`, `zrok`, `ssh -R` and the SSH services that hand out an address (localhost.run, Pinggy
 and the like) are refused to the agent whatever starts them — `Exec`, `Verify`, `ServiceStart`, or a
@@ -35,8 +50,11 @@ when one first appears. It tells and does not stop it: the process may be one yo
 
 Beside the policy: a **project** contains every path a session *resolves* (`..`, an absolute path
 elsewhere and a symlink out of the tree are one refusal, checked on the real path). That is the file
-tools, the file browser, the preview, the download and `SendFile` — the one point a path becomes a
-place. It is not the body of a shell command: `Exec` runs in the project folder and what it reaches
+tools, the file browser, the preview, the download, `SendFile` (and the `.zip` it writes beside a
+folder sent whole: at most 100 MB and 5,000 files, without credentials, repository metadata, rebuilt
+folders such as `node_modules` and links out of the tree) and
+the file `WebFetch(save_to=…)` writes — the one point a path becomes a place. A download is fetched
+from public addresses only, and every redirect is judged again as the first address was. It is not the body of a shell command: `Exec` runs in the project folder and what it reaches
 from there is what the sandbox allows, and where no sandbox is on, what the policy rules allow. On a
 native install those rules refuse the installation's own files outright and ask before a path in your
 home folder outside every project is touched; in a container they do not fire at all, and the
@@ -52,7 +70,7 @@ line, and the desktop launcher's status page prints the same one.
 
 ## Action rules
 
-The policy decides what a call may *touch*. Settings → Rules decides how much of what the agent *does
+The policy decides what a call may *touch*. Settings → Working rules decides how much of what the agent *does
 in the world* it decides on its own. Every tool call is sorted into the categories it acts in
 (`daedalus/host/action_rules.py` holds the table, and a new tool that acts on the world gets a line
 there):
@@ -87,7 +105,7 @@ to the agent as a tool error with the reason and puts a notice in the Inbox; an 
 approval request. The review **fails closed**: a timeout (`review_timeout_seconds`), an error or an
 answer that is neither word asks you. It never sees a secret: everything it reads goes through the
 redactor first, so it reads `«secret:…»` placeholders, not values. Every decision is logged and shown
-under Settings → Rules for ninety days. It is on by default for `message`, `publish` and `payment`.
+under Settings → Working rules for ninety days. It is on by default for `message`, `publish` and `payment`.
 
 **Pages that talk to the agent.** Every fetched page, browser read, search result and MCP reply is
 already fenced as data. Its text is also scanned for what reads like instructions to an AI agent —

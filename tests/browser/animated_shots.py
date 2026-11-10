@@ -16,9 +16,9 @@ SHOTS = Path(os.environ.get("SHOTS", ROOT / "docs" / "screenshots"))
 SIZE = (1200, 675)
 TOURS = {
     "browser": ["session-browser", "session-browser-takeover", "session-browser-giveback", "session-browser-replay"],
-    "session": ["session", "session-panel-files", "session-panel-preview", "session-browser"],
+    "session": ["session", "session-panel-files", "session-panel-preview", "session-mcp", "session-browser"],
     "orchestration": ["main", "project-focus", "project-questions", "board"],
-    "phone": ["phone-bots", "phone-session", "phone-browser", "phone-project", "phone-more"],
+    "phone": ["phone-bots", "phone-session", "phone-session-panel", "phone-browser", "phone-project", "phone-more"],
     "selfdev": ["changes", "changes-summary", "changes-diff"],
 }
 

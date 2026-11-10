@@ -996,7 +996,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if tail == "subagents":
             return respond(route, {"subagents": subagents_of(sid)})
         if tail == "mcp":
-            return respond(route, {"enabled": [], "servers": []})
+            # The bakery's chat has a server it uses and one it left off: the MCP page then shows a
+            # server's own "allow all for a while" beside the one-step add under them.
+            return respond(route, SESSION_MCP if sid == S1 and route.request.method == "GET" else {"enabled": [], "servers": []})
         if tail == "tools":
             return respond(route, [])
         if tail.startswith("tool-groups"):
@@ -1183,12 +1185,22 @@ WORDS = {
     "en": {"steps": "8 steps", "panel": "Panel", "access": "Access", "actions": "Session actions", "details": "Details", "role": "Writes the delivery page",
            "permission": "waiting for permission · 1 min", "answer": "Answer", "checkout": "Checkout page", "q.note": "like last spring",
            "queued": "Then put the opening hours from the shop calendar in the footer.", "steered": "Keep the old prices on the archive page.",
-           "project.name": "ESP32 firmware"},
+           "project.name": "ESP32 firmware", "agent.link": "Agent link…",
+           "agent.name": "Night watch", "agent.task": "Every morning, read the night's log of the shop and tell me about new errors. Count them like this:",
+           "settings.find": "subagent", "markup.note": "bigger"},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
            "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
            "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены.",
-           "project.name": "Прошивка ESP32"},
+           "project.name": "Прошивка ESP32", "agent.link": "Ссылка для агента…",
+           "agent.name": "Ночной дозор", "agent.task": "Каждое утро читай ночной лог магазина и сообщай о новых ошибках. Считай их так:",
+           "settings.find": "субагент", "markup.note": "крупнее"},
 }
+
+
+SESSION_MCP = {"enabled": ["github"], "servers": [
+    {"name": "github", "description": "Issues and pull requests", "connected": True, "error": None, "tools": ["list_issues", "get_issue", "create_pull_request", "add_comment"], "state": "ready", "catalog_revision": 1, "last_error_code": None, "in_flight": 0},
+    {"name": "sentry", "description": "Errors from the shop's checkout", "connected": False, "error": None, "tools": [], "state": "disabled", "catalog_revision": 0, "last_error_code": None, "in_flight": 0},
+]}
 
 
 def word(key: str) -> str:
@@ -1303,9 +1315,15 @@ def open_phone_panel(page: Page) -> None:
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
 
 
+def open_inspector(page: Page, section: str, scope: str = ".panel") -> None:
+    """Details is an inspector now: one line a section, and a press opens that section in place."""
+    page.locator(f"{scope} .panel-tab[data-tab='details']").first.click()
+    page.locator(f"{scope} [data-prop='{section}']").click()
+
+
 def open_tool_groups(page: Page) -> None:
     """The session's Details on its tool groups: which the agent has loaded, which wait on demand."""
-    page.locator(".panel-tab[data-tab='details']").first.click()
+    open_inspector(page, "toolgroups")
     page.wait_for_selector(".stgroups .stgroup", timeout=5000)
     page.locator(".stgroups").first.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
@@ -1313,12 +1331,14 @@ def open_tool_groups(page: Page) -> None:
 
 def open_phone_tool_groups(page: Page) -> None:
     phone_tool(page, "details")
+    page.locator(".panel-sheet [data-prop='toolgroups']").click()
     page.wait_for_selector(".panel-sheet .stgroups .stgroup", timeout=5000)
     page.locator(".panel-sheet .stgroups").first.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
 
 
 def open_share(page: Page) -> None:
+    open_inspector(page, "services")
     page.locator(".service-row").first.locator("button[aria-haspopup='menu']").click()
     page.wait_for_selector(".menu[role='menu']", timeout=5000)
     page.locator(".menu[role='menu'] button", has_text=word("access")).first.click()
@@ -2052,8 +2072,8 @@ def run_main() -> int:
 
 def run_details() -> int:
     """The Details of a project's orchestrator and of a command-line member, on a desktop and on a
-    phone (``ONLY=details``): the spend in total and today, the context with its last compaction, and
-    the member's launch, state and what its CLI did and did not report."""
+    phone (``ONLY=details``): the orchestrator's inspector with the context and the spend in the strip
+    over it, and the member's launch, state and what its CLI did and did not report."""
     OUT.mkdir(parents=True, exist_ok=True)
 
     def member_details(scope: str):  # type: ignore[no-untyped-def]
@@ -2071,7 +2091,7 @@ def run_details() -> int:
         page = desk.new_page()
         page.route("**/api/**", focus_stub(focus))
         pid = focus.projects[0]["id"]
-        shot(page, "orchestrator-details", f"project/{pid}?panel=details", wait=".panel .details [data-usage-today]", settle=700)
+        shot(page, "orchestrator-details", f"project/{pid}?panel=details", wait=".panel .details [data-prop='usage']", settle=700)
         page, pid = staff_stand(desk)
         shot(page, "staff-details", f"project/{pid}/staff/st-ira", wait=".staff-aside .panel-tab[data-tab='details']", before=member_details(".staff-aside"), settle=900)
         desk.close()
@@ -2079,7 +2099,7 @@ def run_details() -> int:
         focus = FocusStub.bakery(LANG)
         page = phone.new_page()
         page.route("**/api/**", focus_stub(focus))
-        shot(page, "phone-orchestrator-details", f"project/{pid}?panel=details", wait=".panel-sheet .details [data-usage-today]", settle=900)
+        shot(page, "phone-orchestrator-details", f"project/{pid}?panel=details", wait=".panel-sheet .details [data-prop='usage']", settle=900)
         page, pid = staff_stand(phone)
         shot(page, "phone-staff-details", f"project/{pid}/staff/st-ira", wait=".staff-cli .ph-top", before=member_details(".sheet"), settle=900)
         phone.close()
@@ -2335,8 +2355,8 @@ def run() -> int:
         shot(page, "usage", "usage", settle=1500)
         shot(page, "health", "health", settle=900)
         shot(page, "memory", "memory")
-        # The settings index, because the language switch is its first row.
-        # Settings is a centred stage of its own now, with no `.screen` to wait for.
+        # Settings is a popup over the screen it was opened from, on its first section; it has no
+        # `.screen` of its own to wait for.
         shot(page, "settings", "settings", wait=".settings-stage")
         shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
@@ -2404,7 +2424,9 @@ def run() -> int:
     modes = run_modes()
     voice = run_voice()
     notes = run_notes()
-    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports or selfdev or details or modes or voice or notes
+    canvas = run_canvas()
+    features = run_features()
+    return run_focus() or canvas or features or notifications or phone or staff or harnesses or main or browser or imports or selfdev or details or modes or voice or notes
 
 
 def run_notes() -> int:
@@ -2477,6 +2499,173 @@ def run_notes() -> int:
             phone.close()
         browser.close()
     NOTES.reset()
+    return UNHANDLED.report()
+
+MENU_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Menu</title>
+<style>body{margin:0;font:17px Georgia,serif;background:#fbf6ee;color:#3a2a1c}header{padding:40px 48px;background:#6b3f1f;color:#fbf6ee}
+h1{margin:0;font-size:40px}header p{margin:8px 0 0;opacity:.85}main{padding:28px 48px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.item{background:#fff;border:1px solid #ead9c2;border-radius:12px;padding:16px 18px}.item b{display:block;font-size:19px}.price{float:right;color:#8a5a2b}</style></head>
+<body><header><h1 id="hero">%(title)s</h1><p>%(lead)s</p></header><main>%(items)s</main></body></html>"""
+"""The bakery's menu page as the agent wrote it, served into the canvas's live frame."""
+
+
+def menu_page() -> str:
+    ru = LANG == "ru"
+    items = [("Тыквенный пирог", "Корица, мускат, песочное тесто", "€4.20"), ("Яблочный штрудель", "Тонкое тесто, изюм, ваниль", "€3.80"), ("Ржаной хлеб", "Закваска, тмин, 800 г", "€3.10"), ("Круассан", "Масло 82 %, утренняя выпечка", "€2.40"), ("Синнабон", "Тростниковый сахар, сливочный сыр", "€2.90"), ("Хлеб с семенами", "Подсолнух, лён, тыквенные семечки", "€3.40")] if ru else [
+        ("Pumpkin pie", "Cinnamon, nutmeg, shortcrust", "€4.20"), ("Apple strudel", "Thin pastry, raisins, vanilla", "€3.80"), ("Rye loaf", "Sourdough, caraway, 800 g", "€3.10"), ("Croissant", "82 % butter, baked at dawn", "€2.40"), ("Cinnamon roll", "Brown sugar, cream cheese", "€2.90"), ("Seeded bread", "Sunflower, flax, pumpkin seeds", "€3.40")]
+    cards = "".join(f'<div class="item"><span class="price">{price}</span><b>{name}</b>{note}</div>' for name, note, price in items)
+    return MENU_PAGE % {"title": "Осеннее меню" if ru else "Autumn menu", "lead": "Сезонное — сверху, цены из таблицы владельца" if ru else "Seasonal first, prices from the owner's sheet", "items": cards}
+
+
+def run_canvas() -> int:
+    """A canvas (``ONLY=canvas``): the agent's menu page live in a frame beside the cards that plan it,
+    with the operator pointing at its heading. Only the desktop: a phone opens a board this wide at a
+    size its words can be read, which leaves the page itself off the screen."""
+    from canvas_stub import CanvasStub, Door, card, edge, frame_node
+
+    ru = LANG == "ru"
+    board = CanvasStub(S1, P1, "Bakery site")
+    board.scopes["chat"]["name"] = "Bakery site"
+    board.page = menu_page()
+    door = Door(board, "/".join(BASE.split("/")[:3]))
+    board.door_port = door.port
+    nodes = [
+        frame_node("menu", 0, 0, path="site/menu.html"),
+        card("sheet", -520, 40, "## Таблица владельца\n27 позиций, цены в евро" if ru else "## Owner's sheet\n27 items, prices in euro", "6", width=360, height=120),
+        card("season", -520, 260, "## Сезонное сверху\nтыква, яблоко, корица" if ru else "## Seasonal on top\npumpkin, apple, cinnamon", "4", width=360, height=120),
+        card("hero", -520, 480, "## Герой меньше\n46 КБ вместо 1,9 МБ" if ru else "## Smaller hero\n46 KB instead of 1.9 MB", "3", width=360, height=120),
+        card("phone", 0, 880, "Проверить на телефоне: 98 / 100 / 100 / 100" if ru else "Checked on a phone: 98 / 100 / 100 / 100", "4", width=520, height=80),
+    ]
+    edges = [edge("e1", "sheet", "right", "menu", "left"), edge("e2", "season", "right", "menu", "left", "сверху" if ru else "on top"), edge("e3", "hero", "right", "menu", "left")]
+    site = board.add("Страница меню" if ru else "Menu page", {"nodes": nodes, "edges": edges}, scope="project", source="agent", minutes_ago=12)
+
+    def answer(route) -> None:  # type: ignore[no-untyped-def]
+        if not board.handle(route):
+            stub(route)
+
+    def open_board(page: Page) -> None:
+        page.goto(f"{BASE}/canvas/{site}?session={S1}&token=t&scheme=dark&lang={LANG}")
+        page.locator(".cv-node[data-node='menu'] iframe.cv-frame-page").wait_for(timeout=15000)
+        page.frame_locator(".cv-node[data-node='menu'] iframe.cv-frame-page").locator("#hero").wait_for(timeout=15000)
+        page.wait_for_timeout(600)
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM)
+            desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+            page = desk.new_page()
+            page.route("**/api/**", answer)
+            open_board(page)
+            page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+            frame = page.locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
+            inner = page.frame_locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
+            hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
+            box = frame.bounding_box()
+            assert box is not None
+            scale = box["width"] / frame.evaluate("(node) => node.offsetWidth")
+            page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
+            note = page.locator(".cv-pick-note")
+            note.wait_for(timeout=5000)
+            note.locator("textarea").fill("Крупнее и теплее" if ru else "Larger, and a warmer brown")
+            note.get_by_role("button", name="Добавить" if ru else "Add").click()
+            toggle = page.locator(".cv-preview-toggle[aria-expanded='true']")
+            if toggle.count():
+                toggle.click()
+            page.locator(".cv-comment textarea").fill("Сделай заголовок как на вывеске" if ru else "Make the heading look like the shop sign")
+            # Off the rail, whose tooltips would otherwise sit in the picture.
+            page.mouse.move(1300, 840)
+            page.wait_for_timeout(700)
+            page.screenshot(path=str(OUT / "canvas.png"))
+            print("wrote canvas")
+            desk.close()
+            browser.close()
+    finally:
+        door.close()
+    return UNHANDLED.report()
+
+
+MARKUP_PASTE = """async ([data, name]) => {
+  const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], name, { type: 'image/png' }));
+  const field = document.querySelector('.composer-box .composer-field');
+  field.focus();
+  field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+}"""
+"""A picture pasted the way a real paste arrives: a clipboard event carrying the file."""
+
+
+def drag_on(page: Page, box: dict, start: tuple[float, float], end: tuple[float, float]) -> None:
+    page.mouse.move(box["x"] + box["width"] * start[0], box["y"] + box["height"] * start[1])
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * end[0], box["y"] + box["height"] * end[1], steps=8)
+    page.mouse.up()
+
+
+def run_features() -> int:
+    """What this release added, one picture each (``ONLY=features``): an agent link handed out from a
+    chat, the settings search with live controls, a new agent started from the composer with a code
+    card in its task, a picture marked up before it is sent, and the MCP page of a chat's inspector."""
+    import base64
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); localStorage.setItem('agents.groupBy', 'workspace'); } catch (e) {}")
+        page = desk.new_page()
+        page.route("**/api/**", stub)
+
+        def agent_link(pg: Page) -> None:
+            pg.get_by_role("button", name=word("actions"), exact=True).first.click()
+            pg.get_by_role("menuitem", name=word("agent.link"), exact=True).click()
+            pg.wait_for_selector("[data-guest-sheet] [data-guest-link]", timeout=5000)
+
+        shot(page, "agent-link", f"agents/{S1}", wait=".chat-scroll .timeline", before=agent_link, settle=700)
+
+        def find_setting(pg: Page) -> None:
+            pg.locator(".settings-dialog input[type='search'], .settings-dialog input").first.fill(word("settings.find"))
+
+        shot(page, "settings-search", "settings", wait=".settings-stage", before=find_setting, settle=900)
+
+        def new_agent(pg: Page) -> None:
+            pg.locator(".start-agent-name").fill(word("agent.name"))
+            pg.keyboard.press("Enter")
+            pg.keyboard.type(word("agent.task"))
+            pg.keyboard.press("Shift+Enter")
+            pg.keyboard.type("```bash")
+            pg.keyboard.press("Enter")
+            pg.keyboard.type("grep -c ' ERROR ' logs/shop-$(date -d yesterday +%F).log")
+
+        shot(page, "new-agent", f"agents?agent=1&in={P1}", wait=".start-agent-name", before=new_agent, settle=700)
+
+        def markup(pg: Page) -> None:
+            painter = desk.new_page()
+            painter.set_viewport_size({"width": 960, "height": 600})
+            painter.set_content(menu_page())
+            picture = base64.b64encode(painter.screenshot()).decode()
+            painter.close()
+            pg.wait_for_selector(".composer-box .composer-field", timeout=20000)
+            pg.evaluate(MARKUP_PASTE, [picture, "menu.png"])
+            pg.wait_for_selector(".composer-box .attachments .attachment .attachment-markup", timeout=5000)
+            pg.locator(".composer-box .attachments .attachment .attachment-markup").first.click()
+            pg.wait_for_selector(".annotate .annotate-canvas", timeout=5000)
+            sheet = pg.locator(".annotate-sheet").bounding_box()
+            assert sheet is not None
+            pg.keyboard.press("o")
+            drag_on(pg, sheet, (0.03, 0.07), (0.42, 0.22))
+            pg.keyboard.press("a")
+            drag_on(pg, sheet, (0.62, 0.30), (0.44, 0.17))
+            pg.keyboard.press("t")
+            pg.mouse.click(sheet["x"] + sheet["width"] * 0.63, sheet["y"] + sheet["height"] * 0.33)
+            pg.keyboard.type(word("markup.note"))
+            pg.keyboard.press("Enter")
+
+        shot(page, "session-mcp", f"agents/{S1}", wait=".chat-scroll .timeline", before=lambda pg: (open_inspector(pg, "mcp"), pg.wait_for_selector("[data-mcp-server]", timeout=5000)), settle=600)
+        # Last: the pasted picture stays in the chat's saved draft, and would sit in every later composer.
+        shot(page, "composer-markup", f"agents/{S1}", wait=".chat-scroll .timeline", before=markup, settle=700)
+        desk.close()
+        browser.close()
     return UNHANDLED.report()
 
 
@@ -2766,4 +2955,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run_notes() if only == "notes" else run())
+    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run_notes() if only == "notes" else run_canvas() if only == "canvas" else run_features() if only == "features" else run())

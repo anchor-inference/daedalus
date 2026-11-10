@@ -11,7 +11,7 @@ Every session has its own workspace and speaks in the chat under its own name �
 <td width="33%" valign="top">
 
 **🖥️ A real web app**<br/>
-Every screen is an address under `/app`: agents, live transcripts, the files an agent sends you attached under its answer, a file browser with previews (images, Markdown, CSV, PDF, Word, Excel), the files and receipts an answer cites as chips that open the file at the lines it named, two sessions side by side, drag-and-drop and clipboard attachments, a microphone. Four tabs on a phone, a rail and a ⌘K palette on a desk. Installable as a PWA.
+Every screen is an address under `/app`: agents, live transcripts, the files an agent sends you attached under its answer, a file browser with previews (images, Markdown, CSV, PDF, Word, Excel), the files and receipts an answer cites as chips that open the file at the lines it named, two sessions side by side, drag-and-drop and clipboard attachments, a microphone. Beside a chat, a side panel keeps its model, context and spend in a strip over every tab, and Files shows the folder's real path. A rail, a More launcher and a ⌘K palette on a desk, a drawer on a phone; Settings opens as a popup over wherever you were, and its search shows the rows themselves. Installable as a PWA.
 
 </td>
 <td width="33%" valign="top">
@@ -101,6 +101,26 @@ A conversation is an ordinary chat, a computer chat or a browser chat. Tabs over
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+**🗺️ Canvas**<br/>
+A board of cards, arrows and groups in the JSON Canvas format, owned by a chat or by a project, that you and the agent edit together: each edit is saved item by item, so two hands on different cards never clash. The agent can put a page from its workspace on the board as a live frame, served from an origin of its own in a sandbox, and a site the page loads from is asked about first. Point at an element in the page or at a card, add a note, and the agent gets the selector, the markup and your words.
+
+</td>
+<td valign="top">
+
+**🔗 Agent links**<br/>
+A chat can hand out a link for somebody else's agent. A **stand-in** answers it from a briefing you read and approve, with no tools; **direct** lets the chat's own agent take each message as a turn, with none, read-only or all tools in a sandbox of its own. You admit a first contact, read along, cap the day's spend and revoke the link. The other way, `AgentTalk` lets your agent talk to theirs through the link they gave you, with every reply kept as data and a message out held for you as you choose. On a desktop, a public address of your own makes links reachable from outside.
+
+</td>
+<td valign="top">
+
+**✍️ A composer that does more**<br/>
+Three backticks open a code card as an answer draws one, coloured and copyable. A picture can be marked up with the pencil before it goes: arrows, shapes, text, blur, crop. **Agent** mode in the same composer starts a named agent, with a task or idle, a loop or its own folder; there is no separate dialog. A message written during a run waits for the end of the turn or steers it now, and each finished turn shows its speed.
+
+</td>
+</tr>
 </table>
 
 ## More pictures
@@ -137,6 +157,14 @@ A conversation is an ordinary chat, a computer chat or a browser chat. Tabs over
 <tr>
 <td align="center"><sub>Notes — Markdown with pictures and files pasted in, drawn as the answers are; the agent can read and add to them</sub></td>
 <td align="center"><sub>The Notes tab — a chat's notes and its project's, searchable, pinned, saved as you type</sub></td>
+</tr>
+<tr>
+<td><img src="screenshots/new-agent.png" alt="The new-chat composer in Agent mode: the agent's name over its task, with a code card for the command it should run, and the project picked under it" /></td>
+<td><img src="screenshots/composer-markup.png" alt="A picture marked up before it is sent: the heading circled, an arrow and a word in red, with the editor's tools along the bottom" /></td>
+</tr>
+<tr>
+<td align="center"><sub>A new agent — the composer in Agent mode, with a code card in its task</sub></td>
+<td align="center"><sub>The pencil — mark up a picture before the agent sees it</sub></td>
 </tr>
 </table>
 
