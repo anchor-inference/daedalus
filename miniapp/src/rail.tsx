@@ -65,7 +65,7 @@ function Tip({ text, keys }: { text: string; keys?: string }) {
   );
 }
 
-/** Moves one rail destination into the More menu or out of sight, through the same settings write as
+/** Moves one rail destination into the More launcher or out of sight, through the same settings write as
  *  Settings → Navigation, and shows the answer on the rail at once. */
 async function placeRailItem(nav: ResolvedNav, id: string, to: "more" | "hidden"): Promise<void> {
   const placement: Record<string, "rail" | "more" | "hidden"> = {};

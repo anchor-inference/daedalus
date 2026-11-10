@@ -9,7 +9,7 @@
     {
       "id": "navigation", "group": "you", "icon": "sliders",
       "title": { "en": "Navigation", "ru": "Навигация" },
-      "about": { "en": "The rail, the More menu and the phone drawer: which screens they list and in what order.", "ru": "Боковая панель, меню «Ещё» и меню телефона: какие экраны в них и в каком порядке." },
+      "about": { "en": "The rail, the More launcher and the phone drawer: which screens they list and in what order.", "ru": "Боковая панель, «Ещё» и меню телефона: какие экраны в них и в каком порядке." },
       "synonyms": ["rail", "sidebar", "menu", "drawer", "боковая панель", "меню", "панель навигации"]
     },
     {
@@ -251,8 +251,8 @@
     {
       "section": "navigation", "anchor": "navigation.rail", "config": "navigation.rail",
       "title": { "en": "Desktop navigation", "ru": "Навигация на компьютере" },
-      "about": { "en": "Which screens sit on the rail, which in the More menu and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны на боковой панели, какие в меню «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
-      "synonyms": ["rail", "sidebar", "side panel", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
+      "about": { "en": "Which screens sit on the rail, which in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны на боковой панели, какие в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
+      "synonyms": ["rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
     },
     {
       "section": "navigation", "anchor": "navigation.drawer", "config": "navigation.drawer",
@@ -263,7 +263,7 @@
     {
       "section": "navigation", "anchor": "navigation.reset", "config": null,
       "title": { "en": "Reset to default", "ru": "Сбросить по умолчанию" },
-      "about": { "en": "Put the rail, the More menu and the phone drawer back the way they came.", "ru": "Вернуть боковую панель, меню «Ещё» и меню телефона к исходному виду." },
+      "about": { "en": "Put the rail, the More launcher and the phone drawer back the way they came.", "ru": "Вернуть боковую панель, «Ещё» и меню телефона к исходному виду." },
       "synonyms": ["reset navigation", "default menu", "restore menu", "сбросить навигацию", "вернуть меню", "по умолчанию"]
     },
     {

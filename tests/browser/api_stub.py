@@ -627,7 +627,7 @@ GATES: dict[str, object] = {
     "/api/keyproxy": KEYPROXY_VIEW,
     # The key proxy card lists the imitated CLIs' versions; check_keyproxy_clients.py updates one.
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
-    # Where the rail, its More menu and the phone drawer put each destination: nothing configured, the
+    # Where the rail, its More launcher and the phone drawer put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
     "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # The pages the agent published: one, so the menus show where a page goes until it is placed.
@@ -2078,7 +2078,7 @@ class TeamStub:
             "id": id_, "project_id": "", "name": name, "color": "blue", "role": "", "harness": harness, "agent": "", "model": "", "effort": "",
             "permission_mode": "", "env": "", "default_folder_id": None, "isolation": "worktree", "instructions": "", "notes": "", "one_off": False,
             "created_by": "operator", "created_at": "2026-09-24T09:00:00Z", "archived_at": None, "sessions": sessions, "status": status,
-            "live": None if status == "off" else {"id": f"ss-{id_}", "status": status, "waiting_for": "", "task_id": None, "started_at": "2026-09-24T09:00:00Z", "ended_at": None, "branch": None, "worktree_path": None},
+            "live": None if status == "off" else {"id": f"ss-{id_}", "status": status, "waiting_for": "", "task_id": None, "started_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(), "ended_at": None, "branch": None, "worktree_path": None},
         }
         row.update(fields)
         return row
@@ -3724,8 +3724,12 @@ class FocusStub:
         garden_project = {"id": garden, "name": "Garden", "folders": [folder("/home/operator/work/garden")], "created_at": "2026-09-22T00:00:00Z", "settings": {"snapshots": True, "system": "", "ephemeral": False}, "system": "", "sessions": []}
         projects = [bakery, garden_project, *(others or [])]
 
+        # Started an hour ago, before the first turn of the transcript: a fixed date read against the live
+        # clock put "Running 46d 23h" in the staff details of every picture.
+        started = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+
         def live(sid: str, status: str, task: str | None, session_id: str | None = None, **extra: object) -> dict:
-            return {"id": sid, "session_id": session_id, "terminal_id": None, "status": status, "waiting_for": "", "task_id": task, "started_at": "2026-09-24T09:00:00Z", "ended_at": None, "branch": None, "worktree_path": None, "pause_requested": False, **extra}
+            return {"id": sid, "session_id": session_id, "terminal_id": None, "status": status, "waiting_for": "", "task_id": task, "started_at": started, "ended_at": None, "branch": None, "worktree_path": None, "pause_requested": False, **extra}
 
         machine = [{"staff_id": "st-olga", "task_id": "t-hours", "priority": 2, "position": 1, "reason": "machine", "detail": "20 of the machine's 20 terminal sessions are running", "since": 1_727_164_800, "by": "orchestrator"}]
         staff = [

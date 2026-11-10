@@ -104,7 +104,7 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
   // Schedule was a tab of its own and is now the second half of Goals; Tools and Memory are sheets
   // over the conversation. Their old addresses still land somewhere sensible.
   const sheet = tab === "tools" || tab === "memory" ? tab : null;
-  const current: CompanionTabId = tab === "schedule" ? "goals" : (TABS as readonly string[]).includes(tab ?? "") ? (tab as CompanionTabId) : "conversation";
+  const current: CompanionTabId = tab === "schedule" ? "goals" : (TABS as readonly string[]).includes(tab ?? "") ? (tab as CompanionTabId) : "chat";
   const name = profile?.name || "";
   const avatar = avatarOf(profile?.avatar);
   const stateId = profile?.paused ? "paused" : ui.micOn && profile?.state === "idle" ? "listening" : profile?.state ?? "idle";
@@ -131,10 +131,10 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
     }
   }
   function showAgents() {
-    if (current !== "conversation") navigate(pathFor("companion"));
+    if (current !== "chat") navigate(pathFor("companion"));
     setPanel(true);
   }
-  const pick = (id: CompanionTabId) => navigate(id === "conversation" ? pathFor("companion") : pathFor("companion", id));
+  const pick = (id: CompanionTabId) => navigate(id === "chat" ? pathFor("companion") : pathFor("companion", id));
   const agents = ui.agents.length;
   const menu: MenuItem[] = [
     { label: t("companion.edit"), icon: "pen", onSelect: () => setEditing(true) },
@@ -189,10 +189,10 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
       {/* Kept mounted under the other tabs, so a call goes on while Goals is open. `contents` rather than
           a box: the conversation's grid sizes itself against the page, and a wrapper box in between
           let the transcript grow the page instead of scrolling inside it. */}
-      <div className="companion-conversation" style={{ display: current === "conversation" ? "contents" : "none" }}>
+      <div className="companion-conversation" style={{ display: current === "chat" ? "contents" : "none" }}>
         <CompanionConversation onOpen={onOpen} toast={toast} name={name} panel={panel} setPanel={setPanel} voiceMascot={voiceMascot} />
       </div>
-      {current !== "conversation" && <CompanionTab tab={current} toast={toast} onOpen={onOpen} />}
+      {current !== "chat" && <CompanionTab tab={current} toast={toast} onOpen={onOpen} />}
     </>
   );
 }

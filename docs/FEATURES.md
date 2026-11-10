@@ -166,6 +166,14 @@ Three backticks open a code card as an answer draws one, coloured and copyable. 
 <td align="center"><sub>A new agent — the composer in Agent mode, with a code card in its task</sub></td>
 <td align="center"><sub>The pencil — mark up a picture before the agent sees it</sub></td>
 </tr>
+<tr>
+<td><img src="screenshots/session-review-block.png" alt="A push the auto-review stopped: a card above the composer with the command, the reviewer's reason, Allow anyway and Keep blocked" /></td>
+<td><img src="screenshots/settings-mcp.png" alt="Settings, MCP servers: a local server with Runs on Daedalus server or Host machine beside its policy, and a pasted command tried on the host machine" /></td>
+</tr>
+<tr>
+<td align="center"><sub>A call the auto-review blocked — the reason, and Allow anyway for this one call</sub></td>
+<td align="center"><sub>MCP servers — a local server runs in the container or on the host machine</sub></td>
+</tr>
 </table>
 
 <p align="center">

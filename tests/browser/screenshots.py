@@ -293,6 +293,23 @@ def subagent_messages(id_: str) -> list[dict]:
 QUESTION = {"questions": [{"question": "The digest has 14 items this week; keep it to the usual 8?", "header": "Length", "options": [{"label": "Top 8", "description": "the usual"}, {"label": "All 14"}, {"label": "Split into two mails"}], "allow_custom": True}]}
 
 
+BLOCK_KEY = "b10c4ed0be11"
+
+
+def blocked_turn() -> list[dict]:
+    """The bakery chat's last turn when the auto-review stopped a push: the call, the host's words for
+    the block (the format the app reads its card from), and the agent saying so."""
+    push = {"command": "git add site && git commit -m 'Menu: phone layout' && git push origin main"}
+    said = (f"Blocked by the auto-review: {word('block.reason')} (rule review.publish). The action was not taken. Approval key: {BLOCK_KEY}. "
+            "The operator sees this call on a card in this chat and in the Inbox, with the reviewer's reason and a button \"Allow anyway\".")
+    return [
+        {"role": "user", "seq": 413, "text": word("block.ask"), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=2)},
+        {"role": "assistant", "seq": 414, "text": "", "thinking": "", "tool_calls": [{"id": "toolu_push", "name": "Exec", "arguments": push}], "tool_results": [], "created_at": ago(minutes=1, seconds=40)},
+        {"role": "tool", "seq": 415, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "toolu_push", "content": said, "is_error": True}], "created_at": ago(minutes=1, seconds=38)},
+        {"role": "assistant", "seq": 416, "text": word("block.said"), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=1, seconds=30)},
+    ]
+
+
 def detail(id_: str) -> dict:
     s = next(x for x in SESSIONS if x["id"] == id_)
     messages = MESSAGES if id_ == S1 else MESSAGES_S2 if id_ == S2 else MESSAGES_S3 if id_ == S3 else subagent_messages(id_) if s["metadata"].get("subagent_of") == S1 else [{"role": "user", "seq": 1, "text": "Start.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}, {"role": "assistant", "seq": 2, "text": "Started. Waiting for the sheet.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}]
@@ -305,12 +322,17 @@ def detail(id_: str) -> dict:
     yagni = id_ == S1 and getattr(stub, "yagni", False)
     if yagni:
         messages = [{**m, "yagni": "on"} if m["seq"] == 401 else m for m in messages]
+    # The auto-review's block as the operator meets it (``ONLY=features``): a push the agent tried after
+    # being asked only to check, held by the host as a request the card above the composer answers.
+    blocked = id_ == S1 and getattr(stub, "blocked", False)
+    if blocked:
+        messages = [*messages, *blocked_turn()]
     helper = bool(s["metadata"].get("subagent_of"))
     running = (id_ == S1 and getattr(stub, "running", False)) or (helper and s["status"] == "running")
     status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
-        "yagni": yagni,
+        "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
         "workspace_sessions": [{"id": S2, "title": "Bakery site: photos"}] if id_ == S1 else [{"id": S1, "title": "Bakery site"}] if id_ == S2 else [],
@@ -1187,13 +1209,17 @@ WORDS = {
            "queued": "Then put the opening hours from the shop calendar in the footer.", "steered": "Keep the old prices on the archive page.",
            "project.name": "ESP32 firmware", "agent.link": "Agent link…",
            "agent.name": "Night watch", "agent.task": "Every morning, read the night's log of the shop and tell me about new errors. Count them like this:",
-           "settings.find": "subagent", "markup.note": "bigger"},
+           "settings.find": "subagent", "markup.note": "bigger",
+           "block.ask": "Check the menu at a phone's width as well.", "block.reason": "the operator asked to check the menu, not to publish it",
+           "block.said": "The auto-review stopped the push; the card under this has Allow anyway if you want it out."},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
            "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
            "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены.",
            "project.name": "Прошивка ESP32", "agent.link": "Ссылка для агента…",
            "agent.name": "Ночной дозор", "agent.task": "Каждое утро читай ночной лог магазина и сообщай о новых ошибках. Считай их так:",
-           "settings.find": "субагент", "markup.note": "крупнее"},
+           "settings.find": "субагент", "markup.note": "крупнее",
+           "block.ask": "Проверь меню ещё и на ширине телефона.", "block.reason": "оператор просил проверить меню, а не публиковать его",
+           "block.said": "Автопроверка остановила публикацию; на карточке ниже есть «Разрешить всё равно», если она всё-таки нужна."},
 }
 
 
@@ -1765,6 +1791,9 @@ def dock_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-de
         page.wait_for_timeout(1200)
         page.screenshot(path=str(OUT / "session-dock.png"))
         print("wrote session-dock")
+        # The dock's state is the context's, not this page's: left in place it opened an empty dock,
+        # its terminals unknown to the general stub, under every later picture of this session.
+        page.evaluate(f"() => localStorage.removeItem('daedalus.dock.{S1}')")
     page.close()
 
 
@@ -2661,7 +2690,41 @@ def run_features() -> int:
             pg.keyboard.type(word("markup.note"))
             pg.keyboard.press("Enter")
 
-        shot(page, "session-mcp", f"agents/{S1}", wait=".chat-scroll .timeline", before=lambda pg: (open_inspector(pg, "mcp"), pg.wait_for_selector("[data-mcp-server]", timeout=5000)), settle=600)
+        def try_on_host(scope) -> None:  # type: ignore[no-untyped-def]
+            # A pasted command tried, then tried again on the host machine, where the phone it drives
+            # is paired: the place to run a stdio server is the choice this release added.
+            quick = scope.locator("[data-mcp-quick]")
+            quick.locator("input.field").first.fill("npx -y @mobilenext/mobile-mcp@latest")
+            quick.get_by_role("button", name="Try" if LANG == "en" else "Проверить").click()
+            trial = quick.locator("[data-mcp-trial] [data-mcp-location]")
+            trial.wait_for(timeout=5000)
+            trial.locator("[role='radio']").nth(1).click()
+            quick.locator("[data-runs-in='host']").wait_for(timeout=5000)
+
+        def session_mcp(pg: Page) -> None:
+            open_inspector(pg, "mcp")
+            pg.wait_for_selector("[data-mcp-server]", timeout=5000)
+            try_on_host(pg.locator(".panel"))
+
+        shot(page, "session-mcp", f"agents/{S1}", wait=".chat-scroll .timeline", before=session_mcp, settle=600)
+
+        def mcp_settings(pg: Page) -> None:
+            # A stdio server's place beside its policy, and the same trial in Settings.
+            card = pg.locator("[data-setting='mcp.servers']")
+            card.wait_for(timeout=10000)
+            try_on_host(card)
+            card.locator("[data-mcp-server='files']").evaluate("(row) => row.scrollIntoView({ block: 'start' })")
+
+        shot(page, "settings-mcp", "settings/tools", wait=".settings-stage", before=mcp_settings, settle=700)
+
+        def review_block(pg: Page) -> None:
+            pg.wait_for_selector('.composer .dock.approval[data-kind="blocked"]', timeout=10000)
+
+        stub.blocked = True  # type: ignore[attr-defined]
+        try:
+            shot(page, "session-review-block", f"agents/{S1}", wait=".chat-scroll .timeline", before=review_block, settle=900)
+        finally:
+            stub.blocked = False  # type: ignore[attr-defined]
         # Last: the pasted picture stays in the chat's saved draft, and would sit in every later composer.
         shot(page, "composer-markup", f"agents/{S1}", wait=".chat-scroll .timeline", before=markup, settle=700)
         desk.close()

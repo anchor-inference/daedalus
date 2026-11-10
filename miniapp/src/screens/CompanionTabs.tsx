@@ -19,7 +19,7 @@ import { timeAgo } from "../ui/components";
 // Four, because four fit across a phone. What the companion runs on its clock is the second half of
 // Goals — a goal's cadence and its own schedules are the same question, "what will it do next" — and
 // its tools and notes are looked at rarely enough to live in the header's menu as sheets.
-export const TABS = ["conversation", "goals", "activity", "computer"] as const;
+export const TABS = ["chat", "goals", "activity", "computer"] as const;
 export type CompanionTabId = (typeof TABS)[number];
 
 /** `GET /api/companion`: the shape every client codes against. */

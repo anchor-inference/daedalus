@@ -1,5 +1,5 @@
 // Settings → Navigation: where each destination sits. The desktop half is three lists — the rail, the
-// More menu, hidden — that an item is dragged between or sent to with its selector; the phone half is
+// More launcher, hidden — that an item is dragged between or sent to with its selector; the phone half is
 // the drawer's order and which items are in it at all. Every change is saved at once through the same
 // PUT the other sections use, and the rail redraws from the answer.
 //

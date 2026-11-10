@@ -1,5 +1,5 @@
-// Where each destination sits: the desktop rail, its More menu, the phone drawer and the phone's More
-// sheet, from three inputs — the layout the app ships with, the operator's `[navigation]` section of
+// Where each destination sits: the desktop rail, its More launcher, the phone drawer and the phone's More
+// launcher, from three inputs — the layout the app ships with, the operator's `[navigation]` section of
 // the configuration, and the pages the agent has published. Every place that draws navigation asks
 // `resolveNav` and nothing else, so the rail and the drawer cannot disagree about what exists.
 //
@@ -30,7 +30,7 @@ export function countFor(s: Screen, counts: Counts): number {
 /** The desktop rail as it ships, under the two modes. */
 export const DESKTOP_RAIL: Screen[] = ["inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules"];
 
-/** Every destination the operator may place, grouped as the More menu heads them (`nav.group.*`).
+/** Every destination the operator may place, grouped as the More launcher heads them (`nav.group.*`).
  *  The two modes and Settings are not here: they are the frame of the rail, not items on it. */
 export const MENU_GROUPS: { key: string; items: Screen[] }[] = [
   { key: "work", items: ["companion", "inbox", "board", "calendar", "canvas", "terminals", "harnesses"] },
@@ -38,12 +38,12 @@ export const MENU_GROUPS: { key: string; items: Screen[] }[] = [
   { key: "knowledge", items: ["memory"] },
   { key: "observe", items: ["usage", "health"] },
 ];
-/** The group a page is listed under in the More menu. */
+/** The group a page is listed under in the More launcher. */
 export const PAGES_GROUP = "pages";
 
 export const NAV_SCREENS: Screen[] = MENU_GROUPS.flatMap((g) => g.items);
 
-/** The phone drawer's places as they ship, per mode; the phone's More sheet holds `PHONE_MORE`. */
+/** The phone drawer's places as they ship, per mode; the phone's More launcher holds `PHONE_MORE`. */
 export const PHONE_AGENTS: Screen[] = ["inbox", "terminals", "board", "companion", "usage"];
 export const PHONE_ORCHESTRATION: Screen[] = ["inbox", "terminals", "usage"];
 export const PHONE_MORE: Screen[] = ["calendar", "canvas", "changes", "schedules", "services", "memory", "harnesses", "health"];
@@ -65,7 +65,7 @@ export type NavItem = {
   iconPath: string | null;
   path: string;
   badge: number;
-  /** The More menu's heading for it. */
+  /** The More launcher's heading for it. */
   group: string;
 };
 
@@ -75,7 +75,7 @@ export type ResolvedNav = {
   /** The phone drawer's places, per mode. */
   drawer: { agents: NavItem[]; orchestration: NavItem[] };
   phoneMore: NavItem[];
-  /** Every item that is shown somewhere, in the order the More menu lists them. */
+  /** Every item that is shown somewhere, in the order the More launcher lists them. */
   shown: NavItem[];
   /** Every item this installation has, hidden ones included, for Settings → Navigation. */
   catalogue: NavItem[];
@@ -123,7 +123,7 @@ function list(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
-/** The items this installation has, in the More menu's order: screens by group, then the pages. */
+/** The items this installation has, in the More launcher's order: screens by group, then the pages. */
 export function catalogue(pages: PageInfo[] | null | undefined, selfdev: SelfDevMode, config: NavConfig | null | undefined = null, counts: Counts = {}): NavItem[] {
   const icons = config?.icons && typeof config.icons === "object" ? config.icons : {};
   const override = (id: string): IconName | null => (isIconName(icons[id]) ? (icons[id] as IconName) : null);

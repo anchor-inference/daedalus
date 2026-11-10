@@ -74,7 +74,7 @@ export function AppearancePanel() {
 
   return (
     <>
-      {/* The language and the companion live here, not in the More menu: they are settings of this
+      {/* The language and the companion live here, not in the More launcher: they are settings of this
           browser like the theme, and a menu of places had grown two switches nobody looked for there. */}
       <div className="section-title">{t("settings.group.langtheme")}</div>
       <div className="card">
