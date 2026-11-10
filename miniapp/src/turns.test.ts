@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MessageView } from "./api";
 import type { LiveState } from "./turns";
 import { activitySummary, applyLive, buildTurns, currentStep, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, splitActivity, stripHeadline } from "./turns";
+import { sentMessageReachedTranscript } from "./pending-message";
 
 let clock = 1_700_000_000_000;
 
@@ -361,6 +362,16 @@ describe("reconcile", () => {
     const once = reconcile(history, [live(5, "still")]);
     const again = reconcile(once.messages, [history[3], live(5, "still")]);
     expect(again.messages).toBe(once.messages);
+  });
+
+  it("takes a placed steer's receipt ids when a later read brings them, so the sending bubble goes", () => {
+    // Read while the host was still labelling the row: the operator's words, no receipt id yet.
+    const steer = msg(5, { role: "user", text: "the first two slides repeat", origin: "operator", delivery: "steer", live: true });
+    const early = reconcile(history, [steer]);
+    expect(sentMessageReachedTranscript(early.messages, "send-1")).toBe(false);
+    const later = reconcile(early.messages, [{ ...steer, client_message_ids: ["send-1"] }]);
+    expect(later.messages).toHaveLength(5);
+    expect(sentMessageReachedTranscript(later.messages, "send-1")).toBe(true);
   });
 
   it("still asks for a whole read when a settled row carries no seq", () => {

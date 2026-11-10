@@ -481,6 +481,37 @@ async def test_a_steer_the_core_placed_is_not_shown_twice_while_the_run_lasts(se
     await manager.close()
 
 
+async def test_a_placed_steer_is_never_read_as_shown_without_its_receipt_id(settings: Settings, db: Database) -> None:
+    """The app drops the bubble it drew while sending only for a shown row naming that send. The row was
+    tagged as the operator's before the awaits that look its receipt up and consume it, so a page read
+    in that gap drew the steer with no id, the app held that copy, and the steer showed twice."""
+    provider = ScriptedProvider([{"text": "hi"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("busy")
+    state.task = asyncio.create_task(asyncio.sleep(SETTLE))
+    await manager.submit(state.session.id, "the first two slides repeat", client_message_id="send-1")
+    state.engine = SimpleNamespace(history=[Message(role=MessageRole.user, content_blocks=[TextBlock(text="the first two slides repeat")])])  # type: ignore[assignment]
+    seen: list[list[dict[str, Any]]] = []
+
+    def reading_first(original: Any) -> Any:
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            # What a page read arriving at this await would draw.
+            seen.append([v for v in await manager.transcript_page(state.session.id) if v["role"] == "user" and not v["internal"]])
+            return await original(*args, **kwargs)
+        return wrapped
+
+    manager.live.receipt = reading_first(manager.live.receipt)  # type: ignore[method-assign]
+    manager.live.consume = reading_first(manager.live.consume)  # type: ignore[method-assign]
+    queued = await manager.queued_input(state.session.id)
+    await manager._dispatch_event(state, TurnEvent(type=EventType.QUEUE_UPDATE, run_id="received-run", payload={"placed": [queued[0]["id"]], "kind": "steer"}))
+    assert seen, "the receipt is looked up and consumed while the row is in the history"
+    for shown in seen:
+        assert all("send-1" in (v.get("client_message_ids") or []) for v in shown), shown
+    state.engine = None
+    state.task.cancel()
+    await manager.close()
+
+
 async def test_two_inputs_at_once_start_one_run_and_queue_the_other(settings: Settings, db: Database) -> None:
     """An operator message and a loop tick in the same instant used to pass the running check together."""
     provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 1"}}, {"text": "done"}])

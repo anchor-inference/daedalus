@@ -625,8 +625,17 @@ export type Merge = {
 /** A message's identity before it has a row: the parts the host's transcript key is made of. */
 const identity = (m: MessageView): string => `${m.role}|${m.created_at}|${m.tool_calls[0]?.id ?? m.tool_results[0]?.id ?? ""}`;
 
+/** The receipt ids a row names, as one comparable string. */
+const receipts = (m: MessageView): string => [m.client_message_id ?? "", ...(m.client_message_ids ?? [])].join(" ");
+
+// The receipt ids and the attachments count as well as the words. A steer is in the engine's history
+// before the host has finished labelling it, and a tail read can catch it in between: the first copy
+// had the words and no receipt id, every later read was "the same message", and the screen kept that
+// first copy for the rest of the run — so the bubble drawn while sending, which waits for a row
+// naming its id, stayed under it and the steer showed twice.
 const sameMessage = (a: MessageView, b: MessageView): boolean =>
-  a.run_id === b.run_id && a.internal === b.internal && a.text === b.text && a.thinking === b.thinking && a.tool_calls.length === b.tool_calls.length && a.tool_results.length === b.tool_results.length && !!a.summary === !!b.summary;
+  a.run_id === b.run_id && a.internal === b.internal && a.text === b.text && a.thinking === b.thinking && a.tool_calls.length === b.tool_calls.length && a.tool_results.length === b.tool_results.length && !!a.summary === !!b.summary
+  && a.origin === b.origin && a.delivery === b.delivery && receipts(a) === receipts(b) && (a.attachments?.length ?? 0) === (b.attachments?.length ?? 0) && (a.media?.length ?? 0) === (b.media?.length ?? 0);
 
 /**
  * Fold a freshly read tail into the messages already on screen, matching by `seq`.

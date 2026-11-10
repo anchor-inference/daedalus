@@ -6311,35 +6311,39 @@ class SessionManager:
                 placed = set(event.payload["placed"])
                 items = [item for kind in ("steer", "follow_up") for item in queued[kind] if item.get("id") in placed]
                 origin = str(items[0].get("origin") or "operator") if items else "operator"
-                message.metadata.update({"daedalus.origin": origin, "daedalus.delivery": event.payload.get("kind"), "daedalus.run_id": event.run_id})
+                # The core may combine queued prompts into one visible row; carry each receipt id
+                # so the app keeps its temporary bubble until that row is actually shown.
+                client_message_ids = [str(item_id) for item_id in sorted(placed) if await self.live.receipt(state.session.id, str(item_id)) is not None]
+                # Every tag goes on in one step, with no await between them. The row is in the history
+                # already and a tail read can arrive at any await: tagged as the operator's but not
+                # yet carrying its receipt ids, it was drawn as a message while the app's bubble for
+                # the same words waited for a row naming them, and the steer showed twice for the
+                # rest of the run. Untagged, the live view hides it as a core note, which is harmless.
+                tags: dict[str, Any] = {"daedalus.origin": origin, "daedalus.delivery": event.payload.get("kind"), "daedalus.run_id": event.run_id}
                 if items:
                     # The images came with the items: the core places each one's ``blob_ref`` on the
                     # message under its own key, so only the words need saying here.
-                    message.metadata.update(_merged_words(items))
+                    tags.update(_merged_words(items))
                 else:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
-                    message.metadata.update(operator_words_metadata(origin, prompts.without_turn_context(message.text)))
-                # The core may combine queued prompts into one visible row; carry each receipt id
-                # so the app keeps its temporary bubble until that row is actually shown.
-                client_message_ids = []
-                for client_message_id in sorted(placed):
-                    if await self.live.receipt(state.session.id, str(client_message_id)) is not None:
-                        client_message_ids.append(str(client_message_id))
-                        try:
-                            await self.live.consume(
-                                state.session.id,
-                                str(client_message_id),
-                                run_id=event.run_id,
-                                step_id=str(event.payload.get("step_id") or "queue"),
-                                message_seq=None,
-                            )
-                        except ReceiptConflict:
-                            # The model has the words whatever the receipt says; failing the run over the
-                            # bookkeeping would only lose the answer to them as well.
-                            logger.error("session %s: placed message %s has a withdrawn receipt", state.session.id, client_message_id)
+                    tags.update(operator_words_metadata(origin, prompts.without_turn_context(message.text)))
                 if client_message_ids:
-                    message.metadata["daedalus.client_message_ids"] = client_message_ids
+                    tags["daedalus.client_message_ids"] = client_message_ids
+                message.metadata.update(tags)
+                for client_message_id in client_message_ids:
+                    try:
+                        await self.live.consume(
+                            state.session.id,
+                            client_message_id,
+                            run_id=event.run_id,
+                            step_id=str(event.payload.get("step_id") or "queue"),
+                            message_seq=None,
+                        )
+                    except ReceiptConflict:
+                        # The model has the words whatever the receipt says; failing the run over the
+                        # bookkeeping would only lose the answer to them as well.
+                        logger.error("session %s: placed message %s has a withdrawn receipt", state.session.id, client_message_id)
         change = self._model_change(state, event)
         if change is not None:
             # Before the message it explains, not after it: the header says which model is speaking
