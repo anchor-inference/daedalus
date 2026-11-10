@@ -240,7 +240,7 @@ target server:
 Install Daedalus (https://github.com/anchor-inference/daedalus) on this server for me, following the
 instructions for agents in docs/AGENT-SETUP.md of that repository exactly. Before you start, ask me
 in one message for everything section 1 of that page needs (a model key or a CLI login to use,
-whether I want Telegram, whether there is a domain, the daily cap, a GitHub token or "later").
+whether I want Telegram, whether there is a domain, a GitHub token or "later").
 Then clone, configure, start the stack, verify it as the page says, and give me the pairing link
 and the two-line summary section 8 asks for. Never paste keys or tokens back into this chat.
 ```
