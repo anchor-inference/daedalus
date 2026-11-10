@@ -1137,10 +1137,16 @@ async def test_a_deleted_chat_ends_its_conversations(rig_for: Any) -> None:
 # -- the routes ----------------------------------------------------------------------------------------------------
 
 
-def api_for(rig: Rig) -> TestClient:
+def api_for(rig: Rig) -> httpx.AsyncClient:
+    """The routes on the test's own event loop, as the app serves them on its one loop.
+
+    They once ran through a ``TestClient`` from a worker thread, which serves each request on a loop of its own.
+    The database's lock is an ``asyncio.Lock``, and a request that waited for it while a task of the test's loop
+    held it (the conversation's reader, a wake) bound it to the wrong loop and failed with "bound to a different
+    event loop": a test that failed only when the machine was busy enough for the two to meet."""
     api = FastAPI()
     api_agent_talk.register(api, rig.app, lambda: {"id": "operator"})
-    return TestClient(api)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test")
 
 
 async def test_the_app_sees_the_conversation_and_what_it_cost(rig_for: Any) -> None:
@@ -1149,11 +1155,28 @@ async def test_the_app_sees_the_conversation_and_what_it_cost(rig_for: Any) -> N
     talk = await opened(rig, state, rig.door.link())
     await rig.talks.tool(state.session.id, "send", text="hi", wait_seconds=30)
     client = api_for(rig)
-    listed = await asyncio.to_thread(client.get, f"/api/sessions/{state.session.id}/agent-talks")
+    listed = await client.get(f"/api/sessions/{state.session.id}/agent-talks")
     body = listed.json()["talks"][0]
     assert body["host"] == "agents.example.test" and body["replies"] == 1 and body["sends"] == 1 and "token" not in body
-    detail = (await asyncio.to_thread(client.get, f"/api/agent-talks/{talk}")).json()
+    detail = (await client.get(f"/api/agent-talks/{talk}")).json()
     assert [m["text"] for m in detail["messages"]] == ["hi", "hello"]
+
+
+async def test_a_route_waits_for_the_database_while_the_conversation_holds_it(rig_for: Any) -> None:
+    rig = await rig_for([], "ok")
+    state = await rig.chat()
+    talk = await opened(rig, state, rig.door.link())
+    client = api_for(rig)
+
+    async def hold() -> None:
+        async with rig.db.transaction():
+            await asyncio.sleep(0.3)
+
+    holder = asyncio.create_task(hold())
+    await asyncio.sleep(0.05)
+    done = await client.put(f"/api/agent-talks/{talk}/settings", json={"review": "all"})
+    await holder
+    assert done.status_code == 200 and done.json()["review"] == "all", done.text
 
 
 async def test_the_operator_sets_review_and_waking_and_ends_it(rig_for: Any) -> None:
@@ -1161,13 +1184,13 @@ async def test_the_operator_sets_review_and_waking_and_ends_it(rig_for: Any) -> 
     state = await rig.chat()
     talk = await opened(rig, state, rig.door.link())
     client = api_for(rig)
-    done = await asyncio.to_thread(client.put, f"/api/agent-talks/{talk}/settings", json={"review": "all", "wake_turns": 4, "wake_usd": 0.5})
+    done = await client.put(f"/api/agent-talks/{talk}/settings", json={"review": "all", "wake_turns": 4, "wake_usd": 0.5})
     assert done.status_code == 200 and done.json()["review"] == "all" and done.json()["wake_turns"] == 4
-    too_many = await asyncio.to_thread(client.put, f"/api/agent-talks/{talk}/settings", json={"wake_turns": 1000})
+    too_many = await client.put(f"/api/agent-talks/{talk}/settings", json={"wake_turns": 1000})
     assert too_many.status_code == 422
-    ended = await asyncio.to_thread(client.post, f"/api/agent-talks/{talk}/end")
+    ended = await client.post(f"/api/agent-talks/{talk}/end")
     assert ended.json()["state"] == "closed"
-    assert (await asyncio.to_thread(client.put, f"/api/agent-talks/{talk}/settings", json={"review": "off"})).status_code == 409
+    assert (await client.put(f"/api/agent-talks/{talk}/settings", json={"review": "off"})).status_code == 409
 
 
 # -- the door's own side -----------------------------------------------------------------------------------------------

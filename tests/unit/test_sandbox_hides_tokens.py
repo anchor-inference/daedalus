@@ -88,7 +88,7 @@ def test_a_real_command_that_builds_the_path_reads_nothing(installation: Path, m
     output = run()
     assert "the-token" not in output and "the-launcher-token" not in output
     # The control: without the two covers the same command reads both, which is what this test is about.
-    monkeypatch.setattr(shell, "hidden_installation", list)
+    monkeypatch.setattr(shell, "hidden_installation", lambda _writable=(): [])
     output = run()
     assert "the-token" in output and "the-launcher-token" in output
 
