@@ -169,6 +169,7 @@ from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.filesystem import foreign_paths, machine_of
 from daedalus.host.host_exec import BRIDGE_DOWN
+from daedalus.host.installation_reach import secrets_hidden_from_commands
 from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
@@ -195,7 +196,6 @@ from daedalus.remote import door as remote_door
 from daedalus.remote.turns import EXTERNAL_CALL
 from daedalus.search.service import ConversationSearch, SearchBusy
 from daedalus.security import redact
-from daedalus.security.installation_reach import secrets_hidden_from_commands
 from daedalus.speech import catalog as speech_catalog
 from daedalus.speech import models as speech_models
 from daedalus.speech import service as speech_service

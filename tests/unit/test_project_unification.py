@@ -124,7 +124,7 @@ async def test_the_folder_browser_is_authenticated_sealed_contained_and_bounded(
 
 
 @pytest.mark.parametrize("delete_workspace", [False, True])
-async def test_last_chat_removes_its_scratch_project_but_keeps_files(settings: Settings, config: RuntimeConfig, db: Database, delete_workspace: bool) -> None:
+async def test_last_chat_removes_its_scratch_project_and_its_folder_unless_kept(settings: Settings, config: RuntimeConfig, db: Database, delete_workspace: bool) -> None:
     manager = SessionManager(settings, config, db=db)
     await manager.start()
     try:
@@ -137,7 +137,10 @@ async def test_last_chat_removes_its_scratch_project_but_keeps_files(settings: S
         await manager.delete_session(chat.session.id, delete_workspace=delete_workspace)
         assert await manager.projects.get(pid) is None
         assert chat.workspace not in manager.projects.roots
-        assert (chat.workspace / "keep.txt").read_text() == "keep"
+        # The scratch folder is the chat's own and goes with it, unless the operator kept it (test_scratch_folder_delete).
+        assert chat.workspace.exists() is not delete_workspace
+        if not delete_workspace:
+            assert (chat.workspace / "keep.txt").read_text() == "keep"
     finally:
         await manager.close()
 

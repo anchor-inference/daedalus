@@ -675,7 +675,7 @@ async def test_the_app_lists_and_writes_key_proxy_values_through_its_own_api(cli
 
 async def test_the_key_proxys_card_is_told_when_a_command_could_read_its_keys(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Natively nothing but the Linux sandbox hides keyproxy.env from a command; the card where keys are typed says so."""
-    from daedalus.security import installation_reach  # noqa: PLC0415
+    from daedalus.host import installation_reach  # noqa: PLC0415
 
     _answering(monkeypatch, lambda request: httpx.Response(200, json={"writable": True, "upstreams": []}))
     app = client.daedalus  # type: ignore[attr-defined]

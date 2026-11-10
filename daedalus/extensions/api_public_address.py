@@ -22,8 +22,8 @@ from daedalus import public_address
 from daedalus.extensions import api_services_door
 from daedalus.extensions.tunnel_address import EXTENSION_KEY
 from daedalus.host import launcher_bridge
+from daedalus.host.installation_reach import secrets_hidden_from_commands
 from daedalus.host.reveal import is_local_client
-from daedalus.security.installation_reach import secrets_hidden_from_commands
 from daedalus.security.two_factor import qr_rows
 from daedalus.stores import pairing
 

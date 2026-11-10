@@ -15,8 +15,7 @@ from daedalus import doctor, public_address
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import api_public_address, tunnel_address, tunnel_watch
 from daedalus.extensions.tunnel_address import TunnelAddress
-from daedalus.host import launcher_bridge, tunnels
-from daedalus.security import installation_reach
+from daedalus.host import installation_reach, launcher_bridge, tunnels
 
 ADDRESS = "https://x.example.test"
 
