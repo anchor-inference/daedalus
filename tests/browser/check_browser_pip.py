@@ -111,12 +111,17 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     if abs(got[0] - want[0]) > 1 or abs(got[1] - want[1]) > 1:
         say(f"the preview's cursor is at {got}, not {want}")
 
-    # Expanded panel: no preview over it.
-    page.locator(".panel-actions button").first.click()
+    # Expanded panel: no preview over it. The expand button is found by what it is: the panel's
+    # redesign put the pin first in the row, and a check that clicked the first button pinned the
+    # panel and then reported the preview still showing beside it.
+    expand = page.locator(".panel-actions button[aria-pressed]:not(.panel-pin)")
+    expand.click()
     page.wait_for_timeout(400)
+    if page.locator(".panel.expanded, .panel-actions button[aria-pressed='true']:not(.panel-pin)").count() == 0:
+        say("the expand button did not expand the panel")
     if page.locator(".bp-pip").count():
         say("the preview stays while the panel covers the chat")
-    page.locator(".panel-actions button").first.click()
+    expand.click()
     page.wait_for_selector(".bp-pip", timeout=5000)
 
     # "Needs you": amber, with the reason.
