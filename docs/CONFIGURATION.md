@@ -15,7 +15,7 @@ url = "https://example.com/mcp"
 headers = { Authorization = "Bearer ..." }
 ```
 
-Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app.
+Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app. A server is added in one step: paste its command, its address or the JSON block from its README into the field in Settings → Tools & search or in a chat's Details › MCP servers, press *Try*, and the server is started once without being saved, so you see whether it answers, where it runs, what it wrote to stderr and its tools before you add it. Added from a chat, it is switched on in that chat. The agent does the same with `McpAdd`, which also switches on a server that answers.
 
 In Docker a stdio server runs inside the Daedalus container unless it is set to run on the host machine, where your `adb`, paired devices, signed-in CLIs and files are. The host terminal starts it there and carries its stdin and stdout back; natively the two places are the same machine:
 
@@ -29,7 +29,7 @@ location = "host"                        # "server" (the default) or "host"
 
 The app's MCP settings offer the same choice per server. A host terminal installed before this needs updating once (`bash deploy/host-terminal.sh install` after the image is rebuilt); until then a server set to `host` fails with words that say so.
 
-A call to an MCP tool is asked about first unless the tool says it is safe. With no setting, the tool's own annotations decide: one marked read-only runs, and one that may destroy something or reach the outside world is asked about — and so is one that says nothing, because the protocol reads a missing hint as "it may". A server's `approval` (`auto`, `ask` or `allow`) decides all its tools at once, and `tool_approval` decides one tool by its name on the server, beating the server's setting:
+A call to an MCP tool is asked about first unless the tool says it is safe. With no setting, the tool's own annotations decide: one marked read-only runs, and one that may destroy something or reach the outside world is asked about — and so is one that says nothing, because the protocol reads a missing hint as "it may". A server's `approval` (`auto`, `ask`, `allow` or `deny`) decides all its tools at once, and `tool_approval` decides one tool by its name on the server, beating the server's setting. `deny` refuses every call without asking and keeps the server connected, so one tool can still be allowed by name:
 
 ```toml
 [mcp.servers.notes]
@@ -39,7 +39,7 @@ approval = "allow"                       # a server you trust: none of its tools
 tool_approval = { delete_note = "ask" }  # except this one
 ```
 
-An operator rule in `[policy]` that names the tool with `action = "allow"` lifts the question as well.
+An operator rule in `[policy]` that names the tool with `action = "allow"` lifts the question as well. In one session, a question about an MCP tool also offers *Allow all from <server>* for 1, 2, 6 or 12 hours or the rest of the session; the grant ends on time, and the chat's Details › Allowed in this session lists it with the time left and takes it back.
 
 Beyond the app's settings, `config.toml` holds the guard rails:
 
@@ -59,6 +59,10 @@ sandbox = "off"              # off | workspace — bubblewrap: the filesystem re
                              # actually run — installed is not enough, the machine has to allow the
                              # namespaces — and "off" everywhere else, a container included.
 
+[tools.web]
+download_max_bytes = 209715200  # the largest file WebFetch(save_to=…) writes into the workspace; a
+                             # larger answer is cut off and nothing is kept
+
 [tools.jobs]                 # what the watcher says about a background job that still runs; its
 quiet_minutes = 15           # end is always reported. One "possibly stuck" note when its log has
 max_hours = 6                # not grown this long, one "overdue" note past this age; 0 = never.
@@ -76,7 +80,7 @@ trim_window_share = 0.075    # and this share of the model's window (4 character
 [tools.groups.browser]       # how a group of tools reaches a run: eager (always in the tool list),
 load = "lazy"                # auto (while it fits), lazy (one catalogue line; the agent loads it with
                              # ToolSearch). Lazy by default: browser, self_development, scheduling,
-                             # loop, docs, learning, mcp_oauth. Settings → Tools shows each group's
+                             # loop, docs, learning, mcp_oauth. Settings → Tools & search shows each group's
                              # cost and how often it was used; a session can choose its own mode.
 
 [policy]                     # tool policy on top of the built-in rules (daedalus/host/policy.py)
@@ -122,7 +126,8 @@ stale_hours = 6              # a 'doing' task whose session went quiet this long
 [subagents.models]           # which presets a session's helpers may run on, unless the session chooses
 mode = "all"                 # all | session (only the session's own model) | chosen (the list below);
 presets = []                 # held for SubAgent, SpawnAgent and a Daedalus member hired from the session,
-                             # and handed to each child as its own, so it cannot reach further
+                             # and handed to each child as its own, so it cannot reach further.
+                             # A chat sets its own in Details › Models for subagents, which wins over this
 
 [harness]                    # command-line agents hired as staff
 max_output_tokens = 64000    # one call's output ceiling for OpenCode and Claude Code members, whose
@@ -143,9 +148,9 @@ paused = false               # keep memory but hand nothing to the agent and lea
 
 [navigation]                 # where the app puts each destination; Settings -> Navigation edits it
 rail = ["inbox", "terminals", "page:dosing"]  # the desktop rail, top to bottom
-more = ["usage"]             # under the rail's More menu, in order within its group
+more = ["usage"]             # off the rail, in the More launcher's catalogue, in order within its group
 drawer = ["inbox", "terminals", "board"]  # the phone drawer; non-empty is the whole drawer, the rest
-                             # waits in the phone's More sheet
+                             # waits in the phone's More launcher
 hidden = ["voice"]           # never shown on any device; wins over the lists above
 icons = { terminals = "bolt" }  # a built-in icon name in place of the item's own
                              # Every list empty is the shipped layout. An item is a screen name or

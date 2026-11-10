@@ -61,8 +61,8 @@ By hand instead: clone `protocore-exp` next to this repository, copy `deploy/env
 `deploy/keyproxy.env.example` to `../daedalus-secrets/keyproxy.env` (provider keys go there, outside the
 checkout, `chmod 600`), then `docker compose -f deploy/compose.yaml --env-file .env up -d --build`.
 
-Once the stack runs, nothing in that file needs editing by hand: Settings → Models → Providers → *Key proxy*
-sets every key, upstream address, key header and the proxy's daily cap, and Settings → Tools → *Search keys*
+Once the stack runs, nothing in that file needs editing by hand: Settings → Models & providers → Providers → *Key proxy*
+sets every key, upstream address, key header and the proxy's daily cap, and Settings → Tools & search → *Search keys*
 holds the keys of the paid search backends (Keenable, Serper, Tavily, Exa, Perplexity). The proxy reads the file
 again on each call, so a saved value holds from the next request with no restart.
 
@@ -72,6 +72,7 @@ again on each call, so a saved value holds from the next request with no restart
 | `search` | a self-hosted SearXNG. Without it `WebSearch` goes to DuckDuckGo directly; with it, SearXNG is the backend the tool falls back to. Settings → Components can instead install SearXNG into the state volume, which the supervisor runs beside the agent | ~382 MB |
 | `selfdev` | the rebuilder, the only container that can reach Docker. Needed only to build a new agent image, which is what a change to the image's own recipe asks for | ~237 MB |
 | `browser` | the agent's browser: `browserd` and Chromium from the `:browser` image target, on a network of its own ([below](#the-agents-browser)) | the `:browser` tag |
+| `guest` | the guest door, a process of its own with no network that answers other people's agents through the links you hand out, and the front that holds its port ([set up here](AGENT-SETUP.md#agent-links-the-guest-door)) | the same image |
 
 The browser skills — driving a page with Playwright, drawing with Pillow — are not in the default
 image either: they are two thirds of one and most sessions never open a page. Run the `:browser` tag
@@ -107,8 +108,12 @@ agent. What survives what:
 - **Project folders.** A folder mounted into the agent's container is mounted into `terminals` too, at
   the same absolute path, so a path means the same thing in a terminal as it does to the agent. The
   desktop launcher writes both entries itself.
+- **Where a new one goes.** Every **+** asks the same question: the container, the host, or another
+  folder, with the places that cannot be used greyed and explained. Closing a terminal's tab or pane
+  ends it; a shell sitting at its prompt ends at once, anything else asks first and names what stops.
+  *Detach* in its menu keeps the process without the tab.
 - **The sandbox toggle.** A terminal is an ordinary shell by default. With **Sandbox** ticked in the
-  terminal menu it runs in bubblewrap instead: the filesystem read-only, the project's writable folders
+  question a new terminal asks, it runs in bubblewrap instead: the filesystem read-only, the project's writable folders
   writable (what the session's own `Exec` may write), a private `/tmp`, and the daemon's token hidden.
   It is a wall against writing, not reading. For it the `terminals` service carries `cap_add:
   [SYS_ADMIN]` with unconfined seccomp and AppArmor — the same widening the agent's container accepts
@@ -196,21 +201,35 @@ A native desktop install has host terminals only: shells on your own machine, as
 quitting the launcher ends them, as it ends the agent. On Windows the shell is PowerShell.
 [desktop/README.md](../desktop/README.md#host-terminals) has the details.
 
+## A public address on the desktop
+
+A desktop install behind a home router can still hand out agent links and open a shared service on a
+phone, while the app is open. **Settings → Public address** turns it on, with a tunnel of your own
+choosing (a Cloudflare quick tunnel, Tailscale Funnel, ngrok or frp on your own server); `tunneld`, a
+small program the desktop release carries, holds it and routes only `/a/` (agent links) and `/s/`
+(shared services) through it. The app, its API and the terminals are never behind it. It is off until
+you turn it on, and the agent may not raise a tunnel of its own ([POLICY.md](POLICY.md)).
+[desktop/README.md](../desktop/README.md#public-address) has the providers and what each costs.
+
 ## The install ends in the app: add a model
 
 **Whichever way you installed it.** A provider key is an address, not a choice of model, so nothing
 is picked for you and the installation ships with none. The app opens on *Add a model* until one
 exists: pick an endpoint, pick a model from the list it serves — with its context window, its
 modalities and its prices beside it — and save. The same screen adds the next one later, from
-Settings → Models.
+Settings → Models & providers.
 
-Each model's card in Settings → Models has a **Price** section: input, output and cache hit in USD per
+Each model's card in Settings → Models & providers has a **Price** section: input, output and cache hit in USD per
 million tokens, the default it starts from (the built-in table, models.dev, or the OpenRouter providers
 chosen for it), and a switch between *subscription*, recorded at $0 and never counted against a cap, and
 *per token*. A price typed there replaces the default from the next call, with no restart, and *Reset*
 brings the default back. A bill the provider states for a call (OpenRouter sends one) is what was really
 charged, so Usage books that over any price here; the typed price still sets the caps' reservations
 and a guest link's rate.
+
+An OpenRouter model can be held to the providers you choose, in *Add a model* and later in its card:
+OpenRouter then routes it only to those, and its default price is theirs. A provider OpenRouter stops
+listing is marked in the card and kept in the choice, so it is used again when it comes back.
 
 <p align="center"><img src="screenshots/add-model.png" alt="Add a model: the endpoints this installation can reach, OpenCode Go and OpenCode Zen among them, and the model from the chosen one's own list with its context window and prices" width="100%" /></p>
 
@@ -225,7 +244,7 @@ Nothing here is a tier: it is the same program, and each row is a real consequen
 | **Self-development** | `local`: the agent commits into the checkout the app runs from and the change applies on a restart, with a preflight on a copy of itself first and an automatic rollback if it cannot stay up | `local` by default; `server` with a GitHub token | `server`: a worktree, a pull request you approve in the chat, a merge, a rebuild |
 | **Browser skills** | `daedalus-desktop install browser`, into the folder | the `:browser` tag | the `:browser` tag |
 | **The agent's browser** | `browserd` beside the launcher, Chromium from `install browser`. **The daemon's proxy is the only wall** between a page and your machine's ports and LAN | the `browser` service: a network of its own, not root, no folders, and the proxy inside it | the same |
-| **Reach** | your machine only: a service a session starts is told to bind `127.0.0.1` | the same | a domain, a PWA, Telegram's Mini App |
+| **Reach** | your machine only: a service a session starts is told to bind `127.0.0.1`. A [public address](#a-public-address-on-the-desktop) can show agent links and shared services, never the app | the same | a domain, a PWA, Telegram's Mini App |
 | **When you close it** | the agent stops, and a run in flight is drained, snapshotted and resumed on the next start | it keeps running and comes back with the machine | it keeps running |
 
 ## Signing in without Telegram
@@ -272,7 +291,7 @@ inside the installation, which is more than the code would guard.
 ## With Telegram
 
 1. Send `/start` to the bot in a private chat. That chat is a window onto one session at a time: `/new <title>` starts a session and writes to it, `/sessions` numbers them, `/use <n|title>` switches, `/close` puts one away. Every other session — a scheduled task, a loop agent, an agent you spawned — still speaks in the same chat, with its name above its words, and a question of any of them is answered back into it. Nothing else is needed.
-2. Optional, for a chat of its own per session: create a supergroup with topics, add the bot as an administrator with *manage topics*, and send `/bind` there. One topic is then one session, and topics you create by hand are adopted too. Mini App → Settings → Chat switches between the two shapes.
+2. Optional, for a chat of its own per session: create a supergroup with topics, add the bot as an administrator with *manage topics*, and send `/bind` there. One topic is then one session, and topics you create by hand are adopted too. Mini App → Settings → Chat & scheduler switches between the two shapes.
 3. Open the app with `/app`. Set `MINIAPP_PUBLIC_URL` to an HTTPS address that proxies to port 8765 and register it as the bot's menu button in @BotFather; the same address serves the browser version (sign in with Telegram's login widget) and a dialog shared from its menu under `/c/…`. Shared services run on an origin of their own, not on the app's: see [the services door](AGENT-SETUP.md#shared-services-the-services-door).
 
 ## Let your agent install it
@@ -292,13 +311,13 @@ and the two-line summary section 8 asks for. Never paste keys or tokens back int
 
 ## Models and keys
 
-Providers are OpenAI-compatible endpoints (DeepSeek, OpenRouter, a self-hosted vLLM, anything else) with their own base URL, key and timeout; **presets** on top of them name a model with its thinking mode, effort, image support, context window and output cap. One preset is the default; any session can switch. The context window is found automatically unless you type one: from the provider's own model list where it says (OpenRouter, vLLM, llama.cpp, LM Studio, Ollama, Anthropic, Groq, Mistral, the Codex login and others), then from the models.dev catalogue, then from a built-in table of model families, and lowered when a provider refuses a request at a smaller limit. Settings → Models shows which of these the number came from; a number you type is kept as yours until you choose *Find automatically*. Automatic use of configured fallback presets is off until enabled in Settings → Models. Temporary failures can still retry on the selected model. Speech-to-text and the vision model pick a provider the same way.
+Providers are OpenAI-compatible endpoints (DeepSeek, OpenRouter, a self-hosted vLLM, anything else) with their own base URL, key and timeout; **presets** on top of them name a model with its thinking mode, effort, image support, context window and output cap. One preset is the default; any session can switch. The context window is found automatically unless you type one: from the provider's own model list where it says (OpenRouter, vLLM, llama.cpp, LM Studio, Ollama, Anthropic, Groq, Mistral, the Codex login and others), then from the models.dev catalogue, then from a built-in table of model families, and lowered when a provider refuses a request at a smaller limit. Settings → Models & providers shows which of these the number came from; a number you type is kept as yours until you choose *Find automatically*. Automatic use of configured fallback presets is off until enabled in Settings → Models & providers. Temporary failures can still retry on the selected model. Speech-to-text and the vision model pick a provider the same way.
 
 **llama.cpp** is a first-class self-hosted provider. Add a `llamacpp` endpoint such as `http://127.0.0.1:8080/v1` or `http://<host>:<port>/v1`; no key is needed unless the server was started with one. Daedalus reads `/props` and `/v1/models` to prefill the model id, context window and image support, and reports tool support, slots, build and sleep state in the doctor. Older servers and proxies that expose only `/v1` still work: whatever they do not publish stays editable. Calls run on your hardware, are recorded at zero cost, and never consume a spending cap.
 
-**An installation ships no preset at all.** The endpoints are configured; which model runs on one — and what it costs per million tokens — is the first thing you decide, in *Add a model* (the app opens there until a model exists, and Settings → Models → **Add a model** is the same screen). The first model added becomes the default. Until then every way in says so and names the fix rather than failing: the chat commands, the API (409), `daedalus-server doctor`, `daedalus-server check`.
+**An installation ships no preset at all.** The endpoints are configured; which model runs on one — and what it costs per million tokens — is the first thing you decide, in *Add a model* (the app opens there until a model exists, and Settings → Models & providers → **Add a model** is the same screen). The first model added becomes the default. Until then every way in says so and names the fix rather than failing: the chat commands, the API (409), `daedalus-server doctor`, `daedalus-server check`.
 
-Keys never reach the agent's process: the **key proxy** injects them (one path per upstream — `/deepseek`, `/openrouter`, `/opencode`, `/opencode_zen`, plus any `KEYPROXY_UPSTREAM_<NAME>` — under `http://keyproxy:3200` in a container and `http://127.0.0.1:3201` natively), meters the calls, and refuses model calls once the daily budget is spent. OpenCode is sold two ways, and one `OPENCODE_API_KEY` serves both. An [OpenCode Go](https://opencode.ai/go) subscription is the `opencode` provider (`/opencode`, `billing = "subscription"`): its models (DeepSeek, GLM, Qwen, Kimi, MiniMax, GPT-5.6 Luna …) are prepaid, so their calls are recorded at $0 and never count against a dollar cap, and what is left of the plan's 5-hour, weekly and monthly allowance shows on the Usage screen. [OpenCode Zen](https://opencode.ai/zen) is the `opencode_zen` provider (`/opencode_zen`): pay per token at Zen's prices, refreshed daily from [models.dev](https://models.dev) and capped like any priced provider, with its free models free. Every request to either carries the session id the gateway routes and caches by. Your **ChatGPT (Codex), SuperGrok and Claude Code** logins are read from the CLIs' own auth files, refreshed in place, and exposed as the `codex`, `grok` and `claude` providers — their quota windows show on the Usage screen and beside every session that uses them. Each is called the way that vendor's own CLI would call it, version included, and a vendor refuses a version it considers too old: the key proxy looks for new CLI releases every six hours, the app offers the update as a notification and under Settings → Models → Providers, and the new version is stored in `keyproxy.env` (`KEYPROXY_CLIENT_<NAME>`) and used from the next request without a restart. If the first request after an update is refused for its version, the previous one comes back by itself. `KEYPROXY_CLAUDE_CLI_VERSION`, `KEYPROXY_CODEX_CLI_VERSION` and `KEYPROXY_GROK_CLIENT_VERSION` pin a version by hand.
+Keys never reach the agent's process: the **key proxy** injects them (one path per upstream — `/deepseek`, `/openrouter`, `/opencode`, `/opencode_zen`, `/anthropic`, plus any `KEYPROXY_UPSTREAM_<NAME>` — under `http://keyproxy:3200` in a container and `http://127.0.0.1:3201` natively), meters the calls, and refuses model calls once the daily budget is spent. OpenCode is sold two ways, and one `OPENCODE_API_KEY` serves both. An [OpenCode Go](https://opencode.ai/go) subscription is the `opencode` provider (`/opencode`, `billing = "subscription"`): its models (DeepSeek, GLM, Qwen, Kimi, MiniMax, GPT-5.6 Luna …) are prepaid, so their calls are recorded at $0 and never count against a dollar cap, and what is left of the plan's 5-hour, weekly and monthly allowance shows on the Usage screen. [OpenCode Zen](https://opencode.ai/zen) is the `opencode_zen` provider (`/opencode_zen`): pay per token at Zen's prices, refreshed daily from [models.dev](https://models.dev) and capped like any priced provider, with its free models free. An `ANTHROPIC_API_KEY` is called through Anthropic's Messages API rather than its OpenAI-compatible endpoint, which takes no cache marks: the proxy marks the tools, a point in the middle of the history and the conversation's tail for the hour-long prompt cache, so each step of a run reads the prompt back at the cache price instead of paying the whole of it again, and a cache write is priced apart at twice the input rate unless the model's price names one. Every request to either carries the session id the gateway routes and caches by. Your **ChatGPT (Codex), SuperGrok and Claude Code** logins are read from the CLIs' own auth files, refreshed in place, and exposed as the `codex`, `grok` and `claude` providers — their quota windows show on the Usage screen and beside every session that uses them. Each is called the way that vendor's own CLI would call it, version included, and a vendor refuses a version it considers too old: the key proxy looks for new CLI releases every six hours, the app offers the update as a notification and under Settings → Models & providers → Providers, and the new version is stored in `keyproxy.env` (`KEYPROXY_CLIENT_<NAME>`) and used from the next request without a restart. If the first request after an update is refused for its version, the previous one comes back by itself. `KEYPROXY_CLAUDE_CLI_VERSION`, `KEYPROXY_CODEX_CLI_VERSION` and `KEYPROXY_GROK_CLIENT_VERSION` pin a version by hand.
 
 ## Without Docker, for development
 

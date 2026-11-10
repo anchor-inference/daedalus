@@ -2,7 +2,7 @@
 //
 // The language is the reader's, not the installation's: ?lang= wins (the launcher opens the app in
 // the language its own window is in), then what the reader chose here before, then the browser's.
-// It is changed in two places — Settings, and the More sheet — and takes effect at once.
+// It is changed in Settings › Appearance, on the sign-in screen and in Add a model, and takes effect at once.
 //
 // A key nobody translated shows itself in brackets rather than falling back to English: a gap that
 // looks like a gap is fixed, and an English sentence in the middle of a Russian page is not.

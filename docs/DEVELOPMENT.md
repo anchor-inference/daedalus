@@ -15,12 +15,13 @@ daedalus/
   bench/        headless task runner and the Harbor adapter
 launcher/       the supervisor (PID 1, never edited by the agent)
 miniapp/        Vite + React app (Telegram Mini App and browser); src/router.ts, shell.tsx,
-                dialogs.tsx, store.ts, format.ts and one file per screen under src/screens/
+                ui/dialogs.tsx, store.ts, format.ts and one file per screen under src/screens/
 skills/         SKILL.md skills the agent can load
 personas/       the persona the prompt is built from
-deploy/         Dockerfile, compose, key proxy, SearXNG settings, env examples
+deploy/         Dockerfile, compose, key proxy, the guest door (guestd), SearXNG settings, env examples
 desktop/        the launcher: one binary that runs the stack on a personal machine — the setup
                 page, the app window, the portable runtime native mode downloads (outside data/)
+tunneld/        the desktop's public address: a tunnel and the router behind it, a program of its own
 tests/          unit and integration tests; tests/browser drives the built app with a real mouse
 docs/           design and decisions (2026-09-06, historical), screenshots, diagrams
 ```

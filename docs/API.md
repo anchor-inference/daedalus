@@ -1,7 +1,7 @@
 # The HTTP API, where the app is not enough
 
 Everything the app does it does over the same API, with the same token (`X-Daedalus-Token`, or the
-browser session cookie), so anything the app can show you a script can fetch. Three of those
+browser session cookie), so anything the app can show you a script can fetch. Some of those
 endpoints are worth naming here.
 
 **Finding a file.** `GET /api/sessions/{id}/files/search?q=&limit=` searches the session's tree by
@@ -75,7 +75,8 @@ brings one back as a new version. `GET …/export` is the `.canvas` file laid ou
 writes it; `POST /api/canvases/import` with `{"title", "scope", "scope_id", "text"}` reads one.
 `POST …/share` answers a public link, `/app/d/<token>`, read through `GET /api/public/canvases/{token}`.
 Each change is announced live as `canvas.changed`. The agent works on the same canvases through its
-on-demand `canvas` tool group. A file node with `daedalus.frame` is a live page of the agent's
+on-demand `canvas` tool group (`CanvasList`, `CanvasRead`, `CanvasCreate`, `CanvasEdit`, `CanvasShow`,
+`CanvasInspect`). A file node with `daedalus.frame` is a live page of the agent's
 workspace: `POST …/frames/{node}/address` answers its signed address on the services door (or
 `{"needs_door": true}` when there is none), `/api/canvases/{id}/origins` lists, allows and removes the
 other sites frames may load from, and `POST …/message` with `{"text", "picks"}` sends the comment bar's
@@ -106,14 +107,20 @@ any client: `POST /api/sessions/{id}/policy/grant` or `…/policy/refuse` with `
 stream carries `permission.pending` and `permission.resolved` for it. `GET …/policy/similar/{key}`
 says what "Allow similar" would grant for an open request (the same tool and rule, with its command
 prefix, folder or host, as `label`), or `null`; `POST …/policy/grant-similar` with `{"key"}` grants
-that family until the session ends and answers every open request it covers. An action the
+that family until the session ends and answers every open request it covers. For a call to an MCP
+tool the same answer carries `server`: `{"name", "hours", "default_hours"}`, and `POST
+…/policy/grant-server` with `{"key", "hours"}` (or `{"server", "hours"}`; `hours` is 1, 2, 6 or 12, and 0
+for the rest of the session) allows every tool of that server for that long. `GET …/policy/standing`
+lists the session's standing grants of both kinds with the time each has left, and `DELETE
+…/policy/standing/{id}` takes one back. A guest's turn, and a run that has read another agent's reply,
+neither uses nor makes one. An action the
 operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
 `kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
 granted. A call the auto-review blocked arrives as `permission.pending` with `blocked: {"reason",
 "category", "level"}` and `routed_to: "operator"`; `…/policy/grant` with its key is *Allow anyway*
 (once, logged as the verdict `override`; a second grant of the same key and an orchestrator's are
 refused with 400). `GET /api/action-rules` answers `{"categories", "levels", "defaults", "log"}` for Settings →
-Rules: the categories and levels the host knows, in order, and the auto-review's latest decisions
+Working rules: the categories and levels the host knows, in order, and the auto-review's latest decisions
 (`limit=`, newest first); the levels themselves are the `action_rules` section of `/api/settings`.
 
 **Notifications.** Everything that wants your attention — a failed run, a scheduled task's result, a
@@ -470,7 +477,41 @@ placeholder, and the last lines of that audit, which the app shows before a remo
 `«secret:name»`, never the value. The whole list also carries `logins`: the sign-ins saved from the
 browser's private form (`{"id", "site", "name": "login:<site>", "last_used_at", "uses", "readable"}`,
 never a username or a password), which `DELETE /api/secrets/logins/{id}` forgets; they are never the
-agent's to use (docs/architecture/browser.md, The private sign-in).
+agent's to use (docs/architecture/browser.md, The private sign-in). The composer's Secret sheet and
+Settings → Security draw this one list as a small manager: search, add, reveal, copy, edit and remove,
+with attaching first on the rows a chat may use.
+
+**MCP servers.** `GET /api/mcp/servers` lists them, with the address an OAuth sign-in returns to. `POST /api/mcp/try` with `{"input",
+"name"?}` — a pasted command, address or README block — starts the server once without saving it and
+answers its name, its parsed spec with the keys masked, its state, its tools and what it wrote to
+stderr; `POST /api/mcp/add` with the same and `"approval"` saves it, and with `"session_id"` switches it on
+in that chat when it answers. `PUT` and `DELETE /api/mcp/servers/{name}` change and remove one, and
+`…/connect`, `…/oauth/begin` and `…/oauth/disconnect` reconnect it and sign it in or out.
+
+**Agent links.** A conversation with somebody else's agent, opened by `AgentTalk`, is listed at `GET
+/api/sessions/{id}/agent-talks` and read whole at `GET /api/agent-talks/{id}`; `PUT …/settings` with
+`{"review": "first" | "all" | "off", "wake_turns", "wake_usd"}` sets what waits for you and how far a
+reply may wake the chat, `POST …/messages/{message}/send` or `…/refuse` decides on a message waiting to
+go out, and `POST …/end` ends it. The other way round, a link for other people's agents is made with
+`POST /api/sessions/{id}/guest/links` (`mode`: `stand_in` with a model and an approved briefing, which
+`POST /api/sessions/{id}/guest/draft` writes a first version of, or `direct` with `tools`: `none`,
+`read` or `all`) and answers the link and its `url`. `GET /api/guest/links?session_id=` and `GET
+/api/guest/links/{id}` read them with their messages, `POST …/revoke` and `…/reissue` end one or give it
+a new invite, and `POST /api/guest/conversations/{id}/admit` or `…/refuse` settles a first contact.
+`GET /api/guest/door` says whether links can be made, with the models a stand-in may use and why any
+are left out, and `PUT /api/guest/settings` sets `usd_per_day` for every guest together.
+
+**The public address.** On a native install, `GET /api/public-address` is the address's state (provider,
+`state`, `address`, what it exposes in numbers, its QR, and `tokens_hidden`), and `PUT` with `{"enabled",
+"provider", …}` changes it; a server answers `{"native": false}`. `POST
+/api/sessions/{id}/services/{name}/phone` answers the ways a phone can open a service (the same Wi-Fi, the
+public address), each a link and a QR with a short-lived code where the service is not public, and
+`DELETE` the same address forgets the phones it let in.
+
+**Which models a chat's helpers use.** `GET /api/sessions/{id}/subagent-models` answers the chat's
+`mode` (`all`, `session` or `chosen`), its `presets`, whether that is the default from Settings
+(`inherited`) or was set by the session that started it (`from_parent`), what is `allowed`, and the
+`options`; `PUT` with `{"mode", "presets"}` sets the chat's own.
 
 **Custom pages.** `GET /api/pages` lists the published pages the navigation offers, `POST /api/pages`
 makes one, `PUT /api/pages/{slug}/draft/{path}` writes its files, `POST …/publish` and `…/rollback`

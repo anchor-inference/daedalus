@@ -66,7 +66,9 @@ STAGES = ["runtime", "checkouts", "environment", "start"]
 
 def status(**over: object) -> dict:
     base = {
-        "data": str(WORK / "Daedalus" / "data"),
+        # Invented like the rest: WORK is wherever the pictures were taken, and the path of the
+        # machine that takes them has no place in a public picture.
+        "data": "/home/someone/Daedalus/data",
         "mode": "native",
         "mode_detail": "native",
         "ports": "8765, 3201",
@@ -288,6 +290,9 @@ def main() -> int:
                         # open, and a page that never goes idle never answers that wait.
                         page.goto(f"http://127.0.0.1:{port}{path}", wait_until="load")
                         page.wait_for_timeout(1400)
+                        # The status page draws the folder from the binary's own --data, which is
+                        # this machine's WORK, before any answer of ours is read: put the invented one there.
+                        page.evaluate("(data) => document.querySelectorAll('code.path').forEach((code) => { code.title = data; code.querySelector('bdi').textContent = data; })", answer["data"])
                         target = OUT / f"launcher-{name}-{lang}-{width}.png"
                         page.screenshot(path=str(target), full_page=True)
                         print(target)

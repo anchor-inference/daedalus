@@ -16,7 +16,7 @@
   <img alt="Docker Compose" src="https://img.shields.io/badge/deploy-docker%20compose-2496ed.svg" />
   <img alt="Telegram" src="https://img.shields.io/badge/chat-Telegram-26a5e4.svg" />
   <img alt="React" src="https://img.shields.io/badge/app-React%2019-61dafb.svg" />
-  <img alt="tests" src="https://img.shields.io/badge/tests-3000%2B-4ade80.svg" />
+  <img alt="tests" src="https://img.shields.io/badge/tests-9000%2B-4ade80.svg" />
 </p>
 
 <p align="center">
@@ -38,7 +38,7 @@ It is built to run for weeks: sessions survive restarts, runs resume from snapsh
 ## What you get
 
 - **💬 Telegram-native** — every session has its own workspace and speaks in the chat under its own name, in the private chat or in a forum topic each; files, voice notes, inline-button questions and answers that stream as they are written.
-- **🖥️ A real web app** — agents, live transcripts, a file browser with previews, two sessions side by side, a ⌘K palette on a desk and four tabs on a phone; installable as a PWA.
+- **🖥️ A real web app** — agents, live transcripts, a side panel that keeps a chat's model, context and spend over its details, files, previews, jobs and notes, two sessions side by side, a ⌘K palette and a More launcher on a desk and a drawer on a phone; installable as a PWA.
 - **🖥️ An app, not a deployment** — one download opens a window of its own on macOS, Linux and Windows; native mode needs no Docker at all and is ready four seconds after launch.
 - **🛠️ Real tools** — shell, files, search, web fetch and search, a vision model, a Chromium you watch and take over, verification runs, MCP servers, skills loaded on demand.
 - **🖱️ Your screen and your Chrome** — in the native app a chat can be given one window, one app, one display or the whole desktop for a time you choose, with a border around it and Ctrl+Alt+Esc to stop; a Chrome extension ([its own repository](https://github.com/anchor-inference/daedalus-chrome-extension)) lets the agent work in your own browser with your sign-ins, beside a side panel of its conversations. Chats, computer chats and browser chats each have a tab over the lists.
@@ -47,6 +47,8 @@ It is built to run for weeks: sessions survive restarts, runs resume from snapsh
 - **🔁 Autonomy on a leash** — loops, cron tasks, a heartbeat and boards, each run bounded by the spend and time limits you set; a provider outage pauses work instead of ending it.
 - **🧬 Self-development** — the agent changes its own code in a worktree and a pull request you approve in the chat, and a bad build is rolled back on its own.
 - **🔐 Keys it never sees** — provider keys live in a key proxy that stops paying once the daily budget is spent; ChatGPT, Claude Code and SuperGrok logins work as providers too.
+- **🗺️ Canvas** — boards of cards and arrows that you and the agent edit together, with the agent's own web pages live on them; point at an element of a page and the agent gets its selector and your note.
+- **🔗 Agent links** — hand someone's agent a link to talk to yours, answered by a stand-in from a briefing you approve or by the chat's own agent with the tools you allow; your agent can talk to theirs the same way.
 - **🧾 Evidence you can open** — an answer cites files and checks as chips that open at the lines it named; a change to the agent's own code needs a receipt that covers it.
 - **🫧 Companion** — your standing personal agent, by text and by voice: it hands work to agents, owns goals it checks on a cadence, and reports back when you are away.
 
@@ -72,6 +74,22 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 <td align="center"><sub>Projects — a folder you add is where its agents work, and the only place they can reach</sub></td>
 </tr>
 <tr>
+<td><img src="docs/screenshots/canvas.png" alt="A canvas: the agent's menu page live in a frame beside the cards that plan it, the operator pointing at its heading with a note for the agent" /></td>
+<td><img src="docs/screenshots/session-mcp.png" alt="A chat's side panel: the model, context and spend over its tabs, and the inspector opened on MCP servers, with a button that allows all of a server's tools for six hours and a field that adds a server in one step" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Canvas — the agent's page live on a board; point at what to change and say how</sub></td>
+<td align="center"><sub>The side panel — what a chat runs on and what it costs, over every tab; each part opens in place</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/agent-link.png" alt="The Agent link sheet of a chat: a guest's first message waiting to be admitted, a stand-in in conversation, a revoked link, and the daily limit for all guests" /></td>
+<td><img src="docs/screenshots/settings-search.png" alt="Settings as a popup over the app, searched for a word: the matching rows drawn as live controls" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Agent links — someone else's agent talks to yours; you admit it, read along and revoke it</sub></td>
+<td align="center"><sub>Settings — a popup over where you were; a search shows the rows themselves, ready to change</sub></td>
+</tr>
+<tr>
 <td><img src="docs/screenshots/usage.png" alt="Usage: spend, subscription quota windows, balances, per-session cost" /></td>
 <td><img src="docs/screenshots/board.png" alt="The task board" /></td>
 </tr>
@@ -82,13 +100,13 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: agents, a session answer, the agent's browser, a project, and the More sheet" />
+  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: agents, a session answer, its side panel, the agent's browser, a project, and the More launcher" />
 </p>
 <p align="center"><sub>The same app on a phone — inside Telegram as a Mini App, or in any browser</sub></p>
 
 <sub>The screenshots are taken over an invented installation by <code>tests/browser/screenshots.py</code>; rerun it after a change to the app. The animated tours use those captures and are built by <code>tests/browser/animated_shots.py</code>; their scenes are listed in <a href="docs/screenshots/MEDIA.md">docs/screenshots/MEDIA.md</a>.</sub>
 
-<sub>The app is bilingual — Russian and English, switched in Settings (the first row) or in the More sheet on a phone, and remembered by the browser. The same pictures in Russian: <code>docs/screenshots/ru/</code>.</sub>
+<sub>The app is bilingual — Russian and English, switched in Settings → Appearance, and remembered by the browser. The same pictures in Russian: <code>docs/screenshots/ru/</code>.</sub>
 
 ## How it is put together
 
@@ -131,20 +149,21 @@ How local mode checks a change before it restarts on it, the gates both modes sh
 
 | Area | Tools |
 |---|---|
-| Files & shell | `Exec` (inside a bubblewrap sandbox — the default on a native install where a namespace probe succeeds, optional in a container, which is a boundary already; a foreground command still running after a couple of minutes moves to the background by itself as a job, the same process carrying on, on the host and on a terminal client too; `background=true` with `JobOutput` / `JobKill` / `JobList` for what is known to run long, and `JobWait` for a pid, a file, a log line or a port; every job that ends — or is lost to a restart — wakes the session once with its outcome; a long `sleep`, a polling loop in the foreground, or a `pgrep -f` that would find its own shell is refused), `Read`, `Write`, `Edit`, `Find`, `Search` |
-| Web | `WebFetch`, `WebSearch` — DuckDuckGo out of the box with no key at all; a self-hosted SearXNG, installed from Settings → Components (natively too, without Docker) or run as a profile; Serper, Tavily, Exa, Perplexity, Keenable through the key proxy |
+| Files & shell | `Exec` (inside a bubblewrap sandbox — the default on a native install where a namespace probe succeeds, optional in a container, which is a boundary already; a foreground command still running after a couple of minutes moves to the background by itself as a job, the same process carrying on, on the host and on a terminal client too; `background=true` with `JobOutput` / `JobKill` / `JobList` for what is known to run long, and `JobWait` for a pid, a file, a log line or a port; every job that ends — or is lost to a restart — wakes the session once with its outcome; a long `sleep`, a polling loop in the foreground, or a `pgrep -f` that would find its own shell is refused), `Read`, `Write`, `Edit` (one replacement, or a batch of them in one file, all or none), `Find`, `Search` |
+| Web | `WebFetch` (with `save_to`, a file from the web straight into the workspace), `WebSearch` — DuckDuckGo out of the box with no key at all; a self-hosted SearXNG, installed from Settings → Components (natively too, without Docker) or run as a profile; Serper, Tavily, Exa, Perplexity, Keenable through the key proxy |
 | Seeing | `ImageView` — a separate vision model answers questions about an image, so the main context never carries pixels |
 | Browser | `BrowserOpen`, `BrowserSnapshot`, `BrowserAct`, `BrowserText`, `BrowserLook`, … — a real Chromium you can watch live and take over, driven by an outline of the page with refs; logins kept per project; page content fenced as data; passwords and payments left to you (`BrowserHandoff`); a purchase, a message sent, a deletion or an upload asked about first. Command-line staff get the same tools through their launch's MCP entry. Only on an installation with a browser daemon ([`docs/architecture/browser.md`](docs/architecture/browser.md)) |
-| Delegation | `SubAgent`, `SubAgentSend`, `SubAgentList`, `SpawnAgent`, `AskPeer` — helpers in the same workspace (a report wakes the leader when it is ready; an idle helper can be raised without a task; `tools_off` takes tools away from a helper, so a launch it must not make is impossible rather than discouraged), sibling sessions, named peers |
+| Delegation | `SubAgent`, `SubAgentSend`, `SubAgentList`, `SpawnAgent`, `AskPeer`, `AgentTalk` — helpers in the same workspace (a report wakes the leader when it is ready; an idle helper can be raised without a task; `tools_off` takes tools away from a helper, so a launch it must not make is impossible rather than discouraged; a chat can choose which models its helpers run on), sibling sessions, named peers, and somebody else's agent through the link they gave you, its words kept as data |
 | Time | `ScheduleCreate`, `LoopNext`, `IntentCreate` — cron, self-paced loops, standing intents on inbound events |
 | Hosting | `ServiceStart` / `ServiceStop` / `ServiceLogs` — processes that outlive the turn, on ports you can reach and share; `TerminalRead` — the screen, output and commands of the session's own terminals, read-only |
 | Pages | `PageCreate`, `PageWrite`, `PageImport`, `PageCheck`, `PagePublish`, `PageShow`, … — screens of your own inside the app, at `/app/p/<slug>` and on the rail: built from a template or with any toolchain and imported, looked at on a phone and a desktop in both schemes before you see them, published and rolled back without a restart; a page may have an agent of its own beside it (`PageBind`, `PageEmit`, `PageStorage`) ([`docs/PAGES.md`](docs/PAGES.md)) |
+| Canvas | `CanvasCreate`, `CanvasEdit`, `CanvasRead`, `CanvasList`, `CanvasShow`, `CanvasInspect` — boards in the JSON Canvas format, the one Obsidian uses, that belong to a chat or a project; the agent lays out cards and arrows, puts a page of its workspace on the board as a live frame on an origin of its own, and reads what you pointed at |
 | Widgets | `Widget` — an interactive element inside the answer (a calculator, sliders, a small chart, a checklist): one HTML document drawn in a sandboxed frame with no network, following the theme, keeping what you enter, and one click from becoming a page ([`docs/PAGES.md`](docs/PAGES.md#widgets-in-an-answer)) |
 | Memory | `Remember`, `Recall`, `Forget`, `HistorySearch` and `HistoryExpand` (this chat's full transcript), `ChatSearch` and `RecentChats` (your other chats, by topic and by time: inside a project its chats, elsewhere the chats outside projects; private chats and agents' sessions never) |
 | Quality | `Verify` — a check with a criterion, recorded as a receipt; `LearningReport` |
 | Self | `SelfWorkspace` plus either `SelfApply` (local: commit into the running checkout, restart to apply) or `SelfPropose`, `SelfRebuild`, `SelfRollback` (server: pull request, rebuild, roll back) — registered according to `[self_change] mode`; on an installation that does not change its own code there are none |
 | Planning | `BoardAdd` / `BoardUpdate` / `BoardList` / `BoardGet` — the agent's own board (shared with its subagents; tasks you post to nobody in particular are on every board), with acceptance criteria, checklists, dependencies and a per-agent work-in-progress limit; `PLAN.md` in the workspace is its rendering |
-| Extensions | `Skill` (37 bundled skills: design systems, web QA, writing, scheduling, comparable variants, figures, search discipline…), `Mcp*` with OAuth, `SendFile` (attached under the answer in the app too), `StaySilent`, `Notify` — tells you something outside the chat, routed like any notification and limited per session |
+| Extensions | `Skill` (37 bundled skills: design systems, web QA, writing, scheduling, comparable variants, figures, search discipline…), `Mcp*` with OAuth (a server added in one step from a pasted command or address, and allowed whole for a few hours when you trust it), `SendFile` (attached under the answer in the app too; a folder goes as a zip), `StaySilent`, `Notify` — tells you something outside the chat, routed like any notification and limited per session |
 
 Every tool can be switched off per session from the app. There are no answer modes: the agent works until the job is done, bounded only by the spend caps you set, and the two switches beside the model are YAGNI (the smallest change that does the job) and Autopilot.
 

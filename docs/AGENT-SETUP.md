@@ -7,9 +7,10 @@ a file; every check names what it must print. Ask the operator only for what the
 ## 0. What you are installing
 
 Daedalus is a personal, self-developing agent: a Docker Compose stack of three containers from one image
-(the agent, a key proxy that holds provider keys, and the terminals the app opens), plus three optional ones behind profiles —
-`search` (a self-hosted SearXNG), `selfdev` (the rebuilder, which a server that develops itself needs)
-and `telegram` (a local Bot API server). The operator talks to it in a web app (a PWA, installable on a
+(the agent, a key proxy that holds provider keys, and the terminals the app opens), plus optional ones behind profiles —
+`search` (a self-hosted SearXNG), `selfdev` (the rebuilder, which a server that develops itself needs),
+`telegram` (a local Bot API server), `browser` (the agent's own browser) and `guest` (the door other
+people's agents talk to). The operator talks to it in a web app (a PWA, installable on a
 phone) and, optionally, in Telegram. Read `README.md` once; it is short.
 
 Requirements on the server: Docker Engine with the compose plugin (`docker compose version`), 4 GB of
@@ -95,6 +96,7 @@ ones the operator's answers in section 1 asked for:
 | `search` | a self-hosted SearXNG | ~382 MB | they asked for one. Without it `WebSearch` goes to DuckDuckGo directly and SearXNG is only the fallback it cannot reach |
 | `selfdev` | the rebuilder, the only container that can reach Docker | ~237 MB | self-development is to resolve to `server` (section 7), which needs a way to build a new image |
 | `browser` | the agent's browser: `browserd` and Chromium from the image's `browser` target, on a network of its own with no route to the key proxy or the agent | the `:browser` tag | they want the agent to browse and to watch it in the app. Put `COMPOSE_PROFILES=browser` in `.env` rather than passing the flag, so every later compose command (the rebuilder's too) keeps it |
+| `guest` | the guest door and the small front that holds its port, for agent links other people's agents open | the same image | they want to hand out agent links. It needs a public address of its own ([below](#agent-links-the-guest-door)) |
 
 The browser skills — driving a page with Playwright, drawing with Pillow — are not in the default
 image: they are two thirds of one and most sessions never open a page. A server that needs them runs
@@ -177,8 +179,8 @@ that, has its agent asked to clean up and the operator told, once per crossing. 
 `min_free_gb` or `min_free_percent` tells the operator whoever filled it. Directories named like
 throwaway (`throwaway_patterns`: `scratch*`, `_scratch*`, `tmp`, private `uv` and `npm` caches)
 that nothing inside changed in for `cleanup_after_days` (7) are deleted and the agent is told at its
-next turn; one a checkout tracks, or anything outside the managed root, is never touched. The
-session's details and the project page show the largest folders and clean up the chosen ones.
+next turn; one a checkout tracks, or anything outside the managed root, is never touched. The Disk
+line of a chat's Details and the project page show the largest folders and clean up the chosen ones.
 
 In this Compose install the container sees only what is mounted into it, so a folder outside the stack
 needs a bind mount before an agent can work in it. The app says which projects are not reachable; add
@@ -271,7 +273,11 @@ which also allows plain http: a link is an address someone else chose, and that 
 
 ### Agent links: the guest door
 
-A link from a chat lets somebody else's agent talk to your side over plain HTTP. What it reaches is a process
+A link from a chat lets somebody else's agent talk to your side over plain HTTP. The chat's menu makes one
+(*Agent link…*), and the form asks who answers: a **stand-in** (*Дублёр* in the Russian app), a separate
+model with no tools that answers from a briefing you read and approve first, or **direct**, where the chat's
+own agent takes each of the guest's messages as a turn of its own with the tools you allow it (none, read-only,
+or all of them where the sandbox below can hold). What the link reaches is a process
 of its own with its own database, in the `guest` compose profile, off until you open it. That process has no network:
 a small front holds the port (`GUEST_DOOR_PORT`, 8764) and passes requests down a unix socket. Nothing of the
 app is on that port.
@@ -434,7 +440,7 @@ Two shapes; both keep every feature:
    the files in your workspace and tell me the date"; it must answer within a minute and the run must
    show tool steps. Before a model exists this step answers 409 with "No model is configured yet",
    which is the correct behaviour, not a fault.
-2. Settings → Models shows the model they added, marked default; Usage shows the call you just made.
+2. Settings → Models & providers shows the model they added, marked default; Usage shows the call you just made.
 3. `docker logs deploy-daedalus-1 | grep -i error` shows nothing about providers.
 
 ## 7. Updating, and whether the agent may update itself

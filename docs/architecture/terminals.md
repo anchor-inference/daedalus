@@ -1016,7 +1016,7 @@ because the token in them is a shell.
   /api/terminals/load?cap=N` reports what runs now and the machine with the cap filled. "Used now"
   (`used.rss_bytes`) is the terminals' process trees plus each daemon's own memory
   (`used.daemon_rss_bytes`), because the daemon holds every terminal's emulator and output ring and
-  no terminal process shows that memory. The cap is set in Settings → Terminals, whose bar redoes the
+  no terminal process shows that memory. The cap is set in Settings → Environments, whose bar redoes the
   projection in the page as the value is typed and warns, without refusing, past what the estimate
   carries.
 - **The event bus.** Every terminal event on the bus carries `terminal_id`, `project_id`, and
