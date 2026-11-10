@@ -178,7 +178,7 @@ Parameters are decoded strictly: an unknown field is `-32602`.
 | `terminal.read_screen` | `{id, format? "text" \| "runs" \| "vt", scrollback? ≤ 10000, tail_rows?}` → `{cols, rows, cursor{x, y, visible, abs_row}, alt_screen, title, cwd, seq, first_abs_row, lines[] \| runs[][] \| data_b64, truncated?}` | |
 | `terminal.wait_for` | `{id, regex?, scope? "screen" \| "output", since_seq?, idle_ms?, command_done?, timeout_ms}` → `{matched: "regex" \| "idle" \| "command_done" \| "exited" \| "timeout", seq, match?, command?}` | see Shell integration |
 | `terminal.commands` | `{id, last? 1..500 = 20, with_output?, output_max? ≤ 256 KiB = 64 KiB}` → `{commands:[Command], busy, shell_integration}` | see Shell integration |
-| `exec.run`, `fs.*`, `net.dial`, `net.allow`, `hooks.*` | side channels for CLI adapters: see below | |
+| `exec.run`, `exec.stream`, `fs.*`, `net.dial`, `net.allow`, `hooks.*` | side channels for CLI adapters: see below | |
 
 ### `terminal.create`
 
@@ -673,6 +673,27 @@ authenticated socket.
   about 640 KiB; `truncated` says so. A program that fails is a result, not an error. At most 16
   run at once (`1003`).
 
+### `exec.stream`
+
+`{argv, cwd?, env{}}` → `{channel, pid, path}`
+
+- A program that runs on with its standard streams on a channel: how the host runs an MCP server
+  the operator set to run on the host machine. `daemon.info` says `capabilities.exec_stream: 1`; a
+  daemon without the field has no such method, and the host names it as one to update instead of
+  calling it.
+- The checks are `exec.run`'s: the program list, an absolute existing `cwd` (default the home
+  directory), environment names that are names, the same environment a terminal gets. There is no
+  timeout. At most 32 run at once (`1003`).
+- Frames from the daemon start with a tag byte: `o` stdout, `e` stderr, and last `x` with the end
+  as JSON (`{exit_code, signal, duration_ms}`), after which the daemon closes the channel. Frames
+  from the host are the program's stdin, untagged; more than 4 MiB the program has not read ends it.
+- The host closing the channel ends the program the way the MCP lifecycle asks: its stdin is
+  closed, after 2 s its group gets `SIGHUP`, after 2 s more `SIGKILL`. The connection ending does
+  the same, so a host that restarts leaves nothing behind. When the program's own process exits,
+  what is left of its group is killed. Unlike `exec.run`'s programs it is tied to the daemon (the
+  kernel's parent-death signal on Linux, the job object on Windows), and the daemon ends every one
+  on its way out.
+
 ### `fs.*`
 
 A path must be absolute. It is allowed when, both as written (cleaned) and as the filesystem
@@ -1024,7 +1045,9 @@ because the token in them is a shell.
   roots of each environment are its project folders plus the directories adapters name
   (`set_extra_roots`), sent on every connection and whenever they change. `hook_events(launch_id)`
   yields a launch's posts in the daemon's order, kept from the moment the launch is registered, and
-  ends with the launch. `net_dial` returns a stream bounded at 1 MiB unread. Every program run,
+  ends with the launch. `net_dial` returns a stream bounded at 1 MiB unread. `exec_stream` returns
+  a `ProcessStream` whose `read` gives `("out" | "err", bytes)` and whose `close` ends the program;
+  its audit row names the environment's variables, never their values. Every program run,
   launch registered or ended, port opened, stream dialled and hook answered is in the audit, with
   the launch's terminal when it is known. Natively the daemons' state directories are sealed like
   the rest of the installation.

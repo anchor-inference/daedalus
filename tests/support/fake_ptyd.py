@@ -85,6 +85,53 @@ class FakeChannel:
         return await asyncio.wait_for(self.received.get(), timeout)
 
 
+@dataclass
+class FakeStream:
+    """A program ``exec.stream`` started: what the host wrote to its stdin, and its output to send.
+
+    A test gives the daemon a ``stream_program``, an async function of one of these, which plays the
+    program: it reads ``stdin`` and answers with ``out``, ``err`` and ``exit``."""
+
+    id: int
+    argv: list[str]
+    env: dict[str, str]
+    writer: asyncio.StreamWriter
+    stdin: asyncio.Queue[bytes] = field(default_factory=asyncio.Queue)
+    """Bytes as the host sent them; ``b""`` once the host closed the stream."""
+    closed_by_host: asyncio.Event = field(default_factory=asyncio.Event)
+    ended: bool = False
+
+    async def _send(self, payload: bytes) -> None:
+        if self.ended:
+            return
+        self.writer.write(struct.pack(">II", 4 + len(payload), self.id) + payload)
+        await self.writer.drain()
+
+    async def out(self, data: bytes) -> None:
+        await self._send(b"o" + data)
+
+    async def err(self, data: bytes) -> None:
+        await self._send(b"e" + data)
+
+    async def exit(self, code: int = 0) -> None:
+        """The program ends by itself: its exit frame, then the daemon closes the channel."""
+        await self._send(b"x" + json.dumps({"exit_code": code, "signal": "", "duration_ms": 1}).encode())
+        await self._send(b"")
+        self.ended = True
+
+    async def line(self, timeout: float = 5.0) -> bytes:
+        """The next line the host wrote, without its newline; ``b""`` once the host closed."""
+        buffer = getattr(self, "_buffer", b"")
+        while b"\n" not in buffer:
+            piece = await asyncio.wait_for(self.stdin.get(), timeout)
+            if not piece:
+                return b""
+            buffer += piece
+        line, _, rest = buffer.partition(b"\n")
+        self._buffer = rest
+        return line
+
+
 class FakePtyd:
     def __init__(self, run_dir: Path, *, env: str = "container", protocol: int = 1) -> None:
         self.run_dir = run_dir
@@ -123,6 +170,13 @@ class FakePtyd:
         self.replies: list[dict[str, Any]] = []
         self.dials: dict[int, str] = {}
         """Channel → target of an open stream; what the host writes on one is echoed back."""
+        self.exec_stream_version = 1
+        """``capabilities.exec_stream``; 0 is a daemon from before ``exec.stream``, which the host must name as old."""
+        self.stream_program: Any = None
+        """The program every ``exec.stream`` plays: an async function of a :class:`FakeStream`."""
+        self.streams: dict[int, FakeStream] = {}
+        self.streamed: asyncio.Queue[FakeStream] = asyncio.Queue()
+        """Every stream as it is started, for a test to wait on."""
         self._server: asyncio.AbstractServer | None = None
         self._subscribers: list[tuple[asyncio.StreamWriter, asyncio.Queue[dict[str, Any] | None]]] = []
         self._writers: set[asyncio.StreamWriter] = set()
@@ -224,6 +278,15 @@ class FakePtyd:
             while True:
                 channel, payload = await self._read(reader)
                 if channel != 0:
+                    if channel in self.streams:
+                        stream = self.streams[channel]
+                        stream.stdin.put_nowait(payload)
+                        if not payload:
+                            stream.closed_by_host.set()
+                            if not stream.ended:
+                                stream.ended = True
+                                await self._frame(writer, channel, b"")
+                        continue
                     if channel in self.dials:
                         if not payload:
                             del self.dials[channel]
@@ -236,6 +299,9 @@ class FakePtyd:
                 self.calls.append((method, params))
                 if method == "terminal.attach" and method not in self.fail:
                     await self._attach(writer, message["id"], params)
+                    continue
+                if method == "exec.stream" and method not in self.fail and self.exec_stream_version:
+                    await self._stream(writer, message["id"], params)
                     continue
                 if method == "events.subscribe":
                     after = int(params.get("after_seq") or 0)
@@ -276,6 +342,22 @@ class FakePtyd:
         self.channels[channel.id] = channel
         await self._send(writer, {"jsonrpc": "2.0", "id": call_id, "result": {"channel": channel.id, "client_id": f"c{channel.id}"}})
         self.attached.put_nowait(channel)
+
+    async def _stream(self, writer: asyncio.StreamWriter, call_id: int, params: dict[str, Any]) -> None:
+        argv = [str(a) for a in params.get("argv") or []]
+        name = Path(argv[0]).name if argv else ""
+        if name not in self.exec_allow:
+            await self._send(writer, {"jsonrpc": "2.0", "id": call_id, "error": {"code": 1004, "message": f"{name} is not among the programs exec.stream may run"}})
+            return
+        self._next_channel += 1
+        stream = FakeStream(self._next_channel, argv, {str(k): str(v) for k, v in (params.get("env") or {}).items()}, writer)
+        self.streams[stream.id] = stream
+        await self._send(writer, {"jsonrpc": "2.0", "id": call_id, "result": {"channel": stream.id, "pid": 4000 + stream.id, "path": f"/usr/bin/{name}"}})
+        self.streamed.put_nowait(stream)
+        if self.stream_program is not None:
+            task = asyncio.create_task(self.stream_program(stream))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     async def _channel_frame(self, writer: asyncio.StreamWriter, channel_id: int, payload: bytes) -> None:
         channel = self.channels.get(channel_id)
@@ -332,7 +414,8 @@ class FakePtyd:
             running = sum(1 for t in self.terminals.values() if t.status == "running")
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "home": self.home, "shell": "/bin/bash",
                     "capabilities": {"sandbox": self.sandbox, "emulator": "fake@1", "stats": "ok",
-                                     "inherited_env_selection": getattr(self, "inheritance_selection", True)}, "hooks": {"listen": ""},
+                                     "inherited_env_selection": getattr(self, "inheritance_selection", True),
+                                     **({"exec_stream": self.exec_stream_version} if self.exec_stream_version else {})}, "hooks": {"listen": ""},
                     "side_channels": {"exec_allow": sorted(self.exec_allow), "fs_roots": self.roots, "state_dir": f"{self.run_dir}-state"},
                     "counts": {"running": running, "exited": len(self.terminals) - running}, "machine": self.machine}
         if method == "events.unsubscribe":

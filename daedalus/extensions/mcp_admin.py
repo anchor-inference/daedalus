@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from pydantic import ValidationError
 
 from daedalus.config import McpServerConfig
-from daedalus.mcp.manager import WHERE, runs_in
+from daedalus.mcp.manager import WHERE, runs_in, where_of
 from daedalus.security import redact
 
 if TYPE_CHECKING:
@@ -81,11 +81,26 @@ def describe(app: Application) -> list[dict[str, Any]]:
             "headers": _masked(config.headers), "env": _masked(config.env), "oauth": oauth,
             "approval": config.approval, "tool_approval": dict(config.tool_approval),
             "state": live.get("state", "disabled"), "error": live.get("error"), "tools": live.get("tools", []),
-            "stderr": live.get("stderr", ""), "runs_in": WHERE[0] if config.transport == "stdio" else "",
+            "stderr": live.get("stderr", ""), "runs_in": where_of(config) if config.transport == "stdio" else "",
+            "location": config.location,
             # By their names on the server, which is what a per-tool rule names.
             "remote_tools": sorted(tool.remote_name for tool in manager.proxies(name)) if manager is not None else [],
         })
     return rows
+
+
+def host_status(app: Application) -> dict[str, Any]:
+    """Whether the app offers to run a stdio server on the host machine, and why that would fail now.
+
+    ``offered`` only in Docker: natively the machine is where every server already runs. ``problem``
+    is empty when a server can be started there now; otherwise the bridge is missing or down, or its
+    daemon is older than the streaming it needs, and the words say what to do."""
+    if WHERE[0] != "container":
+        return {"offered": False, "problem": ""}
+    bridge = app.extensions.get("host_bridge")
+    if bridge is None:
+        return {"offered": True, "problem": "this installation has no host terminal bridge; bash deploy/setup.sh offers to install it"}
+    return {"offered": True, "problem": bridge.stream_problem()}
 
 
 def _package_name(word: str) -> str:
@@ -159,25 +174,38 @@ def parse_pasted(text: str, *, taken: set[str] = frozenset()) -> tuple[str, dict
     return _clean_name(label, set(taken)), {"transport": "stdio", "command": command, "args": args, "env": env}
 
 
-async def trial(app: Application, text: str, name: str = "") -> dict[str, Any]:
+async def trial(app: Application, text: str, name: str = "", location: str = "", session_id: str = "") -> dict[str, Any]:
     """What adding a pasted server would give: its name, spec, state, tools and what it wrote, from one
-    start of it that nothing keeps. The operator then adds it as it is, or reads why it did not start."""
+    start of it that nothing keeps. The operator then adds it as it is, or reads why it did not start.
+    ``location`` is where a stdio server is tried (``server`` or ``host``), and so where it is added;
+    left out in a session's panel, it is where that session works (:func:`_default_location`)."""
     taken = set(app.config.mcp.servers)
     suggested, spec = parse_pasted(text, taken=taken)
     name = name.strip() or suggested
+    if not location and session_id and spec.get("transport") == "stdio":
+        location = await _default_location(app, session_id)
+    spec = _placed(spec, location)
     config = build(name, spec, None)
     result = await app.manager.mcp.trial(name, config, deadline=TRIAL_SECONDS)
     return {**result, "spec": {**spec, "env": _masked(spec.get("env") or {}), "headers": _masked(spec.get("headers") or {})},
-            "exists": name in taken}
+            "exists": name in taken, "location": config.location}
 
 
-async def add_pasted(app: Application, text: str, name: str = "", approval: str = "auto") -> dict[str, Any]:
+async def add_pasted(app: Application, text: str, name: str = "", approval: str = "auto", location: str = "") -> dict[str, Any]:
     """Add what was pasted, as it was tried: parsed again here so the keys in it never travel back
     to the app and return masked."""
     suggested, spec = parse_pasted(text, taken=set(app.config.mcp.servers))
     name = name.strip() or suggested
+    spec = _placed(spec, location)
     saved = await put(app, name, {**spec, "approval": approval})
     return {**saved, "probe": await probe(app, name)}
+
+
+def _placed(spec: dict[str, Any], location: str) -> dict[str, Any]:
+    """``spec`` with the place its process runs, for a stdio server; an HTTP server runs nowhere here."""
+    if location and spec.get("transport", "stdio") == "stdio":
+        return {**spec, "location": location}
+    return spec
 
 
 def build(name: str, spec: dict[str, Any], stored: McpServerConfig | None) -> McpServerConfig:
@@ -193,6 +221,7 @@ def build(name: str, spec: dict[str, Any], stored: McpServerConfig | None) -> Mc
         # edited there put a server the operator had allowed, or held to ask, back to "auto".
         body.setdefault("approval", stored.approval)
         body.setdefault("tool_approval", dict(stored.tool_approval))
+        body.setdefault("location", stored.location)
     oauth = body.get("oauth")
     if isinstance(oauth, dict):
         oauth = dict(oauth)
@@ -212,6 +241,9 @@ def build(name: str, spec: dict[str, Any], stored: McpServerConfig | None) -> Mc
         parsed = urlparse(config.url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise McpAdminError("an HTTP server needs its full http(s) URL")
+        # An HTTP server has no process here to place: it is reached at its address from wherever
+        # this process runs. A location carried over from the stdio server it was would only mislead.
+        config = config.model_copy(update={"location": "server"})
     return config
 
 
@@ -260,7 +292,17 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
             raise McpAdminError(f"no MCP server {name!r}; configured: {', '.join(sorted(app.config.mcp.servers)) or 'none'}")
         logger.info("session %s removed MCP server %s", session_id, name)
         return f"removed {name}: its tools left every session and its connection is stopped"
-    saved = await put(app, name, spec or {})
+    spec = dict(spec or {})
+    location = str(spec.pop("location", "") or "")
+    if location not in ("", "server", "host"):
+        raise McpAdminError("location is 'server' (where Daedalus runs) or 'host' (the operator's machine)")
+    if spec.get("transport", "stdio") == "stdio":
+        stored = app.config.mcp.servers.get(name)
+        location = location or (stored.location if stored is not None else await _default_location(app, session_id))
+        if location == "host" and (problem := host_status(app)["problem"]):
+            raise McpAdminError(f"{name} cannot run on the host machine now: {problem}")
+        spec["location"] = location
+    saved = await put(app, name, spec)
     logger.info("session %s %s MCP server %s", session_id, "added" if saved["added"] else "changed", name)
     result = await probe(app, name)
     verb = "added" if saved["added"] else "changed"
@@ -272,7 +314,7 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
         except (KeyError, RuntimeError) as exc:
             return (f"{verb} {name}; it answers with {len(result['tools'])} tools, but it could not be enabled here ({exc}). "
                     f"Enable it in a session with McpEnable(server={name!r}).")
-        where = f" It runs in {runs_in()}: what its tools need (a CLI, a device, a key) has to be there." if app.config.mcp.servers[name].transport == "stdio" else ""
+        where = f" It runs in {runs_in(app.config.mcp.servers[name])}: what its tools need (a CLI, a device, a key) has to be there." if app.config.mcp.servers[name].transport == "stdio" else ""
         return f"{verb} {name}; it answers with {len(result['tools'])} tools. In this session it is {enabled}.{where}"
     if result["state"] == "auth_required" and app.config.mcp.servers[name].oauth is not None:
         try:
@@ -282,9 +324,22 @@ async def agent_service(app: Application, op: str, *, session_id: str, name: str
         return (f"{verb} {name}; it needs the owner to sign in. Give them this link — after approving, the browser "
                 f"returns to the app and the link completes (Settings → MCP servers shows it):\n\n{url}\n\n"
                 f"Then McpEnable(server={name!r}).")
-    where = f" It was started in {runs_in()}." if app.config.mcp.servers[name].transport == "stdio" else ""
+    where = f" It was started in {runs_in(app.config.mcp.servers[name])}." if app.config.mcp.servers[name].transport == "stdio" else ""
     said = f"\nIts last words on stderr:\n{result['stderr']}" if result.get("stderr") and result["stderr"] not in str(result.get("error") or "") else ""
     return f"{verb} {name}, but it does not answer yet: {result.get('error') or result['state']}.{where} McpRemove takes it back.{said}"
+
+
+async def _default_location(app: Application, session_id: str) -> str:
+    """Where a new stdio server goes when the agent does not say: the host machine for a session that
+    works in a host folder — its commands run there, and what it just checked (a CLI, a device) is
+    there — when the host daemon can run it; anywhere else where Daedalus runs."""
+    if WHERE[0] != "container" or host_status(app)["problem"]:
+        return "server"
+    manager = app.manager
+    state = await manager.get_state(session_id) if manager is not None else None
+    if state is None or manager.host_folder_of(state.session.id, state.session.metadata, state.project) is None:
+        return "server"
+    return "host"
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
@@ -297,4 +352,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return []
 
 
-__all__ = ["McpAdminError", "add_pasted", "agent_service", "build", "describe", "install", "parse_pasted", "probe", "put", "remove", "trial"]
+__all__ = ["McpAdminError", "add_pasted", "agent_service", "build", "describe", "host_status", "install", "parse_pasted", "probe", "put", "remove", "trial"]

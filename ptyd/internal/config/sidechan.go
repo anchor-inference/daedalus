@@ -22,6 +22,15 @@ const (
 	// five; more than this is a client that lost count.
 	MaxExecConcurrent = 16
 
+	// MaxExecStreams bounds the exec.stream programs alive at once. Each is a server the host keeps
+	// (an MCP server on the operator's machine), so a handful is the use and this is a host that
+	// stopped closing them.
+	MaxExecStreams = 32
+
+	// StreamStdinBytes is what an exec.stream holds from the host before its program has read it.
+	// A program that stopped reading its input is ended rather than let the daemon hold more.
+	StreamStdinBytes = 4 << 20
+
 	// MaxReplyData is the most file or program output one reply carries. A reply is one frame
 	// (1 MiB) and the data travels as base64 or as JSON text, so a bigger read is cut here and
 	// continued by offset; the caller learns it from `eof` or `truncated`.

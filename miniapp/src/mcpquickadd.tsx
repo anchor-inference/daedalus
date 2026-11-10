@@ -4,8 +4,12 @@
 // kept. Adding it then saves it with the policy chosen here, and in a session switches it on there.
 // Before this the operator filled a form field by field, and a server that did not start said only
 // "Connection closed": why it failed went to the container's log.
+//
+// In Docker a stdio server can run in the Daedalus container or on the host machine, through the host
+// terminal; the trial says which it chose (a session working in a host folder starts on the host), and
+// choosing the other place tries it again there, so what is added is what was seen to work.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { t } from "./i18n";
 import { errorText } from "./ui";
@@ -13,7 +17,9 @@ import { Segmented } from "./ui/components";
 
 export type McpPolicy = "auto" | "ask" | "allow" | "deny";
 type TrialTool = { name: string; description: string; approval: string };
-type Trial = { name: string; state: string; error: string | null; tools: TrialTool[]; stderr: string; runs_in: string; exists: boolean };
+export type McpLocation = "server" | "host";
+export type McpHost = { offered: boolean; problem: string };
+type Trial = { name: string; state: string; error: string | null; tools: TrialTool[]; stderr: string; runs_in: string; exists: boolean; location: McpLocation };
 
 const TONE: Record<string, string> = { ready: "ok", connecting: "warn", auth_required: "warn", unavailable: "bad" };
 
@@ -26,18 +32,37 @@ export function policyOptions(): { id: McpPolicy; label: string }[] {
   ];
 }
 
+export function locationOptions(): { id: McpLocation; label: string }[] {
+  return [
+    { id: "server", label: t("mcp.location.server") },
+    { id: "host", label: t("mcp.location.host") },
+  ];
+}
+
+/** Whether this installation offers the host machine as a place for a stdio server, and why it would fail now. */
+export function useMcpHost(): McpHost | null {
+  const [host, setHost] = useState<McpHost | null>(null);
+  useEffect(() => {
+    let current = true;
+    api.get<{ host?: McpHost }>("/api/mcp/servers").then((view) => { if (current) setHost(view.host ?? null); }).catch(() => undefined);
+    return () => { current = false; };
+  }, []);
+  return host;
+}
+
 export function McpQuickAdd({ sessionId, toast, onAdded }: { sessionId?: string; toast: (text: string) => void; onAdded: (servers?: unknown) => void }) {
   const [input, setInput] = useState("");
   const [trial, setTrial] = useState<Trial | null>(null);
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState<McpPolicy>("auto");
   const [busy, setBusy] = useState<"try" | "add" | null>(null);
+  const host = useMcpHost();
 
-  async function tryIt() {
+  async function tryIt(location?: McpLocation) {
     setBusy("try");
     setTrial(null);
     try {
-      const result = await api.post<Trial>("/api/mcp/try", { input: input.trim() });
+      const result = await api.post<Trial>("/api/mcp/try", { input: input.trim(), location: location ?? "", session_id: sessionId ?? "" });
       setTrial(result);
       setName(result.name);
     } catch (error) {
@@ -48,7 +73,7 @@ export function McpQuickAdd({ sessionId, toast, onAdded }: { sessionId?: string;
     setBusy("add");
     try {
       const answer = await api.post<{ name: string; probe: { state: string; error: string | null }; enabled: string[] | null; servers: unknown }>(
-        "/api/mcp/add", { input: input.trim(), name: name.trim(), approval: policy, session_id: sessionId ?? "" });
+        "/api/mcp/add", { input: input.trim(), name: name.trim(), approval: policy, location: trial?.runs_in ? trial.location ?? "" : "", session_id: sessionId ?? "" });
       toast(answer.enabled ? t("mcp.quick.added.enabled", { name: answer.name }) : t("mcp.quick.added", { name: answer.name }));
       setTrial(null);
       setInput("");
@@ -75,7 +100,14 @@ export function McpQuickAdd({ sessionId, toast, onAdded }: { sessionId?: string;
             <input className="field mono mcp-trial-name" value={name} aria-label={t("settings.mcp.name")} spellCheck={false} onChange={(e) => setName(e.target.value)} />
             <span className="dt-state" data-tone={TONE[trial.state] ?? ""}>{t(`session.mcp.state.${trial.state}`)}</span>
           </div>
-          {trial.runs_in && <div className="dt-hint" data-runs-in>{t(`mcp.where.${trial.runs_in}`)}</div>}
+          {trial.runs_in && <div className="dt-hint" data-runs-in={trial.runs_in}>{t(`mcp.where.${trial.runs_in}`)}</div>}
+          {trial.runs_in && host?.offered && (
+            <div className="mfield wide" data-mcp-location={trial.location ?? "server"}>
+              <span>{t("mcp.location")}</span>
+              <Segmented value={trial.location ?? "server"} label={t("mcp.location")} options={locationOptions()} onChange={(location) => void tryIt(location)} />
+              {host.problem && <span className="dt-hint" data-tone="warn">{t("mcp.location.hostProblem", { problem: host.problem })}</span>}
+            </div>
+          )}
           {trial.error && <div className="dt-hint" data-tone="bad">{trial.error}</div>}
           {trial.stderr && (
             <details className="mcp-stderr" open={trial.state !== "ready"}>

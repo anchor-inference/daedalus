@@ -838,7 +838,7 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
-    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), own_doors: Callable[[], OwnDoors] | None = None, base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None, mcp_servers: Mapping[str, str] | None = None) -> None:
+    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), own_doors: Callable[[], OwnDoors] | None = None, base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None, mcp_servers: Mapping[str, str] | None = None, drives_host: bool = False) -> None:
         self.protected = [str(p) for p in protected_paths]
         self.egress_allow = [e for e in egress_allow if e.strip()]
         # The installation's own doors on the loopback interface: the app's API and the launcher's
@@ -872,6 +872,9 @@ class Policy:
         ``deny`` for one the operator turned off."""
         self.mcp_servers = dict(mcp_servers or {})
         """The server each MCP tool belongs to, by tool name, for a grant made for a whole server."""
+        self.drives_host = drives_host
+        """Whether the session works in a host folder from a container, its commands already running on
+        the operator's machine through the host terminal daemon."""
 
     # -- the machine's own paths ------------------------------------------------------
 
@@ -1008,18 +1011,24 @@ class Policy:
                 escalate(ASK, f"network access to {', '.join(blocked)} is outside the egress allowlist", "egress.allowlist")
         return worst
 
-    @staticmethod
-    def _mcp_command(arguments: dict[str, Any]) -> Decision | None:
+    def _mcp_command(self, arguments: dict[str, Any]) -> Decision | None:
         """What a stdio MCP server the agent adds would run, read as a command the agent typed.
 
         ``McpAdd`` starts a process as surely as ``Exec`` does, so a rule that only read Exec would
         leave it as the way round: the server's command is ``cloudflared`` and its arguments are a
-        tunnel."""
+        tunnel.
+
+        A server set to run on the host machine is a process on the operator's own computer. A session
+        that works in a host folder already runs its commands there, so for it that is nothing new; for
+        any other session it would be a way out of the container onto the machine, and the operator is
+        asked first."""
         command, args = str(arguments.get("command") or ""), [str(a) for a in arguments.get("args") or []]
         line = command if re.search(r"\s", command) and not args else shlex.join([command, *args])
         for words in shell_segments(line):
             if (tunnel := tunnels.tunnel_in(words, shell_segments)) is not None:
                 return Decision(DENY, f"{tunnel} would raise a public tunnel, which the operator opens from settings", "egress.tunnel", told=tunnels.REFUSAL.format(what=tunnel))
+        if str(arguments.get("location") or "") == "host" and not self.native and not self.drives_host:
+            return Decision(ASK, "an MCP server that would run on the operator's machine, from a session that does not work there", "mcp.host")
         return None
 
     def _web(self, url: str) -> Decision:
@@ -1138,6 +1147,7 @@ class Policy:
             ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
             ("host.own_containers", "Exec, Verify, ServiceStart", DENY, "entering or changing this installation's own containers from outside — nsenter into a process, docker or podman exec, cp, stop or a container joined to one of ours"),
+            ("mcp.host", "McpAdd", ASK, "an MCP server set to run on the host machine, added by a session that does not work in a host folder"),
             ("egress.tunnel", "Exec, Verify, ServiceStart, McpAdd", DENY, "raising a public tunnel — ngrok, cloudflared, tailscale funnel, frpc, zrok, ssh -R, an SSH service such as localhost.run or Pinggy; the operator opens tunnels from settings"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
             ("mcp.denied", "MCP tools", DENY, "an MCP tool, or every tool of a server, the operator set to deny in the server's settings"),

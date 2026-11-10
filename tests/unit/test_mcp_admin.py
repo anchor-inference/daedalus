@@ -30,6 +30,7 @@ class FakeApp:
     def __init__(self, tmp_path: Path) -> None:
         self.config = RuntimeConfig()
         self.settings = SimpleNamespace(miniapp_public_url="https://agent.example")
+        self.extensions: dict[str, object] = {}
         mcp = McpManager({}, ToolRegistry(), token_dir=tmp_path / "mcp",
                          redirect_default=lambda: mcp_callback_url(self.settings.miniapp_public_url))
         self.enabled: list[tuple[str, str]] = []

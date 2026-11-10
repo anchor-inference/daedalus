@@ -36,7 +36,11 @@ type Exec struct {
 	home    string
 	log     *slog.Logger
 	slots   chan struct{}
+	streams chan struct{}
 	tether  Tether
+
+	mu      sync.Mutex
+	running map[*Stream]struct{}
 }
 
 // Tether ties the programs a runner starts to the life of the process that runs them, for a runner
@@ -62,14 +66,16 @@ func NewExec(extra []string, environ []string, home string, log *slog.Logger) *E
 	for _, name := range append(append([]string{}, DefaultExecAllow...), extra...) {
 		allow[name] = true
 	}
-	return &Exec{allow: allow, environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent)}
+	return &Exec{allow: allow, environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent),
+		streams: make(chan struct{}, config.MaxExecStreams), running: map[*Stream]struct{}{}}
 }
 
 // NewOpenExec returns a runner without a program list, for daedalus-cli: there the operator's own
 // guard, on the machine the program runs on, decides what runs, and a list would only be a second
 // answer to the same question.
 func NewOpenExec(environ []string, home string, log *slog.Logger) *Exec {
-	return &Exec{environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent)}
+	return &Exec{environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent),
+		streams: make(chan struct{}, config.MaxExecStreams), running: map[*Stream]struct{}{}}
 }
 
 // Allowed is the allowlist, sorted, for daemon.info; nil for a runner without one.
@@ -207,33 +213,9 @@ func (e *Exec) run(ctx context.Context, r ExecRequest, h *HandOver) (ExecResult,
 	if len(r.Stdin) > config.MaxExecStdin {
 		return ExecResult{}, nil, fmt.Errorf("%w: stdin is at most %d bytes", ErrInvalid, config.MaxExecStdin)
 	}
-	cwd := r.Cwd
-	if cwd == "" {
-		cwd = e.home
-	}
-	if !filepath.IsAbs(cwd) {
-		return ExecResult{}, nil, fmt.Errorf("%w: cwd must be absolute", ErrInvalid)
-	}
-	if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
-		return ExecResult{}, nil, fmt.Errorf("%w: cwd %s is not a directory", ErrInvalid, cwd)
-	}
-	for k := range r.Env {
-		if k == "" || strings.ContainsAny(k, "=\x00") {
-			return ExecResult{}, nil, fmt.Errorf("%w: environment name %q", ErrInvalid, k)
-		}
-	}
-	extra := map[string]string{"HOME": e.home}
-	for k, v := range r.Env {
-		extra[k] = v
-	}
-	procenv.SetPWD(extra, cwd)
-	env := dropVar(procenv.BuildEnv(e.environ, nil, extra, ""), "DAEDALUS_TERMINAL_ID")
-	path, ok := procenv.LookPath(r.Argv[0], env, cwd)
-	if !ok {
-		return ExecResult{}, nil, fmt.Errorf("%w: %q is not an executable on PATH", ErrNotFound, r.Argv[0])
-	}
-	if e.allow != nil && !e.allow[ProgramName(path, runtime.GOOS)] {
-		return ExecResult{}, nil, fmt.Errorf("%w: %s is not among the programs exec.run may run", ErrForbidden, filepath.Base(path))
+	path, cwd, env, err := e.resolve(r.Argv, r.Cwd, r.Env, "exec.run")
+	if err != nil {
+		return ExecResult{}, nil, err
 	}
 
 	// The slot is held for the call, not for a job it hands over: a job counts against nothing here,
@@ -349,6 +331,43 @@ func (e *Exec) run(ctx context.Context, r ExecRequest, h *HandOver) (ExecResult,
 	e.log.Info("exec.run", "program", filepath.Base(path), "args", len(r.Argv)-1, "cwd", cwd,
 		"exit_code", res.ExitCode, "signal", res.Signal, "timed_out", timedOut, "ms", res.DurationMs)
 	return res, nil, nil
+}
+
+// resolve checks what a program is to run with, for exec.run and exec.stream alike: an absolute
+// working directory that exists, environment names that are names, and a program PATH finds and the
+// list allows. It returns the program's path, its working directory and its whole environment.
+func (e *Exec) resolve(argv []string, cwd string, vars map[string]string, method string) (string, string, []string, error) {
+	if len(argv) == 0 || argv[0] == "" {
+		return "", "", nil, fmt.Errorf("%w: argv is empty", ErrInvalid)
+	}
+	if cwd == "" {
+		cwd = e.home
+	}
+	if !filepath.IsAbs(cwd) {
+		return "", "", nil, fmt.Errorf("%w: cwd must be absolute", ErrInvalid)
+	}
+	if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
+		return "", "", nil, fmt.Errorf("%w: cwd %s is not a directory", ErrInvalid, cwd)
+	}
+	for k := range vars {
+		if k == "" || strings.ContainsAny(k, "=\x00") {
+			return "", "", nil, fmt.Errorf("%w: environment name %q", ErrInvalid, k)
+		}
+	}
+	extra := map[string]string{"HOME": e.home}
+	for k, v := range vars {
+		extra[k] = v
+	}
+	procenv.SetPWD(extra, cwd)
+	env := dropVar(procenv.BuildEnv(e.environ, nil, extra, ""), "DAEDALUS_TERMINAL_ID")
+	path, ok := procenv.LookPath(argv[0], env, cwd)
+	if !ok {
+		return "", "", nil, fmt.Errorf("%w: %q is not an executable on PATH", ErrNotFound, argv[0])
+	}
+	if e.allow != nil && !e.allow[ProgramName(path, runtime.GOOS)] {
+		return "", "", nil, fmt.Errorf("%w: %s is not among the programs %s may run", ErrForbidden, filepath.Base(path), method)
+	}
+	return path, cwd, env, nil
 }
 
 // handOver turns a running program into a Job: what it wrote so far goes to the log and into the

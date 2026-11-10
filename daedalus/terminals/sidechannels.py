@@ -131,6 +131,56 @@ class ByteStream:
             yield chunk
 
 
+class ProcessStream:
+    """An ``exec_stream`` program: its stdin, stdout and stderr over one channel of the daemon's
+    connection, for as long as it runs. ``read`` returns ``(kind, bytes)`` with kind ``out`` or
+    ``err``, and ``None`` once the program has ended or the channel closed; ``exit`` is then how it
+    ended, or ``None`` when the channel closed before the daemon could say (the connection lost).
+    ``close`` ends the program: the daemon closes its stdin, then hangs up its group, then kills it."""
+
+    def __init__(self, channel: Channel, *, env: str, pid: int, path: str) -> None:
+        self.channel = channel
+        self.env = env
+        self.pid = pid
+        self.path = path
+        self.exit: dict[str, Any] | None = None
+
+    @property
+    def closed(self) -> bool:
+        return self.channel.closed
+
+    @property
+    def reason(self) -> str:
+        return self.channel.reason
+
+    async def read(self) -> tuple[str, bytes] | None:
+        while True:
+            frame = await self.channel.recv()
+            if not frame:
+                return None
+            tag, body = frame[:1], frame[1:]
+            if tag == b"o":
+                return "out", body
+            if tag == b"e":
+                return "err", body
+            if tag == b"x":
+                try:
+                    self.exit = json.loads(body)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self.exit = {}
+            # Anything else is a frame of a newer daemon this host does not know; it is skipped.
+
+    async def write(self, data: bytes) -> None:
+        try:
+            for start in range(0, len(data), STREAM_WRITE_CHUNK):
+                await self.channel.send(data[start : start + STREAM_WRITE_CHUNK])
+        except Unavailable as exc:
+            raise EnvUnavailable(f"the program {self.path} is gone: {exc.detail}", env=self.env, reason=exc.reason) from None
+
+    async def close(self) -> None:
+        await self.channel.close()
+
+
 class _HookQueue:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[HookEvent | None] = asyncio.Queue()
@@ -224,6 +274,32 @@ class SideChannels:
         if audit:
             await self.audit("", env, actor, "exec", {**detail, "exit_code": out.exit_code, "signal": out.signal, "timed_out": out.timed_out, "duration_ms": out.duration_ms})
         return out
+
+    async def exec_stream(self, env: str, argv: builtins.list[str], *, cwd: str | None = None, env_vars: dict[str, str] | None = None,
+                          actor: str = "system") -> ProcessStream:
+        """Start a program of the daemon's list in ``env`` that runs on with its standard streams
+        bridged here (``exec.stream``): an MCP server on the operator's machine. It ends when the
+        stream is closed, when this connection to the daemon ends, or by itself.
+
+        The audit keeps the program and its arguments, and of its environment only the names: the
+        values are the server's keys, which stay as hidden as they are where a server starts here."""
+        if not argv:
+            raise InvalidRequest("a program needs an argv")
+        params: dict[str, Any] = {"argv": list(argv)}
+        if cwd:
+            params["cwd"] = cwd
+        if env_vars:
+            params["env"] = dict(env_vars)
+        detail: dict[str, Any] = {"argv": [a[:200] for a in argv[:32]], "cwd": cwd, "env": sorted(env_vars or {})}
+        try:
+            result = await self._side_call(env, "exec.stream", params, what=f"starting {argv[0]}")
+        except TerminalError as exc:
+            await self.audit("", env, actor, "exec_stream", {**detail, "error": exc.message})
+            raise
+        channel = self._client(env).channel(int(result["channel"]))
+        stream = ProcessStream(channel, env=env, pid=int(result.get("pid") or 0), path=str(result.get("path") or ""))
+        await self.audit("", env, actor, "exec_stream", {**detail, "pid": stream.pid})
+        return stream
 
     # -- files ------------------------------------------------------------------------------
 
@@ -611,4 +687,4 @@ class SideChannels:
             self._launch_terminals.setdefault(str(data["launch_id"]), event.terminal_id)
 
 
-__all__ = ["ByteStream", "SideChannels", "side_failure"]
+__all__ = ["ByteStream", "ProcessStream", "SideChannels", "side_failure"]

@@ -965,11 +965,19 @@ class McpOAuthConfig(BaseModel):
 McpApproval = Literal["auto", "ask", "allow", "deny"]
 
 
+McpLocation = Literal["server", "host"]
+
+
 class McpServerConfig(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    location: McpLocation = "server"
+    """Where a stdio server's process runs. ``server`` is where Daedalus runs: its container in Docker,
+    the machine itself natively. ``host`` is the operator's machine, reached through the host terminal
+    daemon, for a server that needs what only the machine has (``adb`` and a paired phone, a CLI signed
+    in there). Natively the two are the same place and ``host`` starts it here as ``server`` does."""
     url: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
     description: str = ""

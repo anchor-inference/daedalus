@@ -3,7 +3,9 @@
 At 1440 × 900 and on a 390 px phone: the card lists each server with its state and what it runs, a
 server waiting for its sign-in offers Sign in, Add server opens a form whose fields follow the
 connection kind and whose save sends the server to the host, Remove asks first and sends a delete,
-and a sign-in that came back says so once and leaves the address clean. Nothing scrolls sideways.
+and a sign-in that came back says so once and leaves the address clean. A stdio server offers where
+it runs (the Daedalus server or the host machine) and an HTTP one does not; a pasted command tried
+again on the host says it starts there and is added there. Nothing scrolls sideways.
 
 Exit 0 when every step holds.
 """
@@ -30,7 +32,7 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
 
     def route(r) -> None:  # type: ignore[no-untyped-def]
         url = r.request.url.split("?", 1)[0]
-        if "/api/mcp/" in url and r.request.method in ("PUT", "DELETE"):
+        if "/api/mcp/" in url and r.request.method in ("PUT", "DELETE", "POST"):
             sent.append((r.request.method, url[url.index("/api/"):], json.loads(r.request.post_data or "{}")))
         return stub(r)
 
@@ -52,6 +54,32 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
     sign_in = "Sign in" if LANG == "en" else "Войти"
     if tracker.get_by_role("button", name=sign_in).count() != 1 or files.get_by_role("button", name=sign_in).count():
         problems.append("only the server waiting for its sign-in should offer Sign in")
+    host_label = "Host machine" if LANG == "en" else "Хост-машина"
+    if files.locator("[data-mcp-location='server']").count() != 1 or tracker.locator("[data-mcp-location]").count():
+        problems.append("only the stdio server should offer where it runs")
+    files.locator("[data-mcp-location]").get_by_role("radio", name=host_label).click()
+    page.wait_for_timeout(400)
+    moved = next((item for item in sent if item[0] == "PUT" and item[1] == "/api/mcp/servers/files"), None)
+    if moved is None or moved[2].get("location") != "host" or moved[2].get("command") != "npx":
+        problems.append(f"moving the server to the host was not sent as asked: {moved}")
+    quick = card.locator("[data-mcp-quick]")
+    quick.locator("input.field").first.fill("npx -y @mobilenext/mobile-mcp@latest")
+    quick.get_by_role("button", name="Try" if LANG == "en" else "Проверить").click()
+    trial = quick.locator("[data-mcp-trial]")
+    trial.wait_for(timeout=5000)
+    if trial.locator("[data-runs-in='container']").count() != 1:
+        problems.append("the trial does not say it ran in the container")
+    trial.locator("[data-mcp-location]").get_by_role("radio", name=host_label).click()
+    quick.locator("[data-runs-in='host']").wait_for(timeout=5000)
+    tried = [item for item in sent if item[1] == "/api/mcp/try"]
+    if len(tried) != 2 or tried[-1][2].get("location") != "host":
+        problems.append(f"choosing the host did not try the server there: {tried}")
+    quick.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
+    page.wait_for_timeout(400)
+    added = next((item for item in sent if item[1] == "/api/mcp/add"), None)
+    if added is None or added[2].get("location") != "host":
+        problems.append(f"the server was not added where it was tried: {added}")
+    sent.clear()
     card.get_by_role("button", name="Fill in by hand" if LANG == "en" else "Заполнить вручную").click()
     form = card.locator("[data-mcp-form]")
     form.locator("input.field").first.fill("linear")
