@@ -259,10 +259,11 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
         "BrowserAskOperatorChrome instead. When several of their Chromes are connected, chrome names one, by name or id, "
         "and the conversation stays in it; chrome='?' lists them and opens nothing. Chrome lets no extension open the Chrome Web Store (its developer console "
         "included) or the browser's own pages, so their Chrome never shows you those; your own browser opens the store. "
-        + NETWORK_ASK + " Your browser has no WebGL unless turned on: webgl='software' "
-        "(drawn on the CPU, works everywhere) or 'gpu' (the machine's GPU, where one is passed in) asks the operator — say "
-        "in why what needs 3D — unless they allowed it already; on their yes the browser restarts in that mode with its "
-        "tabs. webgl='off' turns it off again without asking."
+        + NETWORK_ASK + " Your browser starts without WebGL. For a 3D page (three.js, a map, a canvas game) call "
+        "BrowserOpen(webgl='gpu'): the machine has a GPU and the operator allowed it, so it is not asked; the browser "
+        "restarts on it with its tabs, and the result names the renderer (the GPU's name, not SwiftShader). Where no "
+        "GPU is passed in the result says so, and webgl='software' draws on the CPU, slowly. If the operator's settings "
+        "ask first, say in why what needs 3D. webgl='off' turns it off again."
     ),
 )
 async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None, webgl: str | None = None, chrome: str | None = None) -> ToolResult:

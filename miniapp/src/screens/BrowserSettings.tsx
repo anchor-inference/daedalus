@@ -42,7 +42,7 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   injection_monitor_preset: "",
   extract_preset: "",
   point_clicks: false,
-  webgl_allow: "ask",
+  webgl_allow: "gpu",
   user: DEFAULT_USER,
 };
 

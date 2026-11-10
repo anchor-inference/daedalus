@@ -252,7 +252,13 @@ ENTRYPOINT ["python3", "/opt/launcher/supervisor.py"]
 # service (the BROWSER_GPU_* lines in deploy/env.example). Xvfb has no DRI3, so OpenGL on the virtual
 # display is always Mesa's llvmpipe whatever device is passed in; Vulkan on the render node is the
 # browser's one way to the GPU there (measured with a GT 710 on nouveau: Mesa's NVK, WebGL 2, 34-38 fps
-# on a three.js scene llvmpipe drew at 12).
+# on a three.js scene llvmpipe drew at 12). The agent's own image is this target too, and takes the same
+# drivers with the same argument (deploy/compose.yaml) for the GPU its commands get.
+#
+# Each of Playwright's Chromium binaries is renamed to <name>.real and deploy/chromium-gpu.sh stands in
+# its place, in the same layer as the download so the image does not carry the binaries twice: an agent's
+# script that launches Chromium plainly gets it on the GPU when the agent's container has one. Why a
+# wrapper, and when it adds nothing, is in the script.
 FROM runtime AS browser
 ARG GOOGLE_CHROME=0
 ARG BROWSER_GPU=0
@@ -262,6 +268,7 @@ ENV DAEDALUS_VENV_EXTRAS=speech,browser
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 COPY --from=venv /build/requirements-browser.txt /tmp/requirements-browser.txt
 COPY deploy/apt-packages-browser.txt /tmp/apt-packages-browser.txt
+COPY deploy/chromium-gpu.sh /usr/local/lib/daedalus/chromium-gpu.sh
 RUN apt-get update \
     && grep -v '^#' /tmp/apt-packages-browser.txt | xargs apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man \
@@ -271,7 +278,10 @@ RUN apt-get update \
     && shell="$(find /opt/pw-browsers -type f \( -name chrome-headless-shell -o -name headless_shell \) | head -1)" \
     && test -n "$shell" \
     && ln -s "$shell" /usr/local/bin/chromium \
-    && test -n "$(find /opt/pw-browsers -path '*/chromium-*/chrome-linux*/chrome' -type f | head -1)"
+    && test -n "$(find /opt/pw-browsers -path '*/chromium-*/chrome-linux*/chrome' -type f | head -1)" \
+    && for bin in $(find /opt/pw-browsers -type f \( -name chrome-headless-shell -o -name headless_shell -o -path '*/chromium-*/chrome-linux*/chrome' \)); do \
+        mv "$bin" "$bin.real" && install -m 0755 /usr/local/lib/daedalus/chromium-gpu.sh "$bin"; \
+    done
 RUN if [ "$GOOGLE_CHROME" = 1 ]; then \
         test "$TARGETARCH" = amd64 || { echo "Google Chrome has no Linux build for $TARGETARCH" >&2; exit 1; }; \
         curl -fsSLo /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \

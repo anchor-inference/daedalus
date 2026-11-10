@@ -69,6 +69,45 @@ with sync_playwright() as p:
     browser.close()
 ```
 
+## WebGL, three.js and other 3D pages
+
+When the operator passed a GPU into the agent's container, a plain `p.chromium.launch()` draws WebGL on
+it: the image's Chromium adds the switches itself (`--use-angle=vulkan --ignore-gpu-blocklist`). Check what
+draws before you judge a frame rate, once per script:
+
+```python
+renderer = page.evaluate("""() => {
+  const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+  if (!gl) return 'no WebGL';
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+}""")
+print('renderer:', renderer)   # the GPU: "ANGLE (NVIDIA, Vulkan … NVK …)"; the CPU: "SwiftShader" or "llvmpipe"
+```
+
+**SwiftShader or llvmpipe means the browser fell back to the processor, not that the machine has no GPU.**
+Never tell the operator there is no video card from that. Find out why instead:
+- `ls -l /dev/dri` in Exec: no `renderD…` node means the GPU is not passed into the agent's commands
+  (`AGENT_GPU_DEVICE` in the installation's `.env`). Say exactly that, and test with what you have.
+- `echo $DAEDALUS_CHROMIUM_GPU` is not `1`, or you launched a Chromium the image did not install (one you downloaded,
+  `executable_path=…`, another `PLAYWRIGHT_BROWSERS_PATH`): pass the switches yourself,
+  `p.chromium.launch(args=["--use-angle=vulkan", "--ignore-gpu-blocklist"])`.
+- Your own `args` put `--use-angle=swiftshader` or `--disable-gpu`: take them out.
+
+The card is modest, and its frame rate is not what a visitor's laptop gets: a frame rate here proves a scene
+runs and finds the frames that stall, not that it is fast enough. Heavy fill (large points, many full-screen
+passes, a high `devicePixelRatio`) is slow on it too.
+
+**Test a heavy animation in two passes**, or every check waits on the scene:
+1. One real WebGL check: load the page, wait for a couple of `requestAnimationFrame`s, read the renderer,
+   check the canvas is not blank (a screenshot of the canvas, or `gl.readPixels` on a few points), and if it
+   matters measure frames over three to five seconds. Once, not per check.
+2. Everything else (layout, text, clicks, forms, responsive shots) with the animation skipped:
+   `browser.new_context(reduced_motion="reduce")` when the page honours `prefers-reduced-motion` (build it
+   to, a static frame is also what those visitors should get), or a switch of the page's own (`?static=1`
+   that renders one frame and stops the loop). A screenshot of a still frame takes a moment; one of a
+   running 40 000-point scene on the processor took minutes.
+
 ## Reconnaissance-Then-Action Pattern
 
 1. **Inspect rendered DOM**:
