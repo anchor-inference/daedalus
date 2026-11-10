@@ -841,7 +841,7 @@ class SettingsBody(BaseModel):
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
     navigation: dict[str, Any] | None = None
-    """The rail, its More menu and the phone drawer. Each field sent replaces that field whole, so
+    """The rail, its More launcher and the phone drawer. Each field sent replaces that field whole, so
     an icon override or a hidden item can be taken away; a field left out is kept."""
     pages: dict[str, Any] | None = None
     """The caps of custom pages: bytes and files per page, versions kept, the largest stored value."""

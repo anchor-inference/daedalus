@@ -1,4 +1,4 @@
-"""The ``[navigation]`` section: where the rail, its More menu and the phone drawer put each destination."""
+"""The ``[navigation]`` section: where the rail, its More launcher and the phone drawer put each destination."""
 
 from __future__ import annotations
 

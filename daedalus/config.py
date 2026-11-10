@@ -2366,7 +2366,7 @@ NAV_LIST_MAX = 200
 
 
 class NavigationConfig(BaseModel):
-    """Where each destination of the app sits: the desktop rail, its More menu, the phone drawer.
+    """Where each destination of the app sits: the desktop rail, its More launcher, the phone drawer.
 
     Every list empty is the layout the app ships with. An id the app does not know (a page that was
     removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
@@ -2377,10 +2377,10 @@ class NavigationConfig(BaseModel):
     rail: list[str] = Field(default_factory=list)
     """The desktop rail, top to bottom. A built-in place not listed anywhere keeps its usual spot."""
     more: list[str] = Field(default_factory=list)
-    """Items under the rail's More menu, in order within their group."""
+    """Items in the rail's More launcher, in order within their group."""
     drawer: list[str] = Field(default_factory=list)
     """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
-    waits in the phone's More sheet. Empty is each mode's usual drawer."""
+    waits in the phone's More launcher. Empty is each mode's usual drawer."""
     hidden: list[str] = Field(default_factory=list)
     """Never shown, on any device. It wins over the three lists above."""
     icons: dict[str, str] = Field(default_factory=dict)
