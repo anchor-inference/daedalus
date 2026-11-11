@@ -2053,8 +2053,9 @@ class DiskConfig(BaseModel):
     which was well under the limit is measured again only every ``idle_recheck_hours``."""
     idle_recheck_hours: int = Field(default=6, ge=1)
     workspace_soft_limit_gb: float = Field(default=20.0, ge=0)
-    """The size past which a workspace's agent is asked to clean up and the operator is told; told
-    again at twice the size. 0 turns the per-workspace warning off."""
+    """The size, in decimal gigabytes, past which a workspace's agent is asked to clean up and the
+    operator is told; told again at twice the size. 0 turns the per-workspace warning off. It is the
+    default only: the operator can give one workspace a limit of its own, or none, in its Disk usage."""
     min_free_gb: float = Field(default=20.0, ge=0)
     """Free space on the workspaces volume below which the operator is told, whoever filled it."""
     min_free_percent: float = Field(default=5.0, ge=0, le=100)

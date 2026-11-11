@@ -5,11 +5,16 @@ measure on the spot (bounded, in a thread), because the operator opening them is
 A clean-up removes only what the operator chose, inside one top-level directory of the managed
 workspaces root, and refuses a link anywhere on the path, the workspace itself, the directories the
 installation keeps there, and anything a checkout tracks unless they said to include it.
+
+Every workspace is shown against its own limit: the one the operator set for it, or the default from
+the settings when they set none. Only the operator changes a limit, through the route here; the agent
+whose workspace it is has no way to, because a limit it could raise would not limit it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -26,8 +31,18 @@ from daedalus.host.disk_usage import Measurement
 if TYPE_CHECKING:
     from daedalus.app import Application
 
+logger = logging.getLogger(__name__)
+
 LISTED_ENTRIES = 12
 LISTED_CHILDREN = 5
+MOST_LIMIT_GB = 1_000_000
+
+
+class LimitBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit_gb: float | None = Field(ge=0, le=MOST_LIMIT_GB)
+    """Decimal gigabytes, as the setting is written. 0 is "no limit", null is "follow the default"."""
 
 
 class CleanupBody(BaseModel):
@@ -78,6 +93,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     async def details(names: list[tuple[str, str]], outside: list[dict[str, str]]) -> dict[str, Any]:
         g = guard()
+        await g.load()  # The limits are read once; the guard's own first pass waits two minutes after start.
         free, total = await asyncio.to_thread(disk_usage.free_space, g.root)
         patterns = list(g.config.throwaway_patterns)
         workspaces = []
@@ -89,10 +105,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             entries = await asyncio.to_thread(_entries, workspace, measurement, patterns)
             workspaces.append({
                 "name": name, "label": label, "bytes": measurement.bytes, "truncated": measurement.truncated,
-                "over": level_for(measurement.bytes, g.limit), "entries": entries,
+                "limit_bytes": g.limit_for(name), "own_limit": g.has_own_limit(name),
+                "over": level_for(measurement.bytes, g.limit_for(name)), "entries": entries,
             })
         return {
-            "limit_bytes": g.limit, "free_bytes": free, "total_bytes": total,
+            "default_limit_bytes": g.default_limit, "free_bytes": free, "total_bytes": total,
             "low_disk": bool(total) and free < g.floor(total),
             "workspaces": workspaces, "outside": outside,
         }
@@ -100,18 +117,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/disk")
     async def disk_overview(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         g = guard()
+        await g.load()
         free, total = await asyncio.to_thread(disk_usage.free_space, g.root)
         owners = await g.owners()
         rows = [
             {
                 "name": name, "bytes": m.bytes, "truncated": m.truncated, "measured_at": _iso(m.measured_at),
-                "over": level_for(m.bytes, g.limit), "owner": owners[name].view() if name in owners else {"kind": "none", "id": "", "title": ""},
+                "limit_bytes": g.limit_for(name), "own_limit": g.has_own_limit(name),
+                "over": level_for(m.bytes, g.limit_for(name)), "owner": owners[name].view() if name in owners else {"kind": "none", "id": "", "title": ""},
             }
             for name, m in sorted(g.sizes.items(), key=lambda item: item[1].bytes, reverse=True)
         ]
         return {
             "free_bytes": free, "total_bytes": total, "low_disk": bool(total) and free < g.floor(total),
-            "limit_bytes": g.limit, "checked_at": _iso(g.checked_at or 0.0), "workspaces": rows,
+            "default_limit_bytes": g.default_limit, "checked_at": _iso(g.checked_at or 0.0), "workspaces": rows,
         }
 
     @api.get("/api/disk/session/{session_id}")
@@ -149,6 +168,22 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             else:
                 outside.append({"label": label, "env": str(folder["env"] or "")})
         return names, outside
+
+    @api.put("/api/disk/limit/{workspace}")
+    async def disk_limit(workspace: str, body: LimitBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Set one workspace's limit, or hand it back to the default; answers what the view needs to redraw."""
+        g = guard()
+        try:
+            await g.set_limit(workspace, None if body.limit_gb is None else round(body.limit_gb * 1e9))
+        except KeyError:
+            raise HTTPException(404, "no such workspace") from None
+        measurement = g.sizes.get(workspace) or await g.measure(workspace)
+        limit = g.limit_for(workspace)
+        logger.info("operator set the limit of workspace %s to %s", workspace, "the default" if body.limit_gb is None else disk_usage.human(limit) if limit else "none")
+        return {
+            "name": workspace, "limit_bytes": limit, "own_limit": g.has_own_limit(workspace),
+            "default_limit_bytes": g.default_limit, "over": level_for(measurement.bytes, limit),
+        }
 
     @api.post("/api/disk/cleanup")
     async def disk_cleanup(body: CleanupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

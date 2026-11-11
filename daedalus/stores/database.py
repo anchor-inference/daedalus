@@ -3983,6 +3983,19 @@ async def _link_flows(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration(LINK_FLOWS_SQL, _link_flows))
 
+# 164 — a size limit of its own for one workspace, over the global one in the disk settings. The key is the
+# workspace's directory name under the workspaces root, which is what the disk guard measures and what the
+# disk views list, and not a session or project id: a project's folder and a session's home are both just a
+# directory there, and one limit must hold for whichever of them owns it. 0 stands for "no limit" and is a
+# value of its own; a workspace without a row follows the global limit.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS workspace_limits (
+    name TEXT PRIMARY KEY,
+    limit_bytes INTEGER NOT NULL CHECK (limit_bytes >= 0),
+    updated_at TEXT NOT NULL
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

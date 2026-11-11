@@ -173,8 +173,11 @@ offered as an undo in the app, which says once that the older ones were removed.
 
 The workspaces themselves are watched by the disk guard, set in `[disk]`. Every session home and
 managed project folder under the workspaces root is measured (at most every `check_minutes`, an idle
-small one every `idle_recheck_hours`); one past `workspace_soft_limit_gb` (20), and again at twice
-that, has its agent asked to clean up and the operator told, once per crossing. Free space below
+small one every `idle_recheck_hours`); one past its limit, and again at twice that, has its agent
+asked to clean up and the operator told, once per crossing. The limit is `workspace_soft_limit_gb`
+(20 GB, decimal; also under Settings → Limits) unless the operator gave that workspace one of its own,
+or "no limit", with Change limit in its Disk usage; only the operator can, the agent has no tool for
+it. Raising a limit forgets the warnings it made stale, so crossing the new one is news again. Free space below
 `min_free_gb` or `min_free_percent` tells the operator whoever filled it. Directories named like
 throwaway (`throwaway_patterns`: `scratch*`, `_scratch*`, `tmp`, private `uv` and `npm` caches)
 that nothing inside changed in for `cleanup_after_days` (7) are deleted and the agent is told at its
