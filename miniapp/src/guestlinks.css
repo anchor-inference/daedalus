@@ -37,7 +37,23 @@
 .guest-form .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
 .guest-form .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .guest-form .sub { margin: 4px 0 0; }
-.guest-form .sub.guest-warning { color: var(--warn); }
+.guest-form .sub.guest-warning { display: flex; align-items: flex-start; gap: 6px; color: var(--warn); }
+.guest-form .sub.guest-warning .ic { flex: none; margin-top: 2px; }
+/* The choice of who answers comes first and decides which fields follow, so it is set apart from them. */
+.guest-levels { margin-top: var(--space-2); }
+/* A heading over the limits: the rows below it are all of one kind, and the eye looks for them there. */
+.guest-section { margin-top: var(--space-4); padding-bottom: 2px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+/* "No limit" sits beside the number it replaces, and the number goes while it is chosen: the choice is
+   visible as a word, never a 0 the operator would have to know means none. */
+.guest-nolimit { flex: none; min-width: 96px; justify-content: center; }
+.guest-limit[data-none] .settings-row-ctl { min-height: var(--ctl-h-sm); }
+/* On a phone the number spans the row as every number field does, and "No limit" stays on its line at the
+   end rather than taking a line of its own under it: three limits were six rows tall. */
+@media (max-width: 599px) {
+  .guest-limit .settings-row-ctl, .guest-daily .settings-row-ctl { flex-wrap: nowrap; }
+  .guest-limit .settings-row-ctl > .settings-num, .guest-daily .settings-row-ctl > .settings-num { flex: 1 1 0; }
+}
+.guest-daily .settings-row-ctl { flex-wrap: wrap; }
 .guest-draft { align-self: flex-start; margin-top: var(--space-2); }
 .guest-toggle { align-self: flex-start; }
 .guest-form .toggle-row { margin-top: var(--space-2); }

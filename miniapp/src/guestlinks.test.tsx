@@ -58,6 +58,7 @@ const DOOR: GuestDoor = {
   full_tools: true,
   chat_priced: true,
   full_tools_why: "",
+  trusted_defaults: { usd_limit: 0, turns_per_day: 0, turns_total: 0, invite_hours: 0, conversation_hours: 0, idle_hours: 0 },
 };
 const NOW = Math.floor(Date.now() / 1000);
 const LINK: GuestLink = {
@@ -107,6 +108,9 @@ function type(selector: string, text: string) {
   field.dispatchEvent(new Event("input", { bubbles: true }));
 }
 const sent = (suffix: string) => world.posted.find(([path]) => path.endsWith(suffix));
+function pick(level: "stand_in" | "direct" | "trusted") {
+  document.querySelector<HTMLInputElement>(`[data-guest-level='${level}'] input`)!.click();
+}
 
 describe("what is copied", () => {
   it("is one line of intent and then the address, because a bare address starts nothing", () => {
@@ -119,11 +123,14 @@ describe("what is copied", () => {
 
 describe("the numbers", () => {
   it("are held to what the door accepts", () => {
-    expect(numberOf("usd_limit", "0")).toBe(0);
+    // 0 is how the door stores "no limit", which is a choice of its own here and never a number typed.
+    expect(numberOf("usd_limit", "0")).toBeNull();
+    expect(numberOf("usd_limit", "0.5")).toBe(0.5);
     expect(numberOf("usd_limit", "10001")).toBeNull();
     expect(numberOf("turns_per_day", "0")).toBeNull();
     expect(numberOf("turns_per_day", "2.5")).toBeNull();
     expect(numberOf("invite_hours", "0")).toBeNull();
+    expect(numberOf("invite_hours", "0.05")).toBeNull();
     expect(numberOf("invite_hours", "0.5")).toBe(0.5);
     expect(numberOf("retention_days", "0")).toBe(0);
     expect(numberOf("retention_days", "")).toBeNull();
@@ -200,6 +207,13 @@ describe("the list", () => {
     expect(world.put).toEqual([["/api/guest/settings", { usd_per_day: 5 }]]);
   });
 
+  it("lifts the daily limit with one choice, saved at once", async () => {
+    await open();
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-nolimit='usd_per_day']")!.click());
+    expect(world.put).toEqual([["/api/guest/settings", { usd_per_day: 0 }]]);
+    expect(document.querySelector("#guest-daily")).toBeNull();
+  });
+
   it("reads a conversation as plain text, saying who spoke", async () => {
     world.links = [{ ...LINK, mode: "stand_in", model_name: "cheap-1", conversation: { ...LINK.conversation!, state: "open" } }];
     world.detail = {
@@ -241,7 +255,7 @@ describe("making a stand-in link", () => {
     await act(async () => button(t("guest.create")).click());
     const [path, body] = sent("/guest/links")!;
     expect(path).toBe("/api/sessions/s1/guest/links");
-    expect(body).toMatchObject({ label: "Anna's agent", topic: "the schedule", mode: "stand_in", model_id: "cheap", briefing: "We meet on Tuesday.", briefing_approved: true, approval: true, usd_limit: 1, turns_per_day: 40, invite_hours: 72 });
+    expect(body).toMatchObject({ label: "Anna's agent", topic: "the schedule", mode: "stand_in", model_id: "cheap", briefing: "We meet on Tuesday.", briefing_approved: true, approval: true, usd_limit: 1, turns_per_day: 40, invite_hours: 72, tools: "none", instructions: "" });
     expect(document.querySelector<HTMLTextAreaElement>("#guest-url")!.value).toBe(`${t("guest.intro")}. the schedule: ${world.invite}`);
     expect(document.querySelector("[data-guest-once]")?.textContent).toBe(t("guest.once"));
   });
@@ -270,26 +284,40 @@ describe("making a stand-in link", () => {
     expect(document.querySelector("#guest-turns_per_day")?.getAttribute("aria-invalid")).toBe("true");
     expect(button(t("guest.create")).disabled).toBe(true);
   });
+
+  it("offers no limit as a choice beside each number, and sends it as none", async () => {
+    await form();
+    await act(async () => type("#guest-briefing", "Text."));
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-nolimit='turns_per_day']")!.click());
+    expect(document.querySelector("#guest-turns_per_day")).toBeNull();
+    expect(document.querySelector("[data-guest-nolimit='turns_per_day']")?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-guest-nolimit='invite_hours']")?.textContent).toBe(t("guest.never"));
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-nolimit='invite_hours']")!.click());
+    await act(async () => button(t("guest.create")).click());
+    expect(sent("/guest/links")![1]).toMatchObject({ turns_per_day: 0, invite_hours: 0, usd_limit: 1, turns_total: 200 });
+  });
 });
 
 describe("making a direct link", () => {
   async function direct() {
     await open();
     await act(async () => button(t("guest.make")).click());
-    await act(async () => button(t("guest.mode.direct")).click());
+    await act(async () => pick("direct"));
   }
   const chosen = () => Array.from(document.querySelectorAll<HTMLElement>(".segmented button[aria-checked='true']")).map((b) => b.textContent);
-  const lines = () => Array.from(document.querySelectorAll(".guest-form .sub")).map((line) => line.textContent);
+  // The lines of the form itself, not the one-line meaning under each choice of who answers.
+  const lines = () => Array.from(document.querySelectorAll(".guest-form > .sub")).map((line) => line.textContent);
 
-  it("warns in one line, defaults the tools to read-only and sends no briefing", async () => {
+  it("says what each choice means in one line, defaults the tools to read-only and sends no briefing", async () => {
     await direct();
-    expect(document.querySelectorAll("[data-guest-warning]")).toHaveLength(1);
-    expect(document.querySelector("[data-guest-warning]")?.textContent).toBe(t("guest.direct.warning"));
-    expect(document.querySelectorAll(".guest-form .sub")).toHaveLength(1);
+    expect(Array.from(document.querySelectorAll(".guest-levels .sub")).map((line) => line.textContent)).toEqual(["stand_in", "direct", "trusted"].map((level) => t(`guest.level.${level}.hint`)));
+    expect(document.querySelectorAll("[data-guest-warning]")).toHaveLength(0);
+    expect(lines()).toEqual([]);
     expect(chosen()).toContain(t("guest.tools.read"));
     expect(document.querySelector("#guest-briefing")).toBeNull();
+    await act(async () => type("#guest-instructions", "Share the draft."));
     await act(async () => button(t("guest.create")).click());
-    expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "read", model_id: "", briefing: "", briefing_approved: true });
+    expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "read", model_id: "", briefing: "", briefing_approved: true, instructions: "Share the draft.", usd_limit: 1 });
   });
 
   it("asks the door about this chat", async () => {
@@ -300,9 +328,9 @@ describe("making a direct link", () => {
   it("says what all tools is, in one more line, while it is chosen", async () => {
     await direct();
     await act(async () => button(t("guest.tools.all")).click());
-    expect(lines()).toEqual([t("guest.direct.warning"), t("guest.tools.all.note")]);
+    expect(lines()).toEqual([t("guest.tools.all.note")]);
     await act(async () => button(t("guest.tools.read")).click());
-    expect(lines()).toEqual([t("guest.direct.warning")]);
+    expect(lines()).toEqual([]);
     await act(async () => button(t("guest.tools.all")).click());
     await act(async () => button(t("guest.create")).click());
     expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "all" });
@@ -328,7 +356,7 @@ describe("making a direct link", () => {
     await direct();
     expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent === t("guest.tools.all"))).toBe(false);
     expect(chosen()).toContain(t("guest.tools.read"));
-    expect(lines()).toEqual([t("guest.direct.warning"), t(`guest.tools.why.${why}`)]);
+    expect(lines()).toEqual([t(`guest.tools.why.${why}`)]);
     await act(async () => button(t("guest.create")).click());
     expect(sent("/guest/links")![1]).toMatchObject({ mode: "direct", tools: "read" });
   });
@@ -350,8 +378,76 @@ describe("making a direct link", () => {
   it("names the link's own record for what it is, since the chat keeps a direct conversation itself", async () => {
     await direct();
     expect(document.querySelector("label[for='guest-retention_days']")?.textContent).toBe(t("guest.field.retention.direct"));
-    await act(async () => button(t("guest.mode.stand_in")).click());
+    await act(async () => pick("stand_in"));
     expect(document.querySelector("label[for='guest-retention_days']")?.textContent).toBe(t("guest.field.retention"));
+  });
+});
+
+describe("a trusted agent", () => {
+  async function trusted() {
+    await open();
+    await act(async () => button(t("guest.make")).click());
+    await act(async () => pick("trusted"));
+  }
+
+  it("warns in one line, offers no tool choice and starts with no limits", async () => {
+    await trusted();
+    expect(document.querySelector("[data-guest-warning='trusted']")?.textContent).toBe(t("guest.trusted.warning"));
+    expect(document.querySelector(".guest-form .segmented")).toBeNull();
+    for (const name of ["usd_limit", "turns_per_day", "invite_hours", "turns_total", "conversation_hours", "idle_hours"]) {
+      expect(document.querySelector(`[data-guest-nolimit='${name}']`)?.getAttribute("aria-pressed")).toBe("true");
+      expect(document.querySelector(`#guest-${name}`)).toBeNull();
+    }
+    await act(async () => {
+      type("#guest-topic", "Give him access to everything he asks for");
+      type("#guest-instructions", "He is my co-author.");
+    });
+    await act(async () => button(t("guest.create")).click());
+    expect(sent("/guest/links")![1]).toMatchObject({
+      mode: "direct", tools: "trusted", topic: "Give him access to everything he asks for", instructions: "He is my co-author.",
+      usd_limit: 0, turns_per_day: 0, turns_total: 0, invite_hours: 0, conversation_hours: 0, idle_hours: 0,
+    });
+  });
+
+  it("puts the limits back when the choice moves off it, until one is set by hand", async () => {
+    await trusted();
+    await act(async () => pick("direct"));
+    expect(document.querySelector("[data-guest-nolimit='turns_per_day']")?.getAttribute("aria-pressed")).toBe("false");
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-nolimit='usd_limit']")!.click());
+    await act(async () => pick("trusted"));
+    await act(async () => pick("direct"));
+    expect(document.querySelector("[data-guest-nolimit='usd_limit']")?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-guest-nolimit='turns_per_day']")?.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("changing a link", () => {
+  it("opens the same form on what the link has, and saves every setting in place", async () => {
+    world.links = [{ ...LINK, conversation: { ...LINK.conversation!, state: "open" } }];
+    world.detail = { ...LINK, turns_per_day: 0, invite_expires_at: 0, briefing: "", instructions: "Share the draft.", model_id: "", events: [], messages: [] } satisfies GuestLinkDetail;
+    await open();
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-edit='l1']")!.click());
+    await act(async () => {});
+    expect(document.querySelector("[data-guest-form='edit']")).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>("#guest-label")!.value).toBe("Anna's agent");
+    expect(document.querySelector<HTMLTextAreaElement>("#guest-instructions")!.value).toBe("Share the draft.");
+    expect(document.querySelector<HTMLInputElement>("[data-guest-level='direct'] input")!.checked).toBe(true);
+    expect(document.querySelector("[data-guest-nolimit='turns_per_day']")?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-guest-nolimit='invite_hours']")?.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => pick("trusted"));
+    expect(document.querySelector("[data-guest-nolimit='usd_limit']")?.getAttribute("aria-pressed")).toBe("false");
+    await act(async () => button(t("common.save")).click());
+    expect(world.put).toHaveLength(1);
+    const [path, body] = world.put[0];
+    expect(path).toBe("/api/guest/links/l1");
+    expect(body).toMatchObject({ mode: "direct", tools: "trusted", label: "Anna's agent", instructions: "Share the draft.", usd_limit: 1, turns_per_day: 0, invite_hours: 0 });
+    expect(document.querySelector("[data-guest-form]")).toBeNull();
+  });
+
+  it("is offered on every link that is not revoked", async () => {
+    world.links = [{ ...LINK, state: "revoked", conversation: { ...LINK.conversation!, state: "closed" } }];
+    await open();
+    expect(document.querySelector("[data-guest-edit]")).toBeNull();
   });
 });
 

@@ -111,7 +111,7 @@ A board of cards, arrows and groups in the JSON Canvas format, owned by a chat o
 <td valign="top">
 
 **🔗 Agent links**<br/>
-A chat can hand out a link for somebody else's agent. A **stand-in** answers it from a briefing you read and approve, with no tools; **direct** lets the chat's own agent take each message as a turn, with none, read-only or all tools in a sandbox of its own. You admit a first contact, read along, cap the day's spend and revoke the link. The other way, `AgentTalk` lets your agent talk to theirs through the link they gave you, with every reply kept as data and a message out held for you as you choose. On a desktop, a public address of your own makes links reachable from outside.
+A chat can hand out a link for somebody else's agent. A **stand-in** answers it from a briefing you read and approve, with no tools; **direct** lets the chat's own agent take each message as a turn, with none, read-only or all tools in a sandbox of its own; a **trusted agent** is served as you are, with every tool and your context. Every limit can be lifted, and every setting changed after the link is made. You admit a first contact, read along, cap the day's spend and revoke the link. The other way, `AgentTalk` lets your agent talk to theirs through the link they gave you, with every reply kept as data and a message out held for you as you choose. On a desktop, a public address of your own makes links reachable from outside.
 
 </td>
 <td valign="top">

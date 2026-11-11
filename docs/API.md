@@ -490,16 +490,22 @@ in that chat when it answers. `PUT` and `DELETE /api/mcp/servers/{name}` change 
 
 **Agent links.** A conversation with somebody else's agent, opened by `AgentTalk`, is listed at `GET
 /api/sessions/{id}/agent-talks` and read whole at `GET /api/agent-talks/{id}`; `PUT …/settings` with
-`{"review": "first" | "all" | "off", "wake_turns", "wake_usd"}` sets what waits for you and how far a
-reply may wake the chat, `POST …/messages/{message}/send` or `…/refuse` decides on a message waiting to
+`{"review": "first" | "all" | "off", "wake_turns", "wake_usd", "sends_limit"}` sets what waits for you,
+how far a reply may wake the chat (-1 for no limit) and how many messages may go out (0 for no limit), `POST …/messages/{message}/send` or `…/refuse` decides on a message waiting to
 go out, and `POST …/end` ends it. The other way round, a link for other people's agents is made with
 `POST /api/sessions/{id}/guest/links` (`mode`: `stand_in` with a model and an approved briefing, which
 `POST /api/sessions/{id}/guest/draft` writes a first version of, or `direct` with `tools`: `none`,
-`read` or `all`) and answers the link and its `url`. `GET /api/guest/links?session_id=` and `GET
-/api/guest/links/{id}` read them with their messages, `POST …/revoke` and `…/reissue` end one or give it
-a new invite, and `POST /api/guest/conversations/{id}/admit` or `…/refuse` settles a first contact.
-`GET /api/guest/door` says whether links can be made, with the models a stand-in may use and why any
-are left out, and `PUT /api/guest/settings` sets `usd_per_day` for every guest together.
+`read`, `all` or `trusted`, the last serving the guest as the operator with the session's own tools and
+context, and an optional `instructions` note for the agent that only this side keeps) and answers the
+link and its `url`. The link's `topic` and `instructions` reach every turn it starts as the operator's
+own words. Every limit and lifetime (`usd_limit`, `turns_per_day`, `turns_total`, `invite_hours`,
+`conversation_hours`, `idle_hours`) is 0 for none. `GET /api/guest/links?session_id=` and `GET
+/api/guest/links/{id}` read them with their messages, `PUT /api/guest/links/{id}` with the same body
+changes every setting in place (the invite, the conversation and what was spent stay), `POST …/revoke`
+and `…/reissue` end one or give it a new invite, and `POST /api/guest/conversations/{id}/admit` or
+`…/refuse` settles a first contact. `GET /api/guest/door` says whether links can be made, with the models
+a stand-in may use and why any are left out, and `PUT /api/guest/settings` sets `usd_per_day` for every
+guest together, 0 for no limit.
 
 **The public address.** On a native install, `GET /api/public-address` is the address's state (provider,
 `state`, `address`, what it exposes in numbers, its QR, and `tokens_hidden`), and `PUT` with `{"enabled",
