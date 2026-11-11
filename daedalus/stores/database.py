@@ -3830,6 +3830,27 @@ async def _link_kinds(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration(LINK_FILES_SQL, _link_kinds))
 
+DOOR_WAIT_COLUMNS = (
+    ("agent_talk_messages", "attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("agent_talk_messages", "next_at", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "waiting_since", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "wake_state", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+async def _door_waits(conn: aiosqlite.Connection) -> None:
+    """A message for a door that was not there waits here and is tried again: how many times it was tried, when
+    next, since when it waits, and whether the chat still has to be told what became of it. In the rows and not
+    in memory, so that a restart of this side neither drops the message nor says it twice. Each column is added
+    only when it is missing, for the reason ``_usage_speed`` gives."""
+    for table, name, kind in DOOR_WAIT_COLUMNS:
+        present = {row[1] for row in await (await conn.execute(f"PRAGMA table_info({table})")).fetchall()}
+        if name not in present:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _door_waits))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -129,12 +129,17 @@ class GuestTurn:
     brief: str = ""
     """The operator's own words about what this guest is for: the link's topic and its note to the agent.
     Without them the model has only the guest's say-so, and refuses what the operator made the link to give."""
+    notice: bool = False
+    """For a ``reply`` turn: opened by this installation to say what became of a message that waited for the other
+    side's door, and not by anything the other side wrote. Bounded the same way; only what the model is told differs."""
 
     def as_metadata(self) -> dict[str, Any]:
         out: dict[str, Any] = {"link_id": self.link_id, "label": self.label, "tools": self.tools, "usd_left": self.usd_left, "said": self.said}
         if self.brief:
             out["brief"] = self.brief
-        return {**out, "kind": self.kind, "runs": list(self.runs)} if self.kind != "guest" else out
+        if self.kind == "guest":
+            return out
+        return {**out, "kind": self.kind, "runs": list(self.runs), **({"notice": True} if self.notice else {})}
 
     @property
     def trusted(self) -> bool:
@@ -155,6 +160,7 @@ class GuestTurn:
         return cls(
             str(value["link_id"]), str(value.get("label") or ""), tools if tools in GUEST_TOOLS else "none", float(left) if left is not None else None, str(value.get("said") or ""),
             "reply" if value.get("kind") == "reply" else "guest", tuple(str(run) for run in runs) if isinstance(runs, list) else (), str(value.get("brief") or ""),
+            value.get("notice") is True and value.get("kind") == "reply",
         )
 
     @property

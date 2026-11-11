@@ -137,6 +137,17 @@ def reply_note(label: str) -> str:
     )
 
 
+def notice_note(label: str) -> str:
+    """What a turn is told that this installation opened to say what became of a message which waited for the door at
+    ``label``. Nothing above it is the stranger's, but the conversation it reads is, so it is bounded as a reply's turn."""
+    return (
+        f"- This turn was started by this installation, not by the operator and not by the agent at {label}: a message you sent there "
+        "while its side was offline has now been delivered or given up, as the note above says. "
+        "You can use AgentTalk on this conversation and nothing else, and send at most once. Read for a reply, send what the operator's request still needs, "
+        "or do nothing. Send nothing the operator would not hand to this stranger. Your final message is for the operator and stays in this chat."
+    )
+
+
 def for_reply(history: Sequence[Message], run_id: str, runs: Iterable[str]) -> list[Message]:
     """``history`` as a turn opened by a reply may read it: this conversation and nothing else of the chat.
 
@@ -155,5 +166,5 @@ def for_reply(history: Sequence[Message], run_id: str, runs: Iterable[str]) -> l
 
 __all__ = [
     "DOOR_MARK", "FREE_TOOLS", "GROUP", "HELD_TOOLS", "HELD_WHY", "LATER_NOTE", "LINK_NOTE", "LINK_RE", "QUIET_TOOLS", "REFUSED_WHY", "RULE", "TOOL", "TOUCHED_KEY", "TOUCHED_NOTE", "WAKE_ITERATIONS",
-    "DoorLink", "fence_reply", "fence_topic", "find_links", "for_reply", "reply_note", "standing_of", "touch_of",
+    "DoorLink", "fence_reply", "fence_topic", "find_links", "for_reply", "notice_note", "reply_note", "standing_of", "touch_of",
 ]
