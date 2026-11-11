@@ -19,11 +19,13 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from . import a2a
 from .files import CHUNK_BYTES
 from .limits import Failures, Rate
-from .mailbox import DEFAULT_WAIT_SECONDS, MAX_TEXT, Answer, Mailbox
+from .mailbox import DEFAULT_WAIT_SECONDS, MAX_TEXT, RETRY_SECONDS, Answer, Mailbox
+from .store import CLOSED, REVOKED, WAITING, ended
 
 if TYPE_CHECKING:
     from starlette.types import Receive, Scope, Send
@@ -60,6 +62,9 @@ BAD_TOKEN = (
 """Says the likely mistake first, while the file still exists. An agent told only that tokens are not recoverable
 had the right value on disk, and deleted it."""
 
+RPC_MAX_BODY = 63 * 1024
+"""An A2A call, which may carry a small file: what the front and the tunnel let through, less room for the head."""
+
 MARKDOWN = "text/markdown; charset=utf-8"
 CLIENT_HEADER = b"x-guest-client"
 CLIENT_KIND_HEADER = b"x-agent-client"
@@ -90,6 +95,7 @@ class PublicDoor:
         self.reads = reads or Rate(READS_PER_MINUTE)
         self.pages = pages or Rate(PAGES_PER_MINUTE)
         self.pieces = pieces or Rate(PIECES_PER_MINUTE)
+        self.a2a = a2a.A2A(mailbox)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "websocket":
@@ -114,6 +120,10 @@ class PublicDoor:
             return PlainTextResponse("User-agent: *\nDisallow: /\n\nUser-agent: Claude-User\nUser-agent: ChatGPT-User\nAllow: /a/\n", headers=HEADERS)
         if not path.startswith("/a/"):
             return refused(404, "Nothing here.")
+        if path == a2a.RPC_PATH:
+            return await self.rpc(scope, receive, method, address)
+        if card := a2a.CARD_PATH.match(path):
+            return self.agent_card(scope, card.group(1), method, address)
         if path in ("/a/messages", "/a/end", "/a/status", "/a/files") or FILE_PATH.match(path) or TASK_PATH.match(path):
             return await self.conversation(scope, receive, path, method, address)
         matched = INVITE.match(path)
@@ -143,6 +153,117 @@ class PublicDoor:
             return refused(404, "No such link.")
         status, text = found
         return Response(text, status_code=status, media_type=MARKDOWN, headers=HEADERS)
+
+    def agent_card(self, scope: Scope, invite: str, method: str, address: str) -> Response:
+        """A link's A2A card. Like the page, a GET that spends nothing, and gone once the link is spent, except to the
+        guest holding that link's token: a client that fetches the card again at each start must not lose it."""
+        if method not in ("GET", "HEAD"):
+            return refused(405, "The agent card is read with GET.")
+        link = self.mailbox.store.link_by_invite(invite)
+        if link is None and self.failures.blocked(address):
+            return refused(429, "Too many failed attempts from this address.", 600)
+        if not self.pages.allow(invite if link is not None else address):
+            return refused(429, "Too many requests.", 60)
+        if link is None:
+            self.failures.failed(address)
+            return refused(404, "No such link.")
+        if link["state"] == WAITING and not ended(link["invite_expires_at"], self.mailbox.clock()):
+            return JSONResponse(self.a2a.card(link, invite=invite), headers=HEADERS)
+        conversation = self.mailbox.store.conversation_by_token(bearer(scope)) if link["state"] != REVOKED else None
+        if conversation is not None and conversation["link_id"] == link["id"] and conversation["state"] != CLOSED:
+            return JSONResponse(self.a2a.card(link, invite=invite, conversation=conversation), headers=HEADERS)
+        return refused(410, "This link has been used or is closed. A card is shown again only with the conversation's token.")
+
+    async def rpc(self, scope: Scope, receive: Receive, method: str, address: str) -> Response:
+        """The A2A entrance: one JSON-RPC call on a conversation, found by its token like every other call here."""
+        if method != "POST":
+            return refused(405, "A2A calls are JSON-RPC over POST.")
+        token = bearer(scope)
+        conversation = self.mailbox.store.conversation_by_token(token)
+        if conversation is None:
+            if self.failures.blocked(address):
+                return refused(429, "Too many failed attempts from this address.", 600)
+            self.failures.failed(address)
+            error = a2a.RpcError(a2a.REFUSED, BAD_TOKEN if token else "This needs the header Authorization: Bearer <token>, with the token the link's redeem returned.", reason="TOKEN")
+            return JSONResponse(a2a.envelope(None, error=error), status_code=401, headers={**HEADERS, "WWW-Authenticate": "Bearer"})
+        raw = await read_body(receive, RPC_MAX_BODY)
+        if raw is None:
+            return self.rpc_answer(None, error=a2a.RpcError(a2a.INVALID_REQUEST, f"A call is at most {RPC_MAX_BODY} bytes. Send a larger file in pieces first.", reason="TOO_LARGE"))
+        try:
+            call = a2a.parse(raw)
+        except a2a.RpcError as exc:
+            return self.rpc_answer(json.loads(exc.metadata.pop("id", "null")), error=exc)
+        version = header(scope, b"a2a-version") or (parse_qs(scope.get("query_string", b"").decode("latin-1")).get("A2A-Version") or [""])[0]
+        if call.method in a2a.OLD_METHODS:
+            version = version or "0.3"
+        refusal = a2a.version_refused(version)
+        if refusal is not None:
+            return self.rpc_answer(call.id, error=refusal)
+        rate = self.sends if call.method in a2a.SENDING else self.reads
+        if not rate.allow(token):
+            return self.rpc_answer(call.id, error=a2a.RpcError(a2a.REFUSED, "Too many requests on this conversation.", reason="BUSY", retry_after=RETRY_SECONDS))
+        try:
+            if call.method in a2a.STREAMING:
+                return await self.rpc_stream(call, token, conversation)
+            result = await self.rpc_call(call, token, conversation)
+        except a2a.RpcError as exc:
+            return self.rpc_answer(call.id, error=exc)
+        if call.notification:
+            return Response(status_code=204, headers=HEADERS)
+        return self.rpc_answer(call.id, result=result)
+
+    def rpc_answer(self, call_id: Any, *, result: Any = None, error: a2a.RpcError | None = None) -> Response:
+        """Every JSON-RPC answer, an error too, is a 200: the error is in the body, where a client of the protocol looks."""
+        return JSONResponse(a2a.envelope(call_id, result=result, error=error), headers=HEADERS)
+
+    async def rpc_call(self, call: a2a.Call, token: str, conversation: Any) -> Any:
+        method, params, translation = call.method, call.params, self.a2a
+        if method == "SendMessage":
+            task_id, at_once, history = translation.send(token, conversation, params)
+            if at_once:
+                return {"task": translation.task(self.mailbox.store.conversation(conversation["id"]), task_id, history=history)}
+            with self.mailbox.held_open(conversation["id"]) as free:
+                # Held only while there is room: a third wait on one conversation gets the task as it stands.
+                return {"task": await translation.settle(conversation["id"], task_id, a2a.HOLD_SECONDS if free else 0.0, history)}
+        if method == "GetTask":
+            return translation.get_task(conversation, params)
+        if method == "ListTasks":
+            return translation.list_tasks(conversation, params)
+        if method == "CancelTask":
+            return translation.cancel_task(conversation, params)
+        if method == "GetExtendedAgentCard":
+            return translation.extended_card(conversation)
+        if method in a2a.PUSH_METHODS:
+            raise a2a.RpcError(a2a.PUSH_NOT_SUPPORTED, a2a.NO_PUSH, reason="NO_PUSH")
+        raise a2a.RpcError(a2a.METHOD_NOT_FOUND, f"There is no method {method[:64]!r} here. This door speaks A2A {a2a.PROTOCOL_VERSION} over JSON-RPC.")
+
+    async def rpc_stream(self, call: a2a.Call, token: str, conversation: Any) -> Response:
+        """A task followed over server-sent events. What goes wrong before the first event is a plain JSON-RPC answer."""
+        translation = self.a2a
+        if call.method == "SendStreamingMessage":
+            task_id, _, history = translation.send(token, conversation, call.params)
+        else:
+            found = translation.get_task(conversation, {"id": call.params.get("id")})
+            if found["status"]["state"] in a2a.TERMINAL:
+                raise a2a.RpcError(a2a.UNSUPPORTED, f"That task is {found['status']['state']}: there is nothing more to follow. GetTask reads it.", reason="TASK_SETTLED")
+            task_id, history = found["id"], None
+        slot = self.mailbox.held_open(conversation["id"])
+        if not slot.__enter__():
+            slot.__exit__(None, None, None)
+            if call.method == "SendStreamingMessage":
+                # The message is in: answer with its task rather than an error, so it is not sent twice.
+                envelope = a2a.envelope(call.id, result={"task": translation.task(self.mailbox.store.conversation(conversation["id"]), task_id, history=history)})
+                return StreamingResponse(iter([sse(envelope)]), media_type="text/event-stream", headers=STREAM_HEADERS)
+            raise a2a.RpcError(a2a.REFUSED, "Another wait is already open on this conversation.", reason="BUSY", retry_after=RETRY_SECONDS)
+
+        async def events() -> Any:
+            try:
+                async for event in translation.follow(conversation["id"], task_id, history=history):
+                    yield ": still here\n\n" if event is None else sse(a2a.envelope(call.id, result=event))
+            finally:
+                slot.__exit__(None, None, None)
+
+        return StreamingResponse(events(), media_type="text/event-stream", headers=STREAM_HEADERS)
 
     def redeem(self, invite: str, method: str, address: str, key: str, client: str = "") -> Response:
         if method != "POST":
@@ -246,6 +367,14 @@ class PublicDoor:
         return Response(data, media_type="application/octet-stream", headers=headers)
 
 
+STREAM_HEADERS = {**HEADERS, "X-Accel-Buffering": "no"}
+"""``X-Accel-Buffering`` keeps nginx from holding a stream's events back until it has a buffer's worth."""
+
+
+def sse(envelope: dict[str, Any]) -> str:
+    return "data: " + json.dumps(envelope, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+
+
 def header(scope: Scope, name: bytes) -> str:
     for key, value in scope.get("headers", ()):
         if key == name:
@@ -298,4 +427,4 @@ async def read_body(receive: Receive, limit: int = MAX_BODY) -> bytes | None:
             return bytes(body)
 
 
-__all__ = ["CLIENT_HEADER", "FILE_PATH", "HEADERS", "INVITE", "MAX_BODY", "PIECES_PER_MINUTE", "TASK_PATH", "PublicDoor", "visitor"]
+__all__ = ["CLIENT_HEADER", "RPC_MAX_BODY", "STREAM_HEADERS", "FILE_PATH", "HEADERS", "INVITE", "MAX_BODY", "PIECES_PER_MINUTE", "TASK_PATH", "PublicDoor", "visitor"]

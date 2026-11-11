@@ -671,6 +671,31 @@ class Store:
         )
         return cursor.rowcount == 1
 
+    def task_messages(self, task_id: str) -> list[sqlite3.Row]:
+        """Everything said on a task, both ways, in order. The owner's place-holding turns are nobody's words."""
+        return self._all("SELECT * FROM messages WHERE task_id = ? AND role != ? ORDER BY id", task_id, OWNER)
+
+    def answers_to(self, conversation_id: str, message_id: int) -> list[sqlite3.Row]:
+        """The replies written for one guest message (``answers`` in their data), in order."""
+        return self._all(
+            "SELECT * FROM messages WHERE conversation_id = ? AND role IN (?, ?) AND data LIKE '{%' AND json_extract(data, '$.answers') = ? ORDER BY id",
+            conversation_id, AGENT, DOOR, int(message_id),
+        )
+
+    def guest_message_by_mark(self, conversation_id: str, key: str, value: str) -> sqlite3.Row | None:
+        """A guest message kept with ``value`` under ``key`` in its data: how a face finds a message it was sent twice."""
+        return self._one(
+            "SELECT * FROM messages WHERE conversation_id = ? AND role = ? AND data LIKE '{%' AND json_extract(data, ?) = ? ORDER BY id LIMIT 1",
+            conversation_id, GUEST, f"$.{key}", value,
+        )
+
+    def untasked_guest_messages(self, conversation_id: str, limit: int = 200) -> list[sqlite3.Row]:
+        """A guest's messages that belong to no task: what A2A shows as a task of one message each."""
+        return self._all(
+            "SELECT * FROM messages WHERE conversation_id = ? AND role = ? AND task_id = '' AND kind IN (?, ?) ORDER BY id DESC LIMIT ?",
+            conversation_id, GUEST, TEXT, FILE, limit,
+        )
+
     def queued_of_task(self, task_id: str) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM messages WHERE task_id = ? AND state IN (?, ?, ?)", task_id, HELD, QUEUED, CLAIMED)
 

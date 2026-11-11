@@ -13,10 +13,11 @@ process's memory with sudo. So every answer says what the state is and what is s
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -76,6 +77,15 @@ MAX_POLLS = 2
 TASK_PATIENCE_SECONDS = 3600.0
 """How long a guest is told to keep reading while a task is being worked on and nothing has moved."""
 TEXT_ONLY = "This link takes text messages only: the agent behind it has no files and takes no tasks."
+HOST_AWAY_SECONDS = 90.0
+"""How long the host may go without dialling before a guest is told its owner's side is offline. The host holds the
+feed open for 25 s and dials again at once, so a minute and a half of silence is a host that is not there: a desktop
+app that was closed, or a server whose agent is restarting. The door stays up in both and keeps what is sent."""
+OFFLINE_RETRY_SECONDS = 300
+OWNER_OFFLINE = (
+    "The owner's side is offline right now. What you sent is kept here and is answered when it is back. "
+    "Stop polling and tell your user; this token stays good, so you can read again later."
+)
 
 CLOSED_WORDS = {
     "ended": "This conversation has ended.",
@@ -120,6 +130,10 @@ class Mailbox:
         self._wakers: dict[str, asyncio.Event] = {}
         self._polling: dict[str, int] = {}
         self._late_visits: dict[str, float] = {}
+        self.host_seen = clock()
+        self.host_away_seconds = HOST_AWAY_SECONDS
+        """When the host last dialled the control socket. Counted from this process's start, so a door that has just
+        started gives the host the same grace it gives one that went quiet."""
         self.queued = asyncio.Event()
         """Set when a guest message may be waiting for the stand-in."""
         self.changed = asyncio.Event()
@@ -134,6 +148,32 @@ class Mailbox:
     def notify(self) -> None:
         self.queued.set()
         self.changed.set()
+
+    def host_away(self, link: Any) -> bool:
+        """Whether a turn on ``link`` waits for a host that is not there. A stand-in is answered by this process alone."""
+        return link["mode"] != STAND_IN and self.clock() - self.host_seen > self.host_away_seconds
+
+    async def changes(self, conversation_id: str, seconds: float) -> None:
+        """Return when something may have changed in a conversation, or after ``seconds``. A caller looks again
+        either way: the waker is shared, so being woken says only that it is worth looking."""
+        waker = self._wakers.setdefault(conversation_id, asyncio.Event())
+        waker.clear()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(waker.wait(), max(0.0, seconds))
+
+    @contextlib.contextmanager
+    def held_open(self, conversation_id: str) -> Iterator[bool]:
+        """A slot among the :data:`MAX_POLLS` connections a conversation may hold open at once; ``False`` when none is free."""
+        if self._polling.get(conversation_id, 0) >= MAX_POLLS:
+            yield False
+            return
+        self._polling[conversation_id] = self._polling.get(conversation_id, 0) + 1
+        try:
+            yield True
+        finally:
+            self._polling[conversation_id] -= 1
+            if not self._polling[conversation_id]:
+                del self._polling[conversation_id]
 
     # -- before a conversation exists --------------------------------------------------
 
@@ -154,7 +194,9 @@ class Mailbox:
         if status != 200:
             return Answer(status, {"door": DOOR_MARK, "status": "closed" if link["state"] in (REVOKED, EXPIRED, WAITING) else "used", "stop_polling": True})
         direct = link["mode"] != STAND_IN
+        base = self.public_base() or ""
         return Answer(200, {
+            "a2a": {"agent_card": f"{base}/a/{invite}/.well-known/agent-card.json", "rpc": f"{base}/a/rpc", "version": "1.0"},
             "door": DOOR_MARK, "status": "waiting", "topic": link["topic"], "mode": link["mode"], "approval": bool(link["approval"]),
             "retention_days": float(link["retention_days"]), "max_text": MAX_TEXT, "kinds": list(KINDS) if direct else [TEXT],
             **({"file_mb": float(link["file_mb"]), "day_mb": float(link["day_mb"]), "chunk_bytes": CHUNK_BYTES} if direct else {}),
@@ -229,6 +271,7 @@ class Mailbox:
             "save_token": "Save this token to a file now. It is shown only this once and cannot be recovered.",
             "send": "POST /a/messages with Authorization: Bearer <token> and JSON {\"text\": \"...\"}",
             "read": "GET /a/messages?after=<id>&wait=20 with the same header",
+            "a2a": "An A2A 1.0 client sends JSON-RPC to POST /a/rpc with the same header.",
         }
         if link["mode"] != STAND_IN:
             body["more"] = "Files and tasks are described on the link's page, under the same address you redeemed."
@@ -243,8 +286,11 @@ class Mailbox:
         reason = str(conversation["reason"] or "ended")
         return Answer(410, {"status": "closed", "reason": reason, "stop_polling": True, "detail": f"{CLOSED_WORDS.get(reason, 'This conversation is closed.')} {STOP}"})
 
-    def send(self, token: str, body: Any) -> Answer | None:
-        """A guest's message of any kind. ``{"text": ...}`` alone is a text message, as it always was."""
+    def send(self, token: str, body: Any, *, extra: dict[str, Any] | None = None) -> Answer | None:
+        """A guest's message of any kind. ``{"text": ...}`` alone is a text message, as it always was.
+
+        ``extra`` is kept with the message for the face that sent it (A2A keeps the client's message id there), and
+        never read back by the host."""
         conversation = self.store.conversation_by_token(token)
         if conversation is None:
             return None
@@ -276,7 +322,7 @@ class Mailbox:
                 return Answer(409, {"status": "pending", "detail": "Until the owner admits this conversation, only a text message is taken."}, 30)
             if self.store.held_count(conversation["id"]) >= 1:
                 return Answer(202, {"status": "pending", "detail": "Your first message is with the owner. Nothing more is taken until they answer."}, 30)
-            message = self.store.add_guest_message(conversation, clean)
+            message = self.store.add_guest_message(conversation, clean, data=extra)
             self.notify()
             return Answer(202, {"status": "pending", "id": message, "detail": "Kept for the owner, who decides whether to admit this conversation. Read to see when they do."}, 30)
         task_id = ""
@@ -290,7 +336,7 @@ class Mailbox:
             if task["state"] not in OPEN_TASK_STATES:
                 return Answer(409, {"status": "invalid", "task": task["id"], "state": task["state"], "detail": f"That task is {task['state']} and takes no more messages."})
             task_id = task["id"]
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = dict(extra or {})
         if kind == FILE or body.get("files"):
             try:
                 data["files"] = [file["id"] for file in self.desk.ready_of(conversation["id"], body.get("files"), GUEST)]
@@ -312,6 +358,9 @@ class Mailbox:
             out["task"] = task_id
             if kind == TASK:
                 out.update(state=ACCEPTED, detail="Task accepted. Read to follow it: each change of its state comes as a status message naming it.")
+        if self.host_away(link):
+            out.update(owner_offline=True, detail=f"Received and kept. {OWNER_OFFLINE}")
+            return Answer(202, out, OFFLINE_RETRY_SECONDS)
         return Answer(202, out)
 
     def _guest_status(self, conversation: Any, body: dict[str, Any]) -> Answer:
@@ -424,16 +473,10 @@ class Mailbox:
         conversation = self.store.conversation_by_token(token)
         if conversation is None:
             return None
-        conversation_id = conversation["id"]
-        if self._polling.get(conversation_id, 0) >= MAX_POLLS:
-            return Answer(429, {"status": "busy", "stop_polling": False, "detail": "Another read is already waiting on this conversation."}, RETRY_SECONDS)
-        self._polling[conversation_id] = self._polling.get(conversation_id, 0) + 1
-        try:
+        with self.held_open(conversation["id"]) as free:
+            if not free:
+                return Answer(429, {"status": "busy", "stop_polling": False, "detail": "Another read is already waiting on this conversation."}, RETRY_SECONDS)
             return await self._read(conversation, after, wait)
-        finally:
-            self._polling[conversation_id] -= 1
-            if not self._polling[conversation_id]:
-                del self._polling[conversation_id]
 
     async def _read(self, conversation: Any, after: int, wait: int) -> Answer:
         link = self.store.link(conversation["link_id"])
@@ -492,6 +535,8 @@ class Mailbox:
         oldest = self.store.oldest_unanswered(conversation["id"])
         tasks = self.store.tasks_of(conversation["id"])
         working = [task for task in tasks if task["state"] in (ACCEPTED, WORKING)]
+        if (oldest is not None or working) and self.host_away(link):
+            return Answer(200, {**base, "status": "open", "waiting_for": "owner_online", "stop_polling": True, "detail": OWNER_OFFLINE}, OFFLINE_RETRY_SECONDS)
         if oldest is None and working:
             latest = max(task["updated_at"] for task in working)
             if now - latest > TASK_PATIENCE_SECONDS:
@@ -532,6 +577,6 @@ class Mailbox:
 
 
 __all__ = [
-    "AGENT", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "DOOR_MARK", "HELD", "KNOWN_CLIENTS", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "QUESTION", "STAND_IN_REPLY_SECONDS",
+    "AGENT", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "DOOR_MARK", "HELD", "HOST_AWAY_SECONDS", "OFFLINE_RETRY_SECONDS", "OWNER_OFFLINE", "KNOWN_CLIENTS", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "QUESTION", "STAND_IN_REPLY_SECONDS",
     "TASK_PATIENCE_SECONDS", "TEXT_ONLY", "WORKING", "Answer", "Mailbox", "limit_answer",
 ]

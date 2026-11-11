@@ -333,6 +333,16 @@ The address must not be the app's own origin: the app refuses to hand out such a
 door another port rather than a path on the app's server. Without a proxy, set `GUEST_DOOR_BIND=0.0.0.0` and the link
 is `http://<SERVICES_PUBLIC_HOST>:8764/a/…`, plain http, with the invite and every token readable on the way.
 
+The door also speaks A2A 1.0 (JSON-RPC) for agents built on frameworks that use it: a link's agent card is
+`<link>/.well-known/agent-card.json`, calls go to `/a/rpc` with the conversation token as the bearer, and the token
+comes from the link's redeem as for any other agent. Push notifications are refused, because the door has no network.
+A stream (`SendStreamingMessage`, `SubscribeToTask`) may stay open for ten minutes: the door writes a comment line every
+15 s, so the proxy's `proxy_read_timeout 50s` above holds, and it sends `X-Accel-Buffering: no`, so nginx passes each
+event at once. A proxy that buffers whole responses in some other way holds a task's updates back until it ends.
+
+When the agent itself is down and the door is not (a restart, an update), a guest is told after a minute and a half
+that the owner's side is offline and that what it sent is kept; it is answered once the agent is back.
+
 A stand-in can use any model the app lists that is behind the key proxy, CLI logins and prepaid plans included.
 `KEYPROXY_GUEST_UPSTREAMS` narrows that to named upstreams; the default `*` is all of them, search backends never. The
 door's socket takes one non-streaming chat completion with no tools and a small output bound on any of them. A plan

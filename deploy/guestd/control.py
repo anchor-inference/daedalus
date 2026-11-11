@@ -233,6 +233,8 @@ class ControlDoor:
     async def route(self, scope: Scope, receive: Receive) -> tuple[int, Any]:
         if not self.authorised(scope):
             return 401, {"detail": "no"}
+        # Any call of the host's says it is there; a guest is told the owner is offline only after it has gone quiet.
+        self.mailbox.host_seen = self.mailbox.clock()
         method, path = scope.get("method", "GET"), scope.get("path", "")
         body: Any = None
         if method == "PUT" and (piece := re.fullmatch(r"/control/files/(f_[0-9a-f]{16})", path)):
@@ -348,6 +350,8 @@ class ControlDoor:
             deliveries = self.claim()
             latest = self.store.last_event_id()
             if events or deliveries or latest < after or time.monotonic() >= deadline:
+                # A feed held open is the host waiting, not gone: seen at its end as well as its start.
+                self.mailbox.host_seen = self.mailbox.clock()
                 return {
                     "events": [{"id": e["id"], "link_id": e["link_id"], "kind": e["kind"], "at": e["at"], "detail": e["detail"]} for e in events],
                     "deliveries": deliveries,
@@ -473,7 +477,7 @@ class ControlDoor:
             if refusal is not None:
                 store.drop(message["id"])
                 store.record(link["id"], "limit", refusal.limit)
-                store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.")
+                store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.", data=answers(message))
                 self.mailbox.wake(conversation["id"])
                 continue
             if task is not None and task["state"] != WORKING and store.move_task(task["id"], WORKING):
@@ -546,11 +550,11 @@ class ControlDoor:
             store.add_reply(conversation["id"], AGENT if ok else DOOR, text if ok else FAILED_TEXT, kind=STATUS, task_id=task["id"], data={"state": wanted, **({"files": files} if files else {})})
             return
         if not ok:
-            store.add_reply(conversation["id"], DOOR, FAILED_TEXT)
+            store.add_reply(conversation["id"], DOOR, FAILED_TEXT, data=answers(message))
         elif files:
-            store.add_reply(conversation["id"], AGENT, text, kind=FILE, data={"files": files})
+            store.add_reply(conversation["id"], AGENT, text, kind=FILE, data={"files": files, **answers(message)})
         elif text:
-            store.add_reply(conversation["id"], AGENT, text)
+            store.add_reply(conversation["id"], AGENT, text, data=answers(message))
 
     def reset(self) -> int:
         """The host has started: it remembers no turn it claimed before, so none of them will be answered.
@@ -570,9 +574,15 @@ class ControlDoor:
                     # A task whose turn was cut off would otherwise say "working" for ever.
                     store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT, kind=STATUS, task_id=task["id"], data={"state": REFUSED_TASK})
                 else:
-                    store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT)
+                    store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT, data=answers(message))
                 self.mailbox.wake(conversation["id"])
         return len(stale)
+
+
+def answers(message: Any) -> dict[str, Any]:
+    """Which guest message a reply answers, for a face that shows a message and its answer as one thing (A2A's task).
+    A guest's own message only: a turn the host asked for to carry the owner's answer is nobody's question."""
+    return {"answers": int(message["id"])} if message["role"] != OWNER else {}
 
 
 async def read_large(receive: Receive) -> bytes:
