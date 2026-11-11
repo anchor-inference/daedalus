@@ -7,12 +7,14 @@ limit" is one of the choices: 0 for the sends, -1 for waking. Waking switched of
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
 
 from daedalus.extensions.agent_talk import MAX_SENDS, NO_LIMIT
 from tests.unit.test_agent_talk import (  # noqa: F401 — the fixtures are used by name
+    api_for,
     opened,
     quick,
     rig_for,
@@ -60,3 +62,42 @@ async def test_waking_with_no_limit_is_never_counted_down(rig_for: Any) -> None:
     row = await rig.talks.talk(talk)
     assert (row["wake_turns"], row["wake_usd"]) == (NO_LIMIT, NO_LIMIT), "a priced chat with no budget set still wakes, and nothing is spent down"
     assert state.guest_turn is not None and state.guest_turn.usd_left is None
+
+
+async def held_message(rig: Any) -> tuple[Any, str, Any, Any]:
+    state = await rig.chat()
+    talk = await opened(rig, state, rig.door.link(), review="all")
+    task = asyncio.create_task(rig.talks.tool(state.session.id, "send", text="the agent's words", wait_seconds=30))
+    await until(lambda: rig.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE state = 'held'"))
+    return state, talk, (await rig.talks.messages(talk))[0], task
+
+
+def sent_by_us(rig: Any) -> list[str]:
+    store = rig.door.store
+    return [m["text"] for m in store.transcript(store.conversation_of_link(store.links()[0]["id"])["id"]) if m["role"] == "guest"]
+
+
+async def test_the_operator_can_send_their_own_words_in_place_of_a_held_message(rig_for: Any) -> None:
+    rig = await rig_for([], "ok")
+    state, talk, message, task = await held_message(rig)
+    client = api_for(rig)
+    sent = await client.post(f"/api/agent-talks/{talk}/messages/{message['id']}/send", json={"text": "  the operator's words  "})
+    assert sent.status_code == 200, sent.text
+    await task
+    assert sent_by_us(rig) == ["the operator's words"]
+    assert [m["text"] for m in sent.json()["messages"] if m["role"] == "us"] == ["the operator's words"], "the conversation shows what really went"
+    again = await client.post(f"/api/agent-talks/{talk}/messages/{message['id']}/send", json={"text": "twice"})
+    assert again.status_code == 409, "a held message is claimed once, edited or not"
+    assert not state.metadata.get("policy_pending")
+
+
+async def test_an_edit_that_cannot_go_leaves_the_message_waiting(rig_for: Any) -> None:
+    rig = await rig_for([], "ok")
+    _, talk, message, task = await held_message(rig)
+    client = api_for(rig)
+    assert (await client.post(f"/api/agent-talks/{talk}/messages/{message['id']}/send", json={"text": "   "})).status_code == 422
+    assert (await client.post(f"/api/agent-talks/{talk}/messages/{message['id']}/send", json={"text": "x" * 9000})).status_code == 422
+    assert (await rig.talks._message(message["id"]))["state"] == "held"
+    assert (await client.post(f"/api/agent-talks/{talk}/messages/{message['id']}/send")).status_code == 200, "Send with no body sends the row as it is"
+    await task
+    assert sent_by_us(rig) == ["the agent's words"]

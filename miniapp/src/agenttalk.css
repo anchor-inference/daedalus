@@ -1,48 +1,50 @@
-/* A chat's conversations with other agents (agenttalk.tsx). What the other side wrote is laid out as
-   pre-wrapped plain text and given nothing else: these rules only decide where lines break. */
+/* A chat's conversations with other agents (agenttalk.tsx): the Agents tab and the approval over the composer.
+   What the other side wrote is laid out as pre-wrapped plain text and given nothing else: these rules only
+   decide where lines break. The cards borrow the Subagents tab's (.subagent-card in ui/styles.css). */
 
-.talk-bar { display: flex; flex-direction: column; gap: 2px; width: min(100%, var(--chat-w)); margin-inline: auto; min-width: 0; }
-.talk-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; min-height: 28px; padding: 2px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
-.talk-row:hover { background: var(--surface-2); }
-.talk-row[data-tone="attn"] { border-left: 3px solid var(--warn); }
-.talk-row[data-tone="attn"] .talk-word { color: var(--warn); }
-.talk-row[data-tone="ok"] .talk-word { color: var(--ok); }
-.talk-who { min-width: 0; color: var(--fg-1); font-weight: 600; }
-.talk-word { flex: none; }
-.talk-counts { min-width: 0; margin-left: auto; }
+.panel-body.tab-agents { padding-top: 0; }
+.talks { display: flex; flex-direction: column; font-size: var(--fs-13); min-width: 0; }
+.talks-loading { padding: 12px 0; }
+.talks-over { display: flex; flex-direction: column; gap: var(--space-2); padding: 4px 0 12px; }
+.talks-over > summary { cursor: pointer; list-style: none; }
+.talks-over > summary::-webkit-details-marker { display: none; }
+.talks-over[open] > summary { margin-bottom: var(--space-2); }
+.talks-over > .talk-card + .talk-card { margin-top: var(--space-2); }
 
-.talk-sheet { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
-.talk-sheet > .sub { margin: 0; }
-.talk-list { display: flex; flex-direction: column; gap: var(--space-2); }
-.talk-item { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
-.talk-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); min-width: 0; }
-.talk-item-head b { min-width: 0; }
-
-.talk-detail { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.talk-back { align-self: flex-start; }
-.talk-who-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
-.talk-host { overflow-wrap: anywhere; }
-.talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-2); }
-.talk-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-14); line-height: 1.45; }
+.talk-card { gap: var(--space-2); padding-bottom: 10px; }
+.talk-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: var(--ctl-h-sm); }
+.talk-card-head > .ic { flex: none; color: var(--fg-3); }
+.talk-card-head .subagent-chip { margin-left: auto; }
+.talk-counts { font-variant-numeric: tabular-nums; }
+.talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-1); }
+.talk-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-13); line-height: 1.45; }
 
 .talk-messages { display: flex; flex-direction: column; gap: var(--space-2); }
 .talk-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
 .talk-msg[data-role="them"] { border-left: 3px solid var(--warn); }
-.talk-msg[data-role="us"] { background: var(--surface-2); }
+.talk-msg[data-role="us"] { background: var(--bg); }
 .talk-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
 .talk-msg-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
 .talk-msg-word { color: var(--warn); }
-.talk-held { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
-.talk-held-actions { display: flex; gap: var(--space-2); }
 
 .talk-controls { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .talk-control { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.talk-control-title { color: var(--fg); font-weight: 500; }
 .talk-control .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
 .talk-control .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .talk-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.talk-wake-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.talk-wake-fields label { display: flex; flex-direction: column; gap: 2px; flex: 1 1 120px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+/* A limit: its name, the number while there is one, and "No limit" with its switch at the end of the row. */
+.talk-limit { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; min-height: var(--ctl-h-sm); }
+.talk-limit-title { flex: 1 1 auto; min-width: 0; color: var(--fg); }
+.talk-control .talk-limit-title { color: var(--fg-2); }
+.talk-limit .settings-num .field { width: 72px; }
+.talk-free { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--fg-2); font-size: var(--fs-12); white-space: nowrap; }
 .talk-end { align-self: flex-start; }
 
-/* A phone's strip says who and what; the counts are one press away, and they were pushing the name out. */
-@media (max-width: 1023px) { .talk-counts { display: none; } }
+/* The approval of a message that waits to go out: the composer's own permission dock, with the whole text. */
+.talk-approvals { display: flex; flex-direction: column; gap: var(--space-2); width: min(100%, var(--chat-w)); margin-inline: auto; min-width: 0; }
+.talk-approval .talk-approve-text { max-height: 12lh; overflow-y: auto; font-family: inherit; font-size: var(--fs-13); line-height: 1.45; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.talk-approval .talk-approve-why { font-size: var(--fs-12); }
+.talk-approval .talk-edit { width: 100%; min-height: 72px; font-size: var(--fs-13); line-height: 1.45; resize: vertical; }
+.talk-approval .dock-actions { flex-wrap: wrap; }
+.talk-card .talk-approval .dock-detail { background: var(--bg); }

@@ -31,6 +31,13 @@ class TalkSettings(BaseModel):
     """0 is no limit on the messages this side sends."""
 
 
+class Decision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str | None = Field(default=None, max_length=64_000)
+    """The operator's edit of a held message, sent in its place. Only with ``send``."""
+
+
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     def talks() -> AgentTalks:
         found = talks_of(app)
@@ -69,11 +76,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return await talks().describe(await known(talk_id))
 
     @api.post("/api/agent-talks/{talk_id}/messages/{message_id}/{decision}")
-    async def decide(talk_id: str, message_id: int, decision: Literal["send", "refuse"], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def decide(talk_id: str, message_id: int, decision: Literal["send", "refuse"], body: Decision | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await known(talk_id)
-        if not await talks().decide(talk_id, message_id, decision == "send", via="app"):
+        try:
+            decided = await talks().decide(talk_id, message_id, decision == "send", via="app", text=body.text if body is not None else None)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if not decided:
             raise HTTPException(409, "this message is not waiting")
         return await talks().describe(await known(talk_id), messages=True)
 
 
-__all__ = ["TalkSettings", "register"]
+__all__ = ["Decision", "TalkSettings", "register"]

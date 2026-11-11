@@ -250,6 +250,15 @@ describe("the Questions tab of an ordinary session", () => {
   });
 });
 
+describe("the Agents tab", () => {
+  it("is there only for a chat that talks to another agent, before Notes, and a link to it always opens it", () => {
+    expect(tabsFor("session")).not.toContain("agents");
+    expect(tabsFor("session", { agents: true })).toEqual(["details", "files", "preview", "jobs", "agents", "notes"]);
+    expect(tabsFor("session", { subagents: true, agents: true })).toEqual(["details", "files", "preview", "jobs", "subagents", "agents", "notes"]);
+    expect(routeTabsFor("session")).toContain("agents");
+  });
+});
+
 describe("the Browser tab", () => {
   it("is offered only to a session that has had a browser, after the agent's own tabs", () => {
     expect(tabsFor("session")).not.toContain("browser");

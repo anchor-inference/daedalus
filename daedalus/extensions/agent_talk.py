@@ -922,23 +922,37 @@ class AgentTalks:
         if isinstance(message_id, int):
             await self.decide(talk_id, message_id, allowed)
 
-    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "") -> bool:
-        """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again."""
+    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "", text: str | None = None) -> bool:
+        """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again.
+
+        ``text`` is the operator's own edit of the message, which replaces the row in the same step that claims
+        it, so what is posted and what the conversation shows as sent are one text. A value the operator handed
+        over goes out as its placeholder, as it would from the agent. ``ValueError`` for an edit that is empty
+        or longer than the other door takes, before anything is claimed."""
         talk = await self.talk(talk_id)
         message = await self._message(message_id)
-        if talk is None or message is None or message["talk_id"] != talk_id or not await self._claim(message_id, SENDING if allowed else REFUSED):
+        if talk is None or message is None or message["talk_id"] != talk_id:
+            return False
+        edited: str | None = None
+        if allowed and text is not None:
+            edited = self.manager.redactor.conceal_named(text).strip()
+            if not edited:
+                raise ValueError("the message is empty")
+            if len(edited) > talk["max_text"]:
+                raise ValueError(f"a message may be at most {talk['max_text']} characters")
+        if not await self._claim(message_id, SENDING if allowed else REFUSED, text=edited):
             return False
         if allowed:
-            await self._post(talk_id, message_id, str(message["text"]))
+            await self._post(talk_id, message_id, edited if edited is not None else str(message["text"]))
         if via:
             await self.manager.settle_ask(talk["session_id"], ask_key(message_id), "allow" if allowed else "deny", via=via)
         self._wake_readers(talk_id)
         return True
 
-    async def _claim(self, message_id: int, state: str) -> bool:
+    async def _claim(self, message_id: int, state: str, *, text: str | None = None) -> bool:
         """Take a held message out of waiting, once: a card and the sheet answered together must not both act."""
         async with self.db.transaction() as conn:
-            cursor = await conn.execute("UPDATE agent_talk_messages SET state = ? WHERE id = ? AND state = ?", (state, message_id, HELD))
+            cursor = await conn.execute("UPDATE agent_talk_messages SET state = ?, text = coalesce(?, text) WHERE id = ? AND state = ?", (state, text, message_id, HELD))
             claimed = cursor.rowcount > 0
             await cursor.close()
         return claimed
