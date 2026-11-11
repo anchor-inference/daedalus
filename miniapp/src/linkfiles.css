@@ -1,0 +1,35 @@
+/* Files and tasks of an agent link (linkfiles.tsx), the same in the Agents tab, in a link's conversation and in
+   the approvals over the composer. A file's name is a stranger's text: it is cut with an ellipsis and given in
+   full on hover, never wrapped across the row where it would push Download off it. */
+
+.link-files { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.talk-msg .link-files, .guest-msg .link-files { margin-top: var(--space-1); }
+.link-file { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--ctl-h-sm); padding: 2px var(--space-2) 2px 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.link-file[data-state="refused"], .link-file[data-state="dropped"], .link-file[data-state="failed"] { opacity: .7; }
+.link-file-pick { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 auto; min-width: 0; padding-left: var(--space-1); cursor: pointer; }
+.link-file-pick input { flex: none; margin: 0; }
+.link-file-open { display: inline-flex; flex: none; border-radius: var(--radius-xs); }
+/* A square the size of a small control: a picture is recognised at that size, and a row stays a row. */
+.link-file-thumb { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); overflow: hidden; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-3); }
+.link-file-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.link-file-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; line-height: 1.3; }
+.link-file-name { min-width: 0; color: var(--fg); font-size: var(--fs-13); }
+.link-file-meta { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); color: var(--fg-2); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.link-file-meta .mono { font-family: var(--mono); font-size: var(--fs-12); }
+.link-file-word { color: var(--warn); }
+.link-file[data-state="refused"] .link-file-word, .link-file[data-state="failed"] .link-file-word { color: var(--bad); }
+.link-file-save { flex: none; padding-inline: 6px; }
+
+.link-tasks { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.link-task { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.link-task[data-state="done"] { border-left-color: var(--ok); }
+.link-task[data-state="needs_input"] { border-left-color: var(--warn); }
+.link-task[data-state="refused"], .link-task[data-state="cancelled"] { border-left-color: var(--line); }
+.link-task-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--fs-12); }
+.link-task-result { padding-top: var(--space-1); border-top: 1px dashed var(--line); }
+.link-task-cancel { align-self: flex-start; }
+
+.link-kind { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--fg-2); font-size: var(--fs-11); }
+
+/* The files of an approval sit between its words and its buttons, and scroll rather than push them away. */
+.talk-approval .link-picks { max-height: 16lh; overflow-y: auto; }

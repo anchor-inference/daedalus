@@ -33,7 +33,7 @@ from daedalus.extensions.guest_door import (
     model_choices,
     model_options,
 )
-from daedalus.host import guest_turns
+from daedalus.host import guest_turns, link_protocol
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.notify_text import render
 
@@ -45,10 +45,11 @@ logger = logging.getLogger(__name__)
 DEFAULTS: dict[str, Any] = {
     "mode": "stand_in", "approval": True, "tools": guest_turns.DEFAULT_TOOLS, "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200,
     "invite_hours": 72.0, "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0,
+    "file_mb": link_protocol.DEFAULT_FILE_MB, "day_mb": link_protocol.DEFAULT_DAY_MB,
 }
 """What the form opens with. Numbers from no standard: a guest is paid for by the owner, so they start small.
 A trusted agent is the operator's own choice of somebody to serve, and starts with no limits at all."""
-TRUSTED_DEFAULTS: dict[str, Any] = {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0}
+TRUSTED_DEFAULTS: dict[str, Any] = {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0, "file_mb": 0.0, "day_mb": 0.0}
 
 DRAFT_MESSAGES = 30
 DRAFT_CHARS = 16_000
@@ -86,12 +87,24 @@ class LinkBody(BaseModel):
     conversation_hours: float = Field(default=DEFAULTS["conversation_hours"], ge=0, le=8760)
     idle_hours: float = Field(default=DEFAULTS["idle_hours"], ge=0, le=8760)
     retention_days: float = Field(default=DEFAULTS["retention_days"], ge=0, le=3650)
+    file_mb: float = Field(default=DEFAULTS["file_mb"], ge=0, le=1_000_000)
+    """The largest file either side may send, in megabytes; 0 is no limit."""
+    day_mb: float = Field(default=DEFAULTS["day_mb"], ge=0, le=1_000_000)
+    """What files may take in a day, both ways together; 0 is no limit."""
 
 
 class SettingsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     usd_per_day: float = Field(ge=0, le=100_000)
+
+
+class Release(BaseModel):
+    """The operator's answer on files that wait to go: the ids of those to hold back, the rest go."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    drop: list[int] = Field(default_factory=list, max_length=link_protocol.MAX_FILES)
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
@@ -179,7 +192,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if known is None:
             raise HTTPException(404, "no such link")
         out = await door("GET", f"/control/links/{link_id}")
-        return {**out, "link": described(out.get("link") or {}, known)}
+        return {**out, "link": described(out.get("link") or {}, known), "exchange": await bridge().exchange(link_id)}
 
     def described(link: dict[str, Any], known: Any) -> dict[str, Any]:
         """The door's view of a link, with what only this side holds: the turn's level and the note to the agent,
@@ -249,6 +262,34 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             await bridge().contact_settled(conversation_id, render("guest.admitted" if decision == "admit" else "guest.refused", app.notifications.language()))
         return out
 
+    @api.post("/api/guest/links/{link_id}/outbox/{batch}/{decision}")
+    async def release_files(link_id: str, batch: str, decision: Literal["send", "refuse"], body: Release | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Files a guest's turn wanted to send: all of them, all but those dropped, or none."""
+        if await bridge().known_link(link_id) is None:
+            raise HTTPException(404, "no such link")
+        try:
+            released = await bridge().release(link_id, batch, send=decision == "send", drop=body.drop if body is not None else ())
+        except DoorUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        except (DoorRefused, link_protocol.LinkFileError) as exc:
+            raise HTTPException(409, str(exc)) from None
+        if not released:
+            raise HTTPException(409, "these files are not waiting")
+        return await bridge().exchange(link_id)
+
+    @api.post("/api/guest/links/{link_id}/tasks/{task}/cancel")
+    async def cancel_task(link_id: str, task: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator stops a task the guest set: the turn on it ends, and the guest is told."""
+        if await bridge().known_link(link_id) is None:
+            raise HTTPException(404, "no such link")
+        try:
+            await bridge().cancel_task(link_id, task)
+        except DoorUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        except DoorRefused as exc:
+            raise HTTPException(exc.status, exc.detail) from None
+        return await bridge().exchange(link_id)
+
     @api.post("/api/sessions/{session_id}/guest/draft")
     async def draft_briefing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """A briefing to start from, written once from the chat. It goes to the form and nowhere else:
@@ -284,4 +325,4 @@ async def write_draft(manager: Any, session_id: str) -> str:
     return "".join(block.text for block in response.message.content_blocks if isinstance(block, TextBlock)).strip()
 
 
-__all__ = ["DEFAULTS", "TRUSTED_DEFAULTS", "LinkBody", "register", "write_draft"]
+__all__ = ["DEFAULTS", "TRUSTED_DEFAULTS", "LinkBody", "Release", "register", "write_draft"]

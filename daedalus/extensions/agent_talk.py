@@ -43,21 +43,25 @@ import ipaddress
 import json as jsonlib
 import logging
 import math
+import os
+import re
 import secrets
 import socket
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import httpx
 
-from daedalus.extensions.guest_door import chat_link
+from daedalus.extensions.guest_door import bridge_of, chat_link, file_view, task_view
 from daedalus.extensions.notifications import Draft
-from daedalus.host import agent_talk, guest_turns
+from daedalus.host import agent_talk, guest_turns, link_protocol
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
+from daedalus.host.link_protocol import LinkFileError, Staged
 from daedalus.host.notify_text import render
 from daedalus.host.prompts import without_host_notes
 from daedalus.security.untrusted import inert
@@ -111,6 +115,20 @@ WAKE_TURNS_MAX = 20
 WAKE_USD_MAX = 5.0
 RUNS_KEPT = 12
 """Runs of a conversation a turn opened by a reply reads: the most recent, each a few messages."""
+SIDE = "talk"
+"""``link_files.side`` and ``link_tasks.side`` for a conversation of this side's at somebody else's door."""
+TASK_WAKES_MAX = 3
+"""Turns the changes of the tasks this side set may still open when waking is off: each task set adds one. A task's
+result is what the agent set it for, and it should not wait for the operator to ask; three is a few tasks in flight,
+not a conversation that runs itself."""
+SECRET_SCAN_BYTES = 1024 * 1024
+"""How much of a file going out is read for a secret: a text file of that size is a config or a log, where one is."""
+PIECE_SECONDS = 60.0
+FILE_WORDS = {
+    "file_limit": "a file is larger than that link takes",
+    "day_limit": "that link's files for today are used up",
+    "door_full": "that door has no room for files now",
+}
 
 ORIGINS = frozenset({"operator", "core", "events", "autopilot"})
 """Whose runs may use the tool: the operator's and those that continue one. A schedule or a loop reads with nobody there."""
@@ -144,6 +162,7 @@ HELD_WORDS = {
     "looked": "this turn read or ran something after a stranger's reply",
     "secret": "it looks as if it holds a secret",
     "review": "the automatic review of what goes out did not pass it",
+    "outside": "a file comes from outside this chat's folder",
 }
 
 
@@ -160,6 +179,12 @@ class DoorAnswer:
     status: int
     body: dict[str, Any]
     retry_after: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Answered:
+    status_code: int
+    retry: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,7 +277,28 @@ class Dialer:
         target = parts._replace(netloc=f"{place}:{port}").geturl()
         return target, {"host": parts.netloc}, {"sni_hostname": host}
 
-    async def call(self, method: str, url: str, *, token: str = "", body: Any = None, data: bool = True, timeout: float = CALL_SECONDS, extra: dict[str, str] | None = None) -> DoorAnswer:
+    async def call(
+        self, method: str, url: str, *, token: str = "", body: Any = None, data: bool = True, timeout: float = CALL_SECONDS, extra: dict[str, str] | None = None,
+        content: bytes | None = None,
+    ) -> DoorAnswer:
+        """One call whose answer is JSON. ``content`` sends raw bytes in place of ``body``: a piece of a file."""
+        answer, raw = await self._exchange(method, url, token=token, body=body, data=data, timeout=timeout, extra=extra, content=content, cap=MAX_ANSWER_BYTES)
+        try:
+            parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else {}
+        except (ValueError, RecursionError):
+            parsed = {}
+        parsed = parsed if isinstance(parsed, dict) else {}
+        return DoorAnswer(answer.status_code, parsed, _seconds(answer.retry if answer.retry is not None else parsed.get("retry_after")))
+
+    async def fetch(self, url: str, *, token: str, timeout: float = PIECE_SECONDS) -> tuple[int, bytes]:
+        """A piece of a file: the status and the raw bytes, never more than a piece."""
+        answer, raw = await self._exchange("GET", url, token=token, data=False, timeout=timeout, cap=link_protocol.CHUNK_BYTES)
+        return answer.status_code, bytes(raw[: link_protocol.CHUNK_BYTES])
+
+    async def _exchange(
+        self, method: str, url: str, *, token: str = "", body: Any = None, data: bool = True, timeout: float = CALL_SECONDS, extra: dict[str, str] | None = None,
+        content: bytes | None = None, cap: int,
+    ) -> tuple[_Answered, bytearray]:
         target, headers, extensions = await self._pinned(url)
         headers = {**headers, "user-agent": "daedalus-agent-talk", **(extra or {})}
         if data:
@@ -262,25 +308,21 @@ class Dialer:
         try:
             # The whole call, and not httpx's own bound: that one is per read, and a door dripping a byte
             # at a time would hold the tool, a lock and the sweep for as long as it liked.
+            sent: dict[str, Any] = {"content": content} if content is not None else {"json": body}
             async with asyncio.timeout(timeout), httpx.AsyncClient(transport=self.transport, proxy=self.proxy or None, timeout=timeout, follow_redirects=False, trust_env=False) as client:
-                async with client.stream(method, target, json=body, headers=headers, extensions=extensions) as response:
+                async with client.stream(method, target, headers=headers, extensions=extensions, **sent) as response:
                     raw = bytearray()
                     async for chunk in response.aiter_bytes():
                         raw.extend(chunk)
-                        if len(raw) > MAX_ANSWER_BYTES:
+                        if len(raw) > cap:
                             break
         except (httpx.HTTPError, httpx.InvalidURL, OSError, TimeoutError, ValueError) as exc:
             raise DoorGone(type(exc).__name__) from exc
         try:
-            parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else {}
-        except (ValueError, RecursionError):
-            parsed = {}
-        parsed = parsed if isinstance(parsed, dict) else {}
-        try:
-            retry = float(response.headers.get("retry-after", ""))
+            retry: float | None = float(response.headers.get("retry-after", ""))
         except ValueError:
             retry = None
-        return DoorAnswer(response.status_code, parsed, _seconds(retry if retry is not None else parsed.get("retry_after")))
+        return _Answered(response.status_code, retry), raw
 
 
 class AgentTalks:
@@ -346,40 +388,60 @@ class AgentTalks:
             "waiting_for": talk["waiting_for"], "quiet": bool(talk["quiet"]), "review": talk["review"], "sends": talk["sends"], "sends_limit": talk["sends_limit"], "wake_turns": talk["wake_turns"],
             "wake_usd": round(float(talk["wake_usd"]), 6), "created_at": talk["created_at"], "last_at": talk["last_at"], "closed_at": talk["closed_at"], "spent_usd": round(await self.spent(talk), 6),
             "replies": sum(1 for row in rows if row["role"] == THEM), "unread": sum(1 for row in rows if row["state"] == UNREAD), "held": sum(1 for row in rows if row["state"] == HELD),
+            "file_mb": float(talk["file_mb"]), "day_mb": float(talk["day_mb"]),
+            "tasks": [task_view(row) for row in await self.db.fetchall("SELECT * FROM link_tasks WHERE side = ? AND owner = ? ORDER BY id", (SIDE, talk["id"]))],
         }
         if messages:
-            out["messages"] = [{"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"]} for row in rows]
+            files = [file_view(row) for row in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND owner = ? ORDER BY id", (SIDE, talk["id"]))]
+            out["files"] = files
+            out["messages"] = [
+                {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"], "task_state": row["task_state"],
+                 "files": [file["id"] for file in files if file["message_id"] == row["id"]]}
+                for row in rows
+            ]
         return out
 
     # -- the tool -----------------------------------------------------------------------
 
-    async def tool(self, session_id: str, action: str, *, link: str = "", conversation: str = "", text: str = "", wait_seconds: int | None = None) -> Outcome:
+    async def tool(
+        self, session_id: str, action: str, *, link: str = "", conversation: str = "", text: str = "", wait_seconds: int | None = None, files: list[str] | None = None,
+        task: str = "",
+    ) -> Outcome:
         state = self.manager.live_state(session_id)
         if state is None or not self.manager.ordinary_chat(state):
             return Outcome("Agent links belong to an ordinary chat.", error=True)
         turn = state.guest_turn
         if turn is not None and turn.kind != "reply":
-            return Outcome("A guest's turn does not talk to other agents.", error=True)
+            # A guest's turn talks to its guest and to nobody else: the door's side of the same protocol.
+            bridge = bridge_of(self.app)
+            if bridge is None:
+                return Outcome("Agent links are not available here.", error=True)
+            said, failed = await bridge.turn_action(state, action, text=text, files=list(files or []))
+            return Outcome(said, failed)
         if turn is None and state.run_origin not in ORIGINS:
             return Outcome("Talking to another agent is for the operator's own turns, with somebody there to see it.", error=True)
         wait = 0 if turn is not None else max(0, min(WAIT_DEFAULT if wait_seconds is None else int(wait_seconds), WAIT_MAX))
+        if turn is not None and (files or action == "task"):
+            return Outcome("A turn started by a reply sends no files and sets no tasks: tell the operator what you would send.", error=True)
         try:
             if action == "open":
                 if turn is not None:
                     return Outcome("A turn started by a reply opens nothing.", error=True)
                 opened = await self._open(state, link)
-                if opened.error or not text.strip():
+                if opened.error or not (text.strip() or files):
                     return opened
                 # Both real models handed their first message to ``open`` and took it as said, so it is.
-                sent = await self._send(state, await self.talk(opened.talk), text, wait)
+                sent = await self._send(state, await self.talk(opened.talk), text, wait, files=files or [])
                 return Outcome(f"{opened.text}\n{sent.text}", sent.error, opened.talk)
-            if action not in ("send", "read", "end"):
-                return Outcome("action is one of open, send, read, end.", error=True)
+            if action not in ("send", "read", "end", "task", "cancel"):
+                return Outcome("action is one of open, send, task, cancel, read, end.", error=True)
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation)
             if isinstance(talk, Outcome):
                 return talk
-            if action == "send":
-                return await self._send(state, talk, text, wait)
+            if action in ("send", "task"):
+                return await self._send(state, talk, text, wait, files=files or [], kind=link_protocol.TASK if action == "task" else link_protocol.TEXT, task=task if action == "send" else "")
+            if action == "cancel":
+                return await self.cancel(talk["id"], task)
             if action == "read":
                 return await self._read(state, talk, wait)
             await self.end(talk["id"], reason="ended")
@@ -491,7 +553,9 @@ class AgentTalks:
         sent = f"{talk['sends']} of {talk['sends_limit']} messages sent." if talk["sends_limit"] else f"{talk['sends']} messages sent."
         return " ".join(part for part in (lead, said, sent, f"[conversation {talk['id']}]") if part)
 
-    async def _send(self, state: SessionState, talk: Any, text: str, wait: int) -> Outcome:
+    async def _send(
+        self, state: SessionState, talk: Any, text: str, wait: int, *, files: list[str] | None = None, kind: str = link_protocol.TEXT, task: str = "",
+    ) -> Outcome:
         session_id = state.session.id
         if talk["state"] in (CLOSED, OPENING):
             return Outcome(self._state_line(talk), error=True, talk=talk["id"])
@@ -502,19 +566,36 @@ class AgentTalks:
         if turn is not None and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND role = ? AND run_id = ?", (talk["id"], US, run_id)) is not None:
             return Outcome("A turn started by a reply sends once. End the turn; the next reply starts another.", error=True, talk=talk["id"])
         clean = self.manager.redactor.conceal_named(text).strip()
-        if not clean:
-            return Outcome("text is the message to send.", error=True, talk=talk["id"])
+        if not clean and not files:
+            return Outcome("text is the message to send." if kind != link_protocol.TASK else "text says what the task is.", error=True, talk=talk["id"])
+        if kind == link_protocol.TASK and not clean:
+            return Outcome("text says what the task is.", error=True, talk=talk["id"])
         if len(clean) > talk["max_text"]:
             return Outcome(f"A message may be at most {talk['max_text']} characters.", error=True, talk=talk["id"])
+        if task and not await self.db.fetchone("SELECT 1 FROM link_tasks WHERE side = ? AND owner = ? AND task = ?", (SIDE, talk["id"], task)):
+            return Outcome(f"This conversation has no task {task}.", error=True, talk=talk["id"])
         if await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is not None:
             return Outcome("A message of this conversation is already waiting for the operator. Wait for them or end your turn.", error=True, talk=talk["id"])
-        hold = "review" if state.review_holds_send else self._why_hold(talk, clean, session_id)
+        staged: list[Staged] = []
+        outside = False
+        if files:
+            prepared = await self._stage(state, talk, files)
+            if isinstance(prepared, Outcome):
+                return prepared
+            staged, outside = prepared
+        if kind == link_protocol.TEXT and staged:
+            kind = link_protocol.FILE
+        hold = "review" if state.review_holds_send else "outside" if outside else self._why_hold(talk, clean, session_id, staged)
         state.review_holds_send = False
-        message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold)
+        message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold, kind=kind, task=task)
+        for item in staged:
+            await self._file_row(talk, "out", item.name, item.size, item.sha256, str(item.path), "held" if hold else "sending", message_id=message_id, task=task, note=item.source)
         if hold:
             shown = clean if len(clean) <= CARD_CHARS else f"{clean[:CARD_CHARS]}… [{len(clean)} characters in all: read the whole message in the chat's conversation before you allow it]"
+            listed = "".join(f"\n· {item.name} ({item.size} bytes)" for item in staged)
+            what = "A task for" if kind == link_protocol.TASK else "To"
             self.manager.ask_operator(
-                session_id, key=ask_key(message_id), tool=agent_talk.TOOL, text=f"To {talk['host']}: {shown}", on_answer=ASK_HOOK, extra={"talk": talk["id"], "message": message_id},
+                session_id, key=ask_key(message_id), tool=agent_talk.TOOL, text=f"{what} {talk['host']}: {shown}{listed}", on_answer=ASK_HOOK, extra={"talk": talk["id"], "message": message_id},
             )
             settled = await self._await_decision(talk["id"], message_id, wait)
             if settled == HELD:
@@ -529,8 +610,65 @@ class AgentTalks:
             return Outcome(self._send_failure(fresh, await self._message(message_id)), error=True, talk=talk["id"])
         return await self._reply_or_status(state, fresh, wait, "Sent.")
 
-    def _why_hold(self, talk: Any, text: str, session_id: str) -> str:
-        if self.manager.redactor.contains_secret(text):
+    async def _stage(self, state: SessionState, talk: Any, paths: list[str]) -> tuple[list[Staged], bool] | Outcome:
+        """The files a message is to carry, made ready to go and checked against the conversation's limits, and whether
+        any of them comes from outside the chat's folder."""
+        if len(paths) > link_protocol.MAX_FILES:
+            return Outcome(f"At most {link_protocol.MAX_FILES} files in one message.", error=True, talk=talk["id"])
+        fs = state.services.fs if state.services is not None else None
+        if fs is not None and getattr(fs, "remote", False):
+            return Outcome("Files go only from a chat whose folder is on this machine.", error=True, talk=talk["id"])
+        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
+        chosen: list[Path] = []
+        outside = False
+        for path in paths:
+            given = Path(str(path)).expanduser()
+            real = Path(os.path.realpath(given if given.is_absolute() else root / given))
+            if not real.exists():
+                return Outcome(f"There is no {path}.", error=True, talk=talk["id"])
+            if state.services is not None and state.services.is_protected(real):
+                return Outcome(f"{path} is part of this installation, and does not leave it.", error=True, talk=talk["id"])
+            outside = outside or not real.is_relative_to(root)
+            chosen.append(real)
+        try:
+            staged = await asyncio.to_thread(link_protocol.stage, chosen, self.app.settings.state_dir / link_protocol.STAGING)
+        except (LinkFileError, OSError) as exc:
+            return Outcome(f"Could not get the files ready: {exc}", error=True, talk=talk["id"])
+        why = link_protocol.check_limits((item.size for item in staged), file_mb=float(talk["file_mb"]), day_mb=float(talk["day_mb"]), used_today=await self._bytes_today(talk["id"]))
+        if why:
+            link_protocol.unstage(staged)
+            return Outcome(f"Not sent: {why}. The operator can change the limits on the conversation.", error=True, talk=talk["id"])
+        return staged, outside
+
+    async def _bytes_today(self, talk_id: str, direction: str = "out") -> int:
+        midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        row = await self.db.fetchone(
+            "SELECT coalesce(sum(size), 0) AS n FROM link_files WHERE side = ? AND owner = ? AND direction = ? AND created_at >= ? AND state NOT IN ('refused', 'dropped', 'failed')",
+            (SIDE, talk_id, direction, midnight),
+        )
+        return int(row["n"]) if row is not None else 0
+
+    async def _file_row(
+        self, talk: Any, direction: str, name: str, size: int, sha256: str, path: str, state: str, *, message_id: int | None = None, task: str = "", remote_id: str = "",
+        note: str = "",
+    ) -> int:
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO link_files(side, owner, session_id, direction, name, size, sha256, mime, path, remote_id, task, message_id, state, note, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (SIDE, talk["id"], talk["session_id"], direction, link_protocol.safe_name(name), int(size), sha256, link_protocol.mime_of(name), path, remote_id, task, message_id,
+                 state, note[:500], _now()),
+            )
+            row_id = int(cursor.lastrowid or 0)
+            await cursor.close()
+        return row_id
+
+    async def _files_of(self, message_id: int, *states: str) -> list[Any]:
+        marks = ",".join("?" * len(states))
+        return list(await self.db.fetchall(f"SELECT * FROM link_files WHERE side = ? AND message_id = ? AND state IN ({marks}) ORDER BY id", (SIDE, message_id, *states)))
+
+    def _why_hold(self, talk: Any, text: str, session_id: str, staged: list[Staged] | None = None) -> str:
+        if self.manager.redactor.contains_secret(text) or any(self._holds_secret(item) for item in staged or ()):
             return "secret"
         touch = self.manager.touched(session_id)
         if touch is not None and touch.get("looked"):
@@ -539,12 +677,22 @@ class AgentTalks:
             return "all"
         return "first" if talk["review"] == "first" and talk["sends"] == 0 else ""
 
-    async def _insert_message(self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "") -> int:
+    def _holds_secret(self, item: Staged) -> bool:
+        """Whether a small text file going out holds a value this installation knows to be secret, or looks like one."""
+        if item.size > SECRET_SCAN_BYTES:
+            return False
+        try:
+            text = item.path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False
+        return self.manager.redactor.contains_secret(text)
+
+    async def _insert_message(self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "", *, kind: str = link_protocol.TEXT, task: str = "") -> int:
         now = _now()
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (talk_id, role, text, state, run_id, note, now),
+                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at, kind, task) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (talk_id, role, text, state, run_id, note, now, kind, task),
             )
             message_id = int(cursor.lastrowid or 0)
             await cursor.close()
@@ -561,22 +709,71 @@ class AgentTalks:
             return "The door did not answer, so this message may or may not have arrived. Read before you send it again."
         if note.startswith("limit:"):
             return f"Not sent. {LIMIT_WORDS.get(note[6:], 'A limit of that link was reached.')} Tell the operator."
+        if note.startswith("files:"):
+            return f"Not sent: {FILE_WORDS.get(note[6:], 'the door would not take a file')}. Tell the operator."
         if note == "busy":
             return "Not sent: earlier messages are still waiting for an answer. Read first."
         if note == "owner":
             return "Not sent: the first message is still with the other side's owner, and nothing more is taken until they answer."
         return "Not sent: the door would not take this message."
 
+    async def _upload(self, talk: Any, row: Any) -> str:
+        """One file to the other door, announced and then sent a piece at a time from wherever that door has got to.
+        The door's id, or :class:`LinkFileError` with the door's refusal as one of this code's words."""
+        base, token = talk["base_url"], talk["token"]
+        file_id = str(row["remote_id"] or "")
+        received = 0
+        if file_id:
+            # Announced before a drop: the door says how far it got, and the file goes on from there.
+            known = await self.dialer.call("GET", f"{base}/a/files/{file_id}", token=token)
+            received = _count(known.body.get("received")) if known.status == 200 and known.body.get("state") == "uploading" else -1
+            if known.status == 200 and known.body.get("state") == "ready":
+                return file_id
+        if not file_id or received < 0:
+            made = await self.dialer.call("POST", f"{base}/a/files", token=token, body={"name": row["name"], "size": row["size"], "sha256": row["sha256"]})
+            file_id = str(made.body.get("id") or "")
+            if made.status not in (200, 201) or not re.fullmatch(r"f_[0-9a-f]{16}", file_id):
+                code = made.body.get("code")
+                raise LinkFileError(code if isinstance(code, str) and code in FILE_WORDS else "refused")
+            await self.db.execute("UPDATE link_files SET remote_id = ? WHERE id = ?", (file_id, row["id"]))
+            received = 0
+
+        async def put(offset: int, piece: bytes) -> int:
+            answer = await self.dialer.call("PUT", f"{base}/a/files/{file_id}?offset={offset}", token=token, content=piece, timeout=PIECE_SECONDS)
+            if answer.status in (200, 409) and isinstance(answer.body.get("received"), int):
+                return _count(answer.body.get("received"))
+            raise LinkFileError("refused")
+
+        await link_protocol.send_pieces(Path(str(row["path"])), int(row["size"]), received, put)
+        return file_id
+
     async def _post(self, talk_id: str, message_id: int, text: str) -> None:
-        """Send one message and record what became of it. The only caller of ``POST /a/messages``."""
+        """Send one message and record what became of it. The only caller of ``POST /a/messages``: its files go first,
+        each to the end, and the message names them once they are all there."""
         async with self._locks.setdefault(talk_id, asyncio.Lock()):
             talk = await self.talk(talk_id)
             if talk is None or talk["state"] == CLOSED or not talk["token"]:
                 await self._mark(message_id, FAILED)
                 return
             await self._mark(message_id, SENDING)
+            message = await self._message(message_id)
+            body: dict[str, Any] = {"text": text}
+            if message["kind"] != link_protocol.TEXT:
+                body["kind"] = message["kind"]
+            if message["task"]:
+                body["task"] = message["task"]
+            files = await self._files_of(message_id, "sending")
             try:
-                answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body={"text": text})
+                ids = [await self._upload(talk, row) for row in files]
+                if ids:
+                    body["files"] = ids
+                answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body=body)
+            except LinkFileError as exc:
+                await self._mark(message_id, FAILED, note=f"files:{exc}")
+                for row in files:
+                    await self.db.execute("UPDATE link_files SET state = 'failed' WHERE id = ?", (row["id"],))
+                link_protocol.unstage(Staged(str(row["name"]), Path(str(row["path"])), 0, "", "") for row in files)
+                return
             except (DoorGone, NotReachable):
                 await self._mark(message_id, UNSURE)
                 await self._update(talk_id, waiting_for="reply", quiet=0, last_at=_now())
@@ -588,10 +785,17 @@ class AgentTalks:
                 await self._mark(message_id, FAILED, note="owner")
             elif answer.status == 202:
                 await self._mark(message_id, SENT)
+                for row in files:
+                    await self.db.execute("UPDATE link_files SET state = 'sent', path = '' WHERE id = ?", (row["id"],))
+                link_protocol.unstage(Staged(str(row["name"]), Path(str(row["path"])), 0, "", "") for row in files)
                 await self.db.execute(
                     "UPDATE agent_talks SET sends = sends + 1, waiting_for = ?, quiet = 0, last_at = ? WHERE id = ?",
                     ("owner" if word == PENDING else "reply", _now(), talk_id),
                 )
+                task = _task_id(answer.body.get("task"))
+                if message["kind"] == link_protocol.TASK and task:
+                    await self._task_set(talk, task, str(message["text"]))
+                    await self.db.execute("UPDATE agent_talk_messages SET task = ? WHERE id = ?", (task, message_id))
                 self.follow(talk_id)
             elif answer.status in (401, 410):
                 await self._mark(message_id, FAILED)
@@ -674,9 +878,24 @@ class AgentTalks:
             if rules is not None and hasattr(rules, "injection_check"):
                 with suppress(Exception):  # a check that cannot run must not cost the reply: the fence is what holds
                     signs = await rules.injection_check(f"the door at {talk['host']}", row["text"])
-            out.append(agent_talk.fence_reply(row["text"], talk["host"], signs=signs))
+            out.append(agent_talk.fence_reply(await self._as_read(row, talk), talk["host"], signs=signs))
             await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
         return out
+
+    async def _as_read(self, row: Any, talk: Any) -> str:
+        """A reply as the model reads it: its words, its task, and where each of its files is, all inside the fence,
+        because a door's kinds and names are as much a stranger's as its words."""
+        lines = [str(row["text"])]
+        if row["task"] and row["kind"] != link_protocol.TASK:
+            lines.append(f"[about task {row['task']}]")
+        state = await self.manager.get_state(str(talk["session_id"]))
+        root = self.manager.work_dir(state) if state is not None else None
+        for file in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND message_id = ? ORDER BY id", (SIDE, row["id"])):
+            path = Path(str(file["path"])) if file["path"] else None
+            where = (path.relative_to(root).as_posix() if root is not None and path.is_relative_to(root) else str(path)) if path is not None else ""
+            status = {"received": f"saved as {where}", "pending": "still arriving: read again in a moment", "refused": f"not taken: {file['note']}", "failed": "could not be fetched"}
+            lines.append(f"[file {file['name']} ({file['size']} bytes): {status.get(str(file['state']), str(file['state']))}]")
+        return "\n".join(line for line in lines if line)
 
     # -- following a door ---------------------------------------------------------------
 
@@ -755,13 +974,17 @@ class AgentTalks:
         return reason if reason in REASONS else "ended"
 
     async def _store(self, talk: Any, items: Any, cursor: Any) -> int:
-        """Keep what a read brought, each message once, with the new cursor in the same breath."""
+        """Keep what a read brought, each message once, with the new cursor in the same breath. A message's kind, its
+        task and its files are fields like any other a door sends: each is checked, and one that makes no sense is left out."""
         if not isinstance(items, list):
             return 0
         talk_id = talk["id"]
         last = int(talk["cursor"])
         kept: list[tuple[str, str]] = []
+        moved = False
+        files_came = False
         room = MAX_MESSAGES - int((await self.db.fetchone("SELECT count(*) AS n FROM agent_talk_messages WHERE talk_id = ?", (talk_id,)))["n"])
+        mine = {str(row["task"]): str(row["state"]) for row in await self.db.fetchall("SELECT task, state FROM link_tasks WHERE side = ? AND owner = ? AND direction = 'mine'", (SIDE, talk_id))}
         async with self.db.transaction() as conn:
             for item in items[:MAX_PER_READ]:
                 if not isinstance(item, dict) or room <= 0:
@@ -769,30 +992,117 @@ class AgentTalks:
                 door_id, sender, text = item.get("id"), item.get("from"), item.get("text")
                 if isinstance(door_id, bool) or not isinstance(door_id, int) or door_id <= last or sender not in ("agent", "door") or not isinstance(text, str):
                     continue
+                kind = item.get("kind") if item.get("kind") in link_protocol.KINDS else link_protocol.TEXT
+                task = _task_id(item.get("task"))
+                state = item.get("state") if item.get("state") in link_protocol.TASK_STATES else ""
+                files = _door_files(item.get("files"))
                 clean = inert(text)[:MAX_TEXT]
-                if not clean:
+                if kind == link_protocol.STATUS and task and state and not clean:
+                    clean = f"Task {task}: {state.replace('_', ' ')}."
+                if not clean and not files:
                     continue
                 role = THEM if sender == "agent" else DOOR
-                await conn.execute(
-                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (talk_id, role, clean, UNREAD, door_id, _now()),
+                cursor_row = await conn.execute(
+                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (talk_id, role, clean, UNREAD, door_id, _now(), kind, task, state),
                 )
+                message_id = int(cursor_row.lastrowid or 0) if cursor_row.rowcount else 0
+                await cursor_row.close()
+                for file in files if message_id else []:
+                    await conn.execute(
+                        "INSERT INTO link_files(side, owner, session_id, direction, name, size, sha256, mime, remote_id, task, message_id, state, created_at)"
+                        " VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                        (SIDE, talk_id, talk["session_id"], file["name"], file["size"], file["sha256"], link_protocol.mime_of(file["name"]), file["id"], task, message_id, _now()),
+                    )
+                    files_came = True
+                if task in mine and state and mine[task] in link_protocol.OPEN_TASK_STATES and state != mine[task]:
+                    result = clean if state in (link_protocol.DONE, link_protocol.REFUSED, link_protocol.NEEDS_INPUT) else ""
+                    await conn.execute(
+                        "UPDATE link_tasks SET state = ?, result = CASE WHEN ? != '' THEN ? ELSE result END, updated_at = ? WHERE side = ? AND owner = ? AND task = ?",
+                        (state, result, result[:4000], _now(), SIDE, talk_id, task),
+                    )
+                    mine[task] = state
+                    moved = moved or state in link_protocol.WAKING_STATES
                 last = door_id
                 room -= 1
                 kept.append((role, clean))
             await conn.execute("UPDATE agent_talks SET cursor = ?, last_at = ? WHERE id = ?", (last, _now() if kept else talk["last_at"], talk_id))
         if room <= 0:
             await self._close(talk_id, "too_long")
+        if files_came:
+            self._spawn(self._fetch_files(talk_id), f"agent-talk-files:{talk_id}")
         if kept:
-            await self._arrived(talk, kept)
+            await self._arrived(talk, kept, task_moved=moved)
         return len(kept)
+
+    async def _fetch_files(self, talk_id: str) -> None:
+        """Bring what the other side sent into ``guest-files/<conversation>/`` in the chat's folder, within this
+        conversation's limits; what is over them stays at the other door and is marked so."""
+        async with self._locks.setdefault(f"files:{talk_id}", asyncio.Lock()):
+            talk = await self.talk(talk_id)
+            if talk is None or not talk["token"]:
+                return
+            state = await self.manager.get_state(str(talk["session_id"]))
+            if state is None:
+                return
+            fs = state.services.fs if state.services is not None else None
+            root = self.app.settings.state_dir / link_protocol.STAGING / "in" if fs is not None and getattr(fs, "remote", False) else self.manager.work_dir(state)
+            directory = link_protocol.incoming_dir(root, talk_id)
+            for row in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND owner = ? AND direction = 'in' AND state = 'pending' ORDER BY id", (SIDE, talk_id)):
+                why = link_protocol.check_limits([int(row["size"])], file_mb=float(talk["file_mb"]), day_mb=float(talk["day_mb"]), used_today=await self._bytes_today(talk_id, "in") - int(row["size"]))
+                if why:
+                    await self.db.execute("UPDATE link_files SET state = 'refused', note = ? WHERE id = ?", (why, row["id"]))
+                    continue
+                await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+                target = link_protocol.free_path(directory, str(row["name"]))
+                url = f"{talk['base_url']}/a/files/{row['remote_id']}/content"
+
+                async def piece(offset: int, url: str = url) -> bytes:
+                    status, data = await self.dialer.fetch(f"{url}?offset={offset}", token=str(talk["token"]))
+                    if status != 200:
+                        raise LinkFileError(f"the door answered {status}")
+                    return data
+
+                try:
+                    await link_protocol.fetch_pieces(target, int(row["size"]), str(row["sha256"]), piece)
+                except (LinkFileError, DoorGone, NotReachable, OSError) as exc:
+                    await self.db.execute("UPDATE link_files SET state = 'failed', note = ? WHERE id = ?", (str(exc)[:200], row["id"]))
+                    continue
+                await self.db.execute("UPDATE link_files SET state = 'received', path = ? WHERE id = ?", (str(target), row["id"]))
+
+    async def _task_set(self, talk: Any, task: str, text: str) -> None:
+        """A task this side set on the other: recorded, and one more turn its changes may open with waking off."""
+        now = _now()
+        await self.db.execute(
+            "INSERT OR IGNORE INTO link_tasks(side, owner, session_id, task, direction, text, state, created_at, updated_at) VALUES (?, ?, ?, ?, 'mine', ?, ?, ?, ?)",
+            (SIDE, talk["id"], talk["session_id"], task, text[:4000], link_protocol.ACCEPTED, now, now),
+        )
+        await self.db.execute("UPDATE agent_talks SET task_wakes = min(?, task_wakes + 1) WHERE id = ?", (TASK_WAKES_MAX, talk["id"]))
+
+    async def cancel(self, talk_id: str, task: str) -> Outcome:
+        """Cancel a task this side set. The other side stops its turn on it; a task that is over stays as it ended."""
+        talk = await self.talk(talk_id)
+        row = await self.db.fetchone("SELECT * FROM link_tasks WHERE side = ? AND owner = ? AND task = ? AND direction = 'mine'", (SIDE, talk_id, task)) if talk is not None else None
+        if talk is None or row is None:
+            return Outcome(f"This conversation has no task {task} of yours.", error=True, talk=talk_id)
+        if row["state"] not in link_protocol.OPEN_TASK_STATES:
+            return Outcome(f"The task {task} is already {row['state']}.", talk=talk_id)
+        if talk["state"] != CLOSED and talk["token"]:
+            try:
+                answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body={"kind": link_protocol.STATUS, "task": task, "state": link_protocol.CANCELLED})
+            except (DoorGone, NotReachable):
+                return Outcome("The door did not answer, so the task may still be running there. Try again.", error=True, talk=talk_id)
+            if answer.status not in (200, 409):
+                return Outcome("The door would not cancel the task.", error=True, talk=talk_id)
+        await self.db.execute("UPDATE link_tasks SET state = ?, updated_at = ? WHERE id = ?", (link_protocol.CANCELLED, _now(), row["id"]))
+        return Outcome(f"The task {task} is cancelled.", talk=talk_id)
 
     def _wake_readers(self, talk_id: str) -> None:
         news = self._news.pop(talk_id, None)
         if news is not None:
             news.set()
 
-    async def _arrived(self, talk: Any, kept: list[tuple[str, str]]) -> None:
+    async def _arrived(self, talk: Any, kept: list[tuple[str, str]], *, task_moved: bool = False) -> None:
         talk_id = talk["id"]
         self._wake_readers(talk_id)
         spoken = [text for role, text in kept if role == THEM]
@@ -801,7 +1111,10 @@ class AgentTalks:
         fresh = await self.talk(talk_id)
         if fresh is None or self._readers.get(talk_id):
             return
-        if fresh["wake_turns"] != 0 and spoken:
+        if fresh["wake_turns"] != 0 and (spoken or task_moved):
+            self.wake(talk_id)
+        elif task_moved and fresh["task_wakes"] > 0:
+            # The side that set a task wakes when the task moves, whether or not the operator switched waking on.
             self.wake(talk_id)
         elif spoken:
             await self._tell(fresh, "reply", every=REPLY_NOTICE_SECONDS)
@@ -846,8 +1159,9 @@ class AgentTalks:
         deadline = time.monotonic() + CHAT_FREE_SECONDS
         while time.monotonic() < deadline:
             talk = await self.talk(talk_id)
-            if talk is None or talk["state"] == CLOSED or talk["wake_turns"] == 0:
+            if talk is None or talk["state"] == CLOSED or (talk["wake_turns"] == 0 and talk["task_wakes"] <= 0):
                 return
+            by_task = talk["wake_turns"] == 0
             unread = await self._unread(talk_id)
             if not unread:
                 return
@@ -866,9 +1180,15 @@ class AgentTalks:
             runs = (await self.runs_of(talk))[-RUNS_KEPT:]
             unread = self._portion(unread)
             said = "\n\n".join(str(row["text"]) for row in unread)
-            body = "\n".join(agent_talk.fence_reply(str(row["text"]), talk["host"]) for row in unread)
+            body = "\n".join([agent_talk.fence_reply(await self._as_read(row, talk), talk["host"]) for row in unread])
             usd_left: float | None = None
-            if any(price) and float(talk["wake_usd"]) != NO_LIMIT:
+            if by_task and any(price):
+                usd_left = TURN_USD
+                if await manager.guest_first_call_usd(session_id, price, runs=runs, extra_chars=len(body)) > usd_left:
+                    await self._update(talk_id, task_wakes=0)
+                    await self._tell(talk, "wake_spent")
+                    return
+            elif any(price) and float(talk["wake_usd"]) != NO_LIMIT:
                 usd_left = min(float(talk["wake_usd"]), TURN_USD)
                 if usd_left <= 0 or await manager.guest_first_call_usd(session_id, price, runs=runs, extra_chars=len(body)) > usd_left:
                     await self._wake_spent(talk)
@@ -887,11 +1207,21 @@ class AgentTalks:
             for row in unread:
                 await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
             # Before the turn ends and not after: a turn cut off by a restart was still a turn.
-            await self.db.execute("UPDATE agent_talks SET wake_turns = wake_turns - 1 WHERE id = ? AND wake_turns > 0", (talk_id,))
+            if by_task:
+                await self.db.execute("UPDATE agent_talks SET task_wakes = max(0, task_wakes - 1) WHERE id = ?", (talk_id,))
+            else:
+                await self.db.execute("UPDATE agent_talks SET wake_turns = wake_turns - 1 WHERE id = ? AND wake_turns > 0", (talk_id,))
             self._wakes[run_id] = talk_id
             if not manager.is_running(session_id):
                 await self.on_run_finished(session_id, run_id, "completed")
             return
+
+    async def _task_woken(self, talk_id: str) -> bool:
+        """Whether this conversation's waking was ever the operator's: one that only tasks woke says nothing of turns spent."""
+        talk = await self.talk(talk_id)
+        return talk is not None and talk["wake_turns"] == 0 and float(talk["wake_usd"]) == 0 and await self.db.fetchone(
+            "SELECT 1 FROM link_tasks WHERE side = ? AND owner = ? AND direction = 'mine'", (SIDE, talk_id),
+        ) is not None
 
     async def _wake_spent(self, talk: Any) -> None:
         await self._update(talk["id"], wake_turns=0)
@@ -909,8 +1239,12 @@ class AgentTalks:
         if talk is None or talk["state"] == CLOSED:
             return
         price = await self.manager.guest_price(session_id)
+        if talk["wake_turns"] == 0 and talk["task_wakes"] > 0:
+            # A turn a task opened, with waking off: what is still unread waits for the operator, or the next task's change.
+            return
         if talk["wake_turns"] == 0 or (price is not None and any(price) and talk["wake_usd"] == 0):
-            await self._wake_spent(talk)
+            if not await self._task_woken(talk_id):
+                await self._wake_spent(talk)
         elif await self._unread(talk_id):
             self.wake(talk_id)
 
@@ -922,7 +1256,7 @@ class AgentTalks:
         if isinstance(message_id, int):
             await self.decide(talk_id, message_id, allowed)
 
-    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "", text: str | None = None) -> bool:
+    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "", text: str | None = None, drop: list[int] | None = None) -> bool:
         """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again.
 
         ``text`` is the operator's own edit of the message, which replaces the row in the same step that claims
@@ -940,10 +1274,21 @@ class AgentTalks:
                 raise ValueError("the message is empty")
             if len(edited) > talk["max_text"]:
                 raise ValueError(f"a message may be at most {talk['max_text']} characters")
+        held_files = await self._files_of(message_id, "held")
+        dropped = {int(i) for i in drop or ()} & {int(row["id"]) for row in held_files}
+        words = edited if edited is not None else str(message["text"])
+        if allowed and held_files and len(dropped) == len(held_files) and not words.strip():
+            # Every file held back and no words: there is nothing left to send.
+            allowed = False
         if not await self._claim(message_id, SENDING if allowed else REFUSED, text=edited):
             return False
+        for row in held_files:
+            gone = not allowed or int(row["id"]) in dropped
+            await self.db.execute("UPDATE link_files SET state = ? WHERE id = ?", ("dropped" if gone and allowed else "refused" if gone else "sending", row["id"]))
+            if gone:
+                link_protocol.unstage([Staged(str(row["name"]), Path(str(row["path"])), 0, "", "")])
         if allowed:
-            await self._post(talk_id, message_id, edited if edited is not None else str(message["text"]))
+            await self._post(talk_id, message_id, words)
         if via:
             await self.manager.settle_ask(talk["session_id"], ask_key(message_id), "allow" if allowed else "deny", via=via)
         self._wake_readers(talk_id)
@@ -957,10 +1302,17 @@ class AgentTalks:
             await cursor.close()
         return claimed
 
-    async def configure(self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None, sends_limit: int | None = None) -> None:
-        """The operator's settings. :data:`NO_LIMIT` for turns or dollars, and 0 for ``sends_limit``, are none at all."""
+    async def configure(
+        self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None, sends_limit: int | None = None,
+        file_mb: float | None = None, day_mb: float | None = None,
+    ) -> None:
+        """The operator's settings. :data:`NO_LIMIT` for turns or dollars, and 0 for ``sends_limit`` and the file limits, are none at all."""
         if review is not None:
             await self._update(talk_id, review=review)
+        if file_mb is not None:
+            await self._update(talk_id, file_mb=file_mb)
+        if day_mb is not None:
+            await self._update(talk_id, day_mb=day_mb)
         if sends_limit is not None:
             await self._update(talk_id, sends_limit=sends_limit)
         if wake_turns is not None:
@@ -988,6 +1340,12 @@ class AgentTalks:
         for row in held:
             await self._claim(int(row["id"]), REFUSED)
             await self.manager.settle_ask(talk["session_id"], ask_key(int(row["id"])), "deny", via="app")
+        for row in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND owner = ? AND direction = 'out' AND state IN ('held', 'sending')", (SIDE, talk_id)):
+            await self.db.execute("UPDATE link_files SET state = 'refused' WHERE id = ?", (row["id"],))
+            link_protocol.unstage([Staged(str(row["name"]), Path(str(row["path"])), 0, "", "")])
+        await self.db.execute(
+            "UPDATE link_tasks SET state = ?, updated_at = ? WHERE side = ? AND owner = ? AND state IN ('accepted', 'working', 'needs_input')", (link_protocol.CANCELLED, _now(), SIDE, talk_id),
+        )
         self._wake_readers(talk_id)
         if not quiet:
             await self._tell(talk, "closed")
@@ -1012,7 +1370,9 @@ class AgentTalks:
             if talk["state"] == CLOSED:
                 continue
             unread = len(await self._unread(talk["id"]))
-            lines.append(f"- An open conversation with the agent at {talk['host']} ({talk['id']}): {talk['sends']} sent, {unread} replies unread. Use AgentTalk for it if the operator's message is about it.")
+            tasks = await self.db.fetchall("SELECT task, state FROM link_tasks WHERE side = ? AND owner = ? AND direction = 'mine' AND state IN ('accepted', 'working', 'needs_input')", (SIDE, talk["id"]))
+            open_tasks = f", tasks of yours open there: {', '.join(f'{row['task']} ({row['state']})' for row in tasks)}" if tasks else ""
+            lines.append(f"- An open conversation with the agent at {talk['host']} ({talk['id']}): {talk['sends']} sent, {unread} replies unread{open_tasks}. Use AgentTalk for it if the operator's message is about it.")
         if await self.db.fetchone(
             f"SELECT 1 FROM agent_talk_messages WHERE role = ? AND state = ? AND talk_id IN ({','.join('?' * len(talks))}) LIMIT 1",
             (THEM, READ, *(talk["id"] for talk in talks)),
@@ -1032,6 +1392,9 @@ class AgentTalks:
                     continue
                 if talk["waiting_for"]:
                     self.follow(talk["id"])
+                if await self.db.fetchone("SELECT 1 FROM link_files WHERE side = ? AND owner = ? AND direction = 'in' AND state = 'pending'", (SIDE, talk["id"])):
+                    # A fetch a restart or a dropped connection cut short goes on from where its piece file stopped.
+                    self._spawn(self._fetch_files(talk["id"]), f"agent-talk-files:{talk['id']}")
                 if talk["wake_turns"] != 0:
                     self.wake(talk["id"])
             except Exception:  # noqa: BLE001 — one conversation that cannot be swept must not cost the others theirs
@@ -1054,6 +1417,26 @@ class AgentTalks:
         finally:
             for task in list(self._background):
                 task.cancel()
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _task_id(value: Any) -> str:
+    return value if isinstance(value, str) and re.fullmatch(r"t_[0-9a-f]{12}", value) else ""
+
+
+def _door_files(value: Any) -> list[dict[str, Any]]:
+    """The files a reply names, each field checked; one that makes no sense is left out, and so is anything past a message's worth."""
+    out: list[dict[str, Any]] = []
+    for item in value[: link_protocol.MAX_FILES] if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        file_id, size, sha = item.get("id"), item.get("size"), str(item.get("sha256") or "")
+        if isinstance(file_id, str) and re.fullmatch(r"f_[0-9a-f]{16}", file_id) and _count(size) > 0 and link_protocol.SHA256.fullmatch(sha):
+            out.append({"id": file_id, "name": link_protocol.safe_name(item.get("name")), "size": int(size), "sha256": sha})
+    return out
 
 
 def talks_of(app: Application | Any) -> AgentTalks | None:
@@ -1084,4 +1467,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(talks.serve(), name="agent-talks")]
 
 
-__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "NO_LIMIT", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]
+__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "NO_LIMIT", "SIDE", "TASK_WAKES_MAX", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]

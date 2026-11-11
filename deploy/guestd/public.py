@@ -21,6 +21,7 @@ from urllib.parse import parse_qs
 
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
+from .files import CHUNK_BYTES
 from .limits import Failures, Rate
 from .mailbox import DEFAULT_WAIT_SECONDS, MAX_TEXT, Answer, Mailbox
 
@@ -34,9 +35,14 @@ MAX_BODY = MAX_TEXT * 6 + 256
 default for anything past ASCII. At four, a Russian message of 6,000 characters was refused for being over 8,000.
 Past this a body is not read at all, and it stays under the front's and nginx's own bounds of 64 KiB."""
 INVITE = re.compile(r"^/a/([A-Za-z0-9_-]{32,64})(/redeem)?/?$")
+FILE_PATH = re.compile(r"^/a/files/(f_[0-9a-f]{16})(/content)?$")
+TASK_PATH = re.compile(r"^/a/tasks/(t_[0-9a-f]{12})$")
 SENDS_PER_MINUTE = 6
 READS_PER_MINUTE = 30
 PAGES_PER_MINUTE = 30
+PIECES_PER_MINUTE = 240
+"""Pieces of files up or down, per conversation: 120 MB a minute, so a 50 MB file is well under a minute of calls
+and a loop that asks for the same piece for ever is held to a rate a disk does not notice."""
 
 HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -75,12 +81,15 @@ def refused(status: int, detail: str, retry_after: int | None = None) -> JSONRes
 class PublicDoor:
     """The whole ASGI application of the public port."""
 
-    def __init__(self, mailbox: Mailbox, *, failures: Failures | None = None, sends: Rate | None = None, reads: Rate | None = None, pages: Rate | None = None) -> None:
+    def __init__(
+        self, mailbox: Mailbox, *, failures: Failures | None = None, sends: Rate | None = None, reads: Rate | None = None, pages: Rate | None = None, pieces: Rate | None = None,
+    ) -> None:
         self.mailbox = mailbox
         self.failures = failures or Failures()
         self.sends = sends or Rate(SENDS_PER_MINUTE)
         self.reads = reads or Rate(READS_PER_MINUTE)
         self.pages = pages or Rate(PAGES_PER_MINUTE)
+        self.pieces = pieces or Rate(PIECES_PER_MINUTE)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "websocket":
@@ -105,7 +114,7 @@ class PublicDoor:
             return PlainTextResponse("User-agent: *\nDisallow: /\n\nUser-agent: Claude-User\nUser-agent: ChatGPT-User\nAllow: /a/\n", headers=HEADERS)
         if not path.startswith("/a/"):
             return refused(404, "Nothing here.")
-        if path in ("/a/messages", "/a/end", "/a/status"):
+        if path in ("/a/messages", "/a/end", "/a/status", "/a/files") or FILE_PATH.match(path) or TASK_PATH.match(path):
             return await self.conversation(scope, receive, path, method, address)
         matched = INVITE.match(path)
         if matched is None:
@@ -165,7 +174,7 @@ class PublicDoor:
         if rate is not None and not rate.allow(token):
             return refused(429, "Too many requests on this conversation.", 15)
         body: Any = None
-        if method == "POST" and path == "/a/messages":
+        if method == "POST" and path in ("/a/messages", "/a/files"):
             raw = await read_body(receive)
             if raw is None:
                 return refused(413, f"A message may be at most {MAX_TEXT} characters.")
@@ -173,19 +182,25 @@ class PublicDoor:
                 body = json.loads(raw)
             except ValueError:
                 return refused(400, 'Send JSON with one field: {"text": "your message"}.')
+        elif method == "PUT":
+            body = await read_body(receive, CHUNK_BYTES)
+            if body is None:
+                return refused(413, f"A piece is at most {CHUNK_BYTES} bytes.")
         answer = await run(body)
         if answer is None:
             return refused(401, BAD_TOKEN)
+        if isinstance(answer, Response):
+            return answer
         return as_json(answer)
 
-    def call_for(self, path: str, method: str, scope: Scope, token: str) -> tuple[Rate | None, Callable[[Any], Awaitable[Answer | None]]] | None:
+    def call_for(self, path: str, method: str, scope: Scope, token: str) -> tuple[Rate | None, Callable[[Any], Awaitable[Answer | Response | None]]] | None:
         mailbox = self.mailbox
+        query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
 
         async def send(body: Any) -> Answer | None:
-            return mailbox.send(token, body.get("text") if isinstance(body, dict) else None)
+            return mailbox.send(token, body)
 
         async def read(_: Any) -> Answer | None:
-            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
             return await mailbox.read(token, after=number(query.get("after"), 0), wait=number(query.get("wait"), DEFAULT_WAIT_SECONDS))
 
         async def end(_: Any) -> Answer | None:
@@ -202,7 +217,33 @@ class PublicDoor:
             return None, end
         if path == "/a/status" and method == "GET":
             return self.reads, status
+        if path == "/a/files" and method == "POST":
+            return self.pieces, lambda body: answered(mailbox.announce_file(token, body))
+        if matched := TASK_PATH.match(path):
+            return (self.reads, lambda _: answered(mailbox.task_view(token, matched.group(1)))) if method == "GET" else None
+        matched = FILE_PATH.match(path)
+        if matched is None:
+            return None
+        file_id, content = matched.groups()
+        if content and method == "GET":
+            return self.pieces, lambda _: answered(self.content(token, file_id, number(query.get("offset"), 0)))
+        if not content and method == "PUT":
+            return self.pieces, lambda body: answered(mailbox.put_piece(token, file_id, number(query.get("offset"), 0), body))
+        if not content and method == "GET":
+            return self.reads, lambda _: answered(mailbox.file_view(token, file_id))
         return None
+
+    def content(self, token: str, file_id: str, offset: int) -> Answer | Response | None:
+        """A piece of a file as bytes. ``attachment`` and ``nosniff`` with the sandbox of every answer here: whatever a
+        file holds, a browser that opens this address saves it and draws nothing."""
+        answer, data, file = self.mailbox.file_content(token, file_id, offset)
+        if answer is None or file is None:
+            return answer
+        headers = {
+            **HEADERS, "Content-Disposition": "attachment", "X-File-Size": str(file["size"]), "X-File-Sha256": file["sha256"], "X-Offset": str(offset),
+            "X-Next-Offset": str(offset + len(data)),
+        }
+        return Response(data, media_type="application/octet-stream", headers=headers)
 
 
 def header(scope: Scope, name: bytes) -> str:
@@ -238,18 +279,23 @@ def number(values: list[str] | None, default: int) -> int:
     return value if value < 2**63 else default
 
 
-async def read_body(receive: Receive) -> bytes | None:
-    """The request body, or ``None`` past :data:`MAX_BODY`, which stops reading it there."""
+async def answered(answer: Any) -> Any:
+    """A call of the mailbox's, which is not a coroutine, in the shape the routes await."""
+    return answer
+
+
+async def read_body(receive: Receive, limit: int = MAX_BODY) -> bytes | None:
+    """The request body, or ``None`` past ``limit``, which stops reading it there."""
     body = bytearray()
     while True:
         message = await receive()
         if message["type"] != "http.request":
             return bytes(body)
         body.extend(message.get("body", b""))
-        if len(body) > MAX_BODY:
+        if len(body) > limit:
             return None
         if not message.get("more_body", False):
             return bytes(body)
 
 
-__all__ = ["CLIENT_HEADER", "HEADERS", "INVITE", "MAX_BODY", "PublicDoor", "visitor"]
+__all__ = ["CLIENT_HEADER", "FILE_PATH", "HEADERS", "INVITE", "MAX_BODY", "PIECES_PER_MINUTE", "TASK_PATH", "PublicDoor", "visitor"]

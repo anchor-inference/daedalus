@@ -314,6 +314,7 @@ server {
     access_log off;
     add_header Strict-Transport-Security "max-age=63072000" always;
     location /a/ {
+        client_max_body_size 1m;  # a piece of a file is half of it
         proxy_pass http://127.0.0.1:8764;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;

@@ -49,6 +49,8 @@ const (
 
 	// maxDoorBody is the front's own limit, so an answer comes from here rather than a cut connection.
 	maxDoorBody = 64 << 10
+	// maxPieceBody is the front's limit for a piece of a file (PUT /a/files/<id>), the one larger body.
+	maxPieceBody = 512<<10 + 1024
 	// doorBodySeconds is how long a door's short JSON body may take to arrive.
 	doorBodySeconds = 30
 	// inFlightLimit and perVisitorLimit are what one router will hold open at once, past which it says
@@ -290,12 +292,16 @@ func bufferBody(w http.ResponseWriter, r *http.Request) bool {
 	if r.Body == nil || r.Body == http.NoBody {
 		return true
 	}
-	if r.ContentLength > maxDoorBody {
+	limit := int64(maxDoorBody)
+	if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/a/files/") {
+		limit = maxPieceBody
+	}
+	if r.ContentLength > limit {
 		refuse(w, http.StatusRequestEntityTooLarge, "Too long.\n")
 		return false
 	}
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(doorBodySeconds * time.Second))
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDoorBody))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {

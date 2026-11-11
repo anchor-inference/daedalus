@@ -91,7 +91,7 @@ async def test_a_limited_turn_hears_the_operators_topic_and_keeps_its_bounds(set
     said = texts(provider.requests[0].messages[-1])
     assert TOPIC in said and "the operator's own words" in said and "started by a guest" in said
     assert TRAP not in said, "the operator's context stays out of a limited turn"
-    assert offered(provider.requests[0]) <= set(guest_turns.READ_TOOLS)
+    assert offered(provider.requests[0]) <= set(guest_turns.LEVEL_TOOLS["read"])
     state.guest_turn = guest
     assert manager.run_bounds(state).max_iterations == guest_turns.MAX_ITERATIONS
     await manager.close()
@@ -167,4 +167,4 @@ async def test_an_edit_the_door_refuses_leaves_this_side_as_it_was(trapped: Simp
 
 async def test_the_form_offers_no_limits_for_a_trusted_agent(trapped: SimpleRig) -> None:
     door: dict[str, Any] = (await trapped.routes.get("/api/guest/door")).json()
-    assert door["trusted_defaults"] == {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0}
+    assert door["trusted_defaults"] == {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0, "file_mb": 0.0, "day_mb": 0.0}

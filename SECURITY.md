@@ -65,8 +65,20 @@ installation, so it is built on what that stranger cannot reach rather than on w
 - Where that sandbox or those limits cannot be made, or the chat works in a folder on the host or a project's folder
   other chats read, `all` is not offered. They need the agent's container: a native installation has no such limits,
   so it has no `all`. Once a guest could write in a folder, its notes are no longer read as the agent's rules.
+- Files: a stand-in takes none. A file arrives announced with its size and sha256, in pieces the front passes
+  through without holding whole, and is checked before anyone can name it. A link's limits per file and per day
+  count a file when it is announced, and the door's disk is bounded for all links together
+  (`GUEST_FILES_MAX_MB`, 2 GB by default); a file is kept there three days at most, and one from a guest goes as soon
+  as the app has its copy. The app saves it in `guest-files/<conversation>/` in the chat's folder, under the last
+  part of its name, never a hidden one or one the agent reads as rules, and with no execute bit; the turn is told it
+  is a stranger's data. What a guest's turn sends waits for the operator with its size and hash, and they can hold
+  some files back, unless the link is trusted. Nothing goes from outside the chat's folder but at a trusted link,
+  and nothing of the installation's own goes at all. A file served back to the app is a picture or a download, with
+  `nosniff` and a sandbox, never a page.
 - A guest's turn has no secrets at any setting, spends no grant the operator gave, raises no approval card (what
-  would ask is refused), starts nothing that outlives it, and is not resumed or retried after it stops. Each of its
+  would ask is refused), starts nothing that outlives it, and is not resumed or retried after it stops. A question it
+  leaves for the operator waits in the chat's Questions tab, and the answer reaches the guest in a turn of the link's
+  own, bounded as any other, never as the operator's message to the chat. Each of its
   requests leaves out what the host added to earlier messages (memory, the folder's notes, the board, project facts,
   side questions) and what a memory tool returned, in a view of the history; the stored history is not changed.
 
@@ -100,6 +112,10 @@ means of acting on its own.
   one send, and a view of the history holding only this conversation's own runs, without what the host added to them.
 - Sends per conversation are capped, a reply that repeats itself turns waking off, a conversation nobody spoke in for a
   day is ended on both sides, and the far door keeps its own limits on its own side.
+- A file going out follows the same rule as the text it rides with, and also waits for the operator when it comes from
+  outside the chat's folder or a small text file among them looks like a secret; a folder goes as one zip without its
+  links. A task this side set wakes the chat when it moves, a turn per task at most, bounded as a reply's turn. Files
+  that come back are fetched within the conversation's own limits into `guest-files/<conversation>/`, as data.
 
 ## What it does not protect against
 

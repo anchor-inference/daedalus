@@ -24,7 +24,7 @@ describe("what a conversation is doing", () => {
 
 const talk = (over: Partial<AgentTalk> = {}): AgentTalk => ({
   id: "t1", session_id: "s", host: "agents.example.test", topic: "", mode: "direct", state: "open", reason: "", waiting_for: "", quiet: false, review: "first",
-  sends: 1, sends_limit: 30, wake_turns: 0, wake_usd: 0, created_at: "", last_at: "", closed_at: null, spent_usd: 0, replies: 0, unread: 0, held: 0, ...over,
+  sends: 1, sends_limit: 30, wake_turns: 0, wake_usd: 0, created_at: "", last_at: "", closed_at: null, spent_usd: 0, replies: 0, unread: 0, held: 0, file_mb: 50, day_mb: 500, tasks: [], ...over,
 });
 
 describe("when the Agents tab opens by itself", () => {

@@ -236,6 +236,9 @@ describe("the keys the code asks for", () => {
       ["guest.level.", ["stand_in", "direct", "trusted", "stand_in.hint", "direct.hint", "trusted.hint"]],
       ["guest.tools.", ["none", "read", "all", "trusted"]],
       ["guest.tools.why.", ["no_sandbox", "no_limits", "host_folder", "other"]],
+      // A file and a task over an agent link name their state from the host's words for it.
+      ["link.task.state.", ["accepted", "working", "needs_input", "done", "refused", "cancelled"]],
+      ["link.file.", ["pending", "refused", "failed", "held", "sending", "dropped"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
       ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about", "memory"]],

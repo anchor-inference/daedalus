@@ -977,11 +977,45 @@ export type AgentTalk = {
   replies: number;
   unread: number;
   held: number;
+  /** The largest file either way and what files may take in a day, in megabytes; 0 is no limit. */
+  file_mb: number;
+  day_mb: number;
+  tasks: LinkTask[];
 };
-/** `role`: `us` is this side's agent, `them` the other's, `door` the other door's own words. Text is never markup. */
-export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string };
-export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[] };
-export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number };
+/** What a message of an agent link is: words, files, a task set on the other side, a question, or a task's news. */
+export type LinkKind = "text" | "file" | "task" | "question" | "status";
+export type LinkTaskState = "accepted" | "working" | "needs_input" | "done" | "refused" | "cancelled";
+/** A task over a link. `mine` is one this side set on the other agent, `theirs` one a guest set on this chat. */
+export type LinkTask = { task: string; direction: "mine" | "theirs"; text: string; state: LinkTaskState; result: string; created_at: string; updated_at: string };
+/** A file of an agent link, either way, as the host keeps it. Its bytes are at `/api/link-files/{id}`. `image` says
+ *  the app may draw it as a picture; anything else is a name, a size and a download. The name is a stranger's
+ *  when it came in: plain text, never a path to follow. States: in `pending|received|refused|failed`, out
+ *  `held|sending|sent|dropped|refused|failed`. */
+export type LinkFile = {
+  id: number;
+  direction: "in" | "out";
+  name: string;
+  size: number;
+  sha256: string;
+  mime: string;
+  state: string;
+  task: string;
+  note: string;
+  at: string;
+  image: boolean;
+  downloadable: boolean;
+  message_id: number | null;
+  batch: string;
+  /** The door's id of the file, which a door message's `files` names. */
+  remote_id: string;
+};
+/** Files a guest's turn on one of this chat's links wants to send, waiting for the operator. */
+export type HeldGroup = { batch: string; link_id: string; label: string; task: string; note: string; files: LinkFile[] };
+/** `role`: `us` is this side's agent, `them` the other's, `door` the other door's own words. Text is never markup.
+ *  `files` are ids into the detail's `files`. */
+export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string; kind: LinkKind; task: string; task_state?: string; files: number[] };
+export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[]; files: LinkFile[] };
+export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number; guest_held: HeldGroup[]; file_mb: number; day_mb: number };
 
 export type GuestMode = "stand_in" | "direct";
 /** `trusted`: the chat's agent serves the guest as it serves the operator, with the session's own tools and context. */
@@ -1025,11 +1059,18 @@ export type GuestLink = {
   turns_today: number;
   refused_redeems: number;
   conversation: GuestConversation | null;
+  /** The largest file either side may send and what files may take in a day, in megabytes; 0 is no limit. */
+  file_mb: number;
+  day_mb: number;
+  files_today_bytes: number;
 };
-/** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person). */
-export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number };
+/** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person).
+ *  `files` are the door's file ids, which `GuestExchange.files[].remote_id` matches. */
+export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number; kind?: LinkKind; task?: string; task_state?: string; files?: string[] };
 /** `instructions` and `model_id` are the host's: the note to the agent the door never has, and the model as the form names it. */
 export type GuestLinkDetail = GuestLink & { briefing: string; instructions?: string; model_id?: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
+/** A link's files and tasks as this side holds them, with what waits to go out. */
+export type GuestExchange = { files: LinkFile[]; tasks: LinkTask[]; held: HeldGroup[] };
 export type GuestBilling = "metered" | "plan" | "free";
 export type GuestModelOption = { id: string; label: string; path: string; model: string; billing: GuestBilling; price_in: number; price_out: number; free: boolean };
 export type GuestDefaults = {
@@ -1043,6 +1084,8 @@ export type GuestDefaults = {
   conversation_hours: number;
   idle_hours: number;
   retention_days: number;
+  file_mb: number;
+  day_mb: number;
 };
 /** Why a direct link cannot be given every tool this chat could be: it has no sandbox to run commands in, or its folder is on the host. */
 export type GuestToolsWhy = "" | "no_sandbox" | "no_limits" | "host_folder" | "project_folder";
@@ -1059,7 +1102,7 @@ export type GuestDoor = {
   /** Whether that chat's model counts dollars; on a plan or a free model only the turn limits bound a link. */
   chat_priced: boolean;
   /** What a trusted link starts with: no limits, each as 0. */
-  trusted_defaults: Pick<GuestDefaults, "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours">;
+  trusted_defaults: Pick<GuestDefaults, "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours" | "file_mb" | "day_mb">;
 };
 /** What making or changing a link sends (`LinkBody` in daedalus/extensions/api_guest.py). Every limit and lifetime is
  *  0 for none. */
@@ -1081,6 +1124,9 @@ export type GuestLinkBody = {
   conversation_hours: number;
   idle_hours: number;
   retention_days: number;
+  /** A direct link's files; a stand-in takes none, and is sent the defaults. */
+  file_mb: number;
+  day_mb: number;
 };
 /** The answer to making or re-issuing a link. `url` is in no other answer and is never kept anywhere. */
 export type GuestInvite = { link: GuestLink; url: string };

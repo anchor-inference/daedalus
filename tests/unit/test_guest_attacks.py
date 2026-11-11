@@ -352,7 +352,7 @@ def test_links_running_at_once_cannot_each_be_handed_the_whole_day(tmp_path: Pat
     control = ControlDoor(store, mailbox, "t")
     tokens = [opened(store, mailbox)[1] for _ in range(6)]
     for token in tokens:
-        assert mailbox.send(token, "hi").status == 202
+        assert mailbox.send(token, {"text": "hi"}).status == 202
     handed = [d["allowance_usd"] for d in control.claim()]
     assert sum(handed) <= 1.0 + 1e-9 and all(share > 0 for share in handed)
     assert store.spend_today()["reserved"] == pytest.approx(sum(handed))
@@ -362,11 +362,11 @@ def test_a_turn_that_ran_stays_counted_whatever_it_cost(tmp_path: Path) -> None:
     store, mailbox = door(tmp_path)
     control = ControlDoor(store, mailbox, "t")
     link_id, token = opened(store, mailbox, turns_total=1, turns_per_day=1)
-    assert mailbox.send(token, "run tools").status == 202
+    assert mailbox.send(token, {"text": "run tools"}).status == 202
     message = control.claim()[0]["message_id"]
     assert control.reply(message, {"ok": False, "text": "", "cost_usd": 0.0})[0] == 200
     assert store.link(link_id)["turns_used"] == 1
-    assert mailbox.send(token, "again").status in (403, 429)
+    assert mailbox.send(token, {"text": "again"}).status in (403, 429)
 
 
 async def test_a_call_that_timed_out_is_booked_as_spent(tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ async def test_a_call_that_timed_out_is_booked_as_spent(tmp_path: Path) -> None:
         raise TimeoutError
 
     stand_in = StandIn(store, mailbox, slow)
-    mailbox.send(token, "x" * 100)
+    mailbox.send(token, {"text": "x" * 100})
     await stand_in.run_once()
     link = store.link(link_id)
     assert link["spent_usd"] > 0 and link["turns_used"] == 1 and link["reserved_usd"] == 0
@@ -621,14 +621,14 @@ def test_a_number_past_any_cursor_is_not_a_server_error(tmp_path: Path) -> None:
 def test_a_door_restarted_mid_call_does_not_wedge_a_stand_in_conversation(tmp_path: Path) -> None:
     store, mailbox = door(tmp_path)
     link_id, token = opened(store, mailbox, **STAND_IN)
-    assert mailbox.send(token, "first").status == 202
+    assert mailbox.send(token, {"text": "first"}).status == 202
     assert StandIn(store, mailbox, None).take_one() is not None  # type: ignore[arg-type]
     store.close()
     fresh, fresh_box = door(tmp_path)
     stand_in = StandIn(fresh, fresh_box, None)  # type: ignore[arg-type]
     stand_in.recover()
     assert fresh.link(link_id)["reserved_usd"] == 0 and fresh.spend_today()["reserved"] == 0
-    assert fresh_box.send(token, "second").status == 202
+    assert fresh_box.send(token, {"text": "second"}).status == 202
     assert stand_in.take_one() is not None
 
 
@@ -636,7 +636,7 @@ def test_a_feed_lost_on_the_wire_does_not_wedge_a_direct_conversation(tmp_path: 
     store, mailbox = door(tmp_path)
     control = ControlDoor(store, mailbox, "t")
     _, token = opened(store, mailbox)
-    mailbox.send(token, "one")
+    mailbox.send(token, {"text": "one"})
     first = control.claim()
     assert first
     again = control.claim()

@@ -3763,6 +3763,73 @@ async def _link_words(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _link_words))
 
+# Files and tasks over agent links, both ways: what a stranger sent or this side sends, and the tasks either set.
+LINK_FILES_SQL = """
+CREATE TABLE IF NOT EXISTS link_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    side TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    conversation TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    mime TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    remote_id TEXT NOT NULL DEFAULT '',
+    task TEXT NOT NULL DEFAULT '',
+    message_id INTEGER,
+    batch TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS link_files_by_owner ON link_files(side, owner, id);
+CREATE INDEX IF NOT EXISTS link_files_by_batch ON link_files(batch);
+CREATE TABLE IF NOT EXISTS link_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    side TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    conversation TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    task TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    text TEXT NOT NULL,
+    state TEXT NOT NULL,
+    result TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(side, owner, task)
+);
+CREATE INDEX IF NOT EXISTS link_tasks_by_session ON link_tasks(session_id, id);
+"""
+
+LINK_KINDS_COLUMNS = (
+    ("agent_talks", "file_mb", "REAL NOT NULL DEFAULT 50"),
+    ("agent_talks", "day_mb", "REAL NOT NULL DEFAULT 500"),
+    ("agent_talks", "task_wakes", "INTEGER NOT NULL DEFAULT 0"),
+    ("agent_talk_messages", "kind", "TEXT NOT NULL DEFAULT 'text'"),
+    ("agent_talk_messages", "task", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "task_state", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+async def _link_kinds(conn: aiosqlite.Connection) -> None:
+    """A conversation with another agent carries files and tasks now: each message has a kind and may name a task,
+    and a conversation has limits on its files, 50 MB a file and 500 MB a day unless the operator chose others.
+    Every message stored before was text. Each column is added only when it is missing, for the reason
+    ``_usage_speed`` gives."""
+    for table, name, kind in LINK_KINDS_COLUMNS:
+        present = {row[1] for row in await (await conn.execute(f"PRAGMA table_info({table})")).fetchall()}
+        if name not in present:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+
+MIGRATIONS.append(DataMigration(LINK_FILES_SQL, _link_kinds))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
