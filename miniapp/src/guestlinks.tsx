@@ -8,6 +8,7 @@ import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
 import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
+import { LinkActions, LinkCardView, LinkSubscriptions, Summaries } from "./linkflows";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
@@ -304,6 +305,10 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
           {exchange.held.map((group) => <GuestHeldApproval key={group.batch} group={group} toast={toast} onDone={refresh} />)}
           <TaskList tasks={exchange.tasks} side="theirs" busy={busy} onCancel={cancel} />
           {link.messages.length === 0 ? <div className="sub">{t(link.mode === "direct" ? "guest.nomessages.direct" : "guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} files={doorFiles(message, exchange.files)} toast={toast} />)}
+          <LinkSubscriptions subs={exchange.subscriptions ?? []} refresh={refresh} toast={toast} />
+          <LinkActions actions={exchange.actions ?? []} refresh={refresh} toast={toast} />
+          {/* A stand-in's conversation is the stand-in's to sum up, which it cannot: it has no turn of the chat's. */}
+          {link.mode === "direct" && (link.messages.length > 0 || (exchange.cards ?? []).length > 0) && <Summaries rows={exchange.cards ?? []} path={path} refresh={refresh} toast={toast} />}
         </>
       )}
     </div>
@@ -321,7 +326,8 @@ function GuestMessageRow({ message, mode, files, toast }: { message: GuestMessag
         <span className="sub">{absTime(ms(message.at))}</span>
         {message.cost_usd > 0 && <span className="sub">{usd(message.cost_usd)}</span>}
       </div>
-      {message.text && <div className="guest-msg-text">{message.text}</div>}
+      {message.text && !message.card && <div className="guest-msg-text">{message.text}</div>}
+      {message.card && <LinkCardView card={message.card} ours={message.role !== "guest"} />}
       <LinkFiles files={files} toast={toast} />
     </div>
   );

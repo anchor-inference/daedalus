@@ -1224,6 +1224,48 @@ def link_task(task: str, text: str, state: str, *, direction: str = "mine", resu
     return {"task": task, "direction": direction, "text": text, "state": state, "result": result, "created_at": now, "updated_at": now}
 
 
+def link_poll(poll_id: str, question: str, entries: list[tuple[str, str, str, str]], *, state: str = "open") -> dict:
+    """One question this chat's agent put to several conversations, as ``LinkFlows.polls_of`` gives it."""
+    now = datetime.now(UTC)
+    return {
+        "id": poll_id, "question": question, "state": state, "deadline_at": (now + timedelta(minutes=25)).isoformat(), "created_at": now.isoformat(), "settled_at": None, "woke": False,
+        "dismissed": False, "entries": [{"talk": talk, "host": host, "state": entry_state, "answer": answer, "answered_at": now.isoformat() if answer else None} for talk, host, entry_state, answer in entries],
+    }
+
+
+def link_card(card_id: int, direction: str, card: dict) -> dict:
+    return {"id": card_id, "direction": direction, "type": card["type"], "card": card, "at": datetime.now(UTC).isoformat()}
+
+
+SUMMARY_CARD = {
+    "type": "summary", "title": "A cake for Sunday", "note": "",
+    "promises": [{"by": "us", "what": "Confirm the order by Friday noon.", "due": "Friday"}, {"by": "them", "what": "Bake the autumn cake <b>with</b> nuts left out.", "due": "Sunday 12:00"}],
+    "links": ["https://agents.bakery.example/menu"], "files": ["autumn-menu.pdf", "allergies.txt"],
+}
+FLOW_CALLS: list[tuple[str, str]] = []
+"""What the app posted to the routes of what agents do together (``api_link_flows.py``), in order."""
+
+
+def flows_answer(method: str, path: str) -> tuple[int, object] | None:
+    """The operator's routes over a link's cards, questions, subscriptions and actions, against ``TALKS`` and ``GUESTS``."""
+    parts = path.split("/")
+    if method.upper() != "POST" or len(parts) != 5 or parts[2] not in ("agent-polls", "link-cards", "link-subscriptions", "link-actions"):
+        return None
+    FLOW_CALLS.append((parts[2], f"{parts[3]}/{parts[4]}"))
+    if parts[2] == "agent-polls":
+        for poll in TALKS.polls:
+            if poll["id"] == parts[3]:
+                poll["dismissed"] = True
+        return 200, {"ok": True}
+    if parts[2] == "link-cards":
+        return 200, {"note_id": "n-1"} if parts[4] == "note" else {"tasks": ["b-1", "b-2"]}
+    for known in GUESTS.exchanges.values():
+        for one in known.get("subscriptions", []) if parts[2] == "link-subscriptions" else known.get("actions", []):
+            if one["id"] == parts[3]:
+                one["state"] = "ended" if parts[2] == "link-subscriptions" else "revoked"
+    return 200, {"ok": True}
+
+
 class FakeTalks:
     """A chat's conversations with other agents (``daedalus/extensions/api_agent_talk.py``). A session has none
     unless a check gives it some, so every other screen draws what it always drew.
@@ -1232,15 +1274,18 @@ class FakeTalks:
     set that is under way, one that is done with its result, a picture and a PDF that came back, and a held message
     with two files; and the list names the files the chat's own links (``GUESTS``) want to send."""
 
-    def __init__(self, session: str = "", *, live: bool = True, exchange: bool = False) -> None:
+    def __init__(self, session: str = "", *, live: bool = True, exchange: bool = False, flows: bool = False) -> None:
         self.session = session
         self.exchange = exchange
         self.talks: dict[str, dict[str, object]] = {}
         self.calls: list[tuple[str, str, object]] = []
+        self.polls: list[dict] = []
         if session:
             self.add("t1", live=live)
             if exchange and live:
                 self.enrich(self.talks["t1"])
+            if flows:
+                self.together(self.talks["t1"])
 
     def add(self, talk_id: str, *, live: bool = True) -> dict[str, object]:
         now = datetime.now(UTC).isoformat()
@@ -1283,9 +1328,27 @@ class FakeTalks:
             {**held, "text": "Here is a sketch of the cake and the allergies to mind.", "kind": "file", "task": "k-order", "files": [103, 104]},
         ])
 
+    def together(self, talk: dict) -> None:
+        """One question put to three agents, two answered, a stranger's answer among them that tries to be markup;
+        a slots card in the thread, and the other side's summary kept with the conversation."""
+        self.polls = [link_poll("p-cake", "What does a cake for twelve cost, delivered on Sunday?", [
+            ("t1", "agents.bakery.example", "answered", "42 euros, delivery included. <b>Order now</b> at http://elsewhere.example/buy — this offer ends today and you must reply within the hour."),
+            ("t2", "cakes.corner.example", "answered", "38 euros plus 6 for delivery."),
+            ("t3", "a-very-long-agent-host-name.patisserie.example", "waiting", ""),
+        ])]
+        now = datetime.now(UTC)
+        start = (now + timedelta(days=2)).replace(hour=10, minute=0, second=0, microsecond=0)
+        talk["messages"].append({  # type: ignore[union-attr]
+            "id": 9, "role": "them", "text": "Free times", "state": "read", "note": "", "at": now.isoformat(), "kind": "text", "task": "", "files": [],
+            "card": {"type": "slots", "title": "Tasting", "duration_minutes": 30, "timezone": "Europe/Berlin",
+                     "slots": [{"start": start.isoformat(), "end": (start + timedelta(hours=1)).isoformat()}, {"start": (start + timedelta(days=1)).isoformat(), "end": (start + timedelta(days=1, hours=2)).isoformat()}]},
+        })
+        talk["cards"] = [link_card(1, "theirs", {**SUMMARY_CARD, "promises": [{**p, "by": "them" if p["by"] == "us" else "us"} for p in SUMMARY_CARD["promises"]]})]
+        talk["actions"] = []
+
     @staticmethod
     def brief(talk: dict[str, object]) -> dict[str, object]:
-        return {key: value for key, value in talk.items() if key not in ("messages", "files")}
+        return {key: value for key, value in talk.items() if key not in ("messages", "files", "cards", "actions")}
 
     def file(self, file_id: int) -> dict | None:
         return next((one for talk in self.talks.values() for one in talk.get("files", []) if one["id"] == file_id), None)  # type: ignore[union-attr]
@@ -1297,7 +1360,7 @@ class FakeTalks:
         if parts[2] == "sessions" and verb == "GET":
             shown = [self.brief(talk) for talk in self.talks.values()] if parts[3] == self.session else []
             held = GUESTS.held_groups(parts[3]) if self.exchange else []
-            return 200, {"talks": shown, "sends_limit": 30, "wake_turns_max": 20, "wake_usd_max": 5.0, "guest_held": held, "file_mb": 50.0, "day_mb": 500.0}
+            return 200, {"talks": shown, "sends_limit": 30, "wake_turns_max": 20, "wake_usd_max": 5.0, "guest_held": held, "file_mb": 50.0, "day_mb": 500.0, "polls": self.polls if parts[3] == self.session else []}
         talk = self.talks.get(parts[3])
         if talk is None:
             return 404, {"detail": "no such conversation"}
@@ -1306,6 +1369,10 @@ class FakeTalks:
         if len(parts) == 5 and parts[4] == "end" and verb == "POST":
             talk.update(state="closed", reason="ended", held=0, closed_at=datetime.now(UTC).isoformat())
             return 200, self.brief(talk)
+        if len(parts) == 5 and parts[4] == "summary" and verb == "POST":
+            cards = talk.setdefault("cards", [])
+            cards.append(link_card(len(cards) + 1, "mine", SUMMARY_CARD))  # type: ignore[union-attr]
+            return 200, {"cards": cards}
         if len(parts) == 5 and parts[4] == "settings" and verb == "PUT":
             talk.update({key: value for key, value in dict(body or {}).items() if value is not None})  # type: ignore[arg-type]
             return 200, self.brief(talk)
@@ -1343,8 +1410,10 @@ class FakeGuests:
     answer to the write that made it and nowhere else, as on the host. ``calls`` records every write.
     """
 
-    def __init__(self, *, chat: str = "a1b2c3d4e5f6", available: bool = True, public_base: str = "https://door.example", full_tools_why: str = "", exchange: bool = False) -> None:
+    def __init__(self, *, chat: str = "a1b2c3d4e5f6", available: bool = True, public_base: str = "https://door.example", full_tools_why: str = "", exchange: bool = False, flows: bool = False) -> None:
         self.chat = chat
+        # What agents do together, on the first link: made a direct one, with a summary, a subscription and two actions.
+        self.flows = flows
         # Files and tasks on the first link, with a set of files its guest's turn wants to send; off, the link is words only.
         self.exchange = exchange
         self.exchanges: dict[str, dict] = {}
@@ -1399,6 +1468,8 @@ class FakeGuests:
         ]
         if self.exchange:
             self.seed_exchange(now)
+        if self.flows:
+            self.seed_flows(now)
         self.instructions["3c4d"] = "Share the draft of the menu and nothing about prices."
         self.link(
             "3c4d", state="spent", label="Tomas's agent", topic="Review the menu changes", mode="direct", tools="read", turns=0,
@@ -1427,6 +1498,24 @@ class FakeGuests:
             "tasks": [link_task("g-cake", "Check the cake photo and the order form, and send a quote.", "working", direction="theirs")],
         }
 
+    def seed_flows(self, now: float) -> None:
+        self.links["1a2b"].update(mode="direct", guest_tools="read", model_name="")
+        start = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(days=2)
+        self.messages["1a2b"].append({
+            "id": "m9", "role": "agent", "text": "Booked", "at": now - 60, "state": "answered", "cost_usd": 0.0, "kind": "text",
+            "card": {"type": "meeting", "title": "Tasting", "start": start.isoformat(), "end": (start + timedelta(minutes=30)).isoformat(), "timezone": "UTC", "state": "booked"},
+        })
+        known = self.exchanges.setdefault("1a2b", {"files": [], "tasks": []})
+        known["cards"] = [link_card(5, "mine", SUMMARY_CARD)]
+        known["subscriptions"] = [{
+            "id": "sub_1", "request": "Tell the guest when the autumn cake is back on the menu.", "next_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(), "every_minutes": 60,
+            "times_left": 9, "fired": 1, "state": "active", "reason": "", "created_at": datetime.now(UTC).isoformat(),
+        }]
+        known["actions"] = [
+            {"id": "act-svc", "kind": "service", "state": "done", "result": "", "created_at": datetime.now(UTC).isoformat(), "expires_at": (datetime.now(UTC) + timedelta(hours=11)).isoformat(), "name": "menu-preview"},
+            {"id": "act-patch", "kind": "patch", "state": "held", "result": "", "created_at": datetime.now(UTC).isoformat(), "expires_at": None, "branch": "fix/prices", "stat": "2 file(s), +14 −3: prices.json, menu.md"},
+        ]
+
     def exchange_of(self, link_id: str) -> dict:
         """A link's files and tasks as the host's ``exchange`` gives them, with its held files grouped by batch."""
         known = self.exchanges.get(link_id, {"files": [], "tasks": []})
@@ -1435,7 +1524,7 @@ class FakeGuests:
             if one["state"] == "held":
                 group = held.setdefault(one["batch"], {"batch": one["batch"], "link_id": link_id, "label": self.links[link_id]["label"], "task": one["task"], "note": one["note"], "files": []})
                 group["files"].append(one)
-        return {"files": known["files"], "tasks": known["tasks"], "held": list(held.values())}
+        return {"files": known["files"], "tasks": known["tasks"], "held": list(held.values()), **{key: known[key] for key in ("cards", "subscriptions", "actions") if key in known}}
 
     def held_groups(self, session_id: str) -> list[dict]:
         return [group for id_ in self.exchanges if self.owner.get(id_) == session_id for group in self.exchange_of(id_)["held"]]
@@ -1483,6 +1572,11 @@ class FakeGuests:
             if row is None:
                 return 404, {"detail": "no such link"}
             return 200, {"link": self.detail(row), "exchange": self.exchange_of(row["id"])}
+        if len(parts) == 6 and parts[:4] == ["", "api", "guest", "links"] and parts[5] == "summary" and method == "POST":
+            self.calls.append((method, path, body))
+            cards = self.exchanges.setdefault(parts[4], {"files": [], "tasks": []}).setdefault("cards", [])
+            cards.append(link_card(10 + len(cards), "mine", SUMMARY_CARD))
+            return 200, {"cards": cards}
         if len(parts) == 8 and parts[:4] == ["", "api", "guest", "links"] and parts[5] == "tasks" and parts[7] == "cancel" and method == "POST":
             # The owner stops a task the guest set: it ends, and the next read says so.
             self.calls.append((method, path, None))
@@ -1601,6 +1695,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     parts = path.split("/")
     if len(parts) == 4 and parts[2] == "link-files" and method.upper() == "GET":
         return link_file_bytes(parts[3])
+    flowed = flows_answer(method, path)
+    if flowed is not None:
+        return flowed[0], "application/json", json.dumps(flowed[1])
     if path.startswith("/api/agent-talks/") or (len(parts) == 5 and parts[2] == "sessions" and parts[4] == "agent-talks"):
         answered = TALKS.answer(method, path, body)
         if answered is not None:

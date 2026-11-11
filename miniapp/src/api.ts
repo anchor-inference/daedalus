@@ -1013,9 +1013,9 @@ export type LinkFile = {
 export type HeldGroup = { batch: string; link_id: string; label: string; task: string; note: string; files: LinkFile[] };
 /** `role`: `us` is this side's agent, `them` the other's, `door` the other door's own words. Text is never markup.
  *  `files` are ids into the detail's `files`. */
-export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string; kind: LinkKind; task: string; task_state?: string; files: number[] };
-export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[]; files: LinkFile[] };
-export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number; guest_held: HeldGroup[]; file_mb: number; day_mb: number };
+export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string; kind: LinkKind; task: string; task_state?: string; files: number[]; card?: LinkCard | null };
+export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[]; files: LinkFile[]; cards?: LinkCardRow[]; actions?: LinkAction[] };
+export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number; guest_held: HeldGroup[]; file_mb: number; day_mb: number; polls?: LinkPoll[] };
 
 export type GuestMode = "stand_in" | "direct";
 /** `trusted`: the chat's agent serves the guest as it serves the operator, with the session's own tools and context. */
@@ -1066,11 +1066,36 @@ export type GuestLink = {
 };
 /** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person).
  *  `files` are the door's file ids, which `GuestExchange.files[].remote_id` matches. */
-export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number; kind?: LinkKind; task?: string; task_state?: string; files?: string[] };
+export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number; kind?: LinkKind; task?: string; task_state?: string; files?: string[]; card?: LinkCard | null };
 /** `instructions` and `model_id` are the host's: the note to the agent the door never has, and the model as the form names it. */
 export type GuestLinkDetail = GuestLink & { briefing: string; instructions?: string; model_id?: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
 /** A link's files and tasks as this side holds them, with what waits to go out. */
-export type GuestExchange = { files: LinkFile[]; tasks: LinkTask[]; held: HeldGroup[] };
+export type GuestExchange = { files: LinkFile[]; tasks: LinkTask[]; held: HeldGroup[]; cards?: LinkCardRow[]; subscriptions?: LinkSubscription[]; actions?: LinkAction[] };
+
+/** A card a link's message carries beside its words. All of it is data the host checked field by field; the other
+ *  side's is a stranger's, drawn as plain text. A summary's `by` is `us` or `them` as this side reads it; a card
+ *  inside a door's message, as the door keeps it, says `sender` or `receiver`. */
+export type LinkPromise = { by: "us" | "them" | "sender" | "receiver"; what: string; due: string };
+export type LinkSpan = { start: string; end: string };
+export type LinkCard =
+  | { type: "summary"; title: string; promises: LinkPromise[]; links: string[]; files: string[]; note?: string }
+  | { type: "slots"; title: string; duration_minutes: number; timezone: string; slots: LinkSpan[]; busy?: (LinkSpan & { title: string })[] }
+  | { type: "meeting"; title: string; start: string; end: string; timezone: string; state: "proposed" | "booked" | "declined" }
+  | { type: "service"; title: string; url: string; expires_at: string; state: "open" | "revoked" };
+export type LinkCardRow = { id: number; direction: "mine" | "theirs"; type: LinkCard["type"]; card: LinkCard; at: string };
+/** One question this chat's agent put to several conversations at once, and each one's answer as it came. */
+export type LinkPollState = "asking" | "held" | "waiting" | "answered" | "failed";
+export type LinkPoll = {
+  id: string; question: string; state: "open" | "done"; deadline_at: string; created_at: string; settled_at: string | null; woke: boolean; dismissed: boolean;
+  entries: { talk: string; host: string; state: LinkPollState; answer: string; answered_at: string | null }[];
+};
+/** A guest's "tell me when" on one of this chat's links. */
+export type LinkSubscription = { id: string; request: string; next_at: string; every_minutes: number; times_left: number; fired: number; state: "active" | "ended"; reason: string; created_at: string };
+/** What a link's turn asked to have done that waits for the operator or outlives the turn: a patch, a service shown, a meeting. */
+export type LinkAction = {
+  id: string; kind: "patch" | "service" | "meeting"; state: "held" | "running" | "done" | "refused" | "failed" | "revoked"; result: string; created_at: string; expires_at: string | null;
+  name?: string; branch?: string; stat?: string; title?: string; start?: string; end?: string; service?: string;
+};
 export type GuestBilling = "metered" | "plan" | "free";
 export type GuestModelOption = { id: string; label: string; path: string; model: string; billing: GuestBilling; price_in: number; price_out: number; free: boolean };
 export type GuestDefaults = {

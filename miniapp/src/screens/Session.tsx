@@ -204,7 +204,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [promoting, setPromoting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [guesting, setGuesting] = useState(false);
-  const { talks: agentTalks, guestHeld, loaded: talksLoaded } = useAgentTalks(id);
+  const { talks: agentTalks, guestHeld, polls: agentPolls, loaded: talksLoaded } = useAgentTalks(id);
   const composer = useRef<ComposerHandle>(null);
   // The right panel: the route carries the open tab and the previewed file for the pane the URL
   // names; the second pane of a dual view keeps its panel to itself. Phones host it in a sheet.
@@ -1992,7 +1992,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               : (quote) => setBtw((open) => ({ question: "", prefill: `${quote.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n")}\n\n`, ask: (open?.ask ?? 0) + 1 }))} />}
           {detail?.id === id && <Composer
             ref={composer}
-            above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : <TalkApprovals sessionId={id} talks={agentTalks} guestHeld={guestHeld} phone={phone} toast={toast} />}
+            above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : <TalkApprovals sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} phone={phone} toast={toast} />}
             beside={browsers.user?.env === "user" ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
             sessionId={id}
             // A turn parked for its computer reads "waiting", the word a question uses, but nothing is
@@ -2086,7 +2086,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
               notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
               browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
-              agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} loaded={talksLoaded} toast={toast} />,
+              agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} loaded={talksLoaded} toast={toast} />,
               subagents: <SubagentsTab
                 leaderId={id}
                 selected={panel.state.sub}

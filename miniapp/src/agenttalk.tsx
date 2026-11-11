@@ -8,11 +8,12 @@
 // them turning yellow: the message itself was a click and a sheet away, and was missed.
 
 import { useEffect, useRef, useState } from "react";
-import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkReview, api, HeldGroup, LinkFile, LinkTask } from "./api";
+import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkReview, api, HeldGroup, LinkFile, LinkPoll, LinkTask } from "./api";
 import { absTime, usd } from "./format";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { FilePicks, GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
+import { LinkActions, LinkCardView, PollCard, Summaries, TalkPolls } from "./linkflows";
 import { invalidate, useQuery } from "./store";
 import { Segmented, Switch } from "./ui/components";
 import { confirmAsync, errorText } from "./ui";
@@ -32,12 +33,13 @@ const listPath = (sessionId: string) => `/api/sessions/${encoded(sessionId)}/age
 const talkPath = (id: string) => `/api/agent-talks/${encoded(id)}`;
 
 const NO_HELD: HeldGroup[] = [];
+const NO_POLLS: LinkPoll[] = [];
 
-/** The chat's conversations, and the files its own links want to send (`guestHeld`): both wait for the operator
- *  over the composer and in the Agents tab. */
-export function useAgentTalks(sessionId: string | null | undefined): { talks: AgentTalk[]; guestHeld: HeldGroup[]; loaded: boolean } {
+/** The chat's conversations, the files its own links want to send (`guestHeld`), and the questions its agent put to
+ *  several at once (`polls`): all of them wait or gather over the composer and in the Agents tab. */
+export function useAgentTalks(sessionId: string | null | undefined): { talks: AgentTalk[]; guestHeld: HeldGroup[]; polls: LinkPoll[]; loaded: boolean } {
   const { data } = useQuery<AgentTalkList>(sessionId ? listPath(sessionId) : null, { pollMs: POLL_MS });
-  return { talks: data?.talks ?? [], guestHeld: data?.guest_held ?? NO_HELD, loaded: !!data };
+  return { talks: data?.talks ?? [], guestHeld: data?.guest_held ?? NO_HELD, polls: data?.polls ?? NO_POLLS, loaded: !!data };
 }
 
 /** What a conversation is doing, in one word and a tone: `attn` where it waits for the operator. */
@@ -203,13 +205,16 @@ function GuestHeldList({ sessionId, groups, phone, toast }: { sessionId: string;
   return <>{groups.map((group) => <GuestHeldApproval key={`${group.link_id}:${group.batch}`} group={group} phone={phone} toast={toast} onDone={done(group)} />)}</>;
 }
 
-/** Over the composer, where the strips were: every message of this chat's conversations that waits to go out,
- *  and every set of files a guest's turn on this chat's links wants to send. */
-export function TalkApprovals({ sessionId, talks, guestHeld = NO_HELD, phone, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; phone?: boolean; toast: (text: string) => void }) {
+/** Over the composer, where the strips were: the answers to a question put to several agents as they gather, every
+ *  message of this chat's conversations that waits to go out, and every set of files a guest's turn on this chat's
+ *  links wants to send. */
+export function TalkApprovals({ sessionId, talks, guestHeld = NO_HELD, polls = NO_POLLS, phone, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; polls?: readonly LinkPoll[]; phone?: boolean; toast: (text: string) => void }) {
   const waiting = talks.filter((talk) => talk.state !== "closed" && talk.held > 0);
-  if (!waiting.length && !guestHeld.length) return null;
+  const gathering = polls.some((poll) => !poll.dismissed);
+  if (!waiting.length && !guestHeld.length && !gathering) return null;
   return (
     <div className="talk-approvals" data-talk-approvals="">
+      <TalkPolls sessionId={sessionId} polls={polls} />
       {waiting.map((talk) => <HeldOf key={talk.id} talk={talk} phone={phone} toast={toast} />)}
       <GuestHeldList sessionId={sessionId} groups={guestHeld} phone={phone} toast={toast} />
     </div>
@@ -218,9 +223,9 @@ export function TalkApprovals({ sessionId, talks, guestHeld = NO_HELD, phone, to
 
 // ── the tab ───────────────────────────────────────────────────────────────────────────────────
 
-export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; loaded: boolean; toast: (text: string) => void }) {
+export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, polls = NO_POLLS, loaded, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; polls?: readonly LinkPoll[]; loaded: boolean; toast: (text: string) => void }) {
   if (!loaded) return <div className="talks"><div className="sub talks-loading">{t("common.loading")}</div></div>;
-  if (!talks.length && !guestHeld.length) {
+  if (!talks.length && !guestHeld.length && !polls.length) {
     return (
       <div className="talks">
         <div className="subagents-empty">
@@ -238,6 +243,12 @@ export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast
         <section className="subagents-group talks-held" data-group="guest-held">
           <div className="dt-label"><span>{t("link.held.group")}</span><span className="dt-aside">{guestHeld.length}</span></div>
           <GuestHeldList sessionId={sessionId} groups={guestHeld} toast={toast} />
+        </section>
+      )}
+      {polls.length > 0 && (
+        <section className="subagents-group" data-group="polls">
+          <div className="dt-label"><span>{t("flow.poll.group")}</span><span className="dt-aside">{polls.length}</span></div>
+          {polls.map((poll) => <PollCard key={poll.id} poll={poll} />)}
         </section>
       )}
       {live.length > 0 && (
@@ -304,6 +315,8 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
       </div>
       {/* The newest line of the thread, where it would stand once sent. */}
       {held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} files={filesOf(message, data?.files)} toast={toast} />)}
+      <LinkActions actions={data?.actions ?? []} refresh={() => invalidate(path)} toast={toast} />
+      {data && (messages.length > 0 || (data.cards ?? []).length > 0) && <Summaries rows={data.cards ?? []} path={path} refresh={() => invalidate(path)} toast={toast} />}
       {live && <TalkControls talk={talk} busy={busy} onChange={(body) => act(() => api.put(`${path}/settings`, body))} onEnd={() => void end()} />}
     </article>
   );
@@ -316,7 +329,8 @@ function TalkLine({ message, files, toast }: { message: AgentTalkMessage; files:
   return (
     <div className="talk-msg" data-role={message.role} data-state={message.state} data-kind={message.kind || "text"}>
       <div className="talk-msg-head"><b>{t(`talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
-      {message.text && <div className="talk-text">{message.text}</div>}
+      {message.text && !message.card && <div className="talk-text">{message.text}</div>}
+      {message.card && <LinkCardView card={message.card} />}
       <LinkFiles files={files} toast={toast} />
     </div>
   );

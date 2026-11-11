@@ -1,0 +1,48 @@
+/* What agents do together over a link (linkflows.tsx): cards beside a message, the answers to one question side by
+   side, summaries, a guest's subscriptions and the actions a link's turns asked for. The other side's words are
+   pre-wrapped plain text like every message of a link; these rules decide only where lines break and how much
+   of an answer shows before its hover. Colours are the tokens, so both themes follow. */
+
+.lf-card { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; margin-top: var(--space-1); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: var(--radius-sm); background: var(--bg); font-size: var(--fs-13); }
+.lf-card[data-card="meeting"][data-state="booked"] { border-left-color: var(--ok); }
+.lf-card[data-state="declined"], .lf-card[data-state="revoked"] { border-left-color: var(--line); opacity: .8; }
+.lf-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--ctl-h-sm); }
+.lf-card-head > .ic { flex: none; color: var(--fg-3); }
+.lf-card-head > .sub, .lf-card-head > .lf-chip, .lf-card-head > .iconbtn { margin-left: auto; flex: none; }
+.lf-label { color: var(--fg-2); font-size: var(--fs-12); }
+.lf-promises ul, .lf-slots { margin: 0; padding-left: 1.1em; }
+.lf-promises li, .lf-slots li { overflow-wrap: anywhere; line-height: 1.45; }
+/* A label over its values, as the promises are: side by side, a long address pushed its label into a ragged indent. */
+.lf-row { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.lf-plain { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.lf-plain.mono { font-family: var(--mono); font-size: var(--fs-12); }
+.lf-chip { padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--fg-2); font-size: var(--fs-11); white-space: nowrap; }
+.lf-chip[data-state="answered"], .lf-chip[data-state="booked"], .lf-chip[data-state="done"], .lf-chip[data-state="open"] { border-color: var(--ok); color: var(--ok); }
+.lf-chip[data-state="held"] { border-color: var(--warn); color: var(--warn); }
+.lf-chip[data-state="failed"], .lf-chip[data-state="refused"] { border-color: var(--bad); color: var(--bad); }
+.lf-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* The answers to one question: a table of two columns that keeps to the panel's width. An answer shows four lines,
+   the rest on hover, so one long answer cannot push the others out of sight. */
+.lf-polls { display: flex; flex-direction: column; gap: var(--space-2); }
+.lf-poll { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: var(--radius-sm); background: var(--surface-1); font-size: var(--fs-13); }
+.lf-poll[data-poll-state="done"] { border-left-color: var(--ok); }
+.lf-poll-line { font-variant-numeric: tabular-nums; }
+.lf-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.lf-table th { padding: 2px var(--space-2) 2px 0; color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; text-align: left; }
+.lf-table th:first-child { width: 38%; }
+.lf-table td { padding: var(--space-1) var(--space-2) var(--space-1) 0; border-top: 1px solid var(--line); vertical-align: top; min-width: 0; }
+.lf-host { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.lf-host > .truncate { max-width: 100%; }
+.lf-answer { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.talk-approvals .lf-polls, .lf-polls + .talk-approvals { margin-bottom: var(--space-2); }
+
+.lf-summaries { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.lf-summaries > .btn { align-self: flex-start; }
+.lf-summary { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.lf-summary-who { font-size: var(--fs-12); }
+
+.lf-list { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.lf-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); font-size: var(--fs-13); }
+.lf-item > .btn { align-self: flex-start; margin-top: var(--space-1); }
+.lf-item[data-state="ended"], .lf-item[data-state="revoked"], .lf-item[data-state="refused"] { opacity: .75; }

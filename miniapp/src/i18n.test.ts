@@ -239,6 +239,12 @@ describe("the keys the code asks for", () => {
       // A file and a task over an agent link name their state from the host's words for it.
       ["link.task.state.", ["accepted", "working", "needs_input", "done", "refused", "cancelled"]],
       ["link.file.", ["pending", "refused", "failed", "held", "sending", "dropped"]],
+      // What agents do together over a link names its states from the host's words for them.
+      ["flow.poll.state.", ["asking", "held", "waiting", "answered", "failed"]],
+      ["flow.meeting.", ["proposed", "booked", "declined"]],
+      ["flow.service.", ["open", "revoked"]],
+      ["flow.action.", ["patch", "service", "meeting"]],
+      ["flow.action.state.", ["held", "running", "done", "refused", "failed", "revoked"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
       ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about", "memory"]],
