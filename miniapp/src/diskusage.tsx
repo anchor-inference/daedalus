@@ -5,14 +5,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { bytes, relTime } from "./format";
+import { relTime } from "./format";
 import { plural, t } from "./i18n";
-import { invalidate, useOffline, useQuery } from "./store";
+import { invalidate, prime, useOffline, useQuery } from "./store";
 import { errorText } from "./ui";
 import { Sheet } from "./ui/dialogs";
 import {
-  canTick, defaultSelection, fillPercent, reasonKey, selectedBytes, sizeText, tone, withoutTracked,
-  type CleanupResult, type DiskDetail, type DiskEntry, type WorkspaceDetail,
+  canTick, defaultSelection, diskBytes, fillPercent, limitChoices, limitText, parseLimitGb, reasonKey, selectedBytes, sizeText, tone,
+  withLimit, withoutTracked,
+  type CleanupResult, type DiskDetail, type DiskEntry, type LimitResult, type WorkspaceDetail,
 } from "./diskmodel";
 
 export const diskKey = (kind: "session" | "project", id: string) => `/api/disk/${kind}/${encodeURIComponent(id)}`;
@@ -43,33 +44,84 @@ export function DiskUsage({ kind, id, toast }: { kind: "session" | "project"; id
     {open && !data && !query.error && <p className="sub">{t("common.loading")}</p>}
     {data && <>
       <div className={`sub disk-free${data.low_disk ? " attn" : ""}`} data-disk-free>
-        {data.low_disk ? t("disk.low", { free: bytes(data.free_bytes), total: bytes(data.total_bytes) }) : t("disk.free", { free: bytes(data.free_bytes), total: bytes(data.total_bytes) })}
+        {data.low_disk ? t("disk.low", { free: diskBytes(data.free_bytes), total: diskBytes(data.total_bytes) }) : t("disk.free", { free: diskBytes(data.free_bytes), total: diskBytes(data.total_bytes) })}
       </div>
       {!data.workspaces.length && <p className="sub">{t("disk.none")}</p>}
       {data.workspaces.map((workspace) => (
-        <WorkspaceUsage key={workspace.name} workspace={workspace} limit={data.limit_bytes} toast={toast}
-          onCleaned={() => invalidate(key)} />
+        <WorkspaceUsage key={workspace.name} workspace={workspace} defaultLimit={data.default_limit_bytes} toast={toast}
+          onCleaned={() => invalidate(key)} onLimit={(result) => prime(key, withLimit(data, result))} />
       ))}
       {data.outside.map((folder) => <p key={folder.label} className="sub" data-disk-outside>{t("disk.outside", { label: folder.label })}</p>)}
     </>}
   </div>;
 }
 
-function WorkspaceUsage({ workspace, limit, toast, onCleaned }: { workspace: WorkspaceDetail; limit: number; toast: (text: string) => void; onCleaned: () => void }) {
+function WorkspaceUsage({ workspace, defaultLimit, toast, onCleaned, onLimit }: {
+  workspace: WorkspaceDetail; defaultLimit: number; toast: (text: string) => void; onCleaned: () => void; onLimit: (result: LimitResult) => void;
+}) {
   const [cleaning, setCleaning] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const limit = workspace.limit_bytes;
   return <div className="disk-workspace" data-disk-workspace={workspace.name}>
     <div className="disk-head">
       <span className="grow truncate" title={workspace.label}>{workspace.label}</span>
       <b data-disk-total>{sizeText(workspace.bytes, workspace.truncated)}</b>
-      {limit > 0 && <span className="sub">{t("disk.ofLimit", { limit: bytes(limit) })}</span>}
+      <span className="sub" data-disk-limit>{limit > 0 ? t("disk.ofLimit", { limit: diskBytes(limit) }) : t("disk.noLimit")}</span>
     </div>
     {limit > 0 && <div className={`bar ${tone(workspace.over)}`} style={{ "--v": fillPercent(workspace.bytes, limit) } as React.CSSProperties}><i /></div>}
-    {workspace.over > 0 && <div className="sub attn">{t(workspace.over === 2 ? "disk.over2" : "disk.over1")}</div>}
+    <div className="disk-limitline">
+      {workspace.over > 0
+        ? <span className="sub attn grow" data-disk-over>{t(workspace.over === 2 ? "disk.over2" : "disk.over1")}</span>
+        : <span className="sub faint grow" data-disk-source>{t(workspace.own_limit ? "disk.limit.own" : "disk.limit.inherited")}</span>}
+      <button className="btn ghost small" aria-expanded={changing} data-disk-limit-open onClick={() => setChanging(!changing)}>{t("disk.limit.change")}</button>
+    </div>
+    {changing && <LimitEditor workspace={workspace} defaultLimit={defaultLimit} toast={toast} onSaved={onLimit} onClose={() => setChanging(false)} />}
     <div className="disk-entries">
       {workspace.entries.map((entry) => <EntryRow key={entry.path} entry={entry} />)}
     </div>
     <button className="btn ghost small" onClick={() => setCleaning(true)} disabled={!workspace.entries.length}>{t("disk.cleanup")}</button>
     {cleaning && <CleanupSheet workspace={workspace} toast={toast} onClose={() => setCleaning(false)} onCleaned={onCleaned} />}
+  </div>;
+}
+
+/** The ways to change one workspace's limit. Every choice is saved at once: there is no form to fill in
+ *  and confirm, since a limit only decides when someone is told, and is changed back as easily. */
+function LimitEditor({ workspace, defaultLimit, toast, onSaved, onClose }: {
+  workspace: WorkspaceDetail; defaultLimit: number; toast: (text: string) => void; onSaved: (result: LimitResult) => void; onClose: () => void;
+}) {
+  const [text, setText] = useState(() => (workspace.limit_bytes > 0 ? String(Math.round(workspace.limit_bytes / 1e6) / 1000) : ""));
+  const [busy, setBusy] = useState(false);
+  const offline = useOffline();
+  const typed = parseLimitGb(text);
+  const unlimited = workspace.own_limit && workspace.limit_bytes === 0;
+  async function save(limitGb: number | null) {
+    if (busy || offline) return;
+    setBusy(true);
+    try {
+      onSaved(await api.put<LimitResult>(`/api/disk/limit/${encodeURIComponent(workspace.name)}`, { limit_gb: limitGb }));
+      onClose();
+    } catch (error) { toast(errorText(error)); }
+    finally { setBusy(false); }
+  }
+  const idle = busy || offline;
+  return <div className="disk-limit-edit" data-disk-limit-edit>
+    <div className="disk-limit-choices">
+      {limitChoices(workspace.limit_bytes).map((choice) => (
+        <button key={choice.id} className="chip select" disabled={idle} data-disk-limit-choice={choice.id}
+          title={diskBytes(choice.gb * 1e9)} onClick={() => void save(choice.gb)}>{choice.label}</button>
+      ))}
+      <button className="chip select" disabled={idle} aria-pressed={unlimited} data-disk-limit-choice="none" onClick={() => (unlimited ? onClose() : void save(0))}>{t("disk.limit.none")}</button>
+      <button className="chip select" disabled={idle} aria-pressed={!workspace.own_limit} data-disk-limit-choice="default"
+        onClick={() => (workspace.own_limit ? void save(null) : onClose())}>{t("disk.limit.default", { limit: limitText(defaultLimit) })}</button>
+    </div>
+    <div className="disk-limit-custom">
+      <span className="settings-num">
+        <input className="field" type="number" inputMode="decimal" min={0} step="any" value={text} aria-label={t("disk.limit.custom")} aria-invalid={text.trim() !== "" && typed === null}
+          data-disk-limit-input onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && typed !== null) void save(typed); }} />
+        <span className="settings-unit">{t("disk.limit.unit")}</span>
+      </span>
+      <button className="btn small" disabled={idle || typed === null} data-disk-limit-set onClick={() => typed !== null && void save(typed)}>{t("common.save")}</button>
+    </div>
   </div>;
 }
 
@@ -79,14 +131,14 @@ function EntryRow({ entry }: { entry: DiskEntry }) {
     <div className="disk-row">
       <button className="linkbtn disk-name mono truncate" aria-expanded={open} disabled={!entry.children.length} onClick={() => setOpen(!open)} title={entry.path}>{entry.path}</button>
       <EntryBadges entry={entry} />
-      <span className="disk-size">{bytes(entry.bytes)}</span>
+      <span className="disk-size">{diskBytes(entry.bytes)}</span>
     </div>
     {entry.newest && <div className="sub disk-meta">{t("disk.newest", { when: relTime(entry.newest) })} · {plural("disk.files", entry.files)}</div>}
     {open && entry.children.map((child) => (
       <div key={child.path} className="disk-row disk-child" data-disk-child={child.path}>
         <span className="mono truncate grow" title={child.path}>{child.path.split("/").pop()}</span>
         <EntryBadges entry={child} />
-        <span className="disk-size">{bytes(child.bytes)}</span>
+        <span className="disk-size">{diskBytes(child.bytes)}</span>
       </div>
     ))}
   </div>;
@@ -124,7 +176,7 @@ function CleanupSheet({ workspace, toast, onClose, onCleaned }: { workspace: Wor
   }
   return <Sheet title={t("disk.cleanup.title", { label: workspace.label })} onClose={onClose} size="narrow">
     {result ? <div data-disk-result>
-      <p data-disk-freed><b>{t("disk.freed", { size: bytes(result.freed_bytes) })}</b></p>
+      <p data-disk-freed><b>{t("disk.freed", { size: diskBytes(result.freed_bytes) })}</b></p>
       {result.refused.length > 0 && <div className="disk-refused">
         <div className="sub attn">{t("disk.refused.title")}</div>
         {result.refused.map((item) => <div key={item.path} className="sub" data-disk-refused={item.path}><span className="mono">{item.path}</span> — {t(reasonKey(item.reason))}</div>)}
@@ -139,7 +191,7 @@ function CleanupSheet({ workspace, toast, onClose, onCleaned }: { workspace: Wor
             <input type="checkbox" checked={selected.has(entry.path)} disabled={!ok || busy} onChange={(event) => toggle(entry.path, event.target.checked)} />
             <span className="grow mono truncate">{entry.path}</span>
             <EntryBadges entry={entry} />
-            <span className="disk-size">{bytes(entry.bytes)}</span>
+            <span className="disk-size">{diskBytes(entry.bytes)}</span>
           </label>;
         })}
       </div>
@@ -151,7 +203,7 @@ function CleanupSheet({ workspace, toast, onClose, onCleaned }: { workspace: Wor
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
         <button className="btn danger" data-disk-confirm onClick={() => void run()} disabled={busy || offline || !selected.size}>
-          {t("disk.cleanup.confirm", { size: bytes(selectedBytes(selected, workspace.entries)) })}
+          {t("disk.cleanup.confirm", { size: diskBytes(selectedBytes(selected, workspace.entries)) })}
         </button>
       </div>
     </>}

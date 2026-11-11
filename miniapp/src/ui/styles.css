@@ -3172,6 +3172,15 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .disk-pick-row { margin: 0; font-size: var(--fs-13); }
 .disk-pick-row .badge { flex: none; }
 .disk-refused { display: flex; flex-direction: column; gap: 2px; }
+/* The limit's own line sits under the bar: what the size is against, and the way to change it. The editor
+   opens under that line as a quiet inset, not a dialog, so the bar above it can be watched as it moves. */
+.disk-limitline { display: flex; align-items: center; gap: 6px; min-width: 0; align-self: stretch; }
+.disk-limitline .btn { flex: none; }
+.disk-limit-edit { display: flex; flex-direction: column; gap: 6px; align-self: stretch; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
+.disk-limit-choices, .disk-limit-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.disk-limit-custom .settings-num { gap: 6px; }
+.disk-limit-custom .settings-num input.field { width: 88px; }
+.disk-limit-custom .settings-unit { min-width: 0; }
 .project-archived-note { margin: 0 0 8px; }
 /* Archived rows are not picked, only restored or opened in settings, so they read quieter. */
 .project-row.archived .project-pick { cursor: default; color: var(--fg-2); }

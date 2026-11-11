@@ -573,6 +573,12 @@
       "synonyms": ["per run budget", "run cost limit", "USD per run", "cost cap", "бюджет на запуск", "лимит на запуск", "потолок трат", "spend limit per run", "spend per run", "лимит трат на запуск"]
     },
     {
+      "section": "limits", "anchor": "disk.workspace_soft_limit_gb", "config": "disk.workspace_soft_limit_gb",
+      "title": { "en": "Workspace size limit", "ru": "Лимит размера рабочей области" },
+      "about": { "en": "How large a workspace may grow, in GB, before its agent is asked to clean up and you are told; again at twice that. 0 means no limit. A workspace can have a limit of its own in the session's Details.", "ru": "Насколько может вырасти рабочая область, в ГБ, прежде чем её агента попросят убрать лишнее, а вам придёт уведомление; и ещё раз вдвое больше. 0 — без лимита. У области может быть свой лимит в сведениях сессии." },
+      "synonyms": ["disk limit", "workspace limit", "folder size", "disk quota", "soft limit", "workspace_soft_limit_gb", "disk usage limit", "лимит диска", "лимит папки", "размер рабочей области", "квота на диск", "место на диске"]
+    },
+    {
       "section": "limits", "anchor": "limits.usd_total", "config": "limits.usd_total",
       "title": { "en": "Total spend cap", "ru": "Общий потолок трат" },
       "about": { "en": "The most all runs together may spend since the counters were reset, with a cap per provider below it.", "ru": "Сколько могут потратить все запуски вместе с момента сброса счётчиков; ниже — потолки по клиентам." },

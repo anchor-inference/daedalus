@@ -45,6 +45,8 @@ const SAME_IN_BOTH = [
   "comp.name.searxng",
   // The name of the composer's switch is the principle's own acronym, which the operator reads as is in either language.
   "composer.yagni",
+  // A multiplier is written the same way in both languages.
+  "disk.limit.times",
   "fmt.cron.utc",
   // A CLI's own words for the account it is signed in with, and a dash where it is not installed.
   "harness.signin.absent",
