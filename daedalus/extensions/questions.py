@@ -245,6 +245,14 @@ async def answer(
             answered = (await manager.asks.get(ask.id)) or ask
             result = {**base, "state": "answered", "applied": True, "delivered": True, "error": "", "ask": answered.view()}
             results.append(result)
+            bridge = app.extensions.get("guest_door")
+            if answered.detail.get("guest") and bridge is not None:
+                # A guest's turn asked, for the guest: the answer goes back through the link in a turn of its own,
+                # not into the chat as the operator's message, which would start a turn with the operator's tools.
+                failed = await bridge.owner_answered(answered)
+                result["delivered"] = not failed
+                result["error"] = failed
+                continue
             pilot = app.extensions.get("autopilot")
             if answered.detail.get("autopilot") and pilot is not None:
                 # Autopilot asked, not the agent: a chosen option sends the goal kept for it, words of the

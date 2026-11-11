@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS links (
     reserved_usd REAL NOT NULL DEFAULT 0,
     turns_used INTEGER NOT NULL DEFAULT 0,
     turns_today INTEGER NOT NULL DEFAULT 0,
-    turns_day TEXT NOT NULL DEFAULT ''
+    turns_day TEXT NOT NULL DEFAULT '',
+    file_mb REAL NOT NULL DEFAULT 50,
+    day_mb REAL NOT NULL DEFAULT 500
 );
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
@@ -73,7 +75,10 @@ CREATE TABLE IF NOT EXISTS messages (
     state TEXT NOT NULL,
     reserved_usd REAL NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
-    acknowledged INTEGER NOT NULL DEFAULT 0
+    acknowledged INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'text',
+    task_id TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS messages_waiting ON messages(state, id);
@@ -89,7 +94,65 @@ CREATE TABLE IF NOT EXISTS spend_days (
     usd REAL NOT NULL DEFAULT 0,
     reserved REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    origin TEXT NOT NULL,
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    received INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    touched_at REAL NOT NULL,
+    fetched INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS files_by_conversation ON files(conversation_id, created_at);
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_by_conversation ON tasks(conversation_id);
 """
+
+SCHEMA_VERSION = 2
+"""What :func:`migrate` brings a database to. 1 is the door before messages had kinds; nothing before it
+counted, so a file with no version and no ``kind`` column is a 1."""
+
+ADDED_COLUMNS = (
+    ("links", "file_mb", "REAL NOT NULL DEFAULT 50"),
+    ("links", "day_mb", "REAL NOT NULL DEFAULT 500"),
+    ("messages", "kind", "TEXT NOT NULL DEFAULT 'text'"),
+    ("messages", "task_id", "TEXT NOT NULL DEFAULT ''"),
+    ("messages", "data", "TEXT NOT NULL DEFAULT ''"),
+)
+"""What version 2 added to tables that existed in version 1. ``CREATE TABLE IF NOT EXISTS`` leaves an old table
+as it was, so each is added where it is missing; a link made before files existed gets the same defaults a new one
+does."""
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Bring the door's database to :data:`SCHEMA_VERSION`, in one transaction, whatever version it is at.
+
+    The door has no other copy of this file, so a step that fails rolls back and the door stops with the
+    file as it was, rather than half a schema under a version number that says otherwise."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for table, name, kind in ADDED_COLUMNS:
+            present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if name not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 STAND_IN = "stand_in"
 DIRECT = "direct"
@@ -117,8 +180,27 @@ GUEST = "guest"
 AGENT = "agent"
 DOOR = "door"
 """The door's own words to the guest: a limit, a failure. Never the model's."""
+OWNER = "owner"
+"""A turn the host asked for itself, to carry an answer of the operator's to the guest. Its words never reach the
+door: the message only holds a place in the queue, so the turn is counted and bounded as a guest's is."""
+
+TEXT, FILE, TASK, QUESTION, STATUS = "text", "file", "task", "question", "status"
+KINDS = (TEXT, FILE, TASK, QUESTION, STATUS)
+"""What a message is. ``text`` is what a message always was; the others carry ids, so a status names its task and
+a file message names its files."""
+
+ACCEPTED, WORKING, NEEDS_INPUT, DONE, REFUSED_TASK, CANCELLED = "accepted", "working", "needs_input", "done", "refused", "cancelled"
+TASK_STATES = (ACCEPTED, WORKING, NEEDS_INPUT, DONE, REFUSED_TASK, CANCELLED)
+OPEN_TASK_STATES = (ACCEPTED, WORKING, NEEDS_INPUT)
+"""A task that may still move. One that is done, refused or cancelled stays so."""
+
+UPLOADING, READY, GONE = "uploading", "ready", "gone"
+"""A file's body: arriving in pieces, whole and checked, or deleted (by retention, or once the host has its copy)."""
 
 DEFAULT_USD_PER_DAY = 5.0
+DEFAULT_FILE_MB = 50.0
+DEFAULT_DAY_MB = 500.0
+"""A link's file limits when the owner set none: a file, and a day's files both ways. 0 is no limit, as for every other."""
 
 NO_LIMIT = 0
 """What every limit and lifetime of a link, and the day's budget, holds when the owner set none. A column
@@ -153,13 +235,16 @@ class Refusal:
 
 class Store:
     def __init__(self, path: Path | str, *, clock: Callable[[], float] = time.time) -> None:
+        self.path = Path(path)
         self.clock = clock
         # One event loop uses this connection; the check would only trip a test client's own thread.
         self.conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        # The tables first, then the columns an older file is missing.
         self.conn.executescript(SCHEMA)
+        migrate(self.conn)
 
     def close(self) -> None:
         self.conn.close()
@@ -206,12 +291,12 @@ class Store:
         now = self.clock()
         self._write(
             "INSERT INTO links(id, invite_hash, state, label, topic, mode, briefing, model_path, model_name, price_in, price_out, approval,"
-            " usd_limit, turns_per_day, turns_total, invite_expires_at, conversation_hours, idle_hours, retention_days, guest_tools, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " usd_limit, turns_per_day, turns_total, invite_expires_at, conversation_hours, idle_hours, retention_days, guest_tools, created_at, file_mb, day_mb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             link_id, digest(invite), WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
             float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
             int(fields["turns_total"]), until(now, fields["invite_hours"]), float(fields["conversation_hours"]), float(fields["idle_hours"]),
-            float(fields["retention_days"]), fields["guest_tools"], now,
+            float(fields["retention_days"]), fields["guest_tools"], now, float(fields.get("file_mb", DEFAULT_FILE_MB)), float(fields.get("day_mb", DEFAULT_DAY_MB)),
         )
         self.record(link_id, "created")
         return link_id, invite
@@ -231,11 +316,11 @@ class Store:
             self._write(
                 "UPDATE links SET state = ?, closed_at = CASE WHEN ? = ? THEN NULL ELSE closed_at END, label = ?, topic = ?, mode = ?, briefing = ?, model_path = ?, model_name = ?,"
                 " price_in = ?, price_out = ?, approval = ?, usd_limit = ?, turns_per_day = ?, turns_total = ?, invite_expires_at = ?, conversation_hours = ?,"
-                " idle_hours = ?, retention_days = ?, guest_tools = ? WHERE id = ?",
+                " idle_hours = ?, retention_days = ?, guest_tools = ?, file_mb = ?, day_mb = ? WHERE id = ?",
                 state, state, WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
                 float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
                 int(fields["turns_total"]), expires, float(fields["conversation_hours"]), float(fields["idle_hours"]), float(fields["retention_days"]),
-                fields["guest_tools"], link_id,
+                fields["guest_tools"], float(fields.get("file_mb", link["file_mb"])), float(fields.get("day_mb", link["day_mb"])), link_id,
             )
             hours = float(fields["conversation_hours"])
             self._write("UPDATE conversations SET expires_at = CASE WHEN ? > 0 THEN created_at + ? ELSE 0 END WHERE link_id = ? AND state != ?", hours, hours * 3600, link_id, CLOSED)
@@ -279,6 +364,11 @@ class Store:
             return
         self._write("UPDATE conversations SET state = ?, reason = ?, closed_at = ? WHERE id = ?", CLOSED, reason, now, conversation["id"])
         self._write("UPDATE messages SET state = ? WHERE conversation_id = ? AND state IN (?, ?)", FAILED, conversation["id"], HELD, QUEUED)
+        # A task nobody will finish is not left looking as if somebody might.
+        self._write(
+            f"UPDATE tasks SET state = ?, updated_at = ? WHERE conversation_id = ? AND state IN ({','.join('?' * len(OPEN_TASK_STATES))})",
+            CANCELLED, now, conversation["id"], *OPEN_TASK_STATES,
+        )
 
     # -- redeem and approval ----------------------------------------------------------
 
@@ -342,15 +432,30 @@ class Store:
 
     # -- messages ---------------------------------------------------------------------
 
-    def add_guest_message(self, conversation: sqlite3.Row, text: str) -> int:
+    def add_guest_message(self, conversation: sqlite3.Row, text: str, *, kind: str = TEXT, task_id: str = "", data: dict[str, Any] | None = None) -> int:
         now = self.clock()
         state = HELD if conversation["state"] == PENDING else QUEUED
-        cursor = self._write("INSERT INTO messages(conversation_id, role, text, at, state) VALUES (?, ?, ?, ?, ?)", conversation["id"], GUEST, text, now, state)
+        cursor = self._write(
+            "INSERT INTO messages(conversation_id, role, text, at, state, kind, task_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            conversation["id"], GUEST, text, now, state, kind, task_id, json.dumps(data) if data else "",
+        )
         self._write("UPDATE conversations SET last_guest_at = ? WHERE id = ?", now, conversation["id"])
         return int(cursor.lastrowid or 0)
 
-    def add_reply(self, conversation_id: str, role: str, text: str) -> int:
-        cursor = self._write("INSERT INTO messages(conversation_id, role, text, at, state) VALUES (?, ?, ?, ?, ?)", conversation_id, role, text, self.clock(), SENT)
+    def add_reply(self, conversation_id: str, role: str, text: str, *, kind: str = TEXT, task_id: str = "", data: dict[str, Any] | None = None) -> int:
+        cursor = self._write(
+            "INSERT INTO messages(conversation_id, role, text, at, state, kind, task_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            conversation_id, role, text, self.clock(), SENT, kind, task_id, json.dumps(data) if data else "",
+        )
+        return int(cursor.lastrowid or 0)
+
+    def add_resume(self, conversation_id: str, task_id: str, data: dict[str, Any]) -> int:
+        """A turn the host asks for to carry the operator's answer on: queued as a guest's message is, so it is
+        counted, bounded and answered in turn, and kept from the guest's own reads by its role."""
+        cursor = self._write(
+            "INSERT INTO messages(conversation_id, role, text, at, state, kind, task_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            conversation_id, OWNER, "", self.clock(), QUEUED, TEXT, task_id, json.dumps(data),
+        )
         return int(cursor.lastrowid or 0)
 
     def held_count(self, conversation_id: str) -> int:
@@ -359,7 +464,10 @@ class Store:
 
     def replies_after(self, conversation_id: str, after: int) -> list[sqlite3.Row]:
         """What the guest has to read. Their own words are not echoed, so ``after`` is a plain cursor."""
-        return self._all("SELECT id, role, text, at FROM messages WHERE conversation_id = ? AND id > ? AND role != ? ORDER BY id LIMIT 50", conversation_id, after, GUEST)
+        return self._all(
+            "SELECT id, role, text, at, kind, task_id, data FROM messages WHERE conversation_id = ? AND id > ? AND role NOT IN (?, ?) ORDER BY id LIMIT 50",
+            conversation_id, after, GUEST, OWNER,
+        )
 
     def transcript(self, conversation_id: str, limit: int = 500) -> list[sqlite3.Row]:
         return list(reversed(self._all("SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?", conversation_id, limit)))
@@ -541,6 +649,81 @@ class Store:
     def drop(self, message_id: int) -> None:
         self._write("UPDATE messages SET state = ? WHERE id = ? AND state IN (?, ?)", FAILED, message_id, QUEUED, HELD)
 
+    # -- tasks ------------------------------------------------------------------------
+
+    def create_task(self, conversation_id: str, text: str) -> str:
+        task_id = "t_" + secrets.token_hex(6)
+        now = self.clock()
+        self._write("INSERT INTO tasks(id, conversation_id, state, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", task_id, conversation_id, ACCEPTED, text, now, now)
+        return task_id
+
+    def task(self, task_id: str) -> sqlite3.Row | None:
+        return self._one("SELECT * FROM tasks WHERE id = ?", task_id)
+
+    def tasks_of(self, conversation_id: str) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM tasks WHERE conversation_id = ? ORDER BY created_at", conversation_id)
+
+    def move_task(self, task_id: str, state: str) -> bool:
+        """A task's next state. Nothing moves a task that is over: a cancel that raced a result keeps the cancel."""
+        cursor = self._write(
+            f"UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state IN ({','.join('?' * len(OPEN_TASK_STATES))})",
+            state, self.clock(), task_id, *OPEN_TASK_STATES,
+        )
+        return cursor.rowcount == 1
+
+    def queued_of_task(self, task_id: str) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM messages WHERE task_id = ? AND state IN (?, ?, ?)", task_id, HELD, QUEUED, CLAIMED)
+
+    # -- files ------------------------------------------------------------------------
+
+    def create_file(self, conversation_id: str, origin: str, name: str, size: int, sha256: str) -> str:
+        file_id = "f_" + secrets.token_hex(8)
+        now = self.clock()
+        self._write(
+            "INSERT INTO files(id, conversation_id, origin, name, size, sha256, state, created_at, touched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            file_id, conversation_id, origin, name, int(size), sha256, UPLOADING, now, now,
+        )
+        return file_id
+
+    def file(self, file_id: str) -> sqlite3.Row | None:
+        return self._one("SELECT * FROM files WHERE id = ?", file_id)
+
+    def files_of(self, conversation_id: str) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM files WHERE conversation_id = ? ORDER BY created_at", conversation_id)
+
+    def file_received(self, file_id: str, received: int, state: str = UPLOADING) -> None:
+        self._write("UPDATE files SET received = ?, state = ?, touched_at = ? WHERE id = ?", received, state, self.clock(), file_id)
+
+    def file_gone(self, file_id: str) -> None:
+        self._write("UPDATE files SET state = ? WHERE id = ?", GONE, file_id)
+
+    def file_fetched(self, file_id: str) -> None:
+        self._write("UPDATE files SET fetched = 1, state = ? WHERE id = ?", GONE, file_id)
+
+    def bytes_today(self, link_id: str) -> int:
+        """What files took on this link since midnight UTC, both ways and counted when announced: a day's
+        limit that counted only finished files could be passed by starting many at once."""
+        now = self.clock()
+        row = self._one(
+            "SELECT coalesce(sum(f.size), 0) n FROM files f JOIN conversations c ON c.id = f.conversation_id WHERE c.link_id = ? AND f.created_at >= ?",
+            link_id, now - now % 86400,
+        )
+        return int(row["n"]) if row else 0
+
+    def bytes_held(self) -> int:
+        """What every body on the door's disk may grow to: files arriving count at their announced size."""
+        row = self._one("SELECT coalesce(sum(size), 0) n FROM files WHERE state IN (?, ?)", UPLOADING, READY)
+        return int(row["n"]) if row else 0
+
+    def files_to_forget(self, *, stalled_before: float, kept_before: float) -> list[sqlite3.Row]:
+        """Bodies the door no longer keeps: an upload nobody finished, and a file past its time on this disk."""
+        return self._all(
+            "SELECT * FROM files WHERE (state = ? AND touched_at < ?) OR (state = ? AND created_at < ?)", UPLOADING, stalled_before, READY, kept_before,
+        )
+
+    def file_ids(self) -> set[str]:
+        return {str(row["id"]) for row in self._all("SELECT id FROM files WHERE state != ?", GONE)}
+
     # -- the record the owner reads ---------------------------------------------------
 
     def record(self, link_id: str, kind: str, detail: str = "") -> int:
@@ -607,6 +790,8 @@ def rows(items: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "AGENT", "ANSWERED", "CLAIMED", "CLOSED", "DIRECT", "DOOR", "EXPIRED", "FAILED", "FIRST_CONTACT_HOURS", "GUEST", "HELD", "OPEN", "PENDING",
-    "NO_LIMIT", "QUEUED", "REVOKED", "SENT", "SPENT", "STAND_IN", "WAITING", "Refusal", "Store", "digest", "ended", "new_secret", "rows", "until",
+    "ACCEPTED", "AGENT", "ANSWERED", "CANCELLED", "CLAIMED", "CLOSED", "DEFAULT_DAY_MB", "DEFAULT_FILE_MB", "DIRECT", "DONE", "DOOR", "EXPIRED", "FAILED", "FILE",
+    "FIRST_CONTACT_HOURS", "GONE", "GUEST", "HELD", "KINDS", "NEEDS_INPUT", "NO_LIMIT", "OPEN", "OPEN_TASK_STATES", "OWNER", "PENDING", "QUESTION", "QUEUED",
+    "READY", "REFUSED_TASK", "REVOKED", "SCHEMA_VERSION", "SENT", "SPENT", "STAND_IN", "STATUS", "TASK", "TASK_STATES", "TEXT", "UPLOADING", "WAITING", "WORKING",
+    "Refusal", "Store", "digest", "ended", "migrate", "new_secret", "rows", "until",
 ]

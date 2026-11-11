@@ -24,12 +24,40 @@ import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
+from .files import CHUNK_BYTES, FileRefused
+from .limits import Rate
 from .mailbox import Mailbox
 from .public import read_body
 from .standin import FAILED_TEXT
-from .store import AGENT, ANSWERED, CLOSED, DIRECT, DOOR, FAILED, HELD, NO_LIMIT, OPEN, PENDING, QUEUED, Store
+from .store import (
+    AGENT,
+    ANSWERED,
+    CANCELLED,
+    CLOSED,
+    DEFAULT_DAY_MB,
+    DEFAULT_FILE_MB,
+    DIRECT,
+    DONE,
+    DOOR,
+    FAILED,
+    FILE,
+    HELD,
+    NEEDS_INPUT,
+    NO_LIMIT,
+    OPEN,
+    OPEN_TASK_STATES,
+    OWNER,
+    PENDING,
+    QUESTION,
+    QUEUED,
+    REFUSED_TASK,
+    STATUS,
+    TEXT,
+    WORKING,
+    Store,
+)
 from .text import inert, one_line
 
 if TYPE_CHECKING:
@@ -51,7 +79,14 @@ NUMBERS = {
     "invite_hours": (0.0, 24.0 * 365), "conversation_hours": (0.0, 24.0 * 365), "idle_hours": (0.0, 24.0 * 365), "retention_days": (0.0, 3650.0),
 }
 """Each limit and lifetime may be :data:`~.store.NO_LIMIT`, which is none at all; a lifetime that is not is a few minutes at least."""
+FILE_LIMITS = {"file_mb": DEFAULT_FILE_MB, "day_mb": DEFAULT_DAY_MB}
+"""Optional, as the host may not name them: a link made without them has the defaults. Each may be 0, no limit."""
 LIFETIMES = ("invite_hours", "conversation_hours", "idle_hours")
+HOST_KINDS = (TEXT, FILE, QUESTION, STATUS)
+"""What the host may write into a conversation outside the answer to a turn: a progress line, files the operator let
+go, a word of the host's own. A task is never set on a guest through this door; a guest sets tasks here."""
+HOST_SAYS_PER_MINUTE = 30
+WORKING_TEXT = "The other agent is working on this task."
 ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
 ROUTE_MAX_SLUGS = 32
 
@@ -73,6 +108,11 @@ def link_fields(body: Any) -> dict[str, Any]:
         value = body.get(name)
         if isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high:
             raise Invalid(f"{name} must be a number from {low} to {high}")
+        fields[name] = value
+    for name, default in FILE_LIMITS.items():
+        value = body.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1_000_000:
+            raise Invalid(f"{name} is 0 for no limit, or a number of megabytes")
         fields[name] = value
     for name in LIFETIMES:
         if fields[name] and fields[name] < 0.1:
@@ -97,6 +137,7 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
         "guest_tools": link["guest_tools"], "created_at": link["created_at"], "invite_expires_at": link["invite_expires_at"], "conversation_hours": link["conversation_hours"],
         "idle_hours": link["idle_hours"], "retention_days": link["retention_days"], "spent_usd": link["spent_usd"] + link["reserved_usd"], "turns_used": link["turns_used"],
         "turns_today": link["turns_today"] if day_key_matches else 0, "refused_redeems": store.refused_redeems(link["id"]), "conversation": None,
+        "file_mb": float(link["file_mb"]), "day_mb": float(link["day_mb"]), "files_today_bytes": store.bytes_today(link["id"]),
     }
     if conversation is not None:
         out["conversation"] = {
@@ -110,8 +151,29 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
     if full:
         out["briefing"] = link["briefing"]
         out["events"] = [{"id": e["id"], "kind": e["kind"], "at": e["at"]} for e in store.events_of(link["id"])]
-        out["messages"] = [{"id": m["id"], "role": m["role"], "text": m["text"], "at": m["at"], "state": m["state"], "cost_usd": m["cost_usd"]} for m in store.transcript(conversation["id"])] if conversation is not None else []
+        out["messages"] = [message_view(m) for m in store.transcript(conversation["id"]) if m["role"] != OWNER] if conversation is not None else []
+        out["tasks"] = [task_view(t) for t in store.tasks_of(conversation["id"])] if conversation is not None else []
+        out["files"] = [{**file_view(f), "created_at": f["created_at"]} for f in store.files_of(conversation["id"])] if conversation is not None else []
     return out
+
+
+def message_view(message: Any) -> dict[str, Any]:
+    data = json.loads(message["data"]) if message["data"] else {}
+    return {
+        "id": message["id"], "role": message["role"], "text": message["text"], "at": message["at"], "state": message["state"], "cost_usd": message["cost_usd"],
+        "kind": message["kind"] or TEXT, "task": message["task_id"], "task_state": data.get("state", ""), "files": list(data.get("files") or []),
+    }
+
+
+def task_view(task: Any) -> dict[str, Any]:
+    return {"id": task["id"], "state": task["state"], "text": task["text"], "created_at": task["created_at"], "updated_at": task["updated_at"]}
+
+
+def file_view(file: Any) -> dict[str, Any]:
+    return {
+        "id": file["id"], "name": file["name"], "size": int(file["size"]), "sha256": file["sha256"], "received": int(file["received"]), "state": file["state"],
+        "from": file["origin"], "fetched": bool(file["fetched"]),
+    }
 
 
 def model_routes(body: Any) -> list[dict[str, Any]]:
@@ -142,6 +204,8 @@ class ControlDoor:
         self.store = store
         self.mailbox = mailbox
         self.token = token
+        self.says = Rate(HOST_SAYS_PER_MINUTE)
+        """The host's own words per conversation: a progress line from a loop that never stops must not bury the answer."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -150,9 +214,14 @@ class ControlDoor:
             status, body = await self.route(scope, receive)
         except Invalid as exc:
             status, body = 422, {"detail": str(exc)}
+        except FileRefused as exc:
+            status, body = exc.status, {"detail": exc.detail, "code": exc.code, **exc.extra}
         except Exception:
             logger.exception("the control door failed on a request")
             status, body = 500, {"detail": "the door failed"}
+        if isinstance(body, bytes):
+            await Response(body, status_code=status, media_type="application/octet-stream")(scope, receive, send)
+            return
         await JSONResponse(body, status_code=status)(scope, receive, send)
 
     def authorised(self, scope: Scope) -> bool:
@@ -161,11 +230,17 @@ class ControlDoor:
                 return hmac.compare_digest(value.decode("latin-1"), f"Bearer {self.token}")
         return False
 
-    async def route(self, scope: Scope, receive: Receive) -> tuple[int, dict[str, Any]]:
+    async def route(self, scope: Scope, receive: Receive) -> tuple[int, Any]:
         if not self.authorised(scope):
             return 401, {"detail": "no"}
         method, path = scope.get("method", "GET"), scope.get("path", "")
         body: Any = None
+        if method == "PUT" and (piece := re.fullmatch(r"/control/files/(f_[0-9a-f]{16})", path)):
+            raw = await read_body(receive, CHUNK_BYTES)
+            if raw is None:
+                return 413, {"detail": f"a piece is at most {CHUNK_BYTES} bytes"}
+            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+            return self.put_piece(piece.group(1), int((query.get("offset") or ["0"])[0]), raw)
         if method in ("POST", "PUT"):
             raw = await read_body(receive) if not path.startswith("/control/links") else await read_large(receive)
             body = json.loads(raw) if raw else {}
@@ -191,6 +266,13 @@ class ControlDoor:
             if method != "POST":
                 return 405, {"detail": "POST"}
             return self.decide(*matched.groups())
+        if matched := re.fullmatch(r"/control/conversations/([0-9a-f]+)/(messages|resume|files)", path):
+            if method != "POST":
+                return 405, {"detail": "POST"}
+            conversation_id, action = matched.groups()
+            return {"messages": self.say, "resume": self.resume, "files": self.announce}[action](conversation_id, body if isinstance(body, dict) else {})
+        if matched := re.fullmatch(r"/control/files/(f_[0-9a-f]{16})(?:/(content|fetched))?", path):
+            return self.one_file(method, *matched.groups(), parse_qs(scope.get("query_string", b"").decode("latin-1")))
         if matched := re.fullmatch(r"/control/deliveries/([0-9]+)/(reply|ack)", path):
             if method != "POST":
                 return 405, {"detail": "POST"}
@@ -230,7 +312,7 @@ class ControlDoor:
             # The same settings on a new invite, for a guest who lost their token. The old link goes
             # first, so at no moment do two invites speak for one set of settings.
             store.revoke(link_id)
-            fields = {name: link[name] for name in (*REQUIRED, "price_in", "price_out", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days", "approval")}
+            fields = {name: link[name] for name in (*REQUIRED, "price_in", "price_out", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days", "approval", "file_mb", "day_mb")}
             fields["invite_hours"] = max(0.1, (link["invite_expires_at"] - link["created_at"]) / 3600) if link["invite_expires_at"] else NO_LIMIT
             new_id, invite = store.create_link(fields)
             self._woken(conversation)
@@ -277,6 +359,98 @@ class ControlDoor:
             except TimeoutError:
                 pass
 
+    # -- what the host writes besides an answer ------------------------------------------
+
+    def _open_conversation(self, conversation_id: str) -> Any:
+        conversation = self.store.conversation(conversation_id)
+        if conversation is None:
+            raise FileRefused(404, "no_conversation", "no such conversation")
+        if conversation["state"] != OPEN:
+            raise FileRefused(409, "closed", "this conversation is not open")
+        return conversation
+
+    def say(self, conversation_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """A message of the host's own that answers no claimed turn: a task's progress or its new state, files the
+        operator let go after the turn that made them had ended, a word of the host's. No model turn is counted:
+        the turn that wrote any of it already was."""
+        conversation = self._open_conversation(conversation_id)
+        kind = body.get("kind") or TEXT
+        if kind not in HOST_KINDS:
+            raise Invalid(f"kind is one of {', '.join(HOST_KINDS)}")
+        if not self.says.allow(conversation_id):
+            return 429, {"detail": "the host has said a lot in this conversation in the last minute"}
+        text = inert(str(body.get("text") or ""))[:REPLY_MAX_CHARS]
+        data: dict[str, Any] = {}
+        task_id = str(body.get("task") or "")
+        if task_id:
+            task = self.store.task(task_id)
+            if task is None or task["conversation_id"] != conversation_id:
+                raise FileRefused(404, "no_task", "no such task in this conversation")
+            if kind == STATUS:
+                state = body.get("state")
+                if state not in (WORKING, NEEDS_INPUT, DONE, REFUSED_TASK, CANCELLED):
+                    raise Invalid("a status names its state")
+                if state == CANCELLED:
+                    done = self.mailbox.cancel_task(conversation, task, by=AGENT)
+                    return (200, {"ok": True}) if done else (409, {"detail": f"that task is already {task['state']}"})
+                if state != task["state"] and not self.store.move_task(task_id, state):
+                    return 409, {"detail": f"that task is already {task['state']}"}
+                if state == task["state"]:
+                    # A progress line moves nothing, but it says the task is alive.
+                    self.store.move_task(task_id, state)
+                data["state"] = state
+        elif kind == STATUS:
+            raise Invalid("a status names its task")
+        if body.get("files"):
+            data["files"] = [file["id"] for file in self.mailbox.desk.ready_of(conversation_id, body.get("files"), AGENT)]
+        if not text and not data.get("files") and kind != STATUS:
+            raise Invalid("say something, or send files")
+        message_id = self.store.add_reply(conversation_id, AGENT, text, kind=kind, task_id=task_id, data=data)
+        self.mailbox.wake(conversation_id)
+        return 200, {"ok": True, "message_id": message_id}
+
+    def resume(self, conversation_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """A turn for an answer the operator gave: queued like a guest's message, so it is counted and bounded."""
+        self._open_conversation(conversation_id)
+        task_id = str(body.get("task") or "")
+        if task_id:
+            task = self.store.task(task_id)
+            if task is None or task["conversation_id"] != conversation_id or task["state"] not in OPEN_TASK_STATES:
+                return 409, {"detail": "that task takes no more turns"}
+        ask = str(body.get("ask") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", ask):
+            raise Invalid("ask names the operator's answer")
+        message_id = self.store.add_resume(conversation_id, task_id, {"ask": ask})
+        self.mailbox.notify()
+        return 200, {"ok": True, "message_id": message_id}
+
+    def announce(self, conversation_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        conversation = self._open_conversation(conversation_id)
+        link = self.store.link(conversation["link_id"])
+        assert link is not None
+        return 200, self.mailbox.desk.announce(conversation, link, AGENT, body)
+
+    def put_piece(self, file_id: str, offset: int, data: bytes) -> tuple[int, dict[str, Any]]:
+        file = self.store.file(file_id)
+        if file is None or file["origin"] != AGENT:
+            return 404, {"detail": "no such file of the host's"}
+        return 200, self.mailbox.desk.put(file, offset, data)
+
+    def one_file(self, method: str, file_id: str, action: str | None, query: dict[str, list[str]]) -> tuple[int, Any]:
+        file = self.store.file(file_id)
+        if file is None:
+            return 404, {"detail": "no such file"}
+        if action is None and method == "GET":
+            return 200, file_view(file)
+        if action == "content" and method == "GET":
+            return 200, self.mailbox.desk.content(file, int((query.get("offset") or ["0"])[0]))
+        if action == "fetched" and method == "POST":
+            if file["origin"] == AGENT:
+                return 409, {"detail": "that file is the host's own"}
+            self.mailbox.desk.fetched(file)
+            return 200, {"ok": True}
+        return 405, {"detail": "wrong method"}
+
     def claim(self) -> list[dict[str, Any]]:
         """Hand out what waits on direct links, with the money for it put aside first.
 
@@ -291,6 +465,10 @@ class ControlDoor:
             assert conversation is not None
             link = store.link(conversation["link_id"])
             assert link is not None
+            task = store.task(message["task_id"]) if message["task_id"] else None
+            if task is not None and task["state"] not in OPEN_TASK_STATES:
+                store.drop(message["id"])
+                continue
             refusal, share = store.reserve_turn(message["id"], link, self.ceiling(link))
             if refusal is not None:
                 store.drop(message["id"])
@@ -298,6 +476,10 @@ class ControlDoor:
                 store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.")
                 self.mailbox.wake(conversation["id"])
                 continue
+            if task is not None and task["state"] != WORKING and store.move_task(task["id"], WORKING):
+                # Said by the door at once, without a word of the model's: the guest knows its task is in hand.
+                store.add_reply(conversation["id"], DOOR, WORKING_TEXT, kind=STATUS, task_id=task["id"], data={"state": WORKING})
+                self.mailbox.wake(conversation["id"])
             out.append(self._offer(message, share))
         return out
 
@@ -316,7 +498,12 @@ class ControlDoor:
     def _offer(self, message: Any, share: float | None) -> dict[str, Any]:
         conversation = self.store.conversation(message["conversation_id"])
         assert conversation is not None
-        return {"message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share}
+        data = json.loads(message["data"]) if message["data"] else {}
+        files = [file_view(file) for file in (self.store.file(file_id) for file_id in data.get("files") or []) if file is not None]
+        return {
+            "message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share,
+            "role": message["role"], "kind": message["kind"] or TEXT, "task": message["task_id"], "files": files, "ask": str(data.get("ask") or ""),
+        }
 
     def reply(self, message_id: int, body: Any) -> tuple[int, dict[str, Any]]:
         """The one way a word of the host's reaches a guest: the answer to the message that was claimed."""
@@ -335,14 +522,35 @@ class ControlDoor:
             store.settle(message_id, cost=cost, state=ANSWERED if body.get("ok", True) else FAILED)
         # What was revoked or closed meanwhile stays closed: the reply goes nowhere.
         if conversation["state"] == OPEN and store.conversation(conversation["id"])["state"] == OPEN:
-            if body.get("ok", True):
-                text = inert(str(body.get("text") or ""))[:REPLY_MAX_CHARS]
-                if text:
-                    store.add_reply(conversation["id"], AGENT, text)
-            else:
-                store.add_reply(conversation["id"], DOOR, FAILED_TEXT)
+            self._answer(conversation, message, body)
         self.mailbox.wake(conversation["id"])
         return 200, {"ok": True}
+
+    def _answer(self, conversation: Any, message: Any, body: Any) -> None:
+        """What a turn said, as the guest will read it. A turn on a task ends in the task's next state, with its words
+        and files on that status; a task cancelled while the turn ran stays cancelled, and the turn's words go nowhere."""
+        store = self.store
+        ok = body.get("ok", True)
+        text = inert(str(body.get("text") or ""))[:REPLY_MAX_CHARS] if ok else ""
+        try:
+            files = [file["id"] for file in self.mailbox.desk.ready_of(conversation["id"], body.get("files"), AGENT)] if ok and body.get("files") else []
+        except FileRefused:
+            logger.warning("a reply named files the door does not hold whole; sent without them")
+            files = []
+        task = store.task(message["task_id"]) if message["task_id"] else None
+        if task is not None:
+            if task["state"] not in OPEN_TASK_STATES:
+                return
+            wanted = body.get("task_state") if body.get("task_state") in (DONE, NEEDS_INPUT, REFUSED_TASK) else DONE if ok else REFUSED_TASK
+            store.move_task(task["id"], wanted)
+            store.add_reply(conversation["id"], AGENT if ok else DOOR, text if ok else FAILED_TEXT, kind=STATUS, task_id=task["id"], data={"state": wanted, **({"files": files} if files else {})})
+            return
+        if not ok:
+            store.add_reply(conversation["id"], DOOR, FAILED_TEXT)
+        elif files:
+            store.add_reply(conversation["id"], AGENT, text, kind=FILE, data={"files": files})
+        elif text:
+            store.add_reply(conversation["id"], AGENT, text)
 
     def reset(self) -> int:
         """The host has started: it remembers no turn it claimed before, so none of them will be answered.
@@ -357,7 +565,12 @@ class ControlDoor:
             store.write_off(message["id"])
             conversation = store.conversation(message["conversation_id"])
             if conversation is not None and conversation["state"] == OPEN:
-                store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT)
+                task = store.task(message["task_id"]) if message["task_id"] else None
+                if task is not None and store.move_task(task["id"], REFUSED_TASK):
+                    # A task whose turn was cut off would otherwise say "working" for ever.
+                    store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT, kind=STATUS, task_id=task["id"], data={"state": REFUSED_TASK})
+                else:
+                    store.add_reply(conversation["id"], DOOR, INTERRUPTED_TEXT)
                 self.mailbox.wake(conversation["id"])
         return len(stale)
 
@@ -374,4 +587,4 @@ async def read_large(receive: Receive) -> bytes:
             return bytes(body)
 
 
-__all__ = ["CLOSED", "ControlDoor", "FEED_WAIT_SECONDS", "INTERRUPTED_TEXT", "Invalid", "QUEUED", "link_fields", "view"]
+__all__ = ["CLOSED", "HOST_KINDS", "WORKING_TEXT", "ControlDoor", "FEED_WAIT_SECONDS", "INTERRUPTED_TEXT", "Invalid", "QUEUED", "file_view", "link_fields", "message_view", "task_view", "view"]

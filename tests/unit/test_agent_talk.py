@@ -1002,7 +1002,7 @@ async def test_no_tool_can_switch_waking_on(rig_for: Any) -> None:
     state = await rig.chat()
     await opened(rig, state, rig.door.link())
     tool = next(t for t in rig.manager.tools.list_all() if t.name == "AgentTalk")
-    assert set(tool.definition.parameters.properties) == {"action", "link", "conversation", "text", "wait_seconds"}
+    assert set(tool.definition.parameters.properties) == {"action", "link", "conversation", "text", "wait_seconds", "files", "task"}
     assert (await rig.talks.tool(state.session.id, "wake")).error
 
 
@@ -1204,7 +1204,7 @@ def test_a_door_says_what_it_is_as_data_on_the_same_address_and_it_spends_nothin
     assert page.headers["content-type"].startswith("text/markdown")
     card = client.get(f"/a/{invite}", headers={"accept": "application/json"})
     assert card.status_code == 200 and card.headers["content-type"].startswith("application/json")
-    assert card.json() == {"door": "agent-link", "status": "waiting", "topic": LINK_FIELDS["topic"], "mode": "stand_in", "approval": False, "retention_days": 1.0, "max_text": 8000}
+    assert card.json() == {"door": "agent-link", "status": "waiting", "topic": LINK_FIELDS["topic"], "mode": "stand_in", "approval": False, "retention_days": 1.0, "max_text": 8000, "kinds": ["text"]}
     assert door.store.links()[0]["state"] == "waiting"
     assert client.post(f"/a/{invite}/redeem").status_code == 201
     used = client.get(f"/a/{invite}", headers={"accept": "application/json"})

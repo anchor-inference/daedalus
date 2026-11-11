@@ -29,6 +29,7 @@ import uvicorn
 
 from .confine import confine, is_loopback
 from .control import ControlDoor
+from .files import Bodies, Desk
 from .mailbox import Mailbox
 from .public import PublicDoor
 from .standin import KeyProxyCaller, StandIn
@@ -129,6 +130,8 @@ async def sweep(store: Store, mailbox: Mailbox) -> None:
         await asyncio.sleep(SWEEP_SECONDS)
         try:
             store.sweep()
+            # After the links the retention deleted: their files' bodies are what is left of them on disk.
+            mailbox.desk.forget(store.clock())
         except Exception:
             logger.exception("the sweep failed")
         mailbox.notify()
@@ -143,7 +146,7 @@ async def main() -> None:
         directory.mkdir(parents=True, exist_ok=True)
     token = await asyncio.to_thread(host_token, token_dir)
     store = Store(state_dir / "guest.sqlite")
-    mailbox = Mailbox(store, public_base=lambda: store.setting("public_base"))
+    mailbox = Mailbox(store, public_base=lambda: store.setting("public_base"), desk=Desk(store, Bodies(state_dir / "files")))
     model_socket = os.environ.get("GUEST_MODEL_SOCKET", "")
     model_endpoint = os.environ.get("GUEST_MODEL_ENDPOINT", "")
     stand_in = StandIn(store, mailbox, KeyProxyCaller(model_socket, endpoint=model_endpoint))

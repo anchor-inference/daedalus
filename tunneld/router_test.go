@@ -250,6 +250,20 @@ func TestABodyPastTheFrontsLimitIsTurnedAwayHere(t *testing.T) {
 	}
 }
 
+func TestAPieceOfAFileMayBeLargerButNoLargerThanTheFrontTakes(t *testing.T) {
+	r := newRig(t, nil)
+	piece := bytes.Repeat([]byte("x"), maxPieceBody)
+	if answer := r.ask(t, http.MethodPut, "/a/files/f_0123456789abcdef?offset=0", nil, bytes.NewReader(piece)); answer.StatusCode != http.StatusOK {
+		t.Fatalf("a whole piece: %d", answer.StatusCode)
+	}
+	if answer := r.ask(t, http.MethodPut, "/a/files/f_0123456789abcdef?offset=0", nil, bytes.NewReader(append(piece, 'x'))); answer.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("past a piece: %d", answer.StatusCode)
+	}
+	if answer := r.ask(t, http.MethodPost, "/a/files/f_0123456789abcdef", nil, bytes.NewReader(piece)); answer.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a POST keeps the small limit: %d", answer.StatusCode)
+	}
+}
+
 func TestTheProbeAnswersOnlyToItsOwnPath(t *testing.T) {
 	r := newRig(t, nil)
 	if answer := r.ask(t, http.MethodGet, "/.well-known/daedalus-probe", nil, nil); answer.StatusCode != http.StatusNoContent {

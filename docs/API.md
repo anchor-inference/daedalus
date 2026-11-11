@@ -507,6 +507,18 @@ and `…/reissue` end one or give it a new invite, and `POST /api/guest/conversa
 a stand-in may use and why any are left out, and `PUT /api/guest/settings` sets `usd_per_day` for every
 guest together, 0 for no limit.
 
+**Files and tasks over a link.** A message over a link is `text`, `file`, `task`, `question` or `status`; a task has
+an id and moves `accepted`, `working`, `needs_input`, then `done`, `refused` or `cancelled`. A direct link and a
+conversation each have `file_mb` and `day_mb` (50 and 500 by default, 0 for no limit): the link's in its body, a
+conversation's in `PUT /api/agent-talks/{id}/settings`. A conversation's read answers its `tasks` and `files`,
+and each message its `kind`, `task` and file ids; `POST …/messages/{message}/send` takes `{"drop": [file ids]}`
+to hold some of a waiting message's files back, and `POST /api/agent-talks/{id}/tasks/{task}/cancel` cancels a task
+this side set. A link's read adds `exchange` (`files`, `tasks`, and `held`: files a guest's turn wants to send),
+`POST /api/guest/links/{id}/outbox/{batch}/send` with `{"drop": […]}` or `…/refuse` decides on those, and `POST
+/api/guest/links/{id}/tasks/{task}/cancel` stops a task the guest set. `GET /api/sessions/{id}/agent-talks` lists the
+chat's waiting files as `guest_held`. `GET /api/link-files/{id}` is one file either way, a picture inline and anything
+else as a download.
+
 **The public address.** On a native install, `GET /api/public-address` is the address's state (provider,
 `state`, `address`, what it exposes in numbers, its QR, and `tokens_hidden`), and `PUT` with `{"enabled",
 "provider", …}` changes it; a server answers `{"native": false}`. `POST

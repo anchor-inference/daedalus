@@ -32,6 +32,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from collections.abc import Iterable
@@ -46,6 +47,11 @@ LIFE_SECONDS = 45.0
 """A read holds 30 s at most, so this is a slow request's whole life, not an idle timeout to be reset."""
 MAX_HEAD = 16 * 1024
 MAX_BODY = 64 * 1024
+MAX_PIECE_BODY = 512 * 1024 + 1024
+"""A piece of a file (``PUT /a/files/<id>``), the one request with a larger body: the door's own bound with room
+for nothing more. Passed down as it arrives, never held whole, so a few hundred at once stay small."""
+PIECE_PATH = re.compile(r"/a/files/f_[0-9a-f]{16}(\?offset=[0-9]{1,15})?")
+PASS_BYTES = 64 * 1024
 PER_ADDRESS = 8
 OVERALL = 256
 CLIENT_HEADER = "x-guest-client"
@@ -53,7 +59,7 @@ HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-connection", "proxy-authorization", "proxy-authenticate", "te", "trailer", "upgrade",
     "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", CLIENT_HEADER,
 })
-METHODS = frozenset({"GET", "HEAD", "POST", "OPTIONS"})
+METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "OPTIONS"})
 
 
 class Refused(Exception):
@@ -120,7 +126,8 @@ def rewrite(head: bytes, peer: str, trusted: tuple[ipaddress.IPv4Network | ipadd
                 raise Refused(400, "unreadable request")
             length = int(value.strip())
         kept.append(f"{name}:{value}")
-    if (length or 0) > MAX_BODY:
+    bound = MAX_PIECE_BODY if request[0] == "PUT" and PIECE_PATH.fullmatch(request[1]) else MAX_BODY
+    if (length or 0) > bound:
         raise Refused(413, "too long")
     client = peer
     if is_trusted(peer, trusted) and forwarded:
@@ -233,8 +240,12 @@ class Front:
             return
         try:
             door_writer.write(head)
-            if length:
-                door_writer.write(await reader.readexactly(length))
+            left = length
+            while left:
+                piece = await reader.readexactly(min(left, PASS_BYTES))
+                left -= len(piece)
+                door_writer.write(piece)
+                await door_writer.drain()
             await door_writer.drain()
             while chunk := await door_reader.read(65536):
                 writer.write(chunk)

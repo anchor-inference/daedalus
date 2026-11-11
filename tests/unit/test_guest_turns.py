@@ -146,7 +146,8 @@ def offered(request: Any) -> set[str]:
 # -- the tool setting ---------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("tools", "allowed"), [("none", set()), ("read", {"Read", "Find", "Search"})])
+# AgentTalk at every setting is the conversation the turn answers and nothing else (``GuestBridge.turn_action``).
+@pytest.mark.parametrize(("tools", "allowed"), [("none", {"AgentTalk"}), ("read", {"Read", "Find", "Search", "ImageView", "AgentTalk"})])
 async def test_none_and_read_only_withhold_everything_else(settings: Settings, db: Database, tools: Any, allowed: set[str]) -> None:
     manager = await manager_with(settings, db, ScriptedProvider([]))
     state = await manager.create_session("chat", own_directory=True)
@@ -167,7 +168,7 @@ async def test_all_is_a_list_of_what_is_allowed_and_nothing_else_is(settings: Se
     state.guest_turn = turn("all")
     policy = manager.tool_policy_for(state)
     known = {t.name for t in manager.tools.list_all()}
-    assert {name for name in known if policy_admits(policy, name)} == set(guest_turns.ALL_TOOLS) & known
+    assert {name for name in known if policy_admits(policy, name)} == set(guest_turns.LEVEL_TOOLS["all"]) & known
     assert not policy_admits(policy, "ToolAddedNextYear"), "fails closed for what does not exist yet"
     await manager.close()
 
@@ -189,7 +190,7 @@ async def test_the_model_is_not_even_offered_what_is_withheld(settings: Settings
     state = await manager.create_session("chat", own_directory=True)
     await guest_says(manager, state.session.id, turn("none"))
     await settled(manager, state)
-    assert offered(provider.requests[0]) == set()
+    assert offered(provider.requests[0]) == {"AgentTalk"}
     await manager.close()
 
 
@@ -603,7 +604,7 @@ async def test_a_direct_guest_gets_the_live_agents_reply_and_the_tool_setting_is
     rig.store.conn.execute("UPDATE links SET guest_tools = 'all'")
     await pump(bridge)
     await asyncio.wait_for(bridge.lines[state.session.id].worker, 20)
-    assert offered(provider.requests[0]) == set()
+    assert offered(provider.requests[0]) == {"AgentTalk"}
     read = await rig.public.get("/a/messages?after=0&wait=0", headers=headers)
     assert [m["text"] for m in read.json()["messages"]] == ["it listens on 8080"]
     await manager.close()
