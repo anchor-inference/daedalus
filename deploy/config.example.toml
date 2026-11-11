@@ -293,7 +293,7 @@ stale_hours = 6            # a 'doing' task whose session went quiet this long i
 # [disk]
 # check_minutes = 15
 # idle_recheck_hours = 6                # a small workspace whose owner has not run is measured this seldom
-# workspace_soft_limit_gb = 20.0        # 0 = no per-workspace warning
+# workspace_soft_limit_gb = 20.0        # decimal GB; 0 = no per-workspace warning. A workspace can be given its own in the app
 # min_free_gb = 20.0
 # min_free_percent = 5.0
 # cleanup_after_days = 7                # 0 = never delete throwaway directories

@@ -349,3 +349,216 @@ async def test_routes_show_and_clean(host) -> None:
         assert (await client.post("/api/disk/cleanup", json={"workspace": "escape", "paths": ["x"]})).status_code == 404
         overview = (await client.get("/api/disk")).json()
         assert overview["workspaces"][0]["owner"] == {"kind": "session", "id": "sess1", "title": "Experiments"}
+
+
+def _api(app: Any, auth: Any = None) -> FastAPI:
+    api = FastAPI()
+    api_disk.register(api, app, auth or (lambda: {"via": "token", "user_id": 1}))
+    return api
+
+
+def _client(api: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test")
+
+
+async def test_the_limit_is_the_workspaces_own_or_the_default(host) -> None:
+    app, root = host
+    (root / "sess1").mkdir()
+    (root / "other").mkdir()
+    guard = DiskGuard(app)
+    await guard.load()
+    default = guard.default_limit
+    assert default == 2 * MB and guard.limit_for("sess1") == default and not guard.has_own_limit("sess1")
+    await guard.set_limit("sess1", 7 * MB)
+    assert guard.limit_for("sess1") == 7 * MB and guard.has_own_limit("sess1")
+    assert guard.limit_for("other") == default
+    # "No limit" is a limit of its own, not a missing one: the default no longer reaches the workspace.
+    await guard.set_limit("sess1", 0)
+    assert guard.limit_for("sess1") == 0 and guard.has_own_limit("sess1")
+    # Changing the default moves only the workspaces that follow it.
+    app.config.disk.workspace_soft_limit_gb = 50 * MB / 1e9
+    assert guard.limit_for("other") == 50 * MB and guard.limit_for("sess1") == 0
+    await guard.set_limit("sess1", None)
+    assert guard.limit_for("sess1") == 50 * MB and not guard.has_own_limit("sess1")
+    # The default turned off means no limit for everyone who follows it.
+    app.config.disk.workspace_soft_limit_gb = 0
+    assert guard.limit_for("other") == 0
+    with pytest.raises(KeyError):
+        await guard.set_limit("nowhere", MB)
+    with pytest.raises(KeyError):
+        await guard.set_limit("../sess1", MB)
+
+
+async def test_a_limit_outlives_a_restart(host) -> None:
+    app, root = host
+    (root / "sess1").mkdir()
+    await DiskGuard(app).set_limit("sess1", 9 * MB)
+    again = DiskGuard(app)
+    await again.load()
+    assert again.limit_for("sess1") == 9 * MB
+    rows = await app.db.fetchall("SELECT name, limit_bytes FROM workspace_limits")
+    assert [(row["name"], row["limit_bytes"]) for row in rows] == [("sess1", 9 * MB)]
+
+
+async def test_the_workspaces_own_limit_decides_the_warning(host) -> None:
+    app, root = host
+    _fill(root / "sess1" / "_scratch" / "big.bin", 3 * MB)
+    _fill(root / "orphan" / "big.bin", 3 * MB)
+    guard = DiskGuard(app)
+    await guard.load()
+    # 3 MB is past the 2 MB default for both; the operator lifts one and removes the limit of the other.
+    await guard.set_limit("sess1", 50 * MB)
+    await guard.set_limit("orphan", 0)
+    await guard.check()
+    assert app.manager.submitted == [] and app.notifications.posted == []
+    # A limit under the size warns although the default would not.
+    app.config.disk.workspace_soft_limit_gb = 500 * MB / 1e9
+    await guard.set_limit("sess1", MB)
+    await guard.check()
+    assert [s[0] for s in app.manager.submitted] == ["sess1"]
+    assert "past the soft limit of 1.0 MB" in app.manager.submitted[0][2]
+    assert "twice the limit" in app.manager.submitted[0][2]  # 3 MB is past two limits of 1 MB
+
+
+async def test_raising_the_limit_rearms_the_warning_levels(host) -> None:
+    app, root = host
+    _fill(root / "sess1" / "_scratch" / "big.bin", 3 * MB)
+    guard = DiskGuard(app)
+    await guard.check()
+    assert guard.state["levels"] == {"sess1": 1}
+    assert len(app.manager.submitted) == 1
+    # Raised only a little: 3 MB is still above 0.8 of 3.5 MB, so the level stays told, and lowering the
+    # limit again does not repeat a warning that was given for this very crossing.
+    await guard.set_limit("sess1", int(3.5 * MB))
+    assert guard.state["levels"] == {"sess1": 1}
+    await guard.check(now=time.time() + 60)
+    await guard.set_limit("sess1", 2 * MB)
+    await guard.check(now=time.time() + 120)
+    assert len(app.manager.submitted) == 1
+    # Raised well past the size: nothing is said, and the told level is forgotten at once.
+    await guard.set_limit("sess1", 40 * MB)
+    assert "sess1" not in guard.state["levels"]
+    await guard.check(now=time.time() + 180)
+    assert len(app.manager.submitted) == 1
+    # Down to the original limit after having been far above it: it is news again, told at the next pass.
+    await guard.set_limit("sess1", 2 * MB)
+    assert "sess1" not in guard.state["levels"]
+    await guard.check(now=time.time() + 240)
+    assert len(app.manager.submitted) == 2 and guard.state["levels"] == {"sess1": 1}
+    # What a restart reads back is the reconciled state, not the one from before the raise.
+    await guard.set_limit("sess1", 40 * MB)
+    assert (await app.db.kv_get("disk_guard"))["levels"] == {}
+    # Twice the size is the second level of the limit in force, not of the one that was told about.
+    await guard.set_limit("sess1", MB)
+    await guard.check(now=time.time() + 300)
+    assert len(app.manager.submitted) == 3 and "twice the limit" in app.manager.submitted[2][2]
+
+
+async def test_a_changed_limit_is_judged_at_the_next_pass_whatever_the_cadence(host) -> None:
+    app, root = host
+    _fill(root / "sess1" / "small.bin", MB)
+    guard = DiskGuard(app)
+    now = time.time()
+    await guard.check(now=now)
+    owner = (await guard.owners())["sess1"]
+    assert not guard.due("sess1", owner, now + 60)  # under half the limit, nobody running: left alone
+    await guard.set_limit("sess1", MB // 4)
+    assert guard.due("sess1", owner, now + 60)
+    await guard.check(now=now + 60)
+    assert len(app.manager.submitted) == 1 and not guard.rejudge
+
+
+async def test_limits_of_removed_workspaces_go_but_an_unreadable_root_costs_nothing(host) -> None:
+    app, root = host
+    (root / "sess1").mkdir()
+    (root / "gone").mkdir()
+    guard = DiskGuard(app)
+    await guard.set_limit("sess1", MB)
+    await guard.set_limit("gone", MB)
+    (root / "gone").rmdir()
+    await guard.forget_limits_of_gone([])  # the root listed nothing: that is no evidence of anything
+    assert set(guard.limits) == {"sess1", "gone"}
+    await guard.forget_limits_of_gone(["sess1"])
+    assert guard.limits == {"sess1": MB}
+    assert [row["name"] for row in await app.db.fetchall("SELECT name FROM workspace_limits")] == ["sess1"]
+
+
+async def test_the_limit_route_sets_shows_and_clears(host) -> None:
+    app, root = host
+    _fill(root / "sess1" / "big.bin", 3 * MB)
+    async with _client(_api(app)) as client:
+        before = (await client.get("/api/disk/session/sess1")).json()
+        assert before["default_limit_bytes"] == 2 * MB
+        assert before["workspaces"][0]["limit_bytes"] == 2 * MB and not before["workspaces"][0]["own_limit"]
+        assert before["workspaces"][0]["over"] == 1
+        # 5 MB is written as the decimal gigabytes the setting uses.
+        raised = await client.put("/api/disk/limit/sess1", json={"limit_gb": 5 * MB / 1e9})
+        assert raised.status_code == 200
+        assert raised.json() == {"name": "sess1", "limit_bytes": 5 * MB, "own_limit": True, "default_limit_bytes": 2 * MB, "over": 0}
+        after = (await client.get("/api/disk/session/sess1")).json()["workspaces"][0]
+        assert (after["limit_bytes"], after["own_limit"], after["over"]) == (5 * MB, True, 0)
+        row = (await client.get("/api/disk")).json()["workspaces"][0]
+        assert (row["name"], row["limit_bytes"], row["own_limit"], row["over"]) == ("sess1", 5 * MB, True, 0)
+        # Past twice the limit.
+        tight = (await client.put("/api/disk/limit/sess1", json={"limit_gb": 1.2 * MB / 1e9})).json()
+        assert tight["over"] == 2
+        # No limit, and back to following the default.
+        none = (await client.put("/api/disk/limit/sess1", json={"limit_gb": 0})).json()
+        assert (none["limit_bytes"], none["own_limit"], none["over"]) == (0, True, 0)
+        default = (await client.put("/api/disk/limit/sess1", json={"limit_gb": None})).json()
+        assert (default["limit_bytes"], default["own_limit"], default["over"]) == (2 * MB, False, 1)
+        assert await app.db.fetchall("SELECT 1 FROM workspace_limits") == []
+
+
+async def test_the_limit_route_refuses_what_is_not_a_limit_of_a_workspace(host) -> None:
+    app, root = host
+    (root / "sess1").mkdir()
+    (root / "escape").symlink_to(root.parent)
+    async with _client(_api(app)) as client:
+        assert (await client.put("/api/disk/limit/nowhere", json={"limit_gb": 1})).status_code == 404
+        assert (await client.put("/api/disk/limit/escape", json={"limit_gb": 1})).status_code == 404
+        assert (await client.put("/api/disk/limit/sess1", json={"limit_gb": -1})).status_code == 422
+        assert (await client.put("/api/disk/limit/sess1", json={"limit_gb": 10**9})).status_code == 422
+        assert (await client.put("/api/disk/limit/sess1", json={})).status_code == 422
+        assert (await client.put("/api/disk/limit/sess1", json={"limit_gb": 1, "extra": 1})).status_code == 422
+        assert (await client.put("/api/disk/limit/sess1", json={"limit_gb": "lots"})).status_code == 422
+    assert await app.db.fetchall("SELECT 1 FROM workspace_limits") == []
+
+
+async def test_only_the_operator_reaches_the_limit_route(host) -> None:
+    app, root = host
+    (root / "sess1").mkdir()
+
+    def auth() -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        raise HTTPException(401, "not signed in")
+
+    async with _client(_api(app, auth)) as client:
+        assert (await client.put("/api/disk/limit/sess1", json={"limit_gb": 1})).status_code == 401
+        assert (await client.get("/api/disk")).status_code == 401
+    assert await app.db.fetchall("SELECT 1 FROM workspace_limits") == []
+
+
+async def test_the_limits_table_exists_and_refuses_a_negative_limit(host) -> None:
+    app, _root = host
+    from daedalus.stores.database import MIGRATIONS
+
+    assert int((await app.db.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
+    with pytest.raises(Exception, match="CHECK"):
+        await app.db.execute("INSERT INTO workspace_limits(name, limit_bytes, updated_at) VALUES ('x', -1, 'now')")
+
+
+async def test_the_views_know_the_limits_before_the_guard_has_made_its_first_pass(host) -> None:
+    app, root = host
+    _fill(root / "sess1" / "big.bin", 3 * MB)
+    await app.db.execute("INSERT INTO workspace_limits(name, limit_bytes, updated_at) VALUES ('sess1', ?, 'now')", (9 * MB,))
+    # A freshly started host: nothing has loaded the table, and the routes must not answer with the default.
+    async with _client(_api(app)) as client:
+        workspace = (await client.get("/api/disk/session/sess1")).json()["workspaces"][0]
+        assert (workspace["limit_bytes"], workspace["own_limit"], workspace["over"]) == (9 * MB, True, 0)
+    app.extensions.clear()
+    async with _client(_api(app)) as client:
+        await client.get("/api/disk/session/sess1")  # measures it, so the overview lists it
+        row = (await client.get("/api/disk")).json()["workspaces"][0]
+        assert (row["limit_bytes"], row["own_limit"]) == (9 * MB, True)

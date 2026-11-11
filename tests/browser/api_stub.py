@@ -997,18 +997,46 @@ def _disk_entry(path: str, size: int, files: int, **over: object) -> dict[str, o
             "tracked": False, "protected": False, "children": [], **over}
 
 
+DISK_GB = 10**9
+"""The disk panel counts in decimal gigabytes, like the setting it is held against."""
+DISK_DEFAULT_LIMIT = 20 * DISK_GB
+DISK_BYTES = 23 * DISK_GB
+disk_limit_state: dict[str, int | None] = {"own": None}
+"""The operator's limit for the bakery workspace in bytes (0 = none), or None while it follows the default.
+A check that changes it calls :func:`reset_disk_limit` first, so one run does not start from another's."""
+
+
+def reset_disk_limit() -> None:
+    disk_limit_state["own"] = None
+
+
+def disk_limit_fields() -> dict[str, object]:
+    """What the host says of the bakery workspace's limit: in force, whether it is its own, and how far over."""
+    own = disk_limit_state["own"]
+    limit = DISK_DEFAULT_LIMIT if own is None else own
+    over = 0 if limit <= 0 else 2 if DISK_BYTES >= 2 * limit else 1 if DISK_BYTES >= limit else 0
+    return {"limit_bytes": limit, "own_limit": own is not None, "over": over}
+
+
+def disk_limit(body: object) -> dict[str, object]:
+    """``PUT /api/disk/limit/<workspace>``: the new limit from GB, null to follow the default."""
+    gb = body.get("limit_gb") if isinstance(body, dict) else None
+    disk_limit_state["own"] = None if gb is None else round(float(gb) * DISK_GB)
+    return {"name": "ws-bakery", "default_limit_bytes": DISK_DEFAULT_LIMIT, **disk_limit_fields()}
+
+
 def disk_detail() -> dict[str, object]:
     """A workspace of 23 GB over a 20 GB limit: 18 GB of it throwaway, the rest work and bookkeeping."""
     return {
-        "limit_bytes": 20 * GIB, "free_bytes": 41 * GIB, "total_bytes": 230 * GIB, "low_disk": False,
+        "default_limit_bytes": DISK_DEFAULT_LIMIT, "free_bytes": 41 * DISK_GB, "total_bytes": 230 * DISK_GB, "low_disk": False,
         "workspaces": [{
-            "name": "ws-bakery", "label": "bakery", "bytes": 23 * GIB, "truncated": False, "over": 1,
+            "name": "ws-bakery", "label": "bakery", "bytes": DISK_BYTES, "truncated": False, **disk_limit_fields(),
             "entries": [
-                _disk_entry("_scratch", 15 * GIB, 412000, throwaway=True, children=[
-                    _disk_entry("_scratch/repo-copy-1", 5 * GIB, 140000), _disk_entry("_scratch/repo-copy-2", 5 * GIB, 140000)]),
-                _disk_entry(".uv-cache", 3 * GIB, 18000, throwaway=True),
-                _disk_entry("src", 4 * GIB, 900, tracked=True),
-                _disk_entry("inbox", GIB, 40, protected=True),
+                _disk_entry("_scratch", 15 * DISK_GB, 412000, throwaway=True, children=[
+                    _disk_entry("_scratch/repo-copy-1", 5 * DISK_GB, 140000), _disk_entry("_scratch/repo-copy-2", 5 * DISK_GB, 140000)]),
+                _disk_entry(".uv-cache", 3 * DISK_GB, 18000, throwaway=True),
+                _disk_entry("src", 4 * DISK_GB, 900, tracked=True),
+                _disk_entry("inbox", DISK_GB, 40, protected=True),
             ],
         }],
         "outside": [],
@@ -1016,10 +1044,10 @@ def disk_detail() -> dict[str, object]:
 
 
 def disk_overview() -> dict[str, object]:
-    return {"free_bytes": 41 * GIB, "total_bytes": 230 * GIB, "low_disk": False, "limit_bytes": 20 * GIB,
+    return {"free_bytes": 41 * DISK_GB, "total_bytes": 230 * DISK_GB, "low_disk": False, "default_limit_bytes": DISK_DEFAULT_LIMIT,
             "checked_at": "2026-10-10T08:00:00Z",
-            "workspaces": [{"name": "ws-bakery", "bytes": 23 * GIB, "truncated": False, "measured_at": "2026-10-10T08:00:00Z",
-                            "over": 1, "owner": {"kind": "project", "id": "p1", "title": "Bakery"}}]}
+            "workspaces": [{"name": "ws-bakery", "bytes": DISK_BYTES, "truncated": False, "measured_at": "2026-10-10T08:00:00Z",
+                            "owner": {"kind": "project", "id": "p1", "title": "Bakery"}, **disk_limit_fields()}]}
 
 
 def disk_cleanup(body: object) -> dict[str, object]:
@@ -1039,7 +1067,7 @@ def disk_cleanup(body: object) -> dict[str, object]:
         else:
             freed += int(entry["bytes"])  # type: ignore[call-overload]
             removed.append(path)
-    return {"freed_bytes": freed, "removed": removed, "refused": refused, "bytes": 23 * GIB - freed}
+    return {"freed_bytes": freed, "removed": removed, "refused": refused, "bytes": DISK_BYTES - freed}
 
 
 def session_tasks(session_id: str) -> dict:
@@ -2174,6 +2202,8 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps(disk_detail())
     if method.upper() == "POST" and path == "/api/disk/cleanup":
         return 200, "application/json", json.dumps(disk_cleanup(body))
+    if method.upper() == "PUT" and len(parts) == 5 and parts[2:4] == ["disk", "limit"]:
+        return 200, "application/json", json.dumps(disk_limit(body))
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}

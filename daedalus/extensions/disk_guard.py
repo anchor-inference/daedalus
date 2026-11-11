@@ -5,11 +5,14 @@ deleted a copy; its home under the workspaces root reached 209 GB, the host disk
 in the installation had looked. The guard does three things on a timer:
 
 1. It measures every top-level directory under the workspaces root — a session's home or a managed
-   project folder — and when one passes ``disk.workspace_soft_limit_gb`` (and again at twice that) it
-   asks the owning session's agent to clean up, the way a finished background job wakes it
-   (:mod:`daedalus.extensions.jobs`, origin ``disk``), and posts a notice for the operator. The level
-   already told is kept in the ``kv`` table, so a restart does not tell it again, and a workspace has
-   to shrink well below a threshold (``REARM_SHARE``) before crossing it counts as new.
+   project folder — and when one passes its limit (and again at twice that) it asks the owning
+   session's agent to clean up, the way a finished background job wakes it
+   (:mod:`daedalus.extensions.jobs`, origin ``disk``), and posts a notice for the operator. The limit
+   is ``disk.workspace_soft_limit_gb`` unless the operator gave that workspace one of its own, which
+   may also be "no limit" (the ``workspace_limits`` table). The level already told is kept in the
+   ``kv`` table, so a restart does not tell it again, and a workspace has to shrink well below a
+   threshold (``REARM_SHARE``) before crossing it counts as new; raising its limit is the same as
+   shrinking, because the thresholds are the limit's multiples.
 2. It watches the free space of the volume the workspaces live on and tells the operator when it
    drops below ``disk.min_free_gb`` or ``disk.min_free_percent``, whoever filled it.
 3. It deletes directories named like throwaway (``disk.throwaway_patterns``) that nothing inside has
@@ -30,7 +33,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -135,6 +138,11 @@ class DiskGuard:
         self.free: tuple[int, int] = (0, 0)
         self.checked_at: float | None = None
         self.state: dict[str, Any] = {"levels": {}, "low": False, "notes": {}}
+        self.limits: dict[str, int] = {}
+        """The limits the operator gave single workspaces, in bytes by directory name; 0 is "no limit"."""
+        self.rejudge: set[str] = set()
+        """Workspaces whose limit changed: judged on the next pass whatever the cadence says, because the
+        size that was fine yesterday may be over the new limit and nobody would look for hours."""
         self._loaded = False
         self._measuring = asyncio.Lock()
 
@@ -147,8 +155,17 @@ class DiskGuard:
         return Path(os.path.normpath(self.app.settings.workspaces_dir.expanduser()))
 
     @property
-    def limit(self) -> int:
+    def default_limit(self) -> int:
+        """What a workspace without a limit of its own is held to; 0 means no limit."""
         return int(self.config.workspace_soft_limit_gb * 1e9)
+
+    def limit_for(self, name: str) -> int:
+        """The limit that applies to one workspace: its own when the operator set one, else the default."""
+        own = self.limits.get(name)
+        return self.default_limit if own is None else own
+
+    def has_own_limit(self, name: str) -> bool:
+        return name in self.limits
 
     def floor(self, total: int) -> int:
         """The free space below which the volume counts as nearly full."""
@@ -162,6 +179,8 @@ class DiskGuard:
         stored = await self.app.db.kv_get(STATE_KEY, None)
         if isinstance(stored, dict):
             self.state = {"levels": dict(stored.get("levels") or {}), "low": bool(stored.get("low")), "notes": dict(stored.get("notes") or {})}
+        rows = await self.app.db.fetchall("SELECT name, limit_bytes FROM workspace_limits")
+        self.limits = {str(row["name"]): int(row["limit_bytes"]) for row in rows}
         self._loaded = True
 
     async def save(self) -> None:
@@ -233,14 +252,15 @@ class DiskGuard:
 
     def due(self, name: str, owner: Owner, now: float) -> bool:
         previous = self.sizes.get(name)
-        if previous is None:
+        if previous is None or name in self.rejudge:
             return True
         age = now - previous.measured_at
         if age >= self.config.idle_recheck_hours * 3600:
             return True
         if age < self.config.check_minutes * 60 - 5:
             return False
-        return bool(self.limit and previous.bytes >= self.limit / 2) or owner.active > previous.measured_at
+        limit = self.limit_for(name)
+        return bool(limit and previous.bytes >= limit / 2) or owner.active > previous.measured_at
 
     async def measure(self, name: str) -> Measurement:
         measurement = await asyncio.to_thread(disk_usage.measure, self.root / name, max_entries=self.config.walk_max_entries, depth=DEPTH)
@@ -260,6 +280,7 @@ class DiskGuard:
             levels: dict[str, int] = self.state["levels"]
             for gone in set(levels) - set(names):
                 levels.pop(gone, None)
+            await self.forget_limits_of_gone(names)
             for name in names:
                 owner = owners.get(name, NOBODY)
                 try:
@@ -278,22 +299,24 @@ class DiskGuard:
         """Tell the owner and the operator when the workspace crossed a threshold not yet told."""
         measurement = self.sizes[name]
         levels: dict[str, int] = self.state["levels"]
-        told = rearmed(int(levels.get(name, 0)), measurement.bytes, self.limit)
-        level = level_for(measurement.bytes, self.limit)
+        limit = self.limit_for(name)
+        self.rejudge.discard(name)
+        told = rearmed(int(levels.get(name, 0)), measurement.bytes, limit)
+        level = level_for(measurement.bytes, limit)
         if level > told:
             # Marked before telling, which yields: a route measuring meanwhile must not tell it twice.
             levels[name] = level
             await self.save()
-            await self.warn(name, owner, measurement, level, now)
+            await self.warn(name, owner, measurement, level, now, limit)
         else:
             levels[name] = told
         if not levels.get(name):
             levels.pop(name, None)
 
-    async def warn(self, name: str, owner: Owner, measurement: Measurement, level: int, now: float) -> None:
+    async def warn(self, name: str, owner: Owner, measurement: Measurement, level: int, now: float, limit_bytes: int) -> None:
         lines = largest_lines(measurement, now)
         size = ("at least " if measurement.truncated else "") + disk_usage.human(measurement.bytes)
-        limit = disk_usage.human(self.limit)
+        limit = disk_usage.human(limit_bytes)
         manager = self.app.manager
         if owner.session_id and manager is not None:
             twice = " — twice the limit" if level >= 2 else ""
@@ -442,6 +465,53 @@ class DiskGuard:
             await notifications.post(draft)
         except Exception:  # noqa: BLE001 — a notice that failed is logged; the next crossing tries again
             logger.exception("the disk guard could not post its notice")
+
+    # -- the operator's limits --------------------------------------------------------------------
+
+    async def set_limit(self, name: str, limit_bytes: int | None) -> None:
+        """Give one workspace a limit of its own (0 = no limit), or None to follow the default again.
+
+        The level already told is brought down to what the new limit leaves standing at once, not at the
+        next pass: raising the limit and lowering it again before a pass ran would otherwise find the
+        old level still counted as told and never warn about a size that is over the limit once more.
+        Nothing is said here, though; a workspace now over its limit is told on the next pass.
+        """
+        if self.target_workspace(name) is None:
+            raise KeyError(name)
+        await self.load()
+        if limit_bytes is None:
+            await self.app.db.execute("DELETE FROM workspace_limits WHERE name = ?", (name,))
+            self.limits.pop(name, None)
+        else:
+            await self.app.db.execute(
+                "INSERT INTO workspace_limits(name, limit_bytes, updated_at) VALUES (?, ?, ?)"
+                " ON CONFLICT(name) DO UPDATE SET limit_bytes = excluded.limit_bytes, updated_at = excluded.updated_at",
+                (name, limit_bytes, datetime.now(UTC).isoformat()),
+            )
+            self.limits[name] = limit_bytes
+        levels: dict[str, int] = self.state["levels"]
+        measurement = self.sizes.get(name)
+        if measurement is not None and name in levels:
+            told = rearmed(int(levels[name]), measurement.bytes, self.limit_for(name))
+            if told:
+                levels[name] = told
+            else:
+                levels.pop(name)
+            await self.save()
+        self.rejudge.add(name)
+
+    async def forget_limits_of_gone(self, present: list[str]) -> None:
+        """Drop the limits of workspaces whose directory no longer exists.
+
+        Only when the root listed something at all: an unmounted or unreadable root lists nothing, and
+        that must not cost the operator every limit they set.
+        """
+        if not present:
+            return
+        gone = [name for name in self.limits if name not in present and not (self.root / name).exists()]
+        for name in gone:
+            await self.app.db.execute("DELETE FROM workspace_limits WHERE name = ?", (name,))
+            self.limits.pop(name, None)
 
     # -- for the routes ---------------------------------------------------------------------------
 
