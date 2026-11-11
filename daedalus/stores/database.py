@@ -3898,6 +3898,91 @@ async def _door_waits(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _door_waits))
 
+# 163 — what agents do over a link besides talking: one question to several and the answers side by side, cards both
+# sides keep (a summary, free times, a meeting), a guest's "tell me when", and the actions that wait for the
+# operator or outlive a turn (a patch applied, a service shown, a meeting booked).
+LINK_FLOWS_SQL = """
+CREATE TABLE IF NOT EXISTS link_polls (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    state TEXT NOT NULL,
+    deadline_at TEXT NOT NULL,
+    woke INTEGER NOT NULL DEFAULT 0,
+    dismissed INTEGER NOT NULL DEFAULT 0,
+    run_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    settled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS link_polls_by_session ON link_polls(session_id, created_at);
+CREATE TABLE IF NOT EXISTS link_poll_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    poll_id TEXT NOT NULL REFERENCES link_polls(id) ON DELETE CASCADE,
+    talk_id TEXT NOT NULL,
+    message_id INTEGER,
+    state TEXT NOT NULL,
+    answer TEXT NOT NULL DEFAULT '',
+    reply_id INTEGER,
+    answered_at TEXT,
+    UNIQUE(poll_id, talk_id)
+);
+CREATE TABLE IF NOT EXISTS link_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    side TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    conversation TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    type TEXT NOT NULL,
+    card TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS link_cards_by_owner ON link_cards(side, owner, id);
+CREATE TABLE IF NOT EXISTS link_subscriptions (
+    id TEXT PRIMARY KEY,
+    link_id TEXT NOT NULL,
+    conversation TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    request TEXT NOT NULL,
+    next_at TEXT NOT NULL,
+    every_minutes INTEGER NOT NULL DEFAULT 0,
+    times_left INTEGER NOT NULL,
+    fired INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    ended_at TEXT
+);
+CREATE INDEX IF NOT EXISTS link_subscriptions_due ON link_subscriptions(state, next_at);
+CREATE TABLE IF NOT EXISTS link_actions (
+    id TEXT PRIMARY KEY,
+    side TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    conversation TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    args TEXT NOT NULL,
+    state TEXT NOT NULL,
+    result TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    expires_at TEXT
+);
+CREATE INDEX IF NOT EXISTS link_actions_by_owner ON link_actions(side, owner, created_at);
+"""
+
+
+async def _link_flows(conn: aiosqlite.Connection) -> None:
+    """A message of a conversation with another agent may carry a card. Every message stored before carried none.
+    The column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(agent_talk_messages)")).fetchall()}
+    if "card" not in present:
+        await conn.execute("ALTER TABLE agent_talk_messages ADD COLUMN card TEXT NOT NULL DEFAULT ''")
+
+
+MIGRATIONS.append(DataMigration(LINK_FLOWS_SQL, _link_flows))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -925,7 +925,7 @@ def test_a_direct_guests_message_is_handed_out_once_and_only_its_reply_comes_bac
     rig.say(token, "port?")
     feed = rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()
     assert [d["text"] for d in feed["deliveries"]] == ["port?"]
-    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd", "role", "kind", "task", "files", "ask", "by", "signed", "client_key"}
+    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd", "role", "kind", "task", "files", "ask", "by", "signed", "client_key", "card"}
     assert feed["deliveries"][0]["allowance_usd"] == 0.25
     message = feed["deliveries"][0]["message_id"]
     assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == feed["deliveries"], "offered again until it is acknowledged"

@@ -26,16 +26,18 @@ from .files import CHUNK_BYTES
 from .limits import Failures, Rate
 from .mailbox import DEFAULT_WAIT_SECONDS, MAX_TEXT, RETRY_SECONDS, Answer, Mailbox
 from .store import CLOSED, REVOKED, WAITING, ended
+from .text import CARD_BYTES
 
 if TYPE_CHECKING:
     from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
-MAX_BODY = MAX_TEXT * 6 + 256
-"""A message at its limit as JSON escapes it: ``\\uXXXX``, six bytes a character, is what ``json.dumps`` writes by
-default for anything past ASCII. At four, a Russian message of 6,000 characters was refused for being over 8,000.
-Past this a body is not read at all, and it stays under the front's and nginx's own bounds of 64 KiB."""
+MAX_BODY = MAX_TEXT * 6 + CARD_BYTES + 256
+"""A message at its limit as JSON escapes it, with a card at its limit beside it: ``\\uXXXX``, six bytes a character,
+is what ``json.dumps`` writes by default for anything past ASCII. At four, a Russian message of 6,000 characters was
+refused for being over 8,000. Past this a body is not read at all, and it stays under the front's and nginx's own
+bounds of 64 KiB."""
 INVITE = re.compile(r"^/a/([A-Za-z0-9_-]{32,64})(/redeem)?/?$")
 FILE_PATH = re.compile(r"^/a/files/(f_[0-9a-f]{16})(/content)?$")
 TASK_PATH = re.compile(r"^/a/tasks/(t_[0-9a-f]{12})$")

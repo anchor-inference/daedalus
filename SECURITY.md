@@ -128,6 +128,9 @@ link of each door for the other, and adds keys rather than trust.
   owner and starts no turn. It is pinned to the key that redeemed its link; a message under any other key, or none, is
   refused before a model sees it, and the operator is told at once. A message names the key it is for and carries the
   time it was signed, and one already taken is refused, so a copy carried elsewhere or replayed is not taken again.
+  A card beside the words (a summary, free times, a meeting) is under the same signature, so a door cannot put one of
+  its own beside a contact's message. A summary handed over on its own, with no message, is unsigned: it is shown to
+  the operator and starts no turn.
 - What a contact may do here is its link's level and limits, set by this side alone, and either side ends it for both.
   A message an operator writes themselves is marked as theirs, and is still a guest's message to the agent that reads it.
 

@@ -1002,7 +1002,11 @@ async def test_no_tool_can_switch_waking_on(rig_for: Any) -> None:
     state = await rig.chat()
     await opened(rig, state, rig.door.link())
     tool = next(t for t in rig.manager.tools.list_all() if t.name == "AgentTalk")
-    assert set(tool.definition.parameters.properties) == {"action", "link", "conversation", "text", "wait_seconds", "files", "task", "contact"}
+    # What agents do together adds arguments of its own: none of them is a setting of the conversation.
+    assert set(tool.definition.parameters.properties) == {
+        "action", "link", "conversation", "text", "wait_seconds", "files", "task", "contact", "conversations", "deadline_minutes", "at", "every_minutes", "times", "subscription",
+        "start", "end", "duration_minutes", "branch", "service",
+    }
     assert (await rig.talks.tool(state.session.id, "wake")).error
 
 

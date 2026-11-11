@@ -165,6 +165,15 @@ def test_a_guest_conversation_maps_the_doors_roles_and_files(tmp_path: Path) -> 
     assert export.document["conversation"]["conversation"]["created_at"] == "2025-11-10T08:01:00+00:00"
 
 
+def test_the_owners_own_words_are_marked_so_both_ways(tmp_path: Path) -> None:
+    talk = link_export.talk_record(talk_row(), [message(1, "them", "From me, not my agent.", "2026-11-10T09:00:00+00:00", author="owner")], [], [])
+    assert "· them (written by the owner)** · text" in link_export.prepare(talk, now=NOW).transcript
+    known = {"id": "ab12", "session_id": "s1", "label": "a friend", "topic": "", "mode": "direct", "created_at": "2026-11-10T08:00:00+00:00", "revoked_at": None}
+    door = {"messages": [{"id": 1, "role": "agent", "text": "My own words.", "at": 1_762_761_760.0, "state": "sent", "kind": "text", "by": "owner", "files": []}]}
+    export = link_export.prepare(link_export.guest_record(known, door, [], []), now=NOW, language="ru")
+    assert "· мы (написал владелец)** · text" in export.transcript and export.document["messages"][0]["author"] == "owner"
+
+
 def test_with_the_door_out_of_reach_the_guest_export_has_what_this_side_keeps() -> None:
     known = {"id": "ab12", "session_id": "s1", "label": "", "topic": "planning", "mode": "direct", "tools": "read", "usd_limit": 0, "created_at": "2026-11-10T08:00:00+00:00", "revoked_at": None}
     record = link_export.guest_record(known, None, [task_row(direction="theirs")], [], door_error="the door is not running")

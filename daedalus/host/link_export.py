@@ -61,6 +61,7 @@ WORDS: dict[str, dict[str, str]] = {
         "left_out": "The kept files take {size} together, more than the {bound} an export carries, so none of them is in the zip. Each is listed with its sha256.",
         "cut": "The rest of this conversation did not fit in a note. The zip export holds all of it.",
         "us": "us", "them": "them", "door": "door", "owner": "owner", "in": "in", "out": "out", "mine": "ours", "theirs": "theirs",
+        "by_owner": "written by the owner",
     },
     "ru": {
         "title": "Разговор с {label}", "kind.agent_talk": "наш агент у чужой двери", "kind.guest_link": "агент гостя у нашей двери",
@@ -70,6 +71,7 @@ WORDS: dict[str, dict[str, str]] = {
         "left_out": "Сохранённые файлы вместе занимают {size}, больше {bound}, которые вмещает выгрузка, поэтому в архиве их нет. Каждый перечислен с его sha256.",
         "cut": "Остаток разговора не поместился в заметку. В выгрузке архивом он есть целиком.",
         "us": "мы", "them": "они", "door": "дверь", "owner": "владелец", "in": "входящий", "out": "исходящий", "mine": "наша", "theirs": "их",
+        "by_owner": "написал владелец",
     },
 }
 
@@ -161,7 +163,7 @@ def talk_record(talk: Any, messages: Iterable[Any], tasks: Iterable[Any], files:
             {
                 "at": stamp(_get(row, "created_at")), "who": str(_get(row, "role") or ""), "kind": str(_get(row, "kind") or link_protocol.TEXT), "task": str(_get(row, "task") or ""),
                 "task_state": str(_get(row, "task_state") or ""), "state": str(_get(row, "state") or ""), "note": str(_get(row, "note") or ""), "text": str(_get(row, "text") or ""),
-                "files": carried.get(_get(row, "id"), []),
+                "files": carried.get(_get(row, "id"), []), "author": "owner" if _get(row, "author") == "owner" else "",
             }
             for row in messages
         ],
@@ -197,6 +199,7 @@ def guest_record(known: Any, door_link: dict[str, Any] | None, tasks: Iterable[A
                 "at": stamp(item.get("at")), "who": GUEST_ROLES.get(str(item.get("role") or ""), str(item.get("role") or "")), "kind": str(item.get("kind") or link_protocol.TEXT),
                 "task": str(item.get("task") or ""), "task_state": str(item.get("task_state") or ""), "state": str(item.get("state") or ""), "note": "", "text": str(item.get("text") or ""),
                 "files": [by_remote[str(remote)] for remote in item.get("files") or [] if str(remote) in by_remote],
+                "author": "owner" if item.get("by") == "owner" else "",
             })
     label = str(_get(known, "label") or "") or str(_get(known, "topic") or "") or str(_get(known, "id") or "")
     return {
@@ -265,7 +268,7 @@ def prepare(record: dict[str, Any], *, language: str = "en", now: datetime | Non
     document = {
         "kind": record["kind"], "label": record["label"], "exported_at": moment, "conversation": record["conversation"],
         "door_unread": record["door_unread"] or None, "files_left_out": {"bytes": total, "bound": bound} if left_out else None,
-        "messages": [{**{name: message[name] for name in ("at", "who", "kind", "task", "task_state", "state", "note", "text")}, "files": [names[key] for key in message["files"]]} for message in record["messages"]],
+        "messages": [{**{name: message[name] for name in ("at", "who", "author", "kind", "task", "task_state", "state", "note", "text")}, "files": [names[key] for key in message["files"]]} for message in record["messages"]],
         "tasks": record["tasks"],
         "files": [
             {**{name: item[name] for name in ("name", "size", "sha256", "direction", "state", "task", "at")}, "kept": item["key"] in kept, "in_zip": placed.get(item["key"])}
@@ -311,7 +314,8 @@ def transcript(record: dict[str, Any], document: dict[str, Any], *, language: st
     if not record["messages"]:
         lines += [say["none"], ""]
     for message in record["messages"]:
-        head = [f"**{shown(message['at'])} · {say.get(message['who'], message['who'])}**", message["kind"]]
+        who = say.get(message["who"], message["who"]) + (f" ({say['by_owner']})" if message.get("author") == "owner" else "")
+        head = [f"**{shown(message['at'])} · {who}**", message["kind"]]
         if message["task"]:
             head.append(f"{say['task']} `{message['task']}`" + (f" ({message['task_state']})" if message["task_state"] else ""))
         if message["state"]:

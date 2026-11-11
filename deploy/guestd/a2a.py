@@ -43,6 +43,7 @@ from .store import (
     ACCEPTED,
     AGENT,
     ANSWERED,
+    BY_OWNER,
     CANCELLED,
     CLAIMED,
     CLOSED,
@@ -292,9 +293,14 @@ class A2A:
         }
 
     def parts_of(self, message: Any) -> list[dict[str, Any]]:
+        """A message's words, its files as url parts, and its card (a summary, free times, a meeting) as a data part. The
+        words always say what the card says, so a client that knows no cards loses nothing by skipping it."""
         data = loaded(message["data"])
         parts: list[dict[str, Any]] = [{"text": message["text"]}] if message["text"] else []
         parts += [part for part in (self.file_part(file_id) for file_id in data.get("files") or []) if part is not None]
+        card = data.get("card")
+        if isinstance(card, dict) and card.get("type"):
+            parts.append({"data": card, "mediaType": "application/json", "metadata": {"kind": "card", "type": str(card["type"])}})
         return parts or [{"text": str(data.get("state") or "")}]
 
     def message_of(self, message: Any, conversation_id: str, task_id: str) -> dict[str, Any]:
@@ -306,6 +312,9 @@ class A2A:
         }
         if message["role"] == DOOR:
             out["metadata"] = {"from": "door"}
+        elif data.get("from") == BY_OWNER:
+            # The owner's own words, not their agent's: said as the plain door says it, and signed or not as it came.
+            out["metadata"] = {"from": BY_OWNER}
         return out
 
     def door_words(self, text: str, conversation_id: str, task_id: str, word: str) -> dict[str, Any]:

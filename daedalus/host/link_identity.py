@@ -87,10 +87,20 @@ def verify(key: str, signature: str, purpose: str, fields: dict[str, Any]) -> bo
     return True
 
 
-def message_fields(*, text: str, kind: str, task: str, by: str, to: str, at: int) -> dict[str, Any]:
+def message_fields(*, text: str, kind: str, task: str, by: str, to: str, at: int, card: dict[str, Any] | None = None) -> dict[str, Any]:
     """What a message's signature covers. Its files are not in it: each is checked against the sha256 it was announced
-    with, and the door that carries a file is one of the two sides'."""
-    return {"text": text, "kind": kind or "text", "task": task or "", "by": by or "", "to": to or "", "at": at}
+    with, and the door that carries a file is one of the two sides'. A card is, as its digest, and only where there is
+    one: a door could otherwise put a meeting or a summary of its own beside a contact's signed words."""
+    fields: dict[str, Any] = {"text": text, "kind": kind or "text", "task": task or "", "by": by or "", "to": to or "", "at": at}
+    if card is not None:
+        fields["card"] = card_digest(card)
+    return fields
+
+
+def card_digest(card: dict[str, Any]) -> str:
+    """A card as a signature names it. Both sides pass the card as ``link_flows.card_view`` keeps it, which is stricter
+    than the door's own cleaning, so what the door trims and cleans on the way does not change it."""
+    return hashlib.sha256(json.dumps(card, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def contact_fields(*, invite: str, name: str, answer: str, at: int) -> dict[str, Any]:
@@ -103,7 +113,7 @@ def check_redeem(key: str, proof: str, hashed_invite: str) -> bool:
     return at.isdigit() and verify(key, signature, "redeem", {"invite": hashed_invite, "at": int(at)})
 
 
-def check_message(signed: Any, expected_key: str, *, text: str, kind: str, task: str, by: str, to: str) -> bool:
+def check_message(signed: Any, expected_key: str, *, text: str, kind: str, task: str, by: str, to: str, card: dict[str, Any] | None = None) -> bool:
     """A message's signature, by the key it must be by. ``to`` is this side's own key: a message signed for somebody
     else is not one for here, wherever it was copied."""
     if not isinstance(signed, dict) or signed.get("key") != expected_key:
@@ -111,7 +121,7 @@ def check_message(signed: Any, expected_key: str, *, text: str, kind: str, task:
     at = signed.get("at")
     if isinstance(at, bool) or not isinstance(at, int):
         return False
-    return verify(expected_key, str(signed.get("sig") or ""), "message", message_fields(text=text, kind=kind, task=task, by=by, to=to, at=at))
+    return verify(expected_key, str(signed.get("sig") or ""), "message", message_fields(text=text, kind=kind, task=task, by=by, to=to, at=at, card=card))
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,10 +146,10 @@ class Identity:
     def door_proof(self, hashed_invite: str) -> str:
         return self.sign("door", {"invite": hashed_invite})
 
-    def signed_message(self, *, text: str, kind: str = "text", task: str = "", by: str = "", to: str = "") -> dict[str, Any]:
+    def signed_message(self, *, text: str, kind: str = "text", task: str = "", by: str = "", to: str = "", card: dict[str, Any] | None = None) -> dict[str, Any]:
         """The ``signed`` field a message carries: this key, when, and the signature."""
         at = now_ms()
-        return {"key": self.public, "at": at, "sig": self.sign("message", message_fields(text=text, kind=kind, task=task, by=by, to=to, at=at))}
+        return {"key": self.public, "at": at, "sig": self.sign("message", message_fields(text=text, kind=kind, task=task, by=by, to=to, at=at, card=card))}
 
     def contact(self, *, invite: str, name: str, answer: str) -> dict[str, Any]:
         """An offer of a contact, or the answer to one, signed: what the ``contact`` field of such a message holds."""
@@ -193,6 +203,6 @@ def load(path: Path) -> Identity:
 
 
 __all__ = [
-    "DOMAIN", "KEY_FILE", "REPLAY_SKEW_MS", "Identity", "canonical", "check_contact", "check_message", "check_redeem", "contact_fields", "fingerprint", "invite_hash", "load",
+    "DOMAIN", "KEY_FILE", "REPLAY_SKEW_MS", "Identity", "canonical", "card_digest", "check_contact", "check_message", "check_redeem", "contact_fields", "fingerprint", "invite_hash", "load",
     "message_fields", "now_ms", "verify",
 ]

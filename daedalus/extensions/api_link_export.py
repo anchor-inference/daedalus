@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable
@@ -61,7 +62,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         files = await rows("SELECT * FROM link_files WHERE side = ? AND owner = ? ORDER BY id", agent_talk.SIDE, talk_id)
         return link_export.talk_record(talk, messages, tasks, files)
 
-    async def guest_record(link_id: str) -> dict[str, Any]:
+    async def guest_record(link_id: str, conversation: str = "") -> dict[str, Any]:
+        """``conversation`` picks one guest's of a link several guests share; without it the door's newest."""
         bridge = bridge_of(app)
         if bridge is None:
             raise HTTPException(503, "the guest door is not available in this installation")
@@ -71,7 +73,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         door_link: dict[str, Any] | None = None
         door_error = ""
         try:
-            door_link = (await bridge.client.call("GET", f"/control/links/{link_id}")).get("link") or {}
+            picked = f"?conversation={conversation}" if re.fullmatch(r"[0-9a-f]{16}", conversation) else ""
+            door_link = (await bridge.client.call("GET", f"/control/links/{link_id}{picked}")).get("link") or {}
         except DoorUnavailable as exc:
             door_error = str(exc) or "the door is out of reach"
         except DoorRefused as exc:
@@ -134,12 +137,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return await as_note(await talk_record(talk_id), (body or NoteExport()).lang)
 
     @api.get("/api/guest/links/{link_id}/export")
-    async def guest_zip(link_id: str, lang: Language = "en", _: dict[str, Any] = Depends(auth)) -> FileResponse:
-        return await as_zip(await guest_record(link_id), lang)
+    async def guest_zip(link_id: str, lang: Language = "en", conversation: str = "", _: dict[str, Any] = Depends(auth)) -> FileResponse:
+        return await as_zip(await guest_record(link_id, conversation), lang)
 
     @api.post("/api/guest/links/{link_id}/export/note")
-    async def guest_note(link_id: str, body: NoteExport | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return await as_note(await guest_record(link_id), (body or NoteExport()).lang)
+    async def guest_note(link_id: str, body: NoteExport | None = None, conversation: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await as_note(await guest_record(link_id, conversation), (body or NoteExport()).lang)
 
 
 __all__ = ["NoteExport", "register"]

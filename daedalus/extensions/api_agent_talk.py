@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.agent_talk import MAX_SENDS, NO_LIMIT, WAKE_TURNS_MAX, WAKE_USD_MAX, AgentTalks, talks_of
 from daedalus.extensions.guest_door import bridge_of
+from daedalus.extensions.link_flows import flows_of
 from daedalus.host import link_protocol
 
 FILE_HEADERS = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox", "Cache-Control": "private, max-age=300"}
@@ -72,6 +73,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {
             "talks": [await talks().describe(talk) for talk in await talks().talks_of(session_id)], "sends_limit": MAX_SENDS, "wake_turns_max": WAKE_TURNS_MAX, "wake_usd_max": WAKE_USD_MAX,
             "guest_held": held, "file_mb": link_protocol.DEFAULT_FILE_MB, "day_mb": link_protocol.DEFAULT_DAY_MB,
+            "polls": await flows.polls_of(session_id) if (flows := flows_of(app)) is not None else [],
         }
 
     @api.get("/api/agent-talks/{talk_id}")

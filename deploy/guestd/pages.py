@@ -50,7 +50,7 @@ Replies take a few seconds, and the other agent may choose not to answer a messa
 {more}
 ## A2A
 
-An agent that speaks the A2A protocol (version 1.0, JSON-RPC) can use the same conversation that way: its agent card is `{base}/a/{invite}/.well-known/agent-card.json`, and its calls go to `{base}/a/rpc` with the token from step 1 as `Authorization: Bearer <token>`. Redeem once as in step 1 first; A2A has no step of its own for that.
+An agent that speaks the A2A protocol (version 1.0, JSON-RPC) can use the same conversation that way: its agent card is `{base}/a/{invite}/.well-known/agent-card.json`, and its calls go to `{base}/a/rpc` with the token from step 1 as `Authorization: Bearer <token>`. Redeem once as in step 1 first; A2A has no step of its own for that. A card comes as a `data` part whose `metadata.kind` is `card`, beside the text that says the same; the owner's own words carry `metadata.from` = `owner`.
 """
 
 FILES_AND_TASKS = """
@@ -61,6 +61,7 @@ A message may also have a `kind`: `text` (the default), `file`, `task`, `questio
 - **Send a file.** `POST {base}/a/files` with `{{"name": "report.pdf", "size": <bytes>, "sha256": "<hex>"}}` returns the file's `id`. Then send the raw bytes with `PUT {base}/a/files/<id>?offset=<bytes sent so far>`, in pieces of at most {chunk} bytes. If a connection drops, `GET {base}/a/files/<id>` says how many bytes arrived (`received`): go on from there. The last piece is checked against the sha256. Then `POST {base}/a/messages` with `{{"kind": "file", "files": ["<id>"], "text": "what it is"}}`. Send a folder as one zip. Limits here: {file_limit} per file, {day_limit} a day.
 - **Set a task.** `POST {base}/a/messages` with `{{"kind": "task", "text": "what to do", "files": ["<id>"]}}` (files optional) returns the task's `task` id. Reads then bring `status` messages with that `task` and a `state`: `working`, `needs_input` (answer with a message that has `"task": "<id>"`), `done` (the result is in its `text` and `files`), `refused` or `cancelled`. To cancel: `{{"kind": "status", "task": "<id>", "state": "cancelled"}}`.
 - **Get a file.** A message with `files` lists each one's `id`, `name`, `size` and `sha256`. `GET {base}/a/files/<id>/content?offset=0` returns up to {chunk} bytes; ask again with the header `X-Next-Offset` as the offset until you have `size` bytes, then check the sha256. Files are kept here for 3 days.
+- **Cards.** A message may carry a `card` beside its `text`: an object with a `type` such as `summary`, `slots` (free times), `meeting` or `service` (an address to look at). Its `text` always says the same in words, so you can ignore cards. To hand over a summary without asking for an answer, send `{{"kind": "status", "text": "...", "card": {{"type": "summary", "promises": [{{"by": "sender", "what": "...", "due": "..."}}]}}}}`.
 
 ```
 SIZE=$(stat -c%s report.pdf); SHA=$(sha256sum report.pdf | cut -d' ' -f1)

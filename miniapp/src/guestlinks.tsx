@@ -10,6 +10,7 @@ import { plural, t } from "./i18n";
 import { KeyLine, OfferContact, OwnerSay } from "./contacts";
 import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { LinkExport } from "./linkexport";
+import { LinkActions, LinkCardView, LinkSubscriptions, Summaries } from "./linkflows";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
@@ -312,7 +313,7 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
       ) : (
         <>
           <div className="guest-name">{link.label || link.topic || t("guest.untitled")}</div>
-          {link.conversation && <LinkExport target={{ kind: "guest", id: link.id }} toast={toast} />}
+          {link.conversation && <LinkExport target={{ kind: "guest", id: link.id, conversation: picked && current ? current.id : undefined }} toast={toast} />}
           {link.mode === "stand_in" && link.briefing && (
             <>
               <button type="button" className="btn small ghost guest-toggle" aria-expanded={briefing} onClick={() => setBriefing((open) => !open)}>{t("guest.briefing")}</button>
@@ -338,6 +339,12 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
               {link.mode === "direct" && current.verified && <OfferContact via={`link:${link.id}:${current.id}`} name={link.label} toast={toast} />}
             </>
           )}
+          <LinkSubscriptions subs={exchange.subscriptions ?? []} refresh={refresh} toast={toast} />
+          <LinkActions actions={exchange.actions ?? []} refresh={refresh} toast={toast} />
+          {/* A stand-in's conversation is the stand-in's to sum up, which it cannot: it has no turn of the chat's. */}
+          {link.mode === "direct" && (link.messages.length > 0 || (exchange.cards ?? []).length > 0) && (
+            <Summaries rows={exchange.cards ?? []} path={`${LINKS}/${encoded(link.id)}`} query={picked && current ? `?conversation=${encoded(current.id)}` : ""} refresh={refresh} toast={toast} />
+          )}
         </>
       )}
     </div>
@@ -356,7 +363,8 @@ function GuestMessageRow({ message, mode, files, toast }: { message: GuestMessag
         <span className="sub">{absTime(ms(message.at))}</span>
         {message.cost_usd > 0 && <span className="sub">{usd(message.cost_usd)}</span>}
       </div>
-      {message.text && <div className="guest-msg-text">{message.text}</div>}
+      {message.text && !message.card && <div className="guest-msg-text">{message.text}</div>}
+      {message.card && <LinkCardView card={message.card} ours={message.role !== "guest"} />}
       <LinkFiles files={files} toast={toast} />
     </div>
   );

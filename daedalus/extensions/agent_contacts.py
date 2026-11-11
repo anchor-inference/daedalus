@@ -370,7 +370,7 @@ class Contacts:
             await self._mismatch(contact, delivery.link_id, "a message came over a token redeemed with another key")
             return "key"
         signed = delivery.signed
-        if not link_identity.check_message(signed, key, text=delivery.text, kind=delivery.kind, task=delivery.task, by=delivery.by, to=self.identity().public):
+        if not link_identity.check_message(signed, key, text=delivery.text, kind=delivery.kind, task=delivery.task, by=delivery.by, to=self.identity().public, card=delivery.card):
             await self._mismatch(contact, delivery.link_id, "a message was not signed by the contact's key")
             return "signature"
         if not await self._fresh(contact, signed):
@@ -378,7 +378,7 @@ class Contacts:
         await self._update(contact["id"], last_in_at=max(int(contact["last_in_at"]), int(signed["at"])))
         return ""
 
-    async def check_reply(self, talk: Any, item: dict[str, Any], *, text: str, kind: str, task: str, by: str) -> str:
+    async def check_reply(self, talk: Any, item: dict[str, Any], *, text: str, kind: str, task: str, by: str, card: dict[str, Any] | None = None) -> str:
         """``ok``, ``bad`` or "" for a reply on a conversation of ours: "" where there is no key to check it by. A contact's
         reply that is not ``ok`` is refused by the caller; another conversation only shows how it went."""
         contact = await self.of_talk(talk["id"])
@@ -387,7 +387,7 @@ class Contacts:
             return ""
         signed = item.get("signed")
         identity = identity_of(self.app)
-        if identity is None or not link_identity.check_message(signed, key, text=text, kind=kind, task=task, by=by, to=identity.public):
+        if identity is None or not link_identity.check_message(signed, key, text=text, kind=kind, task=task, by=by, to=identity.public, card=card):
             if contact is not None and contact["state"] in LIVE:
                 await self._mismatch(contact, "", "a reply was not signed by the contact's key")
             return "bad"

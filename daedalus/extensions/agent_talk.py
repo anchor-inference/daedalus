@@ -57,9 +57,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from daedalus.extensions import link_flows as flows_module
 from daedalus.extensions.guest_door import bridge_of, chat_link, file_view, identity_of, task_view
 from daedalus.extensions.notifications import Draft
-from daedalus.host import agent_talk, guest_turns, link_identity, link_protocol
+from daedalus.host import agent_talk, guest_turns, link_flows, link_identity, link_protocol
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.link_protocol import LinkFileError, Staged
 from daedalus.host.notify_text import render
@@ -453,16 +454,20 @@ class AgentTalks:
             out["files"] = files
             out["messages"] = [
                 {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"], "task_state": row["task_state"],
-                 "next_at": row["next_at"] if row["state"] == WAITING else "", "files": [file["id"] for file in files if file["message_id"] == row["id"]], "author": row["author"], "signed": row["signed"]}
+                 "next_at": row["next_at"] if row["state"] == WAITING else "", "files": [file["id"] for file in files if file["message_id"] == row["id"]], "author": row["author"], "signed": row["signed"],
+                 "card": _card_of(row)}
                 for row in rows
             ]
+            flows = flows_module.flows_of(self.app)
+            out["cards"] = await flows.cards_of(SIDE, talk["id"]) if flows is not None else []
+            out["actions"] = await flows.actions_of(SIDE, talk["id"]) if flows is not None else []
         return out
 
     # -- the tool -----------------------------------------------------------------------
 
     async def tool(
         self, session_id: str, action: str, *, link: str = "", conversation: str = "", text: str = "", wait_seconds: int | None = None, files: list[str] | None = None,
-        task: str = "", contact: str = "",
+        task: str = "", contact: str = "", extra: dict[str, Any] | None = None,
     ) -> Outcome:
         state = self.manager.live_state(session_id)
         if state is None or not self.manager.ordinary_chat(state):
@@ -473,8 +478,10 @@ class AgentTalks:
             bridge = bridge_of(self.app)
             if bridge is None:
                 return Outcome("Agent links are not available here.", error=True)
-            said, failed = await bridge.turn_action(state, action, text=text, files=list(files or []))
+            said, failed = await bridge.turn_action(state, action, text=text, files=list(files or []), extra=extra or {})
             return Outcome(said, failed)
+        if turn is not None and turn.link_id.startswith(flows_module.POLL_PREFIX):
+            return Outcome("This turn compares the answers to one question for the operator: it sends nothing. Write the comparison.", error=True)
         if turn is None and state.run_origin not in ORIGINS:
             return Outcome("Talking to another agent is for the operator's own turns, with somebody there to see it.", error=True)
         wait = 0 if turn is not None else max(0, min(WAIT_DEFAULT if wait_seconds is None else int(wait_seconds), WAIT_MAX))
@@ -501,11 +508,20 @@ class AgentTalks:
                 # Both real models handed their first message to ``open`` and took it as said, so it is.
                 sent = await self._send(state, await self.talk(opened.talk), text, wait, files=files or [])
                 return Outcome(f"{opened.text}\n{sent.text}", sent.error, opened.talk)
-            if action not in ("send", "read", "end", "task", "cancel"):
-                return Outcome("action is one of open, send, task, cancel, read, end.", error=True)
+            flows = flows_module.flows_of(self.app)
+            if action in flows_module.FLOW_ACTIONS and (turn is not None or flows is None):
+                return Outcome("That is for a turn of the operator's." if turn is not None else "That is not available here.", error=True)
+            if action == "ask" and flows is not None:
+                said, failed = await flows.ask_many(state, list((extra or {}).get("conversations") or []), text, (extra or {}).get("deadline_minutes"))
+                return Outcome(said, failed)
+            if action not in ("send", "read", "end", "task", "cancel", *flows_module.FLOW_ACTIONS):
+                return Outcome("action is one of open, send, task, cancel, read, end, contacts, ask, summary, slots, meet, apply_patch.", error=True)
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation, contact=bool(contact))
             if isinstance(talk, Outcome):
                 return talk
+            if action in flows_module.FLOW_ACTIONS and flows is not None:
+                said, failed = await flows.talk_action(state, action, talk, text=text, files=list(files or []), extra=extra or {})
+                return Outcome(said, failed, talk["id"])
             if action in ("send", "task"):
                 return await self._send(state, talk, text, wait, files=files or [], kind=link_protocol.TASK if action == "task" else link_protocol.TEXT, task=task if action == "send" else "")
             if action == "cancel":
@@ -657,7 +673,7 @@ class AgentTalks:
         return " ".join(part for part in (lead, said, sent, f"[conversation {talk['id']}]") if part)
 
     async def _send(
-        self, state: SessionState, talk: Any, text: str, wait: int, *, files: list[str] | None = None, kind: str = link_protocol.TEXT, task: str = "",
+        self, state: SessionState, talk: Any, text: str, wait: int, *, files: list[str] | None = None, kind: str = link_protocol.TEXT, task: str = "", card: dict[str, Any] | None = None,
     ) -> Outcome:
         session_id = state.session.id
         if talk["state"] in (CLOSED, OPENING):
@@ -691,7 +707,7 @@ class AgentTalks:
             kind = link_protocol.FILE
         hold = "review" if state.review_holds_send else "outside" if outside else self._why_hold(talk, clean, session_id, staged)
         state.review_holds_send = False
-        message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold, kind=kind, task=task)
+        message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold, kind=kind, task=task, card=card)
         for item in staged:
             await self._file_row(talk, "out", item.name, item.size, item.sha256, str(item.path), "held" if hold else "sending", message_id=message_id, task=task, note=item.source)
         if hold:
@@ -796,12 +812,13 @@ class AgentTalks:
 
     async def _insert_message(
         self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "", *, kind: str = link_protocol.TEXT, task: str = "", author: str = "",
+        card: dict[str, Any] | None = None,
     ) -> int:
         now = _now()
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at, kind, task, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (talk_id, role, text, state, run_id, note, now, kind, task, author),
+                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at, kind, task, author, card) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (talk_id, role, text, state, run_id, note, now, kind, task, author, jsonlib.dumps(card, ensure_ascii=False) if card is not None else ""),
             )
             message_id = int(cursor.lastrowid or 0)
             await cursor.close()
@@ -833,6 +850,18 @@ class AgentTalks:
         if note == "behind":
             return "Not sent: it waited behind an earlier message that did not go, and was not sent out of order."
         return "Not sent: the door would not take this message."
+
+    def signature(self, talk: Any, text: str, *, kind: str = link_protocol.TEXT, task: str = "", by: str = "", card: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The ``signed`` field of a message to this conversation's door, or nothing where this side has no key.
+
+        Signed as the door will keep it, which cleans the text as it stores it, and for the key of the door's owner where
+        its card proved one. Whatever sends to a door outside :meth:`_post` signs through here too: a contact refuses
+        an unsigned message, and tells its operator of it as of a stranger's."""
+        identity = identity_of(self.app)
+        if identity is None:
+            return {}
+        seen = link_flows.card_view(card) if card is not None else None
+        return {"signed": identity.signed_message(text=inert(text), kind=kind, task=task, by=by, to=str(talk["peer_key"] or ""), card=seen)}
 
     async def _upload(self, talk: Any, row: Any) -> str:
         """One file to the other door, announced and then sent a piece at a time from wherever that door has got to.
@@ -889,10 +918,10 @@ class AgentTalks:
             by = "owner" if message["author"] == "owner" else ""
             if by:
                 body["from"] = by
-            identity = identity_of(self.app)
-            if identity is not None:
-                # Signed as the door will keep it, which cleans it as it stores it, and for the key of the door's owner where its card proved one.
-                body["signed"] = identity.signed_message(text=inert(text), kind=str(message["kind"]), task=str(message["task"] or ""), by=by, to=str(talk["peer_key"] or ""))
+            card = jsonlib.loads(message["card"]) if message["card"] else None
+            if card is not None:
+                body["card"] = card
+            body.update(self.signature(talk, text, kind=str(message["kind"]), task=str(message["task"] or ""), by=by, card=card))
             files = await self._files_of(message_id, "sending")
             posting = False
             try:
@@ -1342,7 +1371,9 @@ class AgentTalks:
                 if item["id"] > last:
                     by = "owner" if item.get("from") == "owner" else ""
                     kind = item.get("kind") if item.get("kind") in link_protocol.KINDS else link_protocol.TEXT
-                    verdicts[item["id"]] = await contacts.check_reply(talk, item, text=item["text"], kind=kind, task=_task_id(item.get("task")), by=by)
+                    seen = link_flows.card_view(item.get("card")) if item.get("from") == "agent" else None
+                    verdicts[item["id"]] = await contacts.check_reply(talk, item, text=item["text"], kind=kind, task=_task_id(item.get("task")), by=by, card=seen)
+        cards: list[dict[str, Any]] = []
         async with self.db.transaction() as conn:
             for item in items[:MAX_PER_READ]:
                 if not isinstance(item, dict) or room <= 0:
@@ -1359,16 +1390,23 @@ class AgentTalks:
                 if kind == "contact":
                     # An offer is the operator's to decide, not the agent's to read: kept as read, and handed to the contacts.
                     offers.append((item.get("contact"), clean))
+                card = link_flows.card_view(item.get("card")) if sender == "agent" else None
                 if kind == link_protocol.STATUS and task and state and not clean:
                     clean = f"Task {task}: {state.replace('_', ' ')}."
+                if card is not None and not clean:
+                    clean = link_flows.card_words(card)
                 if not clean and not files and kind != "contact":
                     continue
                 role = DOOR if sender == "door" else THEM
                 signed = verdicts.get(door_id, "")
                 refused = signed == "bad" and contact is not None
+                if refused:
+                    card = None
                 cursor_row = await conn.execute(
-                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state, author, signed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (talk_id, role, clean, REFUSED if refused else READ if kind == "contact" else UNREAD, door_id, _now(), kind, task, state, author, signed, "key" if refused else ""),
+                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state, author, signed, note, card)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (talk_id, role, clean, REFUSED if refused else READ if kind == "contact" else UNREAD, door_id, _now(), kind, task, state, author, signed, "key" if refused else "",
+                     jsonlib.dumps(card, ensure_ascii=False) if card is not None else ""),
                 )
                 message_id = int(cursor_row.lastrowid or 0) if cursor_row.rowcount else 0
                 await cursor_row.close()
@@ -1395,7 +1433,10 @@ class AgentTalks:
                 last = door_id
                 room -= 1
                 if kind != "contact":
-                    kept.append((role, clean))
+                    # A summary or a service shown asks nothing back: kept and shown, and no turn wakes for it.
+                    kept.append(("card" if card is not None and card["type"] in QUIET_CARDS else role, clean))
+                if card is not None and message_id:
+                    cards.append(card)
             await conn.execute("UPDATE agent_talks SET cursor = ?, last_at = ? WHERE id = ?", (last, _now() if kept else talk["last_at"], talk_id))
         for offer, words in offers if contacts is not None else []:
             await contacts.on_talk_contact(talk, offer, words)
@@ -1403,6 +1444,9 @@ class AgentTalks:
             await self._close(talk_id, "too_long")
         if files_came:
             self._spawn(self._fetch_files(talk_id), f"agent-talk-files:{talk_id}")
+        flows = flows_module.flows_of(self.app)
+        for card in cards if flows is not None else []:
+            await flows.keep_card(SIDE, talk_id, str(talk["session_id"]), "theirs", card, text=link_flows.card_words(card))
         if kept:
             await self._arrived(talk, kept, task_moved=moved)
         return len(kept)
@@ -1480,6 +1524,9 @@ class AgentTalks:
         spoken = [text for role, text in kept if role == THEM]
         if spoken:
             await self._count_repeats(talk, spoken)
+        flows = flows_module.flows_of(self.app)
+        if spoken and flows is not None and await flows.poll_reply(talk_id):
+            return
         fresh = await self.talk(talk_id)
         if fresh is None or self._readers.get(talk_id):
             return
@@ -1697,11 +1744,26 @@ class AgentTalks:
         talk = await self.talk(talk_id)
         if talk is None or talk["state"] == CLOSED:
             return
+        flows = flows_module.flows_of(self.app)
+        if reason == "ended" and flows is not None and await self._summary_owed(talk_id):
+            # The end of a conversation that said something leaves both sides the same summary, as the button does.
+            try:
+                await flows.summarise_talk(talk_id)
+            except Exception:  # noqa: BLE001 — a summary that could not be made must not keep a conversation open
+                logger.exception("the summary of conversation %s at its end failed", talk_id)
         # Closed here first: whatever the door does with the call below, the token is gone from this side.
         await self._close(talk_id, reason, quiet=True)
         if talk["token"]:
             with suppress(DoorGone, NotReachable):
                 await self.dialer.call("POST", f"{talk['base_url']}/a/end", token=talk["token"])
+
+    async def _summary_owed(self, talk_id: str) -> bool:
+        """Whether ending this conversation should leave a summary: the other side said something, and no summary of
+        ours went since it last did."""
+        last = await self.db.fetchone("SELECT max(id) AS id FROM agent_talk_messages WHERE talk_id = ? AND role = ?", (talk_id, THEM))
+        if last is None or last["id"] is None:
+            return False
+        return await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND role = ? AND note = 'summary' AND id > ?", (talk_id, US, last["id"])) is None
 
     async def _close(self, talk_id: str, reason: str, *, quiet: bool = False) -> None:
         talk = await self.talk(talk_id)
@@ -1818,6 +1880,17 @@ def _present(answer: DoorAnswer) -> DoorAnswer:
     if door_absent(answer):
         raise DoorGone(f"answered {answer.status} in place of the door", unsent=True)
     return answer
+
+
+QUIET_CARDS = frozenset({link_flows.SUMMARY, link_flows.SERVICE})
+
+
+def _card_of(row: Any) -> dict[str, Any] | None:
+    """A message's card as the app draws it: ours as we sent it, theirs checked again, as everything of theirs is."""
+    if not row["card"]:
+        return None
+    card = link_flows.card_view(jsonlib.loads(row["card"]))
+    return link_flows.as_seen(card, "mine" if row["role"] == US else "theirs") if card is not None else None
 
 
 def _count(value: Any) -> int:

@@ -176,6 +176,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "explorations", "exploration_attempts", "folder_moves", "agent_messages", "terminal_layouts",
         "cli_devices", "cli_pairings", "cli_device_sessions", "remote_calls", "notes", "note_files", "request_manifest_blobs",
         "operator_secret_audit", "guest_links", "phone_passes", "agent_talks", "agent_talk_messages", "link_files", "link_tasks", "link_contacts",
+        "link_polls", "link_poll_entries", "link_cards", "link_subscriptions", "link_actions",
         "canvases", "canvas_revisions", "canvas_files", "canvas_frames", "canvas_snapshots", "canvas_origins",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}

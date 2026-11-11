@@ -246,6 +246,22 @@ def test_the_same_message_sent_twice_is_one_task_and_one_turn(rig: Rig) -> None:
     assert len(feed(rig)["deliveries"]) == 1
 
 
+def test_a_card_on_a_tasks_message_is_a_data_part_and_the_owners_words_say_whose_they_are(rig: Rig) -> None:
+    _, token = opened(rig)
+    task = send(rig, token, "when can we meet?")
+    conversation_id = rig.store.conversation_by_token(token)["id"]
+    card = {"type": "slots", "title": "Next week", "duration_minutes": 30, "slots": [{"start": "2026-11-16T10:00:00+00:00", "end": "2026-11-16T10:30:00+00:00"}]}
+    said = rig.control.post(
+        f"/control/conversations/{conversation_id}/messages", json={"kind": "status", "task": task["id"], "state": "working", "text": "Monday at ten.", "card": card, "from": "owner"},
+        headers=CONTROL,
+    )
+    assert said.status_code == 200, said.text
+    status = get(rig, token, task["id"])["status"]["message"]
+    assert status["metadata"] == {"from": "owner"}, "the owner's own words, as the plain door marks them"
+    assert status["parts"][0] == {"text": "Monday at ten."}
+    assert status["parts"][1] == {"data": card, "mediaType": "application/json", "metadata": {"kind": "card", "type": "slots"}}
+
+
 def test_a_task_that_needs_input_takes_the_answer_and_a_finished_one_takes_nothing(rig: Rig) -> None:
     _, token = opened(rig)
     task = send(rig, token, "deploy it")

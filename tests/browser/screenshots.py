@@ -961,6 +961,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # Standing contacts (api_stub.FakeContacts): offering, accepting and breaking change what the next read returns.
     if (rel == "/api/contacts" or rel.startswith("/api/contacts/")) and fulfil_shared(route):
         return None
+    # What agents do together over a link (api_stub.flows_answer): questions put away, summaries kept, access closed.
+    if rel.startswith(("/api/agent-polls/", "/api/link-cards/", "/api/link-subscriptions/", "/api/link-actions/")) and fulfil_shared(route):
+        return None
     # The Notes tab's writes, uploads and files are the shared host's (notes_stub.py), which keeps them.
     if (rel.startswith("/api/notes/") or (rel.startswith("/api/sessions/") and "/notes" in rel)) and fulfil_shared(route):
         return None

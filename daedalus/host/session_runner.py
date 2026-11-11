@@ -5602,7 +5602,7 @@ class SessionManager:
         """
         blocks = list(message.content_blocks)
         said = blocks[at].text  # type: ignore[union-attr]
-        note = (agent_talk.notice_note(turn.label) if turn.notice else agent_talk.reply_note(turn.label)) if turn.kind == "reply" else guest_turns.turn_note(turn)
+        note = (agent_talk.notice_note(turn.label) if turn.notice else agent_talk.reply_note(turn.label, comparing=turn.link_id.startswith(agent_talk.COMPARE_PREFIX))) if turn.kind == "reply" else guest_turns.turn_note(turn)
         blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{prompts.turn_context(notes=note)}")
         words = operator_words_metadata(str(message.metadata.get("daedalus.origin") or "operator"), prompts.without_turn_context(said))
         return message.model_copy(update={"content_blocks": blocks, "metadata": {**message.metadata, **words}})

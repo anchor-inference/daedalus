@@ -101,6 +101,7 @@ from daedalus.extensions import (
     api_knowledge,
     api_lifecycle,
     api_link_export,
+    api_link_flows,
     api_mcp,
     api_meetings,
     api_memory,
@@ -1769,6 +1770,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_contacts.register(api, app, auth)
     # One conversation over an agent link, either way, as a zip or as a note in its chat.
     api_link_export.register(api, app, auth)
+    api_link_flows.register(api, app, auth)
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)

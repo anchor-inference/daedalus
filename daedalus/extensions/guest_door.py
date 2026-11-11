@@ -46,8 +46,9 @@ import httpx
 
 from daedalus import public_address
 from daedalus.config import is_keyproxy_url, keyproxy_base
+from daedalus.extensions.link_flows import GUEST_ACTIONS, SUB_PREFIX, flows_of
 from daedalus.extensions.notifications import Action, ActionConflict, ActionOutcome, ActionRefused, ActionRequest, Draft
-from daedalus.host import guest_turns, link_identity, link_protocol
+from daedalus.host import guest_turns, link_flows, link_identity, link_protocol
 from daedalus.host.filesystem import write_atomically
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.link_protocol import LinkFileError, Staged
@@ -328,6 +329,13 @@ class Delivery:
     """The guest's host's signature over the message, as the door carried it: checked only for a contact."""
     client_key: str = ""
     """The key the guest redeemed with, as the door recorded it."""
+    card: dict[str, Any] | None = None
+    """A card the guest's message carries beside its words, as :func:`link_flows.card_view` keeps it."""
+
+    @property
+    def subscription(self) -> bool:
+        """A turn this side asked for, for a guest's "tell me when" (:mod:`daedalus.extensions.link_flows`)."""
+        return self.role == "owner" and self.ask.startswith(SUB_PREFIX)
 
 
 @dataclass(slots=True)
@@ -424,6 +432,9 @@ class GuestBridge:
         stop here. ``door_told`` is what the next connection reads to tell the door.
         """
         await self.app.db.execute("UPDATE guest_links SET revoked_at = coalesce(revoked_at, ?), door_told = ? WHERE id = ?", (datetime.now(UTC).isoformat(), int(door_told), link_id))
+        flows = flows_of(self.app)
+        if flows is not None:
+            await flows.link_ended(link_id)
         row = await self.known_link(link_id)
         for line in self.lines.values():
             for delivery in [d for d in line.waiting if d.link_id == link_id and not d.run_id]:
@@ -515,7 +526,7 @@ class GuestBridge:
                     role="owner" if item.get("role") == "owner" else "guest", kind=str(item.get("kind") or "text") if item.get("kind") in link_protocol.KINDS else "text",
                     task=_task_id(item.get("task")), files=[_door_file(f) for f in _items(item.get("files"))][: link_protocol.MAX_FILES], ask=str(item.get("ask") or "")[:64],
                     by="owner" if item.get("by") == "owner" else "", signed=item.get("signed") if isinstance(item.get("signed"), dict) else None,
-                    client_key=str(item.get("client_key") or "")[:64],
+                    client_key=str(item.get("client_key") or "")[:64], card=link_flows.card_view(item.get("card")),
                 )
                 if not link_protocol.CONVERSATION.fullmatch(delivery.conversation_id):
                     raise ValueError(delivery.conversation_id)
@@ -542,6 +553,11 @@ class GuestBridge:
         kind, link_id = str(event.get("kind")), str(event.get("link_id"))
         if kind == "task_cancelled":
             await self.task_cancelled(link_id, _task_id(event.get("detail")))
+            return
+        if kind == "card":
+            flows = flows_of(self.app)
+            if flows is not None:
+                await flows.card_from_guest(link_id, str(event.get("detail") or ""), event.get("id"))
             return
         from daedalus.extensions.agent_contacts import ContactError, contacts_of  # Lazy: contacts import this module.
 
@@ -681,8 +697,12 @@ class GuestBridge:
         self.turns.pop(run_id, None)
         spent, _ = await manager.spend(run_id=run_id)
         text = await manager.guest_answer(session_id, run_id) if status == "completed" else ""
+        # A check of a subscription with nothing to tell says so and is answered with silence: the guest hears nothing.
+        quiet = delivery.subscription and status == "completed" and text.strip().endswith(link_flows.NOTHING_YET)
+        if quiet:
+            text = ""
         # A turn that ended without a word, on its model-call bound for one, has not answered; files are an answer.
-        ok = status == "completed" and bool(text or delivery.sent_files)
+        ok = status == "completed" and bool(text or delivery.sent_files or quiet)
         state = link_protocol.NEEDS_INPUT if delivery.asked and ok else link_protocol.DONE if ok else link_protocol.REFUSED
         if delivery.task:
             await self._task_row(session_id, delivery, state if status != "cancelled" else link_protocol.CANCELLED, result=text)
@@ -741,10 +761,10 @@ class GuestBridge:
         if delivery.done is not None and not delivery.done.done():
             delivery.done.set_result(status)
 
-    def signed(self, *, text: str, kind: str = link_protocol.TEXT, task: str = "", by: str = "", to: str = "") -> dict[str, Any]:
+    def signed(self, *, text: str, kind: str = link_protocol.TEXT, task: str = "", by: str = "", to: str = "", card: dict[str, Any] | None = None) -> dict[str, Any]:
         """The ``signed`` field of what this side writes into a conversation, or nothing where there is no key."""
         identity = identity_of(self.app)
-        return {"signed": identity.signed_message(text=text, kind=kind, task=task, by=by, to=to)} if identity is not None else {}
+        return {"signed": identity.signed_message(text=text, kind=kind, task=task, by=by, to=to, card=card)} if identity is not None else {}
 
     async def peer_of(self, link_id: str, conversation_id: str) -> str:
         """The key a conversation's guest redeemed with, which what this side writes to it is signed for."""
@@ -757,7 +777,8 @@ class GuestBridge:
     async def say(self, link_id: str, conversation_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """A message of this side's own into a conversation, signed for its guest as a reply is."""
         text, kind, task, by = str(body.get("text") or ""), str(body.get("kind") or link_protocol.TEXT), str(body.get("task") or ""), str(body.get("from") or "")
-        signed = self.signed(text=_as_door_keeps(text), kind=kind, task=task, by=by, to=await self.peer_of(link_id, conversation_id))
+        card = link_flows.card_view(body.get("card"))
+        signed = self.signed(text=_as_door_keeps(text), kind=kind, task=task, by=by, to=await self.peer_of(link_id, conversation_id), card=card)
         return await self.client.call("POST", f"/control/conversations/{conversation_id}/messages", json={**body, **signed})
 
     async def say_as_owner(self, link_id: str, conversation_id: str, text: str) -> None:
@@ -804,10 +825,24 @@ class GuestBridge:
     async def _turn_input(self, session_id: str, delivery: Delivery, label: str) -> tuple[str, str]:
         """What a turn reads, and what the app shows of the guest's words. The guest's words are fenced; what this side
         says about them (a task, the files and where they are) stands outside the fence in its own voice."""
+        if delivery.subscription:
+            flows = flows_of(self.app)
+            if flows is None:
+                raise LinkFileError("subscriptions are not available here")
+            try:
+                return await flows.subscription_input(session_id, delivery, label), ""
+            except ValueError as exc:
+                raise LinkFileError(str(exc)) from None
         if delivery.role == "owner":
             return await self._owner_input(session_id, delivery, label), ""
         saved = await self._fetch_incoming(session_id, delivery)
         guest_text = delivery.text
+        if delivery.card is not None:
+            # Inside the fence with the guest's words: a card is as much a stranger's as what it says.
+            guest_text = "\n\n".join(part for part in (guest_text, link_flows.card_words(delivery.card)) if part)
+            flows = flows_of(self.app)
+            if flows is not None:
+                await flows.keep_card(SIDE, delivery.link_id, session_id, "theirs", delivery.card, conversation=delivery.conversation_id, text=delivery.text)
         if saved:
             guest_text = "\n\n".join(part for part in (guest_text, "\n".join(f"[file: {path} ({size} bytes)]" for path, size in saved)) if part)
         lead: list[str] = [OWNER_NOTE] if delivery.by == "owner" else []
@@ -939,19 +974,25 @@ class GuestBridge:
         delivery = line.waiting[0]
         return delivery if delivery.link_id == turn.link_id else None
 
-    async def turn_action(self, state: Any, action: str, *, text: str = "", files: list[str] | None = None) -> tuple[str, bool]:
-        """What ``AgentTalk`` does in a guest's turn: send files, a progress line, a question for the operator. Returns the
-        words for the tool's result and whether they are an error."""
+    async def turn_action(self, state: Any, action: str, *, text: str = "", files: list[str] | None = None, extra: dict[str, Any] | None = None) -> tuple[str, bool]:
+        """What ``AgentTalk`` does in a guest's turn: send files, a progress line, a question for the operator, and what
+        :mod:`daedalus.extensions.link_flows` adds. Returns the words for the tool's result and whether they are an error."""
         delivery = self.running_delivery(state)
         if delivery is None:
             return "This turn answers no guest's message.", True
+        flows = flows_of(self.app)
+        if action in GUEST_ACTIONS and flows is not None:
+            return await flows.guest_action(state, delivery, action, text=text, files=files or [], extra=extra or {})
         if action == "send":
             return await self._send_files(state, delivery, files or [], text)
         if action == "progress":
             return await self._progress(delivery, text)
         if action == "ask_owner":
             return await self._ask_owner(state, delivery, text)
-        return "In a guest's turn AgentTalk does send (files to the guest), progress (a short line on the task) and ask_owner. Your final message is your answer.", True
+        return (
+            "In a guest's turn AgentTalk does send (files to the guest), progress (a short line on the task), ask_owner, summary, slots, meet, apply_patch, share_service, "
+            "subscribe and unsubscribe. Your final message is your answer."
+        ), True
 
     async def _send_files(self, state: Any, delivery: Delivery, paths: list[str], note: str) -> tuple[str, bool]:
         turn = state.guest_turn
@@ -1146,7 +1187,11 @@ class GuestBridge:
         tasks = await self.app.db.fetchall("SELECT * FROM link_tasks WHERE side = ? AND owner = ? ORDER BY id", (SIDE, link_id))
         row = await self.known_link(link_id)
         held = [group for group in await self.held(str(row["session_id"])) if group["link_id"] == link_id] if row is not None else []
-        return {"files": [file_view(row) for row in files], "tasks": [task_view(row) for row in tasks], "held": held}
+        out = {"files": [file_view(row) for row in files], "tasks": [task_view(row) for row in tasks], "held": held}
+        flows = flows_of(self.app)
+        if flows is not None:
+            out.update(cards=await flows.cards_of(SIDE, link_id), subscriptions=await flows.subscriptions_of(link_id), actions=await flows.actions_of(SIDE, link_id))
+        return out
 
     # -- notification buttons ---------------------------------------------------------
 
