@@ -7,6 +7,7 @@ import { api, GuestDefaults, GuestDoor, GuestExchange, GuestInvite, GuestLink, G
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
+import { KeyLine, OfferContact, OwnerSay } from "./contacts";
 import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
@@ -33,7 +34,8 @@ export function inviteText(topic: string, url: string): string {
 /** The word and tone a link is shown with: its own state until it is spent, then its conversation's. */
 export function linkState(link: Pick<GuestLink, "state" | "conversation">): { key: string; tone: "" | "attn" | "ok" } {
   if (link.state === "revoked" || link.state === "expired") return { key: link.state, tone: "" };
-  if (link.state === "waiting") return { key: "waiting", tone: "" };
+  // A link for several guests waits for the next one while those who came talk: what they are doing is the news.
+  if (link.state === "waiting" && !link.conversation) return { key: "waiting", tone: "" };
   const conversation = link.conversation;
   if (!conversation) return { key: "used", tone: "" };
   return { key: conversation.state, tone: conversation.state === "pending" ? "attn" : conversation.state === "open" ? "ok" : "" };
@@ -159,7 +161,7 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead, onEd
     link.priced ? (link.usd_limit ? `${usd(link.spent_usd)} / ${usd(link.usd_limit)}` : t("guest.spent.nolimit", { sum: usd(link.spent_usd) })) : "",
     plural("guest.turns", link.turns_used),
     link.state === "waiting" ? (link.invite_expires_at ? t("guest.expires", { when: relTimeLong(ms(link.invite_expires_at)) }) : t("guest.expires.never")) : "",
-    link.conversation?.client === "daedalus" ? t("guest.client.daedalus") : "",
+    guestsWord(link),
   ].filter(Boolean).join(" · ");
   return (
     <div className="guest-link" data-guest-link={link.id} data-state={state.key}>
@@ -168,6 +170,8 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead, onEd
         <span className={`chip ${state.tone}`} data-guest-state="">{t(`guest.state.${state.key}`)}</span>
       </div>
       <div className="sub guest-link-meta">{meta}</div>
+      {/* Who came, by the key it proved it holds; anything it only said about itself is not shown as a fact. */}
+      {conversation && (link.max_guests ?? 1) === 1 && <KeyLine fingerprint={conversation.fingerprint} verified={!!conversation.verified} />}
       {pending && conversation && (
         <>
           <blockquote className="guest-quote" data-guest-quote="">
@@ -190,6 +194,14 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead, onEd
       </div>
     </div>
   );
+}
+
+/** How many guests a link has had of how many it takes, for a link of more than one. */
+export function guestsWord(link: Pick<GuestLink, "max_guests" | "conversations">): string {
+  const most = link.max_guests ?? 1;
+  if (most === 1) return "";
+  const came = link.conversations?.length ?? 0;
+  return most ? t("guest.guests.of", { n: came, of: most }) : t("guest.guests.free", { n: came });
 }
 
 /** What all guests together may spend in a day, or no limit at all: a choice of its own, which the door stores
@@ -262,14 +274,18 @@ export function doorFiles(message: Pick<GuestMessage, "files">, files: readonly 
 }
 
 function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: string; toast: (text: string) => void; onBack: () => void }) {
-  const path = `${LINKS}/${encoded(id)}`;
+  // A link of several guests reads one conversation at a time: the newest until the operator picks another.
+  const [picked, setPicked] = useState("");
+  const path = `${LINKS}/${encoded(id)}${picked ? `?conversation=${encoded(picked)}` : ""}`;
   const query = useQuery<{ link: GuestLinkDetail; exchange?: GuestExchange }>(path, { pollMs: 4000 });
   const link = query.data?.link;
+  const guests = link?.conversations ?? [];
+  const current = guests.find((one) => one.id === picked) ?? link?.conversation ?? null;
   const exchange = query.data?.exchange ?? NO_EXCHANGE;
   const [briefing, setBriefing] = useState(false);
   const [busy, setBusy] = useState(false);
   const refresh = () => {
-    invalidate(path);
+    invalidate(`${LINKS}/${encoded(id)}`);
     invalidate(`/api/sessions/${encoded(sessionId)}/agent-talks`);
   };
   async function cancel(task: LinkTask) {
@@ -301,9 +317,25 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
               {briefing && <div className="guest-briefing guest-msg-text" data-guest-briefing="">{link.briefing}</div>}
             </>
           )}
+          {guests.length > 1 && (
+            <div className="guest-guests" role="list" aria-label={t("guest.guests")} data-guest-guests="">
+              {guests.map((one, at) => (
+                <button key={one.id} type="button" role="listitem" className={`chip select ${one.state === "pending" ? "attn" : ""}`} aria-pressed={current?.id === one.id} data-guest-pick={one.id} onClick={() => setPicked(one.id)}>
+                  {t("guest.guest.n", { n: at + 1 })} · {t(`guest.state.${one.state}`)}{one.spent_usd ? ` · ${usd(one.spent_usd)}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+          {current && <KeyLine fingerprint={current.fingerprint} verified={!!current.verified} />}
           {exchange.held.map((group) => <GuestHeldApproval key={group.batch} group={group} toast={toast} onDone={refresh} />)}
           <TaskList tasks={exchange.tasks} side="theirs" busy={busy} onCancel={cancel} />
           {link.messages.length === 0 ? <div className="sub">{t(link.mode === "direct" ? "guest.nomessages.direct" : "guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} files={doorFiles(message, exchange.files)} toast={toast} />)}
+          {current?.state === "open" && link.state !== "revoked" && (
+            <>
+              <OwnerSay path={`${LINKS}/${encoded(link.id)}/conversations/${encoded(current.id)}/say`} toast={toast} onSent={refresh} />
+              {link.mode === "direct" && current.verified && <OfferContact via={`link:${link.id}:${current.id}`} name={link.label} toast={toast} />}
+            </>
+          )}
         </>
       )}
     </div>
@@ -311,10 +343,11 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
 }
 
 function GuestMessageRow({ message, mode, files, toast }: { message: GuestMessage; mode: GuestMode; files: readonly LinkFile[]; toast: (text: string) => void }) {
-  const who = message.role === "guest" ? t("guest.role.guest") : message.role === "door" ? t("guest.role.door") : t(mode === "direct" ? "guest.role.direct" : "guest.role.standin");
+  const owner = message.by === "owner";
+  const who = message.role === "guest" ? t(owner ? "guest.role.guest.owner" : "guest.role.guest") : message.role === "door" ? t("guest.role.door") : owner ? t("guest.role.owner") : t(mode === "direct" ? "guest.role.direct" : "guest.role.standin");
   const kind = message.kind === "file" && files.length ? "" : kindWord(message.kind, message.task_state);
   return (
-    <div className="guest-msg" data-role={message.role} data-kind={message.kind || "text"}>
+    <div className="guest-msg" data-role={message.role} data-kind={message.kind || "text"} data-author={owner ? "owner" : undefined}>
       <div className="guest-msg-head">
         <b>{who}</b>
         {kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}
@@ -329,12 +362,13 @@ function GuestMessageRow({ message, mode, files, toast }: { message: GuestMessag
 
 // ── making and editing a link ────────────────────────────────────────────────────────────
 
-type NumberName = "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours" | "retention_days" | "file_mb" | "day_mb";
+type NumberName = "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours" | "retention_days" | "file_mb" | "day_mb" | "max_guests" | "total_usd";
 type LimitName = Exclude<NumberName, "retention_days">;
-const NUMBERS: NumberName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "retention_days", "file_mb", "day_mb"];
-const LIMITS: LimitName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "file_mb", "day_mb"];
-/** The host's own defaults for files (`link_protocol.DEFAULT_FILE_MB`, `DEFAULT_DAY_MB`), for a door that names none. */
-const FILE_DEFAULTS: Partial<Record<NumberName, number>> = { file_mb: 50, day_mb: 500 };
+const NUMBERS: NumberName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "retention_days", "file_mb", "day_mb", "max_guests", "total_usd"];
+const LIMITS: LimitName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "file_mb", "day_mb", "max_guests", "total_usd"];
+/** The host's own defaults for files (`link_protocol.DEFAULT_FILE_MB`, `DEFAULT_DAY_MB`), for a door that names none, and
+ *  what a field starts from when "No limit" is switched off where there was none: a shared budget, more than one guest. */
+const FILE_DEFAULTS: Partial<Record<NumberName, number>> = { file_mb: 50, day_mb: 500, total_usd: 5, max_guests: 1 };
 /** The limits only a direct link has: a stand-in takes no files, so its form neither shows nor checks them. */
 const FILE_LIMITS: NumberName[] = ["file_mb", "day_mb"];
 
@@ -351,6 +385,8 @@ const RANGES: Record<NumberName, { min: number; max: number; whole?: boolean; ab
   retention_days: { min: 0, max: 3650 },
   file_mb: { min: 0, max: 1_000_000, above: true },
   day_mb: { min: 0, max: 1_000_000, above: true },
+  max_guests: { min: 1, max: 10_000, whole: true },
+  total_usd: { min: 0, max: 10_000, above: true },
 };
 
 export function numberOf(name: NumberName, text: string): number | null {
@@ -372,11 +408,13 @@ export function levelOf(link: Pick<GuestLink, "mode" | "guest_tools">): GuestLev
 type Numbers = { text: Record<NumberName, string>; none: Record<LimitName, boolean> };
 
 /** A form's numbers from stored values: 0 is "no limit", shown as the choice with the default ready behind it. */
-function numbersFrom(values: Record<NumberName, number>, defaults: GuestDefaults): Numbers {
+function numbersFrom(values: Partial<Record<NumberName, number>>, defaults: GuestDefaults): Numbers {
   const text = {} as Record<NumberName, string>;
   const none = {} as Record<LimitName, boolean>;
-  for (const name of NUMBERS) text[name] = String(name !== "retention_days" && !values[name] ? defaults[name] ?? FILE_DEFAULTS[name] ?? 0 : values[name]);
-  for (const name of LIMITS) none[name] = !values[name];
+  // A value that is not there yet (a link from before several guests) reads as the default: one guest, no shared budget.
+  const of = (name: NumberName) => values[name] ?? defaults[name] ?? (name === "max_guests" ? 1 : 0);
+  for (const name of NUMBERS) text[name] = String(name !== "retention_days" && !of(name) ? defaults[name] || FILE_DEFAULTS[name] || 0 : of(name));
+  for (const name of LIMITS) none[name] = !of(name);
   return { text, none };
 }
 
@@ -490,7 +528,7 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
   const billing: GuestBilling = standIn ? door.models.find((model) => model.id === modelId)?.billing ?? "metered" : door.chat_priced ? "metered" : "plan";
   const priced = billing === "metered";
   const value = (name: NumberName): number | null => (name !== "retention_days" && numbers.none[name] ? 0 : numberOf(name, numbers.text[name]));
-  const valid = NUMBERS.filter((name) => (priced || name !== "usd_limit") && (!standIn || !FILE_LIMITS.includes(name))).every((name) => value(name) !== null)
+  const valid = NUMBERS.filter((name) => (priced || (name !== "usd_limit" && name !== "total_usd")) && (!standIn || !FILE_LIMITS.includes(name))).every((name) => value(name) !== null)
     && (!standIn || (!!modelId && briefing.trim() !== "" && (!drafted || read)));
 
   function writeBriefing(next: string) {
@@ -556,6 +594,8 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
       // A stand-in takes no files; it is sent what it has, so a link made as one and turned direct later keeps them.
       file_mb: standIn ? (editing?.file_mb ?? defaults.file_mb ?? FILE_DEFAULTS.file_mb!) : value("file_mb")!,
       day_mb: standIn ? (editing?.day_mb ?? defaults.day_mb ?? FILE_DEFAULTS.day_mb!) : value("day_mb")!,
+      max_guests: value("max_guests")!,
+      total_usd: priced && value("max_guests") !== 1 ? value("total_usd")! : 0,
     };
     try {
       if (editing) {
@@ -639,6 +679,9 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
         : <div className="sub" data-guest-bound={billing}>{t(`guest.bound.${billing}`)}</div>}
       <LimitRow name="turns_per_day" title={t("guest.field.turnsday")} numbers={numbers} onText={setText("turns_per_day")} onNone={setNone("turns_per_day")} />
       <LimitRow name="invite_hours" title={t("guest.field.lifetime")} unit={t("guest.unit.hours")} never numbers={numbers} onText={setText("invite_hours")} onNone={setNone("invite_hours")} />
+      <LimitRow name="max_guests" title={t("guest.field.guests")} numbers={numbers} onText={setText("max_guests")} onNone={setNone("max_guests")} />
+      {/* Each guest has the limits above to itself; what they may spend together is a limit of its own. */}
+      {priced && value("max_guests") !== 1 && <LimitRow name="total_usd" title={t("guest.field.total")} unit="$" numbers={numbers} onText={setText("total_usd")} onNone={setNone("total_usd")} />}
       {!standIn && (
         <>
           <LimitRow name="file_mb" title={t("link.limit.file")} unit={t("link.unit.mb")} numbers={numbers} onText={setText("file_mb")} onNone={setNone("file_mb")} />
@@ -708,7 +751,7 @@ function MadeLink({ url, topic, toast, onDone }: { url: string; topic: string; t
 
 /** A guest's message in the conversation: a card with their mark and what their turn could do. Plain
  *  text only: it is a stranger's, and it is drawn on the answer's side, never as the operator's bubble. */
-export function GuestCard({ guest, text }: { guest?: { label: string; tools: string; kind?: "reply" } | null; text: string }) {
+export function GuestCard({ guest, text }: { guest?: { label: string; tools: string; kind?: "reply"; by?: "owner" } | null; text: string }) {
   const label = guest?.label ?? "";
   const reply = guest?.kind === "reply";
   const tools = reply ? t("talk.card.woke") : guest?.tools === "none" || guest?.tools === "read" || guest?.tools === "all" || guest?.tools === "trusted" ? t(`guest.tools.${guest.tools}`) : "";
@@ -718,6 +761,7 @@ export function GuestCard({ guest, text }: { guest?: { label: string; tools: str
         <Icon name="link" size={13} />
         <b>{reply ? t("talk.card.from", { host: label }) : label ? t("guest.from", { label }) : t("guest.from.none")}</b>
         {tools && <span>{tools}</span>}
+        {guest?.by === "owner" && <span className="owner-mark" data-guest-by="owner">{t("guest.by.owner")}</span>}
       </div>
       <div className="guest-card-text">{text}</div>
     </div>

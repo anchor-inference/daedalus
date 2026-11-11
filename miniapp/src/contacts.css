@@ -1,0 +1,37 @@
+/* Standing contacts and the operator's own words (contacts.tsx). What the other side wrote is pre-wrapped plain text,
+   as in the rest of the Agents tab; these rules only lay it out. A contact borrows a talk card's frame. */
+
+.contacts { display: flex; flex-direction: column; gap: var(--space-2); }
+.contacts-mine { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.contact { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.contact[data-contact-state="incoming"], .contact[data-contact-state="key"] { border-left: 3px solid var(--warn); }
+.contact[data-contact-state="broken"] { background: transparent; color: var(--fg-2); }
+.contact-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: var(--ctl-h-sm); }
+.contact-head > .ic { flex: none; color: var(--fg-3); }
+.contact-head .chip { margin-left: auto; flex: none; }
+.contact-name { font-weight: 500; min-width: 0; }
+.contact-meta { font-variant-numeric: tabular-nums; }
+.contact-quote { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--bg); }
+.contact-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.contact .segmented, .contact-form .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
+.contact .segmented button, .contact-form .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.contact-form { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) 0; min-width: 0; }
+.contact-incoming { display: flex; flex-direction: column; gap: var(--space-2); }
+.contact-caption { margin-bottom: calc(-1 * var(--space-1)); font-size: var(--fs-12); }
+
+/* A fingerprint is read aloud group by group, so its digits keep one width and never break inside a group. */
+.key-line { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; }
+.key-line[data-key="verified"] { color: var(--fg); }
+.key-line > .ic { flex: none; color: var(--ok); }
+
+/* The operator's own message: a field and its button, the button under it on a phone. */
+.owner-say { display: flex; align-items: flex-end; gap: var(--space-2); min-width: 0; }
+.owner-say textarea { flex: 1 1 auto; min-width: 0; min-height: 56px; font-size: var(--fs-13); line-height: 1.45; resize: vertical; }
+.owner-say .btn { flex: none; }
+@media (max-width: 480px) {
+  .owner-say { flex-direction: column; align-items: stretch; }
+  .owner-say .btn { align-self: flex-end; }
+}
+
+/* A message an operator wrote themselves, on either side: marked apart from the agents' words. */
+.owner-mark { display: inline-flex; align-items: center; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg); font-size: var(--fs-11); }

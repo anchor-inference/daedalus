@@ -981,9 +981,39 @@ export type AgentTalk = {
   file_mb: number;
   day_mb: number;
   tasks: LinkTask[];
+  /** The fingerprint of the key the other door's card proved its owner holds; empty when it proved none. */
+  fingerprint?: string;
+  /** The standing contact this conversation belongs to, if any. */
+  contact?: { id: string; name: string; state: ContactState } | null;
 };
-/** What a message of an agent link is: words, files, a task set on the other side, a question, or a task's news. */
-export type LinkKind = "text" | "file" | "task" | "question" | "status";
+/** What a message of an agent link is: words, files, a task set on the other side, a question, a task's news, or an
+ *  offer of a standing contact (which is for the operator, never the agent). */
+export type LinkKind = "text" | "file" | "task" | "question" | "status" | "contact";
+/** A standing contact with another installation (`daedalus/extensions/agent_contacts.py`). `incoming` is an offer
+ *  waiting for the operator; `accepting` waits for the other side to redeem our link. */
+export type ContactState = "offered" | "incoming" | "accepting" | "active" | "broken";
+/** `level` is the tools of our link for them; `stand_in` when the operator made it one in the link's editor. The
+ *  address of their link is never here. `offer_text` is the other side's words: untrusted plain text. */
+export type Contact = {
+  id: string;
+  name: string;
+  state: ContactState;
+  reason: string;
+  session_id: string;
+  fingerprint: string;
+  link_id: string;
+  talk_id: string;
+  offer_text: string;
+  level: "" | "read" | "all" | "trusted" | "stand_in";
+  usd_limit: number;
+  turns_per_day: number;
+  spent_usd: number;
+  created_at: string;
+  last_at: string;
+  via: string;
+};
+/** Every contact of the installation, with this side's own fingerprint to read to the other operator. */
+export type ContactList = { contacts: Contact[]; fingerprint: string; name: string; levels: string[] };
 export type LinkTaskState = "accepted" | "working" | "needs_input" | "done" | "refused" | "cancelled";
 /** A task over a link. `mine` is one this side set on the other agent, `theirs` one a guest set on this chat. */
 export type LinkTask = { task: string; direction: "mine" | "theirs"; text: string; state: LinkTaskState; result: string; created_at: string; updated_at: string };
@@ -1013,7 +1043,13 @@ export type LinkFile = {
 export type HeldGroup = { batch: string; link_id: string; label: string; task: string; note: string; files: LinkFile[] };
 /** `role`: `us` is this side's agent, `them` the other's, `door` the other door's own words. Text is never markup.
  *  `files` are ids into the detail's `files`. */
-export type AgentTalkMessage = { id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string; kind: LinkKind; task: string; task_state?: string; files: number[] };
+export type AgentTalkMessage = {
+  id: number; role: "us" | "them" | "door"; text: string; state: string; note: string; at: string; kind: LinkKind; task: string; task_state?: string; files: number[];
+  /** `owner`: written by an operator themselves, ours (`us`) or theirs (`them`), rather than an agent. */
+  author?: "" | "owner";
+  /** How the other side's signature checked: `ok`, `bad` (refused on a contact), or empty where there was no key. */
+  signed?: "" | "ok" | "bad";
+};
 export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[]; files: LinkFile[] };
 export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number; guest_held: HeldGroup[]; file_mb: number; day_mb: number };
 
@@ -1033,6 +1069,11 @@ export type GuestConversation = {
   first_message?: string;
   /** What the guest said it is at the redeem: a claim, for the owner to read, and nothing more. */
   client?: string;
+  /** The fingerprint of the key the guest redeemed with, present only where its proof held (`verified`). */
+  fingerprint?: string;
+  verified?: boolean;
+  spent_usd?: number;
+  turns_used?: number;
 };
 /** One link as the door describes it. Times are epoch seconds. */
 export type GuestLink = {
@@ -1063,10 +1104,19 @@ export type GuestLink = {
   file_mb: number;
   day_mb: number;
   files_today_bytes: number;
+  /** How many guests may redeem it, each into a conversation of its own (0: no limit), and what they may spend
+   *  together (0: no limit); `usd_limit` is each guest's. `conversations` are the guests so far, oldest first. */
+  max_guests?: number;
+  total_usd?: number;
+  conversations?: GuestConversation[];
 };
 /** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person).
  *  `files` are the door's file ids, which `GuestExchange.files[].remote_id` matches. */
-export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number; kind?: LinkKind; task?: string; task_state?: string; files?: string[] };
+export type GuestMessage = {
+  id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number; kind?: LinkKind; task?: string; task_state?: string; files?: string[];
+  /** `owner`: the guest's owner (role `guest`), or this side's operator (role `agent`), wrote it themselves. */
+  by?: string;
+};
 /** `instructions` and `model_id` are the host's: the note to the agent the door never has, and the model as the form names it. */
 export type GuestLinkDetail = GuestLink & { briefing: string; instructions?: string; model_id?: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
 /** A link's files and tasks as this side holds them, with what waits to go out. */
@@ -1086,6 +1136,8 @@ export type GuestDefaults = {
   retention_days: number;
   file_mb: number;
   day_mb: number;
+  max_guests?: number;
+  total_usd?: number;
 };
 /** Why a direct link cannot be given every tool this chat could be: it has no sandbox to run commands in, or its folder is on the host. */
 export type GuestToolsWhy = "" | "no_sandbox" | "no_limits" | "host_folder" | "project_folder";
@@ -1127,6 +1179,9 @@ export type GuestLinkBody = {
   /** A direct link's files; a stand-in takes none, and is sent the defaults. */
   file_mb: number;
   day_mb: number;
+  /** Guests the link takes (0: no limit) and what they may spend together (0: no limit). */
+  max_guests: number;
+  total_usd: number;
 };
 /** The answer to making or re-issuing a link. `url` is in no other answer and is never kept anywhere. */
 export type GuestInvite = { link: GuestLink; url: string };
@@ -1329,7 +1384,7 @@ export type MessageView = {
   silent?: boolean;
   /** A message that came over an agent link (origin `guest:<link>`): who the link was made for and what
    *  the turn it started could do. The text is the guest's words, never the operator's. */
-  guest?: { label: string; tools: string; kind?: "reply" } | null;
+  guest?: { label: string; tools: string; kind?: "reply"; by?: "owner" } | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
