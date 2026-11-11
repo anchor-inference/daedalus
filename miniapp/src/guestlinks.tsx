@@ -3,10 +3,11 @@
 // that says whose it is, and nothing here turns it into markdown, a link or a picture.
 
 import { useEffect, useRef, useState } from "react";
-import { api, GuestDefaults, GuestDoor, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestBilling, GuestMode, GuestTools } from "./api";
+import { api, GuestDefaults, GuestDoor, GuestExchange, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestBilling, GuestMode, GuestTools, LinkFile, LinkTask } from "./api";
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
+import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
@@ -66,7 +67,7 @@ export function GuestLinksSheet({ sessionId, toast, onClose }: { sessionId: stri
         ) : view.kind === "made" ? (
           <MadeLink url={view.url} topic={view.topic} toast={toast} onDone={() => setView({ kind: "list" })} />
         ) : view.kind === "read" ? (
-          <GuestReader id={view.id} onBack={() => setView({ kind: "list" })} />
+          <GuestReader id={view.id} sessionId={sessionId} toast={toast} onBack={() => setView({ kind: "list" })} />
         ) : (
           <GuestList sessionId={sessionId} door={data} toast={toast} onNew={() => setView({ kind: "form" })} onRead={(id) => setView({ kind: "read", id })} onEdit={(id) => setView({ kind: "edit", id })} onMade={(url, topic) => setView({ kind: "made", url, topic })} />
         )}
@@ -251,10 +252,38 @@ function DailyLimit({ door, toast }: { door: GuestDoor; toast: (text: string) =>
 
 // ── reading a conversation ───────────────────────────────────────────────────────────────
 
-function GuestReader({ id, onBack }: { id: string; onBack: () => void }) {
-  const query = useQuery<{ link: GuestLinkDetail }>(`${LINKS}/${encoded(id)}`, { pollMs: 4000 });
+const NO_EXCHANGE: GuestExchange = { files: [], tasks: [], held: [] };
+
+/** A door message's files, matched by the door's ids to what this side keeps of them. A file the door named and
+ *  this side has no row for yet is left out rather than drawn as a name with nothing behind it. */
+export function doorFiles(message: Pick<GuestMessage, "files">, files: readonly LinkFile[]): LinkFile[] {
+  const ids = new Set(message.files ?? []);
+  return ids.size ? files.filter((file) => file.remote_id && ids.has(file.remote_id)) : [];
+}
+
+function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: string; toast: (text: string) => void; onBack: () => void }) {
+  const path = `${LINKS}/${encoded(id)}`;
+  const query = useQuery<{ link: GuestLinkDetail; exchange?: GuestExchange }>(path, { pollMs: 4000 });
   const link = query.data?.link;
+  const exchange = query.data?.exchange ?? NO_EXCHANGE;
   const [briefing, setBriefing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const refresh = () => {
+    invalidate(path);
+    invalidate(`/api/sessions/${encoded(sessionId)}/agent-talks`);
+  };
+  async function cancel(task: LinkTask) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.post(`${path}/tasks/${encoded(task.task)}/cancel`);
+      refresh();
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="guest-reader" data-guest-reader="">
       <div className="guest-bar">
@@ -272,33 +301,42 @@ function GuestReader({ id, onBack }: { id: string; onBack: () => void }) {
               {briefing && <div className="guest-briefing guest-msg-text" data-guest-briefing="">{link.briefing}</div>}
             </>
           )}
-          {link.messages.length === 0 ? <div className="sub">{t(link.mode === "direct" ? "guest.nomessages.direct" : "guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} />)}
+          {exchange.held.map((group) => <GuestHeldApproval key={group.batch} group={group} toast={toast} onDone={refresh} />)}
+          <TaskList tasks={exchange.tasks} side="theirs" busy={busy} onCancel={cancel} />
+          {link.messages.length === 0 ? <div className="sub">{t(link.mode === "direct" ? "guest.nomessages.direct" : "guest.nomessages")}</div> : link.messages.map((message) => <GuestMessageRow key={message.id} message={message} mode={link.mode} files={doorFiles(message, exchange.files)} toast={toast} />)}
         </>
       )}
     </div>
   );
 }
 
-function GuestMessageRow({ message, mode }: { message: GuestMessage; mode: GuestMode }) {
+function GuestMessageRow({ message, mode, files, toast }: { message: GuestMessage; mode: GuestMode; files: readonly LinkFile[]; toast: (text: string) => void }) {
   const who = message.role === "guest" ? t("guest.role.guest") : message.role === "door" ? t("guest.role.door") : t(mode === "direct" ? "guest.role.direct" : "guest.role.standin");
+  const kind = message.kind === "file" && files.length ? "" : kindWord(message.kind, message.task_state);
   return (
-    <div className="guest-msg" data-role={message.role}>
+    <div className="guest-msg" data-role={message.role} data-kind={message.kind || "text"}>
       <div className="guest-msg-head">
         <b>{who}</b>
+        {kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}
         <span className="sub">{absTime(ms(message.at))}</span>
         {message.cost_usd > 0 && <span className="sub">{usd(message.cost_usd)}</span>}
       </div>
-      <div className="guest-msg-text">{message.text}</div>
+      {message.text && <div className="guest-msg-text">{message.text}</div>}
+      <LinkFiles files={files} toast={toast} />
     </div>
   );
 }
 
 // ── making and editing a link ────────────────────────────────────────────────────────────
 
-type NumberName = "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours" | "retention_days";
+type NumberName = "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours" | "retention_days" | "file_mb" | "day_mb";
 type LimitName = Exclude<NumberName, "retention_days">;
-const NUMBERS: NumberName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "retention_days"];
-const LIMITS: LimitName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours"];
+const NUMBERS: NumberName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "retention_days", "file_mb", "day_mb"];
+const LIMITS: LimitName[] = ["usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours", "file_mb", "day_mb"];
+/** The host's own defaults for files (`link_protocol.DEFAULT_FILE_MB`, `DEFAULT_DAY_MB`), for a door that names none. */
+const FILE_DEFAULTS: Partial<Record<NumberName, number>> = { file_mb: 50, day_mb: 500 };
+/** The limits only a direct link has: a stand-in takes no files, so its form neither shows nor checks them. */
+const FILE_LIMITS: NumberName[] = ["file_mb", "day_mb"];
 
 /** What the door accepts for a number that is set (`LinkBody` in daedalus/extensions/api_guest.py), so a value it
  *  would refuse is marked before it is sent, not after. "No limit" is a choice of its own and not a number: the
@@ -311,6 +349,8 @@ const RANGES: Record<NumberName, { min: number; max: number; whole?: boolean; ab
   conversation_hours: { min: 0.1, max: 8760 },
   idle_hours: { min: 0.1, max: 8760 },
   retention_days: { min: 0, max: 3650 },
+  file_mb: { min: 0, max: 1_000_000, above: true },
+  day_mb: { min: 0, max: 1_000_000, above: true },
 };
 
 export function numberOf(name: NumberName, text: string): number | null {
@@ -335,7 +375,7 @@ type Numbers = { text: Record<NumberName, string>; none: Record<LimitName, boole
 function numbersFrom(values: Record<NumberName, number>, defaults: GuestDefaults): Numbers {
   const text = {} as Record<NumberName, string>;
   const none = {} as Record<LimitName, boolean>;
-  for (const name of NUMBERS) text[name] = String(name !== "retention_days" && !values[name] ? defaults[name] : values[name]);
+  for (const name of NUMBERS) text[name] = String(name !== "retention_days" && !values[name] ? defaults[name] ?? FILE_DEFAULTS[name] ?? 0 : values[name]);
   for (const name of LIMITS) none[name] = !values[name];
   return { text, none };
 }
@@ -450,7 +490,7 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
   const billing: GuestBilling = standIn ? door.models.find((model) => model.id === modelId)?.billing ?? "metered" : door.chat_priced ? "metered" : "plan";
   const priced = billing === "metered";
   const value = (name: NumberName): number | null => (name !== "retention_days" && numbers.none[name] ? 0 : numberOf(name, numbers.text[name]));
-  const valid = NUMBERS.filter((name) => priced || name !== "usd_limit").every((name) => value(name) !== null)
+  const valid = NUMBERS.filter((name) => (priced || name !== "usd_limit") && (!standIn || !FILE_LIMITS.includes(name))).every((name) => value(name) !== null)
     && (!standIn || (!!modelId && briefing.trim() !== "" && (!drafted || read)));
 
   function writeBriefing(next: string) {
@@ -513,6 +553,9 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
       conversation_hours: value("conversation_hours")!,
       idle_hours: value("idle_hours")!,
       retention_days: value("retention_days")!,
+      // A stand-in takes no files; it is sent what it has, so a link made as one and turned direct later keeps them.
+      file_mb: standIn ? (editing?.file_mb ?? defaults.file_mb ?? FILE_DEFAULTS.file_mb!) : value("file_mb")!,
+      day_mb: standIn ? (editing?.day_mb ?? defaults.day_mb ?? FILE_DEFAULTS.day_mb!) : value("day_mb")!,
     };
     try {
       if (editing) {
@@ -596,6 +639,12 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
         : <div className="sub" data-guest-bound={billing}>{t(`guest.bound.${billing}`)}</div>}
       <LimitRow name="turns_per_day" title={t("guest.field.turnsday")} numbers={numbers} onText={setText("turns_per_day")} onNone={setNone("turns_per_day")} />
       <LimitRow name="invite_hours" title={t("guest.field.lifetime")} unit={t("guest.unit.hours")} never numbers={numbers} onText={setText("invite_hours")} onNone={setNone("invite_hours")} />
+      {!standIn && (
+        <>
+          <LimitRow name="file_mb" title={t("link.limit.file")} unit={t("link.unit.mb")} numbers={numbers} onText={setText("file_mb")} onNone={setNone("file_mb")} />
+          <LimitRow name="day_mb" title={t("link.limit.day")} unit={t("link.unit.mb")} numbers={numbers} onText={setText("day_mb")} onNone={setNone("day_mb")} />
+        </>
+      )}
       <div className="settings-row">
         <span className="settings-row-text"><span className="settings-row-title">{t("guest.field.approval")}</span></span>
         <div className="settings-row-ctl"><Switch checked={approval} onChange={setApproval} label={t("guest.field.approval")} /></div>

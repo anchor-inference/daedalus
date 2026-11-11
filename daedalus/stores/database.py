@@ -3813,6 +3813,7 @@ LINK_KINDS_COLUMNS = (
     ("agent_talks", "task_wakes", "INTEGER NOT NULL DEFAULT 0"),
     ("agent_talk_messages", "kind", "TEXT NOT NULL DEFAULT 'text'"),
     ("agent_talk_messages", "task", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "task_state", "TEXT NOT NULL DEFAULT ''"),
 )
 
 

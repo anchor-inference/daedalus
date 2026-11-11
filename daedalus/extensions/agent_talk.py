@@ -395,7 +395,7 @@ class AgentTalks:
             files = [file_view(row) for row in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND owner = ? ORDER BY id", (SIDE, talk["id"]))]
             out["files"] = files
             out["messages"] = [
-                {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"],
+                {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"], "task_state": row["task_state"],
                  "files": [file["id"] for file in files if file["message_id"] == row["id"]]}
                 for row in rows
             ]
@@ -1003,8 +1003,8 @@ class AgentTalks:
                     continue
                 role = THEM if sender == "agent" else DOOR
                 cursor_row = await conn.execute(
-                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (talk_id, role, clean, UNREAD, door_id, _now(), kind, task),
+                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (talk_id, role, clean, UNREAD, door_id, _now(), kind, task, state),
                 )
                 message_id = int(cursor_row.lastrowid or 0) if cursor_row.rowcount else 0
                 await cursor_row.close()

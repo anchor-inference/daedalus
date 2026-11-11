@@ -956,7 +956,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # change what the next read of the list returns.
     if (rel.startswith("/api/guest/") or (rel.startswith("/api/sessions/") and "/guest/" in rel)) and fulfil_shared(route):
         return None
-    if (rel.startswith("/api/agent-talks/") or rel.endswith("/agent-talks")) and fulfil_shared(route):
+    if (rel.startswith("/api/agent-talks/") or rel.endswith("/agent-talks") or rel.startswith("/api/link-files/")) and fulfil_shared(route):
         return None
     # The Notes tab's writes, uploads and files are the shared host's (notes_stub.py), which keeps them.
     if (rel.startswith("/api/notes/") or (rel.startswith("/api/sessions/") and "/notes" in rel)) and fulfil_shared(route):

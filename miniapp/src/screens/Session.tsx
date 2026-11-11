@@ -204,7 +204,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [promoting, setPromoting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [guesting, setGuesting] = useState(false);
-  const { talks: agentTalks, loaded: talksLoaded } = useAgentTalks(id);
+  const { talks: agentTalks, guestHeld, loaded: talksLoaded } = useAgentTalks(id);
   const composer = useRef<ComposerHandle>(null);
   // The right panel: the route carries the open tab and the previewed file for the pane the URL
   // names; the second pane of a dual view keeps its panel to itself. Phones host it in a sheet.
@@ -247,11 +247,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     setSourcesOf(turnKey);
     panel.open("sources");
   }, [panel.open]);
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || panel.state.tab === "agents" });
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
   // A conversation with another agent that starts, a reply that comes, a message that waits for the operator:
   // the Agents tab opens on that change, once. A phone opens no sheet over the chat for it, as it opens none
   // for a subagent; the approval sits over the composer there and the tab is a tile.
-  const talksWaiting = agentsWaiting(agentTalks);
+  const talksWaiting = agentsWaiting(agentTalks, guestHeld);
   const openAgents = useCallback(() => panel.open("agents"), [panel.open]);
   useAgentsAutoOpen(id, agentTalks, talksLoaded, !phone && !embedded && !bare && pane !== "right", openAgents);
   const browserShown = pipGroup(browsers.groups);
@@ -1684,7 +1684,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
     ...(panelTabs.includes("notes") ? [{ id: "notes", icon: "note" as IconName, label: t("panel.tab.notes"), count: notesCount || undefined, onSelect: () => panel.open("notes") }] : []),
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
-    ...(panelTabs.includes("agents") ? [{ id: "agents", icon: "bots" as IconName, label: t("panel.tab.agents"), count: talksWaiting || undefined, attn: agentTalks.some((talk) => talk.held > 0), onSelect: openAgents }] : []),
+    ...(panelTabs.includes("agents") ? [{ id: "agents", icon: "bots" as IconName, label: t("panel.tab.agents"), count: talksWaiting || undefined, attn: guestHeld.length > 0 || agentTalks.some((talk) => talk.held > 0), onSelect: openAgents }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
     ...(sessionCanvases?.length ? [{ id: "canvas", icon: "grid" as IconName, label: t("session.phone.canvas"), count: sessionCanvases.length, onSelect: () => navigate(pathFor("canvas", null, { session: id })) }] : []),
   ] : [];
@@ -1992,7 +1992,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               : (quote) => setBtw((open) => ({ question: "", prefill: `${quote.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n")}\n\n`, ask: (open?.ask ?? 0) + 1 }))} />}
           {detail?.id === id && <Composer
             ref={composer}
-            above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : <TalkApprovals talks={agentTalks} phone={phone} toast={toast} />}
+            above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : <TalkApprovals sessionId={id} talks={agentTalks} guestHeld={guestHeld} phone={phone} toast={toast} />}
             beside={browsers.user?.env === "user" ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
             sessionId={id}
             // A turn parked for its computer reads "waiting", the word a question uses, but nothing is
@@ -2086,7 +2086,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
               notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
               browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
-              agents: <AgentsTab talks={agentTalks} loaded={talksLoaded} toast={toast} />,
+              agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} loaded={talksLoaded} toast={toast} />,
               subagents: <SubagentsTab
                 leaderId={id}
                 selected={panel.state.sub}
@@ -2098,7 +2098,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             }}
             // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
             badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
-            marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
+            marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
             details={hasDetails ? (ids) =>
               <SessionDetails
                 ids={ids}

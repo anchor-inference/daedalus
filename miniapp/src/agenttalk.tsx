@@ -8,10 +8,11 @@
 // them turning yellow: the message itself was a click and a sheet away, and was missed.
 
 import { useEffect, useRef, useState } from "react";
-import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkReview, api } from "./api";
+import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkReview, api, HeldGroup, LinkFile, LinkTask } from "./api";
 import { absTime, usd } from "./format";
 import { Icon } from "./icons";
 import { t } from "./i18n";
+import { FilePicks, GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { invalidate, useQuery } from "./store";
 import { Segmented, Switch } from "./ui/components";
 import { confirmAsync, errorText } from "./ui";
@@ -21,6 +22,8 @@ const POLL_MS = 5000;
 const WAKE_TURNS = 5;
 const WAKE_USD = 0.5;
 const SENDS = 30;
+const FILE_MB = 50;
+const DAY_MB = 500;
 /** What the host stores for "no limit" on waking (`agent_talk.NO_LIMIT`); a cap on sends uses 0. */
 export const NO_LIMIT = -1;
 
@@ -28,9 +31,13 @@ const encoded = encodeURIComponent;
 const listPath = (sessionId: string) => `/api/sessions/${encoded(sessionId)}/agent-talks`;
 const talkPath = (id: string) => `/api/agent-talks/${encoded(id)}`;
 
-export function useAgentTalks(sessionId: string | null | undefined): { talks: AgentTalk[]; loaded: boolean } {
+const NO_HELD: HeldGroup[] = [];
+
+/** The chat's conversations, and the files its own links want to send (`guestHeld`): both wait for the operator
+ *  over the composer and in the Agents tab. */
+export function useAgentTalks(sessionId: string | null | undefined): { talks: AgentTalk[]; guestHeld: HeldGroup[]; loaded: boolean } {
   const { data } = useQuery<AgentTalkList>(sessionId ? listPath(sessionId) : null, { pollMs: POLL_MS });
-  return { talks: data?.talks ?? [], loaded: !!data };
+  return { talks: data?.talks ?? [], guestHeld: data?.guest_held ?? NO_HELD, loaded: !!data };
 }
 
 /** What a conversation is doing, in one word and a tone: `attn` where it waits for the operator. */
@@ -48,9 +55,10 @@ export function talkCounts(talk: Pick<AgentTalk, "sends" | "sends_limit" | "repl
   return [sent, t("talk.replies", { n: talk.replies }), usd(talk.spent_usd)].join(" · ");
 }
 
-/** What the tab's badge counts: messages waiting for the operator and replies the agent has not read yet. */
-export function agentsWaiting(talks: readonly AgentTalk[]): number {
-  return talks.filter((talk) => talk.state !== "closed").reduce((sum, talk) => sum + talk.held + talk.unread, 0);
+/** What the tab's badge counts: messages waiting for the operator, replies the agent has not read yet, and each
+ *  set of files a guest's turn wants to send. */
+export function agentsWaiting(talks: readonly AgentTalk[], guestHeld: readonly HeldGroup[] = []): number {
+  return talks.filter((talk) => talk.state !== "closed").reduce((sum, talk) => sum + talk.held + talk.unread, 0) + guestHeld.length;
 }
 
 type Seen = Map<string, { replies: number; held: number }>;
@@ -85,30 +93,52 @@ export function useAgentsAutoOpen(sessionId: string, talks: readonly AgentTalk[]
 
 // ── the approval of a message that waits ──────────────────────────────────────────────────────
 
-async function decide(talk: AgentTalk, message: AgentTalkMessage, send: boolean, text?: string) {
-  await api.post(`${talkPath(talk.id)}/messages/${message.id}/${send ? "send" : "refuse"}`, text !== undefined ? { text } : undefined);
+/** What Send posts: the edit when there is one and the files held back when any are. Neither is sent when it says
+ *  nothing, so a plain Send is the request it always was. */
+export function decision(text: string | undefined, dropped: ReadonlySet<number>): { text?: string; drop?: number[] } | undefined {
+  const body: { text?: string; drop?: number[] } = {};
+  if (text !== undefined) body.text = text;
+  if (dropped.size) body.drop = [...dropped].sort((a, b) => a - b);
+  return Object.keys(body).length ? body : undefined;
+}
+
+async function decide(talk: AgentTalk, message: AgentTalkMessage, send: boolean, body?: { text?: string; drop?: number[] }) {
+  await api.post(`${talkPath(talk.id)}/messages/${message.id}/${send ? "send" : "refuse"}`, send ? body : undefined);
   invalidate(listPath(talk.session_id));
   invalidate(talkPath(talk.id));
 }
 
+/** The files of a message, by the ids it names, in the order the detail lists them. */
+export function filesOf(message: Pick<AgentTalkMessage, "files">, files: readonly LinkFile[] | undefined): LinkFile[] {
+  const ids = new Set(message.files ?? []);
+  return ids.size ? (files ?? []).filter((file) => ids.has(file.id)) : [];
+}
+
 /** One held message as an approval, drawn like the composer's own permission request: who it goes to, why it
- *  waits, the whole text, and Send, Edit and Don't send. Edit opens the text in place; what is sent then is
- *  the operator's words, which the host puts in the conversation in place of the agent's. */
-export function TalkApproval({ talk, message, phone, toast }: { talk: AgentTalk; message: AgentTalkMessage; phone?: boolean; toast: (text: string) => void }) {
+ *  waits, the whole text, its files, and Send, Edit and Don't send. Edit opens the text in place; what is sent
+ *  then is the operator's words, which the host puts in the conversation in place of the agent's. Each file has
+ *  a tick, on to begin with; an unticked one stays here. With no words and no file left, Send would send
+ *  nothing, so it waits and Don't send is the answer. */
+export function TalkApproval({ talk, message, files = [], phone, toast }: { talk: AgentTalk; message: AgentTalkMessage; files?: readonly LinkFile[]; phone?: boolean; toast: (text: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.text);
   const [busy, setBusy] = useState(false);
+  const [dropped, setDropped] = useState<Set<number>>(() => new Set());
   useEffect(() => {
     if (!editing) setText(message.text);
   }, [message.text, editing]);
   const title = t("talk.approve.title", { host: talk.host });
   const why = t(`talk.held.${message.note || "first"}`);
   const changed = editing && text.trim() !== message.text.trim();
+  const going = files.filter((file) => !dropped.has(file.id)).length;
+  const empty = !(editing ? text : message.text).trim() && (files.length > 0 ? going === 0 : true);
+  // The host refuses an empty edit whatever goes with it, so an emptied field waits as it always did.
+  const blocked = (editing && !text.trim()) || empty;
   async function act(send: boolean) {
-    if (busy || (send && editing && !text.trim())) return;
+    if (busy || (send && blocked)) return;
     setBusy(true);
     try {
-      await decide(talk, message, send, send && changed ? text : undefined);
+      await decide(talk, message, send, decision(changed ? text : undefined, dropped));
       setEditing(false);
     } catch (e) {
       toast(errorText(e));
@@ -120,6 +150,8 @@ export function TalkApproval({ talk, message, phone, toast }: { talk: AgentTalk;
     ? <textarea className="field talk-edit" data-talk-edit="" aria-label={t("talk.edit")} rows={Math.min(10, Math.max(3, text.split("\n").length + 1))} value={text} autoFocus onChange={(e) => setText(e.target.value)} />
     : <div className={`${phone ? "ph-tray-detail" : "dock-detail"} talk-approve-text`}>{message.text}</div>;
   const sendLabel = t(changed ? "talk.send.edited" : "talk.send");
+  const picks = <FilePicks files={files} dropped={dropped} disabled={busy} toast={toast} onChange={setDropped} />;
+  const nothing = files.length > 0 && going === 0 ? <div className="sub talk-approve-why" data-talk-nothing="">{t(empty ? "link.held.none" : "link.held.textonly")}</div> : null;
   if (phone) {
     return (
       <div className="dock approval ph-tray talk-approval" role="group" aria-label={title} data-talk-held={message.id}>
@@ -127,8 +159,10 @@ export function TalkApproval({ talk, message, phone, toast }: { talk: AgentTalk;
         <div className="ph-tray-title">{title}</div>
         <div className="sub talk-approve-why">{why}</div>
         {body}
+        {picks}
+        {nothing}
         <div className="ph-tray-actions">
-          <button type="button" className="ph-btn primary" data-action="send" disabled={busy} onClick={() => void act(true)}>{sendLabel}</button>
+          <button type="button" className="ph-btn primary" data-action="send" disabled={busy || blocked} onClick={() => void act(true)}>{sendLabel}</button>
           <button type="button" className="ph-btn" data-action="edit" disabled={busy} onClick={() => setEditing((on) => !on)}>{t(editing ? "talk.edit.undo" : "talk.edit")}</button>
           <button type="button" className="ph-btn ph-deny" data-action="refuse" disabled={busy} onClick={() => void act(false)}>{t("talk.refuse")}</button>
         </div>
@@ -143,8 +177,10 @@ export function TalkApproval({ talk, message, phone, toast }: { talk: AgentTalk;
       </div>
       <div className="sub talk-approve-why">{why}</div>
       {body}
+      {picks}
+      {nothing}
       <div className="dock-actions">
-        <button type="button" className="btn small primary" data-action="send" disabled={busy} onClick={() => void act(true)}>{sendLabel}</button>
+        <button type="button" className="btn small primary" data-action="send" disabled={busy || blocked} onClick={() => void act(true)}>{sendLabel}</button>
         <button type="button" className="btn small" data-action="edit" disabled={busy} onClick={() => setEditing((on) => !on)}>{t(editing ? "talk.edit.undo" : "talk.edit")}</button>
         <button type="button" className="btn small" data-action="refuse" disabled={busy} onClick={() => void act(false)}>{t("talk.refuse")}</button>
       </div>
@@ -155,25 +191,36 @@ export function TalkApproval({ talk, message, phone, toast }: { talk: AgentTalk;
 function HeldOf({ talk, phone, toast }: { talk: AgentTalk; phone?: boolean; toast: (text: string) => void }) {
   const { data } = useQuery<AgentTalkDetail>(talkPath(talk.id), { pollMs: POLL_MS });
   const held = data?.messages.filter((message) => message.state === "held") ?? [];
-  return <>{held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} phone={phone} toast={toast} />)}</>;
+  return <>{held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} files={filesOf(message, data?.files)} phone={phone} toast={toast} />)}</>;
 }
 
-/** Over the composer, where the strips were: every message of this chat's conversations that waits to go out. */
-export function TalkApprovals({ talks, phone, toast }: { talks: readonly AgentTalk[]; phone?: boolean; toast: (text: string) => void }) {
+/** The files this chat's links want to send, each set as its own approval. */
+function GuestHeldList({ sessionId, groups, phone, toast }: { sessionId: string; groups: readonly HeldGroup[]; phone?: boolean; toast: (text: string) => void }) {
+  const done = (group: HeldGroup) => () => {
+    invalidate(listPath(sessionId));
+    invalidate(`/api/guest/links/${encoded(group.link_id)}`);
+  };
+  return <>{groups.map((group) => <GuestHeldApproval key={`${group.link_id}:${group.batch}`} group={group} phone={phone} toast={toast} onDone={done(group)} />)}</>;
+}
+
+/** Over the composer, where the strips were: every message of this chat's conversations that waits to go out,
+ *  and every set of files a guest's turn on this chat's links wants to send. */
+export function TalkApprovals({ sessionId, talks, guestHeld = NO_HELD, phone, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; phone?: boolean; toast: (text: string) => void }) {
   const waiting = talks.filter((talk) => talk.state !== "closed" && talk.held > 0);
-  if (!waiting.length) return null;
+  if (!waiting.length && !guestHeld.length) return null;
   return (
     <div className="talk-approvals" data-talk-approvals="">
       {waiting.map((talk) => <HeldOf key={talk.id} talk={talk} phone={phone} toast={toast} />)}
+      <GuestHeldList sessionId={sessionId} groups={guestHeld} phone={phone} toast={toast} />
     </div>
   );
 }
 
 // ── the tab ───────────────────────────────────────────────────────────────────────────────────
 
-export function AgentsTab({ talks, loaded, toast }: { talks: readonly AgentTalk[]; loaded: boolean; toast: (text: string) => void }) {
+export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast }: { sessionId: string; talks: readonly AgentTalk[]; guestHeld?: readonly HeldGroup[]; loaded: boolean; toast: (text: string) => void }) {
   if (!loaded) return <div className="talks"><div className="sub talks-loading">{t("common.loading")}</div></div>;
-  if (!talks.length) {
+  if (!talks.length && !guestHeld.length) {
     return (
       <div className="talks">
         <div className="subagents-empty">
@@ -187,6 +234,12 @@ export function AgentsTab({ talks, loaded, toast }: { talks: readonly AgentTalk[
   const over = talks.filter((talk) => talk.state === "closed");
   return (
     <div className="talks" data-agents-tab="">
+      {guestHeld.length > 0 && (
+        <section className="subagents-group talks-held" data-group="guest-held">
+          <div className="dt-label"><span>{t("link.held.group")}</span><span className="dt-aside">{guestHeld.length}</span></div>
+          <GuestHeldList sessionId={sessionId} groups={guestHeld} toast={toast} />
+        </section>
+      )}
       {live.length > 0 && (
         <section className="subagents-group" data-group="live">
           <div className="dt-label"><span>{t("talk.group.live")}</span><span className="dt-aside">{live.length}</span></div>
@@ -231,6 +284,7 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
   const end = async () => {
     if (await confirmAsync(t("talk.end.ask", { host: talk.host }), { action: t("talk.end"), danger: true })) void act(() => api.post(`${path}/end`));
   };
+  const cancel = (task: LinkTask) => void act(() => api.post(`${path}/tasks/${encoded(task.task)}/cancel`));
   const messages = data?.messages ?? [];
   const held = messages.filter((message) => message.state === "held");
   return (
@@ -242,23 +296,28 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
       </div>
       <div className="talk-counts sub" title={t("talk.spend.note")}>{talk.mode ? `${t(`talk.mode.${talk.mode}`)} · ` : ""}{talkCounts(talk)}</div>
       {talk.topic && <blockquote className="talk-topic"><span className="sub">{t("talk.topic")}</span><div className="talk-text">{talk.topic}</div></blockquote>}
+      {/* The tasks above the thread: what was asked and where it stands is what the operator looks for first. */}
+      <TaskList tasks={talk.tasks ?? []} side="mine" busy={busy || !live} onCancel={live ? cancel : undefined} />
       <div className="talk-messages" data-talk-messages="">
-        {messages.filter((message) => message.state !== "held").map((message) => <TalkLine key={message.id} message={message} />)}
+        {messages.filter((message) => message.state !== "held").map((message) => <TalkLine key={message.id} message={message} files={filesOf(message, data?.files)} toast={toast} />)}
         {data && !messages.length && <div className="sub">{t("talk.empty")}</div>}
       </div>
       {/* The newest line of the thread, where it would stand once sent. */}
-      {held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} toast={toast} />)}
+      {held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} files={filesOf(message, data?.files)} toast={toast} />)}
       {live && <TalkControls talk={talk} busy={busy} onChange={(body) => act(() => api.put(`${path}/settings`, body))} onEnd={() => void end()} />}
     </article>
   );
 }
 
-function TalkLine({ message }: { message: AgentTalkMessage }) {
+function TalkLine({ message, files, toast }: { message: AgentTalkMessage; files: readonly LinkFile[]; toast: (text: string) => void }) {
   const word = message.state === "sent" || message.state === "read" ? "" : t(`talk.message.${message.state}`);
+  // A message that only carried files says so through them; "file" beside them would say it twice.
+  const kind = message.kind === "file" && files.length ? "" : kindWord(message.kind, message.task_state);
   return (
-    <div className="talk-msg" data-role={message.role} data-state={message.state}>
-      <div className="talk-msg-head"><b>{t(`talk.role.${message.role}`)}</b><span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
-      <div className="talk-text">{message.text}</div>
+    <div className="talk-msg" data-role={message.role} data-state={message.state} data-kind={message.kind || "text"}>
+      <div className="talk-msg-head"><b>{t(`talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
+      {message.text && <div className="talk-text">{message.text}</div>}
+      <LinkFiles files={files} toast={toast} />
     </div>
   );
 }
@@ -318,6 +377,8 @@ function TalkControls({ talk, busy, onChange, onEnd }: { talk: AgentTalk; busy: 
         <span className="sub">{t(`talk.review.${talk.review}.hint`)}</span>
       </div>
       <LimitField id="sends" title={t("talk.sends")} value={talk.sends_limit} none={0} fallback={SENDS} whole disabled={busy} onCommit={(next) => onChange({ sends_limit: next })} />
+      <LimitField id="file-mb" title={t("link.limit.file")} value={talk.file_mb ?? FILE_MB} none={0} fallback={FILE_MB} unit={t("link.unit.mb")} disabled={busy} onCommit={(next) => onChange({ file_mb: next })} />
+      <LimitField id="day-mb" title={t("link.limit.day")} value={talk.day_mb ?? DAY_MB} none={0} fallback={DAY_MB} unit={t("link.unit.mb")} disabled={busy} onCommit={(next) => onChange({ day_mb: next })} />
       <div className="talk-control">
         <span className="talk-toggle"><span className="talk-control-title">{t("talk.wake")}</span><Switch checked={waking} label={t("talk.wake")} disabled={busy} onChange={(on) => onChange(on ? { wake_turns: plan.turns, wake_usd: plan.usd } : { wake_turns: 0, wake_usd: 0 })} /></span>
         <span className="sub">{waking ? t("talk.wake.on", { turns: talk.wake_turns < 0 ? none : talk.wake_turns, usd: talk.wake_usd < 0 ? none : usd(talk.wake_usd) }) : t("talk.wake.off")}</span>

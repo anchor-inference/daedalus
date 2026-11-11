@@ -334,6 +334,7 @@ async def test_our_agent_sets_a_task_wakes_on_its_result_and_gets_its_file(rig_f
     await until(lambda: talk_rig.db.fetchone("SELECT 1 FROM agent_talks WHERE id = ? AND task_wakes = 0", (talk_id,)))
     view = await talk_rig.talks.describe(await talk_rig.talks.talk(talk_id), messages=True)
     assert view["tasks"][0]["state"] == "done" and any(f["name"] == "summary.txt" and f["direction"] == "in" for f in view["files"])
+    assert any(m["kind"] == "status" and m["task_state"] == "done" and m["task"] == task for m in view["messages"])
 
 
 async def test_our_files_wait_for_the_operator_like_a_first_message_and_one_can_be_dropped(rig_for: Any) -> None:
