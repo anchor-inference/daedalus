@@ -4,8 +4,12 @@ Each one is the operator's, behind the app's own login, and most are a translati
 door's control socket (:mod:`daedalus.extensions.guest_door`). Nothing here is reachable from the door's
 public port, which serves another process altogether.
 
-Limits and lifetimes default here and travel with the link. The invite comes back once, in the answer to
-the call that made it, and neither this process nor the door keeps it.
+Limits and lifetimes default here and travel with the link. Each may be 0, which is none at all: the app
+offers that as its own choice, "no limit", and never as a number to guess. The invite comes back once, in the
+answer to the call that made it, and neither this process nor the door keeps it.
+
+A link's settings can all be changed after it is made. The door holds what it enforces and this side holds
+what a turn may do, so an edit writes both, the door first: a door that refuses leaves this side as it was.
 """
 
 from __future__ import annotations
@@ -42,7 +46,9 @@ DEFAULTS: dict[str, Any] = {
     "mode": "stand_in", "approval": True, "tools": guest_turns.DEFAULT_TOOLS, "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200,
     "invite_hours": 72.0, "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0,
 }
-"""What the form opens with. Numbers from no standard: a guest is paid for by the owner, so they start small."""
+"""What the form opens with. Numbers from no standard: a guest is paid for by the owner, so they start small.
+A trusted agent is the operator's own choice of somebody to serve, and starts with no limits at all."""
+TRUSTED_DEFAULTS: dict[str, Any] = {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0}
 
 DRAFT_MESSAGES = 30
 DRAFT_CHARS = 16_000
@@ -68,15 +74,17 @@ class LinkBody(BaseModel):
     mode: Literal["stand_in", "direct"] = DEFAULTS["mode"]
     model_id: str = Field(default="", max_length=200)
     briefing: str = Field(default="", max_length=20_000)
+    instructions: str = Field(default="", max_length=4000)
+    """A direct link's note to the chat's agent, beside the topic. Kept on this side only: the door never has it."""
     briefing_approved: bool = False
     tools: guest_turns.GuestTools = guest_turns.DEFAULT_TOOLS
     approval: bool = DEFAULTS["approval"]
     usd_limit: float = Field(default=DEFAULTS["usd_limit"], ge=0, le=10_000)
-    turns_per_day: int = Field(default=DEFAULTS["turns_per_day"], ge=1, le=100_000)
-    turns_total: int = Field(default=DEFAULTS["turns_total"], ge=1, le=1_000_000)
-    invite_hours: float = Field(default=DEFAULTS["invite_hours"], gt=0, le=8760)
-    conversation_hours: float = Field(default=DEFAULTS["conversation_hours"], gt=0, le=8760)
-    idle_hours: float = Field(default=DEFAULTS["idle_hours"], gt=0, le=8760)
+    turns_per_day: int = Field(default=DEFAULTS["turns_per_day"], ge=0, le=100_000)
+    turns_total: int = Field(default=DEFAULTS["turns_total"], ge=0, le=1_000_000)
+    invite_hours: float = Field(default=DEFAULTS["invite_hours"], ge=0, le=8760)
+    conversation_hours: float = Field(default=DEFAULTS["conversation_hours"], ge=0, le=8760)
+    idle_hours: float = Field(default=DEFAULTS["idle_hours"], ge=0, le=8760)
     retention_days: float = Field(default=DEFAULTS["retention_days"], ge=0, le=3650)
 
 
@@ -104,6 +112,39 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     def link_url(invite: str) -> str:
         return f"{public_address.guest_base(app.settings)}/a/{invite}"
 
+    async def door_fields(state: Any, body: LinkBody) -> dict[str, Any]:
+        """What the door is to hold for a link, or the reason this chat cannot have it. Shared by making a link and editing one."""
+        manager = app.manager
+        fields = body.model_dump(exclude={"model_id", "briefing_approved", "tools", "instructions"})
+        if body.mode == "direct":
+            if any(state.metadata.get(key) for key in PRIVATE_KINDS) or manager.is_dispatcher(state) or manager.is_orchestrator(state) or manager.is_companion(state) or manager.is_prompt_coach(state) or manager.is_btw(state):
+                raise HTTPException(409, "a direct link needs an ordinary chat")
+            refused = await manager.guest_ready(state.session.id, body.tools)
+            if refused:
+                raise HTTPException(409, REFUSED_WORDS.get(refused, refused))
+            if body.usd_limit and await manager.guest_price(state.session.id) is None:
+                raise HTTPException(409, "this chat's model has no known price, so a dollar limit could not hold")
+            fields.update(model_path="", model_name="", price_in=0.0, price_out=0.0, briefing="", guest_tools=body.tools)
+        else:
+            option = next((o for o in model_options(app) if o["id"] == body.model_id), None)
+            if option is None:
+                raise HTTPException(422, "that model is not one the door can reach")
+            if not body.briefing.strip():
+                raise HTTPException(422, "a stand-in needs a briefing")
+            if not body.briefing_approved:
+                # The briefing is published to whoever holds the link, so a person reads it first.
+                raise HTTPException(422, "the briefing must be approved before it is used")
+            fields.update(model_path=option["path"], model_name=option["model"], price_in=option["price_in"], price_out=option["price_out"], guest_tools="none")
+        return fields
+
+    def kept(body: LinkBody) -> dict[str, Any]:
+        """What this side keeps of a link: what its turns may do and what the operator wrote for the agent."""
+        direct = body.mode == "direct"
+        return {
+            "label": body.label.strip() or body.topic.strip()[:120], "mode": body.mode, "tools": body.tools if direct else "none", "usd_limit": body.usd_limit,
+            "topic": body.topic.strip(), "instructions": body.instructions.strip() if direct else "",
+        }
+
     @api.get("/api/guest/door")
     async def door_state(session_id: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Whether links can be made here, and everything the form needs to open."""
@@ -112,7 +153,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         why = await app.manager.guest_full_tools(state) if state is not None else "no_sandbox"
         price = await app.manager.guest_price(state.session.id) if state is not None else None
         out: dict[str, Any] = {
-            "available": False, "public_base": public_address.guest_base(app.settings), "defaults": DEFAULTS, "models": models, "left_out": left_out, "usd_per_day": 0.0, "spent_today": 0.0,
+            "available": False, "public_base": public_address.guest_base(app.settings), "defaults": DEFAULTS, "trusted_defaults": TRUSTED_DEFAULTS, "models": models, "left_out": left_out, "usd_per_day": 0.0, "spent_today": 0.0,
             "full_tools": not why, "full_tools_why": why, "chat_priced": bool(any(price)) if price else True,
         }
         try:
@@ -134,9 +175,32 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.get("/api/guest/links/{link_id}")
     async def one_link(link_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        if await bridge().known_link(link_id) is None:
+        known = await bridge().known_link(link_id)
+        if known is None:
             raise HTTPException(404, "no such link")
-        return await door("GET", f"/control/links/{link_id}")
+        out = await door("GET", f"/control/links/{link_id}")
+        return {**out, "link": described(out.get("link") or {}, known)}
+
+    def described(link: dict[str, Any], known: Any) -> dict[str, Any]:
+        """The door's view of a link, with what only this side holds: the turn's level and the note to the agent,
+        and the model as the form names it, so an edit opens on what the link has."""
+        model_id = next((o["id"] for o in model_options(app) if o["path"] == link.get("model_path") and o["model"] == link.get("model_name")), "")
+        tools = str(known["tools"]) if known["mode"] == "direct" else "none"
+        return {**link, "guest_tools": tools, "instructions": str(known["instructions"] or ""), "model_id": model_id}
+
+    @api.put("/api/guest/links/{link_id}")
+    async def edit_link(link_id: str, body: LinkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Every setting of a link, changed in place: the invite and the conversation stay what they are."""
+        known = await bridge().known_link(link_id)
+        if known is None or known["revoked_at"]:
+            raise HTTPException(404, "no such link")
+        manager = app.manager
+        state = await manager.get_state(str(known["session_id"])) if manager is not None else None
+        if state is None:
+            raise HTTPException(404, "no such session")
+        out = await door("PUT", f"/control/links/{link_id}", json=await door_fields(state, body))
+        await bridge().relabel_link(link_id, **kept(body))
+        return {**out, "link": described(out.get("link") or {}, await bridge().known_link(link_id))}
 
     @api.post("/api/sessions/{session_id}/guest/links")
     async def create_link(session_id: str, body: LinkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -146,29 +210,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such session")
         if not public_address.guest_base(app.settings):
             raise HTTPException(409, "the guest door has no public address: set GUEST_PUBLIC_URL")
-        fields = body.model_dump(exclude={"model_id", "briefing_approved", "tools"})
-        if body.mode == "direct":
-            if any(state.metadata.get(key) for key in PRIVATE_KINDS) or manager.is_dispatcher(state) or manager.is_orchestrator(state) or manager.is_companion(state) or manager.is_prompt_coach(state) or manager.is_btw(state):
-                raise HTTPException(409, "a direct link needs an ordinary chat")
-            refused = await manager.guest_ready(session_id, body.tools)
-            if refused:
-                raise HTTPException(409, REFUSED_WORDS.get(refused, refused))
-            if await manager.guest_price(session_id) is None:
-                raise HTTPException(409, "this chat's model has no known price, so a dollar limit could not hold")
-            fields.update(model_path="", model_name="", price_in=0.0, price_out=0.0, briefing="", guest_tools=body.tools)
-        else:
-            option = next((o for o in model_options(app) if o["id"] == body.model_id), None)
-            if option is None:
-                raise HTTPException(422, "that model is not one the door can reach")
-            if not body.briefing.strip():
-                raise HTTPException(422, "a stand-in needs a briefing")
-            if not body.briefing_approved:
-                # The briefing is published to whoever holds the link, so a person reads it first.
-                raise HTTPException(422, "the briefing must be approved before it is used")
-            fields.update(model_path=option["path"], model_name=option["model"], price_in=option["price_in"], price_out=option["price_out"], guest_tools="none")
-        made = await door("POST", "/control/links", json=fields)
+        made = await door("POST", "/control/links", json=await door_fields(state, body))
         link = made["link"]
-        await bridge().remember_link(link["id"], session_id, body.label.strip() or body.topic.strip()[:120], body.mode, body.tools if body.mode == "direct" else "none", body.usd_limit)
+        mine = kept(body)
+        await bridge().remember_link(link["id"], session_id, mine.pop("label"), mine.pop("mode"), mine.pop("tools"), mine.pop("usd_limit"), **mine)
         return {"link": link, "url": link_url(made["invite"])}
 
     @api.post("/api/guest/links/{link_id}/revoke")
@@ -191,7 +236,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such link")
         made = await door("POST", f"/control/links/{link_id}/reissue")
         await bridge().revoked(link_id)
-        await bridge().remember_link(made["link"]["id"], str(known["session_id"]), str(known["label"]), str(known["mode"]), str(known["tools"]), float(known["usd_limit"]))
+        await bridge().remember_link(
+            made["link"]["id"], str(known["session_id"]), str(known["label"]), str(known["mode"]), str(known["tools"]), float(known["usd_limit"]),
+            topic=str(known["topic"] or ""), instructions=str(known["instructions"] or ""),
+        )
         return {"link": made["link"], "url": link_url(made["invite"])}
 
     @api.post("/api/guest/conversations/{conversation_id}/{decision}")
@@ -236,4 +284,4 @@ async def write_draft(manager: Any, session_id: str) -> str:
     return "".join(block.text for block in response.message.content_blocks if isinstance(block, TextBlock)).strip()
 
 
-__all__ = ["DEFAULTS", "LinkBody", "register", "write_draft"]
+__all__ = ["DEFAULTS", "TRUSTED_DEFAULTS", "LinkBody", "register", "write_draft"]

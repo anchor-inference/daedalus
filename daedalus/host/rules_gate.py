@@ -33,7 +33,7 @@ from daedalus.browser.monitor import PROMPT as INJECTION_PROMPT
 from daedalus.browser.monitor import SAMPLE_CHARS as INJECTION_SAMPLE_CHARS
 from daedalus.browser.monitor import TIMEOUT_SECONDS as INJECTION_TIMEOUT_SECONDS
 from daedalus.host import action_rules as rules
-from daedalus.host import agent_talk, prompts
+from daedalus.host import agent_talk, guest_turns, prompts
 from daedalus.host.engine_factory import TENANT, refusal_text
 from daedalus.host.policy import (
     ALLOW,
@@ -126,7 +126,7 @@ class RulesGate:
         if verdict.verdict == "allow":
             return None
         if verdict.verdict == "block":
-            if state is not None and state.guest_turn is not None:
+            if state is not None and guest_turns.restricted(state.guest_turn) is not None:
                 # No card for a guest's turn (see hold_block), so none is promised to it either.
                 return HookResult(action=HookActionKind.DENY, reason=f"refused: the auto-review blocked this call ({verdict.reason})")
             family = similar_grant(tool, arguments, f"review.{ruled.category}")
@@ -137,7 +137,7 @@ class RulesGate:
             # sends it. A refusal here would mean a second card and the agent saying it all over again.
             state.review_holds_send = True
             return None
-        if state is not None and state.guest_turn is not None:
+        if state is not None and guest_turns.restricted(state.guest_turn) is not None:
             # Never a card, for the reason the gate gives: an Allow starts a run with the operator's tools
             # over words a stranger chose, and nothing on the card would say so.
             return HookResult(action=HookActionKind.DENY, reason=f"refused: the review of this call did not pass, and a guest's turn asks nobody for anything ({verdict.reason})")
@@ -252,7 +252,7 @@ class RulesGate:
 
         A guest's turn gets no card: nothing standing is ever granted in it, so an Allow would grant a
         call that cannot use it."""
-        if state is None or state.guest_turn is not None or not key:
+        if state is None or guest_turns.restricted(state.guest_turn) is not None or not key:
             return
         pending = dict(state.metadata.get("policy_pending") or {})
         fresh = key not in pending

@@ -29,7 +29,7 @@ from starlette.responses import JSONResponse
 from .mailbox import Mailbox
 from .public import read_body
 from .standin import FAILED_TEXT
-from .store import AGENT, ANSWERED, CLOSED, DIRECT, DOOR, FAILED, HELD, OPEN, PENDING, QUEUED, Store
+from .store import AGENT, ANSWERED, CLOSED, DIRECT, DOOR, FAILED, HELD, NO_LIMIT, OPEN, PENDING, QUEUED, Store
 from .text import inert, one_line
 
 if TYPE_CHECKING:
@@ -47,9 +47,11 @@ once on several links cannot each be handed everything that is left of the day."
 
 REQUIRED = {"label": str, "topic": str, "mode": str, "briefing": str, "model_path": str, "model_name": str, "guest_tools": str}
 NUMBERS = {
-    "price_in": (0.0, 10_000.0), "price_out": (0.0, 10_000.0), "usd_limit": (0.0, 10_000.0), "turns_per_day": (1, 100_000), "turns_total": (1, 1_000_000),
-    "invite_hours": (0.1, 24.0 * 365), "conversation_hours": (0.1, 24.0 * 365), "idle_hours": (0.1, 24.0 * 365), "retention_days": (0.0, 3650.0),
+    "price_in": (0.0, 10_000.0), "price_out": (0.0, 10_000.0), "usd_limit": (0.0, 10_000.0), "turns_per_day": (0, 100_000), "turns_total": (0, 1_000_000),
+    "invite_hours": (0.0, 24.0 * 365), "conversation_hours": (0.0, 24.0 * 365), "idle_hours": (0.0, 24.0 * 365), "retention_days": (0.0, 3650.0),
 }
+"""Each limit and lifetime may be :data:`~.store.NO_LIMIT`, which is none at all; a lifetime that is not is a few minutes at least."""
+LIFETIMES = ("invite_hours", "conversation_hours", "idle_hours")
 ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
 ROUTE_MAX_SLUGS = 32
 
@@ -72,6 +74,9 @@ def link_fields(body: Any) -> dict[str, Any]:
         if isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high:
             raise Invalid(f"{name} must be a number from {low} to {high}")
         fields[name] = value
+    for name in LIFETIMES:
+        if fields[name] and fields[name] < 0.1:
+            raise Invalid(f"{name} is 0 for none, or at least 0.1")
     if fields["mode"] not in ("stand_in", "direct"):
         raise Invalid("mode is stand_in or direct")
     if fields["mode"] == "stand_in" and not fields["briefing"].strip():
@@ -87,7 +92,7 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
     conversation = store.conversation_of_link(link["id"])
     day_key_matches = link["turns_day"] == store._day()
     out: dict[str, Any] = {
-        "id": link["id"], "state": link["state"], "label": link["label"], "topic": link["topic"], "mode": link["mode"], "model_name": link["model_name"],
+        "id": link["id"], "state": link["state"], "label": link["label"], "topic": link["topic"], "mode": link["mode"], "model_name": link["model_name"], "model_path": link["model_path"],
         "approval": bool(link["approval"]), "usd_limit": link["usd_limit"], "priced": link["mode"] == DIRECT or float(link["price_in"]) + float(link["price_out"]) > 0, "turns_per_day": link["turns_per_day"], "turns_total": link["turns_total"],
         "guest_tools": link["guest_tools"], "created_at": link["created_at"], "invite_expires_at": link["invite_expires_at"], "conversation_hours": link["conversation_hours"],
         "idle_hours": link["idle_hours"], "retention_days": link["retention_days"], "spent_usd": link["spent_usd"] + link["reserved_usd"], "turns_used": link["turns_used"],
@@ -162,7 +167,7 @@ class ControlDoor:
         method, path = scope.get("method", "GET"), scope.get("path", "")
         body: Any = None
         if method in ("POST", "PUT"):
-            raw = await read_body(receive) if not path.endswith("/links") else await read_large(receive)
+            raw = await read_body(receive) if not path.startswith("/control/links") else await read_large(receive)
             body = json.loads(raw) if raw else {}
         query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
         store = self.store
@@ -181,7 +186,7 @@ class ControlDoor:
         if (method, path) == ("POST", "/control/deliveries/reset"):
             return 200, {"reset": self.reset()}
         if matched := re.fullmatch(r"/control/links/([0-9a-f]+)(?:/(revoke|reissue))?", path):
-            return self.one_link(method, *matched.groups())
+            return self.one_link(method, *matched.groups(), body)
         if matched := re.fullmatch(r"/control/conversations/([0-9a-f]+)/(admit|refuse)", path):
             if method != "POST":
                 return 405, {"detail": "POST"}
@@ -199,7 +204,7 @@ class ControlDoor:
         if "usd_per_day" in body:
             value = body["usd_per_day"]
             if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
-                raise Invalid("usd_per_day must not be negative")
+                raise Invalid("usd_per_day is 0 for no limit, or more")
             self.store.set_setting("usd_per_day", str(float(value)))
         if "public_base" in body:
             self.store.set_setting("public_base", str(body["public_base"]).rstrip("/"))
@@ -207,13 +212,17 @@ class ControlDoor:
             self.store.set_setting("model_routes", json.dumps(model_routes(body["model_routes"])))
         return 200, {"ok": True, "usd_per_day": self.store.usd_per_day(), "public_base": self.store.setting("public_base")}
 
-    def one_link(self, method: str, link_id: str, action: str | None) -> tuple[int, dict[str, Any]]:
+    def one_link(self, method: str, link_id: str, action: str | None, body: Any = None) -> tuple[int, dict[str, Any]]:
         store = self.store
         link = store.link(link_id)
         if link is None:
             return 404, {"detail": "no such link"}
+        if action is None and method == "PUT":
+            store.update_link(link_id, link_fields(body))
+            self._woken(store.conversation_of_link(link_id))
+            return 200, {"link": view(store, store.link(link_id), full=True)}
         if action is None:
-            return (200, {"link": view(store, link, full=True)}) if method == "GET" else (405, {"detail": "GET"})
+            return (200, {"link": view(store, link, full=True)}) if method == "GET" else (405, {"detail": "GET or PUT"})
         if method != "POST":
             return 405, {"detail": "POST"}
         conversation = store.conversation_of_link(link_id)
@@ -222,7 +231,7 @@ class ControlDoor:
             # first, so at no moment do two invites speak for one set of settings.
             store.revoke(link_id)
             fields = {name: link[name] for name in (*REQUIRED, "price_in", "price_out", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days", "approval")}
-            fields["invite_hours"] = max(0.1, (link["invite_expires_at"] - link["created_at"]) / 3600)
+            fields["invite_hours"] = max(0.1, (link["invite_expires_at"] - link["created_at"]) / 3600) if link["invite_expires_at"] else NO_LIMIT
             new_id, invite = store.create_link(fields)
             self._woken(conversation)
             return 200, {"link": view(store, store.link(new_id)), "invite": invite, "replaces": link_id}
@@ -276,13 +285,13 @@ class ControlDoor:
         host keeps the ids it has seen, so a message offered twice is run once.
         """
         store = self.store
-        out = [self._offer(message, float(message["reserved_usd"])) for message in store.unacknowledged(DIRECT)]
+        out = [self._offer(message, self._put_aside(message)) for message in store.unacknowledged(DIRECT)]
         while (message := store.next_queued(DIRECT)) is not None:
             conversation = store.conversation(message["conversation_id"])
             assert conversation is not None
             link = store.link(conversation["link_id"])
             assert link is not None
-            refusal, share = store.reserve_turn(message["id"], link, max(DIRECT_TURN_USD, float(link["usd_limit"]) / 4))
+            refusal, share = store.reserve_turn(message["id"], link, self.ceiling(link))
             if refusal is not None:
                 store.drop(message["id"])
                 store.record(link["id"], "limit", refusal.limit)
@@ -292,7 +301,19 @@ class ControlDoor:
             out.append(self._offer(message, share))
         return out
 
-    def _offer(self, message: Any, share: float) -> dict[str, Any]:
+    def ceiling(self, link: Any) -> float | None:
+        """A direct turn's share of what it may spend: a quarter of whichever limit bounds it, and ``None`` with none."""
+        bound = float(link["usd_limit"]) or self.store.usd_per_day()
+        return max(DIRECT_TURN_USD, bound / 4) if bound != NO_LIMIT else None
+
+    def _put_aside(self, message: Any) -> float | None:
+        """What a turn offered again was given the first time: ``None`` where nothing bounded it then."""
+        conversation = self.store.conversation(message["conversation_id"])
+        link = self.store.link(conversation["link_id"]) if conversation is not None else None
+        reserved = float(message["reserved_usd"])
+        return reserved if reserved or link is None or self.ceiling(link) is not None else None
+
+    def _offer(self, message: Any, share: float | None) -> dict[str, Any]:
         conversation = self.store.conversation(message["conversation_id"])
         assert conversation is not None
         return {"message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share}

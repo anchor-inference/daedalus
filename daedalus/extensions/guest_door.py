@@ -251,7 +251,8 @@ class Delivery:
     link_id: str
     conversation_id: str
     text: str
-    allowance_usd: float
+    allowance_usd: float | None
+    """What the door put aside for the turn; ``None`` when no limit of the door bounds it."""
     done: asyncio.Future[str] | None = None
     run_id: str = ""
 
@@ -289,10 +290,18 @@ class GuestBridge:
 
     # -- the links the host answers for -----------------------------------------------
 
-    async def remember_link(self, link_id: str, session_id: str, label: str, mode: str, tools: str, usd_limit: float = 0.0) -> None:
+    async def remember_link(self, link_id: str, session_id: str, label: str, mode: str, tools: str, usd_limit: float = 0.0, *, topic: str = "", instructions: str = "") -> None:
+        """``usd_limit`` 0 is no limit, as at the door."""
         await self.app.db.execute(
-            "INSERT INTO guest_links(id, session_id, label, mode, tools, usd_limit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (link_id, session_id, label, mode, tools, usd_limit, datetime.now(UTC).isoformat()),
+            "INSERT INTO guest_links(id, session_id, label, mode, tools, usd_limit, topic, instructions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (link_id, session_id, label, mode, tools, usd_limit, topic, instructions, datetime.now(UTC).isoformat()),
+        )
+
+    async def relabel_link(self, link_id: str, *, label: str, mode: str, tools: str, usd_limit: float, topic: str, instructions: str) -> None:
+        """An edit of a link, on this side: what its next turn reads. A turn already running keeps what it started with."""
+        await self.app.db.execute(
+            "UPDATE guest_links SET label = ?, mode = ?, tools = ?, usd_limit = ?, topic = ?, instructions = ? WHERE id = ?",
+            (label, mode, tools, usd_limit, topic, instructions, link_id),
         )
 
     async def known_link(self, link_id: str) -> Any:
@@ -389,7 +398,8 @@ class GuestBridge:
                 logger.exception("could not act on a guest door event")
         for item in _items(feed.get("deliveries")):
             try:
-                delivery = Delivery(int(item["message_id"]), str(item["link_id"]), str(item["conversation_id"]), str(item["text"])[:MAX_GUEST_TEXT], float(item.get("allowance_usd") or 0.0))
+                allowance = item.get("allowance_usd")
+                delivery = Delivery(int(item["message_id"]), str(item["link_id"]), str(item["conversation_id"]), str(item["text"])[:MAX_GUEST_TEXT], None if allowance is None else float(allowance))
             except (KeyError, TypeError, ValueError):
                 logger.warning("the guest door sent a delivery that makes no sense; left out")
                 continue
@@ -495,19 +505,19 @@ class GuestBridge:
         tools = row["tools"] if row["tools"] in guest_turns.GUEST_TOOLS else "none"
         why = await manager.guest_ready(session_id, tools)
         price = await manager.guest_price(session_id)
-        if why or price is None:
+        limit = float(row["usd_limit"])
+        # A link with no dollar limit runs on a model nobody can price: the operator chose not to count.
+        if why or (price is None and limit):
             logger.warning("a guest's message could not start a turn in session %s: %s", session_id, why or "the chat's model has no known price")
             await self._answer(delivery, ok=False, ran=False)
             return
-        usd_left: float | None = None
-        if any(price):
-            # Clamped here: what the door says a turn may spend is only ever a request.
-            usd_left = max(0.0, min(delivery.allowance_usd, max(guest_turns.TURN_USD, float(row["usd_limit"]) / 4), float(row["usd_limit"])))
-            if await manager.guest_first_call_usd(session_id, price) > usd_left:
-                logger.warning("a guest's turn in session %s would pass its limit on its first call", session_id)
-                await self._answer(delivery, ok=False, ran=False)
-                return
-        turn = GuestTurn(delivery.link_id, str(row["label"]), tools, usd_left, delivery.text)
+        usd_left = self.turn_allowance(delivery.allowance_usd, limit) if price is not None and any(price) else None
+        if usd_left is not None and price is not None and await manager.guest_first_call_usd(session_id, price) > usd_left:
+            logger.warning("a guest's turn in session %s would pass its limit on its first call", session_id)
+            await self._answer(delivery, ok=False, ran=False)
+            return
+        brief = guest_turns.brief_of(str(row["topic"] or ""), str(row["instructions"] or ""))
+        turn = GuestTurn(delivery.link_id, str(row["label"]), tools, usd_left, delivery.text, brief=brief)
         run_id = await self._start(session_id, delivery, turn)
         if not run_id:
             await self._answer(delivery, ok=False, ran=False)
@@ -519,6 +529,15 @@ class GuestBridge:
         text = await manager.guest_answer(session_id, run_id) if status == "completed" else ""
         # A turn that ended without a word, on its model-call bound for one, has not answered.
         await self._answer(delivery, ok=status == "completed" and bool(text), text=text, cost=spent)
+
+    @staticmethod
+    def turn_allowance(door_said: float | None, usd_limit: float) -> float | None:
+        """What one turn may spend: what the door put aside, clamped to this side's record of the link, since what
+        the door says is only ever a request. ``None`` when neither bounds it, a link and a day with no limit."""
+        bounds = [] if door_said is None else [door_said]
+        if usd_limit > 0:
+            bounds += [max(guest_turns.TURN_USD, usd_limit / 4), usd_limit]
+        return max(0.0, min(bounds)) if bounds else None
 
     async def _start(self, session_id: str, delivery: Delivery, turn: GuestTurn) -> str:
         """Open the guest's own run as soon as the chat is free; "" when it never is, or cannot run."""

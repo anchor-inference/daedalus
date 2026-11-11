@@ -3742,6 +3742,15 @@ ALTER TABLE action_reviews_rebuilt RENAME TO action_reviews;
 CREATE INDEX action_reviews_at ON action_reviews(at);
 """)
 
+# What the operator wrote on an agent link reaches the turns it starts: its topic, which the guest sees too, and
+# a note for the agent only. A conversation with another agent may send without a cap: 0 is no limit, and every
+# conversation made before keeps the 30 it was opened with.
+MIGRATIONS.append("""
+ALTER TABLE guest_links ADD COLUMN topic TEXT NOT NULL DEFAULT '';
+ALTER TABLE guest_links ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_talks ADD COLUMN sends_limit INTEGER NOT NULL DEFAULT 30;
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -20,7 +20,23 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import pages
-from .store import AGENT, CLOSED, DOOR, EXPIRED, GUEST, HELD, OPEN, PENDING, REVOKED, STAND_IN, WAITING, Refusal, Store
+from .store import (
+    AGENT,
+    CLOSED,
+    DOOR,
+    EXPIRED,
+    GUEST,
+    HELD,
+    NO_LIMIT,
+    OPEN,
+    PENDING,
+    REVOKED,
+    STAND_IN,
+    WAITING,
+    Refusal,
+    Store,
+    ended,
+)
 from .text import inert
 
 logger = logging.getLogger(__name__)
@@ -140,7 +156,7 @@ class Mailbox:
         if link is None:
             return None
         if link["state"] == WAITING:
-            if link["invite_expires_at"] < self.clock():
+            if ended(link["invite_expires_at"], self.clock()):
                 return 410, pages.GONE_PAGE
             return 200, pages.page(link, base=self.public_base() or "", invite=invite, max_text=MAX_TEXT)
         if link["state"] in (REVOKED, EXPIRED):
@@ -177,7 +193,7 @@ class Mailbox:
         link = self.store.link_by_invite(invite)
         if link is None:
             return None
-        if link["state"] in (REVOKED, EXPIRED) or (link["state"] == WAITING and link["invite_expires_at"] < self.clock()):
+        if link["state"] in (REVOKED, EXPIRED) or (link["state"] == WAITING and ended(link["invite_expires_at"], self.clock())):
             return Answer(410, {"status": "closed", "stop_polling": True, "detail": "This link is closed. Stop here and ask your user for a new link."})
         spent = None if link["state"] != WAITING else self.store.redeem(link, address)
         if spent is None:
@@ -333,7 +349,10 @@ class Mailbox:
             return self._closed_answer(conversation)
         link = self.store.link(conversation["link_id"])
         assert link is not None
-        return Answer(200, {"status": conversation["state"], "expires_at": conversation["expires_at"], "turns_left_today": max(0, int(link["turns_per_day"]) - (int(link["turns_today"]) if link["turns_day"] == self.store._day() else 0))})
+        today = int(link["turns_today"]) if link["turns_day"] == self.store._day() else 0
+        # ``None`` where the owner set no such limit: a number would be read as one.
+        left = None if int(link["turns_per_day"]) == NO_LIMIT else max(0, int(link["turns_per_day"]) - today)
+        return Answer(200, {"status": conversation["state"], "expires_at": conversation["expires_at"] or None, "turns_left_today": left})
 
 
 __all__ = [
