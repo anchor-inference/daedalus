@@ -15,6 +15,7 @@ describe("what a conversation is doing", () => {
     expect(talkState({ ...base, waiting_for: "reply" }).key).toBe("waiting");
     expect(talkState({ ...base, waiting_for: "reply", quiet: true }).key).toBe("quiet");
     expect(talkState({ ...base, waiting_for: "owner" }).key).toBe("owner");
+    expect(talkState({ ...base, waiting_for: "offline", quiet: true }).key).toBe("offline");
   });
 
   it("calls a closed conversation closed whatever was left in it", () => {

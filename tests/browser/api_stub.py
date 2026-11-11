@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 import zlib
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
@@ -1570,6 +1572,37 @@ def link_file_bytes(file_id: str) -> tuple[int, str, str | bytes]:
     return 200, "application/octet-stream", f"{found['name']}: the bytes of a file sent over an agent link.\n".encode()
 
 
+LINK_EXPORTS: list[tuple[str, str]] = []
+"""Every export of a link's conversation the app asked for, as ``(method, path)``, for a check to read."""
+
+
+def link_export(method: str, parts: list[str]) -> tuple[int, str, str | bytes] | None:
+    """The export of one conversation over an agent link: ``GET …/export`` is a zip, ``POST …/export/note`` the note it
+    became. A conversation the stubs do not list is a 404, as on the host."""
+    talk = len(parts) in (5, 6) and parts[2] == "agent-talks" and parts[4] == "export"
+    guest = len(parts) in (6, 7) and parts[2:4] == ["guest", "links"] and parts[5] == "export"
+    if not (talk or guest):
+        return None
+    owner = parts[3] if talk else parts[4]
+    note = parts[-1] == "note" and len(parts) == (6 if talk else 7)
+    if not note and len(parts) != (5 if talk else 6):
+        return None
+    LINK_EXPORTS.append((method, "/".join(parts)))
+    known = TALKS.talks.get(owner) if talk else GUESTS.links.get(owner)
+    if known is None:
+        return 404, "application/json", json.dumps({"detail": "no such conversation" if talk else "no such link"})
+    if note and method == "POST":
+        session_id = known["session_id"] if talk else GUESTS.owner.get(owner, "")
+        return 200, "application/json", json.dumps({"note_id": f"n-{owner}", "session_id": session_id, "title": "Conversation with a stub"})
+    if not note and method == "GET":
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as made:
+            made.writestr("transcript.md", "# Conversation with a stub\n")
+            made.writestr("conversation.json", "{}")
+        return 200, "application/zip", archive.getvalue()
+    return 405, "application/json", json.dumps({"detail": "method not allowed"})
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -1601,6 +1634,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     parts = path.split("/")
     if len(parts) == 4 and parts[2] == "link-files" and method.upper() == "GET":
         return link_file_bytes(parts[3])
+    exported = link_export(method.upper(), parts)
+    if exported is not None:
+        return exported
     if path.startswith("/api/agent-talks/") or (len(parts) == 5 and parts[2] == "sessions" and parts[4] == "agent-talks"):
         answered = TALKS.answer(method, path, body)
         if answered is not None:

@@ -8,6 +8,7 @@ import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
 import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
+import { LinkExport } from "./linkexport";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
@@ -295,6 +296,7 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
       ) : (
         <>
           <div className="guest-name">{link.label || link.topic || t("guest.untitled")}</div>
+          {link.conversation && <LinkExport target={{ kind: "guest", id: link.id }} toast={toast} />}
           {link.mode === "stand_in" && link.briefing && (
             <>
               <button type="button" className="btn small ghost guest-toggle" aria-expanded={briefing} onClick={() => setBriefing((open) => !open)}>{t("guest.briefing")}</button>

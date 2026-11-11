@@ -33,3 +33,10 @@
 
 /* The files of an approval sit between its words and its buttons, and scroll rather than push them away. */
 .talk-approval .link-picks { max-height: 16lh; overflow-y: auto; }
+
+/* Export of one conversation (linkexport.tsx): a quiet row of two small buttons that wraps under its word on a phone. */
+.link-export { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); min-width: 0; }
+.link-export-title { color: var(--fg-2); font-size: var(--fs-12); margin-right: auto; }
+.link-export .btn { gap: 4px; }
+.link-export-done { color: var(--fg-2); font-size: var(--fs-12); }
+.guest-reader .link-export { padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
