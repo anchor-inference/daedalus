@@ -28,7 +28,6 @@ import secrets
 import shutil
 import time
 from collections import OrderedDict
-from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -97,7 +96,7 @@ class LinkFlows:
         return talks_of(self.app)
 
     def bridge(self) -> Any:
-        from daedalus.extensions.guest_door import bridge_of  # Lazy, as above.
+        from daedalus.extensions.guest_door import bridge_of  # Lazy: guest_door imports this module.
 
         return bridge_of(self.app)
 
@@ -117,8 +116,6 @@ class LinkFlows:
             )
             card_id = int(cursor.lastrowid or 0)
             await cursor.close()
-        with suppress(Exception):  # the app polls as well; a bus that is not there loses only the hurry
-            await self.manager.bus.publish("link.card", {"side": side, "owner": owner, "type": card["type"]}, session_id=session_id)
         return card_id
 
     async def cards_of(self, side: str, owner: str) -> list[dict[str, Any]]:
@@ -246,7 +243,6 @@ class LinkFlows:
             if "reply from another agent" in sent.text:
                 # Older replies the send handed this run on its way: they are read now, so they are shown.
                 read.append(sent.text)
-        await self._publish(session_id)
         await self.check_poll(poll_id)
         head = f"Asked {len(rows)} agents (question {poll_id}). Their answers are gathered into one table in the chat, and you are woken once, when all have answered or at {deadline.isoformat(timespec='minutes')}. End your turn now."
         return "\n".join([head, *lines, *read]), False
@@ -291,9 +287,6 @@ class LinkFlows:
                     "UPDATE link_poll_entries SET state = ?, answer = ?, reply_id = ?, answered_at = ? WHERE id = ?",
                     (ANSWERED, str(reply["text"])[: link_flows.ANSWER_CHARS], reply["id"], _stamp(), row["id"]),
                 )
-        session = await self.db.fetchone("SELECT session_id FROM link_polls WHERE id = ?", (rows[0]["poll"],))
-        if session is not None:
-            await self._publish(str(session["session_id"]))
         for poll in {str(row["poll"]) for row in rows}:
             await self.check_poll(poll)
         return True
@@ -316,7 +309,6 @@ class LinkFlows:
             for entry in entries:
                 if entry["state"] == FAILED:
                     await self.db.execute("UPDATE link_poll_entries SET state = ? WHERE poll_id = ? AND talk_id = ?", (FAILED, poll_id, entry["talk"]))
-            await self._publish(str(poll["session_id"]))
             poll = await self.db.fetchone("SELECT * FROM link_polls WHERE id = ?", (poll_id,))
         if poll is not None and not poll["woke"] and poll_id not in self._waking:
             self._waking.add(poll_id)
@@ -394,10 +386,6 @@ class LinkFlows:
             await cursor.close()
         return done
 
-    async def _publish(self, session_id: str) -> None:
-        with suppress(Exception):
-            await self.manager.bus.publish("link.poll", {"session_id": session_id}, session_id=session_id)
-
     # -- summaries ---------------------------------------------------------------------------------------
 
     async def _promises(self, session_id: str, lines: list[tuple[str, str]]) -> tuple[str, list[dict[str, str]]]:
@@ -468,7 +456,7 @@ class LinkFlows:
 
     async def _say(self, conversation: str, text: str, card: dict[str, Any] | None = None) -> bool:
         """A word of this side's to a guest of our door, outside any turn. ``False`` when the door did not take it."""
-        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy, as above.
+        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy: guest_door imports this module.
 
         body: dict[str, Any] = {"kind": "text", "text": text[:WORDS_CHARS]}
         if card is not None:
@@ -505,8 +493,8 @@ class LinkFlows:
 
     async def to_board(self, card_id: int, authenticated: dict[str, Any]) -> dict[str, Any]:
         """Each promise of a summary as a task on the chat's board: ours as they are, theirs as something to expect."""
-        from daedalus.extensions.board_commands import BoardCommands  # Lazy, as above.
-        from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+        from daedalus.extensions.board_commands import BoardCommands  # Lazy: it imports the app's stores.
+        from daedalus.stores.control import ControlStore, Entity, Principal, Scope  # Lazy: for this route alone.
 
         row = await self.card_row(card_id)
         card = link_flows.card_view(json.loads(row["card"])) if row is not None else None
@@ -576,7 +564,7 @@ class LinkFlows:
 
     async def fire_due(self) -> None:
         """Every subscription whose time has come: a counted turn of its link through the door, or its end."""
-        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy, as above.
+        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy: guest_door imports this module.
 
         bridge = self.bridge()
         if bridge is None:
@@ -799,7 +787,7 @@ class LinkFlows:
         return f"The guest has a one-time address of {args['name']}, open until {expires[:16]} or the conversation's end."
 
     async def revoke_service(self, action_id: str, reason: str = "revoked") -> bool:
-        from daedalus.stores import pairing  # Lazy, as above.
+        from daedalus.stores import pairing  # Lazy: the stores import the app's.
 
         row = await self.db.fetchone("SELECT * FROM link_actions WHERE id = ? AND kind = 'service' AND state = 'done'", (action_id,))
         if row is None:
@@ -877,7 +865,7 @@ class LinkFlows:
         return "The meeting waits for the operator. Once they allow it, it is in the calendar and the other side hears it is booked.", False
 
     async def _book(self, row: Any, args: dict[str, Any]) -> str:
-        from daedalus.stores.calendar import CalendarStore  # Lazy, as above.
+        from daedalus.stores.calendar import CalendarStore  # Lazy: the stores import the app's.
 
         store = CalendarStore(self.db)
         zone = args.get("timezone") or (await store.settings())["timezone"]
@@ -903,7 +891,7 @@ class LinkFlows:
         await self.db.execute("UPDATE link_actions SET state = 'refused', result = 'the link closed first', decided_at = ? WHERE side = ? AND owner = ? AND state = 'held'", (_stamp(), DOOR, link_id))
 
     async def sweep(self) -> None:
-        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy, as above.
+        from daedalus.extensions.guest_door import DoorRefused, DoorUnavailable  # Lazy: guest_door imports this module.
 
         for row in await self.db.fetchall("SELECT id FROM link_polls WHERE state = ? OR (woke = 0 AND settled_at IS NOT NULL)", (link_flows.POLL_OPEN,)):
             await self.check_poll(str(row["id"]))
