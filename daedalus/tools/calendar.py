@@ -123,24 +123,39 @@ async def calendar_list(context: ToolContext) -> ToolResult:
 @search_hint("calendar free time slot find available when can meet busy schedule найти свободное время окно когда свободен слот встреча созвон")
 @tool(name="CalendarFindTime", description="Find free slots of at least duration_minutes between start and end (defaults: now to 7 days later), inside the operator's working hours unless any_time is true, skipping weekends unless weekends is true. Busy time is every timed event on the visible calendars (or the listed calendar ids) and every time-blocked planner task. Use this before proposing a time; never guess free time.")
 async def calendar_find_time(context: ToolContext, duration_minutes: int = 30, start: str = "", end: str = "", calendars: str = "", weekends: bool = False, any_time: bool = False, limit: int = 10) -> ToolResult:
-    store, planner = _store(context), _planner(context)
-    if not 5 <= duration_minutes <= 24 * 60:
-        return error(context, "duration_minutes is 5 to 1440")
     try:
-        now_moment = datetime.now(UTC)
-        first = max(moment(start), now_moment) if start else now_moment
-        last = moment(end) if end else first + timedelta(days=7)
-        if last <= first:
-            return error(context, "the range needs an end after its start (and after now)")
-        if last - first > timedelta(days=62):
-            return error(context, "look for free time at most two months ahead at a time")
-        settings = await store.settings()
-        busy = [(moment(item["start_at"]), moment(item["end_at"])) for item in await store.occurrences(first.isoformat(), last.isoformat(), _ids(calendars)) if not item["all_day"]]
-        for task in await planner.tasks("all", start=first.isoformat(), end=last.isoformat(), timezone=settings["timezone"]):
-            if task["scheduled_start"] and task["scheduled_end"] and not task["done"]:
-                busy.append((moment(task["scheduled_start"]), moment(task["scheduled_end"])))
+        found = await free_time(_db(context), duration_minutes=duration_minutes, start=start, end=end, calendars=_ids(calendars), weekends=weekends, any_time=any_time, limit=limit)
     except ValueError as exc:
         return error(context, str(exc))
+    return ok(context, json.dumps(found, ensure_ascii=False))
+
+
+async def free_time(
+    db: Any, *, duration_minutes: int = 30, start: str = "", end: str = "", calendars: list[str] | None = None, weekends: bool = False, any_time: bool = False, limit: int = 10,
+    with_busy: bool = False,
+) -> dict[str, Any]:
+    """Free slots of at least ``duration_minutes``, as :func:`calendar_find_time` finds them; ``ValueError`` names what is wrong.
+
+    Apart from the tool because an agent link offers free time to a stranger, and what such a stranger may be told
+    is decided there: ``with_busy`` adds the busy spans with their titles, which only a trusted link is given."""
+    store, planner = CalendarStore(db), PlannerStore(db)
+    if not 5 <= duration_minutes <= 24 * 60:
+        raise ValueError("duration_minutes is 5 to 1440")
+    now_moment = datetime.now(UTC)
+    first = max(moment(start), now_moment) if start else now_moment
+    last = moment(end) if end else first + timedelta(days=7)
+    if last <= first:
+        raise ValueError("the range needs an end after its start (and after now)")
+    if last - first > timedelta(days=62):
+        raise ValueError("look for free time at most two months ahead at a time")
+    settings = await store.settings()
+    events = [item for item in await store.occurrences(first.isoformat(), last.isoformat(), calendars or None) if not item["all_day"]]
+    busy = [(moment(item["start_at"]), moment(item["end_at"])) for item in events]
+    titled = [(moment(item["start_at"]), moment(item["end_at"]), str(item.get("title") or "")) for item in events]
+    for task in await planner.tasks("all", start=first.isoformat(), end=last.isoformat(), timezone=settings["timezone"]):
+        if task["scheduled_start"] and task["scheduled_end"] and not task["done"]:
+            busy.append((moment(task["scheduled_start"]), moment(task["scheduled_end"])))
+            titled.append((moment(task["scheduled_start"]), moment(task["scheduled_end"]), str(task.get("title") or "")))
     zone = rules.zone(settings["timezone"])
     work_start = time.fromisoformat(settings["work_start"])
     work_end = time.fromisoformat(settings["work_end"])
@@ -161,7 +176,10 @@ async def calendar_find_time(context: ToolContext, duration_minutes: int = 30, s
             if closes - cursor >= timedelta(minutes=duration_minutes):
                 slots.append({"start": cursor.astimezone(zone).isoformat(), "end": closes.astimezone(zone).isoformat()})
         day += timedelta(days=1)
-    return ok(context, json.dumps({"timezone": settings["timezone"], "working_hours": [settings["work_start"], settings["work_end"]], "slots": slots[:limit]}, ensure_ascii=False))
+    found: dict[str, Any] = {"timezone": settings["timezone"], "working_hours": [settings["work_start"], settings["work_end"]], "slots": slots[:limit]}
+    if with_busy:
+        found["busy"] = [{"start": a.astimezone(zone).isoformat(), "end": b.astimezone(zone).isoformat(), "title": title} for a, b, title in sorted(titled)][:50]
+    return found
 
 
 @tool_group("calendar")

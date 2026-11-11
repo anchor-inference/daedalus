@@ -58,7 +58,7 @@ from .store import (
     WORKING,
     Store,
 )
-from .text import inert, one_line
+from .text import CardRefused, card_of, inert, one_line
 
 if TYPE_CHECKING:
     from starlette.types import Receive, Scope, Send
@@ -161,7 +161,7 @@ def message_view(message: Any) -> dict[str, Any]:
     data = json.loads(message["data"]) if message["data"] else {}
     return {
         "id": message["id"], "role": message["role"], "text": message["text"], "at": message["at"], "state": message["state"], "cost_usd": message["cost_usd"],
-        "kind": message["kind"] or TEXT, "task": message["task_id"], "task_state": data.get("state", ""), "files": list(data.get("files") or []),
+        "kind": message["kind"] or TEXT, "task": message["task_id"], "task_state": data.get("state", ""), "files": list(data.get("files") or []), "card": data.get("card"),
     }
 
 
@@ -403,6 +403,12 @@ class ControlDoor:
             raise Invalid("a status names its task")
         if body.get("files"):
             data["files"] = [file["id"] for file in self.mailbox.desk.ready_of(conversation_id, body.get("files"), AGENT)]
+        try:
+            card = card_of(body.get("card"))
+        except CardRefused as exc:
+            raise Invalid(str(exc)) from None
+        if card is not None:
+            data["card"] = card
         if not text and not data.get("files") and kind != STATUS:
             raise Invalid("say something, or send files")
         message_id = self.store.add_reply(conversation_id, AGENT, text, kind=kind, task_id=task_id, data=data)
@@ -502,7 +508,7 @@ class ControlDoor:
         files = [file_view(file) for file in (self.store.file(file_id) for file_id in data.get("files") or []) if file is not None]
         return {
             "message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share,
-            "role": message["role"], "kind": message["kind"] or TEXT, "task": message["task_id"], "files": files, "ask": str(data.get("ask") or ""),
+            "role": message["role"], "kind": message["kind"] or TEXT, "task": message["task_id"], "files": files, "ask": str(data.get("ask") or ""), "card": data.get("card"),
         }
 
     def reply(self, message_id: int, body: Any) -> tuple[int, dict[str, Any]]:

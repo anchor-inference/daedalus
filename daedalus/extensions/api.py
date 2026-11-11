@@ -99,6 +99,7 @@ from daedalus.extensions import (
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
+    api_link_flows,
     api_mcp,
     api_meetings,
     api_memory,
@@ -1764,6 +1765,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_btw.register(api, app, auth)
     api_guest.register(api, app, auth)
     api_agent_talk.register(api, app, auth)
+    api_link_flows.register(api, app, auth)
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)

@@ -50,7 +50,7 @@ from .store import (
     Store,
     ended,
 )
-from .text import inert
+from .text import CardRefused, card_of, inert
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,10 @@ MAX_WAIT_SECONDS = 30
 nothing between the guest and this door has to keep a quiet connection alive."""
 DEFAULT_WAIT_SECONDS = 20
 MAX_UNANSWERED = 3
+CARDS_PER_CONVERSATION = 30
+"""Cards a guest may hand the host without a turn: each is a row the operator is shown, and they cost nobody a turn."""
+CARD_WORDS = 2000
+"""Cards a guest may hand the host without a turn: each is a row the operator is shown, and they cost nobody a turn."""
 """Guest messages that may wait for an answer at once: a turn each, so a burst is not a backlog of spending."""
 STAND_IN_REPLY_SECONDS = 120.0
 DIRECT_REPLY_SECONDS = 900.0
@@ -259,6 +263,14 @@ class Mailbox:
             return Answer(400, {"status": "invalid", "detail": f"kind is one of {', '.join(KINDS)}."})
         if link["mode"] == STAND_IN and (kind != TEXT or body.get("files")):
             return Answer(403, {"status": "refused", "detail": TEXT_ONLY})
+        try:
+            card = card_of(body.get("card"))
+        except CardRefused as exc:
+            return Answer(400, {"status": "invalid", "detail": str(exc)})
+        if card is not None and (kind not in (TEXT, STATUS) or conversation["state"] == PENDING):
+            return Answer(400, {"status": "invalid", "detail": "A card goes with a text message, or alone as a status once the conversation is open."})
+        if kind == STATUS and card is not None and not body.get("task"):
+            return self._guest_card(conversation, link, card, body.get("text"))
         if kind == STATUS:
             return self._guest_status(conversation, body)
         text = body.get("text")
@@ -290,7 +302,7 @@ class Mailbox:
             if task["state"] not in OPEN_TASK_STATES:
                 return Answer(409, {"status": "invalid", "task": task["id"], "state": task["state"], "detail": f"That task is {task['state']} and takes no more messages."})
             task_id = task["id"]
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = {"card": card} if card is not None else {}
         if kind == FILE or body.get("files"):
             try:
                 data["files"] = [file["id"] for file in self.desk.ready_of(conversation["id"], body.get("files"), GUEST)]
@@ -313,6 +325,16 @@ class Mailbox:
             if kind == TASK:
                 out.update(state=ACCEPTED, detail="Task accepted. Read to follow it: each change of its state comes as a status message naming it.")
         return Answer(202, out)
+
+    def _guest_card(self, conversation: Any, link: Any, card: dict[str, Any], text: Any) -> Answer:
+        """A card on its own, such as the summary of the conversation: the host keeps it and shows it, and no turn is
+        spent on it. It travels as an event, since an event is what reaches the host without a turn."""
+        if sum(1 for event in self.store.events_of(link["id"], 200) if event["kind"] == "card") >= CARDS_PER_CONVERSATION:
+            return Answer(429, {"status": "busy", "detail": f"This conversation has handed over {CARDS_PER_CONVERSATION} cards, which is all it takes."})
+        words = inert(text)[:CARD_WORDS] if isinstance(text, str) else ""
+        self.store.record(link["id"], "card", json.dumps({"conversation": conversation["id"], "card": card, "text": words}, ensure_ascii=False))
+        self.notify()
+        return Answer(200, {"status": "open", "detail": "The card is with the other side."})
 
     def _guest_status(self, conversation: Any, body: dict[str, Any]) -> Answer:
         """The one status a guest sends: cancelling a task it set. A turn already running on it is stopped by the host."""
@@ -346,6 +368,8 @@ class Mailbox:
             out["task"] = message["task_id"]
         if data.get("state"):
             out["state"] = data["state"]
+        if data.get("card"):
+            out["card"] = data["card"]
         if data.get("files"):
             out["files"] = [self.desk.view(file) for file in (self.store.file(file_id) for file_id in data["files"]) if file is not None]
         return out

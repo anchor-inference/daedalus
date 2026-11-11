@@ -125,6 +125,17 @@ async def phone_admitted(db: Database, slug: str, issued: str | None, *, lan: bo
     return row is not None and row["expires_at"] is not None and datetime.fromisoformat(row["expires_at"]) > datetime.now(UTC)
 
 
+def code_digest(code: str) -> str:
+    """What a phone's code is kept as: the handle by which one pass, and no other, is taken back later."""
+    return _digest(code)
+
+
+async def forget_phone(db: Database, code_hash: str) -> None:
+    """The one pass a code became, or the code itself if it was never spent: a guest's view of a service ends
+    without the operator's own phones losing theirs."""
+    await db.execute("DELETE FROM phone_passes WHERE code_hash = ?", (code_hash,))
+
+
 async def forget_phones(db: Database, slug: str) -> None:
     """Every phone's way into this service, and every code not used yet."""
     await db.execute("DELETE FROM phone_passes WHERE slug = ?", (slug,))
