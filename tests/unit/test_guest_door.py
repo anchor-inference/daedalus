@@ -71,6 +71,9 @@ class Rig:
         self.clock = Clock()
         self.store = Store(tmp_path / "guest.sqlite", clock=self.clock)
         self.mailbox = Mailbox(self.store, public_base=lambda: "https://agents.example.test", clock=self.clock)
+        # The host is taken to be dialling all along, however far a test moves the clock: a test of the owner's side
+        # going quiet sets this back itself.
+        self.mailbox.host_away_seconds = float("inf")
         self.model = FakeModel()
         self.stand_in = StandIn(self.store, self.mailbox, self.model)
         self.public = TestClient(PublicDoor(self.mailbox, **limits), base_url="https://agents.example.test")

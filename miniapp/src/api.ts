@@ -963,7 +963,7 @@ export type AgentTalk = {
   mode: "" | "stand_in" | "direct";
   state: "opening" | "pending" | "open" | "closed";
   reason: string;
-  waiting_for: "" | "reply" | "owner";
+  waiting_for: "" | "reply" | "owner" | "offline";
   quiet: boolean;
   review: AgentTalkReview;
   sends: number;
@@ -1049,6 +1049,8 @@ export type AgentTalkMessage = {
   author?: "" | "owner";
   /** How the other side's signature checked: `ok`, `bad` (refused on a contact), or empty where there was no key. */
   signed?: "" | "ok" | "bad";
+  /** When a message kept for an absent door is next tried. */
+  next_at?: string;
 };
 export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[]; files: LinkFile[] };
 export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number; guest_held: HeldGroup[]; file_mb: number; day_mb: number };
@@ -2328,3 +2330,32 @@ export type AutopilotOverview = {
 
 /** The operator's style profile as learned from their own messages. */
 export type UserStyle = { summary: string; learned: number; updated_at: string; max_chars: number };
+
+/** One conversation over an agent link, as the operator takes it out: `talk` is ours at another door, `guest` a
+ *  guest's at ours, named by its link. */
+export type LinkExportTarget = { kind: "talk" | "guest"; id: string };
+/** What "To notes" made: the note's id in the chat that owns the conversation. */
+export type LinkExportNote = { note_id: string; session_id: string; title: string };
+
+export function linkExportPath(target: LinkExportTarget): string {
+  const id = encodeURIComponent(target.id);
+  return target.kind === "talk" ? `/api/agent-talks/${id}/export` : `/api/guest/links/${id}/export`;
+}
+
+/** The export's zip and the name the host gave it. Fetched with the app's credential, which a plain link would not carry. */
+export async function linkExportZip(target: LinkExportTarget, language: string): Promise<{ blob: Blob; name: string }> {
+  const response = await authedFetch(`${linkExportPath(target)}?lang=${encodeURIComponent(language)}`);
+  if (!response.ok) throw await archiveError(response);
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const encoded = /filename\*=utf-8''([^;]+)/i.exec(disposition)?.[1];
+  const plain = /filename="([^"]+)"/i.exec(disposition)?.[1];
+  let name = plain ?? "conversation.zip";
+  try {
+    if (encoded) name = decodeURIComponent(encoded);
+  } catch { /* a malformed name keeps the plain one */ }
+  return { blob: await response.blob(), name };
+}
+
+export function linkExportNote(target: LinkExportTarget, language: string): Promise<LinkExportNote> {
+  return call<LinkExportNote>("POST", `${linkExportPath(target)}/note`, { lang: language });
+}

@@ -45,6 +45,13 @@ logger = logging.getLogger("guestd.front")
 HEAD_SECONDS = 10.0
 LIFE_SECONDS = 45.0
 """A read holds 30 s at most, so this is a slow request's whole life, not an idle timeout to be reset."""
+STREAM_SECONDS = 600.0
+"""The life of an A2A stream (``POST /a/rpc`` asking for ``text/event-stream``), counted from once its body has
+arrived: the body itself still has to come within :data:`LIFE_SECONDS`, so a slow sender holds nothing longer. A
+stream is how an A2A client follows a task, and one cut at 45 s left a framework's client thinking the task was
+over. The door says something every 15 s and ends the stream itself before this; per address the cap on
+connections still holds, and per conversation the door lets two waits be open at once."""
+STREAM_HEAD = re.compile(rb"\APOST /a/rpc(?:\?[^ ]*)? HTTP/1\.[01]\r\n(?:.*\r\n)*?accept:[^\r\n]*text/event-stream", re.IGNORECASE)
 MAX_HEAD = 16 * 1024
 MAX_BODY = 64 * 1024
 MAX_PIECE_BODY = 512 * 1024 + 1024
@@ -167,7 +174,10 @@ async def dial_door(socket_path: str, *, tcp: bool) -> tuple[asyncio.StreamReade
 
 
 class Front:
-    def __init__(self, socket_path: str, trusted: str = "", *, tcp: bool = False, per_address: int = PER_ADDRESS, overall: int = OVERALL, head_seconds: float = HEAD_SECONDS, life_seconds: float = LIFE_SECONDS) -> None:
+    def __init__(
+        self, socket_path: str, trusted: str = "", *, tcp: bool = False, per_address: int = PER_ADDRESS, overall: int = OVERALL, head_seconds: float = HEAD_SECONDS,
+        life_seconds: float = LIFE_SECONDS, stream_seconds: float = STREAM_SECONDS,
+    ) -> None:
         self.socket_path = socket_path
         self.tcp = tcp
         self.trusted = parse_trusted(trusted)
@@ -175,6 +185,7 @@ class Front:
         self.overall = overall
         self.head_seconds = head_seconds
         self.life_seconds = life_seconds
+        self.stream_seconds = stream_seconds
         self.open: Counter[str] = Counter()
         self.total = 0
 
@@ -192,7 +203,7 @@ class Front:
                 writer.write(refusal(429, "Too many connections.", 10))
                 await writer.drain()
                 return
-            async with asyncio.timeout(self.life_seconds):
+            async with asyncio.timeout(self.life_seconds) as life:
                 try:
                     async with asyncio.timeout(self.head_seconds):
                         head = await reader.readuntil(b"\r\n\r\n")
@@ -214,7 +225,7 @@ class Front:
                         writer.write(refusal(429, "Too many connections.", 10))
                         await writer.drain()
                         return
-                await self.pass_on(reader, writer, new_head, length)
+                await self.pass_on(reader, writer, new_head, length, life if STREAM_HEAD.match(head) else None)
         except Refused as exc:
             writer.write(refusal(exc.status, exc.detail))
             with contextlib.suppress(OSError):
@@ -231,7 +242,7 @@ class Front:
             with contextlib.suppress(OSError, asyncio.CancelledError):
                 await writer.wait_closed()
 
-    async def pass_on(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, head: bytes, length: int) -> None:
+    async def pass_on(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, head: bytes, length: int, stream: asyncio.Timeout | None = None) -> None:
         try:
             door_reader, door_writer = await dial_door(self.socket_path, tcp=self.tcp)
         except OSError:
@@ -247,6 +258,8 @@ class Front:
                 door_writer.write(piece)
                 await door_writer.drain()
             await door_writer.drain()
+            if stream is not None:
+                stream.reschedule(asyncio.get_running_loop().time() + self.stream_seconds)
             while chunk := await door_reader.read(65536):
                 writer.write(chunk)
                 await writer.drain()

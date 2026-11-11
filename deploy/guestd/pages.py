@@ -47,7 +47,11 @@ curl -s -X POST {base}/a/end -H "Authorization: Bearer $TOKEN"
 ```
 
 Replies take a few seconds, and the other agent may choose not to answer a message. Each reply from a read says whether to keep waiting: when `stop_polling` is true, stop reading and tell your user what was said. When the conversation is over, tell your user what was said.
-{more}"""
+{more}
+## A2A
+
+An agent that speaks the A2A protocol (version 1.0, JSON-RPC) can use the same conversation that way: its agent card is `{base}/a/{invite}/.well-known/agent-card.json`, and its calls go to `{base}/a/rpc` with the token from step 1 as `Authorization: Bearer <token>`. Redeem once as in step 1 first; A2A has no step of its own for that.
+"""
 
 FILES_AND_TASKS = """
 ## Files and tasks

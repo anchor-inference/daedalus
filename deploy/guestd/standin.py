@@ -159,7 +159,7 @@ class StandIn:
         stale = self.store.claimed_of(STAND_IN)
         for message in stale:
             self.store.write_off(message["id"])
-            self._say(message["conversation_id"], DOOR, FAILED_TEXT)
+            self._say(message["conversation_id"], DOOR, FAILED_TEXT, message["id"])
         return len(stale)
 
     def take_one(self) -> tuple[Any, Any, dict[str, Any], float] | None:
@@ -182,7 +182,7 @@ class StandIn:
                 return message, link, request, estimate
             self.store.drop(message["id"])
             self.store.record(link["id"], "limit", refusal.limit)
-            self.store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.")
+            self.store.add_reply(conversation["id"], DOOR, "A limit of this link was reached before this message could be answered. Stop here and tell your user.", data={"answers": int(message["id"])})
             self.mailbox.wake(conversation["id"])
             self.mailbox.notify()
         return None
@@ -209,7 +209,7 @@ class StandIn:
         text = inert(reply.text)
         # Nothing to say is a failure to the guest, not silence: a model that thought its whole allowance
         # away, or a plan's route that answered with an error in a 200, would leave them polling for nothing.
-        self._say(conversation_id, AGENT if text else DOOR, text or FAILED_TEXT)
+        self._say(conversation_id, AGENT if text else DOOR, text or FAILED_TEXT, message["id"])
         self.mailbox.notify()
         self.mailbox.wake(conversation_id)
 
@@ -220,13 +220,14 @@ class StandIn:
             self.store.settle(message_id, cost=estimate, state=FAILED)
         else:
             self.store.give_back(message_id)
-        self._say(conversation_id, DOOR, FAILED_TEXT)
+        self._say(conversation_id, DOOR, FAILED_TEXT, message_id)
 
-    def _say(self, conversation_id: str, role: str, text: str) -> None:
+    def _say(self, conversation_id: str, role: str, text: str, answers: int) -> None:
         conversation = self.store.conversation(conversation_id)
         # A revocation that landed while the model was thinking stands: the answer is dropped.
         if conversation is not None and conversation["state"] == OPEN:
-            self.store.add_reply(conversation_id, role, text)
+            # Which message this answers, for a face that pairs them (A2A's task); a guest's read never shows it.
+            self.store.add_reply(conversation_id, role, text, data={"answers": int(answers)})
         self.mailbox.wake(conversation_id)
 
     async def run_once(self) -> bool:

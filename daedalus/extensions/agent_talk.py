@@ -137,6 +137,25 @@ REVIEWS = ("first", "all", "off")
 OPENING, PENDING, OPEN, CLOSED = "opening", "pending", "open", "closed"
 US, THEM, DOOR = "us", "them", "door"
 HELD, SENDING, SENT, REFUSED, FAILED, UNSURE, UNREAD, READ = "held", "sending", "sent", "refused", "failed", "unsure", "unread", "read"
+WAITING = "waiting_door"
+"""A message the door was not there to take: kept here and tried again by itself (``attempts``, ``next_at``)."""
+OFFLINE = "offline"
+"""``agent_talks.waiting_for`` while the other side is away: its door does not answer, or its owner's agent is not running."""
+RETRY_SECONDS = (30.0, 60.0, 120.0, 300.0, 600.0, 1800.0, 3600.0)
+"""How long a message waits before its next attempt, by the attempts already made, and hourly past the end: the first
+few catch a server whose agent restarts, the later ones a desktop that was closed for the night."""
+GIVE_UP_SECONDS = 72 * 3600.0
+"""How long a message waits for a door before it is failed: a weekend away, and not a conversation nobody remembers."""
+OFFLINE_AFTER = 2
+"""Reads in a row that find nobody before the conversation shows the other side as offline: one dropped long read is
+the network, not a door that has gone."""
+ABSENT_STATUSES = frozenset({502, 503, 521, 522, 523, 525, 526, 530})
+"""What a front says when it could not reach the door at all: its own 502 when the door's socket is closed, a proxy's
+503, and Cloudflare's codes for an origin it could not connect to or a tunnel with nobody at the other end. The message
+never reached the door, so sending it again cannot say it twice."""
+UNKNOWN_STATUSES = frozenset({504, 520, 524})
+"""What a front says when it gave up waiting on a door it had reached, or got something it could not read back:
+the door may have taken the message, so these stay "may or may not have arrived" whatever page comes with them."""
 REASONS = ("ended", "expired", "idle", "refused", "approval_timeout", "revoked")
 """The door's reasons this code has words for. Anything else reads as plain ``ended``."""
 
@@ -164,6 +183,8 @@ HELD_WORDS = {
     "review": "the automatic review of what goes out did not pass it",
     "outside": "a file comes from outside this chat's folder",
 }
+KEPT_WORDS = "The other side is offline; the message is kept and will be sent when it is back. You will be woken when it is delivered or given up."
+OWNER_AWAY_WORDS = "Received and kept; the other side's owner is offline, the reply comes when they are back."
 
 
 class NotReachable(Exception):
@@ -171,7 +192,12 @@ class NotReachable(Exception):
 
 
 class DoorGone(Exception):
-    """The door did not answer. Nothing can be said about what it did with what it was sent."""
+    """The door did not answer. Nothing can be said about what it did with what it was sent, unless ``unsent``: the
+    name did not resolve or nothing took the connection, so nothing was sent at all."""
+
+    def __init__(self, why: str = "", *, unsent: bool = False) -> None:
+        super().__init__(why)
+        self.unsent = unsent
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +205,16 @@ class DoorAnswer:
     status: int
     body: dict[str, Any]
     retry_after: float | None = None
+    parsed: bool = True
+    """Whether the answer was a JSON object. A door always answers with one; a page of HTML is a tunnel's or a
+    proxy's, standing where the door should be."""
+
+
+def door_absent(answer: DoorAnswer) -> bool:
+    """Whether something in front of the door answered for it, so that the door cannot have taken what was sent."""
+    if answer.status in UNKNOWN_STATUSES:
+        return False
+    return answer.status in ABSENT_STATUSES or not answer.parsed
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +232,13 @@ class Outcome:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _instant(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
 
 
 def _seconds(value: Any) -> float | None:
@@ -233,7 +276,7 @@ async def public_addresses(host: str, port: int) -> list[str]:
     try:
         found = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as exc:
-        raise DoorGone(f"{host} does not resolve") from exc
+        raise DoorGone(f"{host} does not resolve", unsent=True) from exc
     addresses = list(dict.fromkeys(str(info[4][0]) for info in found))
     for address in addresses:
         parsed = ipaddress.ip_address(address.split("%", 1)[0])
@@ -241,7 +284,7 @@ async def public_addresses(host: str, port: int) -> list[str]:
         if not (mapped or parsed).is_global:
             raise NotReachable(f"{host} is not on the public internet")
     if not addresses:
-        raise DoorGone(f"{host} does not resolve")
+        raise DoorGone(f"{host} does not resolve", unsent=True)
     return addresses
 
 
@@ -284,11 +327,12 @@ class Dialer:
         """One call whose answer is JSON. ``content`` sends raw bytes in place of ``body``: a piece of a file."""
         answer, raw = await self._exchange(method, url, token=token, body=body, data=data, timeout=timeout, extra=extra, content=content, cap=MAX_ANSWER_BYTES)
         try:
-            parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else {}
+            parsed = jsonlib.loads(raw) if len(raw) <= MAX_ANSWER_BYTES else None
         except (ValueError, RecursionError):
-            parsed = {}
+            parsed = None
+        whole = isinstance(parsed, dict)
         parsed = parsed if isinstance(parsed, dict) else {}
-        return DoorAnswer(answer.status_code, parsed, _seconds(answer.retry if answer.retry is not None else parsed.get("retry_after")))
+        return DoorAnswer(answer.status_code, parsed, _seconds(answer.retry if answer.retry is not None else parsed.get("retry_after")), whole)
 
     async def fetch(self, url: str, *, token: str, timeout: float = PIECE_SECONDS) -> tuple[int, bytes]:
         """A piece of a file: the status and the raw bytes, never more than a piece."""
@@ -307,15 +351,22 @@ class Dialer:
             headers["authorization"] = f"Bearer {token}"
         try:
             # The whole call, and not httpx's own bound: that one is per read, and a door dripping a byte
-            # at a time would hold the tool, a lock and the sweep for as long as it liked.
+            # at a time would hold the tool, a lock and the sweep for as long as it liked. The connection has
+            # half of it, so that an address nobody answers at fails as a connect, which says nothing was sent,
+            # before the whole call's bound fails it as a timeout, which cannot.
             sent: dict[str, Any] = {"content": content} if content is not None else {"json": body}
-            async with asyncio.timeout(timeout), httpx.AsyncClient(transport=self.transport, proxy=self.proxy or None, timeout=timeout, follow_redirects=False, trust_env=False) as client:
+            async with asyncio.timeout(timeout), httpx.AsyncClient(
+                transport=self.transport, proxy=self.proxy or None, timeout=httpx.Timeout(timeout, connect=timeout / 2), follow_redirects=False, trust_env=False,
+            ) as client:
                 async with client.stream(method, target, headers=headers, extensions=extensions, **sent) as response:
                     raw = bytearray()
                     async for chunk in response.aiter_bytes():
                         raw.extend(chunk)
                         if len(raw) > cap:
                             break
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError) as exc:
+            # Nothing took the connection, or the proxy would not reach the door: the request never left.
+            raise DoorGone(type(exc).__name__, unsent=True) from exc
         except (httpx.HTTPError, httpx.InvalidURL, OSError, TimeoutError, ValueError) as exc:
             raise DoorGone(type(exc).__name__) from exc
         try:
@@ -338,6 +389,9 @@ class AgentTalks:
         """Run id to the conversation it answers."""
         self._told: dict[tuple[str, str], float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._retriers: dict[str, asyncio.Task[None]] = {}
+        self._retry_news: dict[str, asyncio.Event] = {}
+        self._announcers: dict[str, asyncio.Task[None]] = {}
         self._background: set[asyncio.Task[None]] = set()
 
     @property
@@ -399,7 +453,7 @@ class AgentTalks:
             out["files"] = files
             out["messages"] = [
                 {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"], "task_state": row["task_state"],
-                 "files": [file["id"] for file in files if file["message_id"] == row["id"]], "author": row["author"], "signed": row["signed"]}
+                 "next_at": row["next_at"] if row["state"] == WAITING else "", "files": [file["id"] for file in files if file["message_id"] == row["id"]], "author": row["author"], "signed": row["signed"]}
                 for row in rows
             ]
         return out
@@ -592,6 +646,9 @@ class AgentTalks:
             said = CLOSED_WORDS.get(str(talk["reason"]), CLOSED_WORDS["ended"])
         elif talk["waiting_for"] == "owner":
             said = "Its owner has not admitted this conversation yet."
+        elif talk["waiting_for"] == OFFLINE:
+            # Not "a reply is owed": an agent told that waited out its turn, or gave up, on a side that was only away.
+            said = "The other side is offline: no reply comes until it is back, so do not wait for one in this turn."
         elif talk["waiting_for"] == "reply":
             said = "The door says it is no use waiting for now: tell the operator, and read again later." if talk["quiet"] else "A reply is owed."
         else:
@@ -605,7 +662,8 @@ class AgentTalks:
         session_id = state.session.id
         if talk["state"] in (CLOSED, OPENING):
             return Outcome(self._state_line(talk), error=True, talk=talk["id"])
-        if talk["sends_limit"] and talk["sends"] >= talk["sends_limit"]:
+        if talk["sends_limit"] and talk["sends"] + await self._waiting_count(talk["id"]) >= talk["sends_limit"]:
+            # Those waiting for the door count now: each is counted once more when it goes, which it will by itself.
             return Outcome(f"This conversation has used its {talk['sends_limit']} messages. Tell the operator: they can lift the limit, or talking on needs a new link.", error=True, talk=talk["id"])
         run_id = state.run_id or ""
         turn = state.guest_turn
@@ -652,9 +710,12 @@ class AgentTalks:
             await self._post(talk["id"], message_id, clean)
             settled = (await self._message(message_id))["state"]
         fresh = await self.talk(talk["id"])
+        message = await self._message(message_id)
+        if settled == WAITING:
+            return Outcome(self._state_line(fresh, KEPT_WORDS), talk=talk["id"])
         if settled != SENT:
-            return Outcome(self._send_failure(fresh, await self._message(message_id)), error=True, talk=talk["id"])
-        return await self._reply_or_status(state, fresh, wait, "Sent.")
+            return Outcome(self._send_failure(fresh, message), error=True, talk=talk["id"])
+        return await self._reply_or_status(state, fresh, wait, OWNER_AWAY_WORDS if message["note"] == "owner_offline" else "Sent.")
 
     async def _stage(self, state: SessionState, talk: Any, paths: list[str]) -> tuple[list[Staged], bool] | Outcome:
         """The files a message is to carry, made ready to go and checked against the conversation's limits, and whether
@@ -749,6 +810,10 @@ class AgentTalks:
     async def _message(self, message_id: int) -> Any:
         return await self.db.fetchone("SELECT * FROM agent_talk_messages WHERE id = ?", (message_id,))
 
+    async def _waiting_count(self, talk_id: str) -> int:
+        row = await self.db.fetchone("SELECT count(*) AS n FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk_id, WAITING))
+        return int(row["n"]) if row is not None else 0
+
     def _send_failure(self, talk: Any, message: Any) -> str:
         note = str(message["note"])
         if talk["state"] == CLOSED:
@@ -763,6 +828,10 @@ class AgentTalks:
             return "Not sent: earlier messages are still waiting for an answer. Read first."
         if note == "owner":
             return "Not sent: the first message is still with the other side's owner, and nothing more is taken until they answer."
+        if note == "gave_up":
+            return f"Not sent: the other side stayed offline for {int(GIVE_UP_SECONDS // 3600)} hours, so the message was given up."
+        if note == "behind":
+            return "Not sent: it waited behind an earlier message that did not go, and was not sent out of order."
         return "Not sent: the door would not take this message."
 
     async def _upload(self, talk: Any, row: Any) -> str:
@@ -773,12 +842,12 @@ class AgentTalks:
         received = 0
         if file_id:
             # Announced before a drop: the door says how far it got, and the file goes on from there.
-            known = await self.dialer.call("GET", f"{base}/a/files/{file_id}", token=token)
+            known = _present(await self.dialer.call("GET", f"{base}/a/files/{file_id}", token=token))
             received = _count(known.body.get("received")) if known.status == 200 and known.body.get("state") == "uploading" else -1
             if known.status == 200 and known.body.get("state") == "ready":
                 return file_id
         if not file_id or received < 0:
-            made = await self.dialer.call("POST", f"{base}/a/files", token=token, body={"name": row["name"], "size": row["size"], "sha256": row["sha256"]})
+            made = _present(await self.dialer.call("POST", f"{base}/a/files", token=token, body={"name": row["name"], "size": row["size"], "sha256": row["sha256"]}))
             file_id = str(made.body.get("id") or "")
             if made.status not in (200, 201) or not re.fullmatch(r"f_[0-9a-f]{16}", file_id):
                 code = made.body.get("code")
@@ -787,7 +856,7 @@ class AgentTalks:
             received = 0
 
         async def put(offset: int, piece: bytes) -> int:
-            answer = await self.dialer.call("PUT", f"{base}/a/files/{file_id}?offset={offset}", token=token, content=piece, timeout=PIECE_SECONDS)
+            answer = _present(await self.dialer.call("PUT", f"{base}/a/files/{file_id}?offset={offset}", token=token, content=piece, timeout=PIECE_SECONDS))
             if answer.status in (200, 409) and isinstance(answer.body.get("received"), int):
                 return _count(answer.body.get("received"))
             raise LinkFileError("refused")
@@ -797,11 +866,18 @@ class AgentTalks:
 
     async def _post(self, talk_id: str, message_id: int, text: str) -> None:
         """Send one message and record what became of it. The only caller of ``POST /a/messages``: its files go first,
-        each to the end, and the message names them once they are all there."""
+        each to the end, and the message names them once they are all there.
+
+        A door that is not there leaves the message :data:`WAITING`, to go by itself when it is back, and so does an
+        earlier message of the conversation that waits: the other side reads them in the order they were written."""
         async with self._locks.setdefault(talk_id, asyncio.Lock()):
             talk = await self.talk(talk_id)
             if talk is None or talk["state"] == CLOSED or not talk["token"]:
                 await self._mark(message_id, FAILED)
+                return
+            if await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ? AND id < ?", (talk_id, WAITING, message_id)) is not None:
+                now = _now()
+                await self.db.execute("UPDATE agent_talk_messages SET state = ?, next_at = ?, waiting_since = ? WHERE id = ?", (WAITING, now, now, message_id))
                 return
             await self._mark(message_id, SENDING)
             message = await self._message(message_id)
@@ -818,10 +894,12 @@ class AgentTalks:
                 # Signed as the door will keep it, which cleans it as it stores it, and for the key of the door's owner where its card proved one.
                 body["signed"] = identity.signed_message(text=inert(text), kind=str(message["kind"]), task=str(message["task"] or ""), by=by, to=str(talk["peer_key"] or ""))
             files = await self._files_of(message_id, "sending")
+            posting = False
             try:
                 ids = [await self._upload(talk, row) for row in files]
                 if ids:
                     body["files"] = ids
+                posting = True
                 answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body=body)
             except LinkFileError as exc:
                 await self._mark(message_id, FAILED, note=f"files:{exc}")
@@ -829,23 +907,37 @@ class AgentTalks:
                     await self.db.execute("UPDATE link_files SET state = 'failed' WHERE id = ?", (row["id"],))
                 link_protocol.unstage(Staged(str(row["name"]), Path(str(row["path"])), 0, "", "") for row in files)
                 return
-            except (DoorGone, NotReachable):
+            except DoorGone as exc:
+                if exc.unsent or not posting:
+                    # Before the message itself went, a file cut off goes on later from where the door has it.
+                    await self._keep_for_door(talk_id, message_id)
+                    return
                 await self._mark(message_id, UNSURE)
                 await self._update(talk_id, waiting_for="reply", quiet=0, last_at=_now())
                 self.follow(talk_id)
+                return
+            except NotReachable:
+                await self._mark(message_id, UNSURE)
+                await self._update(talk_id, waiting_for="reply", quiet=0, last_at=_now())
+                self.follow(talk_id)
+                return
+            if door_absent(answer):
+                await self._keep_for_door(talk_id, message_id)
                 return
             word = answer.body.get("status")
             if answer.status == 202 and "id" not in answer.body:
                 # The first message is with an owner who has not answered, and the door took nothing more.
                 await self._mark(message_id, FAILED, note="owner")
             elif answer.status == 202:
-                await self._mark(message_id, SENT)
+                away = answer.body.get("owner_offline") is True
+                await self._mark(message_id, SENT, note="owner_offline" if away else None)
                 for row in files:
                     await self.db.execute("UPDATE link_files SET state = 'sent', path = '' WHERE id = ?", (row["id"],))
                 link_protocol.unstage(Staged(str(row["name"]), Path(str(row["path"])), 0, "", "") for row in files)
+                # Kept at the door with its owner away: a reply is owed but will not come soon, so it is read slowly.
                 await self.db.execute(
-                    "UPDATE agent_talks SET sends = sends + 1, waiting_for = ?, quiet = 0, last_at = ? WHERE id = ?",
-                    ("owner" if word == PENDING else "reply", _now(), talk_id),
+                    "UPDATE agent_talks SET sends = sends + 1, waiting_for = ?, quiet = ?, last_at = ? WHERE id = ?",
+                    (OFFLINE if away else "owner" if word == PENDING else "reply", int(away), _now(), talk_id),
                 )
                 task = _task_id(answer.body.get("task"))
                 if message["kind"] == link_protocol.TASK and task:
@@ -873,7 +965,8 @@ class AgentTalks:
             raise ValueError(f"a message may be at most {talk['max_text']} characters")
         message_id = await self._insert_message(talk_id, US, words, SENDING, "", author="owner")
         await self._post(talk_id, message_id, words)
-        if (await self._message(message_id))["state"] != SENT:
+        # Kept for a door that is not there goes by itself when it is back, as the agent's own words do.
+        if (await self._message(message_id))["state"] not in (SENT, WAITING):
             raise ValueError(self._send_failure(await self.talk(talk_id), await self._message(message_id)))
 
     async def post_contact(self, talk_id: str, payload: dict[str, Any], text: str) -> None:
@@ -895,6 +988,158 @@ class AgentTalks:
             raise ContactError(f"{talk['host']} did not take it ({answer.status})")
         await self._mark(message_id, SENT)
         await self.db.execute("UPDATE agent_talks SET sends = sends + 1, last_at = ? WHERE id = ?", (_now(), talk_id))
+
+    async def _keep_for_door(self, talk_id: str, message_id: int) -> None:
+        """The door was not there for this message: it waits, and is tried again on :data:`RETRY_SECONDS`.
+
+        It used to be failed, or marked as perhaps arrived, and the agent gave up on a conversation whose other side
+        was only a desktop app closed for the night."""
+        row = await self._message(message_id)
+        attempts = int(row["attempts"]) + 1
+        now = datetime.now(UTC)
+        later = now + timedelta(seconds=RETRY_SECONDS[min(attempts, len(RETRY_SECONDS)) - 1])
+        await self.db.execute(
+            "UPDATE agent_talk_messages SET state = ?, attempts = ?, next_at = ?, waiting_since = CASE WHEN waiting_since = '' THEN ? ELSE waiting_since END WHERE id = ?",
+            (WAITING, attempts, later.isoformat(), now.isoformat(), message_id),
+        )
+        await self._update(talk_id, waiting_for=OFFLINE, quiet=1)
+        self._wake_readers(talk_id)
+        # The reader looks at the door every few minutes, the hourly retry far less often: whichever sees it back first
+        # sends what waits.
+        self.follow(talk_id)
+        self._retry_later(talk_id)
+
+    def _retry_later(self, talk_id: str) -> None:
+        """Send what waits for this conversation's door, in order, once. Nothing waiting ends the task at once."""
+        running = self._retriers.get(talk_id)
+        if running is None or running.done():
+            self._retriers[talk_id] = self._spawn(self._retry(talk_id), f"agent-talk-retry:{talk_id}")
+
+    def _door_back(self, talk_id: str) -> None:
+        """The other side answered again: what waits for it goes now rather than at its next hour."""
+        news = self._retry_news.get(talk_id)
+        if news is not None:
+            news.set()
+
+    async def _retry(self, talk_id: str) -> None:
+        """Try the oldest waiting message of a conversation when it is due, and the next once it went. A message that
+        cannot go for another reason stops the line, and the ones behind it are not sent out of order."""
+        while True:
+            talk = await self.talk(talk_id)
+            head = await self.db.fetchone("SELECT * FROM agent_talk_messages WHERE talk_id = ? AND state = ? ORDER BY id LIMIT 1", (talk_id, WAITING))
+            if talk is None or head is None or talk["state"] == CLOSED:
+                break
+            now = datetime.now(UTC)
+            since = _instant(head["waiting_since"]) or now
+            if (now - since).total_seconds() >= GIVE_UP_SECONDS:
+                await self._settle_waiting(talk_id, "gave_up")
+                break
+            left = ((_instant(head["next_at"]) or now) - now).total_seconds()
+            if left > 0:
+                news = self._retry_news[talk_id] = asyncio.Event()
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(news.wait(), min(left, GIVE_UP_SECONDS - (now - since).total_seconds()))
+                if news.is_set():
+                    await self.db.execute("UPDATE agent_talk_messages SET next_at = ? WHERE talk_id = ? AND state = ?", (_now(), talk_id, WAITING))
+                continue
+            await self._post(talk_id, int(head["id"]), str(head["text"]))
+            after = await self._message(int(head["id"]))
+            if after is None or after["state"] == WAITING:
+                continue
+            await self.db.execute("UPDATE agent_talk_messages SET wake_state = 'owed' WHERE id = ?", (head["id"],))
+            if after["state"] != SENT:
+                await self._settle_waiting(talk_id, "behind")
+                break
+        self._retry_news.pop(talk_id, None)
+        self.announce(talk_id)
+
+    async def _settle_waiting(self, talk_id: str, note: str) -> None:
+        """Fail every message still waiting for this door, with ``note`` for why, and owe the chat word of it."""
+        for row in await self.db.fetchall("SELECT id FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk_id, WAITING)):
+            await self.db.execute("UPDATE agent_talk_messages SET state = ?, note = ?, wake_state = 'owed' WHERE id = ? AND state = ?", (FAILED, note, row["id"], WAITING))
+            for file in await self._files_of(int(row["id"]), "sending"):
+                await self.db.execute("UPDATE link_files SET state = 'failed' WHERE id = ?", (file["id"],))
+                link_protocol.unstage([Staged(str(file["name"]), Path(str(file["path"])), 0, "", "")])
+
+    def announce(self, talk_id: str) -> None:
+        running = self._announcers.get(talk_id)
+        if running is None or running.done():
+            self._announcers[talk_id] = self._spawn(self._announce(talk_id), f"agent-talk-announce:{talk_id}")
+
+    async def _announce(self, talk_id: str) -> None:
+        """Open a turn to say what became of the messages that waited for the door: delivered, or given up.
+
+        Once a message, whether or not the turn could be had: the row is claimed before the turn is asked for, so a
+        restart in between costs the word and never says it twice. Bounded as a turn a task opens is, at
+        :data:`TURN_USD` and the tools of a reply's turn, and opened whether or not waking is on: the agent sent
+        those words and was told it would hear what became of them."""
+        deadline = time.monotonic() + CHAT_FREE_SECONDS
+        while True:
+            talk = await self.talk(talk_id)
+            rows = list(await self.db.fetchall("SELECT * FROM agent_talk_messages WHERE talk_id = ? AND wake_state = 'owed' ORDER BY id", (talk_id,)))
+            if talk is None or not rows:
+                return
+            if await self._waiting_count(talk_id):
+                return  # the rest of the line is still going: one turn for all of it, when it is through
+            if talk["state"] == CLOSED or time.monotonic() >= deadline:
+                await self._told_of(rows)
+                return
+            if self._readers.get(talk_id):
+                await asyncio.sleep(1.0)
+                continue
+            session_id = str(talk["session_id"])
+            manager = self.manager
+            key = "delivered" if all(row["state"] == SENT for row in rows) else "gave_up"
+            why = await manager.guest_ready(session_id, "none")
+            price = await manager.guest_price(session_id)
+            body = self._outcome_note(talk, rows)
+            runs = (await self.runs_of(talk))[-RUNS_KEPT:]
+            usd_left = TURN_USD if price is not None and any(price) else None
+            if why or price is None or (usd_left is not None and await manager.guest_first_call_usd(session_id, price, runs=runs, extra_chars=len(body)) > usd_left):
+                logger.info("what became of a waiting message could not wake session %s: %s", session_id, why or "no turn within its budget")
+                await self._told_of(rows)
+                await self._tell(talk, key)
+                return
+            await self._told_of(rows)
+            turn = GuestTurn(talk_id, str(talk["host"]), "none", usd_left, "", "reply", tuple(runs), notice=True)
+            try:
+                await manager.submit(session_id, body, as_answer=False, origin=turn.origin, via="agent_talk", guest=turn)
+            except GuestTurnBusy:
+                await self.db.execute(f"UPDATE agent_talk_messages SET wake_state = 'owed' WHERE id IN ({','.join('?' * len(rows))})", tuple(row["id"] for row in rows))
+                await asyncio.sleep(1.0)
+                continue
+            except (RuntimeError, KeyError) as exc:
+                logger.warning("what became of a waiting message could not open a turn in session %s: %s", session_id, exc)
+                await self._tell(talk, key)
+                return
+            # The turn reads this conversation's runs, which hold the stranger's replies.
+            manager.touch_run(session_id)
+            if key == "gave_up":
+                await self._tell(talk, key)
+            return
+
+    async def _told_of(self, rows: list[Any]) -> None:
+        await self.db.execute(f"UPDATE agent_talk_messages SET wake_state = 'done' WHERE id IN ({','.join('?' * len(rows))})", tuple(row["id"] for row in rows))
+
+    @staticmethod
+    def _outcome_note(talk: Any, rows: list[Any]) -> str:
+        """What the turn opened by :meth:`_announce` reads: this code's words and the agent's own, none of the stranger's."""
+        lines = [f"What became of the messages that waited while the agent at {talk['host']} was offline (conversation {talk['id']}):"]
+        for row in rows:
+            text = str(row["text"])
+            quoted = text if len(text) <= CARD_CHARS else f"{text[:CARD_CHARS]}…"
+            if row["state"] == SENT:
+                outcome = "delivered"
+            elif row["note"] == "gave_up":
+                outcome = f"not sent: the other side stayed offline for {int(GIVE_UP_SECONDS // 3600)} hours"
+            elif row["note"] == "behind":
+                outcome = "not sent: it waited behind a message that did not go"
+            elif row["state"] == UNSURE:
+                outcome = "may or may not have arrived: the door stopped answering while it was being sent"
+            else:
+                outcome = "not sent: the door would not take it"
+            lines.append(f"- {outcome}: {quoted!r}")
+        return "\n".join(lines)
 
     async def _mark(self, message_id: int, state: str, *, note: str | None = None) -> None:
         if note is None:
@@ -1015,12 +1260,19 @@ class AgentTalks:
                 answer = await self.dialer.call(
                     "GET", f"{talk['base_url']}/a/messages?after={talk['cursor']}&wait={DOOR_WAIT_SECONDS}", token=talk["token"], timeout=DOOR_WAIT_SECONDS + CALL_SECONDS,
                 )
+                if door_absent(answer):
+                    raise DoorGone(f"answered {answer.status} in place of the door")
             except (DoorGone, NotReachable) as exc:
                 failures += 1
                 logger.debug("the door of conversation %s did not answer: %s", talk_id, exc)
+                if failures >= OFFLINE_AFTER and talk["waiting_for"] != OFFLINE:
+                    await self._update(talk_id, waiting_for=OFFLINE, quiet=1)
+                    self._wake_readers(talk_id)
                 await asyncio.sleep(min(FAILURE_BACKOFF_MAX, MIN_CYCLE_SECONDS * 2**failures))
                 continue
             failures = 0
+            if talk["waiting_for"] == OFFLINE:
+                self._door_back(talk_id)
             try:
                 pause = await self._took(talk, answer)
             except Exception:  # noqa: BLE001 — nothing a door sends may stop what follows it silently
@@ -1055,11 +1307,13 @@ class AgentTalks:
         if stop and (taken or waiting == "nothing"):
             await self._update(talk_id, waiting_for="", quiet=0)
             return None
-        if stop:
-            await self._update(talk_id, waiting_for="owner" if waiting == "owner" else "reply", quiet=1)
+        # The door is up and has kept what was sent, but its owner's agent has not been seen: offline, read slowly.
+        owed = "owner" if waiting == "owner" else OFFLINE if waiting == "owner_online" else "reply"
+        if stop or owed == OFFLINE:
+            await self._update(talk_id, waiting_for=owed, quiet=1)
             self._wake_readers(talk_id)
             return max(QUIET_POLL_SECONDS, answer.retry_after or 0.0)
-        await self._update(talk_id, waiting_for="owner" if waiting == "owner" else "reply", quiet=0)
+        await self._update(talk_id, waiting_for=owed, quiet=0)
         return 0.0
 
     def _reason(self, body: dict[str, Any]) -> str:
@@ -1454,6 +1708,7 @@ class AgentTalks:
         if talk is None or talk["state"] == CLOSED:
             return
         await self._update(talk_id, state=CLOSED, reason=reason, token="", waiting_for="", quiet=0, wake_turns=0, closed_at=_now())
+        await self.db.execute("UPDATE agent_talk_messages SET state = ?, note = 'closed' WHERE talk_id = ? AND state = ?", (FAILED, talk_id, WAITING))
         held = await self.db.fetchall("SELECT id FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk_id, HELD))
         for row in held:
             await self._claim(int(row["id"]), REFUSED)
@@ -1513,7 +1768,8 @@ class AgentTalks:
             try:
                 standing = await self.db.fetchone("SELECT 1 FROM link_contacts WHERE talk_id = ? AND state IN ('offered', 'accepting', 'active')", (talk["id"],))
                 # A contact's conversation waits as long as the contact lasts: that it may be quiet for weeks is the point of one.
-                if standing is None and talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
+                # A message that waits for the operator or for the door is somebody still meaning to talk.
+                if standing is None and talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state IN (?, ?)", (talk["id"], HELD, WAITING)) is None:
                     await self.end(talk["id"], reason="idle")
                     await self._tell(talk, "closed")
                     continue
@@ -1524,14 +1780,25 @@ class AgentTalks:
                     self._spawn(self._fetch_files(talk["id"]), f"agent-talk-files:{talk['id']}")
                 if talk["wake_turns"] != 0:
                     self.wake(talk["id"])
+                # Picked up after a restart: what waits for the door, and word owed of what became of it.
+                if await self._waiting_count(talk["id"]):
+                    self._retry_later(talk["id"])
+                elif await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND wake_state = 'owed'", (talk["id"],)):
+                    self.announce(talk["id"])
             except Exception:  # noqa: BLE001 — one conversation that cannot be swept must not cost the others theirs
                 logger.exception("could not sweep conversation %s", talk["id"])
 
     async def serve(self) -> None:
         """Pick up what a restart left, then keep the slow clock: idle ends, and anything that fell off.
 
-        A message caught on its way out is left as sent-or-not: sending it again could be saying it twice.
+        A message caught on its way out is left as sent-or-not: sending it again could be saying it twice. One that
+        waits for the door was never sent, and goes on waiting.
         """
+        for row in await self.db.fetchall("SELECT id, talk_id FROM agent_talk_messages WHERE state = ? AND waiting_since != ''", (SENDING,)):
+            # A retry the restart cut short may have arrived: the chat hears so, and what waited behind it does not
+            # go after a message the other side may never have had.
+            await self.db.execute("UPDATE agent_talk_messages SET state = ?, wake_state = 'owed' WHERE id = ?", (UNSURE, row["id"]))
+            await self._settle_waiting(str(row["talk_id"]), "behind")
         await self.db.execute("UPDATE agent_talk_messages SET state = ? WHERE state = ?", (UNSURE, SENDING))
         await self.db.execute("DELETE FROM agent_talks WHERE state = ? AND token = ''", (OPENING,))
         try:
@@ -1544,6 +1811,13 @@ class AgentTalks:
         finally:
             for task in list(self._background):
                 task.cancel()
+
+
+def _present(answer: DoorAnswer) -> DoorAnswer:
+    """``answer``, or :class:`DoorGone` with nothing sent when a front answered in the door's place."""
+    if door_absent(answer):
+        raise DoorGone(f"answered {answer.status} in place of the door", unsent=True)
+    return answer
 
 
 def _count(value: Any) -> int:
@@ -1600,4 +1874,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(talks.serve(), name="agent-talks")]
 
 
-__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "NO_LIMIT", "SIDE", "TASK_WAKES_MAX", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]
+__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "NO_LIMIT", "SIDE", "TASK_WAKES_MAX", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "door_absent", "install", "public_addresses", "talks_of"]

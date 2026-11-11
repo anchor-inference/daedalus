@@ -9833,3 +9833,16 @@ Object.assign(DICT, {
   "subm.nothing": { en: "No model is allowed: helpers will be refused.", ru: "Ни одна модель не разрешена: помощники будут отклонены." },
   "subm.settings.sub": { en: "The default for every session; a session’s own choice in its Details wins. Also holds for agents it spawns or hires.", ru: "По умолчанию для всех сессий; выбор в деталях сессии важнее. Действует и для агентов, которых она создаёт или нанимает." },
 });
+
+// The export of one conversation over an agent link (linkexport.tsx).
+Object.assign(DICT, {
+  "link.export": { en: "Export", ru: "Выгрузить" },
+  "link.export.zip": { en: "Zip", ru: "Архив" },
+  "link.export.zip.title": { en: "Download the transcript, its data and the files kept here as one zip", ru: "Скачать переписку, её данные и хранящиеся здесь файлы одним zip" },
+  "link.export.note": { en: "To notes", ru: "В заметки" },
+  "link.export.note.title": { en: "Save the transcript as a note in this chat", ru: "Сохранить переписку заметкой в этом чате" },
+  "link.export.saved": { en: "Saved to notes", ru: "Сохранено в заметки" },
+  "talk.state.offline": { en: "Other side offline", ru: "Собеседник офлайн" },
+  "talk.message.waiting_door": { en: "Waiting: other side offline", ru: "Ждёт: собеседник офлайн" },
+  "talk.message.next": { en: "next try {when}", ru: "следующая попытка {when}" },
+});

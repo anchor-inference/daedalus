@@ -9,11 +9,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkReview, api, HeldGroup, LinkFile, LinkTask } from "./api";
-import { absTime, usd } from "./format";
+import { absTime, relTime, usd } from "./format";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { ContactsSection, KeyLine, OfferContact, OwnerSay } from "./contacts";
 import { FilePicks, GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
+import { LinkExport } from "./linkexport";
 import { invalidate, useQuery } from "./store";
 import { Segmented, Switch } from "./ui/components";
 import { confirmAsync, errorText } from "./ui";
@@ -47,6 +48,7 @@ export function talkState(talk: Pick<AgentTalk, "state" | "reason" | "waiting_fo
   if (talk.held > 0) return { key: "held", tone: "attn" };
   if (talk.unread > 0) return { key: "unread", tone: "attn" };
   if (talk.waiting_for === "owner") return { key: "owner", tone: "" };
+  if (talk.waiting_for === "offline") return { key: "offline", tone: "" };
   if (talk.waiting_for === "reply") return { key: talk.quiet ? "quiet" : "waiting", tone: "" };
   return { key: "open", tone: "ok" };
 }
@@ -259,7 +261,7 @@ export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast
   );
 }
 
-const PHASE: Record<string, string> = { held: "question", unread: "question", open: "done", waiting: "working", quiet: "standby", owner: "standby", closed: "stopped" };
+const PHASE: Record<string, string> = { held: "question", unread: "question", open: "done", waiting: "working", quiet: "standby", owner: "standby", offline: "standby", closed: "stopped" };
 
 /** One conversation: who and how it stands, what it cost, what their door says of itself, the thread, a
  *  message that waits, and the settings. The rail and the chip borrow the Subagents tab's colours. */
@@ -310,6 +312,8 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
       {held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} files={filesOf(message, data?.files)} toast={toast} />)}
       {live && talk.state === "open" && <OwnerSay path={`${path}/say`} toast={toast} onSent={() => { invalidate(path); invalidate(listPath(talk.session_id)); }} />}
       {live && talk.state === "open" && !talk.contact && talk.fingerprint && <OfferContact via={`talk:${talk.id}`} name={talk.host} toast={toast} onDone={() => invalidate(path)} />}
+      {/* Under the thread and above the settings: a closed conversation keeps it, since that is when it is wanted most. */}
+      <LinkExport target={{ kind: "talk", id: talk.id }} toast={toast} />
       {live && <TalkControls talk={talk} busy={busy} onChange={(body) => act(() => api.put(`${path}/settings`, body))} onEnd={() => void end()} />}
     </article>
   );
@@ -318,12 +322,14 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
 function TalkLine({ message, files, toast }: { message: AgentTalkMessage; files: readonly LinkFile[]; toast: (text: string) => void }) {
   // A reply refused for its key says why in its own words: "refused" alone reads as the other side's refusal.
   const word = message.state === "sent" || message.state === "read" ? "" : message.state === "refused" && message.note === "key" ? t("talk.message.key") : t(`talk.message.${message.state}`);
+  // A message kept for a door that was not there goes by itself; when it is next tried is what the operator wants to know.
+  const next = message.state === "waiting_door" && message.next_at ? t("talk.message.next", { when: relTime(message.next_at) }) : "";
   // A message that only carried files says so through them; "file" beside them would say it twice.
   const kind = message.kind === "file" && files.length ? "" : kindWord(message.kind, message.task_state);
   const owner = message.author === "owner";
   return (
     <div className="talk-msg" data-role={message.role} data-state={message.state} data-kind={message.kind || "text"} data-author={owner ? "owner" : undefined}>
-      <div className="talk-msg-head"><b>{t(owner ? `talk.role.${message.role}.owner` : `talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
+      <div className="talk-msg-head"><b>{t(owner ? `talk.role.${message.role}.owner` : `talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}{next && <span className="sub" data-talk-next="">{next}</span>}</div>
       {message.text && <div className="talk-text">{message.text}</div>}
       <LinkFiles files={files} toast={toast} />
     </div>

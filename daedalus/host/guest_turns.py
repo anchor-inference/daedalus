@@ -131,6 +131,9 @@ class GuestTurn:
     Without them the model has only the guest's say-so, and refuses what the operator made the link to give."""
     by: str = ""
     """``owner`` where the guest's owner says they wrote the message themselves: the app marks it so. A claim of theirs."""
+    notice: bool = False
+    """For a ``reply`` turn: opened by this installation to say what became of a message that waited for the other
+    side's door, and not by anything the other side wrote. Bounded the same way; only what the model is told differs."""
 
     def as_metadata(self) -> dict[str, Any]:
         out: dict[str, Any] = {"link_id": self.link_id, "label": self.label, "tools": self.tools, "usd_left": self.usd_left, "said": self.said}
@@ -138,7 +141,9 @@ class GuestTurn:
             out["brief"] = self.brief
         if self.by:
             out["by"] = self.by
-        return {**out, "kind": self.kind, "runs": list(self.runs)} if self.kind != "guest" else out
+        if self.kind == "guest":
+            return out
+        return {**out, "kind": self.kind, "runs": list(self.runs), **({"notice": True} if self.notice else {})}
 
     @property
     def trusted(self) -> bool:
@@ -160,6 +165,7 @@ class GuestTurn:
             str(value["link_id"]), str(value.get("label") or ""), tools if tools in GUEST_TOOLS else "none", float(left) if left is not None else None, str(value.get("said") or ""),
             "reply" if value.get("kind") == "reply" else "guest", tuple(str(run) for run in runs) if isinstance(runs, list) else (), str(value.get("brief") or ""),
             "owner" if value.get("by") == "owner" else "",
+            value.get("notice") is True and value.get("kind") == "reply",
         )
 
     @property
