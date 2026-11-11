@@ -52,11 +52,15 @@ CREATE TABLE IF NOT EXISTS links (
     turns_today INTEGER NOT NULL DEFAULT 0,
     turns_day TEXT NOT NULL DEFAULT '',
     file_mb REAL NOT NULL DEFAULT 50,
-    day_mb REAL NOT NULL DEFAULT 500
+    day_mb REAL NOT NULL DEFAULT 500,
+    max_guests INTEGER NOT NULL DEFAULT 1,
+    total_usd REAL NOT NULL DEFAULT 0,
+    owner_key TEXT NOT NULL DEFAULT '',
+    owner_proof TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
-    link_id TEXT NOT NULL UNIQUE REFERENCES links(id) ON DELETE CASCADE,
+    link_id TEXT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE,
     state TEXT NOT NULL,
     reason TEXT NOT NULL DEFAULT '',
@@ -64,8 +68,17 @@ CREATE TABLE IF NOT EXISTS conversations (
     decide_by REAL NOT NULL,
     expires_at REAL NOT NULL,
     last_guest_at REAL NOT NULL,
-    closed_at REAL
+    closed_at REAL,
+    spent_usd REAL NOT NULL DEFAULT 0,
+    reserved_usd REAL NOT NULL DEFAULT 0,
+    turns_used INTEGER NOT NULL DEFAULT 0,
+    turns_today INTEGER NOT NULL DEFAULT 0,
+    turns_day TEXT NOT NULL DEFAULT '',
+    client TEXT NOT NULL DEFAULT '',
+    client_key TEXT NOT NULL DEFAULT '',
+    client_proof TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS conversations_by_link ON conversations(link_id);
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -119,40 +132,94 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS tasks_by_conversation ON tasks(conversation_id);
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """What :func:`migrate` brings a database to. 1 is the door before messages had kinds; nothing before it
-counted, so a file with no version and no ``kind`` column is a 1."""
+counted, so a file with no version and no ``kind`` column is a 1. 3 is the door where a link may have several
+guests, each in a conversation of its own with its own count of turns and money."""
 
 ADDED_COLUMNS = (
     ("links", "file_mb", "REAL NOT NULL DEFAULT 50"),
     ("links", "day_mb", "REAL NOT NULL DEFAULT 500"),
+    ("links", "max_guests", "INTEGER NOT NULL DEFAULT 1"),
+    ("links", "total_usd", "REAL NOT NULL DEFAULT 0"),
+    ("links", "owner_key", "TEXT NOT NULL DEFAULT ''"),
+    ("links", "owner_proof", "TEXT NOT NULL DEFAULT ''"),
     ("messages", "kind", "TEXT NOT NULL DEFAULT 'text'"),
     ("messages", "task_id", "TEXT NOT NULL DEFAULT ''"),
     ("messages", "data", "TEXT NOT NULL DEFAULT ''"),
 )
-"""What version 2 added to tables that existed in version 1. ``CREATE TABLE IF NOT EXISTS`` leaves an old table
-as it was, so each is added where it is missing; a link made before files existed gets the same defaults a new one
-does."""
+"""What versions 2 and 3 added to tables that existed before them. ``CREATE TABLE IF NOT EXISTS`` leaves an old
+table as it was, so each is added where it is missing; a link made before files existed gets the same defaults a new
+one does, and one made before several guests could share a link takes one guest, as it always did."""
+
+CONVERSATIONS_V3 = """
+CREATE TABLE conversations_v3 (
+    id TEXT PRIMARY KEY,
+    link_id TEXT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    decide_by REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    last_guest_at REAL NOT NULL,
+    closed_at REAL,
+    spent_usd REAL NOT NULL DEFAULT 0,
+    reserved_usd REAL NOT NULL DEFAULT 0,
+    turns_used INTEGER NOT NULL DEFAULT 0,
+    turns_today INTEGER NOT NULL DEFAULT 0,
+    turns_day TEXT NOT NULL DEFAULT '',
+    client TEXT NOT NULL DEFAULT '',
+    client_key TEXT NOT NULL DEFAULT '',
+    client_proof TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO conversations_v3(id, link_id, token_hash, state, reason, created_at, decide_by, expires_at, last_guest_at, closed_at,
+    spent_usd, reserved_usd, turns_used, turns_today, turns_day, client)
+SELECT c.id, c.link_id, c.token_hash, c.state, c.reason, c.created_at, c.decide_by, c.expires_at, c.last_guest_at, c.closed_at,
+    l.spent_usd, l.reserved_usd, l.turns_used, l.turns_today, l.turns_day,
+    coalesce((SELECT e.detail FROM events e WHERE e.link_id = c.link_id AND e.kind = 'client' ORDER BY e.id DESC LIMIT 1), '')
+FROM conversations c JOIN links l ON l.id = c.link_id;
+DROP TABLE conversations;
+ALTER TABLE conversations_v3 RENAME TO conversations;
+CREATE INDEX IF NOT EXISTS conversations_by_link ON conversations(link_id);
+"""
+"""Version 3's conversations: no longer one to a link, and each with the counters a guest's own limits are held
+to. A table's UNIQUE cannot be dropped in place, so it is rebuilt, and its rows take their link's counters, which
+were theirs alone while a link had one conversation. What the guest said it was moves from the record onto its row."""
 
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Bring the door's database to :data:`SCHEMA_VERSION`, in one transaction, whatever version it is at.
 
     The door has no other copy of this file, so a step that fails rolls back and the door stops with the
-    file as it was, rather than half a schema under a version number that says otherwise."""
+    file as it was, rather than half a schema under a version number that says otherwise.
+
+    Foreign keys are off while it runs, and only then: dropping the old conversations table with them on
+    deletes, by cascade, every message, file and task that pointed at it. The setting cannot change inside a
+    transaction, so it is set around it, and checked once the rebuilt table is in place."""
     if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
         return
-    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("PRAGMA foreign_keys=OFF")
     try:
-        for table, name, kind in ADDED_COLUMNS:
-            present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-            if name not in present:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table, name, kind in ADDED_COLUMNS:
+                present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+                if name not in present:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+            if "turns_used" not in {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}:
+                for statement in CONVERSATIONS_V3.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+            if conn.execute("PRAGMA foreign_key_check").fetchall():
+                raise sqlite3.IntegrityError("the rebuilt conversations left rows pointing at nothing")
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 STAND_IN = "stand_in"
 DIRECT = "direct"
@@ -184,10 +251,16 @@ OWNER = "owner"
 """A turn the host asked for itself, to carry an answer of the operator's to the guest. Its words never reach the
 door: the message only holds a place in the queue, so the turn is counted and bounded as a guest's is."""
 
-TEXT, FILE, TASK, QUESTION, STATUS = "text", "file", "task", "question", "status"
-KINDS = (TEXT, FILE, TASK, QUESTION, STATUS)
+TEXT, FILE, TASK, QUESTION, STATUS, CONTACT = "text", "file", "task", "question", "status", "contact"
+PROTOCOL_KINDS = (TEXT, FILE, TASK, QUESTION, STATUS)
+KINDS = (*PROTOCOL_KINDS, CONTACT)
 """What a message is. ``text`` is what a message always was; the others carry ids, so a status names its task and
-a file message names its files."""
+a file message names its files. ``contact`` is one installation offering another a standing contact, or taking
+one up: it is for the owner on the other side, starts no turn, and its fields are checked by that owner's host."""
+
+BY_OWNER = "owner"
+"""``data.from`` of a message the operator on either side wrote themselves rather than their agent. A claim of
+that side's, which the door keeps and shows as such: no door can tell a person from a program."""
 
 ACCEPTED, WORKING, NEEDS_INPUT, DONE, REFUSED_TASK, CANCELLED = "accepted", "working", "needs_input", "done", "refused", "cancelled"
 TASK_STATES = (ACCEPTED, WORKING, NEEDS_INPUT, DONE, REFUSED_TASK, CANCELLED)
@@ -291,12 +364,13 @@ class Store:
         now = self.clock()
         self._write(
             "INSERT INTO links(id, invite_hash, state, label, topic, mode, briefing, model_path, model_name, price_in, price_out, approval,"
-            " usd_limit, turns_per_day, turns_total, invite_expires_at, conversation_hours, idle_hours, retention_days, guest_tools, created_at, file_mb, day_mb)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " usd_limit, turns_per_day, turns_total, invite_expires_at, conversation_hours, idle_hours, retention_days, guest_tools, created_at, file_mb, day_mb, max_guests, total_usd)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             link_id, digest(invite), WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
             float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
             int(fields["turns_total"]), until(now, fields["invite_hours"]), float(fields["conversation_hours"]), float(fields["idle_hours"]),
             float(fields["retention_days"]), fields["guest_tools"], now, float(fields.get("file_mb", DEFAULT_FILE_MB)), float(fields.get("day_mb", DEFAULT_DAY_MB)),
+            int(fields.get("max_guests", 1)), float(fields.get("total_usd", NO_LIMIT)),
         )
         self.record(link_id, "created")
         return link_id, invite
@@ -304,23 +378,31 @@ class Store:
     def update_link(self, link_id: str, fields: dict[str, Any]) -> bool:
         """The owner's edit of every setting of a link. What it spent and counted stays; lifetimes count from
         when the link and its conversation began, as they did, so an edit lengthens or shortens them rather
-        than starting them again. An invite that ran out comes back if its new lifetime has not."""
+        than starting them again. An invite that ran out comes back if its new lifetime has not, and one that had
+        all its guests takes more if the number of them was raised."""
         link = self.link(link_id)
         if link is None or link["state"] == REVOKED:
             return False
         now = self.clock()
         expires = until(link["created_at"], fields["invite_hours"])
-        state = WAITING if link["state"] == EXPIRED and not ended(expires, now) else link["state"]
+        guests = int(fields.get("max_guests", link["max_guests"]))
+        room = guests == NO_LIMIT or self.guests_of(link_id) < guests
+        state = link["state"]
+        if state == EXPIRED and not ended(expires, now):
+            state = WAITING if room else SPENT
+        elif state in (WAITING, SPENT):
+            state = WAITING if room else SPENT
         self._write("BEGIN IMMEDIATE")
         try:
             self._write(
                 "UPDATE links SET state = ?, closed_at = CASE WHEN ? = ? THEN NULL ELSE closed_at END, label = ?, topic = ?, mode = ?, briefing = ?, model_path = ?, model_name = ?,"
                 " price_in = ?, price_out = ?, approval = ?, usd_limit = ?, turns_per_day = ?, turns_total = ?, invite_expires_at = ?, conversation_hours = ?,"
-                " idle_hours = ?, retention_days = ?, guest_tools = ?, file_mb = ?, day_mb = ? WHERE id = ?",
+                " idle_hours = ?, retention_days = ?, guest_tools = ?, file_mb = ?, day_mb = ?, max_guests = ?, total_usd = ? WHERE id = ?",
                 state, state, WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
                 float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
                 int(fields["turns_total"]), expires, float(fields["conversation_hours"]), float(fields["idle_hours"]), float(fields["retention_days"]),
-                fields["guest_tools"], float(fields.get("file_mb", link["file_mb"])), float(fields.get("day_mb", link["day_mb"])), link_id,
+                fields["guest_tools"], float(fields.get("file_mb", link["file_mb"])), float(fields.get("day_mb", link["day_mb"])), guests,
+                float(fields.get("total_usd", link["total_usd"])), link_id,
             )
             hours = float(fields["conversation_hours"])
             self._write("UPDATE conversations SET expires_at = CASE WHEN ? > 0 THEN created_at + ? ELSE 0 END WHERE link_id = ? AND state != ?", hours, hours * 3600, link_id, CLOSED)
@@ -333,6 +415,15 @@ class Store:
 
     def link(self, link_id: str) -> sqlite3.Row | None:
         return self._one("SELECT * FROM links WHERE id = ?", link_id)
+
+    def set_identity(self, link_id: str, key: str, proof: str) -> None:
+        """The owner's key and its proof over this link's invite, which the card hands a guest. The door cannot make
+        the proof, holding no key, and has no use for it but to pass it on."""
+        self._write("UPDATE links SET owner_key = ?, owner_proof = ? WHERE id = ?", key, proof, link_id)
+
+    def guests_of(self, link_id: str) -> int:
+        row = self._one("SELECT count(*) c FROM conversations WHERE link_id = ?", link_id)
+        return int(row["c"]) if row else 0
 
     def link_by_invite(self, invite: str) -> sqlite3.Row | None:
         return self._one("SELECT * FROM links WHERE invite_hash = ?", digest(invite))
@@ -358,9 +449,13 @@ class Store:
         return True
 
     def _close_conversation_of(self, link_id: str, reason: str, now: float) -> None:
+        """Every conversation of a link: what a revocation closes."""
+        for conversation in self._all("SELECT * FROM conversations WHERE link_id = ? AND state != ?", link_id, CLOSED):
+            self._close_conversation(conversation, reason, now)
+
+    def _close_conversation(self, conversation: sqlite3.Row, reason: str, now: float) -> None:
         """A turn already running stays claimed: its cost is still booked when it ends, its words go nowhere."""
-        conversation = self._one("SELECT * FROM conversations WHERE link_id = ?", link_id)
-        if conversation is None or conversation["state"] == CLOSED:
+        if conversation["state"] == CLOSED:
             return
         self._write("UPDATE conversations SET state = ?, reason = ?, closed_at = ? WHERE id = ?", CLOSED, reason, now, conversation["id"])
         self._write("UPDATE messages SET state = ? WHERE conversation_id = ? AND state IN (?, ?)", FAILED, conversation["id"], HELD, QUEUED)
@@ -372,28 +467,37 @@ class Store:
 
     # -- redeem and approval ----------------------------------------------------------
 
-    def redeem(self, link: sqlite3.Row, address_note: str) -> tuple[str, sqlite3.Row] | None:
-        """Spend the invite once: the conversation token and row, or ``None`` when it was spent already."""
+    def redeem(self, link: sqlite3.Row, *, client: str = "", key: str = "", proof: str = "") -> tuple[str, sqlite3.Row] | None:
+        """Spend one use of the invite: the conversation token and row, or ``None`` when none is left.
+
+        A link for several guests stays waiting until the last of them has come, and each gets a conversation and
+        a token of its own. ``client``, ``key`` and ``proof`` are what the guest says it is and the key it signed the
+        redeem with: kept on its row for the owner's host to check, and nothing here acts on them."""
         token = new_secret("gt_")
         conversation_id = secrets.token_hex(8)
         now = self.clock()
         self._write("BEGIN IMMEDIATE")
         try:
-            # The state is read again inside the transaction, so a race has exactly one winner.
-            cursor = self._write("UPDATE links SET state = ? WHERE id = ? AND state = ?", SPENT, link["id"], WAITING)
+            # The state and the count are read again inside the transaction, so a race for the last place has one winner.
+            cursor = self._write(
+                "UPDATE links SET state = CASE WHEN max_guests != ? AND (SELECT count(*) FROM conversations WHERE link_id = links.id) + 1 >= max_guests THEN ? ELSE ? END"
+                " WHERE id = ? AND state = ?",
+                NO_LIMIT, SPENT, WAITING, link["id"], WAITING,
+            )
             if cursor.rowcount != 1:
                 self._write("ROLLBACK")
                 return None
             state = PENDING if link["approval"] else OPEN
             self._write(
-                "INSERT INTO conversations(id, link_id, token_hash, state, created_at, decide_by, expires_at, last_guest_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                conversation_id, link["id"], digest(token), state, now, now + FIRST_CONTACT_HOURS * 3600, until(now, link["conversation_hours"]), now,
+                "INSERT INTO conversations(id, link_id, token_hash, state, created_at, decide_by, expires_at, last_guest_at, client, client_key, client_proof)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                conversation_id, link["id"], digest(token), state, now, now + FIRST_CONTACT_HOURS * 3600, until(now, link["conversation_hours"]), now, client, key, proof,
             )
             self._write("COMMIT")
         except BaseException:
             self._write("ROLLBACK")
             raise
-        self.record(link["id"], "first_contact" if state == PENDING else "opened", address_note)
+        self.record(link["id"], "first_contact" if state == PENDING else "opened", conversation_id)
         row = self.conversation(conversation_id)
         assert row is not None
         return token, row
@@ -402,7 +506,11 @@ class Store:
         return self._one("SELECT * FROM conversations WHERE id = ?", conversation_id)
 
     def conversation_of_link(self, link_id: str) -> sqlite3.Row | None:
-        return self._one("SELECT * FROM conversations WHERE link_id = ?", link_id)
+        """The newest conversation of a link: the only one, for a link of one guest."""
+        return self._one("SELECT * FROM conversations WHERE link_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", link_id)
+
+    def conversations_of(self, link_id: str) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM conversations WHERE link_id = ? ORDER BY created_at, rowid", link_id)
 
     def conversation_by_token(self, token: str) -> sqlite3.Row | None:
         return self._one("SELECT * FROM conversations WHERE token_hash = ?", digest(token))
@@ -415,26 +523,27 @@ class Store:
         now = self.clock()
         self._write("UPDATE conversations SET state = ?, last_guest_at = ? WHERE id = ?", OPEN, now, conversation_id)
         self._write("UPDATE messages SET state = ? WHERE conversation_id = ? AND state = ?", QUEUED, conversation_id, HELD)
-        self.record(conversation["link_id"], "admitted")
+        self.record(conversation["link_id"], "admitted", conversation_id)
         return True
 
     def refuse(self, conversation_id: str, reason: str = "refused") -> bool:
         conversation = self.conversation(conversation_id)
         if conversation is None or conversation["state"] != PENDING:
             return False
-        self._close_conversation_of(conversation["link_id"], reason, self.clock())
-        self.record(conversation["link_id"], reason)
+        self._close_conversation(conversation, reason, self.clock())
+        self.record(conversation["link_id"], reason, conversation_id)
         return True
 
     def end(self, conversation: sqlite3.Row) -> None:
-        self._close_conversation_of(conversation["link_id"], "ended", self.clock())
-        self.record(conversation["link_id"], "ended")
+        self._close_conversation(conversation, "ended", self.clock())
+        self.record(conversation["link_id"], "ended", conversation["id"])
 
     # -- messages ---------------------------------------------------------------------
 
-    def add_guest_message(self, conversation: sqlite3.Row, text: str, *, kind: str = TEXT, task_id: str = "", data: dict[str, Any] | None = None) -> int:
+    def add_guest_message(self, conversation: sqlite3.Row, text: str, *, kind: str = TEXT, task_id: str = "", data: dict[str, Any] | None = None, state: str = "") -> int:
+        """``state`` for a message that is not a turn's to answer: an offer of a contact, which is the owner's."""
         now = self.clock()
-        state = HELD if conversation["state"] == PENDING else QUEUED
+        state = state or (HELD if conversation["state"] == PENDING else QUEUED)
         cursor = self._write(
             "INSERT INTO messages(conversation_id, role, text, at, state, kind, task_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             conversation["id"], GUEST, text, now, state, kind, task_id, json.dumps(data) if data else "",
@@ -519,21 +628,30 @@ class Store:
         row = self._one("SELECT usd, reserved FROM spend_days WHERE day = ?", self._day())
         return {"usd": float(row["usd"]), "reserved": float(row["reserved"])} if row else {"usd": 0.0, "reserved": 0.0}
 
-    def limit_reached(self, link: sqlite3.Row, estimate: float = 0.0) -> Refusal | None:
+    def limit_reached(self, link: sqlite3.Row, estimate: float = 0.0, *, conversation: sqlite3.Row | None = None) -> Refusal | None:
         """The first limit a turn of ``estimate`` dollars would pass. Asked before anything is spent.
+
+        A link's limits are each guest's: its dollars and its turns are counted on the guest's conversation, and on
+        the link as a whole only where no conversation is named, which for a link of one guest is the same count.
+        ``total_usd`` is what all the guests of a link may spend together, and the day's budget is every link's.
 
         A direct link has no price of its own, its turn runs on the chat's model and is priced only
         afterwards, so it counts as priced: a free stand-in model is the only thing the dollars skip.
         A limit of :data:`NO_LIMIT` is skipped too: the owner chose not to count it.
         """
+        own = conversation if conversation is not None else link
         priced = link["mode"] == DIRECT or float(link["price_in"]) + float(link["price_out"]) > 0
         if priced and float(link["usd_limit"]) != NO_LIMIT:
-            spent = float(link["spent_usd"]) + float(link["reserved_usd"])
+            spent = float(own["spent_usd"]) + float(own["reserved_usd"])
             if spent >= float(link["usd_limit"]) or spent + estimate > float(link["usd_limit"]):
                 return Refusal("usd_per_link", None)
-        if int(link["turns_total"]) != NO_LIMIT and int(link["turns_used"]) >= int(link["turns_total"]):
+        if priced and float(link["total_usd"]) != NO_LIMIT:
+            spent = float(link["spent_usd"]) + float(link["reserved_usd"])
+            if spent >= float(link["total_usd"]) or spent + estimate > float(link["total_usd"]):
+                return Refusal("usd_all_guests", None)
+        if int(link["turns_total"]) != NO_LIMIT and int(own["turns_used"]) >= int(link["turns_total"]):
             return Refusal("turns_total", None)
-        today = int(link["turns_today"]) if link["turns_day"] == self._day() else 0
+        today = int(own["turns_today"]) if own["turns_day"] == self._day() else 0
         if int(link["turns_per_day"]) != NO_LIMIT and today >= int(link["turns_per_day"]):
             return Refusal("turns_per_day", self._tomorrow())
         if priced and self.usd_per_day() != NO_LIMIT:
@@ -543,16 +661,28 @@ class Store:
                 return Refusal("usd_per_day", self._tomorrow())
         return None
 
-    def allowance(self, link: sqlite3.Row) -> float | None:
-        """What one more turn of this link may spend before a limit: a direct turn's own cap. ``None`` when
-        neither the link nor the day has a limit in dollars."""
+    def allowance(self, link: sqlite3.Row, conversation: sqlite3.Row | None = None) -> float | None:
+        """What one more turn of this guest may spend before a limit: a direct turn's own cap. ``None`` when
+        neither the link, its guests together nor the day has a limit in dollars."""
+        own = conversation if conversation is not None else link
         day = self.spend_today()
         left = []
         if float(link["usd_limit"]) != NO_LIMIT:
-            left.append(float(link["usd_limit"]) - float(link["spent_usd"]) - float(link["reserved_usd"]))
+            left.append(float(link["usd_limit"]) - float(own["spent_usd"]) - float(own["reserved_usd"]))
+        if float(link["total_usd"]) != NO_LIMIT:
+            left.append(float(link["total_usd"]) - float(link["spent_usd"]) - float(link["reserved_usd"]))
         if self.usd_per_day() != NO_LIMIT:
             left.append(self.usd_per_day() - day["usd"] - day["reserved"])
         return max(0.0, min(left)) if left else None
+
+    def _guest_of(self, message_id: int) -> tuple[sqlite3.Row, sqlite3.Row]:
+        message = self.message(message_id)
+        assert message is not None
+        conversation = self.conversation(message["conversation_id"])
+        assert conversation is not None
+        link = self.link(conversation["link_id"])
+        assert link is not None
+        return link, conversation
 
     def reserve_turn(self, message_id: int, link: sqlite3.Row, ceiling: float | None) -> tuple[Refusal | None, float | None]:
         """Put aside what a direct turn may spend: ``ceiling``, or what is left if that is less.
@@ -563,28 +693,28 @@ class Store:
         """
         self._write("BEGIN IMMEDIATE")
         try:
-            fresh = self.link(link["id"])
-            assert fresh is not None
-            left = self.allowance(fresh)
+            fresh, conversation = self._guest_of(message_id)
+            left = self.allowance(fresh, conversation)
             share = left if ceiling is None else ceiling if left is None else min(ceiling, left)
-            refusal = self.limit_reached(fresh, share or 0.0)
+            refusal = self.limit_reached(fresh, share or 0.0, conversation=conversation)
             if refusal is not None:
                 self._write("ROLLBACK")
                 return refusal, 0.0
-            self._take(link["id"], message_id, share or 0.0)
+            self._take(link["id"], conversation["id"], message_id, share or 0.0)
             self._write("COMMIT")
         except BaseException:
             self._write("ROLLBACK")
             raise
         return None, share
 
-    def _take(self, link_id: str, message_id: int, amount: float) -> None:
+    def _take(self, link_id: str, conversation_id: str, message_id: int, amount: float) -> None:
         day = self._day()
-        self._write(
-            "UPDATE links SET reserved_usd = reserved_usd + ?, turns_used = turns_used + 1,"
-            " turns_today = CASE WHEN turns_day = ? THEN turns_today + 1 ELSE 1 END, turns_day = ? WHERE id = ?",
-            amount, day, day, link_id,
-        )
+        for table, row_id in (("links", link_id), ("conversations", conversation_id)):
+            self._write(
+                f"UPDATE {table} SET reserved_usd = reserved_usd + ?, turns_used = turns_used + 1,"
+                " turns_today = CASE WHEN turns_day = ? THEN turns_today + 1 ELSE 1 END, turns_day = ? WHERE id = ?",
+                amount, day, day, row_id,
+            )
         self._write("INSERT INTO spend_days(day, reserved) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET reserved = reserved + excluded.reserved", day, amount)
         self._write("UPDATE messages SET state = ?, reserved_usd = ? WHERE id = ?", CLAIMED, amount, message_id)
 
@@ -596,22 +726,22 @@ class Store:
         """
         self._write("BEGIN IMMEDIATE")
         try:
-            fresh = self.link(link["id"])
-            assert fresh is not None
-            refusal = self.limit_reached(fresh, estimate)
+            fresh, conversation = self._guest_of(message_id)
+            refusal = self.limit_reached(fresh, estimate, conversation=conversation)
             if refusal is not None:
                 self._write("ROLLBACK")
                 return refusal
-            self._take(link["id"], message_id, estimate)
+            self._take(link["id"], conversation["id"], message_id, estimate)
             self._write("COMMIT")
         except BaseException:
             self._write("ROLLBACK")
             raise
         return None
 
-    def _refund(self, link_id: str, amount: float) -> None:
+    def _refund(self, link_id: str, conversation_id: str, amount: float) -> None:
         if amount:
             self._write("UPDATE links SET reserved_usd = max(0, reserved_usd - ?) WHERE id = ?", amount, link_id)
+            self._write("UPDATE conversations SET reserved_usd = max(0, reserved_usd - ?) WHERE id = ?", amount, conversation_id)
             self._write("UPDATE spend_days SET reserved = max(0, reserved - ?) WHERE day = ?", amount, self._day())
 
     def settle(self, message_id: int, *, cost: float, state: str = ANSWERED) -> None:
@@ -625,8 +755,9 @@ class Store:
         day = self._day()
         self._write("BEGIN IMMEDIATE")
         try:
-            self._refund(link_id, float(message["reserved_usd"]))
+            self._refund(link_id, conversation["id"], float(message["reserved_usd"]))
             self._write("UPDATE links SET spent_usd = spent_usd + ? WHERE id = ?", cost, link_id)
+            self._write("UPDATE conversations SET spent_usd = spent_usd + ? WHERE id = ?", cost, conversation["id"])
             self._write("INSERT INTO spend_days(day, usd) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET usd = usd + excluded.usd", day, cost)
             self._write("UPDATE messages SET state = ?, reserved_usd = 0, cost_usd = ? WHERE id = ?", state, cost, message_id)
             self._write("COMMIT")
@@ -642,8 +773,9 @@ class Store:
             return
         conversation = self.conversation(message["conversation_id"])
         assert conversation is not None
-        self._refund(conversation["link_id"], float(message["reserved_usd"]))
-        self._write("UPDATE links SET turns_used = max(0, turns_used - 1), turns_today = max(0, turns_today - 1) WHERE id = ?", conversation["link_id"])
+        self._refund(conversation["link_id"], conversation["id"], float(message["reserved_usd"]))
+        for table, row_id in (("links", conversation["link_id"]), ("conversations", conversation["id"])):
+            self._write(f"UPDATE {table} SET turns_used = max(0, turns_used - 1), turns_today = max(0, turns_today - 1) WHERE id = ?", row_id)
         self._write("UPDATE messages SET state = ?, reserved_usd = 0 WHERE id = ?", FAILED, message_id)
 
     def drop(self, message_id: int) -> None:
@@ -740,11 +872,6 @@ class Store:
         row = self._one("SELECT max(id) m FROM events")
         return int(row["m"] or 0) if row else 0
 
-    def client_of(self, link_id: str) -> str:
-        """What the guest said it is at the redeem, or nothing. A claim, never a fact: see ``Mailbox.redeem``."""
-        row = self._one("SELECT detail FROM events WHERE link_id = ? AND kind = 'client' ORDER BY id DESC LIMIT 1", link_id)
-        return str(row["detail"]) if row is not None else ""
-
     def refused_redeems(self, link_id: str) -> int:
         row = self._one("SELECT count(*) c FROM events WHERE link_id = ? AND kind = 'redeem_refused'", link_id)
         return int(row["c"]) if row else 0
@@ -762,21 +889,25 @@ class Store:
         for link in self._all("SELECT id FROM links WHERE state = ? AND invite_expires_at > 0 AND invite_expires_at < ?", WAITING, now):
             self._write("UPDATE links SET state = ?, closed_at = ? WHERE id = ?", EXPIRED, now, link["id"])
             self.record(link["id"], "invite_expired")
-        for conversation in self._all("SELECT id, link_id FROM conversations WHERE state = ? AND decide_by < ?", PENDING, now):
-            self._close_conversation_of(conversation["link_id"], "approval_timeout", now)
-            self.record(conversation["link_id"], "approval_timeout")
+        for conversation in self._all("SELECT * FROM conversations WHERE state = ? AND decide_by < ?", PENDING, now):
+            self._close_conversation(conversation, "approval_timeout", now)
+            self.record(conversation["link_id"], "approval_timeout", conversation["id"])
         rows = self._all(
-            "SELECT c.id, c.link_id, c.expires_at, c.last_guest_at, l.idle_hours FROM conversations c JOIN links l ON l.id = c.link_id WHERE c.state = ?", OPEN,
+            "SELECT c.*, l.idle_hours FROM conversations c JOIN links l ON l.id = c.link_id WHERE c.state = ?", OPEN,
         )
         for row in rows:
             idle = float(row["idle_hours"]) and row["last_guest_at"] + float(row["idle_hours"]) * 3600 < now
             reason = "expired" if ended(row["expires_at"], now) else "idle" if idle else ""
             if reason:
-                self._close_conversation_of(row["link_id"], reason, now)
-                self.record(row["link_id"], reason)
-        for link in self._all("SELECT l.id, l.retention_days, l.closed_at, c.closed_at AS talked FROM links l LEFT JOIN conversations c ON c.link_id = l.id WHERE l.state != ?", WAITING):
+                self._close_conversation(row, reason, now)
+                self.record(row["link_id"], reason, row["id"])
+        # A link goes once it takes nobody new and every conversation of it has been closed for the retention period.
+        for link in self._all(
+            "SELECT l.id, l.retention_days, l.closed_at, (SELECT max(closed_at) FROM conversations c WHERE c.link_id = l.id) AS talked,"
+            " (SELECT count(*) FROM conversations c WHERE c.link_id = l.id AND c.state != ?) AS live FROM links l WHERE l.state != ?", CLOSED, WAITING,
+        ):
             closed = link["talked"] or link["closed_at"]
-            if closed is not None and closed + float(link["retention_days"]) * 86400 < now:
+            if not link["live"] and closed is not None and closed + float(link["retention_days"]) * 86400 < now:
                 self._write("DELETE FROM links WHERE id = ?", link["id"])
         self._write("DELETE FROM spend_days WHERE day < ?", self._day(now - 40 * 86400))
 
@@ -790,8 +921,8 @@ def rows(items: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "ACCEPTED", "AGENT", "ANSWERED", "CANCELLED", "CLAIMED", "CLOSED", "DEFAULT_DAY_MB", "DEFAULT_FILE_MB", "DIRECT", "DONE", "DOOR", "EXPIRED", "FAILED", "FILE",
-    "FIRST_CONTACT_HOURS", "GONE", "GUEST", "HELD", "KINDS", "NEEDS_INPUT", "NO_LIMIT", "OPEN", "OPEN_TASK_STATES", "OWNER", "PENDING", "QUESTION", "QUEUED",
+    "ACCEPTED", "AGENT", "ANSWERED", "BY_OWNER", "CANCELLED", "CLAIMED", "CLOSED", "CONTACT", "DEFAULT_DAY_MB", "DEFAULT_FILE_MB", "DIRECT", "DONE", "DOOR", "EXPIRED", "FAILED", "FILE",
+    "FIRST_CONTACT_HOURS", "GONE", "GUEST", "HELD", "KINDS", "NEEDS_INPUT", "NO_LIMIT", "OPEN", "OPEN_TASK_STATES", "OWNER", "PENDING", "PROTOCOL_KINDS", "QUESTION", "QUEUED",
     "READY", "REFUSED_TASK", "REVOKED", "SCHEMA_VERSION", "SENT", "SPENT", "STAND_IN", "STATUS", "TASK", "TASK_STATES", "TEXT", "UPLOADING", "WAITING", "WORKING",
     "Refusal", "Store", "digest", "ended", "migrate", "new_secret", "rows", "until",
 ]

@@ -1328,10 +1328,83 @@ class FakeTalks:
                     one["state"] = "cancelled"
                     return 200, talk
             return 409, {"detail": "this task is not open"}
+        if len(parts) == 5 and parts[4] == "say" and verb == "POST":
+            # The operator's own words: sent at once, marked as theirs, with no approval.
+            messages = talk["messages"]  # type: ignore[assignment]
+            messages.append({"id": 100 + len(messages), "role": "us", "text": str(dict(body or {}).get("text") or ""), "state": "sent", "note": "", "at": datetime.now(UTC).isoformat(),  # type: ignore[attr-defined]
+                             "kind": "text", "task": "", "files": [], "author": "owner", "signed": ""})
+            return 200, talk
         return None
+
+    def contact_talk(self) -> None:
+        """The first conversation as a contact's: its door proved a key, and the other side's owner wrote in it themselves."""
+        talk = self.talks["t1"]
+        talk["fingerprint"] = "7C1E-04A9-B3D2-5F80-E6A1"
+        talk["contact"] = {"id": "k1", "name": "Mira's Daedalus", "state": "active"}
+        now = datetime.now(UTC).isoformat()
+        talk["messages"].insert(2, {"id": 9, "role": "them", "text": "This is Mira herself: the cake can wait until Monday.", "state": "read", "note": "", "at": now,  # type: ignore[attr-defined]
+                                    "kind": "text", "task": "", "files": [], "author": "owner", "signed": "ok"})
 
 
 TALKS = FakeTalks()
+
+
+class FakeContacts:
+    """The installation's standing contacts (``daedalus/extensions/api_contacts.py``): none unless a check seeds them, so
+    every other screen draws what it always drew. Seeded: one active contact and one offer that waits."""
+
+    def __init__(self, *, seeded: bool = False) -> None:
+        self.contacts: dict[str, dict] = {}
+        self.calls: list[tuple[str, str, object]] = []
+        if seeded:
+            self.seed()
+
+    def seed(self) -> None:
+        now = datetime.now(UTC).isoformat()
+        base = {"reason": "", "session_id": "", "link_id": "", "talk_id": "", "offer_text": "", "usd_limit": 1.0, "turns_per_day": 40, "spent_usd": 0.0, "created_at": now, "last_at": now, "via": "talk"}
+        self.contacts["k1"] = {**base, "id": "k1", "name": "Mira's Daedalus", "state": "active", "fingerprint": "7C1E-04A9-B3D2-5F80-E6A1", "link_id": "ck1", "talk_id": "t1", "level": "read", "spent_usd": 0.214}
+        self.contacts["k2"] = {**base, "id": "k2", "name": "Tomas's agent", "state": "incoming", "fingerprint": "2B9D-E310-55AC-0F47-C8D6", "level": "", "via": "link",
+                               "offer_text": "We work on the menu every week: <b>shall we</b> keep a standing line? See http://elsewhere.example/x"}
+
+    def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:
+        parts = path.split("/")
+        verb = method.upper()
+        data = body if isinstance(body, dict) else {}
+        if verb != "GET":
+            self.calls.append((verb, path, dict(data)))
+        if path == "/api/contacts" and verb == "GET":
+            return 200, {"contacts": list(self.contacts.values()), "fingerprint": "41F0-9A2C-D7B3-6E15-08CB", "name": "Daedalus", "levels": ["read", "all", "trusted"]}
+        if path == "/api/contacts/offer" and verb == "POST":
+            made = {"id": f"k{len(self.contacts) + 1}", "name": str(data.get("name") or "contact"), "state": "offered", "reason": "", "session_id": session_id, "fingerprint": "", "link_id": "x",
+                    "talk_id": "", "offer_text": "", "level": str(data.get("tools") or "read"), "usd_limit": 1.0, "turns_per_day": 40, "spent_usd": 0.0,
+                    "created_at": datetime.now(UTC).isoformat(), "last_at": datetime.now(UTC).isoformat(), "via": str(data.get("via") or "").split(":")[0]}
+            self.contacts[made["id"]] = made
+            return 200, made
+        contact = self.contacts.get(parts[3]) if len(parts) >= 4 else None
+        if contact is None:
+            return 404, {"detail": "no such contact"}
+        if len(parts) == 4 and verb == "PUT":
+            if data.get("tools"):
+                contact["level"] = data["tools"]
+            if data.get("name"):
+                contact["name"] = data["name"]
+            return 200, contact
+        if len(parts) == 5 and verb == "POST":
+            if parts[4] == "accept":
+                contact.update(state="accepting", level=str(data.get("tools") or "read"), session_id=str(data.get("session_id") or "new"), offer_text="")
+                return 200, contact
+            if parts[4] == "decline":
+                del self.contacts[parts[3]]
+                return 200, {"ok": True}
+            if parts[4] == "break":
+                contact.update(state="broken")
+                return 200, {"ok": True}
+            if parts[4] == "say":
+                return 200, contact
+        return None
+
+
+CONTACTS = FakeContacts()
 
 
 class FakeGuests:
@@ -1380,7 +1453,7 @@ class FakeGuests:
             "id": id_, "state": state, "label": label, "topic": topic, "mode": mode, "model_name": model if mode == "stand_in" else "", "approval": True, "usd_limit": 1.0,
             "turns_per_day": 40, "turns_total": 200, "guest_tools": tools, "created_at": now - 3600, "invite_expires_at": now + 2 * 86400, "conversation_hours": 168.0,
             "idle_hours": 24.0, "retention_days": 30.0, "spent_usd": spent, "priced": True, "turns_used": turns, "turns_today": turns, "refused_redeems": redeems, "conversation": conversation,
-            "file_mb": 50.0, "day_mb": 500.0, "files_today_bytes": 0,
+            "file_mb": 50.0, "day_mb": 500.0, "files_today_bytes": 0, "max_guests": 1, "total_usd": 0.0, "conversations": [conversation] if conversation else [],
         }
         row.update(over)
         self.links[id_] = row
@@ -1447,7 +1520,7 @@ class FakeGuests:
         return {
             "available": self.available, "public_base": self.public_base,
             "defaults": {"mode": "stand_in", "approval": True, "tools": "read", "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200, "invite_hours": 72.0,
-                         "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0, "file_mb": 50.0, "day_mb": 500.0},
+                         "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0, "file_mb": 50.0, "day_mb": 500.0, "max_guests": 1, "total_usd": 0.0},
             "models": [
                 {"id": "cheap", "label": "Cheap model", "path": "openrouter/v1", "model": "cheap-1", "billing": "metered", "price_in": 0.1, "price_out": 0.4, "free": False},
                 {"id": "good", "label": "Good model", "path": "openrouter/v1", "model": "good-1", "billing": "metered", "price_in": 2.0, "price_out": 8.0, "free": False},
@@ -1524,6 +1597,7 @@ class FakeGuests:
             row["state"] = "revoked"
             if row["conversation"] and row["conversation"]["state"] != "closed":
                 row["conversation"] = {**row["conversation"], "state": "closed", "reason": "revoked"}
+                row["conversations"] = [row["conversation"]]
             if parts[5] == "revoke":
                 return 200, {"link": row}
             fresh = self.link(f"n{len(self.links)}", label=row["label"], topic=row["topic"], mode=row["mode"], tools=row["guest_tools"])
@@ -1535,8 +1609,14 @@ class FakeGuests:
                 if conversation and conversation["id"] == parts[4] and conversation["state"] == "pending":
                     conversation = {k: v for k, v in conversation.items() if k != "first_message"}
                     row["conversation"] = {**conversation, "state": "open" if parts[5] == "admit" else "closed", "reason": "" if parts[5] == "admit" else "refused"}
+                    row["conversations"] = [row["conversation"]]
                     return 200, {"ok": True}
             return 409, {"detail": "this conversation is not waiting for a decision"}
+        if len(parts) == 8 and parts[:4] == ["", "api", "guest", "links"] and parts[5] == "conversations" and parts[7] == "say" and method == "POST":
+            # The operator's own words to a guest: the door keeps them as the owner's.
+            self.calls.append((method, path, dict(data)))
+            self.messages.setdefault(parts[4], []).append({"id": f"o{len(self.calls)}", "role": "agent", "text": str(data.get("text") or ""), "at": time.time(), "state": "sent", "cost_usd": 0.0, "by": "owner"})
+            return 200, {"ok": True}
         if len(parts) == 6 and parts[:3] == ["", "api", "sessions"] and parts[4:] == ["guest", "draft"] and method == "POST":
             self.calls.append((method, path, None))
             return 200, {"briefing": self.draft}
@@ -1549,7 +1629,7 @@ class FakeGuests:
                             tools=str(data.get("tools") or "none") if data.get("mode") == "direct" else "none")
             self.briefings[row["id"]] = str(data.get("briefing") or "")
             self.instructions[row["id"]] = str(data.get("instructions") or "")
-            row.update({name: data[name] for name in ("usd_limit", "turns_per_day", "turns_total", "approval", "file_mb", "day_mb") if name in data})
+            row.update({name: data[name] for name in ("usd_limit", "turns_per_day", "turns_total", "approval", "file_mb", "day_mb", "max_guests", "total_usd") if name in data})
             if "invite_hours" in data:
                 row["invite_expires_at"] = row["created_at"] + float(data["invite_hours"]) * 3600 if data["invite_hours"] else 0
             return 200, {"link": row, "url": f"{self.public_base}/a/n{len(self.links)}tokenvalue"}
@@ -1603,6 +1683,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return link_file_bytes(parts[3])
     if path.startswith("/api/agent-talks/") or (len(parts) == 5 and parts[2] == "sessions" and parts[4] == "agent-talks"):
         answered = TALKS.answer(method, path, body)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
+    if path == "/api/contacts" or path.startswith("/api/contacts/"):
+        answered = CONTACTS.answer(method, path, body)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path.startswith("/api/guest/") or (len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "guest"):

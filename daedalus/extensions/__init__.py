@@ -75,6 +75,7 @@ EXTENSIONS = (
     "daedalus.extensions.sandbox_notice",
     "daedalus.extensions.guest_door",
     "daedalus.extensions.agent_talk",
+    "daedalus.extensions.agent_contacts",
     "daedalus.extensions.calendar_reminders",
     "daedalus.extensions.calendar_hooks",
     "daedalus.extensions.context_windows",

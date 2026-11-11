@@ -30,10 +30,11 @@ from daedalus.extensions.guest_door import (
     DoorUnavailable,
     GuestBridge,
     bridge_of,
+    identity_of,
     model_choices,
     model_options,
 )
-from daedalus.host import guest_turns, link_protocol
+from daedalus.host import guest_turns, link_identity, link_protocol
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.notify_text import render
 
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 DEFAULTS: dict[str, Any] = {
     "mode": "stand_in", "approval": True, "tools": guest_turns.DEFAULT_TOOLS, "usd_limit": 1.0, "turns_per_day": 40, "turns_total": 200,
     "invite_hours": 72.0, "conversation_hours": 168.0, "idle_hours": 24.0, "retention_days": 30.0,
-    "file_mb": link_protocol.DEFAULT_FILE_MB, "day_mb": link_protocol.DEFAULT_DAY_MB,
+    "file_mb": link_protocol.DEFAULT_FILE_MB, "day_mb": link_protocol.DEFAULT_DAY_MB, "max_guests": 1, "total_usd": 0.0,
 }
 """What the form opens with. Numbers from no standard: a guest is paid for by the owner, so they start small.
 A trusted agent is the operator's own choice of somebody to serve, and starts with no limits at all."""
@@ -91,6 +92,10 @@ class LinkBody(BaseModel):
     """The largest file either side may send, in megabytes; 0 is no limit."""
     day_mb: float = Field(default=DEFAULTS["day_mb"], ge=0, le=1_000_000)
     """What files may take in a day, both ways together; 0 is no limit."""
+    max_guests: int = Field(default=DEFAULTS["max_guests"], ge=0, le=10_000)
+    """How many guests may redeem the link, each into a conversation of its own; 0 is no limit."""
+    total_usd: float = Field(default=DEFAULTS["total_usd"], ge=0, le=10_000)
+    """What all the guests of the link may spend together; 0 is no limit. ``usd_limit`` is each guest's."""
 
 
 class SettingsBody(BaseModel):
@@ -184,22 +189,37 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def links(session_id: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         mine = await bridge().links_of(session_id)
         listed = await door("GET", "/control/links")
-        return {"links": [link for link in listed.get("links") or [] if link.get("id") in mine]}
+        return {"links": [checked(link) for link in listed.get("links") or [] if link.get("id") in mine]}
 
     @api.get("/api/guest/links/{link_id}")
-    async def one_link(link_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def one_link(link_id: str, conversation: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A link and the transcript of one of its guests: ``conversation``, or the newest."""
         known = await bridge().known_link(link_id)
         if known is None:
             raise HTTPException(404, "no such link")
-        out = await door("GET", f"/control/links/{link_id}")
+        out = await door("GET", f"/control/links/{link_id}" + (f"?conversation={conversation}" if conversation.isalnum() else ""))
         return {**out, "link": described(out.get("link") or {}, known), "exchange": await bridge().exchange(link_id)}
+
+    def guest_key(conversation: dict[str, Any], hashed_invite: str) -> dict[str, Any]:
+        """A guest as the app shows it: the fingerprint of the key it redeemed with where the redeem's proof holds, and
+        nothing it merely said about itself. The key and its proof stay here."""
+        key, proof = str(conversation.pop("client_key", "") or ""), str(conversation.pop("client_proof", "") or "")
+        verified = bool(key) and link_identity.check_redeem(key, proof, hashed_invite)
+        return {**conversation, "fingerprint": link_identity.fingerprint(key) if verified else "", "verified": verified}
+
+    def checked(link: dict[str, Any]) -> dict[str, Any]:
+        hashed = str(link.pop("invite_hash", "") or "")
+        out = {**link, "conversations": [guest_key(dict(c), hashed) for c in link.get("conversations") or []]}
+        if link.get("conversation"):
+            out["conversation"] = guest_key(dict(link["conversation"]), hashed)
+        return out
 
     def described(link: dict[str, Any], known: Any) -> dict[str, Any]:
         """The door's view of a link, with what only this side holds: the turn's level and the note to the agent,
         and the model as the form names it, so an edit opens on what the link has."""
         model_id = next((o["id"] for o in model_options(app) if o["path"] == link.get("model_path") and o["model"] == link.get("model_name")), "")
         tools = str(known["tools"]) if known["mode"] == "direct" else "none"
-        return {**link, "guest_tools": tools, "instructions": str(known["instructions"] or ""), "model_id": model_id}
+        return {**checked(link), "guest_tools": tools, "instructions": str(known["instructions"] or ""), "model_id": model_id}
 
     @api.put("/api/guest/links/{link_id}")
     async def edit_link(link_id: str, body: LinkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -227,7 +247,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         link = made["link"]
         mine = kept(body)
         await bridge().remember_link(link["id"], session_id, mine.pop("label"), mine.pop("mode"), mine.pop("tools"), mine.pop("usd_limit"), **mine)
-        return {"link": link, "url": link_url(made["invite"])}
+        await sign_link(link)
+        return {"link": checked(link), "url": link_url(made["invite"])}
+
+    async def sign_link(link: dict[str, Any]) -> None:
+        """This installation's key on the link's card, with its proof over the invite, so a Daedalus that comes sees whose door it is."""
+        identity = identity_of(app)
+        if identity is not None and link.get("invite_hash"):
+            await door("PUT", f"/control/links/{link['id']}/identity", json={"key": identity.public, "proof": identity.door_proof(str(link["invite_hash"]))})
 
     @api.post("/api/guest/links/{link_id}/revoke")
     async def revoke_link(link_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -238,8 +265,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         await bridge().revoked(link_id, door_told=False)
         out = await door("POST", f"/control/links/{link_id}/revoke")
         await bridge().revoked(link_id)
-        await bridge().contact_settled(str(((out.get("link") or {}).get("conversation") or {}).get("id") or ""), render("guest.revoked", app.notifications.language()) if app.notifications is not None else "")
-        return out
+        resolution = render("guest.revoked", app.notifications.language()) if app.notifications is not None else ""
+        for conversation in (out.get("link") or {}).get("conversations") or []:
+            await bridge().contact_settled(str(conversation.get("id") or ""), resolution)
+        return {**out, "link": checked(out.get("link") or {})}
 
     @api.post("/api/guest/links/{link_id}/reissue")
     async def reissue_link(link_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -248,12 +277,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if known is None:
             raise HTTPException(404, "no such link")
         made = await door("POST", f"/control/links/{link_id}/reissue")
+        await sign_link(made["link"])
         await bridge().revoked(link_id)
         await bridge().remember_link(
             made["link"]["id"], str(known["session_id"]), str(known["label"]), str(known["mode"]), str(known["tools"]), float(known["usd_limit"]),
             topic=str(known["topic"] or ""), instructions=str(known["instructions"] or ""),
         )
-        return {"link": made["link"], "url": link_url(made["invite"])}
+        return {"link": checked(made["link"]), "url": link_url(made["invite"])}
 
     @api.post("/api/guest/conversations/{conversation_id}/{decision}")
     async def decide(conversation_id: str, decision: Literal["admit", "refuse"], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

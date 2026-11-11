@@ -16,6 +16,8 @@
 .talk-card-head > .ic { flex: none; color: var(--fg-3); }
 .talk-card-head .subagent-chip { margin-left: auto; }
 .talk-counts { font-variant-numeric: tabular-nums; }
+.talk-key { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.talk-msg[data-author="owner"] .talk-msg-head > b { color: var(--accent); }
 .talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-1); }
 .talk-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-13); line-height: 1.45; }
 

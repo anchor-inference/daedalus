@@ -129,11 +129,15 @@ class GuestTurn:
     brief: str = ""
     """The operator's own words about what this guest is for: the link's topic and its note to the agent.
     Without them the model has only the guest's say-so, and refuses what the operator made the link to give."""
+    by: str = ""
+    """``owner`` where the guest's owner says they wrote the message themselves: the app marks it so. A claim of theirs."""
 
     def as_metadata(self) -> dict[str, Any]:
         out: dict[str, Any] = {"link_id": self.link_id, "label": self.label, "tools": self.tools, "usd_left": self.usd_left, "said": self.said}
         if self.brief:
             out["brief"] = self.brief
+        if self.by:
+            out["by"] = self.by
         return {**out, "kind": self.kind, "runs": list(self.runs)} if self.kind != "guest" else out
 
     @property
@@ -155,6 +159,7 @@ class GuestTurn:
         return cls(
             str(value["link_id"]), str(value.get("label") or ""), tools if tools in GUEST_TOOLS else "none", float(left) if left is not None else None, str(value.get("said") or ""),
             "reply" if value.get("kind") == "reply" else "guest", tuple(str(run) for run in runs) if isinstance(runs, list) else (), str(value.get("brief") or ""),
+            "owner" if value.get("by") == "owner" else "",
         )
 
     @property

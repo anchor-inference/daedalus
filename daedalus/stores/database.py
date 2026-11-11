@@ -3830,6 +3830,52 @@ async def _link_kinds(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration(LINK_FILES_SQL, _link_kinds))
 
+# 161 — standing contacts between two installations, and who wrote a message of a link. A contact is a link of this
+# side's door for them and a conversation of ours at theirs, tied to the key they signed with; ``invite`` holds their
+# link's address only until this side has redeemed it. A message an operator wrote themselves says so in ``author``,
+# and one whose signature this side checked says how that went in ``signed``. ``peer_key`` is the key the other
+# door's card proved its owner holds.
+LINK_CONTACTS_SQL = """
+CREATE TABLE IF NOT EXISTS link_contacts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    key TEXT NOT NULL DEFAULT '',
+    link_id TEXT NOT NULL DEFAULT '',
+    talk_id TEXT NOT NULL DEFAULT '',
+    invite TEXT NOT NULL DEFAULT '',
+    our_invite_hash TEXT NOT NULL DEFAULT '',
+    via TEXT NOT NULL DEFAULT '',
+    offer_text TEXT NOT NULL DEFAULT '',
+    last_in_at INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS link_contacts_by_link ON link_contacts(link_id);
+CREATE INDEX IF NOT EXISTS link_contacts_by_talk ON link_contacts(talk_id);
+"""
+
+LINK_CONTACTS_COLUMNS = (
+    ("agent_talks", "peer_key", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "author", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talk_messages", "signed", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+async def _link_contacts(conn: aiosqlite.Connection) -> None:
+    """Every conversation and message from before has no key and no author but the agent, which is what the defaults
+    say. Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    for table, name, kind in LINK_CONTACTS_COLUMNS:
+        present = {row[1] for row in await (await conn.execute(f"PRAGMA table_info({table})")).fetchall()}
+        if name not in present:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+
+MIGRATIONS.append(DataMigration(LINK_CONTACTS_SQL, _link_contacts))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

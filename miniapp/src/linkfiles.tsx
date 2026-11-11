@@ -181,6 +181,7 @@ export function kindWord(kind: string | undefined, taskState?: string): string {
   if (kind === "task") return t("link.kind.task");
   if (kind === "question") return t("link.kind.question");
   if (kind === "file") return t("link.kind.file");
+  if (kind === "contact") return t("link.kind.contact");
   if (kind === "status") return taskState && TASK_PHASE[taskState] ? `${t("link.kind.status")} · ${t(`link.task.state.${taskState}`)}` : t("link.kind.status");
   return "";
 }

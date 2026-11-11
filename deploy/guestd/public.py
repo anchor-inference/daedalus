@@ -64,6 +64,9 @@ MARKDOWN = "text/markdown; charset=utf-8"
 CLIENT_HEADER = b"x-guest-client"
 CLIENT_KIND_HEADER = b"x-agent-client"
 """What the caller says it is, as opposed to :data:`CLIENT_HEADER`, which is who the front saw connect."""
+KEY_HEADER = b"x-agent-key"
+PROOF_HEADER = b"x-agent-proof"
+"""Another installation's public key and its signature over the invite it redeems: kept for the owner's host to check."""
 
 
 def as_json(answer: Answer) -> JSONResponse:
@@ -127,7 +130,7 @@ class PublicDoor:
         # visitor's knocking must not close it to the one it was given to.
         key = invite if known else address
         if redeem:
-            return self.redeem(invite, method, address, key, header(scope, CLIENT_KIND_HEADER))
+            return self.redeem(invite, method, address, key, header(scope, CLIENT_KIND_HEADER), raw_header(scope, KEY_HEADER), raw_header(scope, PROOF_HEADER))
         return self.page(invite, method, address, key, "application/json" in header(scope, b"accept"))
 
     def page(self, invite: str, method: str, address: str, key: str, as_data: bool = False) -> Response:
@@ -144,13 +147,13 @@ class PublicDoor:
         status, text = found
         return Response(text, status_code=status, media_type=MARKDOWN, headers=HEADERS)
 
-    def redeem(self, invite: str, method: str, address: str, key: str, client: str = "") -> Response:
+    def redeem(self, invite: str, method: str, address: str, key: str, client: str = "", agent_key: str = "", proof: str = "") -> Response:
         if method != "POST":
             return refused(405, "Redeeming is a POST. A GET here spends nothing.")
         if not self.pages.allow(key):
             # Each refused redeem leaves a line for the owner: a loop must not be able to fill the record.
             return refused(429, "Too many requests.", 60)
-        answer = self.mailbox.redeem(invite, address=address, client=client)
+        answer = self.mailbox.redeem(invite, address=address, client=client, key=agent_key, proof=proof)
         if answer is None:
             self.failures.failed(address)
             return refused(404, "No such link.")
@@ -250,6 +253,14 @@ def header(scope: Scope, name: bytes) -> str:
     for key, value in scope.get("headers", ()):
         if key == name:
             return value.decode("latin-1").lower()
+    return ""
+
+
+def raw_header(scope: Scope, name: bytes) -> str:
+    """A header as sent: a key is base64, where case is the value."""
+    for key, value in scope.get("headers", ()):
+        if key == name:
+            return value.decode("latin-1")[:256]
     return ""
 
 

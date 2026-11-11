@@ -28,14 +28,16 @@ from starlette.responses import JSONResponse, Response
 
 from .files import CHUNK_BYTES, FileRefused
 from .limits import Rate
-from .mailbox import Mailbox
+from .mailbox import KEY, SIGNATURE, Mailbox, contact_of, signed_of
 from .public import read_body
 from .standin import FAILED_TEXT
 from .store import (
     AGENT,
     ANSWERED,
+    BY_OWNER,
     CANCELLED,
     CLOSED,
+    CONTACT,
     DEFAULT_DAY_MB,
     DEFAULT_FILE_MB,
     DIRECT,
@@ -81,10 +83,14 @@ NUMBERS = {
 """Each limit and lifetime may be :data:`~.store.NO_LIMIT`, which is none at all; a lifetime that is not is a few minutes at least."""
 FILE_LIMITS = {"file_mb": DEFAULT_FILE_MB, "day_mb": DEFAULT_DAY_MB}
 """Optional, as the host may not name them: a link made without them has the defaults. Each may be 0, no limit."""
+GUEST_LIMITS = {"max_guests": (1, 0, 10_000), "total_usd": (0.0, 0.0, 10_000.0)}
+"""How many guests a link takes, and what they may spend together: optional, a link of one guest with no shared
+budget by default. 0 is no limit for both, as for every other limit."""
 LIFETIMES = ("invite_hours", "conversation_hours", "idle_hours")
-HOST_KINDS = (TEXT, FILE, QUESTION, STATUS)
+HOST_KINDS = (TEXT, FILE, QUESTION, STATUS, CONTACT)
 """What the host may write into a conversation outside the answer to a turn: a progress line, files the operator let
-go, a word of the host's own. A task is never set on a guest through this door; a guest sets tasks here."""
+go, a word of the host's own or of the operator's, an offer of a contact. A task is never set on a guest through
+this door; a guest sets tasks here."""
 HOST_SAYS_PER_MINUTE = 30
 WORKING_TEXT = "The other agent is working on this task."
 ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+){0,3}")
@@ -114,6 +120,11 @@ def link_fields(body: Any) -> dict[str, Any]:
         if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1_000_000:
             raise Invalid(f"{name} is 0 for no limit, or a number of megabytes")
         fields[name] = value
+    for name, (default, low, high) in GUEST_LIMITS.items():
+        value = body.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high:
+            raise Invalid(f"{name} is 0 for no limit, or a number up to {high:g}")
+        fields[name] = int(value) if name == "max_guests" else float(value)
     for name in LIFETIMES:
         if fields[name] and fields[name] < 0.1:
             raise Invalid(f"{name} is 0 for none, or at least 0.1")
@@ -128,8 +139,26 @@ def link_fields(body: Any) -> dict[str, Any]:
     return fields
 
 
-def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
-    conversation = store.conversation_of_link(link["id"])
+def conversation_view(store: Store, conversation: Any) -> dict[str, Any]:
+    """One guest of a link: where its conversation stands, what it spent, and what it said it is at the redeem."""
+    today = conversation["turns_today"] if conversation["turns_day"] == store._day() else 0
+    out = {
+        "id": conversation["id"], "state": conversation["state"], "reason": conversation["reason"], "created_at": conversation["created_at"],
+        "decide_by": conversation["decide_by"], "expires_at": conversation["expires_at"], "last_guest_at": conversation["last_guest_at"],
+        "client": conversation["client"], "client_key": conversation["client_key"], "client_proof": conversation["client_proof"],
+        "spent_usd": conversation["spent_usd"] + conversation["reserved_usd"], "turns_used": conversation["turns_used"], "turns_today": today,
+    }
+    if conversation["state"] == PENDING:
+        held = [m for m in store.transcript(conversation["id"], 5) if m["state"] == HELD]
+        out["first_message"] = held[0]["text"] if held else ""
+    return out
+
+
+def view(store: Store, link: Any, *, full: bool = False, conversation_id: str = "") -> dict[str, Any]:
+    """A link as the host reads it. ``conversation`` is the newest of its guests, the one a link of one guest has, and
+    ``conversations`` all of them; a full view carries the transcript of ``conversation_id``, or of the newest."""
+    every = store.conversations_of(link["id"])
+    conversation = next((c for c in every if c["id"] == conversation_id), None) if conversation_id else (every[-1] if every else None)
     day_key_matches = link["turns_day"] == store._day()
     out: dict[str, Any] = {
         "id": link["id"], "state": link["state"], "label": link["label"], "topic": link["topic"], "mode": link["mode"], "model_name": link["model_name"], "model_path": link["model_path"],
@@ -138,16 +167,11 @@ def view(store: Store, link: Any, *, full: bool = False) -> dict[str, Any]:
         "idle_hours": link["idle_hours"], "retention_days": link["retention_days"], "spent_usd": link["spent_usd"] + link["reserved_usd"], "turns_used": link["turns_used"],
         "turns_today": link["turns_today"] if day_key_matches else 0, "refused_redeems": store.refused_redeems(link["id"]), "conversation": None,
         "file_mb": float(link["file_mb"]), "day_mb": float(link["day_mb"]), "files_today_bytes": store.bytes_today(link["id"]),
+        "max_guests": int(link["max_guests"]), "total_usd": float(link["total_usd"]), "invite_hash": link["invite_hash"],
+        "conversations": [conversation_view(store, c) for c in every],
     }
     if conversation is not None:
-        out["conversation"] = {
-            "id": conversation["id"], "state": conversation["state"], "reason": conversation["reason"], "created_at": conversation["created_at"],
-            "decide_by": conversation["decide_by"], "expires_at": conversation["expires_at"], "last_guest_at": conversation["last_guest_at"],
-            "client": store.client_of(link["id"]),
-        }
-        if conversation["state"] == PENDING:
-            held = [m for m in store.transcript(conversation["id"], 5) if m["state"] == HELD]
-            out["conversation"]["first_message"] = held[0]["text"] if held else ""
+        out["conversation"] = conversation_view(store, conversation)
     if full:
         out["briefing"] = link["briefing"]
         out["events"] = [{"id": e["id"], "kind": e["kind"], "at": e["at"]} for e in store.events_of(link["id"])]
@@ -162,6 +186,7 @@ def message_view(message: Any) -> dict[str, Any]:
     return {
         "id": message["id"], "role": message["role"], "text": message["text"], "at": message["at"], "state": message["state"], "cost_usd": message["cost_usd"],
         "kind": message["kind"] or TEXT, "task": message["task_id"], "task_state": data.get("state", ""), "files": list(data.get("files") or []),
+        "by": data.get("from", ""), "signed": data.get("signed"), "contact": data.get("contact"),
     }
 
 
@@ -256,12 +281,14 @@ class ControlDoor:
             return 200, {"link": view(store, link), "invite": invite}
         if (method, path) == ("GET", "/control/links"):
             return 200, {"links": [view(store, link) for link in store.links()]}
+        if matched := re.fullmatch(r"/control/links/([0-9a-f]+)/identity", path):
+            return self.identity(matched.group(1), method, body)
         if (method, path) == ("GET", "/control/feed"):
             return 200, await self.feed(int((query.get("after") or ["0"])[0]), int((query.get("wait") or [str(FEED_WAIT_SECONDS)])[0]))
         if (method, path) == ("POST", "/control/deliveries/reset"):
             return 200, {"reset": self.reset()}
         if matched := re.fullmatch(r"/control/links/([0-9a-f]+)(?:/(revoke|reissue))?", path):
-            return self.one_link(method, *matched.groups(), body)
+            return self.one_link(method, *matched.groups(), body, conversation_id=(query.get("conversation") or [""])[0])
         if matched := re.fullmatch(r"/control/conversations/([0-9a-f]+)/(admit|refuse)", path):
             if method != "POST":
                 return 405, {"detail": "POST"}
@@ -294,35 +321,51 @@ class ControlDoor:
             self.store.set_setting("model_routes", json.dumps(model_routes(body["model_routes"])))
         return 200, {"ok": True, "usd_per_day": self.store.usd_per_day(), "public_base": self.store.setting("public_base")}
 
-    def one_link(self, method: str, link_id: str, action: str | None, body: Any = None) -> tuple[int, dict[str, Any]]:
+    def one_link(self, method: str, link_id: str, action: str | None, body: Any = None, *, conversation_id: str = "") -> tuple[int, dict[str, Any]]:
         store = self.store
         link = store.link(link_id)
         if link is None:
             return 404, {"detail": "no such link"}
         if action is None and method == "PUT":
             store.update_link(link_id, link_fields(body))
-            self._woken(store.conversation_of_link(link_id))
+            self._woken(link_id)
             return 200, {"link": view(store, store.link(link_id), full=True)}
         if action is None:
-            return (200, {"link": view(store, link, full=True)}) if method == "GET" else (405, {"detail": "GET or PUT"})
+            return (200, {"link": view(store, link, full=True, conversation_id=conversation_id)}) if method == "GET" else (405, {"detail": "GET or PUT"})
         if method != "POST":
             return 405, {"detail": "POST"}
-        conversation = store.conversation_of_link(link_id)
         if action == "reissue":
             # The same settings on a new invite, for a guest who lost their token. The old link goes
             # first, so at no moment do two invites speak for one set of settings.
             store.revoke(link_id)
-            fields = {name: link[name] for name in (*REQUIRED, "price_in", "price_out", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days", "approval", "file_mb", "day_mb")}
+            fields = {
+                name: link[name] for name in (
+                    *REQUIRED, "price_in", "price_out", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days", "approval", "file_mb", "day_mb",
+                    "max_guests", "total_usd",
+                )
+            }
             fields["invite_hours"] = max(0.1, (link["invite_expires_at"] - link["created_at"]) / 3600) if link["invite_expires_at"] else NO_LIMIT
             new_id, invite = store.create_link(fields)
-            self._woken(conversation)
+            self._woken(link_id)
             return 200, {"link": view(store, store.link(new_id)), "invite": invite, "replaces": link_id}
         store.revoke(link_id)
-        self._woken(conversation)
+        self._woken(link_id)
         return 200, {"link": view(store, store.link(link_id))}
 
-    def _woken(self, conversation: Any) -> None:
-        if conversation is not None:
+    def identity(self, link_id: str, method: str, body: Any) -> tuple[int, dict[str, Any]]:
+        """The owner's key on a link and its signature over the invite, for the card to hand a guest."""
+        if method != "PUT":
+            return 405, {"detail": "PUT"}
+        if self.store.link(link_id) is None:
+            return 404, {"detail": "no such link"}
+        key, proof = body.get("key") if isinstance(body, dict) else None, body.get("proof") if isinstance(body, dict) else None
+        if not isinstance(key, str) or not KEY.fullmatch(key) or not isinstance(proof, str) or not SIGNATURE.fullmatch(proof):
+            raise Invalid("key and proof are a public key and a signature, base64url")
+        self.store.set_identity(link_id, key, proof)
+        return 200, {"ok": True}
+
+    def _woken(self, link_id: str) -> None:
+        for conversation in self.store.conversations_of(link_id):
             self.mailbox.wake(conversation["id"])
         self.mailbox.notify()
 
@@ -380,7 +423,12 @@ class ControlDoor:
         if not self.says.allow(conversation_id):
             return 429, {"detail": "the host has said a lot in this conversation in the last minute"}
         text = inert(str(body.get("text") or ""))[:REPLY_MAX_CHARS]
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = self._marks(body)
+        if kind == CONTACT:
+            offer = contact_of(body.get("contact"))
+            if offer is None:
+                raise Invalid("a contact message carries its contact")
+            data["contact"] = offer
         task_id = str(body.get("task") or "")
         if task_id:
             task = self.store.task(task_id)
@@ -403,11 +451,22 @@ class ControlDoor:
             raise Invalid("a status names its task")
         if body.get("files"):
             data["files"] = [file["id"] for file in self.mailbox.desk.ready_of(conversation_id, body.get("files"), AGENT)]
-        if not text and not data.get("files") and kind != STATUS:
+        if not text and not data.get("files") and kind not in (STATUS, CONTACT):
             raise Invalid("say something, or send files")
         message_id = self.store.add_reply(conversation_id, AGENT, text, kind=kind, task_id=task_id, data=data)
         self.mailbox.wake(conversation_id)
         return 200, {"ok": True, "message_id": message_id}
+
+    @staticmethod
+    def _marks(body: Any) -> dict[str, Any]:
+        """Who wrote a message the host sends, when it was the operator, and the host's signature over it."""
+        data: dict[str, Any] = {}
+        if isinstance(body, dict) and body.get("from") == BY_OWNER:
+            data["from"] = BY_OWNER
+        signed = signed_of(body.get("signed")) if isinstance(body, dict) else None
+        if signed is not None:
+            data["signed"] = signed
+        return data
 
     def resume(self, conversation_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """A turn for an answer the operator gave: queued like a guest's message, so it is counted and bounded."""
@@ -503,6 +562,7 @@ class ControlDoor:
         return {
             "message_id": message["id"], "link_id": conversation["link_id"], "conversation_id": conversation["id"], "text": message["text"], "allowance_usd": share,
             "role": message["role"], "kind": message["kind"] or TEXT, "task": message["task_id"], "files": files, "ask": str(data.get("ask") or ""),
+            "by": str(data.get("from") or ""), "signed": data.get("signed"), "client_key": conversation["client_key"],
         }
 
     def reply(self, message_id: int, body: Any) -> tuple[int, dict[str, Any]]:
@@ -532,6 +592,7 @@ class ControlDoor:
         store = self.store
         ok = body.get("ok", True)
         text = inert(str(body.get("text") or ""))[:REPLY_MAX_CHARS] if ok else ""
+        marks = self._marks(body) if ok else {}
         try:
             files = [file["id"] for file in self.mailbox.desk.ready_of(conversation["id"], body.get("files"), AGENT)] if ok and body.get("files") else []
         except FileRefused:
@@ -543,14 +604,14 @@ class ControlDoor:
                 return
             wanted = body.get("task_state") if body.get("task_state") in (DONE, NEEDS_INPUT, REFUSED_TASK) else DONE if ok else REFUSED_TASK
             store.move_task(task["id"], wanted)
-            store.add_reply(conversation["id"], AGENT if ok else DOOR, text if ok else FAILED_TEXT, kind=STATUS, task_id=task["id"], data={"state": wanted, **({"files": files} if files else {})})
+            store.add_reply(conversation["id"], AGENT if ok else DOOR, text if ok else FAILED_TEXT, kind=STATUS, task_id=task["id"], data={"state": wanted, **({"files": files} if files else {}), **marks})
             return
         if not ok:
             store.add_reply(conversation["id"], DOOR, FAILED_TEXT)
         elif files:
-            store.add_reply(conversation["id"], AGENT, text, kind=FILE, data={"files": files})
+            store.add_reply(conversation["id"], AGENT, text, kind=FILE, data={"files": files, **marks})
         elif text:
-            store.add_reply(conversation["id"], AGENT, text)
+            store.add_reply(conversation["id"], AGENT, text, data=marks or None)
 
     def reset(self) -> int:
         """The host has started: it remembers no turn it claimed before, so none of them will be answered.
@@ -587,4 +648,4 @@ async def read_large(receive: Receive) -> bytes:
             return bytes(body)
 
 
-__all__ = ["CLOSED", "HOST_KINDS", "WORKING_TEXT", "ControlDoor", "FEED_WAIT_SECONDS", "INTERRUPTED_TEXT", "Invalid", "QUEUED", "file_view", "link_fields", "message_view", "task_view", "view"]
+__all__ = ["CLOSED", "HOST_KINDS", "conversation_view", "WORKING_TEXT", "ControlDoor", "FEED_WAIT_SECONDS", "INTERRUPTED_TEXT", "Invalid", "QUEUED", "file_view", "link_fields", "message_view", "task_view", "view"]

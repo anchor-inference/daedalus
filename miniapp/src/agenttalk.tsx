@@ -12,6 +12,7 @@ import { AgentTalk, AgentTalkDetail, AgentTalkList, AgentTalkMessage, AgentTalkR
 import { absTime, usd } from "./format";
 import { Icon } from "./icons";
 import { t } from "./i18n";
+import { ContactsSection, KeyLine, OfferContact, OwnerSay } from "./contacts";
 import { FilePicks, GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { invalidate, useQuery } from "./store";
 import { Segmented, Switch } from "./ui/components";
@@ -223,6 +224,7 @@ export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast
   if (!talks.length && !guestHeld.length) {
     return (
       <div className="talks">
+        <ContactsSection sessionId={sessionId} toast={toast} />
         <div className="subagents-empty">
           <span className="subagents-empty-mark" aria-hidden="true"><Icon name="bots" size={20} /></span>
           <p>{t("talk.none")}</p>
@@ -234,6 +236,7 @@ export function AgentsTab({ sessionId, talks, guestHeld = NO_HELD, loaded, toast
   const over = talks.filter((talk) => talk.state === "closed");
   return (
     <div className="talks" data-agents-tab="">
+      <ContactsSection sessionId={sessionId} toast={toast} />
       {guestHeld.length > 0 && (
         <section className="subagents-group talks-held" data-group="guest-held">
           <div className="dt-label"><span>{t("link.held.group")}</span><span className="dt-aside">{guestHeld.length}</span></div>
@@ -295,6 +298,7 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
         <span className="subagent-chip" data-phase={phase}>{talk.state === "closed" ? t(`talk.reason.${talk.reason || "ended"}`) : t(`talk.state.${state.key}`)}</span>
       </div>
       <div className="talk-counts sub" title={t("talk.spend.note")}>{talk.mode ? `${t(`talk.mode.${talk.mode}`)} · ` : ""}{talkCounts(talk)}</div>
+      <div className="talk-key"><KeyLine fingerprint={talk.fingerprint} />{talk.contact && <span className="owner-mark" data-talk-contact={talk.contact.id}>{t("contact.of", { name: talk.contact.name })}</span>}</div>
       {talk.topic && <blockquote className="talk-topic"><span className="sub">{t("talk.topic")}</span><div className="talk-text">{talk.topic}</div></blockquote>}
       {/* The tasks above the thread: what was asked and where it stands is what the operator looks for first. */}
       <TaskList tasks={talk.tasks ?? []} side="mine" busy={busy || !live} onCancel={live ? cancel : undefined} />
@@ -304,18 +308,22 @@ function TalkCard({ talk, toast }: { talk: AgentTalk; toast: (text: string) => v
       </div>
       {/* The newest line of the thread, where it would stand once sent. */}
       {held.map((message) => <TalkApproval key={message.id} talk={talk} message={message} files={filesOf(message, data?.files)} toast={toast} />)}
+      {live && talk.state === "open" && <OwnerSay path={`${path}/say`} toast={toast} onSent={() => { invalidate(path); invalidate(listPath(talk.session_id)); }} />}
+      {live && talk.state === "open" && !talk.contact && talk.fingerprint && <OfferContact via={`talk:${talk.id}`} name={talk.host} toast={toast} onDone={() => invalidate(path)} />}
       {live && <TalkControls talk={talk} busy={busy} onChange={(body) => act(() => api.put(`${path}/settings`, body))} onEnd={() => void end()} />}
     </article>
   );
 }
 
 function TalkLine({ message, files, toast }: { message: AgentTalkMessage; files: readonly LinkFile[]; toast: (text: string) => void }) {
-  const word = message.state === "sent" || message.state === "read" ? "" : t(`talk.message.${message.state}`);
+  // A reply refused for its key says why in its own words: "refused" alone reads as the other side's refusal.
+  const word = message.state === "sent" || message.state === "read" ? "" : message.state === "refused" && message.note === "key" ? t("talk.message.key") : t(`talk.message.${message.state}`);
   // A message that only carried files says so through them; "file" beside them would say it twice.
   const kind = message.kind === "file" && files.length ? "" : kindWord(message.kind, message.task_state);
+  const owner = message.author === "owner";
   return (
-    <div className="talk-msg" data-role={message.role} data-state={message.state} data-kind={message.kind || "text"}>
-      <div className="talk-msg-head"><b>{t(`talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
+    <div className="talk-msg" data-role={message.role} data-state={message.state} data-kind={message.kind || "text"} data-author={owner ? "owner" : undefined}>
+      <div className="talk-msg-head"><b>{t(owner ? `talk.role.${message.role}.owner` : `talk.role.${message.role}`)}</b>{kind && <span className="link-kind" data-link-kind={message.kind}>{kind}</span>}<span className="sub">{absTime(message.at)}</span>{word && <span className="talk-msg-word">{word}</span>}</div>
       {message.text && <div className="talk-text">{message.text}</div>}
       <LinkFiles files={files} toast={toast} />
     </div>

@@ -84,6 +84,7 @@ from daedalus.extensions import (
     api_ci,
     api_comparisons,
     api_computer,
+    api_contacts,
     api_control,
     api_coordinator_authority,
     api_disk,
@@ -1764,6 +1765,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_btw.register(api, app, auth)
     api_guest.register(api, app, auth)
     api_agent_talk.register(api, app, auth)
+    api_contacts.register(api, app, auth)
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)

@@ -736,7 +736,7 @@ async def test_a_door_cannot_write_the_operators_notifications(settings: Setting
     app.notifications = Notes()  # type: ignore[assignment]
     bridge = GuestBridge(app, Script([]))  # type: ignore[arg-type]
     await bridge.remember_link("l1", "s1", "a friend", "direct", "read", 1.0)  # type: ignore[call-arg]
-    await bridge.on_event({"kind": "first_contact", "link_id": "l1"})
+    await bridge.on_event({"kind": "first_contact", "link_id": "l1", "detail": "0123456789abcdef"})
     await bridge.on_event({"kind": "limit", "link_id": "l1", "detail": "Your account is locked: https://evil.test/login"})
     drafts = app.notifications.posted  # type: ignore[attr-defined]
     written = " ".join(d.title + " " + d.body for d in drafts)
@@ -748,11 +748,11 @@ async def test_a_door_cannot_page_the_operator_about_links_nobody_made_or_withou
     app.notifications = Notes()  # type: ignore[assignment]
     bridge = GuestBridge(app, Script([]))  # type: ignore[arg-type]
     for number in range(50):
-        await bridge.on_event({"kind": "first_contact", "link_id": f"fake{number}"})
+        await bridge.on_event({"kind": "first_contact", "link_id": f"fake{number}", "detail": f"{number:016x}"})
     assert app.notifications.posted == []  # type: ignore[attr-defined]
     for number in range(50):
         await bridge.remember_link(f"real{number}", "s1", "friend", "direct", "read", 1.0)  # type: ignore[call-arg]
-        await bridge.on_event({"kind": "first_contact", "link_id": f"real{number}"})
+        await bridge.on_event({"kind": "first_contact", "link_id": f"real{number}", "detail": f"{number:016x}"})
     assert len(app.notifications.posted) <= 12  # type: ignore[attr-defined]
 
 

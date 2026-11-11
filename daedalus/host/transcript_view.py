@@ -165,7 +165,10 @@ def message_view(message: Message) -> dict[str, Any]:
         # stored view from before this field is recomputed.
         "attachments": attached_files.of(message.metadata, body) if message.role is MessageRole.user else [],
         # A guest's message: who holds the link and what the turn could do, for the chat's mark.
-        "guest": {"label": str(guest.get("label") or ""), "tools": str(guest.get("tools") or ""), **({"kind": "reply"} if guest.get("kind") == "reply" else {})} if guest else None,
+        "guest": {
+            "label": str(guest.get("label") or ""), "tools": str(guest.get("tools") or ""), **({"kind": "reply"} if guest.get("kind") == "reply" else {}),
+            **({"by": "owner"} if guest.get("by") == "owner" else {}),
+        } if guest else None,
         # The operator's secrets attached to the message, by name and scope; never a value.
         "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.

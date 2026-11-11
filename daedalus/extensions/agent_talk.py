@@ -57,9 +57,9 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from daedalus.extensions.guest_door import bridge_of, chat_link, file_view, task_view
+from daedalus.extensions.guest_door import bridge_of, chat_link, file_view, identity_of, task_view
 from daedalus.extensions.notifications import Draft
-from daedalus.host import agent_talk, guest_turns, link_protocol
+from daedalus.host import agent_talk, guest_turns, link_identity, link_protocol
 from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.link_protocol import LinkFileError, Staged
 from daedalus.host.notify_text import render
@@ -390,13 +390,16 @@ class AgentTalks:
             "replies": sum(1 for row in rows if row["role"] == THEM), "unread": sum(1 for row in rows if row["state"] == UNREAD), "held": sum(1 for row in rows if row["state"] == HELD),
             "file_mb": float(talk["file_mb"]), "day_mb": float(talk["day_mb"]),
             "tasks": [task_view(row) for row in await self.db.fetchall("SELECT * FROM link_tasks WHERE side = ? AND owner = ? ORDER BY id", (SIDE, talk["id"]))],
+            "fingerprint": link_identity.fingerprint(str(talk["peer_key"] or "")),
         }
+        contact = await self.db.fetchone("SELECT id, name, state FROM link_contacts WHERE talk_id = ? ORDER BY created_at DESC", (talk["id"],))
+        out["contact"] = {"id": contact["id"], "name": contact["name"], "state": contact["state"]} if contact is not None else None
         if messages:
             files = [file_view(row) for row in await self.db.fetchall("SELECT * FROM link_files WHERE side = ? AND owner = ? ORDER BY id", (SIDE, talk["id"]))]
             out["files"] = files
             out["messages"] = [
                 {"id": row["id"], "role": row["role"], "text": row["text"], "state": row["state"], "note": row["note"], "at": row["created_at"], "kind": row["kind"], "task": row["task"], "task_state": row["task_state"],
-                 "files": [file["id"] for file in files if file["message_id"] == row["id"]]}
+                 "files": [file["id"] for file in files if file["message_id"] == row["id"]], "author": row["author"], "signed": row["signed"]}
                 for row in rows
             ]
         return out
@@ -405,7 +408,7 @@ class AgentTalks:
 
     async def tool(
         self, session_id: str, action: str, *, link: str = "", conversation: str = "", text: str = "", wait_seconds: int | None = None, files: list[str] | None = None,
-        task: str = "",
+        task: str = "", contact: str = "",
     ) -> Outcome:
         state = self.manager.live_state(session_id)
         if state is None or not self.manager.ordinary_chat(state):
@@ -423,6 +426,17 @@ class AgentTalks:
         wait = 0 if turn is not None else max(0, min(WAIT_DEFAULT if wait_seconds is None else int(wait_seconds), WAIT_MAX))
         if turn is not None and (files or action == "task"):
             return Outcome("A turn started by a reply sends no files and sets no tasks: tell the operator what you would send.", error=True)
+        contacts = contacts_of(self.app)
+        if action == "contacts":
+            return Outcome(await contacts.listed() if contacts is not None else "Contacts are not available here.")
+        if contact:
+            # A contact is the installation's, not one chat's: any chat of the operator's may write to it, and its replies stay in its own chat.
+            if turn is not None:
+                return Outcome("A turn started by a reply writes only to its own conversation.", error=True)
+            found = await contacts.by_name(contact) if contacts is not None else None
+            if found is None or not found["talk_id"]:
+                return Outcome(f"There is no live contact called {contact!r}. action='contacts' lists them.", error=True)
+            conversation = str(found["talk_id"])
         try:
             if action == "open":
                 if turn is not None:
@@ -435,7 +449,7 @@ class AgentTalks:
                 return Outcome(f"{opened.text}\n{sent.text}", sent.error, opened.talk)
             if action not in ("send", "read", "end", "task", "cancel"):
                 return Outcome("action is one of open, send, task, cancel, read, end.", error=True)
-            talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation)
+            talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation, contact=bool(contact))
             if isinstance(talk, Outcome):
                 return talk
             if action in ("send", "task"):
@@ -449,7 +463,10 @@ class AgentTalks:
         except NotReachable as exc:
             return Outcome(str(exc), error=True)
 
-    async def _chosen(self, session_id: str, conversation: str) -> Any:
+    async def _chosen(self, session_id: str, conversation: str, *, contact: bool = False) -> Any:
+        if contact:
+            found = await self.talk(conversation)
+            return found if found is not None else Outcome("That contact's conversation is gone.", error=True)
         talks = await self.talks_of(session_id)
         if conversation:
             found = next((talk for talk in talks if talk["id"] == conversation), None)
@@ -495,6 +512,25 @@ class AgentTalks:
         row = await self.db.fetchone("SELECT * FROM agent_talks WHERE session_id = ? AND invite_hash = ?", (session_id, invite_hash))
         if row is not None:
             return Outcome(self._state_line(row, "This chat has already opened this link." if row["state"] != CLOSED else ""), talk=row["id"], error=row["state"] == CLOSED)
+        return await self._redeem(session_id, door, state.run_id or "")
+
+    async def open_contact(self, session_id: str, address: str, key: str) -> str:
+        """Redeem a contact's link, which their host sent signed: the operator decided by taking the offer up, so no
+        agent is asked and no operator's words are looked for. Its card must prove the key the offer was signed with."""
+        from daedalus.extensions.agent_contacts import ContactError  # Lazy: contacts import this module.
+
+        found = agent_talk.find_links(address)
+        if len(found) != 1:
+            raise ContactError("the other side sent no link that could be opened")
+        opened = await self._redeem(session_id, found[0], "", contact_key=key)
+        if opened.error:
+            raise ContactError(opened.text)
+        return opened.talk
+
+    async def _redeem(self, session_id: str, door: agent_talk.DoorLink, run_id: str, *, contact_key: str = "") -> Outcome:
+        """The card, then the redeem, signed with this installation's key. ``contact_key`` is the key the door's card must
+        prove its owner holds: a contact's link at a door that does not is refused, loudly."""
+        invite_hash = _hash(door.invite)
         url = f"{door.base}/a/{door.invite}"
         try:
             card = await self.dialer.call("GET", url)
@@ -509,16 +545,26 @@ class AgentTalks:
         mode = card.body.get("mode") if card.body.get("mode") in ("stand_in", "direct") else ""
         retention = _seconds(card.body.get("retention_days"))
         limit = card.body.get("max_text")
+        peer = str(card.body.get("key") or "")
+        # The card's key counts only where its proof over this very invite holds: a key copied from another door's card does not.
+        peer = peer if link_identity.verify(peer, str(card.body.get("proof") or ""), "door", {"invite": invite_hash}) else ""
+        if contact_key and peer != contact_key:
+            return Outcome(f"The door at {door.host} did not prove the key this contact was offered with, so its link was not opened. Nothing was spent.", error=True)
         talk_id = secrets.token_hex(6)
         now = _now()
         await self.db.execute(
-            "INSERT INTO agent_talks(id, session_id, base_url, host, invite_hash, state, topic, mode, approval, retention_days, max_text, opened_run, created_at, last_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO agent_talks(id, session_id, base_url, host, invite_hash, state, topic, mode, approval, retention_days, max_text, opened_run, created_at, last_at, peer_key, sends_limit, review) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (talk_id, session_id, door.base, door.host, invite_hash, OPENING, topic, mode, int(card.body.get("approval") is True), retention or 0.0,
-             min(limit, MAX_TEXT) if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else MAX_TEXT, state.run_id or "", now, now),
+             min(limit, MAX_TEXT) if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else MAX_TEXT, run_id, now, now, peer, 0 if contact_key else MAX_SENDS,
+             # A contact's first message is not a first contact: both operators met it in the offer. What looks like a
+             # secret, or follows a look around after a reply, still waits; the operator can ask for more in the tab.
+             "off" if contact_key else "first"),
         )
+        identity = identity_of(self.app)
+        signing = {"x-agent-key": identity.public, "x-agent-proof": identity.redeem_proof(door.invite)} if identity is not None else {}
         try:
-            answer = await self.dialer.call("POST", f"{url}/redeem", extra={"x-agent-client": CLIENT_KIND})
+            answer = await self.dialer.call("POST", f"{url}/redeem", extra={"x-agent-client": CLIENT_KIND, **signing})
         except DoorGone:
             await self.db.execute("DELETE FROM agent_talks WHERE id = ?", (talk_id,))
             return Outcome(f"{door.host} did not answer the redeem. The link may or may not be spent: opening it again will show which.", error=True)
@@ -534,7 +580,7 @@ class AgentTalks:
             parts.append("Its door says this is a stand-in that knows only what its owner wrote down." if mode == "stand_in" else "Its door says this is its owner's own agent.")
         if conversation_state == PENDING:
             parts.append("Its owner admits a first contact by hand, so the first answer may take a while.")
-        if topic:
+        if topic and run_id:
             parts.append(agent_talk.fence_topic(topic, door.host))
             self.manager.touch_run(session_id)
             parts.append(agent_talk.TOUCHED_NOTE)
@@ -687,12 +733,14 @@ class AgentTalks:
             return False
         return self.manager.redactor.contains_secret(text)
 
-    async def _insert_message(self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "", *, kind: str = link_protocol.TEXT, task: str = "") -> int:
+    async def _insert_message(
+        self, talk_id: str, role: str, text: str, state: str, run_id: str, note: str = "", *, kind: str = link_protocol.TEXT, task: str = "", author: str = "",
+    ) -> int:
         now = _now()
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at, kind, task) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (talk_id, role, text, state, run_id, note, now, kind, task),
+                "INSERT INTO agent_talk_messages(talk_id, role, text, state, run_id, note, created_at, kind, task, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (talk_id, role, text, state, run_id, note, now, kind, task, author),
             )
             message_id = int(cursor.lastrowid or 0)
             await cursor.close()
@@ -762,6 +810,13 @@ class AgentTalks:
                 body["kind"] = message["kind"]
             if message["task"]:
                 body["task"] = message["task"]
+            by = "owner" if message["author"] == "owner" else ""
+            if by:
+                body["from"] = by
+            identity = identity_of(self.app)
+            if identity is not None:
+                # Signed as the door will keep it, which cleans it as it stores it, and for the key of the door's owner where its card proved one.
+                body["signed"] = identity.signed_message(text=inert(text), kind=str(message["kind"]), task=str(message["task"] or ""), by=by, to=str(talk["peer_key"] or ""))
             files = await self._files_of(message_id, "sending")
             try:
                 ids = [await self._upload(talk, row) for row in files]
@@ -805,6 +860,41 @@ class AgentTalks:
                 await self._mark(message_id, FAILED, note=f"limit:{limit}" if isinstance(limit, str) and limit in LIMIT_WORDS else "limit:")
             else:
                 await self._mark(message_id, FAILED, note="busy" if word == "busy" else "refused")
+
+    async def say_as_owner(self, talk_id: str, text: str) -> None:
+        """The operator's own words to the other side: sent as theirs, with no review, because they are the reviewer."""
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] in (CLOSED, OPENING) or not talk["token"]:
+            raise ValueError("this conversation is not open")
+        words = self.manager.redactor.conceal_named(text).strip()
+        if not words:
+            raise ValueError("the message is empty")
+        if len(words) > talk["max_text"]:
+            raise ValueError(f"a message may be at most {talk['max_text']} characters")
+        message_id = await self._insert_message(talk_id, US, words, SENDING, "", author="owner")
+        await self._post(talk_id, message_id, words)
+        if (await self._message(message_id))["state"] != SENT:
+            raise ValueError(self._send_failure(await self.talk(talk_id), await self._message(message_id)))
+
+    async def post_contact(self, talk_id: str, payload: dict[str, Any], text: str) -> None:
+        """An offer of a contact, or the answer to one, over this conversation: the operator's decision, sent as it is."""
+        from daedalus.extensions.agent_contacts import ContactError  # Lazy: contacts import this module.
+
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] == CLOSED or not talk["token"]:
+            raise ContactError("that conversation is not open")
+        message_id = await self._insert_message(talk_id, US, text, SENDING, "", kind="contact", author="owner")
+        async with self._locks.setdefault(talk_id, asyncio.Lock()):
+            try:
+                answer = await self.dialer.call("POST", f"{talk['base_url']}/a/messages", token=talk["token"], body={"kind": "contact", "contact": payload, "text": text, "from": "owner"})
+            except (DoorGone, NotReachable) as exc:
+                await self._mark(message_id, FAILED)
+                raise ContactError(f"{talk['host']} did not answer") from exc
+        if answer.status != 202:
+            await self._mark(message_id, FAILED)
+            raise ContactError(f"{talk['host']} did not take it ({answer.status})")
+        await self._mark(message_id, SENT)
+        await self.db.execute("UPDATE agent_talks SET sends = sends + 1, last_at = ? WHERE id = ?", (_now(), talk_id))
 
     async def _mark(self, message_id: int, state: str, *, note: str | None = None) -> None:
         if note is None:
@@ -852,7 +942,7 @@ class AgentTalks:
             return Outcome(self._state_line(talk, lead), talk=talk_id)
         taken = self._portion(unread)
         more = [f"{len(unread) - len(taken)} more replies are unread: read again."] if len(taken) < len(unread) else []
-        return Outcome("\n".join([self._state_line(talk, lead), *await self._fenced(taken, talk, state.run_id or ""), *more, agent_talk.TOUCHED_NOTE]), talk=talk_id)
+        return Outcome("\n".join([self._state_line(talk, lead), *await self._fenced(taken, talk, state.run_id or "", state.session.id), *more, agent_talk.TOUCHED_NOTE]), talk=talk_id)
 
     @staticmethod
     def _portion(rows: list[Any]) -> list[Any]:
@@ -866,11 +956,12 @@ class AgentTalks:
             taken.append(row)
         return taken
 
-    async def _fenced(self, rows: list[Any], talk: Any, run_id: str) -> list[str]:
+    async def _fenced(self, rows: list[Any], talk: Any, run_id: str, reader: str) -> list[str]:
         """Hand unread replies to a run: fenced, marked read by that run, and the run touched. In that order of
         thought and the reverse in code: the run is touched first, so nothing can go wrong between its reading
         a stranger and its being treated as having done so."""
-        self.manager.touch_run(talk["session_id"])
+        # The chat whose run reads them, which for a contact written to from another chat is not the conversation's own.
+        self.manager.touch_run(reader)
         rules = getattr(self.manager, "action_rules", None)
         out: list[str] = []
         for row in rows:
@@ -886,6 +977,8 @@ class AgentTalks:
         """A reply as the model reads it: its words, its task, and where each of its files is, all inside the fence,
         because a door's kinds and names are as much a stranger's as its words."""
         lines = [str(row["text"])]
+        if row["author"] == "owner":
+            lines.insert(0, "[written by the other side's owner themselves, a person, and not by their agent]")
         if row["task"] and row["kind"] != link_protocol.TASK:
             lines.append(f"[about task {row['task']}]")
         state = await self.manager.get_state(str(talk["session_id"]))
@@ -984,30 +1077,52 @@ class AgentTalks:
         moved = False
         files_came = False
         room = MAX_MESSAGES - int((await self.db.fetchone("SELECT count(*) AS n FROM agent_talk_messages WHERE talk_id = ?", (talk_id,)))["n"])
+        contacts = contacts_of(self.app)
+        contact = await contacts.of_talk(talk_id) if contacts is not None else None
+        offers: list[tuple[Any, str]] = []
         mine = {str(row["task"]): str(row["state"]) for row in await self.db.fetchall("SELECT task, state FROM link_tasks WHERE side = ? AND owner = ? AND direction = 'mine'", (SIDE, talk_id))}
+        # Each signature is checked before the transaction below, which holds the one connection: the check writes too.
+        verdicts: dict[int, str] = {}
+        for item in items[:MAX_PER_READ] if contacts is not None else []:
+            if isinstance(item, dict) and item.get("from") in ("agent", "owner") and item.get("kind") != "contact" and isinstance(item.get("id"), int) and isinstance(item.get("text"), str):
+                if item["id"] > last:
+                    by = "owner" if item.get("from") == "owner" else ""
+                    kind = item.get("kind") if item.get("kind") in link_protocol.KINDS else link_protocol.TEXT
+                    verdicts[item["id"]] = await contacts.check_reply(talk, item, text=item["text"], kind=kind, task=_task_id(item.get("task")), by=by)
         async with self.db.transaction() as conn:
             for item in items[:MAX_PER_READ]:
                 if not isinstance(item, dict) or room <= 0:
                     continue
                 door_id, sender, text = item.get("id"), item.get("from"), item.get("text")
-                if isinstance(door_id, bool) or not isinstance(door_id, int) or door_id <= last or sender not in ("agent", "door") or not isinstance(text, str):
+                if isinstance(door_id, bool) or not isinstance(door_id, int) or door_id <= last or sender not in ("agent", "door", "owner") or not isinstance(text, str):
                     continue
-                kind = item.get("kind") if item.get("kind") in link_protocol.KINDS else link_protocol.TEXT
+                kind = item.get("kind") if item.get("kind") in (*link_protocol.KINDS, "contact") else link_protocol.TEXT
                 task = _task_id(item.get("task"))
                 state = item.get("state") if item.get("state") in link_protocol.TASK_STATES else ""
                 files = _door_files(item.get("files"))
                 clean = inert(text)[:MAX_TEXT]
+                author = "owner" if sender == "owner" else ""
+                if kind == "contact":
+                    # An offer is the operator's to decide, not the agent's to read: kept as read, and handed to the contacts.
+                    offers.append((item.get("contact"), clean))
                 if kind == link_protocol.STATUS and task and state and not clean:
                     clean = f"Task {task}: {state.replace('_', ' ')}."
-                if not clean and not files:
+                if not clean and not files and kind != "contact":
                     continue
-                role = THEM if sender == "agent" else DOOR
+                role = DOOR if sender == "door" else THEM
+                signed = verdicts.get(door_id, "")
+                refused = signed == "bad" and contact is not None
                 cursor_row = await conn.execute(
-                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (talk_id, role, clean, UNREAD, door_id, _now(), kind, task, state),
+                    "INSERT OR IGNORE INTO agent_talk_messages(talk_id, role, text, state, door_id, created_at, kind, task, task_state, author, signed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (talk_id, role, clean, REFUSED if refused else READ if kind == "contact" else UNREAD, door_id, _now(), kind, task, state, author, signed, "key" if refused else ""),
                 )
                 message_id = int(cursor_row.lastrowid or 0) if cursor_row.rowcount else 0
                 await cursor_row.close()
+                if refused:
+                    # Under another key, or none: nothing of it reaches a model, a task or a file fetch.
+                    last = door_id
+                    room -= 1
+                    continue
                 for file in files if message_id else []:
                     await conn.execute(
                         "INSERT INTO link_files(side, owner, session_id, direction, name, size, sha256, mime, remote_id, task, message_id, state, created_at)"
@@ -1025,8 +1140,11 @@ class AgentTalks:
                     moved = moved or state in link_protocol.WAKING_STATES
                 last = door_id
                 room -= 1
-                kept.append((role, clean))
+                if kind != "contact":
+                    kept.append((role, clean))
             await conn.execute("UPDATE agent_talks SET cursor = ?, last_at = ? WHERE id = ?", (last, _now() if kept else talk["last_at"], talk_id))
+        for offer, words in offers if contacts is not None else []:
+            await contacts.on_talk_contact(talk, offer, words)
         if room <= 0:
             await self._close(talk_id, "too_long")
         if files_came:
@@ -1347,6 +1465,9 @@ class AgentTalks:
             "UPDATE link_tasks SET state = ?, updated_at = ? WHERE side = ? AND owner = ? AND state IN ('accepted', 'working', 'needs_input')", (link_protocol.CANCELLED, _now(), SIDE, talk_id),
         )
         self._wake_readers(talk_id)
+        contacts = contacts_of(self.app)
+        if contacts is not None:
+            await contacts.on_talk_closed(talk_id, reason)
         if not quiet:
             await self._tell(talk, "closed")
 
@@ -1362,10 +1483,14 @@ class AgentTalks:
     async def turn_notes(self, state: SessionState) -> str:
         """The conversations of this chat, for a turn of the operator's. In the turn context and not the prompt, for
         the prompt's cache, and written here: nothing in it is a word of the other side's but the host's name."""
-        talks = await self.talks_of(state.session.id)
-        if not talks or state.run_origin != "operator":
+        if state.run_origin != "operator":
             return ""
-        lines: list[str] = []
+        contacts = contacts_of(self.app)
+        standing = await contacts.turn_notes() if contacts is not None else ""
+        talks = await self.talks_of(state.session.id)
+        if not talks:
+            return standing
+        lines: list[str] = [standing] if standing else []
         for talk in talks:
             if talk["state"] == CLOSED:
                 continue
@@ -1386,7 +1511,9 @@ class AgentTalks:
         cutoff = (datetime.now(UTC) - timedelta(seconds=IDLE_SECONDS)).isoformat()
         for talk in await self.db.fetchall("SELECT * FROM agent_talks WHERE state != ?", (CLOSED,)):
             try:
-                if talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
+                standing = await self.db.fetchone("SELECT 1 FROM link_contacts WHERE talk_id = ? AND state IN ('offered', 'accepting', 'active')", (talk["id"],))
+                # A contact's conversation waits as long as the contact lasts: that it may be quiet for weeks is the point of one.
+                if standing is None and talk["last_at"] < cutoff and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?", (talk["id"], HELD)) is None:
                     await self.end(talk["id"], reason="idle")
                     await self._tell(talk, "closed")
                     continue
@@ -1437,6 +1564,12 @@ def _door_files(value: Any) -> list[dict[str, Any]]:
         if isinstance(file_id, str) and re.fullmatch(r"f_[0-9a-f]{16}", file_id) and _count(size) > 0 and link_protocol.SHA256.fullmatch(sha):
             out.append({"id": file_id, "name": link_protocol.safe_name(item.get("name")), "size": int(size), "sha256": sha})
     return out
+
+
+def contacts_of(app: Application | Any) -> Any:
+    from daedalus.extensions.agent_contacts import contacts_of as found  # Lazy: contacts import this module.
+
+    return found(app)
 
 
 def talks_of(app: Application | Any) -> AgentTalks | None:

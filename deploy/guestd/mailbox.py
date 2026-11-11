@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,8 +26,11 @@ from .files import CHUNK_BYTES, Bodies, Desk, FileRefused
 from .store import (
     ACCEPTED,
     AGENT,
+    ANSWERED,
+    BY_OWNER,
     CANCELLED,
     CLOSED,
+    CONTACT,
     DOOR,
     EXPIRED,
     FILE,
@@ -38,6 +42,7 @@ from .store import (
     OPEN,
     OPEN_TASK_STATES,
     PENDING,
+    PROTOCOL_KINDS,
     QUESTION,
     REVOKED,
     STAND_IN,
@@ -50,7 +55,7 @@ from .store import (
     Store,
     ended,
 )
-from .text import inert
+from .text import inert, one_line
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +81,42 @@ MAX_POLLS = 2
 TASK_PATIENCE_SECONDS = 3600.0
 """How long a guest is told to keep reading while a task is being worked on and nothing has moved."""
 TEXT_ONLY = "This link takes text messages only: the agent behind it has no files and takes no tasks."
+CONTACTS_PER_CONVERSATION = 6
+"""Offers of a contact, and answers to one, a conversation may carry. Each reaches the owner, so a loop of them must
+not become a way to page somebody."""
+KEY = re.compile(r"[A-Za-z0-9_-]{43}")
+"""An Ed25519 public key as the hosts write it: 32 bytes, base64url without padding."""
+SIGNATURE = re.compile(r"[A-Za-z0-9_-]{86}")
+PROOF = re.compile(r"[0-9]{1,16}\.[A-Za-z0-9_-]{86}")
+"""``<milliseconds>.<signature>``: what a redeem is signed with."""
+
+
+def signed_of(value: Any) -> dict[str, Any] | None:
+    """A message's signature as the sending host made it, each field in its shape, or ``None``. The door checks
+    nothing else about it: it holds no keys, and the receiving host does the checking."""
+    if not isinstance(value, dict):
+        return None
+    key, sig, at = value.get("key"), value.get("sig"), value.get("at")
+    if not isinstance(key, str) or not KEY.fullmatch(key) or not isinstance(sig, str) or not SIGNATURE.fullmatch(sig):
+        return None
+    if isinstance(at, bool) or not isinstance(at, int) or not 0 < at < 10**16:
+        return None
+    return {"key": key, "sig": sig, "at": at}
+
+
+def contact_of(value: Any) -> dict[str, Any] | None:
+    """An offer of a contact, or the answer to one, as plain data: the offering host's key, a name, the address of a
+    link of its own for the other side, and its signature over them. ``None`` for anything else."""
+    if not isinstance(value, dict):
+        return None
+    key, name, invite, sig, at = value.get("key"), value.get("name"), value.get("invite", ""), value.get("sig"), value.get("at")
+    if not isinstance(key, str) or not KEY.fullmatch(key) or not isinstance(sig, str) or not SIGNATURE.fullmatch(sig):
+        return None
+    if isinstance(at, bool) or not isinstance(at, int) or not 0 < at < 10**16 or not isinstance(name, str) or not isinstance(invite, str) or len(invite) > 400:
+        return None
+    if value.get("answer") not in ("accept", "decline", "offer"):
+        return None
+    return {"key": key, "name": one_line(name, 80), "invite": inert(invite), "sig": sig, "at": at, "answer": value["answer"]}
 
 CLOSED_WORDS = {
     "ended": "This conversation has ended.",
@@ -90,6 +131,7 @@ STOP = "Stop here and tell your user what was said. To talk again they need a ne
 
 LIMIT_WORDS = {
     "usd_per_link": "This link has used up its budget.",
+    "usd_all_guests": "This link has used up the budget all its guests share.",
     "usd_per_day": "The owner's budget for guests is used up for today.",
     "turns_per_day": "This link has used up its messages for today.",
     "turns_total": "This link has used up its messages.",
@@ -156,8 +198,10 @@ class Mailbox:
         direct = link["mode"] != STAND_IN
         return Answer(200, {
             "door": DOOR_MARK, "status": "waiting", "topic": link["topic"], "mode": link["mode"], "approval": bool(link["approval"]),
-            "retention_days": float(link["retention_days"]), "max_text": MAX_TEXT, "kinds": list(KINDS) if direct else [TEXT],
+            "retention_days": float(link["retention_days"]), "max_text": MAX_TEXT, "kinds": list(PROTOCOL_KINDS) if direct else [TEXT],
             **({"file_mb": float(link["file_mb"]), "day_mb": float(link["day_mb"]), "chunk_bytes": CHUNK_BYTES} if direct else {}),
+            # The owner's key and its signature over this invite: a guest's host checks it, the door cannot.
+            **({"key": link["owner_key"], "proof": link["owner_proof"]} if link["owner_key"] else {}),
         })
 
     def page(self, invite: str) -> tuple[int, str] | None:
@@ -193,7 +237,7 @@ class Mailbox:
         self.store.record(link["id"], "redeem_refused", "page")
         self.notify()
 
-    def redeem(self, invite: str, *, address: str = "", client: str = "") -> Answer | None:
+    def redeem(self, invite: str, *, address: str = "", client: str = "", key: str = "", proof: str = "") -> Answer | None:
         """Spend the invite and bind a token, or ``None`` for an invite this door never made.
 
         ``client`` is what the caller says it is. Kept for the owner to read and nothing else: it opens nothing,
@@ -208,20 +252,24 @@ class Mailbox:
         a thief handed the same token would sit silently inside a conversation the owner has admitted
         for someone else. Instead the refusal stays visible to the owner as evidence, the owner can
         issue a new link with one action, and the wording keeps the guest's agent from hunting.
+
+        ``key`` and ``proof`` are another installation's public key and its signature over this invite. Kept for the
+        owner's host, which checks them; a malformed pair is dropped rather than refused, since all it would prove is
+        who holds a key.
         """
         link = self.store.link_by_invite(invite)
         if link is None:
             return None
         if link["state"] in (REVOKED, EXPIRED) or (link["state"] == WAITING and ended(link["invite_expires_at"], self.clock())):
             return Answer(410, {"status": "closed", "stop_polling": True, "detail": "This link is closed. Stop here and ask your user for a new link."})
-        spent = None if link["state"] != WAITING else self.store.redeem(link, address)
+        if not (KEY.fullmatch(key) and PROOF.fullmatch(proof)):
+            key = proof = ""
+        spent = None if link["state"] != WAITING else self.store.redeem(link, client=client if client in KNOWN_CLIENTS else "", key=key, proof=proof)
         if spent is None:
             self.store.record(link["id"], "redeem_refused", address)
             self.notify()
             return Answer(410, {"status": "already_redeemed", "stop_polling": True, "detail": pages.LOST_TOKEN})
         token, conversation = spent
-        if client in KNOWN_CLIENTS:
-            self.store.record(link["id"], "client", client)
         self.notify()
         body: dict[str, Any] = {
             "token": token,
@@ -257,10 +305,12 @@ class Mailbox:
         kind = body.get("kind") or TEXT
         if kind not in KINDS:
             return Answer(400, {"status": "invalid", "detail": f"kind is one of {', '.join(KINDS)}."})
-        if link["mode"] == STAND_IN and (kind != TEXT or body.get("files")):
+        if link["mode"] == STAND_IN and (kind not in (TEXT, CONTACT) or body.get("files")):
             return Answer(403, {"status": "refused", "detail": TEXT_ONLY})
         if kind == STATUS:
             return self._guest_status(conversation, body)
+        if kind == CONTACT:
+            return self._contact(conversation, body)
         text = body.get("text")
         if text is None and kind == FILE:
             text = ""
@@ -291,12 +341,17 @@ class Mailbox:
                 return Answer(409, {"status": "invalid", "task": task["id"], "state": task["state"], "detail": f"That task is {task['state']} and takes no more messages."})
             task_id = task["id"]
         data: dict[str, Any] = {}
+        if body.get("from") == BY_OWNER:
+            data["from"] = BY_OWNER
+        signed = signed_of(body.get("signed"))
+        if signed is not None:
+            data["signed"] = signed
         if kind == FILE or body.get("files"):
             try:
                 data["files"] = [file["id"] for file in self.desk.ready_of(conversation["id"], body.get("files"), GUEST)]
             except FileRefused as exc:
                 return Answer(exc.status, {"status": "invalid", "code": exc.code, "detail": exc.detail, **exc.extra})
-        refusal = self.store.limit_reached(link)
+        refusal = self.store.limit_reached(link, conversation=conversation)
         if refusal is not None:
             self.store.record(link["id"], "limit", refusal.limit)
             self.notify()
@@ -313,6 +368,23 @@ class Mailbox:
             if kind == TASK:
                 out.update(state=ACCEPTED, detail="Task accepted. Read to follow it: each change of its state comes as a status message naming it.")
         return Answer(202, out)
+
+    def _contact(self, conversation: Any, body: dict[str, Any]) -> Answer:
+        """An offer of a contact, or the answer to one: kept for the owner and handed to the host as an event. No
+        turn answers it, so it costs no turn; what the owner decides comes back as a message."""
+        if conversation["state"] != OPEN:
+            return Answer(409, {"status": "pending", "detail": "A contact is offered once the owner has admitted this conversation."}, 30)
+        offer = contact_of(body.get("contact"))
+        if offer is None:
+            return Answer(400, {"status": "invalid", "detail": "contact carries key, name, invite, answer, at and sig, as a Daedalus writes them."})
+        sent = sum(1 for m in self.store.transcript(conversation["id"], 200) if m["kind"] == CONTACT and m["role"] == GUEST)
+        if sent >= CONTACTS_PER_CONVERSATION:
+            return Answer(429, {"status": "busy", "stop_polling": True, "detail": "This conversation has carried enough offers of a contact."})
+        text = inert(str(body.get("text") or ""))[:MAX_TEXT]
+        message = self.store.add_guest_message(conversation, text, kind=CONTACT, data={"contact": offer}, state=ANSWERED)
+        self.store.record(conversation["link_id"], "contact", json.dumps({"conversation": conversation["id"], "message": message, "contact": offer, "text": text[:600]}))
+        self.notify()
+        return Answer(202, {"status": "open", "id": message, "detail": "Kept for the owner, who answers in this conversation."})
 
     def _guest_status(self, conversation: Any, body: dict[str, Any]) -> Answer:
         """The one status a guest sends: cancelling a task it set. A turn already running on it is stopped by the host."""
@@ -340,8 +412,13 @@ class Mailbox:
 
     def shown(self, message: Any) -> dict[str, Any]:
         """A message as a guest reads it: its kind, and the ids that tie it to a task and to files."""
-        out: dict[str, Any] = {"id": message["id"], "from": "door" if message["role"] == DOOR else "agent", "kind": message["kind"] or TEXT, "text": message["text"], "at": message["at"]}
         data = json.loads(message["data"]) if message["data"] else {}
+        sender = "door" if message["role"] == DOOR else BY_OWNER if data.get("from") == BY_OWNER else "agent"
+        out: dict[str, Any] = {"id": message["id"], "from": sender, "kind": message["kind"] or TEXT, "text": message["text"], "at": message["at"]}
+        if data.get("signed"):
+            out["signed"] = data["signed"]
+        if data.get("contact"):
+            out["contact"] = data["contact"]
         if message["task_id"]:
             out["task"] = message["task_id"]
         if data.get("state"):
@@ -525,7 +602,7 @@ class Mailbox:
             return self._closed_answer(conversation)
         link = self.store.link(conversation["link_id"])
         assert link is not None
-        today = int(link["turns_today"]) if link["turns_day"] == self.store._day() else 0
+        today = int(conversation["turns_today"]) if conversation["turns_day"] == self.store._day() else 0
         # ``None`` where the owner set no such limit: a number would be read as one.
         left = None if int(link["turns_per_day"]) == NO_LIMIT else max(0, int(link["turns_per_day"]) - today)
         return Answer(200, {"status": conversation["state"], "expires_at": conversation["expires_at"] or None, "turns_left_today": left})
