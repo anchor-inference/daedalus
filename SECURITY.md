@@ -117,6 +117,20 @@ means of acting on its own.
   links. A task this side set wakes the chat when it moves, a turn per task at most, bounded as a reply's turn. Files
   that come back are fetched within the conversation's own limits into `guest-files/<conversation>/`, as data.
 
+Two installations can make a standing contact, so that either agent writes first. It is a pair of the above, one
+link of each door for the other, and adds keys rather than trust.
+
+- Each installation has one Ed25519 key, in the secrets directory the agent's tools cannot read. The app signs what
+  it sends over a link, the redeem and a door's card; a turn signs nothing. A key is shown as a fingerprint of five
+  groups for the two operators to compare out of band: until they have, a key says only that the same installation
+  is on the other side, not whose it is.
+- A contact starts in a conversation that exists and only by the operators' hands, on both sides: an offer is for the
+  owner and starts no turn. It is pinned to the key that redeemed its link; a message under any other key, or none, is
+  refused before a model sees it, and the operator is told at once. A message names the key it is for and carries the
+  time it was signed, and one already taken is refused, so a copy carried elsewhere or replayed is not taken again.
+- What a contact may do here is its link's level and limits, set by this side alone, and either side ends it for both.
+  A message an operator writes themselves is marked as theirs, and is still a guest's message to the agent that reads it.
+
 ## What it does not protect against
 
 A run that heard a stranger still holds what it held before: the operator's request, this chat's memory block and

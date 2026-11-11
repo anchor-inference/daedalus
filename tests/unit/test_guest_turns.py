@@ -1008,7 +1008,7 @@ async def test_a_first_contact_card_closes_when_the_contact_is_settled_some_othe
     conversation = listed[-1]["conversation"]["id"]
     assert (await trapped.routes.post(f"/api/guest/conversations/{conversation}/admit")).status_code == 200
     assert resolved == [(f"guest:{conversation}", "Admitted")]
-    await trapped.bridge.on_event({"kind": "approval_timeout", "link_id": listed[-1]["id"]})
+    await trapped.bridge.on_event({"kind": "approval_timeout", "link_id": listed[-1]["id"], "detail": conversation})
     assert resolved[-1] == (f"guest:{conversation}", "Refused")
     assert (await trapped.routes.post(f"/api/guest/links/{listed[-1]['id']}/revoke")).status_code == 200
     assert resolved[-1] == (f"guest:{conversation}", "Link closed")

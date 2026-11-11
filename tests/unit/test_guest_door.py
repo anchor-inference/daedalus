@@ -662,7 +662,8 @@ async def test_a_link_out_of_money_never_reaches_the_model(rig: Rig) -> None:
 async def test_a_spent_link_refuses_the_next_message_at_the_door(rig: Rig) -> None:
     link_id, invite = rig.link(usd_limit=1.0)
     token = rig.redeem(invite)
-    rig.store.conn.execute("UPDATE links SET spent_usd = 1.0 WHERE id = ?", (link_id,))
+    # A link's limit is each guest's own: it is counted on the guest's conversation.
+    rig.store.conn.execute("UPDATE conversations SET spent_usd = 1.0 WHERE link_id = ?", (link_id,))
     answer = rig.say(token, "port?")
     assert answer.status_code == 403 and answer.json()["limit"] == "usd_per_link" and answer.json()["stop_polling"] is True
     assert "limit" in rig.events(link_id)
@@ -921,7 +922,7 @@ def test_a_direct_guests_message_is_handed_out_once_and_only_its_reply_comes_bac
     rig.say(token, "port?")
     feed = rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()
     assert [d["text"] for d in feed["deliveries"]] == ["port?"]
-    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd", "role", "kind", "task", "files", "ask"}
+    assert set(feed["deliveries"][0]) == {"message_id", "link_id", "conversation_id", "text", "allowance_usd", "role", "kind", "task", "files", "ask", "by", "signed", "client_key"}
     assert feed["deliveries"][0]["allowance_usd"] == 0.25
     message = feed["deliveries"][0]["message_id"]
     assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == feed["deliveries"], "offered again until it is acknowledged"
@@ -949,7 +950,7 @@ def test_a_direct_link_out_of_money_is_not_handed_to_the_host(rig: Rig) -> None:
     link_id, invite = direct_link(rig, usd_limit=0.5)
     token = rig.redeem(invite)
     rig.say(token, "port?")
-    rig.store.conn.execute("UPDATE links SET spent_usd = 0.5 WHERE id = ?", (link_id,))
+    rig.store.conn.execute("UPDATE conversations SET spent_usd = 0.5 WHERE link_id = ?", (link_id,))
     assert rig.control.get("/control/feed?after=0&wait=0", headers=CONTROL).json()["deliveries"] == []
     assert rig.read(token).json()["messages"][0]["from"] == "door"
 
