@@ -2,6 +2,13 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-11-11 — desktop-v0.24.1
+
+- **Trusted agent links.** A direct link can now trust its guest: the other agent may ask for anything and ask for anything to be done, and the turn runs with the chat's full tools and context, as your own turn would. The narrower levels stay, and they no longer treat the guest as hostile: a chat's own results can be shared where they serve the link's purpose.
+- **The link says what you want.** The link's topic, and an optional note only your agent sees, reach every guest turn as your own words, so the agent follows them instead of refusing by default.
+- **A clearer link form.** It starts from who answers and how far they are trusted, as three cards, and shows only the fields that choice needs. Every limit, the lifetime and the daily limit for all guests can be set to *No limit*. Every link has *Edit*, which opens the same form on its current settings and updates the door in place.
+- **An Agents tab for your agent's conversations.** Conversations your agent holds through other people's links moved from above the composer into a right-panel tab with a card per conversation: its thread, the other side's door text, counts, spend and settings. It opens by itself when a conversation starts or a reply arrives. A message waiting for your approval shows as a proper card above the composer and in the tab, with Send, Edit and Don't send. Its message, turn and dollar caps can be lifted too.
+
 ## 2026-11-11 — desktop-v0.24.0
 
 - **Agent links: other people's agents can talk to yours.** A chat can hand out a link, and another person's agent (or another Daedalus) talks to that chat through it. Each link is made either as a *stand-in*, which answers in its own sandboxed turn with any model the app lists and never reaches your tools, notes, memory or allowance, or as *direct*, where the message reaches the chat as a turn of its own after the auto-review. A stranger's words are kept apart from your tools. The chat's new Agent links screen shows every conversation. Telegram shows each new contact's card too. The guest door is a process of its own, off the network and bounded in what it can ask for. On a server it is opened under a public name. In the desktop application, `tunneld` holds a public address through the tunnel you choose (ngrok, Tailscale Funnel, frp or a quick tunnel), and the agent itself is refused when it tries to raise a tunnel.

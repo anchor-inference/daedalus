@@ -328,7 +328,11 @@ def test_the_launcher_writes_its_environment_file_in_place() -> None:
         if source.name.endswith("_test.go"):
             continue
         for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"\b(?:p|paths|s\.app\.paths|a\.paths|n\.paths|t\.paths)\.Env\b", line) and re.search(r"Rename|Create|OpenFile|WriteFile|atomic", line):
+            if re.search(r"\b(?:p|paths|s\.app\.paths|a\.paths|n\.paths|t\.paths)\.Env\b", line) and re.search(r"Rename|Create|OpenFile|WriteFile|writePrivateFile|atomic", line):
                 writes.append((source.name, number, line.strip()))
     assert writes, "the launcher writes the file somewhere"
-    assert all("os.WriteFile(" in line and "Rename" not in line for _, _, line in writes), writes
+    assert all(("os.WriteFile(" in line or "writePrivateFile(" in line) and "Rename" not in line for _, _, line in writes), writes
+    # The file is written through the helper that also narrows its permissions on Windows, so the helper is
+    # held to the same rule: a write in place, never a temporary file renamed over the old one.
+    helper = re.search(r"func writePrivateFile\(.*?\n}\n", (desktop / "private.go").read_text(encoding="utf-8"), re.S)
+    assert helper and "os.WriteFile(path" in helper.group(0) and "Rename" not in helper.group(0), helper
