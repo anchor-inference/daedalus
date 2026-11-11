@@ -984,7 +984,8 @@ export type AgentTalkDetail = AgentTalk & { messages: AgentTalkMessage[] };
 export type AgentTalkList = { talks: AgentTalk[]; sends_limit: number; wake_turns_max: number; wake_usd_max: number };
 
 export type GuestMode = "stand_in" | "direct";
-export type GuestTools = "none" | "read" | "all";
+/** `trusted`: the chat's agent serves the guest as it serves the operator, with the session's own tools and context. */
+export type GuestTools = "none" | "read" | "all" | "trusted";
 export type GuestLinkState = "waiting" | "spent" | "revoked" | "expired";
 export type GuestConversation = {
   id: string;
@@ -1027,7 +1028,8 @@ export type GuestLink = {
 };
 /** `role` is who spoke: the guest's agent, the answering side, or the door itself (a notice, not a person). */
 export type GuestMessage = { id: string; role: "guest" | "agent" | "door"; text: string; at: number; state: string; cost_usd: number };
-export type GuestLinkDetail = GuestLink & { briefing: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
+/** `instructions` and `model_id` are the host's: the note to the agent the door never has, and the model as the form names it. */
+export type GuestLinkDetail = GuestLink & { briefing: string; instructions?: string; model_id?: string; events: { id: string; kind: string; at: number }[]; messages: GuestMessage[] };
 export type GuestBilling = "metered" | "plan" | "free";
 export type GuestModelOption = { id: string; label: string; path: string; model: string; billing: GuestBilling; price_in: number; price_out: number; free: boolean };
 export type GuestDefaults = {
@@ -1056,14 +1058,19 @@ export type GuestDoor = {
   full_tools_why: GuestToolsWhy;
   /** Whether that chat's model counts dollars; on a plan or a free model only the turn limits bound a link. */
   chat_priced: boolean;
+  /** What a trusted link starts with: no limits, each as 0. */
+  trusted_defaults: Pick<GuestDefaults, "usd_limit" | "turns_per_day" | "turns_total" | "invite_hours" | "conversation_hours" | "idle_hours">;
 };
-/** What making a link sends (`LinkBody` in daedalus/extensions/api_guest.py). */
+/** What making or changing a link sends (`LinkBody` in daedalus/extensions/api_guest.py). Every limit and lifetime is
+ *  0 for none. */
 export type GuestLinkBody = {
   label: string;
   topic: string;
   mode: GuestMode;
   model_id: string;
   briefing: string;
+  /** A direct link's note to the chat's agent; kept by the host only. */
+  instructions: string;
   briefing_approved: boolean;
   tools: GuestTools;
   approval: boolean;

@@ -120,6 +120,19 @@ DOOR = "door"
 
 DEFAULT_USD_PER_DAY = 5.0
 
+NO_LIMIT = 0
+"""What every limit and lifetime of a link, and the day's budget, holds when the owner set none. A column
+cannot hold infinity, and a zero limit had no use: a link that may never answer is one not made."""
+
+
+def until(now: float, hours: float) -> float:
+    """When a lifetime of ``hours`` from ``now`` ends: :data:`NO_LIMIT` for one that never does."""
+    return now + float(hours) * 3600 if hours else NO_LIMIT
+
+
+def ended(at: float, now: float) -> bool:
+    return bool(at) and at < now
+
 
 def digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
@@ -197,11 +210,41 @@ class Store:
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             link_id, digest(invite), WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
             float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
-            int(fields["turns_total"]), now + float(fields["invite_hours"]) * 3600, float(fields["conversation_hours"]), float(fields["idle_hours"]),
+            int(fields["turns_total"]), until(now, fields["invite_hours"]), float(fields["conversation_hours"]), float(fields["idle_hours"]),
             float(fields["retention_days"]), fields["guest_tools"], now,
         )
         self.record(link_id, "created")
         return link_id, invite
+
+    def update_link(self, link_id: str, fields: dict[str, Any]) -> bool:
+        """The owner's edit of every setting of a link. What it spent and counted stays; lifetimes count from
+        when the link and its conversation began, as they did, so an edit lengthens or shortens them rather
+        than starting them again. An invite that ran out comes back if its new lifetime has not."""
+        link = self.link(link_id)
+        if link is None or link["state"] == REVOKED:
+            return False
+        now = self.clock()
+        expires = until(link["created_at"], fields["invite_hours"])
+        state = WAITING if link["state"] == EXPIRED and not ended(expires, now) else link["state"]
+        self._write("BEGIN IMMEDIATE")
+        try:
+            self._write(
+                "UPDATE links SET state = ?, closed_at = CASE WHEN ? = ? THEN NULL ELSE closed_at END, label = ?, topic = ?, mode = ?, briefing = ?, model_path = ?, model_name = ?,"
+                " price_in = ?, price_out = ?, approval = ?, usd_limit = ?, turns_per_day = ?, turns_total = ?, invite_expires_at = ?, conversation_hours = ?,"
+                " idle_hours = ?, retention_days = ?, guest_tools = ? WHERE id = ?",
+                state, state, WAITING, fields["label"], fields["topic"], fields["mode"], fields["briefing"], fields["model_path"], fields["model_name"],
+                float(fields["price_in"]), float(fields["price_out"]), int(bool(fields["approval"])), float(fields["usd_limit"]), int(fields["turns_per_day"]),
+                int(fields["turns_total"]), expires, float(fields["conversation_hours"]), float(fields["idle_hours"]), float(fields["retention_days"]),
+                fields["guest_tools"], link_id,
+            )
+            hours = float(fields["conversation_hours"])
+            self._write("UPDATE conversations SET expires_at = CASE WHEN ? > 0 THEN created_at + ? ELSE 0 END WHERE link_id = ? AND state != ?", hours, hours * 3600, link_id, CLOSED)
+            self._write("COMMIT")
+        except BaseException:
+            self._write("ROLLBACK")
+            raise
+        self.record(link_id, "edited")
+        return True
 
     def link(self, link_id: str) -> sqlite3.Row | None:
         return self._one("SELECT * FROM links WHERE id = ?", link_id)
@@ -254,7 +297,7 @@ class Store:
             state = PENDING if link["approval"] else OPEN
             self._write(
                 "INSERT INTO conversations(id, link_id, token_hash, state, created_at, decide_by, expires_at, last_guest_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                conversation_id, link["id"], digest(token), state, now, now + FIRST_CONTACT_HOURS * 3600, now + float(link["conversation_hours"]) * 3600, now,
+                conversation_id, link["id"], digest(token), state, now, now + FIRST_CONTACT_HOURS * 3600, until(now, link["conversation_hours"]), now,
             )
             self._write("COMMIT")
         except BaseException:
@@ -373,45 +416,54 @@ class Store:
 
         A direct link has no price of its own, its turn runs on the chat's model and is priced only
         afterwards, so it counts as priced: a free stand-in model is the only thing the dollars skip.
+        A limit of :data:`NO_LIMIT` is skipped too: the owner chose not to count it.
         """
         priced = link["mode"] == DIRECT or float(link["price_in"]) + float(link["price_out"]) > 0
-        if priced:
+        if priced and float(link["usd_limit"]) != NO_LIMIT:
             spent = float(link["spent_usd"]) + float(link["reserved_usd"])
             if spent >= float(link["usd_limit"]) or spent + estimate > float(link["usd_limit"]):
                 return Refusal("usd_per_link", None)
-        if int(link["turns_used"]) >= int(link["turns_total"]):
+        if int(link["turns_total"]) != NO_LIMIT and int(link["turns_used"]) >= int(link["turns_total"]):
             return Refusal("turns_total", None)
         today = int(link["turns_today"]) if link["turns_day"] == self._day() else 0
-        if today >= int(link["turns_per_day"]):
+        if int(link["turns_per_day"]) != NO_LIMIT and today >= int(link["turns_per_day"]):
             return Refusal("turns_per_day", self._tomorrow())
-        if priced:
+        if priced and self.usd_per_day() != NO_LIMIT:
             day = self.spend_today()
             total = day["usd"] + day["reserved"]
             if total >= self.usd_per_day() or total + estimate > self.usd_per_day():
                 return Refusal("usd_per_day", self._tomorrow())
         return None
 
-    def allowance(self, link: sqlite3.Row) -> float:
-        """What one more turn of this link may spend before a limit: a direct turn's own cap."""
+    def allowance(self, link: sqlite3.Row) -> float | None:
+        """What one more turn of this link may spend before a limit: a direct turn's own cap. ``None`` when
+        neither the link nor the day has a limit in dollars."""
         day = self.spend_today()
-        return max(0.0, min(float(link["usd_limit"]) - float(link["spent_usd"]) - float(link["reserved_usd"]), self.usd_per_day() - day["usd"] - day["reserved"]))
+        left = []
+        if float(link["usd_limit"]) != NO_LIMIT:
+            left.append(float(link["usd_limit"]) - float(link["spent_usd"]) - float(link["reserved_usd"]))
+        if self.usd_per_day() != NO_LIMIT:
+            left.append(self.usd_per_day() - day["usd"] - day["reserved"])
+        return max(0.0, min(left)) if left else None
 
-    def reserve_turn(self, message_id: int, link: sqlite3.Row, ceiling: float) -> tuple[Refusal | None, float]:
+    def reserve_turn(self, message_id: int, link: sqlite3.Row, ceiling: float | None) -> tuple[Refusal | None, float | None]:
         """Put aside what a direct turn may spend: ``ceiling``, or what is left if that is less.
 
         Atomic, and what it takes shrinks the next turn's share, so turns running at once cannot each
-        be told they have the whole of what is left.
+        be told they have the whole of what is left. ``None`` for a share is a turn nothing bounds in
+        dollars: it is counted, nothing is put aside, and the host holds it to its own cap on a run.
         """
         self._write("BEGIN IMMEDIATE")
         try:
             fresh = self.link(link["id"])
             assert fresh is not None
-            share = min(ceiling, self.allowance(fresh))
-            refusal = self.limit_reached(fresh, share)
+            left = self.allowance(fresh)
+            share = left if ceiling is None else ceiling if left is None else min(ceiling, left)
+            refusal = self.limit_reached(fresh, share or 0.0)
             if refusal is not None:
                 self._write("ROLLBACK")
                 return refusal, 0.0
-            self._take(link["id"], message_id, share)
+            self._take(link["id"], message_id, share or 0.0)
             self._write("COMMIT")
         except BaseException:
             self._write("ROLLBACK")
@@ -524,7 +576,7 @@ class Store:
         here, so a client left polling forever does not keep a conversation alive.
         """
         now = self.clock()
-        for link in self._all("SELECT id FROM links WHERE state = ? AND invite_expires_at < ?", WAITING, now):
+        for link in self._all("SELECT id FROM links WHERE state = ? AND invite_expires_at > 0 AND invite_expires_at < ?", WAITING, now):
             self._write("UPDATE links SET state = ?, closed_at = ? WHERE id = ?", EXPIRED, now, link["id"])
             self.record(link["id"], "invite_expired")
         for conversation in self._all("SELECT id, link_id FROM conversations WHERE state = ? AND decide_by < ?", PENDING, now):
@@ -534,7 +586,8 @@ class Store:
             "SELECT c.id, c.link_id, c.expires_at, c.last_guest_at, l.idle_hours FROM conversations c JOIN links l ON l.id = c.link_id WHERE c.state = ?", OPEN,
         )
         for row in rows:
-            reason = "expired" if row["expires_at"] < now else "idle" if row["last_guest_at"] + float(row["idle_hours"]) * 3600 < now else ""
+            idle = float(row["idle_hours"]) and row["last_guest_at"] + float(row["idle_hours"]) * 3600 < now
+            reason = "expired" if ended(row["expires_at"], now) else "idle" if idle else ""
             if reason:
                 self._close_conversation_of(row["link_id"], reason, now)
                 self.record(row["link_id"], reason)
@@ -555,5 +608,5 @@ def rows(items: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 
 __all__ = [
     "AGENT", "ANSWERED", "CLAIMED", "CLOSED", "DIRECT", "DOOR", "EXPIRED", "FAILED", "FIRST_CONTACT_HOURS", "GUEST", "HELD", "OPEN", "PENDING",
-    "QUEUED", "REVOKED", "SENT", "SPENT", "STAND_IN", "WAITING", "Refusal", "Store", "digest", "new_secret", "rows",
+    "NO_LIMIT", "QUEUED", "REVOKED", "SENT", "SPENT", "STAND_IN", "WAITING", "Refusal", "Store", "digest", "ended", "new_secret", "rows", "until",
 ]

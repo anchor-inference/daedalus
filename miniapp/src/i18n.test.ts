@@ -233,8 +233,8 @@ describe("the keys the code asks for", () => {
       // An agent link names its state, mode and tools from what the door reports; the state is its
       // conversation's once the invite is spent.
       ["guest.state.", ["waiting", "used", "pending", "open", "closed", "revoked", "expired"]],
-      ["guest.mode.", ["stand_in", "direct"]],
-      ["guest.tools.", ["none", "read", "all"]],
+      ["guest.level.", ["stand_in", "direct", "trusted", "stand_in.hint", "direct.hint", "trusted.hint"]],
+      ["guest.tools.", ["none", "read", "all", "trusted"]],
       ["guest.tools.why.", ["no_sandbox", "no_limits", "host_folder", "other"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],

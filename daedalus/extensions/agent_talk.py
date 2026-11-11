@@ -86,7 +86,11 @@ CARD_CHARS = 600
 MAX_MESSAGES = 300
 """Everything kept of a conversation. A door that talks without end must not fill this database."""
 MAX_SENDS = 30
-"""Messages this side sends in one conversation. Past it the operator starts a new one, with a new link."""
+"""Messages this side sends in one conversation unless the operator sets another number or none (0, the column's
+``sends_limit``). Past it the operator starts a new one, with a new link, or lifts the limit."""
+NO_LIMIT = -1
+"""``wake_turns`` and ``wake_usd`` with no limit: waking on every reply, at no cap but the one on any run. Not 0,
+which is waking switched off and a spent budget, as it always was."""
 DOOR_WAIT_SECONDS = 25
 """How long one read is held at the door, under the door's own limit of 30."""
 CALL_SECONDS = 15.0
@@ -339,7 +343,7 @@ class AgentTalks:
         rows = await self.messages(talk["id"])
         out: dict[str, Any] = {
             "id": talk["id"], "session_id": talk["session_id"], "host": talk["host"], "topic": talk["topic"], "mode": talk["mode"], "state": talk["state"], "reason": talk["reason"],
-            "waiting_for": talk["waiting_for"], "quiet": bool(talk["quiet"]), "review": talk["review"], "sends": talk["sends"], "sends_limit": MAX_SENDS, "wake_turns": talk["wake_turns"],
+            "waiting_for": talk["waiting_for"], "quiet": bool(talk["quiet"]), "review": talk["review"], "sends": talk["sends"], "sends_limit": talk["sends_limit"], "wake_turns": talk["wake_turns"],
             "wake_usd": round(float(talk["wake_usd"]), 6), "created_at": talk["created_at"], "last_at": talk["last_at"], "closed_at": talk["closed_at"], "spent_usd": round(await self.spent(talk), 6),
             "replies": sum(1 for row in rows if row["role"] == THEM), "unread": sum(1 for row in rows if row["state"] == UNREAD), "held": sum(1 for row in rows if row["state"] == HELD),
         }
@@ -484,15 +488,15 @@ class AgentTalks:
             said = "The door says it is no use waiting for now: tell the operator, and read again later." if talk["quiet"] else "A reply is owed."
         else:
             said = "Nothing is owed."
-        sent = f"{talk['sends']} of {MAX_SENDS} messages sent."
+        sent = f"{talk['sends']} of {talk['sends_limit']} messages sent." if talk["sends_limit"] else f"{talk['sends']} messages sent."
         return " ".join(part for part in (lead, said, sent, f"[conversation {talk['id']}]") if part)
 
     async def _send(self, state: SessionState, talk: Any, text: str, wait: int) -> Outcome:
         session_id = state.session.id
         if talk["state"] in (CLOSED, OPENING):
             return Outcome(self._state_line(talk), error=True, talk=talk["id"])
-        if talk["sends"] >= MAX_SENDS:
-            return Outcome(f"This conversation has used its {MAX_SENDS} messages. Tell the operator; talking on needs a new link.", error=True, talk=talk["id"])
+        if talk["sends_limit"] and talk["sends"] >= talk["sends_limit"]:
+            return Outcome(f"This conversation has used its {talk['sends_limit']} messages. Tell the operator: they can lift the limit, or talking on needs a new link.", error=True, talk=talk["id"])
         run_id = state.run_id or ""
         turn = state.guest_turn
         if turn is not None and await self.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND role = ? AND run_id = ?", (talk["id"], US, run_id)) is not None:
@@ -797,7 +801,7 @@ class AgentTalks:
         fresh = await self.talk(talk_id)
         if fresh is None or self._readers.get(talk_id):
             return
-        if fresh["wake_turns"] > 0 and spoken:
+        if fresh["wake_turns"] != 0 and spoken:
             self.wake(talk_id)
         elif spoken:
             await self._tell(fresh, "reply", every=REPLY_NOTICE_SECONDS)
@@ -807,7 +811,7 @@ class AgentTalks:
         texts = [_same(str(row["text"])) for row in rows]
         repeats = int(talk["repeats"]) + 1 if len(texts) >= 2 and len(set(texts)) == 1 else 0
         await self._update(talk["id"], repeats=repeats)
-        if repeats >= REPEATS_ALLOWED and talk["wake_turns"] > 0:
+        if repeats >= REPEATS_ALLOWED and talk["wake_turns"] != 0:
             # The surest sign of two agents politely stuck, and each turn of it is paid for on both sides.
             await self._update(talk["id"], wake_turns=0)
             await self._tell(talk, "repeats")
@@ -842,7 +846,7 @@ class AgentTalks:
         deadline = time.monotonic() + CHAT_FREE_SECONDS
         while time.monotonic() < deadline:
             talk = await self.talk(talk_id)
-            if talk is None or talk["state"] == CLOSED or talk["wake_turns"] <= 0:
+            if talk is None or talk["state"] == CLOSED or talk["wake_turns"] == 0:
                 return
             unread = await self._unread(talk_id)
             if not unread:
@@ -864,7 +868,7 @@ class AgentTalks:
             said = "\n\n".join(str(row["text"]) for row in unread)
             body = "\n".join(agent_talk.fence_reply(str(row["text"]), talk["host"]) for row in unread)
             usd_left: float | None = None
-            if any(price):
+            if any(price) and float(talk["wake_usd"]) != NO_LIMIT:
                 usd_left = min(float(talk["wake_usd"]), TURN_USD)
                 if usd_left <= 0 or await manager.guest_first_call_usd(session_id, price, runs=runs, extra_chars=len(body)) > usd_left:
                     await self._wake_spent(talk)
@@ -883,7 +887,7 @@ class AgentTalks:
             for row in unread:
                 await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
             # Before the turn ends and not after: a turn cut off by a restart was still a turn.
-            await self.db.execute("UPDATE agent_talks SET wake_turns = wake_turns - 1 WHERE id = ?", (talk_id,))
+            await self.db.execute("UPDATE agent_talks SET wake_turns = wake_turns - 1 WHERE id = ? AND wake_turns > 0", (talk_id,))
             self._wakes[run_id] = talk_id
             if not manager.is_running(session_id):
                 await self.on_run_finished(session_id, run_id, "completed")
@@ -900,12 +904,12 @@ class AgentTalks:
         if talk_id is None:
             return
         spent, _ = await self.manager.spend(run_id=run_id)
-        await self.db.execute("UPDATE agent_talks SET wake_usd = max(0, wake_usd - ?) WHERE id = ?", (float(spent), talk_id))
+        await self.db.execute("UPDATE agent_talks SET wake_usd = max(0, wake_usd - ?) WHERE id = ? AND wake_usd >= 0", (float(spent), talk_id))
         talk = await self.talk(talk_id)
         if talk is None or talk["state"] == CLOSED:
             return
         price = await self.manager.guest_price(session_id)
-        if talk["wake_turns"] <= 0 or (price is not None and any(price) and talk["wake_usd"] <= 0):
+        if talk["wake_turns"] == 0 or (price is not None and any(price) and talk["wake_usd"] == 0):
             await self._wake_spent(talk)
         elif await self._unread(talk_id):
             self.wake(talk_id)
@@ -918,33 +922,50 @@ class AgentTalks:
         if isinstance(message_id, int):
             await self.decide(talk_id, message_id, allowed)
 
-    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "") -> bool:
-        """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again."""
+    async def decide(self, talk_id: str, message_id: int, allowed: bool, *, via: str = "", text: str | None = None) -> bool:
+        """Let a held message go, or not. What goes is what the row holds: no model is asked to say it again.
+
+        ``text`` is the operator's own edit of the message, which replaces the row in the same step that claims
+        it, so what is posted and what the conversation shows as sent are one text. A value the operator handed
+        over goes out as its placeholder, as it would from the agent. ``ValueError`` for an edit that is empty
+        or longer than the other door takes, before anything is claimed."""
         talk = await self.talk(talk_id)
         message = await self._message(message_id)
-        if talk is None or message is None or message["talk_id"] != talk_id or not await self._claim(message_id, SENDING if allowed else REFUSED):
+        if talk is None or message is None or message["talk_id"] != talk_id:
+            return False
+        edited: str | None = None
+        if allowed and text is not None:
+            edited = self.manager.redactor.conceal_named(text).strip()
+            if not edited:
+                raise ValueError("the message is empty")
+            if len(edited) > talk["max_text"]:
+                raise ValueError(f"a message may be at most {talk['max_text']} characters")
+        if not await self._claim(message_id, SENDING if allowed else REFUSED, text=edited):
             return False
         if allowed:
-            await self._post(talk_id, message_id, str(message["text"]))
+            await self._post(talk_id, message_id, edited if edited is not None else str(message["text"]))
         if via:
             await self.manager.settle_ask(talk["session_id"], ask_key(message_id), "allow" if allowed else "deny", via=via)
         self._wake_readers(talk_id)
         return True
 
-    async def _claim(self, message_id: int, state: str) -> bool:
+    async def _claim(self, message_id: int, state: str, *, text: str | None = None) -> bool:
         """Take a held message out of waiting, once: a card and the sheet answered together must not both act."""
         async with self.db.transaction() as conn:
-            cursor = await conn.execute("UPDATE agent_talk_messages SET state = ? WHERE id = ? AND state = ?", (state, message_id, HELD))
+            cursor = await conn.execute("UPDATE agent_talk_messages SET state = ?, text = coalesce(?, text) WHERE id = ? AND state = ?", (state, text, message_id, HELD))
             claimed = cursor.rowcount > 0
             await cursor.close()
         return claimed
 
-    async def configure(self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None) -> None:
+    async def configure(self, talk_id: str, *, review: str | None = None, wake_turns: int | None = None, wake_usd: float | None = None, sends_limit: int | None = None) -> None:
+        """The operator's settings. :data:`NO_LIMIT` for turns or dollars, and 0 for ``sends_limit``, are none at all."""
         if review is not None:
             await self._update(talk_id, review=review)
+        if sends_limit is not None:
+            await self._update(talk_id, sends_limit=sends_limit)
         if wake_turns is not None:
             await self._update(talk_id, wake_turns=wake_turns, wake_usd=wake_usd or 0.0)
-            if wake_turns > 0:
+            if wake_turns != 0:
                 self.wake(talk_id)
 
     async def end(self, talk_id: str, *, reason: str = "ended") -> None:
@@ -1011,7 +1032,7 @@ class AgentTalks:
                     continue
                 if talk["waiting_for"]:
                     self.follow(talk["id"])
-                if talk["wake_turns"] > 0:
+                if talk["wake_turns"] != 0:
                     self.wake(talk["id"])
             except Exception:  # noqa: BLE001 — one conversation that cannot be swept must not cost the others theirs
                 logger.exception("could not sweep conversation %s", talk["id"])
@@ -1063,4 +1084,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(talks.serve(), name="agent-talks")]
 
 
-__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]
+__all__ = ["ASK_HOOK", "EXTENSION_KEY", "MAX_SENDS", "NO_LIMIT", "REVIEWS", "WAKE_TURNS_MAX", "WAKE_USD_MAX", "AgentTalks", "Dialer", "DoorAnswer", "DoorGone", "HideDoorPaths", "NotReachable", "Outcome", "ask_key", "install", "public_addresses", "talks_of"]

@@ -901,7 +901,7 @@ def test_the_control_socket_wants_its_token(rig: Rig) -> None:
     assert rig.control.get("/control/health", headers=CONTROL).json()["usd_per_day"] == 5.0
 
 
-@pytest.mark.parametrize(("change", "word"), [({"mode": "other"}, "mode"), ({"usd_limit": -1}, "usd_limit"), ({"turns_per_day": 0}, "turns_per_day"), ({"briefing": " "}, "briefing"), ({"usd_limit": True}, "usd_limit")])
+@pytest.mark.parametrize(("change", "word"), [({"mode": "other"}, "mode"), ({"usd_limit": -1}, "usd_limit"), ({"turns_per_day": -1}, "turns_per_day"), ({"invite_hours": 0.05}, "invite_hours"), ({"briefing": " "}, "briefing"), ({"usd_limit": True}, "usd_limit")])
 def test_a_link_with_wrong_settings_is_refused(change: dict[str, Any], word: str) -> None:
     fields = {
         "label": "a", "topic": "b", "mode": "stand_in", "briefing": "c", "model_path": "d", "model_name": "e", "guest_tools": "none", "price_in": 1, "price_out": 1,

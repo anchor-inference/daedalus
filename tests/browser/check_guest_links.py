@@ -6,7 +6,10 @@ the way a hand does:
 - a stand-in link is made from a typed briefing, the address shows once with one line of intent in front
   of it, and the clipboard holds that line and the address; the address is nowhere on the page after Done;
 - a briefing drafted from the chat has to be read and ticked before Create answers;
-- a direct link says in one line that the guest reaches everything, and opens on read-only tools;
+- the form opens on the choice of who answers, three cards with one line each; a direct link opens on
+  read-only tools; a trusted agent says in one line what it can do, offers no tool choice and starts with
+  no limits, each shown as the words "No limit" and never as a 0;
+- a link is changed in place from its card: the same form, opened on what the link has, saved with PUT;
 - a first message that waits is shown as plain text, and Admit and Revoke change the list;
 - a conversation is read as plain text, who spoke on each line, and nothing a guest wrote becomes a link,
   a picture or markup;
@@ -43,7 +46,8 @@ WORDS = {
         "actions": "Session actions", "menu": "Agent link…", "title": "Agent link", "make": "Make a link", "create": "Create link", "done": "Done",
         "direct": "Direct", "standin": "Stand-in", "admit": "Admit", "refuse": "Refuse", "revoke": "Revoke", "read": "Read", "back": "Back", "copy": "Copy",
         "intro": "Talk to this agent and ask what you need", "once": "Shown only now. If you lose it, make a new link.",
-        "warning": "The guest's agent reads every message in this chat. Your memory and notes stay out of its turn.", "off": "The agent link is off in this installation.",
+        "warning": "They can ask for anything and have it done. Only for someone you trust fully.", "off": "The agent link is off in this installation.",
+        "nolimit": "No limit", "never": "Never ends", "edit": "Edit", "trusted": "Trusted agent", "note": "Note for your agent",
         "noaddress": "The agent link has no public address yet.", "draft": "Draft from this chat", "tick": "I have read this briefing",
         "from": "From a guest · Mira's assistant", "state_open": "In conversation", "state_pending": "Waits for you", "state_revoked": "Revoked",
         "state_waiting": "Not opened yet", "readonly": "Read-only", "save": "Save", "daily": "Daily limit for all guests", "cancel": "Cancel",
@@ -60,7 +64,8 @@ WORDS = {
         "actions": "Действия с сессией", "menu": "Ссылка для агента…", "title": "Ссылка для агента", "make": "Сделать ссылку", "create": "Создать ссылку", "done": "Готово",
         "direct": "Напрямую", "standin": "Дублёр", "admit": "Допустить", "refuse": "Отказать", "revoke": "Отозвать", "read": "Читать", "back": "Назад", "copy": "Копировать",
         "intro": "Поговорите с этим агентом и спросите, что вам нужно", "once": "Показана только сейчас. Потеряете — сделайте новую.",
-        "warning": "Агент гостя читает все сообщения этого диалога. Ваша память и заметки в его ход не попадают.", "off": "Ссылки для агентов в этой установке выключены.",
+        "warning": "Он сможет запросить что угодно и получить это. Только для тех, кому вы полностью доверяете.", "off": "Ссылки для агентов в этой установке выключены.",
+        "nolimit": "Без лимита", "never": "Бессрочно", "edit": "Изменить", "trusted": "Доверенный агент", "note": "Указания вашему агенту",
         "noaddress": "У ссылок для агентов пока нет публичного адреса.", "draft": "Набросать по этому диалогу", "tick": "Я прочитал этот брифинг",
         "from": "От гостя · Mira's assistant", "state_open": "Идёт разговор", "state_pending": "Ждёт вашего ответа", "state_revoked": "Отозвана",
         "state_waiting": "Ещё не открыта", "readonly": "Только чтение", "save": "Сохранить", "daily": "Дневной лимит для всех гостей", "cancel": "Отмена",
@@ -185,6 +190,11 @@ def check_list(page: Page, words: dict[str, str], guests: FakeGuests) -> None:
     page.locator("[data-guest-daily]").get_by_role("button", name=words["save"], exact=True).click()
     expect(page.locator("[data-guest-daily] input")).to_have_value("3.5")
     assert any(call[1] == "/api/guest/settings" and call[2] == {"usd_per_day": 3.5} for call in guests.calls), guests.calls
+    # No limit for the day is one choice, said in words and saved at once; the number goes while it holds.
+    page.locator("[data-guest-nolimit='usd_per_day']").click()
+    expect(page.locator("[data-guest-nolimit='usd_per_day']")).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("[data-guest-daily] input")).to_have_count(0)
+    assert guests.calls[-1] == ("PUT", "/api/guest/settings", {"usd_per_day": 0}), guests.calls[-1]
 
 
 def made_text(page: Page) -> str:
@@ -202,7 +212,7 @@ def check_stand_in(page: Page, words: dict[str, str], guests: FakeGuests, width:
     # A stand-in's conversation lives only on the link, so its record is the record.
     expect(page.locator("label[for='guest-retention_days']")).to_have_text(words["retention"])
     page.get_by_label(words["who"], exact=True).fill("Anna's agent")
-    page.get_by_label(words["topic"], exact=True).fill("Opening hours for the autumn")
+    page.locator("#guest-topic").fill("Opening hours for the autumn")
     page.locator("#guest-briefing").fill("The bakery opens at seven.")
     expect(create).to_be_enabled()
     create.click()
@@ -273,10 +283,10 @@ def check_segments(page: Page) -> None:
 
 def check_direct(page: Page, words: dict[str, str], guests: FakeGuests, width: int) -> None:
     page.locator("[data-guest-new]").click()
-    page.get_by_role("radio", name=words["direct"], exact=True).click()
-    # One line, the one that says what the guest can reach, and the tools open on read-only.
-    expect(page.locator("[data-guest-warning]")).to_have_text(words["warning"])
-    assert page.locator(".guest-form .sub").count() == 1
+    level(page, "direct")
+    # Nothing to warn of below the line under the choice, and the tools open on read-only.
+    expect(page.locator("[data-guest-warning]")).to_have_count(0)
+    assert page.locator(".guest-form > .sub").count() == 0
     expect(page.locator("[data-guest-tools-all], [data-guest-tools-why]")).to_have_count(0)
     snap(page, words, width, "direct")
     check_segments(page)
@@ -296,11 +306,10 @@ def check_direct(page: Page, words: dict[str, str], guests: FakeGuests, width: i
 
     # All tools is an allow-list, and the form says so in one more line, only while it is chosen.
     page.locator("[data-guest-new]").click()
-    page.get_by_role("radio", name=words["direct"], exact=True).click()
+    level(page, "direct")
     page.get_by_role("radio", name=words["all"], exact=True).click()
     expect(page.locator("[data-guest-tools-all]")).to_have_text(words["all_note"])
-    assert page.locator(".guest-form .sub").count() == 2
-    expect(page.locator("[data-guest-warning]")).to_have_text(words["warning"])
+    assert page.locator(".guest-form > .sub").count() == 1
     snap(page, words, width, "direct-all")
     check_segments(page)
     page.get_by_role("radio", name=words["readonly"], exact=True).click()
@@ -327,13 +336,12 @@ def check_no_full_tools(browser, words: dict[str, str], lang: str, why: str, wid
     # The door was asked about this chat.
     assert guests.door_asked and all(asked == S1 for asked in guests.door_asked), guests.door_asked
     page.locator("[data-guest-new]").click()
-    page.get_by_role("radio", name=words["direct"], exact=True).click()
+    level(page, "direct")
     expect(page.get_by_role("radio", name=words["all"], exact=True)).to_have_count(0)
     expect(page.get_by_role("radio", name=words["readonly"], exact=True)).to_have_attribute("aria-checked", "true")
     expect(page.locator(f"[data-guest-tools-why='{why}']")).to_have_text(words[f"why_{why}"])
-    # The warning of every direct link, and this one reason: two lines, and no more.
-    assert page.locator(".guest-form .sub").count() == 2
-    expect(page.locator("[data-guest-warning]")).to_have_text(words["warning"])
+    # This one reason, and no more.
+    assert page.locator(".guest-form > .sub").count() == 1
     expect(page.locator("[data-guest-tools-all]")).to_have_count(0)
     snap(page, words, width, f"direct-{why}")
     check_segments(page)
@@ -341,6 +349,77 @@ def check_no_full_tools(browser, words: dict[str, str], lang: str, why: str, wid
     expect(page.locator("#guest-url")).to_be_visible()
     body = [call for call in guests.calls if call[1].endswith("/guest/links")][-1][2]
     assert body["mode"] == "direct" and body["tools"] == "read", body
+    context.close()
+
+
+def level(page: Page, which: str) -> None:
+    page.locator(f"[data-guest-level='{which}'] input").click()
+    expect(page.locator(f"[data-guest-level='{which}'] input")).to_be_checked()
+
+
+def check_trusted(page: Page, words: dict[str, str], guests: FakeGuests, width: int, scheme: str = "dark") -> None:
+    """A trusted agent: one line of warning, no tool choice, and every limit lifted, each said in words."""
+    page.locator("[data-guest-new]").click()
+    expect(page.locator(".guest-levels [data-guest-level]")).to_have_count(3)
+    level(page, "trusted")
+    expect(page.locator("[data-guest-warning='trusted']")).to_have_text(words["warning"])
+    assert page.locator(".guest-form > .sub").count() == 1, "the warning is the one line"
+    expect(page.locator(".guest-form .segmented")).to_have_count(0)
+    for name in ("usd_limit", "turns_per_day", "invite_hours"):
+        chip = page.locator(f"[data-guest-nolimit='{name}']")
+        expect(chip).to_have_attribute("aria-pressed", "true")
+        expect(chip).to_have_text(words["never"] if name == "invite_hours" else words["nolimit"])
+        expect(page.locator(f"#guest-{name}")).to_have_count(0)
+    page.locator("#guest-label").fill("A colleague")
+    page.locator("#guest-topic").fill("Give him access to everything he asks for")
+    page.get_by_label(words["note"], exact=True).fill("He is my co-author of the paper.")
+    snap(page, words, width, "trusted", scheme)
+    check_segments(page)
+    check_fit(page, width)
+    page.get_by_role("button", name=words["create"], exact=True).click()
+    expect(page.locator("#guest-url")).to_be_visible()
+    body = [call for call in guests.calls if call[1].endswith("/guest/links")][-1][2]
+    assert body["mode"] == "direct" and body["tools"] == "trusted" and body["instructions"] == "He is my co-author of the paper.", body
+    assert all(body[name] == 0 for name in ("usd_limit", "turns_per_day", "turns_total", "invite_hours", "conversation_hours", "idle_hours")), body
+    page.get_by_role("button", name=words["done"], exact=True).click()
+    expect(page.locator("[data-guest-link]").first).to_be_visible()
+
+
+def check_edit(page: Page, words: dict[str, str], guests: FakeGuests, width: int, scheme: str = "dark") -> None:
+    """Every setting of a link changes from its card, in the form it was made with, and the list follows."""
+    card(page, "3c4d").locator("[data-guest-edit]").click()
+    form = page.locator("[data-guest-form='edit']")
+    expect(form).to_be_visible()
+    expect(page.locator("#guest-label")).to_have_value("Tomas's agent")
+    expect(page.locator("#guest-instructions")).to_have_value("Share the draft of the menu and nothing about prices.")
+    expect(page.locator("[data-guest-level='direct'] input")).to_be_checked()
+    expect(page.get_by_role("radio", name=words["readonly"], exact=True)).to_have_attribute("aria-checked", "true")
+    expect(page.locator("#guest-usd_limit")).to_have_value("1")
+    level(page, "trusted")
+    page.locator("[data-guest-nolimit='turns_per_day']").click()
+    expect(page.locator("#guest-turns_per_day")).to_have_count(0)
+    snap(page, words, width, "edit", scheme)
+    check_fit(page, width)
+    page.get_by_role("button", name=words["save"], exact=True).click()
+    expect(form).to_have_count(0)
+    put = [call for call in guests.calls if call[0] == "PUT" and call[1] == "/api/guest/links/3c4d"][-1][2]
+    assert put["tools"] == "trusted" and put["turns_per_day"] == 0 and put["usd_limit"] == 1 and put["label"] == "Tomas's agent", put
+    expect(card(page, "3c4d").locator(".guest-link-meta")).to_contain_text(words["trusted"])
+
+
+def check_looks(browser, words: dict[str, str], lang: str, width: int, scheme: str) -> None:  # type: ignore[no-untyped-def]
+    """The new form and the edit, in a scheme of their own, for the pictures."""
+    guests = FakeGuests()
+    context = browser.new_context(viewport={"width": width, "height": 844 if width < 600 else 800}, permissions=["clipboard-read", "clipboard-write"])
+    page = context.new_page()
+    install(page, guests)
+    page.goto(f"{BASE}/agents/{S1}?lang={lang}&scheme={scheme}", wait_until="domcontentloaded")
+    expect(page.locator(".chat-title")).to_be_visible()
+    open_sheet(page, words)
+    expect(page.locator("[data-guest-link]")).to_have_count(3)
+    check_edit(page, words, guests, width, scheme)
+    check_trusted(page, words, guests, width, scheme)
+    snap(page, words, width, "list-after", scheme)
     context.close()
 
 
@@ -353,11 +432,11 @@ def check_fit(page: Page, width: int) -> None:
     assert wide <= 1, f"the sheet scrolls sideways by {wide}px"
 
 
-def snap(page: Page, words: dict[str, str], width: int, name: str) -> None:
+def snap(page: Page, words: dict[str, str], width: int, name: str, scheme: str = "dark") -> None:
     if os.environ.get("SHOTS"):
         # The sheet slides in; a picture taken mid-way shows the page through it.
         page.wait_for_timeout(600)
-        tag = "ru" if words["title"].startswith("С") else "en"
+        tag = ("ru" if words["title"].startswith("С") else "en") + ("" if scheme == "dark" else f"-{scheme}")
         page.screenshot(path=f"{os.environ['SHOTS']}/guest-{name}-{tag}-{width}.png")
         # And the foot of it, where the settings and the buttons are.
         page.evaluate("document.querySelector('.sheet-body').scrollTop = 1e6")
@@ -400,11 +479,15 @@ def main() -> None:
                 check_stand_in(page, words, guests, width)
                 check_draft(page, words)
                 check_direct(page, words, guests, width)
+                check_trusted(page, words, guests, width)
+                check_edit(page, words, guests, width)
                 page.get_by_role("button", name=words["make"], exact=True).click()
                 snap(page, words, width, "form")
                 check_fit(page, width)
                 page.keyboard.press("Escape")
                 context.close()
+            for width in (1280, 390):
+                check_looks(browser, words, lang, width, "light")
             for why in ("no_sandbox", "no_limits", "host_folder"):
                 for width in (1280, 390):
                     check_no_full_tools(browser, words, lang, why, width)

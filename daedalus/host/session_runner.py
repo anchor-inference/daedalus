@@ -4296,6 +4296,9 @@ class SessionManager:
         state = await self.get_state(session_id)
         if state is None:
             return "the chat is gone"
+        if tools == "trusted":
+            # Served as the operator: a loop or a schedule reading what such a guest said is what the operator chose.
+            return ""
         if await self.db.fetchone("SELECT 1 FROM loops WHERE session_id = ? AND status = 'active'", (session_id,)) is not None:
             return "a loop runs in this chat, and it would read the guest's words with nobody watching"
         if await self.db.fetchone("SELECT 1 FROM schedules WHERE enabled = 1 AND target_session = ?", (session_id,)) is not None:
@@ -4742,6 +4745,9 @@ class SessionManager:
         A guest's turn has them too, for a reason of its own: the door checks a link's limits before the
         turn starts, but only a turn that stops can be held to what was left of them.
         """
+        if state.guest_turn is not None and state.guest_turn.trusted:
+            # The operator's own bounds, and the link's money where it has a limit: 0 is no cap on model calls.
+            return RunBounds(0, state.guest_turn.usd_left, "guest.usd_per_turn") if state.guest_turn.usd_left is not None else None
         if state.guest_turn is not None:
             limit = agent_talk.WAKE_ITERATIONS if state.guest_turn.kind == "reply" else guest_turns.MAX_ITERATIONS
             return RunBounds(limit, state.guest_turn.usd_left, "guest.usd_per_turn")
@@ -5014,7 +5020,7 @@ class SessionManager:
         build = engine.context_manager.build_context
 
         def build_context(*args: Any, **options: Any) -> Any:
-            turn = state.guest_turn
+            turn = guest_turns.restricted(state.guest_turn)
             if turn is not None and "history" in options:
                 options["history"] = agent_talk.for_reply(options["history"], state.run_id or "", turn.runs) if turn.kind == "reply" else guest_turns.for_guest(options["history"], state.run_id or "")
             return build(*args, **options)
@@ -5354,7 +5360,8 @@ class SessionManager:
         if message is not None:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
             state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
-            self.secrets.hold_back(state.session.id, state.guest_turn is not None)
+            # A trusted guest is served as the operator is, and the operator's turn has the handed values.
+            self.secrets.hold_back(state.session.id, guest_turns.restricted(state.guest_turn) is not None)
             if state.run_origin == "operator" and not continue_turn and message.metadata.get("daedalus.delivery") != "drained":
                 # Not a message drained from the queue: it may have been written before the reply came.
                 await self._clear_touch(state)
@@ -5485,8 +5492,9 @@ class SessionManager:
             nested_rules.forget(state.services)
         if at is None:
             return message
-        if state.guest_turn is not None:
-            return self._with_guest_context(state.guest_turn, message, at)
+        if (narrow := guest_turns.restricted(state.guest_turn)) is not None:
+            return self._with_guest_context(narrow, message, at)
+        trusted = state.guest_turn
         notes: str | None = None
         for hook in self.turn_notes_hooks:
             try:
@@ -5555,7 +5563,11 @@ class SessionManager:
                     volatile.append("\n" + said_of_talks)
             except Exception:  # noqa: BLE001 — a turn starts without this note rather than not at all
                 logger.exception("the notes on agent talks failed for session %s", state.session.id)
-        if state.metadata.get(guest_turns.SEEN_KEY):
+        if trusted is not None:
+            # The operator's whole context, and the one note that says whose message this is and how to serve it.
+            volatile.append("\n" + guest_turns.turn_note(trusted))
+        elif state.metadata.get(guest_turns.SEEN_KEY):
+            # Not for a trusted guest's turn: this note tells the model the turn is the operator's.
             volatile.append("\n" + guest_turns.LATER_TURN_NOTE)
         if state.metadata.get(guest_turns.WROTE_KEY):
             volatile.append("\n" + guest_turns.WROTE_NOTE)
@@ -5618,7 +5630,8 @@ class SessionManager:
             return False
         if privacy.is_private(state) or self.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
             return False
-        return state.run_origin == "operator"
+        # A guest the operator trusts is given what the operator's own turn has, memory included.
+        return state.run_origin == "operator" or (state.guest_turn is not None and state.guest_turn.trusted)
 
     async def _memory_turn(self, state: SessionState, working: Callable[[], Awaitable[Sequence[Message]]]) -> memory_render.Turn:
         """What this run's opening context carries of memory: the whole block the first time, a delta
@@ -7471,7 +7484,7 @@ class SessionManager:
             state = self._states.get(session_id)
             if state is not None and not policy_admits(self.tool_policy_for(state), tool):
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
-            turn = state.guest_turn if state is not None else None
+            turn = guest_turns.restricted(state.guest_turn) if state is not None else None
             if turn is not None and (refused := self._guest_refused(state, turn, tool, arguments)) is not None:
                 return refused
             touch = agent_talk.touch_of(state.metadata) if state is not None and turn is None else None

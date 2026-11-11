@@ -3,7 +3,7 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
+export type PanelTab = "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources" | "agents";
 
 /** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs, and the
  *  operator's notes beside the conversation (the chat's, and its project's when it has one). */
@@ -39,15 +39,19 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
  * the tab joins its strip after Files, so the file on screen has a tab to be on.
  *
+ * The Agents tab is there only for a chat that talks to another agent through a link (`agents`), right
+ * before Notes: those conversations used to be strips over the composer, and a message waiting for
+ * approval was a strip turning yellow that had to be clicked to be seen.
+ *
  * An ordinary session has a Questions tab only while its agent's side questions wait (`questions`),
  * first, where the orchestrator's is: most sessions never leave one, and a tab that is nearly always
  * empty is one more thing on a phone's strip to read past.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean } = {}): PanelTab[] {
+export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean; agents?: boolean } = {}): PanelTab[] {
   // An answer's sources sit beside the browser: both are the web the turn read.
   const browser: PanelTab[] = [...(opts.browser ? (["browser"] as PanelTab[]) : []), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
   // Subagents stay right after Jobs, where they came from; Notes close the agent's own tabs.
-  const own: PanelTab[] = [...PANEL_TABS.filter((tab) => tab !== "notes"), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), "notes"];
+  const own: PanelTab[] = [...PANEL_TABS.filter((tab) => tab !== "notes"), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), ...(opts.agents ? (["agents"] as PanelTab[]) : []), "notes"];
   if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), "notes", ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...own, ...browser];
@@ -61,7 +65,7 @@ export function tabsFor(context: PanelContext, opts: { browser?: boolean; previe
  *  moment — the first click fetched the file and showed nothing, and only a second click, landing
  *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true, sources: true });
+  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true, sources: true, agents: true });
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */
@@ -81,7 +85,7 @@ export type PanelState = {
 
 export const PANEL_CLOSED: PanelState = { tab: null, stack: [], at: -1, expanded: false, sub: null };
 
-export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", ...PROJECT_TABS, "questions", "browser", "sources"]): v is PanelTab {
+export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", "agents", ...PROJECT_TABS, "questions", "browser", "sources"]): v is PanelTab {
   return !!v && (tabs as readonly string[]).includes(v);
 }
 

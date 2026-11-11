@@ -3742,6 +3742,27 @@ ALTER TABLE action_reviews_rebuilt RENAME TO action_reviews;
 CREATE INDEX action_reviews_at ON action_reviews(at);
 """)
 
+LINK_WORDS_COLUMNS = (
+    ("guest_links", "topic", "TEXT NOT NULL DEFAULT ''"),
+    ("guest_links", "instructions", "TEXT NOT NULL DEFAULT ''"),
+    ("agent_talks", "sends_limit", "INTEGER NOT NULL DEFAULT 30"),
+)
+
+
+async def _link_words(conn: aiosqlite.Connection) -> None:
+    """What the operator wrote on an agent link reaches the turns it starts: its topic, which the guest sees too,
+    and a note for the agent only. A conversation with another agent may send without a cap: 0 is no limit, and
+    every conversation made before keeps the 30 it was opened with.
+
+    Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    for table, name, kind in LINK_WORDS_COLUMNS:
+        present = {row[1] for row in await (await conn.execute(f"PRAGMA table_info({table})")).fetchall()}
+        if name not in present:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _link_words))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

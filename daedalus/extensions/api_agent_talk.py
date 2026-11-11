@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from daedalus.extensions.agent_talk import MAX_SENDS, WAKE_TURNS_MAX, WAKE_USD_MAX, AgentTalks, talks_of
+from daedalus.extensions.agent_talk import MAX_SENDS, NO_LIMIT, WAKE_TURNS_MAX, WAKE_USD_MAX, AgentTalks, talks_of
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -23,8 +23,19 @@ class TalkSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     review: Literal["first", "all", "off"] | None = None
-    wake_turns: int | None = Field(default=None, ge=0, le=WAKE_TURNS_MAX)
-    wake_usd: float | None = Field(default=None, ge=0, le=WAKE_USD_MAX)
+    wake_turns: int | None = Field(default=None, ge=NO_LIMIT, le=WAKE_TURNS_MAX)
+    """-1 is waking on every reply; 0 is not waking."""
+    wake_usd: float | None = Field(default=None, ge=NO_LIMIT, le=WAKE_USD_MAX)
+    """-1 is no budget for those turns but the cap on any run."""
+    sends_limit: int | None = Field(default=None, ge=0, le=10_000)
+    """0 is no limit on the messages this side sends."""
+
+
+class Decision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str | None = Field(default=None, max_length=64_000)
+    """The operator's edit of a held message, sent in its place. Only with ``send``."""
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
@@ -59,15 +70,21 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         talk = await known(talk_id)
         if talk["state"] == "closed":
             raise HTTPException(409, "this conversation is over")
-        await talks().configure(talk_id, review=body.review, wake_turns=body.wake_turns, wake_usd=body.wake_usd)
+        if body.wake_usd is not None and NO_LIMIT < body.wake_usd < 0:
+            raise HTTPException(422, "wake_usd is -1 for no limit, or 0 and more")
+        await talks().configure(talk_id, review=body.review, wake_turns=body.wake_turns, wake_usd=body.wake_usd, sends_limit=body.sends_limit)
         return await talks().describe(await known(talk_id))
 
     @api.post("/api/agent-talks/{talk_id}/messages/{message_id}/{decision}")
-    async def decide(talk_id: str, message_id: int, decision: Literal["send", "refuse"], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def decide(talk_id: str, message_id: int, decision: Literal["send", "refuse"], body: Decision | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await known(talk_id)
-        if not await talks().decide(talk_id, message_id, decision == "send", via="app"):
+        try:
+            decided = await talks().decide(talk_id, message_id, decision == "send", via="app", text=body.text if body is not None else None)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if not decided:
             raise HTTPException(409, "this message is not waiting")
         return await talks().describe(await known(talk_id), messages=True)
 
 
-__all__ = ["TalkSettings", "register"]
+__all__ = ["Decision", "TalkSettings", "register"]

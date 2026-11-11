@@ -1260,6 +1260,9 @@ class FakeTalks:
             for message in talk["messages"]:  # type: ignore[attr-defined]
                 if str(message["id"]) == parts[5]:
                     message["state"] = "sent" if parts[6] == "send" else "refused"
+                    # The operator's own edit goes in place of the agent's words, as the host does.
+                    if parts[6] == "send" and isinstance(body, dict) and body.get("text"):
+                        message["text"] = str(body["text"]).strip()
             talk["held"] = 0
             return 200, talk
         return None
@@ -1291,6 +1294,8 @@ class FakeGuests:
         self.links: dict[str, dict] = {}
         self.messages: dict[str, list[dict]] = {}
         self.briefings: dict[str, str] = {}
+        # The note to the agent a direct link carries, which the host keeps and the door never has.
+        self.instructions: dict[str, str] = {}
         self.draft = "Daedalus is a personal agent. The subject here is the bakery site: opening hours, the menu and how orders are taken."
         self.seed()
 
@@ -1325,6 +1330,7 @@ class FakeGuests:
             {"id": "m3", "role": "guest", "text": "Can I order <b>a cake</b> for Sunday? See http://elsewhere.example/menu", "at": now - 300, "state": "answered", "cost_usd": 0.0},
             {"id": "m4", "role": "door", "text": "A limit of this link was reached before this message could be answered.", "at": now - 290, "state": "answered", "cost_usd": 0.0},
         ]
+        self.instructions["3c4d"] = "Share the draft of the menu and nothing about prices."
         self.link(
             "3c4d", state="spent", label="Tomas's agent", topic="Review the menu changes", mode="direct", tools="read", turns=0,
             conversation=self.conversation("c3c", "pending", first="Hi, I am Tomas's agent. I would like to read the draft of the new menu and send comments."), redeems=2,
@@ -1344,7 +1350,14 @@ class FakeGuests:
             ],
             "usd_per_day": self.usd_per_day, "spent_today": 0.5,
             "full_tools": not self.full_tools_why, "full_tools_why": self.full_tools_why, "chat_priced": True, "left_out": [],
+            "trusted_defaults": {"usd_limit": 0.0, "turns_per_day": 0, "turns_total": 0, "invite_hours": 0.0, "conversation_hours": 0.0, "idle_hours": 0.0},
         }
+
+    def detail(self, row: dict) -> dict:
+        """A link as the host's own route describes it: the door's view with the note and the model id the form reads."""
+        model_id = next((m["id"] for m in self.door()["models"] if m["model"] == row["model_name"]), "")
+        events = [{"id": "e1", "kind": "redeemed", "at": time.time() - 1700}]
+        return {**row, "briefing": self.briefings.get(row["id"], ""), "instructions": self.instructions.get(row["id"], ""), "model_id": model_id, "events": events, "messages": self.messages.get(row["id"], [])}
 
     def answer(self, method: str, path: str, body: object, session_id: str = "") -> tuple[int, object] | None:
         method = method.upper()
@@ -1365,8 +1378,22 @@ class FakeGuests:
             row = self.links.get(parts[4])
             if row is None:
                 return 404, {"detail": "no such link"}
-            events = [{"id": "e1", "kind": "redeemed", "at": time.time() - 1700}]
-            return 200, {"link": {**row, "briefing": self.briefings.get(row["id"], ""), "events": events, "messages": self.messages.get(row["id"], [])}}
+            return 200, {"link": self.detail(row)}
+        if len(parts) == 5 and parts[:4] == ["", "api", "guest", "links"] and method == "PUT":
+            # An edit in place: every setting the form sends, on the same id, with what was spent kept.
+            self.calls.append((method, path, dict(data)))
+            row = self.links.get(parts[4])
+            if row is None or row["state"] == "revoked":
+                return 404, {"detail": "no such link"}
+            direct = data.get("mode") == "direct"
+            row.update({name: data[name] for name in ("label", "topic", "mode", "approval", "usd_limit", "turns_per_day", "turns_total", "conversation_hours", "idle_hours", "retention_days") if name in data})
+            row["guest_tools"] = str(data.get("tools") or "none") if direct else "none"
+            row["model_name"] = "" if direct else next((m["model"] for m in self.door()["models"] if m["id"] == data.get("model_id")), row["model_name"])
+            hours = float(data.get("invite_hours") or 0)
+            row["invite_expires_at"] = row["created_at"] + hours * 3600 if hours else 0
+            self.briefings[row["id"]] = str(data.get("briefing") or "")
+            self.instructions[row["id"]] = str(data.get("instructions") or "") if direct else ""
+            return 200, {"link": self.detail(row)}
         if len(parts) == 6 and parts[:4] == ["", "api", "guest", "links"] and method == "POST" and parts[5] in ("revoke", "reissue"):
             self.calls.append((method, path, None))
             row = self.links.get(parts[4])
@@ -1399,6 +1426,10 @@ class FakeGuests:
             row = self.link(f"n{len(self.links)}", label=str(data.get("label") or ""), topic=str(data.get("topic") or ""), mode=str(data.get("mode") or "stand_in"),
                             tools=str(data.get("tools") or "none") if data.get("mode") == "direct" else "none")
             self.briefings[row["id"]] = str(data.get("briefing") or "")
+            self.instructions[row["id"]] = str(data.get("instructions") or "")
+            row.update({name: data[name] for name in ("usd_limit", "turns_per_day", "turns_total", "approval") if name in data})
+            if "invite_hours" in data:
+                row["invite_expires_at"] = row["created_at"] + float(data["invite_hours"]) * 3600 if data["invite_hours"] else 0
             return 200, {"link": row, "url": f"{self.public_base}/a/n{len(self.links)}tokenvalue"}
         return None
 
