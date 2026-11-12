@@ -423,7 +423,8 @@ async def test_a_service_page_proxies_the_agents_app(site: Any) -> None:
     posted = await client.post("/pages/nb/upload", content=big, headers=H)
     assert posted.status_code == 201 and posted.text == f"got {len(big)}"
     # A port that nothing listens on is a clear refusal, not a hang.
-    assert (await client.get("/pages/raw/", headers=H)).status_code == 502
+    refused = await client.get("/pages/raw/", headers=H)
+    assert refused.status_code == 502 and "The service did not answer" in refused.text and "connection was refused" in refused.text
 
 
 async def test_a_link_page_frames_the_site(site: Any) -> None:

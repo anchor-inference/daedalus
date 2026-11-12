@@ -34,7 +34,7 @@ from starlette.datastructures import UploadFile
 from starlette.websockets import WebSocket
 
 from daedalus.extensions.api_proxy import forward_http, forward_websocket
-from daedalus.extensions.services import dial_address
+from daedalus.extensions.services import dial_address, unreachable_hint
 from daedalus.host.pages import (
     PageError,
     PageStore,
@@ -523,7 +523,7 @@ def register(
         if served.kind == "service":
             address, port = await service_port(manifest, served)
             upstream = f"http://{address}:{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
-            return await forward_http(request, upstream, f"/pages/{slug}", strip_cookies=(session_cookie, DRAFT_COOKIE), page=True, read_timeout=None)
+            return await forward_http(request, upstream, f"/pages/{slug}", strip_cookies=(session_cookie, DRAFT_COOKIE), page=True, read_timeout=None, hint=unreachable_hint(app.settings, address, port))
         if request.method not in ("GET", "HEAD"):
             return _plain_page(405, "Daedalus", "This page is files; it takes no writes.")
         headers = {"Content-Security-Policy": FRAME_POLICY, "X-Robots-Tag": "noindex", "Cache-Control": "no-store" if draft else "no-cache"}

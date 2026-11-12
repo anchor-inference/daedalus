@@ -14,14 +14,16 @@ that safe: the answer gets an opaque origin, so the page holds nothing of the ap
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from collections.abc import AsyncIterator, Iterable
 from contextlib import suppress
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 # ``websockets`` comes with uvicorn's standard extra, which serves this API.
@@ -100,6 +102,26 @@ def frameable_policy(value: str) -> str:
     return re.sub(r"frame-ancestors[^;]*", "frame-ancestors 'self'", value, flags=re.IGNORECASE)
 
 
+def unreachable_page(upstream: str, *, timed_out: bool, hint: str = "") -> HTMLResponse:
+    """The 502 for a server nothing answered at, as a page a person reads in the browser tab.
+
+    It used to be ``{"detail": "the service did not answer: All connection attempts failed"}``, which
+    says neither where the proxy knocked nor what to look at; a host service behind a firewall that
+    drops the Docker bridge looked exactly like a crashed one."""
+    target = urlsplit(upstream).netloc
+    what = "the connection timed out" if timed_out else "the connection was refused"
+    body = (
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<title>The service did not answer</title>"
+        "<body style='font:15px/1.5 system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 16px'>"
+        "<h1 style='font-size:1.3em'>The service did not answer</h1>"
+        f"<p>Nothing answered at <code>{html.escape(target)}</code>: {what}. The service may have stopped, "
+        "crashed, or not be listening on that address and port yet; its log says which.</p>"
+        + (f"<p>{html.escape(hint)}</p>" if hint else "")
+    )
+    return HTMLResponse(body, status_code=502, headers={"Cache-Control": "no-store"})
+
+
 async def forward_http(
     request: Request,
     upstream: str,
@@ -110,8 +132,12 @@ async def forward_http(
     sandbox: bool = False,
     extra_headers: dict[str, str] | None = None,
     read_timeout: float | None = 300.0,
-) -> StreamingResponse:
+    hint: str = "",
+) -> Response:
     """Send the request on to ``upstream`` (a full URL) and stream the answer back.
+
+    A server that cannot be connected to is answered with :func:`unreachable_page`, ``hint`` being
+    the likeliest reason the caller knows of.
 
     ``page`` makes the answer fit inside the app's frame: no ``X-Frame-Options`` and a
     ``frame-ancestors`` of ``'self'``. ``sandbox`` puts the answer in an opaque origin, for a server
@@ -140,6 +166,9 @@ async def forward_http(
     client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=read_timeout))
     try:
         up = await client.send(client.build_request(request.method, upstream, headers=headers, content=content), stream=True)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        await client.aclose()
+        return unreachable_page(upstream, timed_out=isinstance(exc, httpx.ConnectTimeout), hint=hint)
     except httpx.HTTPError as exc:
         await client.aclose()
         raise HTTPException(502, f"the service did not answer: {exc}") from exc
@@ -241,4 +270,4 @@ async def forward_websocket(
             await websocket.close()
 
 
-__all__ = ["HOP_HEADERS", "ORIGIN_WIDE_HEADERS", "OWN_COOKIE_PREFIXES", "SANDBOX_POLICY", "forward_http", "forward_websocket", "frameable_policy", "scoped_set_cookie", "without_cookies"]
+__all__ = ["HOP_HEADERS", "ORIGIN_WIDE_HEADERS", "OWN_COOKIE_PREFIXES", "SANDBOX_POLICY", "forward_http", "forward_websocket", "frameable_policy", "scoped_set_cookie", "unreachable_page", "without_cookies"]

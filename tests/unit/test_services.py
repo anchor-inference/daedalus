@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from daedalus.config import RuntimeConfig, Settings
-from daedalus.extensions.services import Services, parse_range, pid_alive
+from daedalus.extensions.api_proxy import unreachable_page
+from daedalus.extensions.services import Services, ending_words, local_alive, parse_range, pid_alive, unreachable_hint
+from daedalus.host.host_services import exit_code_in
 from daedalus.host.session_runner import SessionManager
+from daedalus.processes import start_mark
 from daedalus.stores.database import Database
 from tests.support.notifications import RecordingNotifications
-from tests.support.waiting import until_await
+from tests.support.waiting import until, until_await
 
 
 @pytest.fixture
@@ -153,3 +159,123 @@ async def test_a_service_without_a_port_cannot_be_shared(app: Any) -> None:
     with pytest.raises(ValueError, match="without a port"):
         await services.share(state.session.id, "worker", "public")
     await services.stop_all(state.session.id)
+
+
+def recording_submits(app: Any) -> list[tuple[str, str, dict[str, Any]]]:
+    told: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def submit(session_id: str, text: str, *args: Any, **kwargs: Any) -> str:
+        told.append((session_id, text, kwargs))
+        return "run"
+
+    app.manager.submit = submit
+    return told
+
+
+def test_the_way_a_service_ended_is_read_from_its_log() -> None:
+    log = "\n=== 2026-01-01T00:00:00Z start: a\n\n=== 2026-01-01T00:00:01Z exited with code 2\n\n=== 2026-01-01T00:01:00Z start: b\nserving\n"
+    assert exit_code_in(log) is None, "the last run has not ended yet: an older run's code is not this one's"
+    assert exit_code_in(log + "boom\n\n=== 2026-01-01T00:02:00Z exited with code 139\n") == 139
+    assert ending_words(139) == "it was killed by signal 11 (SIGSEGV)" and ending_words(3) == "it exited with code 3"
+    assert "no exit code was recorded" in ending_words(None)
+
+
+def test_a_process_is_told_from_a_later_one_with_the_same_pid() -> None:
+    mark = start_mark(os.getpid())
+    assert mark and mark == start_mark(os.getpid()) and ":" in mark
+    assert start_mark(999_999_999) is None
+    assert local_alive({"pid": os.getpid(), "pid_start": mark}) and local_alive({"pid": os.getpid(), "pid_start": None})
+    assert not local_alive({"pid": os.getpid(), "pid_start": mark + "0"}), "the same pid with another start is a stranger"
+
+
+@pytest.mark.usefixtures("brief_start_grace")
+async def test_a_stranger_holding_a_services_pid_is_neither_running_nor_signalled(app: Any) -> None:
+    services = Services(app)
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    s = await services.start(sid, name="web", command="sleep 30")
+    assert (await services.get(sid, "web") or {})["pid_start"] == start_mark(s["pid"])
+    # What a reboot does: the row's pid now names a process that started at another moment.
+    await app.db.execute("UPDATE services SET pid_start = 'another-boot:1' WHERE session_id = ? AND name = 'web'", (sid,))
+    assert (await services.list(sid))[0]["status"] == "dead"
+    stopped = await services.stop(sid, "web")
+    assert stopped["status"] == "stopped" and pid_alive(s["pid"]), "the process the pid now names was not signalled"
+    await services._terminate(int(s["pid"]), "another-boot:1")
+    assert pid_alive(s["pid"])
+    await services._terminate(int(s["pid"]), start_mark(s["pid"]))
+    assert not pid_alive(s["pid"])
+    await services.stop_all(sid)
+
+
+@pytest.mark.usefixtures("brief_start_grace")
+async def test_a_service_that_dies_wakes_its_session_once_and_a_stopped_one_does_not(app: Any) -> None:
+    services = Services(app)
+    told = recording_submits(app)
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    await services.start(sid, name="api", command="sleep 0.4; echo 'listening failed: address in use'; exit 4", port="none")
+    await services.start(sid, name="calm", command="sleep 30", port="none")
+    await until(lambda: services._procs[(sid, "api")].poll() is not None, "the service died")
+    await services.reconcile_local()
+    row = await services.get(sid, "api") or {}
+    assert row["status"] == "dead" and "exited with code 4" in row["note"]
+    assert len(told) == 1 and told[0][0] == sid and told[0][2]["origin"] == "service" and told[0][2]["steer"] is True
+    text = told[0][1]
+    assert "service 'api' died" in text and "exited with code 4" in text and "address in use" in text and "ServiceLogs" in text
+    await services.reconcile_local()
+    assert len(told) == 1, "one death, one wake"
+    await services.stop(sid, "calm")
+    await services.reconcile_local()
+    assert len(told) == 1, "a service the agent stopped wakes nobody"
+    await services.stop_all(sid)
+
+
+@pytest.mark.usefixtures("brief_start_grace")
+async def test_a_service_the_restart_policy_brings_back_wakes_nobody(app: Any) -> None:
+    services = Services(app)
+    told = recording_submits(app)
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    old = await services.start(sid, name="web", command="sleep 30", restart=True)
+    young = await services.start(sid, name="flaky", command="sleep 30", restart=True)
+    an_hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    await app.db.execute("UPDATE services SET started_at = ? WHERE session_id = ? AND name = 'web'", (an_hour_ago, sid))
+    procs = {n: services._procs[(sid, n)] for n in ("web", "flaky")}
+    for s in (old, young):
+        os.killpg(int(s["pid"]), signal.SIGKILL)
+    await until(lambda: all(p.poll() is not None for p in procs.values()), "both died")
+    await services.reconcile_local()
+    again = await services.get(sid, "web") or {}
+    assert again["status"] == "running" and again["pid"] != old["pid"] and again["port"] == old["port"]
+    flaky = await services.get(sid, "flaky") or {}
+    assert flaky["status"] == "dead" and "too soon" in flaky["note"] and "signal 9" in flaky["note"]
+    assert [t[1].split("]")[0] for t in told] == [f"[service 'flaky' died: {flaky['note']}"], "only the one left dead is told"
+    await services.stop_all(sid)
+
+
+@pytest.mark.usefixtures("brief_start_grace")
+async def test_nothing_is_told_while_the_process_shuts_down(app: Any) -> None:
+    services = Services(app)
+    told = recording_submits(app)
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    s = await services.start(sid, name="web", command="sleep 30", restart=False)
+    proc = services._procs[(sid, "web")]
+    os.killpg(int(s["pid"]), signal.SIGKILL)
+    await until(lambda: proc.poll() is not None, "it died")
+    app.manager.shutting_down = True
+    try:
+        await services.reconcile_local()
+        assert told == [] and (await services.get(sid, "web") or {})["status"] == "running", "left for the next process to judge"
+    finally:
+        app.manager.shutting_down = False
+    await services.stop_all(sid)
+
+
+def test_a_host_service_the_proxy_cannot_reach_names_the_firewall(settings: Settings) -> None:
+    settings.host_services_port_range = "8140-8159"
+    assert "ufw" in unreachable_hint(settings, "10.0.70.1", 8141) and "8140:8159" in unreachable_hint(settings, "10.0.70.1", 8141)
+    assert unreachable_hint(settings, "127.0.0.1", 8141) == "" and unreachable_hint(settings, "10.0.70.1", 8101) == ""
+    page = unreachable_page("http://10.0.70.1:8141/x", timed_out=True, hint="a <firewall>")
+    body = bytes(page.body).decode()
+    assert page.status_code == 502 and "10.0.70.1:8141" in body and "timed out" in body and "a &lt;firewall&gt;" in body

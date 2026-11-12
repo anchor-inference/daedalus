@@ -18,7 +18,7 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
 
 
 def _line(s: dict) -> str:  # type: ignore[type-arg]
-    where = f" → {s['url']}" if s.get("url") else f" on the host at {s['address']}:{s['port']}" if s.get("machine") == HOST and s.get("port") else ""
+    where = f" → {s['url']}" if s.get("url") else f" on the host → http://{s['address']}:{s['port']}" if s.get("machine") == HOST and s.get("port") else ""
     note = f" ({s['note']})" if s.get("note") else ""
     return f"- {s['name']} [{s['status']}]{where} pid {s.get('pid')} · {s['command'][:80]}{note}"
 
@@ -62,8 +62,9 @@ async def service_start(context: ToolContext, name: str, command: str, cwd: str 
             where = f"reachable at {s['url']}"
         elif s.get("port"):
             where = (
-                f"listening on the host at http://{s['address']}:{s['port']}, where Daedalus reaches it; the operator opens it from "
-                "the Services panel (its share link or a phone's code), since that address is the host's side of the Docker bridge"
+                f"listening on the host at http://{s['address']}:{s['port']}: open that address with BrowserOpen or curl it from your "
+                "commands. It is the host's side of the Docker bridge, which the operator's network does not reach, so the operator "
+                "opens it from the Services panel (its share link or a phone's code)"
             )
         return ok(context, f"service {s['name']!r} running on the host (pid {s['pid']}), {where}. Log: ServiceLogs({s['name']!r}).", url=s.get("url"), port=s.get("port"), pid=s.get("pid"))
     where = f"reachable at {s['url']} (inside the container: http://127.0.0.1:{s['port']})" if s.get("url") else "no port"

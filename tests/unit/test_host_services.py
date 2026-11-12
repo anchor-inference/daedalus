@@ -21,8 +21,9 @@ from daedalus.config import Settings
 from daedalus.extensions import services as services_module
 from daedalus.extensions.services import Services, dial_address
 from daedalus.host import host_services
-from daedalus.host.host_services import HostDown, HostServices, default_gateway
+from daedalus.host.host_services import HostDown, HostServices, default_gateway, exit_code_in
 from daedalus.host.policy import DENY, Policy
+from daedalus.processes import start_mark
 from daedalus.stores.database import Database
 from tests.support.notifications import RecordingNotifications
 from tests.support.waiting import until_await
@@ -100,6 +101,25 @@ async def test_the_host_half_starts_reads_and_ends_a_process_group(tmp_path: Pat
             await question
 
 
+async def test_a_pid_the_host_handed_to_another_process_is_not_the_service(tmp_path: Path) -> None:
+    disk = host_disk(tmp_path)
+    _, half = backend(disk)
+    log = f"{HOST_ROOT}/.services/web.log"
+    started = await half.start("exec sleep 60", cwd=HOST_ROOT, log=log, port=None, host="127.0.0.1", watch=0.3)
+    try:
+        assert started.mark == start_mark(started.pid), "the host's mark is the one this machine's /proc gives"
+        assert await half.alive([(started.pid, started.mark)]) == {started.pid}
+        assert await half.alive([(started.pid, "another-boot:1")]) == set(), "the same pid with another start is a stranger"
+        assert not await half.stop(started.pid, grace=1.0, mark="another-boot:1")
+        assert await half.alive([started.pid]) == {started.pid}, "and the stranger was not signalled"
+        assert await half.stop(started.pid, grace=2.0, mark=started.mark)
+        assert await half.alive([started.pid]) == set()
+    finally:
+        await half.stop(started.pid, grace=1.0)
+    died = await half.start("echo bye; exit 5", cwd=HOST_ROOT, log=log, port=None, host="127.0.0.1", watch=1.0)
+    assert died.exit_code == 5 and exit_code_in(await half.logs(log, 20)) == 5, "the way it ended is in the log"
+
+
 async def test_the_ports_the_host_listens_on_are_read_on_the_host(tmp_path: Path) -> None:
     _, half = backend(host_disk(tmp_path))
     with socket.socket() as server:
@@ -131,7 +151,7 @@ async def test_a_host_session_starts_a_service_that_is_registered_reached_and_en
 
         started = await service_start().invoke(ctx, {"name": "web", "command": "exec python3 -m http.server $PORT --bind $HOST"})
         assert not started.is_error, started.content
-        assert "running on the host" in started.content and "Services panel" in started.content
+        assert "running on the host" in started.content and "Services panel" in started.content and "BrowserOpen" in started.content
         row = await services.get(state.session.id, "web")
         assert row is not None and row["machine"] == "host" and row["address"] == "127.0.0.1"
         lo, hi = services.host_lo, services.host_hi
@@ -149,7 +169,7 @@ async def test_a_host_session_starts_a_service_that_is_registered_reached_and_en
 
         view = (await services.list_all())[0]
         assert view["status"] == "running" and view["machine"] == "host" and view["url"] is None, "the LAN cannot reach it, so no LAN address is offered"
-        assert "on the host at 127.0.0.1" in (await service_list().invoke(ctx, {})).content
+        assert "on the host → http://127.0.0.1:" in (await service_list().invoke(ctx, {})).content
         assert "GET /README.md" in (await service_logs().invoke(ctx, {"name": "web"})).content
 
         second = await services.start(state.session.id, name="api", command="exec sleep 60")
@@ -213,6 +233,13 @@ async def test_a_host_service_that_died_is_started_again_or_reported(settings: S
         services.host = HostServices(lambda: manager.host_bridge, resolve=lambda: "127.0.0.1")
         state = await manager.create_session("Labs chat", project_id=(await host_project(manager)).id)
         sid = state.session.id
+        told: list[tuple[str, str]] = []
+
+        async def submit(session_id: str, text: str, *args: Any, **kwargs: Any) -> str:
+            told.append((session_id, text))
+            return "run"
+
+        manager.submit = submit  # type: ignore[method-assign]
         old = await services.start(sid, name="web", command="exec sleep 60")
         young = await services.start(sid, name="flaky", command="exec sleep 60")
         an_hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
@@ -229,6 +256,9 @@ async def test_a_host_service_that_died_is_started_again_or_reported(settings: S
         assert again["status"] == "running" and again["pid"] != old["pid"] and again["port"] == old["port"], "brought back on its own port"
         flaky = await services.get(sid, "flaky") or {}
         assert flaky["status"] == "dead" and "too soon" in flaky["note"], "one that died soon after its start is reported, not looped"
+        assert len(told) == 1 and told[0][0] == sid and "service 'flaky' died" in told[0][1] and "on the host" in told[0][1], "the session hears of the one left dead, once"
+        await services.reconcile_host()
+        assert len(told) == 1
         await services.stop_all(sid)
     finally:
         await manager.close()

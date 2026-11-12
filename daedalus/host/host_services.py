@@ -18,6 +18,7 @@ Natively nothing of this is needed, because Daedalus and the service share a mac
 from __future__ import annotations
 
 import contextlib
+import re
 import shlex
 import socket
 import struct
@@ -46,17 +47,28 @@ SCOPE_PROBE = "systemd-run --user --scope --quiet --collect -- true"
 """Asked before the scope is used: a host without a user manager (no systemd, no session bus) runs
 the service as the daemon's child, which still works until the daemon goes."""
 
+MARK_OF = (
+    "mark_of() {{ if [ -r /proc/$1/stat ]; then s=$(cat /proc/$1/stat 2>/dev/null) || return 0; s=${{s##*) }}; set -- $s; "
+    "[ -n \"${{20}}\" ] && printf '%s:%s' \"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\" \"${{20}}\"; "
+    "else t=$(ps -o lstart= -p $1 2>/dev/null | tr -s ' ' '_' | sed 's/^_//;s/_$//'); [ -n \"$t\" ] && printf 'ps:%s' \"$t\"; fi; return 0; }}; "
+)
+"""A shell function that prints what tells a process from a later one with the same pid: the boot and
+its start time where the host has ``/proc`` (the same mark :func:`daedalus.processes.start_mark`
+takes), the start time ``ps`` reports elsewhere, nothing when the process is gone. Spaces become
+underscores, so a mark is one word in the answers below."""
+
 START = (
+    MARK_OF +
     "cd -- {cwd} 2>/dev/null || {{ printf '%s nodir\\n' {mark}; exit 0; }}; "
     "mkdir -p -- {logdir} && touch -- {log} || {{ printf '%s nolog\\n' {mark}; exit 0; }}; "
     "export PORT={port} HOST={host}; "
-    "printf '\\n=== %s start: %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" {command} >> {log}; "
+    "printf '\\n=== %s start: %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" {shown} >> {log}; "
     "scope=; if command -v systemd-run >/dev/null 2>&1 && {probe} >/dev/null 2>&1; then scope='{scope}'; fi; "
     "if command -v setsid >/dev/null 2>&1; then detach=setsid; else detach=; fi; "
     "$detach $scope nohup bash -c {command} >> {log} 2>&1 < /dev/null & "
-    "pid=$!; echo $pid > {log}.pid; n={ticks}; "
+    "pid=$!; echo $pid > {log}.pid; m=$(mark_of $pid); n={ticks}; "
     "while [ $n -gt 0 ] && kill -0 $pid 2>/dev/null; do sleep 0.1; n=$((n-1)); done; "
-    "if kill -0 $pid 2>/dev/null; then printf '%s running %s\\n' {mark} $pid; "
+    "if kill -0 $pid 2>/dev/null; then printf '%s running %s %s\\n' {mark} $pid \"$m\"; "
     "else wait $pid; printf '%s exited %s %s\\n' {mark} $? $pid; fi"
 )
 """Starts the command detached on the host, in its own process group (``setsid``) and, where systemd
@@ -64,20 +76,30 @@ can give it one, its own scope (:data:`SCOPE`), with its output appended to the 
 for ``ticks`` tenths of a second, so a command that dies at once is reported as broken rather than
 recorded as a service. ``$PORT`` and ``$HOST`` are exported after the profile was read, so a profile
 that sets either cannot change where the service listens. The pid goes to a file beside the log at
-once, so a start cancelled while it watches can still end what it started."""
+once, so a start cancelled while it watches can still end what it started, and the process's mark
+(:data:`MARK_OF`) is taken at once too, before the pid could be anyone else's."""
 
 ALIVE = (
-    "for p in {pids}; do if kill -0 -- -$p 2>/dev/null || kill -0 $p 2>/dev/null; then echo $p; fi; done; "
+    MARK_OF +
+    "for e in {entries}; do p=${{e%%=*}}; m=${{e#*=}}; "
+    "if kill -0 -- -$p 2>/dev/null || kill -0 $p 2>/dev/null; then now=$(mark_of $p); "
+    "if [ -z \"$m\" ] || [ -z \"$now\" ] || [ \"$now\" = \"$m\" ]; then echo $p; fi; fi; done; "
     "printf '%s\\n' {mark}"
 )
-"""Which of the pids still run, as a group or as a process; the mark proves the answer is whole."""
+"""Which of the services still run, as a group or as a process, each given as ``pid=mark``. A pid
+whose process now has another mark is a stranger that was handed the number, and is not named. One
+with no mark now (its leader gone, the group still there) is the service: the kernel does not hand
+out a pid that is still a group's id. The marker line proves the answer is whole."""
 
 STOP = (
+    MARK_OF +
+    "now=$(mark_of {pid}); if [ -n {expected} ] && [ -n \"$now\" ] && [ \"$now\" != {expected} ]; then printf 'stranger\\n%s\\n' {mark}; exit 0; fi; "
     "kill -TERM -- -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
     "for _ in {ticks}; do kill -0 -- -{pid} 2>/dev/null || kill -0 {pid} 2>/dev/null || {{ printf '%s\\n' {mark}; exit 0; }}; sleep 0.5; done; "
     "kill -KILL -- -{pid} 2>/dev/null || kill -KILL {pid} 2>/dev/null; printf '%s\\n' {mark}"
 )
-"""SIGTERM to the service's group, SIGKILL to what is left of it after the grace."""
+"""SIGTERM to the service's group, SIGKILL to what is left of it after the grace; nothing at all when the
+pid now belongs to a process with another mark."""
 
 KILL_BY_PIDFILE = "pid=$(cat {log}.pid 2>/dev/null) || exit 0; [ -n \"$pid\" ] || exit 0; kill -KILL -- -$pid 2>/dev/null || kill -KILL $pid 2>/dev/null; true"
 
@@ -96,6 +118,32 @@ LOGS = (
 )
 
 
+def noting_exit(command: str) -> str:
+    """``command`` run in a subshell, with the way it ended appended to its output.
+
+    The process that started a service is long gone when the service dies (this one was restarted,
+    or the service runs on the host and was never its child), so nothing is left to collect the exit
+    code from: the line in the log is the one record of it. Stopped on purpose, the whole group is
+    signalled, this shell with it, and no line is written, which is right: nothing went wrong."""
+    return (
+        f"(\n{command}\n); c=$?; "
+        "printf '\\n=== %s exited with code %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$c\"; exit $c"
+    )
+
+
+EXIT_LINE = re.compile(r"^=== \S+ exited with code (-?\d+)$", re.MULTILINE)
+START_LINE = re.compile(r"^=== \S+ start: ", re.MULTILINE)
+
+
+def exit_code_in(log_tail: str) -> int | None:
+    """The code the last run of a service ended with, as :func:`noting_exit` wrote it into the log;
+    ``None`` when the run since the last start line has written none."""
+    starts = list(START_LINE.finditer(log_tail))
+    run = log_tail[starts[-1].end():] if starts else log_tail
+    found = EXIT_LINE.findall(run)
+    return int(found[-1]) if found else None
+
+
 class HostDown(ConnectionError):
     """The host terminal daemon does not answer, so what a host service is doing cannot be known."""
 
@@ -105,6 +153,8 @@ class Started:
     pid: int
     exit_code: int | None = None
     """None while it runs; the code it exited with when it died within the watch."""
+    mark: str = ""
+    """The process's mark on the host (:data:`MARK_OF`); empty where the host could not give one."""
 
 
 def default_gateway(routes: str) -> str:
@@ -174,7 +224,7 @@ class HostServices:
         when the directory is not there or the log cannot be written."""
         quoted_log = shlex.quote(log)
         script = START.format(
-            cwd=shlex.quote(cwd), logdir=shlex.quote(log.rpartition("/")[0] or "/"), log=quoted_log, command=shlex.quote(command),
+            cwd=shlex.quote(cwd), logdir=shlex.quote(log.rpartition("/")[0] or "/"), log=quoted_log, command=shlex.quote(noting_exit(command)), shown=shlex.quote(command),
             port=shlex.quote(str(port or "")), host=shlex.quote(host), probe=SCOPE_PROBE, scope=SCOPE, mark=MARK,
             ticks=max(1, int(round(watch * 10))),
         )
@@ -193,22 +243,31 @@ class HostServices:
         if words[:1] == ["nolog"]:
             raise ValueError(f"the log {log} cannot be written on the host")
         if words[:1] == ["running"] and len(words) > 1 and words[1].isdigit():
-            return Started(pid=int(words[1]))
+            return Started(pid=int(words[1]), mark=words[2] if len(words) > 2 else "")
         if words[:1] == ["exited"] and len(words) > 2 and words[1].lstrip("-").isdigit() and words[2].isdigit():
             return Started(pid=int(words[2]), exit_code=int(words[1]))
         raise RuntimeError(f"the host did not say whether the service started: {outcome.output.strip()[-400:] or f'exit code {outcome.exit_code}'}")
 
-    async def alive(self, pids: Iterable[int]) -> set[int]:
-        """Which of ``pids`` still run on the host."""
-        wanted = sorted({int(p) for p in pids if p})
+    async def alive(self, processes: Iterable[int | tuple[int, str | None]]) -> set[int]:
+        """Which of the processes, each a pid or a pid with its mark, still run on the host. A pid given
+        without a mark is judged by the number alone."""
+        wanted: dict[int, str] = {}
+        for entry in processes:
+            pid, mark = entry if isinstance(entry, tuple) else (entry, None)
+            if pid:
+                wanted[int(pid)] = str(mark or "")
         if not wanted:
             return set()
-        lines = await self._answer(ALIVE.format(pids=" ".join(str(p) for p in wanted), mark=MARK))
+        entries = " ".join(shlex.quote(f"{pid}={mark}") for pid, mark in sorted(wanted.items()))
+        lines = await self._answer(ALIVE.format(entries=entries, mark=MARK))
         return {int(line) for line in lines if line.isdigit()} & set(wanted)
 
-    async def stop(self, pid: int, *, grace: float) -> None:
+    async def stop(self, pid: int, *, grace: float, mark: str | None = None) -> bool:
+        """End the service's group; ``False``, with nothing signalled, when ``pid`` now belongs to a
+        process whose mark is not ``mark``."""
         ticks = " ".join(str(n) for n in range(max(1, int(grace / 0.5))))
-        await self._answer(STOP.format(pid=int(pid), ticks=ticks, mark=MARK), timeout=grace + 30.0)
+        lines = await self._answer(STOP.format(pid=int(pid), ticks=ticks, mark=MARK, expected=shlex.quote(mark or "")), timeout=grace + 30.0)
+        return "stranger" not in lines
 
     async def listening(self) -> set[int]:
         """The TCP ports something listens on, on the host."""
@@ -220,4 +279,4 @@ class HostServices:
         return text or "(empty)"
 
 
-__all__ = ["GATEWAY_NAME", "MARK", "HostDown", "HostServices", "Started", "default_gateway", "gateway_address"]
+__all__ = ["GATEWAY_NAME", "MARK", "HostDown", "HostServices", "Started", "default_gateway", "exit_code_in", "gateway_address", "noting_exit"]
