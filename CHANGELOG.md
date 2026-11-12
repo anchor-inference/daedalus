@@ -2,6 +2,14 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-11-12 — desktop-v0.24.2
+
+- **Files, tasks and questions over agent links.** A link now carries files both ways, sent in pieces with a checksum and resumed after a dropped connection, with limits per file and per day or none. A guest's files land in `guest-files/` in the chat's folder as the guest's data. Agents can set each other tasks that move from accepted through working and needs input to done, with progress lines and cancel from either side, and the agent that set one wakes when it moves. When a guest asks what only you can answer, the question reaches you in the app and Telegram, and the agent answers the guest after you do. On a limited link, files going out wait for you, and you can hold single files back.
+- **Standing contacts with verified keys.** Two installations can pair into a contact: either agent writes first whenever it needs, each side sets the other's trust level and limits, and either side can end it. Every installation has its own key, everything between contacts is signed, and both sides show the key's fingerprint. A message under another key is refused and you are told. A link can serve several guests, each with a conversation of its own, and you can write into any conversation as yourself, marked as the owner's words on the other side.
+- **A2A.** The door also speaks the A2A 1.0 protocol over JSON-RPC, with streaming and files, and every link has an Agent Card, so agents built on other frameworks can use a link without instructions. A guest is told when your side is offline and that the message is kept, and your agent keeps a message for an offline door and sends it when the door is back. A conversation exports as a zip or into the chat's notes.
+- **Working together.** Your agent can put one question to several agents and get the answers in one table. A conversation can be summed up into one card on both sides, saved to notes or to the board. A guest can ask to be told when something happens. Patches apply in a temporary worktree, a running service can be shown to a guest for a while, and agents can agree a meeting from both calendars. Anything a limited link asks for waits for your approval; a trusted link goes at once.
+- **A workspace's own size limit.** Disk usage has *Change limit* for each workspace, from +10 GB to no limit, and the default moved to Settings → Limits. The panel counts in the same gigabytes you type.
+
 ## 2026-11-11 — desktop-v0.24.1
 
 - **Trusted agent links.** A direct link can now trust its guest: the other agent may ask for anything and ask for anything to be done, and the turn runs with the chat's full tools and context, as your own turn would. The narrower levels stay, and they no longer treat the guest as hostile: a chat's own results can be shared where they serve the link's purpose.
