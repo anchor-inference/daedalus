@@ -8,7 +8,7 @@
 // shell to offer the update button. The shell's own message page uses openLog and retry.
 //
 // desk is the app's side of Quick Chat, the appshot and the tray (desk-main.js): the settings page
-// reads and changes their settings, and the app in the main window reports what runs for the tray and
+// reads and changes their settings and quits the application, and the app in the main window reports what runs for the tray and
 // hears its menu's commands. quick is Quick Chat's own page: hide, grow, open a conversation in the
 // main window, take a picture, collect the voice shortcut's request to dictate. region is the page of
 // the region appshot's overlay (pages/region.html): the still it draws on and the rectangle chosen.
@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('daedalus', {
     setSettings: (patch) => ipcRenderer.invoke('desk:set-settings', patch),
     status: (status) => ipcRenderer.send('desk:status', status),
     openScreenSettings: () => ipcRenderer.send('desk:screen-settings'),
+    quit: () => ipcRenderer.send('desk:quit'),
     onAction: (callback) => listen('desk:action', (name) => callback(String(name || ''))),
     onNavigate: (callback) => listen('desk:navigate', (where) => callback(String(where || ''))),
   },

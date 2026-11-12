@@ -15,20 +15,25 @@ test('a shortcut needs a modifier, except a function key, and empty means off', 
 });
 
 test('saved settings keep what is valid and fall back to the defaults for the rest', () => {
-  const defaults = { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true };
+  const defaults = { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', background: null };
   assert.deepEqual(desk.normaliseSettings(null), defaults);
-  assert.deepEqual(desk.normaliseSettings({ quickChat: 'Ctrl+Shift+J', appshot: 'Space', hideToTray: false }), { ...defaults, quickChat: 'Ctrl+Shift+J', hideToTray: false });
-  assert.deepEqual(desk.normaliseSettings({ quickChat: '', hideToTray: 'yes' }), { ...defaults, quickChat: '' });
+  assert.deepEqual(desk.normaliseSettings({ quickChat: 'Ctrl+Shift+J', appshot: 'Space', background: false }), { ...defaults, quickChat: 'Ctrl+Shift+J', background: false });
+  assert.deepEqual(desk.normaliseSettings({ quickChat: '', background: 'yes' }), { ...defaults, quickChat: '' });
+  // The older key's default was written into every file: it is no choice, and is not read as one.
+  assert.deepEqual(desk.normaliseSettings({ hideToTray: true }), defaults);
   // A default already given to another action is left off, not registered twice.
   assert.deepEqual(desk.normaliseSettings({ quickChat: 'alt+shift+v' }), { ...defaults, quickChat: 'alt+shift+v', voice: '' });
 });
 
 test('a change is refused field by field, and one key cannot do both jobs', () => {
   const current = desk.normaliseSettings(null);
-  const bad = desk.mergeSettings(current, { quickChat: 'Q', hideToTray: false });
+  const bad = desk.mergeSettings(current, { quickChat: 'Q', background: false });
   assert.deepEqual(bad.errors, { quickChat: 'invalid' });
   assert.equal(bad.settings.quickChat, 'Alt+Space');
-  assert.equal(bad.settings.hideToTray, false);
+  assert.equal(bad.settings.background, false);
+  // null hands the choice back to the desktop; anything else that is not a boolean changes nothing.
+  assert.equal(desk.mergeSettings(bad.settings, { background: null }).settings.background, null);
+  assert.equal(desk.mergeSettings(bad.settings, { background: 'on' }).settings.background, false);
   const same = desk.mergeSettings(current, { appshot: 'alt+space' });
   assert.deepEqual(same.errors, { appshot: 'duplicate' });
   assert.equal(same.settings.appshot, 'Alt+Shift+Space');
@@ -80,7 +85,7 @@ test('changing a shortcut releases the old one and leaves nothing behind', () =>
   const held = new Set();
   desk.registerShortcuts(shortcuts, desk.normaliseSettings(null), { quickChat() {}, appshot() {} }, held);
   assert.deepEqual([...shortcuts.registered.keys()].sort(), ['Alt+Shift+S', 'Alt+Shift+Space', 'Alt+Shift+V', 'Alt+Space']);
-  const report = desk.registerShortcuts(shortcuts, { quickChat: 'Ctrl+F13', appshot: '', region: '', voice: '', hideToTray: true }, { quickChat() {}, appshot() {} }, held);
+  const report = desk.registerShortcuts(shortcuts, { quickChat: 'Ctrl+F13', appshot: '', region: '', voice: '', background: null }, { quickChat() {}, appshot() {} }, held);
   assert.deepEqual([...shortcuts.registered.keys()], []);
   assert.equal(report.quickChat.reason, 'taken');
   assert.equal(report.appshot.reason, 'off');
@@ -105,11 +110,20 @@ test('the tray note names plain GNOME and a session with no bus, and nothing els
   assert.equal(desk.trayNote('darwin', {}), '');
 });
 
-test('closing hides the window only with a tray to come back from, and never while quitting', () => {
-  assert.equal(desk.hideOnClose({ hideToTray: true, trayReady: true, quitting: false }), true);
-  assert.equal(desk.hideOnClose({ hideToTray: true, trayReady: false, quitting: false }), false);
-  assert.equal(desk.hideOnClose({ hideToTray: false, trayReady: true, quitting: false }), false);
-  assert.equal(desk.hideOnClose({ hideToTray: true, trayReady: true, quitting: true }), false);
+test('closing keeps the application in the background where the desktop or the operator says so, never while quitting', () => {
+  // Left to the desktop: with a tray to come back from, and only then.
+  assert.equal(desk.hideOnClose({ background: null, trayReady: true, quitting: false }), true);
+  assert.equal(desk.hideOnClose({ background: null, trayReady: false, quitting: false }), false);
+  assert.equal(desk.hideOnClose({ trayReady: true, quitting: false }), true);
+  // Chosen: kept even with no tray, where a second start brings the window back.
+  assert.equal(desk.hideOnClose({ background: true, trayReady: false, quitting: false }), true);
+  assert.equal(desk.hideOnClose({ background: true, trayReady: true, quitting: false }), true);
+  assert.equal(desk.hideOnClose({ background: false, trayReady: true, quitting: false }), false);
+  // Quit, from the tray, the menu, the settings page or `--quit`, always closes for real.
+  for (const background of [null, true, false]) {
+    assert.equal(desk.hideOnClose({ background, trayReady: true, quitting: true }), false);
+    assert.equal(desk.hideOnClose({ background, trayReady: false, quitting: true }), false);
+  }
 });
 
 test('the tray shows what waits before what runs, in both languages', () => {

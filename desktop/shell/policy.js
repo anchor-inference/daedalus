@@ -98,7 +98,7 @@ function restoreBounds(saved, workAreas) {
 }
 
 // closeAction decides what closing the main window does: 'close' when it really closes, 'hide' when
-// the application stays in the tray, and on a Mac, when the window is in full screen, the full screen
+// the application stays running in the background, and on a Mac, when the window is in full screen, the full screen
 // it must leave first. Hiding a window that is in native full screen on macOS hides the window and
 // keeps its Space: the operator was left looking at a black full-screen Space that nothing would
 // close. So the window leaves full screen ('leave-full-screen', which is animated and ends with an

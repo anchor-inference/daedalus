@@ -15,7 +15,14 @@ const DEFAULTS = Object.freeze({
   region: 'Alt+Shift+S',
   // Quick Chat with the microphone already listening: V as in voice.
   voice: 'Alt+Shift+V',
-  hideToTray: true,
+  // Whether closing the window leaves the application running in the background: true, false, or
+  // null for "as this desktop allows" — on wherever there is a tray icon to come back from and to
+  // quit from, off where there is none (plain GNOME, a session with no bus), because there a window
+  // that vanishes with no icon is taken for a crash. A native installation stops its agent, its agent
+  // links and its public address when the application quits, so off is a real cost there; the app
+  // says so where it matters (a link or a contact made) and offers to turn this on, rather than
+  // turning it on behind the operator's back on a desktop where the only way back is a second start.
+  background: null,
 });
 
 // The shortcuts, in the order they are registered, listed and checked against each other.
@@ -67,7 +74,9 @@ function normaliseSettings(raw) {
     if (name in settings) continue;
     settings[name] = chosen.has(DEFAULTS[name].toLowerCase()) ? '' : DEFAULTS[name];
   }
-  settings.hideToTray = typeof saved.hideToTray === 'boolean' ? saved.hideToTray : DEFAULTS.hideToTray;
+  // The older hideToTray is not carried over: its default was written into every saved file, so it
+  // cannot tell a choice from a default, and read as a choice it would hide the window with no tray.
+  settings.background = typeof saved.background === 'boolean' ? saved.background : DEFAULTS.background;
   return settings;
 }
 
@@ -81,7 +90,7 @@ function mergeSettings(current, patch) {
     if (validAccelerator(patch[name])) next[name] = patch[name];
     else errors[name] = 'invalid';
   }
-  if (patch && typeof patch.hideToTray === 'boolean') next.hideToTray = patch.hideToTray;
+  if (patch && (typeof patch.background === 'boolean' || patch.background === null)) next.background = patch.background;
   // One key cannot do two jobs: the field that was just changed is the one refused, and keeps its value.
   for (const name of SHORTCUTS) {
     if (!next[name] || next[name] === current[name]) continue;
@@ -151,11 +160,14 @@ function trayNote(platform, env) {
   return '';
 }
 
-// hideOnClose decides whether closing the main window only hides it. It never does while the
-// application is quitting, and never when there is no tray to bring it back from — a window hidden
-// with no icon is found again only by opening the application a second time.
-function hideOnClose({ hideToTray, trayReady, quitting }) {
-  return Boolean(hideToTray && trayReady && !quitting);
+// hideOnClose decides whether closing the main window only hides it, leaving the launcher, the agent
+// and everything it serves running. Never while the application is quitting. Left to the desktop
+// (null), it does where there is a tray to come back from. Chosen, it does even with no tray: the way
+// back is opening the application again, which the single-instance lock turns into showing this
+// window, and the way out is Quit in Settings → Desktop app, the File menu or `daedalus --quit`.
+function hideOnClose({ background, trayReady, quitting }) {
+  if (quitting) return false;
+  return background === null || background === undefined ? Boolean(trayReady) : Boolean(background);
 }
 
 function count(value) {

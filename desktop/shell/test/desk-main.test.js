@@ -168,6 +168,7 @@ function start(options) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-'));
   const quitHooks = [];
   const app = { getPath: () => userData, on: (name, hook) => quitHooks.push(hook), quit() {}, focus() {} };
+  electron.lastApp = app;
   const main = new electron.module.BrowserWindow({ width: 1180, height: 820 });
   main.webContents.url = 'http://127.0.0.1:48765/app/agents';
   let shown = 0;
@@ -224,13 +225,28 @@ test('settings change only from the main window, are saved, and re-register the 
   assert.equal(desk.keepOnClose(false), true, 'closing hides the window by default');
   assert.equal(desk.keepOnClose(true), false, 'but not while quitting');
   assert.equal(await set(from(quick.webContents), { quickChat: 'Ctrl+Shift+K' }), null);
-  const answer = await set(from(main.webContents), { quickChat: 'Ctrl+Shift+K', hideToTray: false });
+  const answer = await set(from(main.webContents), { quickChat: 'Ctrl+Shift+K', background: false });
   assert.equal(answer.settings.quickChat, 'Ctrl+Shift+K');
   assert.equal(answer.report.quickChat.ok, true);
   assert.ok(electron.shortcuts.has('Ctrl+Shift+K'));
   assert.ok(!electron.shortcuts.has('Alt+Space'));
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userData, 'desk.json'), 'utf8')), { quickChat: 'Ctrl+Shift+K', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userData, 'desk.json'), 'utf8')), { quickChat: 'Ctrl+Shift+K', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', background: false });
   assert.equal(desk.keepOnClose(false), false);
+  assert.equal(answer.background, false, 'the page is told what closing does now');
+});
+
+test('only the app in the main window may quit the application', () => {
+  const { electron, main, from } = start();
+  let quits = 0;
+  // start() hands desk-main an app whose quit does nothing; count the calls instead.
+  electron.lastApp.quit = () => quits++;
+  const quit = electron.listeners.get('desk:quit');
+  const stranger = new electron.FakeContents();
+  stranger.url = 'http://127.0.0.1:48765/app/agents';
+  quit(from(stranger));
+  assert.equal(quits, 0);
+  quit(from(main.webContents));
+  assert.equal(quits, 1);
 });
 
 test('"open" from Quick Chat moves the app in the main window without reloading it', () => {
@@ -262,11 +278,15 @@ test('the appshot shortcut hands its picture to Quick Chat once, when it asks', 
   assert.deepEqual(await pending(from(quick.webContents)), []);
 });
 
-test('on plain GNOME, where the icon may draw nothing, closing the window quits', () => {
+test('on plain GNOME, where the icon may draw nothing, closing quits unless the operator chose the background', async () => {
   process.env.XDG_CURRENT_DESKTOP = 'GNOME';
   try {
-    const { desk } = start();
+    const { electron, desk, main, from } = start();
     assert.equal(desk.keepOnClose(false), process.platform !== 'linux');
+    const answer = await electron.handlers.get('desk:set-settings')(from(main.webContents), { background: true });
+    assert.equal(answer.background, true);
+    assert.equal(desk.keepOnClose(false), true, 'chosen, the window hides with no tray; a second start shows it');
+    assert.equal(desk.keepOnClose(true), false);
   } finally {
     process.env.XDG_CURRENT_DESKTOP = 'KDE';
   }

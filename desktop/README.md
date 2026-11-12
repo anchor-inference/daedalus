@@ -441,10 +441,17 @@ ever shown in your browser: the launcher's pages and the app are on loopback and
 a link that leaves this machine opens in your browser; a page cannot open files, custom schemes or
 anything else through the system.
 
-The window remembers its size and place, and opens on a screen that is still there. Closing it hides
-it into the tray (below) when there is a tray to bring it back from; with that switched off, or where
-the desktop shows no tray, closing it quits Daedalus: in native mode the launcher stops the agent
-first, as below; in Docker mode the containers keep running. The menu is the standard one on macOS — without an Edit menu ⌘C and ⌘V would do
+The window remembers its size and place, and opens on a screen that is still there. Closing it keeps
+Daedalus running in the background — the launcher, the agent, its agent links, contacts and public
+address all stay up — when there is a tray to bring it back from (below). Where the desktop shows no
+tray (plain GNOME without the AppIndicator extension, a session with no bus) closing it quits unless
+**Keep running in the background when the window is closed** is on in **Settings → Desktop app**;
+with it on there, opening Daedalus again brings the window back (a second start only shows the
+running one), and Quit is in that settings section, in the File menu (Ctrl+Q) and `daedalus --quit`.
+Quitting in native mode stops the agent first, as below, and the links and contacts go offline with
+it; in Docker mode the containers keep running. A native installation that makes an agent link or
+has contacts while closing would quit says so under the link and the contacts, with a button that
+turns the background on. The menu is the standard one on macOS — without an Edit menu ⌘C and ⌘V would do
 nothing — and hidden on Windows and Linux (Alt shows it), with the same edit, zoom and reload
 commands and their shortcuts.
 
@@ -493,9 +500,10 @@ The **tray** icon shows what is running and what waits for you (a dot, amber whi
 while a question or an approval waits; on a Mac the number beside it), and its menu has Open, Quick
 Chat, Appshot, the area appshot, dictation into Quick Chat, Pause or Resume the companion when there is one, and Quit. On Linux the icon needs a
 desktop that shows StatusNotifierItem icons: KDE, Ubuntu's GNOME and most others do; plain GNOME
-needs the AppIndicator extension, and there closing the window quits rather than hiding it.
+needs the AppIndicator extension, and there closing the window quits unless the background is
+switched on (above).
 
-The four shortcuts, and closing into the tray, are set in the app under **Settings → Desktop app**, which
+The four shortcuts, and running in the background, are set in the app under **Settings → Desktop app**, which
 records a shortcut from the keys you press and says when another program already holds it. They are
 kept per computer, in the application's own `desk.json`. On a Wayland desktop a program may grab a
 key for the whole desktop only through the desktop's portal, which some desktops refuse; there, bind

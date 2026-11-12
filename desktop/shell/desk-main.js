@@ -363,6 +363,9 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
       platform: process.platform,
       wayland: process.platform === 'linux' && desk.waylandSession(env),
       tray: { ready: trayShown(), note: desk.trayNote(process.platform, env) },
+      // What closing the window does now, whatever settings.background says: the page shows the
+      // switch at this and does not work out the tray rule a second time.
+      background: desk.hideOnClose({ background: settings.background, trayReady: trayShown(), quitting: false }),
       screen: appshot.screenAccess(deps),
     };
   }
@@ -381,6 +384,11 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     if (!fromMain(event)) return;
     status = desk.normaliseStatus(next);
     updateTray();
+  });
+  // Quit from the settings page: with the window kept in the background and no tray, the page is
+  // the one place left with a button for it.
+  ipcMain.on('desk:quit', (event) => {
+    if (fromMain(event)) app.quit();
   });
   ipcMain.on('desk:screen-settings', (event) => {
     if (!(fromMain(event) || fromQuick(event)) || process.platform !== 'darwin') return;
@@ -475,6 +483,6 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
       updateTray();
     },
     run: (name) => (actions[name] ? actions[name]() : undefined),
-    keepOnClose: (quitting) => desk.hideOnClose({ hideToTray: settings.hideToTray, trayReady: trayShown(), quitting }),
+    keepOnClose: (quitting) => desk.hideOnClose({ background: settings.background, trayReady: trayShown(), quitting }),
   };
 };
