@@ -179,6 +179,12 @@ func interruptedUpgrade(p Paths, own *InstallLock) error {
 				"with --apply it settles it without touching the live data", item.Path, item.Detail, p.Data)
 		}
 	}
+	// The work a switch moved out of the data folder and did not put back: an app started now would
+	// find its sessions' folders empty and start filling new ones in their place.
+	if workIsAside(p) {
+		return fmt.Errorf("the working folders were moved out of the data folder for a switch and are not back yet; they are in %s.\n"+
+			"Nothing starts until they are. `daedalus-desktop update resolve --apply --data %s` puts them back", workAsideDir(p), p.Data)
+	}
 	return nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +18,12 @@ import (
 //   - the writer fence (fence*.go): the data folder is copied and the copy swapped in with one
 //     atomic exchange while the kernel keeps every writer out; the tree from before is kept whole
 //     and goes back by the same exchange. Only where it has been proven: Linux, ext4, file leases
-//     on, not in a container, not as root;
+//     on, not in a container, not as root. The work (work.go) is moved out of the folder by rename
+//     before the switch and back into whichever tree is live after it, so it is never copied,
+//     leased or kept;
 //   - the verified backup (backup.go): the folder is archived and read back against its manifest
-//     before anything changes, and restored from the archive on failure. Everywhere else — Windows,
+//     before anything changes, and restored from the archive on failure; the work is neither
+//     archived nor touched by the restore. Everywhere else — Windows,
 //     macOS, other filesystems. It cannot exclude a write that lands after the archive is read;
 //     the stack is stopped and the data writers are checked for first, and that is all it has.
 //
@@ -205,7 +209,13 @@ func (u *Upgrader) protect(ctx context.Context, journal *Journal, root string, i
 		return nil
 	}
 	u.say("Switching the data folder to a fenced copy; the folder as it is now is kept whole...")
+	if err := u.setWorkAside(); err != nil {
+		return err
+	}
 	rep := fencedSwitch(fenceOptions{Data: u.paths.Data, Held: u.heldLocks(), Handover: u.follow, Upgrading: true})
+	if err := u.returnWork(rep); err != nil {
+		return err
+	}
 	if rep.Outcome != fenceCommitted {
 		return fenceOutcomeError(rep)
 	}
@@ -226,6 +236,51 @@ func (u *Upgrader) protect(ctx context.Context, journal *Journal, root string, i
 	return nil
 }
 
+// setWorkAside moves the work out of the data folder before a switch. A failure puts back what had
+// moved, so it changes nothing.
+func (u *Upgrader) setWorkAside() error {
+	notes, err := setWorkAside(u.paths)
+	for _, note := range notes {
+		u.say("%s", note)
+	}
+	if err != nil {
+		_, back := returnWork(u.paths)
+		return fmt.Errorf("the working folders could not be moved out of the way of the switch, so nothing was changed: %w", errors.Join(err, back))
+	}
+	return nil
+}
+
+// returnWork puts the work back after a switch, into the tree it left at the data folder. Not when
+// the switch could not say which tree that is, or left its journal open for `update resolve`: the
+// work would land in a tree nobody has identified yet. It then waits in the control folder, nothing
+// starts (interruptedUpgrade), and `update resolve --apply` puts it back once the switch is settled.
+func (u *Upgrader) returnWork(rep fenceReport) error {
+	if (rep.Live != "P" && rep.Live != "C") || switchUnfinished(u.paths) {
+		if workIsAside(u.paths) {
+			u.say("The working folders stay in %s until the switch is settled.", workAsideDir(u.paths))
+		}
+		return nil
+	}
+	notes, err := returnWork(u.paths)
+	for _, note := range notes {
+		u.say("%s", note)
+	}
+	if err != nil {
+		return fmt.Errorf("the working folders could not be put back after the switch: %w", err)
+	}
+	return nil
+}
+
+// switchUnfinished says whether a switch of the data folder has a journal that did not reach its end.
+func switchUnfinished(p Paths) bool {
+	for _, item := range fenceSummarize(fenceControlPath(p.Data)).Items {
+		if item.Kind == "unfinished" {
+			return true
+		}
+	}
+	return false
+}
+
 // restoreProtected puts the data from before the update back, the way protect kept it.
 func (u *Upgrader) restoreProtected(ctx context.Context, journal *Journal) error {
 	if journal.Pre != "" {
@@ -233,10 +288,17 @@ func (u *Upgrader) restoreProtected(ctx context.Context, journal *Journal) error
 			// A rollback that was cut off after its restore committed: the data from before is live
 			// already, and restoring it again would find no kept copy to restore.
 			u.say("The data folder from before is already live again.")
-			return nil
+			// The cut may have come before the work went back into it.
+			return u.returnWork(fenceReport{Outcome: fenceCommitted, Live: "C"})
 		}
 		u.say("Putting the data folder from before back (%s)...", journal.Pre)
+		if err := u.setWorkAside(); err != nil {
+			return err
+		}
 		rep := fencedSwitch(fenceOptions{Data: u.paths.Data, RestoreFrom: journal.Pre, Held: u.heldLocks(), Handover: u.follow, Upgrading: true})
+		if err := u.returnWork(rep); err != nil {
+			return err
+		}
 		if rep.Outcome != fenceCommitted {
 			return fmt.Errorf("%s (%s); the report is %s", rep.Reason, rep.Outcome, rep.ReportPath)
 		}

@@ -112,7 +112,10 @@ func checkWindowsDataWriters(data string) error {
 		if err != nil {
 			return err
 		}
-		if notBackedUp[strings.Split(rel, string(os.PathSeparator))[0]] {
+		// What a backup leaves out is not checked either: the workspaces alone can be a hundred
+		// thousand files, each opened here, and a session process still holding one is no threat to
+		// a backup that never reads it.
+		if !backedUp(filepath.ToSlash(rel)) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}

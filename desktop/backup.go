@@ -29,10 +29,12 @@ import (
 //	<data>/backups/<UTC time>-<launcher version>/manifest.json
 //	<data>/backups/<UTC time>-<launcher version>/volumes/<volume>.tar.gz   (Docker mode)
 //
-// The backup holds everything the installation owns, the provider keys included, so the folder is
-// 0700 and the files 0600, like the secrets folder they are copied from. What is left out is what
-// the launcher downloads again by itself (runtime/), the backups themselves, the upgrade's own
-// working folder and the running launcher's handover file.
+// The backup holds the installation, the provider keys included, so the folder is 0700 and the
+// files 0600, like the secrets folder they are copied from: the database and the rest of state/, the
+// keys and secrets, the configuration, the checkouts an update replaces. It does not hold the work
+// done in the installation — the session workspaces and the project folders in them, the agent's
+// worktrees, the snapshot stores that copy the workspaces, what is downloaded or rebuilt by itself
+// (work.go has the list and the reasons) — and a restore leaves that work exactly where it is.
 const (
 	backupsDirName  = "backups"
 	backupArchive   = "data.tar.gz"
@@ -43,13 +45,21 @@ const (
 	manifestVersion = 1
 )
 
-// notBackedUp are the top-level names under the data folder that a backup skips and a restore
-// leaves where they are.
+// notBackedUp are the top-level names of the data folder's own bookkeeping, which a backup skips
+// and a restore leaves where they are like the work: the backups themselves, the upgrade's working
+// folder, a runtime from before it moved out of the data folder, the running launcher's handover file.
 var notBackedUp = map[string]bool{
 	backupsDirName:  true,
 	"upgrade":       true,
 	"runtime":       true,
 	"launcher.json": true,
+}
+
+// backedUp says whether the entry at rel — slash-separated, relative to the data folder — is one a
+// backup holds: neither bookkeeping nor work.
+func backedUp(rel string) bool {
+	top, _, _ := strings.Cut(rel, "/")
+	return !notBackedUp[top] && !isWork(rel)
 }
 
 // BackupEntry is one thing in the archive.
@@ -130,7 +140,7 @@ func CreateBackup(p Paths, launcher, mode string, now time.Time, launcherRoot st
 	if err := os.Mkdir(partial, 0o700); err != nil {
 		return "", nil, err
 	}
-	manifest, err := writeArchive(p.Data, filepath.Join(partial, backupArchive), func(top string) bool { return !notBackedUp[top] })
+	manifest, err := writeArchive(p.Data, filepath.Join(partial, backupArchive), backedUp)
 	if err != nil {
 		os.RemoveAll(partial)
 		return "", nil, fmt.Errorf("the backup could not be written: %w", err)
@@ -140,7 +150,10 @@ func CreateBackup(p Paths, launcher, mode string, now time.Time, launcherRoot st
 		for _, item := range launcherItems {
 			wanted[item] = true
 		}
-		files, err := writeArchive(launcherRoot, filepath.Join(partial, launcherArchive), func(top string) bool { return wanted[top] })
+		files, err := writeArchive(launcherRoot, filepath.Join(partial, launcherArchive), func(rel string) bool {
+			top, _, _ := strings.Cut(rel, "/")
+			return wanted[top]
+		})
 		if err != nil {
 			os.RemoveAll(partial)
 			return "", nil, fmt.Errorf("the launcher's files could not be backed up: %w", err)
@@ -211,8 +224,16 @@ func sanitizeName(s string) string {
 }
 
 // writeArchive tars root into target, hashing each file as it goes into the archive, so the
-// manifest describes exactly the bytes that were written. include decides by top-level name.
-func writeArchive(root, target string, include func(top string) bool) (*Manifest, error) {
+// manifest describes exactly the bytes that were written. include decides by the slash-separated
+// path relative to root; a folder it refuses is not descended into at all.
+//
+// A link is never followed: WalkDir reports it as what it is, does not descend, and it goes into the
+// archive as a link. That matters for a link that leads out of the folder — to a project folder
+// elsewhere on the machine — which followed would bring the whole project into the backup. On
+// Windows a junction or another directory reparse point is not a directory to WalkDir either (Go
+// 1.23 reports it as irregular, older releases as a link), so it is passed over or kept as a link,
+// never walked into.
+func writeArchive(root, target string, include func(rel string) bool) (*Manifest, error) {
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -233,8 +254,7 @@ func writeArchive(root, target string, include func(top string) bool) (*Manifest
 			return err
 		}
 		slash := filepath.ToSlash(relative)
-		top, _, _ := strings.Cut(slash, "/")
-		if !include(top) {
+		if !include(slash) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -260,6 +280,7 @@ func writeArchive(root, target string, include func(top string) bool) (*Manifest
 			record.Kind, header.Typeflag, header.Size = "file", tar.TypeReg, info.Size()
 		default:
 			// A socket, a pipe: the supervisor's socket is one. Nothing a restore could bring back.
+			// A Windows junction lands here too, and is neither archived nor followed.
 			return nil
 		}
 		if err := writer.WriteHeader(header); err != nil {
@@ -469,7 +490,8 @@ func readArchive(name string, visit func(name string, header *tar.Header, body i
 
 // RestoreBackup puts the data folder back the way the backup found it. The backup is verified
 // first; what the folder holds now is not deleted but moved aside into `aside`, so a restore can
-// itself be undone by hand. The restored tree is checked against the manifest before this returns.
+// itself be undone by hand. What the backup does not hold is left where it is: a top-level name is
+// never moved, and the work below one goes aside with its parent and is moved straight back. The restored tree is checked against the manifest before this returns.
 func RestoreBackup(p Paths, dir, aside string) error {
 	manifest, err := VerifyBackup(dir)
 	if err != nil {
@@ -484,7 +506,7 @@ func RestoreBackup(p Paths, dir, aside string) error {
 	}
 	var moved []string
 	for _, entry := range current {
-		if notBackedUp[entry.Name()] {
+		if !backedUp(entry.Name()) {
 			continue
 		}
 		if err := os.Rename(filepath.Join(p.Data, entry.Name()), filepath.Join(aside, entry.Name())); err != nil {
@@ -499,28 +521,46 @@ func RestoreBackup(p Paths, dir, aside string) error {
 	if err := extractBackup(filepath.Join(dir, backupArchive), p.Data); err != nil {
 		return fmt.Errorf("the backup could not be unpacked (what was there before is in %s): %w", aside, err)
 	}
+	// The work below a top-level name — state/checkpoints, a checkout's node_modules — went aside
+	// with it, and comes straight back.
+	nested, err := findWork(aside)
+	if err != nil {
+		return fmt.Errorf("could not look for the work in %s to put it back: %w", aside, err)
+	}
+	for _, rel := range nested {
+		from := filepath.Join(aside, filepath.FromSlash(rel))
+		to := filepath.Join(p.Data, filepath.FromSlash(rel))
+		if err := ensureParents(p.Data, filepath.Dir(to)); err != nil {
+			return fmt.Errorf("could not put %s back (it is in %s): %w", rel, aside, err)
+		}
+		if err := os.Rename(from, to); err != nil {
+			return fmt.Errorf("could not put %s back (it is in %s): %w", rel, aside, err)
+		}
+	}
 	if err := checkRestored(p.Data, manifest); err != nil {
 		return fmt.Errorf("the restored folder does not match the backup (what was there before is in %s): %w", aside, err)
 	}
 	return nil
 }
 
+// extractBackup unpacks the data's archive. An entry under a path a backup no longer takes — from a
+// launcher that still archived the workspaces — is passed over rather than unpacked: the restore left
+// that folder in place, and what is in it now is newer than the copy.
 func extractBackup(archive, root string) error {
-	return extractArchive(archive, root, func(top string) bool { return !notBackedUp[top] })
+	return extractArchive(archive, root, backedUp)
 }
 
-// extractArchive unpacks one of the backup's archives into root; allowed says which top-level
-// names it may hold.
-func extractArchive(archive, root string, allowed func(top string) bool) error {
+// extractArchive unpacks one of the backup's archives into root; wanted says, by the slash-separated
+// name, which entries are unpacked, and the rest are passed over.
+func extractArchive(archive, root string, wanted func(name string) bool) error {
 	type dirMode struct {
 		name string
 		mode os.FileMode
 	}
 	var dirs []dirMode
 	err := readArchive(archive, func(name string, header *tar.Header, body io.Reader) error {
-		top, _, _ := strings.Cut(name, "/")
-		if !allowed(top) {
-			return fmt.Errorf("the backup holds %q, which a backup never does", name)
+		if !wanted(name) {
+			return nil
 		}
 		target, err := safeJoin(root, name)
 		if err != nil {
@@ -588,9 +628,13 @@ func extractArchive(archive, root string, allowed func(top string) bool) error {
 	return syncDir(root)
 }
 
-// checkRestored compares the folder with the manifest, entry by entry.
+// checkRestored compares the folder with the manifest, entry by entry, past the entries
+// extractBackup passed over.
 func checkRestored(root string, manifest *Manifest) error {
 	for _, entry := range manifest.Entries {
+		if !backedUp(entry.Path) {
+			continue
+		}
 		name := filepath.Join(root, filepath.FromSlash(entry.Path))
 		info, err := os.Lstat(name)
 		if err != nil {
@@ -701,8 +745,7 @@ func backupRoom(p Paths, launcherRoot string, launcherItems []string) (need uint
 				return err
 			}
 			relative, _ := filepath.Rel(root, name)
-			top, _, _ := strings.Cut(filepath.ToSlash(relative), "/")
-			if name != root && !include(top) {
+			if name != root && !include(filepath.ToSlash(relative)) {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
@@ -716,7 +759,7 @@ func backupRoom(p Paths, launcherRoot string, launcherItems []string) (need uint
 			return nil
 		})
 	}
-	if err := add(p.Data, func(top string) bool { return !notBackedUp[top] }); err != nil {
+	if err := add(p.Data, backedUp); err != nil {
 		return 0, err
 	}
 	if len(launcherItems) > 0 {
@@ -724,7 +767,10 @@ func backupRoom(p Paths, launcherRoot string, launcherItems []string) (need uint
 		for _, item := range launcherItems {
 			wanted[item] = true
 		}
-		if err := add(launcherRoot, func(top string) bool { return wanted[top] }); err != nil {
+		if err := add(launcherRoot, func(rel string) bool {
+			top, _, _ := strings.Cut(rel, "/")
+			return wanted[top]
+		}); err != nil {
 			return 0, err
 		}
 	}

@@ -233,12 +233,14 @@ func (s *smoke) fresh(name string, bigMB int) (root, data string) {
 		os.WriteFile(filepath.Join(data, rel), []byte(body), 0o640)
 	}
 	os.Symlink("today.md", filepath.Join(data, "workspaces", "notes", "latest.md"))
+	// The bulk that keeps a restore busy long enough to interrupt goes into state/: the workspaces
+	// are no longer backed up, so bulk there would make the restore no slower at all.
 	if bigMB > 0 {
 		chunk := bytes.Repeat([]byte{0}, 1<<20)
-		os.MkdirAll(filepath.Join(data, "workspaces", "big"), 0o755)
+		os.MkdirAll(filepath.Join(data, "state", "big"), 0o755)
 		for i := 0; i < bigMB; i++ {
 			copy(chunk, fmt.Sprintf("file %d", i))
-			os.WriteFile(filepath.Join(data, "workspaces", "big", fmt.Sprintf("f%03d.bin", i)), chunk, 0o644)
+			os.WriteFile(filepath.Join(data, "state", "big", fmt.Sprintf("f%03d.bin", i)), chunk, 0o644)
 		}
 	}
 	return root, data

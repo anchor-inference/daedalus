@@ -458,5 +458,26 @@ func switchReportCommand(paths Paths, opts options) error {
 	case !opts.apply:
 		fmt.Println("nothing was changed; run it again with --apply to do the above")
 	}
+	if !workIsAside(paths) {
+		return nil
+	}
+	if !opts.apply || switchUnfinished(paths) {
+		fmt.Printf("the working folders a switch moved out of the data folder are in %s; --apply puts them back once no switch is unfinished\n", workAsideDir(paths))
+		return nil
+	}
+	// Under the installation lock: a switch running in a launcher has its work aside on purpose.
+	lock, err := AcquireLock(paths, "resolve")
+	if err != nil {
+		return fmt.Errorf("the working folders were not put back: %w", err)
+	}
+	defer lock.Release()
+	notes, err := returnWork(paths)
+	for _, note := range notes {
+		fmt.Println(note)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Println("the working folders are back in the data folder")
 	return nil
 }
