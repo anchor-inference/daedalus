@@ -302,23 +302,6 @@ async def test_a_background_job_runs_on_the_host_and_is_read_and_ended_through_t
         await manager.close()
 
 
-async def test_a_service_is_refused_on_the_host_with_the_way_round(settings: Settings, db: Database, tmp_path: Path) -> None:
-    from daedalus.tools.services import service_start
-
-    manager = await _manager(settings, db, ScriptedProvider([]))
-    try:
-        container_only(manager)
-        manager.host_bridge = ShellHost(host_disk(tmp_path))  # type: ignore[assignment]
-        state = await manager.create_session("Labs chat", project_id=(await host_project(manager)).id)
-        assert state.services is not None
-        state.services.extra["manager"] = manager
-        manager.service_hooks["services"] = lambda *a, **k: None
-        refused = await service_start().invoke(context(state.session.id), {"name": "web", "command": "python -m http.server"})
-        assert refused.is_error and "Exec(background=true)" in refused.content
-    finally:
-        await manager.close()
-
-
 # -- a Daedalus staff member in a host folder -----------------------------------------------------------
 
 

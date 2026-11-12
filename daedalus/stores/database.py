@@ -3996,6 +3996,20 @@ CREATE TABLE IF NOT EXISTS workspace_limits (
 );
 """)
 
+# 165 — a service can run on the operator's own machine, started through the host terminal daemon by a
+# session that works in a host folder. ``machine`` is 'host' for one of those and NULL for a process of
+# this one; its pid is a pid of the host, and ``address`` is where on the host it was told to listen,
+# which is the address the share proxy dials instead of loopback.
+async def _host_services(conn: aiosqlite.Connection) -> None:
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(services)")).fetchall()}
+    for name in ("machine", "address"):
+        if name not in present:
+            await conn.execute(f"ALTER TABLE services ADD COLUMN {name} TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _host_services))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

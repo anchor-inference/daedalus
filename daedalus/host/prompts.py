@@ -1162,7 +1162,7 @@ def environment_section(
         "its outcome and the last lines of its log, mid-turn or idle; a job silent for a long time earns one nudge. Never "
         "poll with sleep loops, never `nohup … &` inside a plain Exec (nothing reports it), never `pgrep -f` a pattern your "
         "own command line contains (it finds itself and never ends). To wait for a pid, a file, a log line or a port, use "
-        "JobWait. A server goes to ServiceStart, or Exec(service=true) where services are unavailable"
+        "JobWait. A server goes to ServiceStart, on the host as here, or Exec(service=true) on an operator's terminal, where services are unavailable"
     )
     if gpu:
         lines.append(

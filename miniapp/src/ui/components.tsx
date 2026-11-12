@@ -300,7 +300,7 @@ export function Avatar({ status, seed }: { status: Status; seed: string }) {
 }
 
 /** The states the app has a word for; anything else the server invents is shown as it came. */
-const STATUS_WORDS = ["idle", "running", "waiting", "compacting", "failed", "done", "paused", "stopped", "pending", "merged", "approved", "rejected", "closed", "dead"];
+const STATUS_WORDS = ["idle", "running", "waiting", "compacting", "failed", "done", "paused", "stopped", "pending", "merged", "approved", "rejected", "closed", "dead", "unknown"];
 
 /** One word for a state, in the one colour that state has everywhere: idle stays grey. */
 export function statusWord(status: string): string {
@@ -551,13 +551,14 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
           <div className="service-name">
             {s.name}
             {s.port && <span className="chip mono port">:{s.port}</span>}
+            {s.machine === "host" && <span className="chip host" title={t("svc.host.title")}>{t("svc.host")}</span>}
             {shared && <span className={`chip ${mode === "public" ? "bad" : "attn"}`}>{accessWord(mode)}</span>}
           </div>
           {/* The dot leads the line it describes. Centred beside the whole block, it sat level with
               an access badge whenever a phone wrapped the name, and read as that badge's colour. */}
           <div className="sub service-meta">
             <span className={`dot ${s.status}`} />
-            {s.status === "running" ? t("svc.running", { t: relTime(s.started_at) }) : `${statusWord(s.status === "dead" ? "dead" : "stopped")}${s.note ? `: ${s.note}` : ""}${s.stopped_at ? ` · ${relTime(s.stopped_at)}` : ""}`}
+            {s.status === "running" ? t("svc.running", { t: relTime(s.started_at) }) : `${statusWord(s.status === "dead" || s.status === "unknown" ? s.status : "stopped")}${s.note ? `: ${s.note}` : ""}${s.stopped_at ? ` · ${relTime(s.stopped_at)}` : ""}`}
             {s.status === "running" && lan && !shared ? ` · ${lan}` : ""}
           </div>
           <div className="sub mono service-cmd" title={s.command}>{s.command}</div>
@@ -577,7 +578,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
                 <input type="radio" name={`access-${s.name}`} checked={mode === m} disabled={busy} onChange={() => setMode(m)} />
                 <span>
                   <b>{accessWord(m)}</b>
-                  <span className="sub">{m === "local" ? t("svc.access.local.sub", { addr: lan ?? t("svc.access.local.addr") }) : m === "key" ? t("svc.access.key.sub") : t("svc.access.public.sub")}</span>
+                  <span className="sub">{m === "local" ? (s.machine === "host" && !lan ? t("svc.access.local.host") : t("svc.access.local.sub", { addr: lan ?? t("svc.access.local.addr") })) : m === "key" ? t("svc.access.key.sub") : t("svc.access.public.sub")}</span>
                 </span>
               </label>
             ))}

@@ -150,7 +150,7 @@ def door_client(port: int, *, mode: str = "public") -> tuple[FakeApp, TestClient
 
 @pytest.fixture
 def alive(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("daedalus.extensions.api.pid_alive", lambda _: True)
+    monkeypatch.setattr("daedalus.extensions.services.pid_alive", lambda _: True)
 
 
 def test_a_hot_reload_gets_through_the_door(alive: None) -> None:
@@ -236,7 +236,7 @@ def test_a_service_that_is_down_or_unshared_closes_the_socket(alive: None, monke
         with pytest.raises(WebSocketDisconnect), door.websocket_connect("/s/demo-ab12/hmr"):
             pass
         _, door = door_client(server.port)
-        monkeypatch.setattr("daedalus.extensions.api.pid_alive", lambda _: False)
+        monkeypatch.setattr("daedalus.extensions.services.pid_alive", lambda _: False)
         with pytest.raises(WebSocketDisconnect), door.websocket_connect("/s/demo-ab12/hmr"):
             pass
     assert not server.seen

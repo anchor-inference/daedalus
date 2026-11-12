@@ -159,7 +159,7 @@ from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.quota_sampler import fetch_subscriptions
 from daedalus.extensions.review import ReviewRefused
-from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
+from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFIX, SHARE_MODES, dial_address
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
@@ -4787,6 +4787,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             return await services.stop(session_id, name, note="stopped by the operator")
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc  # a host service while the host's daemon is down
 
     @api.delete("/api/sessions/{session_id}/services/{name}")
     async def session_service_remove(session_id: str, name: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -4794,7 +4796,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         services = app.extensions.get("services")
         if services is None:
             raise HTTPException(503, "services are not installed")
-        if not await services.remove(session_id, name):
+        try:
+            removed = await services.remove(session_id, name)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc  # a host service while the host's daemon is down
+        if not removed:
             raise HTTPException(404, f"no service {name!r} in this session")
         return {"removed": name}
 
@@ -4984,7 +4990,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             return response
         if not phone and not services.share_allows(row, carried or request.cookies.get(cookie_name) or request.headers.get("x-share-key")):  # type: ignore[attr-defined]
             raise HTTPException(403, "this service needs its key: open the link that carries ?key=…")
-        if row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):
+        # Loopback for a process of this machine, the host's bridge address for one on the host.
+        address = await dial_address(services, row)
+        if address is None:
             raise HTTPException(503, "the service is not running")
         # Nothing under /s/ is for search engines: the address is the only secret of a public share.
         answer = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
@@ -4996,7 +5004,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if request.method == "OPTIONS" and "access-control-request-method" in request.headers:
                 allowed = {"Access-Control-Allow-Methods": "*", "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*")}
                 return Response(status_code=204, headers={**answer, **allowed})
-        upstream = f"http://127.0.0.1:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+        upstream = f"http://{address}:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
         response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug), sandbox=not at_door, extra_headers=answer)
         # A page must not outlive the share in a browser cache: switching a service back to LAN-only takes
         # effect on the next reload, not when the cached copy expires.
@@ -5028,11 +5036,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             await websocket.close(code=1008)
             return
         presented = carried or websocket.query_params.get("key") or websocket.cookies.get(SHARE_COOKIE_PREFIX + slug) or websocket.headers.get("x-share-key")
-        if not (phone or services.share_allows(row, presented)) or row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):  # type: ignore[attr-defined]
+        address = await dial_address(services, row) if phone or services.share_allows(row, presented) else None  # type: ignore[attr-defined]
+        if address is None:
             await websocket.close(code=1008)
             return
         rest = [(k, v) for k, v in websocket.query_params.multi_items() if k != "key"]
-        upstream = f"ws://127.0.0.1:{row['port']}/{path}" + (f"?{urlencode(rest)}" if rest else "")
+        upstream = f"ws://{address}:{row['port']}/{path}" + (f"?{urlencode(rest)}" if rest else "")
         await forward_websocket(websocket, upstream, f"/s/{slug}~{carried}" if carried else f"/s/{slug}", strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug))
 
     @api.post("/api/sessions/{session_id}/loop")

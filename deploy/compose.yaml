@@ -134,6 +134,9 @@ services:
       # Container names start with the compose project; the rule that keeps the agent out of them reads it.
       DAEDALUS_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-deploy}
       SERVICES_PORT_RANGE: ${SERVICES_PORT_RANGE:-8100-8119}
+      # Services a session in a host folder starts on the server through the host terminal; not
+      # published, so nothing here maps them (see extra_hosts below for how they are reached).
+      HOST_SERVICES_PORT_RANGE: ${HOST_SERVICES_PORT_RANGE:-8140-8159}
       SERVICES_PUBLIC_HOST: ${SERVICES_PUBLIC_HOST:-}
       SERVICES_DOOR_PORT: ${SERVICES_DOOR_PORT:-8766}
       SERVICES_PUBLIC_URL: ${SERVICES_PUBLIC_URL:-}
@@ -219,6 +222,10 @@ services:
       # The door shared services are served from, on an origin that is not the app's. Published like
       # the range above, and it opens less: only what the operator switched to public or by key.
       - "${SERVICES_DOOR_PORT:-8766}:${SERVICES_DOOR_PORT:-8766}"
+    # The server's own address on the Docker bridge. A service started on the server through the host
+    # terminal is told to listen there: the share proxy in here reaches it, and the LAN does not,
+    # which loopback (unreachable from in here) and every interface (the whole network) would not give.
+    extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [telegram, keys, search]
     depends_on:
       keyproxy:
