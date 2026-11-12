@@ -41,7 +41,7 @@ import (
 //	{"command":"focus","link":L}   the app was opened again, with the daedalus:// link L when there was one
 //	{"command":"sign-in"}          the app in the window is on its login screen: mint a link that signs it in
 //	{"command":"computer-stop"}    the operator pressed the shell's Stop shortcut or tray item: stop the agent on the desktop
-//	{"command":"quit"}             the window was closed: stop, as Ctrl+C would
+//	{"command":"quit"}             the application quit (a closed window only hides it when it runs in the background): stop, as Ctrl+C would
 //
 // The end of standard input is a quit as well. A shell that crashed or was killed by an uninstaller
 // must not leave a native agent running behind a window nobody can see.

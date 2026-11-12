@@ -1167,10 +1167,16 @@
       "synonyms": ["appshot", "screenshot", "screen capture", "снимок экрана", "скриншот"]
     },
     {
-      "section": "desktop", "anchor": "desktop.hideToTray", "config": null,
-      "title": { "en": "Hide to tray on close", "ru": "Сворачивать в трей при закрытии" },
-      "about": { "en": "Closing the window keeps Daedalus running in the tray instead of quitting.", "ru": "Закрытие окна оставляет Daedalus работать в трее, а не завершает его." },
-      "synonyms": ["tray", "close to tray", "minimize", "трей", "свернуть"]
+      "section": "desktop", "anchor": "desktop.background", "config": null,
+      "title": { "en": "Keep running in the background when the window is closed", "ru": "Работать в фоне, когда окно закрыто" },
+      "about": { "en": "Closing the window keeps Daedalus, its agent links, contacts and public address running instead of quitting.", "ru": "Закрытие окна оставляет Daedalus, его ссылки для агентов, контакты и публичный адрес работать, а не завершает его." },
+      "synonyms": ["tray", "close to tray", "background", "minimize", "keep running", "трей", "свернуть", "фон", "в фоне"]
+    },
+    {
+      "section": "desktop", "anchor": "desktop.quit", "config": null,
+      "title": { "en": "Quit Daedalus", "ru": "Завершить Daedalus" },
+      "about": { "en": "Closes the desktop application and, in the native installation, stops the agent.", "ru": "Закрывает настольное приложение и, в нативной установке, останавливает агента." },
+      "synonyms": ["quit", "exit", "close", "выйти", "выход", "завершить"]
     },
     {
       "section": "models", "anchor": "action_rules.review_preset", "config": "action_rules.review_preset",

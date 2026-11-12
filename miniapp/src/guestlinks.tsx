@@ -11,6 +11,7 @@ import { KeyLine, OfferContact, OwnerSay } from "./contacts";
 import { GuestHeldApproval, kindWord, LinkFiles, TaskList } from "./linkfiles";
 import { LinkExport } from "./linkexport";
 import { LinkActions, LinkCardView, LinkSubscriptions, Summaries } from "./linkflows";
+import { BackgroundNote } from "./backgroundnote";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
@@ -750,6 +751,7 @@ function MadeLink({ url, topic, toast, onDone }: { url: string; topic: string; t
       <textarea id="guest-url" className="field mono" readOnly rows={3} value={text} onFocus={(e) => e.target.select()} />
       <button type="button" className="btn primary guest-copy" data-guest-copy="" onClick={() => void copy()}><Icon name={copied ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
       <div className="sub attn" data-guest-once="">{t("guest.once")}</div>
+      <BackgroundNote />
       <div className="sheet-foot">
         <button type="button" className="btn primary" onClick={onDone}>{t("guest.done")}</button>
       </div>

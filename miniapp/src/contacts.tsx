@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { api, Contact, ContactList } from "./api";
+import { BackgroundNote } from "./backgroundnote";
 import { relTime, usd } from "./format";
 import { Icon } from "./icons";
 import { t } from "./i18n";
@@ -116,6 +117,7 @@ export function ContactsSection({ sessionId, toast }: { sessionId: string; toast
     <section className="subagents-group contacts" data-group="contacts" data-contacts="">
       <div className="dt-label"><span>{t("contact.group")}</span><span className="dt-aside">{contacts.filter((c) => c.state !== "broken").length}</span></div>
       {data.fingerprint && <div className="sub contacts-mine" data-contacts-mine="">{t("contact.mine", { fp: data.fingerprint })}</div>}
+      <BackgroundNote />
       {contacts.map((contact) => <ContactRow key={contact.id} contact={contact} sessionId={sessionId} toast={toast} />)}
     </section>
   );

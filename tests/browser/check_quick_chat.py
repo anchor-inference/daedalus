@@ -65,7 +65,7 @@ window.__action = null;
 window.__navigate = null;
 const png = Uint8Array.from(atob('__PNG__'), (c) => c.charCodeAt(0));
 const shot = (name) => ({ ok: true, name, type: 'image/png', bytes: png, width: 160, height: 100 });
-window.__desk = { settings: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true } };
+window.__desk = { settings: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', background: null } };
 window.__region = null;
 window.__voice = false;
 window.daedalus = {
@@ -92,9 +92,9 @@ window.daedalus = {
   },
 };
 function info(errors) {
-  return { settings: { ...window.__desk.settings }, defaults: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true },
+  return { settings: { ...window.__desk.settings }, defaults: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', background: null },
     report: { quickChat: { accelerator: window.__desk.settings.quickChat, ok: true, reason: '' }, appshot: { accelerator: window.__desk.settings.appshot, ok: false, reason: 'taken' } },
-    errors, platform: 'linux', wayland: true, tray: { ready: true, note: '' }, screen: 'granted' };
+    errors, platform: 'linux', wayland: true, tray: { ready: true, note: '' }, background: window.__desk.settings.background !== false, screen: 'granted' };
 }
 """.replace("__PNG__", PNG)
 

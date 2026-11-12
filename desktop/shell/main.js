@@ -529,8 +529,10 @@ function readJSON(file) {
 // nothing in the window — so it is the standard one. Elsewhere the bar is hidden (Alt shows it)
 // and carries the same edit, zoom and reload commands, so their shortcuts work.
 function installMenu() {
+  // The File menu is Quit alone (Ctrl+Q) on Windows and Linux: with the window kept in the background
+  // where the desktop shows no tray, quitting must not depend on finding the settings page.
   const template = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : [{ role: 'fileMenu' }]),
     { role: 'editMenu' },
     {
       label: strings.view,

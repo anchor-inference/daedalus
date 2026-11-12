@@ -1,4 +1,4 @@
-// Settings → Desktop app: the shortcuts of Quick Chat, the appshots and dictation, closing to the tray, and what
+// Settings → Desktop app: the shortcuts of Quick Chat, the appshots and dictation, running in the background, and what
 // this system allows. The values belong to the desktop shell, not to the host — each computer the
 // application runs on keeps its own — so they are read and written through window.daedalus.desk.
 
@@ -7,6 +7,7 @@ import { t } from "../i18n";
 import { acceleratorFrom, showAccelerator } from "../quick/accelerator";
 import type { DeskInfo, DeskSettings, ShortcutName } from "../quick/bridge";
 import { Row } from "../settingsrow";
+import { confirmAsync } from "../ui";
 import { Switch } from "../ui/components";
 
 /** What a system shortcut runs where the desktop refuses the application one of its own: a second
@@ -69,7 +70,10 @@ export function DesktopPanel() {
     );
   };
 
-  const trayNote = info.tray.note === "gnome" ? t("settings.desktop.tray.gnome") : !info.tray.ready ? t("settings.desktop.tray.unavailable") : "";
+  // Where there is a tray its menu has Open and Quit; where there is none the way back is opening the
+  // application again, and Quit is the row below or the File menu.
+  const backgroundNote = info.tray.note === "gnome" ? t("settings.desktop.background.gnome") : info.tray.ready ? t("settings.desktop.background.tray") : t("settings.desktop.background.notray");
+  const quit = desk.quit;
   return (
     <div className="card settings-desktop">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.sec.desktop")}</div>
@@ -85,12 +89,20 @@ export function DesktopPanel() {
           <span className="settings-desktop-commands">{COMMANDS.map((command) => <code key={command}>{command}</code>)}</span>
         </div>
       )}
-      <Row title={t("settings.desktop.tray.title")} desc={<>{t("settings.desktop.tray.desc")}{trayNote && <span className="settings-desktop-note"> {trayNote}</span>}</>} data-setting="desktop.hideToTray">
-        <Switch checked={info.settings.hideToTray && info.tray.ready} disabled={!info.tray.ready} onChange={(next) => void save({ hideToTray: next })} label={t("settings.desktop.tray.title")} />
-      </Row>
+      {/* A shell older than the setting reports no `background` and would not hear the switch. */}
+      {info.background !== undefined && (
+        <Row title={t("settings.desktop.background.title")} desc={<>{t("settings.desktop.background.desc")}<span className="settings-desktop-note"> {backgroundNote}</span></>} data-setting="desktop.background">
+          <Switch checked={info.background} onChange={(next) => void save({ background: next })} label={t("settings.desktop.background.title")} />
+        </Row>
+      )}
       {mac && (
         <Row title={t("settings.desktop.screen.title")} desc={t(info.screen === "granted" ? "settings.desktop.screen.granted" : info.screen === "not-determined" ? "settings.desktop.screen.unknown" : "settings.desktop.screen.denied")}>
           {info.screen !== "granted" && <button type="button" className="btn small" onClick={() => desk.openScreenSettings()}>{t("settings.desktop.screen.open")}</button>}
+        </Row>
+      )}
+      {quit && (
+        <Row title={t("settings.desktop.quit.title")} desc={t("settings.desktop.quit.desc")} data-setting="desktop.quit">
+          <button type="button" className="btn small danger" data-desktop-quit="" onClick={() => void confirmAsync(t("settings.desktop.quit.ask"), { action: t("settings.desktop.quit.button"), danger: true }).then((yes) => yes && quit())}>{t("settings.desktop.quit.button")}</button>
         </Row>
       )}
     </div>
