@@ -2,6 +2,14 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-11-13 — desktop-v0.24.3
+
+- **Updates no longer back up your work.** The backup an update takes now holds only the installation's state: the database, secrets, settings and the checkouts it replaces. Workspaces, worktrees, checkpoints, temporary uploads, downloaded models and `node_modules` are left where they are, so an update no longer spends minutes archiving folders with hundreds of thousands of files. A rollback leaves them in place too. Under the Linux writer fence they are moved aside by rename and back, never copied. In Docker mode the workspaces, worktrees and cache volumes are no longer archived.
+- **Keep running in the background.** Closing the window can leave Daedalus running, so agent links, contacts, the tunnel and services on your phone stay up. Settings → Desktop app has the switch, and it now works on Linux desktops without a tray icon too. The app offers it when you make an agent link or a contact. *Quit Daedalus* is in Settings and in the File menu.
+- **Services for agents on your own machine.** A chat working in a host folder starts services with ServiceStart like any other chat: a port from their own range (8140–8159 by default), logs, a share link and a phone QR, restart and the Services panel, marked *host*. The agent's browser can open them.
+- **Services that die wake their agent.** A service that ends on its own wakes the chat once with its exit code and the end of its log; a long-running one marked restart is started again instead. A recorded process is checked by its start time, so a recycled process id is never taken for the service or stopped. A share link to a service that does not answer explains why, and names the firewall when a host service is unreachable from Docker.
+- **Moving a chat into a host project** works: the move uses the same check as creating a chat there and makes the agent's own directory on the host.
+
 ## 2026-11-12 — desktop-v0.24.2
 
 - **Files, tasks and questions over agent links.** A link now carries files both ways, sent in pieces with a checksum and resumed after a dropped connection, with limits per file and per day or none. A guest's files land in `guest-files/` in the chat's folder as the guest's data. Agents can set each other tasks that move from accepted through working and needs input to done, with progress lines and cancel from either side, and the agent that set one wakes when it moves. When a guest asks what only you can answer, the question reaches you in the app and Telegram, and the agent answers the guest after you do. On a limited link, files going out wait for you, and you can hold single files back.
