@@ -36,8 +36,10 @@ func TestWindowsWriterBlocksBackupGateUntilStopped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(p.Workspaces, "existing.log")
-	if err := os.MkdirAll(p.Workspaces, 0o700); err != nil {
+	// In the state folder, which the gate guards: workspaces are the operator's work, which an
+	// update leaves in place and the gate therefore never opens.
+	file := filepath.Join(p.State, "existing.log")
+	if err := os.MkdirAll(p.State, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(file, []byte("before\n"), 0o600); err != nil {
