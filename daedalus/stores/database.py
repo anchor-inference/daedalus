@@ -4010,6 +4010,19 @@ async def _host_services(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _host_services))
 
+# 166 — a service's pid comes with the mark of the process it was given to (the boot and the start
+# time, ``daedalus.processes.start_mark``, or the host's own when it runs there). A pid is reused: a row
+# that outlived its process across a reboot read as running while a stranger held the number, and
+# stopping the service signalled the stranger. NULL for a row written before, judged by its pid alone.
+async def _service_start_marks(conn: aiosqlite.Connection) -> None:
+    """Added only when missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(services)")).fetchall()}
+    if "pid_start" not in present:
+        await conn.execute("ALTER TABLE services ADD COLUMN pid_start TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _service_start_marks))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

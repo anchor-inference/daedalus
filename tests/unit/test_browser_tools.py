@@ -626,3 +626,20 @@ async def test_a_page_without_a_popup_reads_as_before(rig: Rig) -> None:
     await rig.call(sid, "BrowserOpen", url="https://shop.test/shoes")
     text, failed = await rig.call(sid, "BrowserSnapshot")
     assert not failed and "covers this page" not in text and "[over the page" not in text
+
+
+async def test_the_wall_opens_the_hosts_services_range_and_the_address_they_are_announced_at(rig: Rig) -> None:
+    """A session in a host folder runs its servers on the host's side of the Docker bridge; ServiceStart
+    names http://<that address>:<port>, and the agent's browser must be able to open what it was told."""
+    service = rig.app.extensions["browser"]
+    rig.app.extensions["services"] = SimpleNamespace(host=SimpleNamespace(address=lambda: "10.0.70.1"))
+    lo, hi = (int(p) for p in rig.app.settings.host_services_port_range.split("-"))
+    rules = service.wall("container")
+    assert [lo, hi] in rules["services_ports"] and "egress_allow" not in rules
+    rig.app.config.policy.egress_allow = ["example.com"]
+    assert service.wall("container")["egress_allow"] == ["example.com", "10.0.70.1"], "the allowlist is about the web, not this installation"
+    rig.app.settings.native = True
+    try:
+        assert [lo, hi] not in service.wall("container")["services_ports"], "natively a host folder's services take the ordinary range"
+    finally:
+        rig.app.settings.native = False

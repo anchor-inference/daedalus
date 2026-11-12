@@ -174,8 +174,8 @@ class HostExecBackend:
             f"- You work on the operator's own machine (the host), in {workdir}: Exec, Verify, "
             "background jobs and the file tools run there through the host terminal, with no sandbox around them, "
             "so take the care you would take on someone's own computer. A server goes to ServiceStart, which runs it "
-            "there too: bind it to $HOST and listen on $PORT, the address and port Daedalus reaches it at, and it "
-            "appears in the operator's Services panel with its log."
+            "there too: bind it to $HOST and listen on $PORT, the address and port Daedalus and your browser reach it at "
+            "(ServiceStart names the URL), and it appears in the operator's Services panel with its log."
         )
 
     async def put_bytes(self, path: str, data: bytes) -> None:

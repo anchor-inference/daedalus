@@ -1455,9 +1455,11 @@ on every connection and within two seconds of a change.
 
 On every connection the host sends `net.configure` (The network wall, below): `sealed_ports` = the
 policy's sealed ports (the API, the launcher, the terminal daemons' ports) and the key proxy's port
-when it is on loopback, `services_ports` = the agent's and the terminals' ranges, `local_sites` from
-`[browser] local_sites`, `lan_allow` from `[browser] lan_allow` and, when the operator has one,
-`[policy] egress_allow`; in a container also `loopback_rewrite: "host.docker.internal"` and
+when it is on loopback, `services_ports` = the agent's and the terminals' ranges (in a container
+also `HOST_SERVICES_PORT_RANGE`, where a host session's services listen on the host's side of the
+Docker bridge), `local_sites` from `[browser] local_sites`, `lan_allow` from `[browser] lan_allow`
+and, when the operator has one, `[policy] egress_allow` with the bridge address those host services
+are announced at added; in a container also `loopback_rewrite: "host.docker.internal"` and
 `host_addrs` = `SERVICES_PUBLIC_HOST` when it is an address. A navigation the wall refuses with `decision: "ask"` becomes the caller's
 question to the operator (rule `browser.network`, the key over the group, host and port); on a yes
 the host sends `net.grant {group_id, host, port}` and navigates once more. A `deny` is told to the
@@ -1528,7 +1530,8 @@ The host sends:
 - **natively**: `sealed_ports` = its API, the key proxy, the terminal daemons' hook listeners, the
   launcher's page (the policy's own sealed ports); `services_ports` = the agent's and the
   terminals' ranges; `local_sites` from the settings (`ask` by default);
-- **in a container**: the same, plus `loopback_rewrite: "host.docker.internal"`, so
+- **in a container**: the same with the host services' range among `services_ports`, plus
+  `loopback_rewrite: "host.docker.internal"`, so
   `http://127.0.0.1:8103` — the address the agent prints — opens the service published on the
   Docker host. Unless `local_sites` is `services`, a loopback address on any other port is sent there
   too, so a dev server's `http://localhost:5173` is the Docker host's port 5173; and `host_addrs`

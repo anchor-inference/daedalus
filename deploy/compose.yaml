@@ -371,8 +371,9 @@ services:
       # Profiles (the agent's logins, per project), downloads, uploads. No workspace, no project
       # folder: a file reaches a page, or leaves one, only through the host and its walls.
       - browser-state:/var/lib/browserd
-    # The agent's services and the terminals' servers are published on the Docker host; the wall
-    # sends a page's http://127.0.0.1:<services port> there, and refuses the host's other ports.
+    # The agent's services and the terminals' servers are published on the Docker host, and a host
+    # session's services listen there on HOST_SERVICES_PORT_RANGE; the wall sends a page's
+    # http://127.0.0.1:<services port> there, and refuses the host's other ports.
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [browser]
 

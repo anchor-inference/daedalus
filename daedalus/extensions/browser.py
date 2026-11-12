@@ -90,7 +90,12 @@ def build(app: Application) -> Browsers:
         """The network wall's rules for ``env``'s daemon (``docs/architecture/browser.md``, The
         network wall). The daemon cannot know them: this installation's own ports, the ranges its
         services are published on, the operator's allowlist and LAN addresses."""
-        ranges = [r for r in (_port_range(settings.services_port_range), _port_range(settings.terminals_port_range)) if r]
+        # In a container the host's own services range too: a session in a host folder starts its
+        # servers on the host, on the host's side of the Docker bridge, which is the very address the
+        # loopback rewrite below leads to. Every other port of the host stays shut. Natively a host
+        # folder is this machine's and its services take the ordinary range.
+        texts = [settings.services_port_range, settings.terminals_port_range] + ([] if settings.native else [settings.host_services_port_range])
+        ranges = [r for r in (_port_range(text) for text in texts) if r]
         # The installation's own doors, sealed in both environments: in a container they are on the
         # Docker host, which the local sites setting can open to the browser.
         sealed = set(manager.sealed_ports())
@@ -121,6 +126,13 @@ def build(app: Application) -> Browsers:
             # ask, which the host turns into the operator's question about the site.
             rules["egress_allow"] = list(app.config.browser.user.granted_sites)
         elif allow:
+            # The address a host service is announced at (ServiceStart says http://<it>:<port>) is
+            # the installation's own, not the web the allowlist is about; the wall still opens only
+            # the services ranges on it.
+            services = app.extensions.get("services")
+            with contextlib.suppress(Exception):
+                if services is not None and not settings.native and (address := services.host.address()):  # type: ignore[attr-defined]
+                    allow = [*allow, address]
             rules["egress_allow"] = allow
         return rules
 

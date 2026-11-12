@@ -159,7 +159,13 @@ from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.quota_sampler import fetch_subscriptions
 from daedalus.extensions.review import ReviewRefused
-from daedalus.extensions.services import PHONE_COOKIE_PREFIX, SHARE_COOKIE_PREFIX, SHARE_MODES, dial_address
+from daedalus.extensions.services import (
+    PHONE_COOKIE_PREFIX,
+    SHARE_COOKIE_PREFIX,
+    SHARE_MODES,
+    dial_address,
+    unreachable_hint,
+)
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
@@ -5005,7 +5011,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 allowed = {"Access-Control-Allow-Methods": "*", "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*")}
                 return Response(status_code=204, headers={**answer, **allowed})
         upstream = f"http://{address}:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
-        response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug), sandbox=not at_door, extra_headers=answer)
+        response = await forward_http(request, upstream, prefix, strip_cookies=(SESSION_COOKIE, api_two_factor.PENDING_COOKIE, PHONE_COOKIE_PREFIX + slug), sandbox=not at_door, extra_headers=answer, hint=unreachable_hint(app.settings, address, int(row["port"])))
         # A page must not outlive the share in a browser cache: switching a service back to LAN-only takes
         # effect on the next reload, not when the cached copy expires.
         if response.headers.get("content-type", "").startswith("text/html"):

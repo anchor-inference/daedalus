@@ -77,6 +77,28 @@ def pid_alive(pid: int | None) -> bool:
     return True
 
 
+def start_mark(pid: int | None) -> str | None:
+    """What tells this process from a later one given the same pid: the boot it runs in and the
+    moment it started (``/proc/<pid>/stat`` field 22, in clock ticks since that boot). ``None`` where
+    there is no ``/proc`` to ask, or the process is gone.
+
+    A pid is only a number the kernel hands out again. A service's row outlives its process — across
+    a reboot of the host, or simply a long time — and a stranger that got the same number read as
+    the service still running, and was the one ServiceStop signalled."""
+    if not pid or pid <= 0 or WINDOWS:
+        return None
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+            # The command name in parentheses may hold spaces and ")", so the fields are counted
+            # after its last ")": the first of them is field 3, which makes field 22 the twentieth.
+            fields = fh.read().rsplit(")", 1)[-1].split()
+        with open("/proc/sys/kernel/random/boot_id", encoding="utf-8") as fh:
+            boot = fh.read().strip()
+    except OSError:
+        return None
+    return f"{boot}:{fields[19]}" if len(fields) > 19 else None
+
+
 def _windows_alive(pid: int) -> bool:
     import ctypes  # Lazy: only Windows reaches here, and the module is not free to import
     from ctypes import wintypes  # Lazy: as above
