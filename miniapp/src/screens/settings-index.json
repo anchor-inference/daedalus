@@ -1175,7 +1175,7 @@
     {
       "section": "desktop", "anchor": "desktop.quit", "config": null,
       "title": { "en": "Quit Daedalus", "ru": "Завершить Daedalus" },
-      "about": { "en": "Closes the desktop application and, in the native installation, stops the agent.", "ru": "Закрывает настольное приложение и, в нативной установке, останавливает агента." },
+      "about": { "en": "Closes Daedalus; in native mode the agent stops with it.", "ru": "Закрывает Daedalus; в нативном режиме вместе с ним останавливается агент." },
       "synonyms": ["quit", "exit", "close", "выйти", "выход", "завершить"]
     },
     {
