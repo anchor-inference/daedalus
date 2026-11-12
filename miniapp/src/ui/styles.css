@@ -1528,6 +1528,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .service-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .service-row .dot.running { background: var(--ok); }
 .service-row .dot.dead { background: var(--bad); }
+.service-row .dot.unknown { background: var(--warn); }
 .service-name { font-size: var(--fs-13); font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .service-url { color: var(--info); font-weight: 400; font-size: var(--fs-12); text-decoration: none; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-name { min-width: 0; }

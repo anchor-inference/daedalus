@@ -327,6 +327,10 @@ class Settings(BaseSettings):
     default trusts loopback, which is also where a tunnel's client connects from."""
     services_port_range: str = "8100-8119"
     """Ports a session's services may listen on; the compose file publishes the same range from the container."""
+    host_services_port_range: str = "8140-8159"
+    """Ports a service started on the host (by a session working in a host folder, through the host
+    terminal daemon) listens on. Not ``services_port_range``: in a container installation the Docker
+    host holds every port of that range for the container it publishes, so none of them is free there."""
     services_public_host: str = Field(default_factory=lambda: "localhost" if native_mode() else "")
     """The address the operator reaches those ports at (the docker host on the LAN); empty = shown as <host>.
     Natively there is no host but this one: a service the agent starts listens on the loopback interface

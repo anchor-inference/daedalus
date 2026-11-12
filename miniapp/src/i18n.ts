@@ -1191,6 +1191,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "status.rejected": { en: "Rejected", ru: "Отклонено" },
   "status.closed": { en: "Closed", ru: "Закрыто" },
   "status.dead": { en: "Died", ru: "Упал" },
+  "status.unknown": { en: "Unknown", ru: "Неизвестно" },
 
   // ── times, sizes and sums ──────────────────────────────────────────────────────────────
   "fmt.now": { en: "now", ru: "сейчас" },
@@ -1297,6 +1298,9 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "svc.sheet.title": { en: "Access to {name}", ru: "Доступ к {name}" },
   "svc.access.local.sub": { en: "Reachable only from your network at {addr}.", ru: "Доступен только из вашей сети по адресу {addr}." },
   "svc.access.local.addr": { en: "its LAN address", ru: "его адресу в сети" },
+  "svc.access.local.host": { en: "Not reachable from your network: it runs on the server, where only Daedalus reaches it. Choose a key or public link, or send it to a phone.", ru: "Из вашей сети недоступен: он работает на сервере, где до него доходит только Daedalus. Выберите ссылку с ключом или публичную либо отправьте его на телефон." },
+  "svc.host": { en: "host", ru: "хост" },
+  "svc.host.title": { en: "Runs on the server itself, started through the host terminal", ru: "Работает на самом сервере, запущен через терминал хоста" },
   "svc.access.key.sub": { en: "Served through the site; the link carries a key once and sets a cookie.", ru: "Отдаётся через сайт: ссылка один раз несёт ключ и ставит cookie." },
   "svc.access.public.sub": { en: "Served through the site; anyone with the link, no login.", ru: "Отдаётся через сайт: любой со ссылкой и без входа." },
   "svc.sandboxed": { en: "This address has no separate origin for shared pages yet, so a page runs in a sandbox: its own storage and cookies will not work. Set SERVICES_PUBLIC_URL to give it one.", ru: "У этого адреса пока нет отдельного источника для общих страниц, поэтому страница работает в песочнице: её локальное хранилище и куки недоступны. Задайте SERVICES_PUBLIC_URL, чтобы это исправить." },

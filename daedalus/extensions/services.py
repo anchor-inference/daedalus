@@ -17,6 +17,12 @@ the app (``daedalus.extensions.api_services_door``); ``public_address.services_b
 Natively a service is told to listen on loopback, through ``$HOST``. In a container it has to listen
 on every interface of the container, because a published port arrives at the container's own address
 and not at its loopback; the container's edge is what is published, and ``compose.yaml`` decides that.
+
+A session that works in a host folder starts its services on the host, through the host terminal
+daemon (:mod:`daedalus.host.host_services`): the row says ``machine = 'host'``, its pid is the host's,
+its port comes from ``host_services_port_range``, and ``address`` is where on the host it listens and
+where the proxy dials it. Whether it still runs is asked of the daemon, so while the daemon is down
+the answer is "unknown", never "dead": the process may well be serving.
 """
 
 from __future__ import annotations
@@ -29,12 +35,16 @@ import secrets
 import signal
 import socket
 import subprocess
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus import public_address
 from daedalus.extensions.notifications import Draft
+from daedalus.host.filesystem import machine_of
+from daedalus.host.host_exec import BRIDGE_DOWN, HOST
+from daedalus.host.host_services import HostDown, HostServices
 from daedalus.processes import end_tree, pid_alive
 from daedalus.stores import pairing
 from daedalus.tools import sandbox_health
@@ -53,6 +63,32 @@ START_GRACE_SECONDS = 1.5
 SHARE_MODES = ("local", "public", "key")
 SHARE_COOKIE_PREFIX = "dshare-"
 PHONE_COOKIE_PREFIX = "dphone-"
+HOST_SEEN_SECONDS = 5.0
+"""How long the daemon's word on whether a host service runs is believed. The share proxy asks on every
+request, a page asks for dozens of files at once, and each question is a call to the host."""
+HOST_WATCH_SECONDS = 30.0
+"""How often the host's services are looked at: the daemon can go and come back, and the host reboot,
+while this process runs, and nothing else would notice that a service died with them."""
+HOST_RESTART_AFTER_SECONDS = 600.0
+"""A host service that dies sooner than this after its start is reported, not started again: what
+dies on its own that soon is the program failing, and starting it every half minute would hide that."""
+
+
+def on_host(row: dict[str, Any]) -> bool:
+    return row.get("machine") == HOST
+
+
+async def dial_address(services: Any, row: dict[str, Any]) -> str | None:
+    """Where the proxy reaches a service's port, or ``None`` when the service is not running.
+
+    Loopback for a process of this machine; for a host service, the address on the host it was told
+    to listen on. Any services object will do: one without host services is never asked about them.
+    """
+    if row.get("status") != "running" or not row.get("port"):
+        return None
+    if on_host(row):
+        return (str(row.get("address") or "") or None) if await services.host_alive(row) else None
+    return "127.0.0.1" if pid_alive(row.get("pid")) else None
 
 
 def _now() -> str:
@@ -88,6 +124,11 @@ class Services:
         self.public_host = app.settings.services_public_host.strip()
         self.bind_host = "127.0.0.1" if app.settings.native else "0.0.0.0"  # noqa: S104 — the module's docstring says why
         self._procs: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
+        self.host_lo, self.host_hi = parse_range(app.settings.host_services_port_range)
+        manager = app.manager
+        self.host = HostServices(lambda: getattr(manager, "host_bridge", None), native=bool(app.settings.native))
+        self._host_seen: dict[int, tuple[float, bool | None]] = {}
+        """A host pid → when the daemon was asked about it and whether it ran; ``None`` is "no answer"."""
 
     # -- views ----------------------------------------------------------------------
 
@@ -116,7 +157,20 @@ class Services:
         return url
 
     def view(self, row: dict[str, Any]) -> dict[str, Any]:
-        alive = row["status"] == "running" and pid_alive(row.get("pid"))
+        """The row as the app and the tools show it. A host service's liveness is what the daemon last
+        said (:meth:`refresh_host` asks); one the daemon could not be asked about is ``unknown``, with a
+        note that says why and how to bring the daemon back, because "dead" would be a guess."""
+        note = row.get("note")
+        if on_host(row):
+            seen = self._host_seen.get(int(row.get("pid") or 0), (0.0, None))[1]
+            if row["status"] == "running" and seen is None:
+                status = "unknown"
+                note = f"it runs on the host, and {BRIDGE_DOWN}"
+            else:
+                status = "running" if row["status"] == "running" and seen else ("stopped" if row["status"] == "stopped" else "dead")
+        else:
+            alive = row["status"] == "running" and pid_alive(row.get("pid"))
+            status = "running" if alive else ("stopped" if row["status"] == "stopped" else "dead")
         mode = row.get("share_mode") or "local"
         return {
             "share": {
@@ -132,11 +186,16 @@ class Services:
             "command": row["command"],
             "cwd": row["cwd"],
             "port": row.get("port"),
-            "url": self.url_for(row.get("port")),
+            # A host service listens on the host's side of the Docker bridge, which the operator's
+            # network does not reach (host_services says why): it is opened through its share or a
+            # phone's code, and an address that leads nowhere is not offered.
+            "url": None if on_host(row) and not self.app.settings.native else self.url_for(row.get("port")),
             "pid": row.get("pid"),
-            "status": "running" if alive else ("stopped" if row["status"] == "stopped" else "dead"),
+            "status": status,
+            "machine": HOST if on_host(row) else None,
+            "address": row.get("address") if on_host(row) else None,
             "restart": bool(row.get("restart")),
-            "note": row.get("note"),
+            "note": note,
             "started_at": row["started_at"],
             "stopped_at": row.get("stopped_at"),
             "log_path": row["log_path"],
@@ -148,13 +207,67 @@ class Services:
         return [dict(r) for r in await self.app.db.fetchall("SELECT * FROM services WHERE session_id = ? ORDER BY started_at", (session_id,))]
 
     async def list(self, session_id: str) -> list[dict[str, Any]]:
-        return [self.view(r) for r in await self.rows(session_id)]
+        rows = await self.rows(session_id)
+        await self.refresh_host(rows)
+        return [self.view(r) for r in rows]
+
+    async def _view(self, session_id: str, name: str) -> dict[str, Any]:
+        row = await self.get(session_id, name) or {}
+        await self.refresh_host([row])
+        return self.view(row)
+
+    # -- host services --------------------------------------------------------------
+
+    async def refresh_host(self, rows: Iterable[dict[str, Any]], *, fresh: bool = False) -> None:
+        """Ask the daemon, in one call, which of the running host services in ``rows`` still run. An
+        answer younger than :data:`HOST_SEEN_SECONDS` is kept unless ``fresh``."""
+        now = asyncio.get_running_loop().time()
+        pids = {int(r["pid"]) for r in rows if on_host(r) and r.get("status") == "running" and r.get("pid")}
+        stale = {p for p in pids if fresh or now - self._host_seen.get(p, (-HOST_SEEN_SECONDS * 2, None))[0] > HOST_SEEN_SECONDS}
+        if not stale:
+            return
+        try:
+            alive: set[int] | None = await self.host.alive(stale)
+        except HostDown:
+            alive = None
+        except Exception:  # noqa: BLE001 — a question the host could not answer is an unknown, not a death
+            logger.warning("could not ask the host whether its services run", exc_info=True)
+            alive = None
+        for pid in stale:
+            self._host_seen[pid] = (now, None if alive is None else pid in alive)
+
+    async def host_alive(self, row: dict[str, Any]) -> bool | None:
+        """Whether a host service runs; ``None`` when the daemon cannot be asked."""
+        await self.refresh_host([row])
+        return self._host_seen.get(int(row.get("pid") or 0), (0.0, None))[1]
+
+    async def _running(self, row: dict[str, Any] | None) -> bool:
+        """Whether the row's process runs, asked afresh. A host service the daemon cannot be asked
+        about raises :class:`HostDown`, since neither "running" nor "gone" would be true of it."""
+        if row is None or row.get("status") != "running":
+            return False
+        if not on_host(row):
+            return pid_alive(row.get("pid"))
+        await self.refresh_host([row], fresh=True)
+        alive = self._host_seen.get(int(row.get("pid") or 0), (0.0, None))[1]
+        if alive is None:
+            raise HostDown(f"service {row['name']!r} runs on the host, and {BRIDGE_DOWN}")
+        return alive
+
+    async def _end(self, row: dict[str, Any]) -> None:
+        if on_host(row):
+            await self.host.stop(int(row["pid"]), grace=STOP_GRACE_SECONDS)
+            self._host_seen.pop(int(row["pid"]), None)
+        else:
+            await self._terminate(int(row["pid"]))
 
     async def list_all(self) -> list[dict[str, Any]]:
         """Every session's services, each with the session it belongs to."""
         titles = {row["id"]: row["title"] for row in await self.app.db.fetchall("SELECT id, title FROM sessions")}
         out = []
-        for r in await self.rows():
+        rows = await self.rows()
+        await self.refresh_host(rows)
+        for r in rows:
             out.append({**self.view(r), "session_id": r["session_id"], "session_title": titles.get(r["session_id"], "(deleted session)")})
         out.sort(key=lambda s: (s["status"] != "running", s["session_title"], s["name"]))
         return out
@@ -195,7 +308,7 @@ class Services:
         if rotate_key or mode != (row.get("share_mode") or "local"):
             # Whoever was let in was let in on the terms that just changed, phones included.
             await pairing.forget_phones(self.app.db, slug)
-        return self.view(await self.get(session_id, name) or {})
+        return await self._view(session_id, name)
 
     async def ensure_slug(self, session_id: str, name: str) -> str:
         """The service's address under ``/s/``, minted if it has none. An address is not a share: a
@@ -220,22 +333,38 @@ class Services:
 
     # -- ports ----------------------------------------------------------------------
 
-    async def allocate_port(self, wanted: int | str | None) -> int | None:
-        """A port in the published range that no service holds and nothing listens on; None = no port."""
+    async def allocate_port(self, wanted: int | str | None, *, host: bool = False, starting: tuple[str, str] | None = None) -> int | None:
+        """A port in the published range that no service holds and nothing listens on; None = no port.
+
+        With ``host`` the range is the host's, and "nothing listens" is asked of the host, where the
+        service will listen: a port free in this container says nothing about the operator's machine.
+        A host service whose row says it runs keeps its port even while the daemon cannot say so,
+        except the one ``starting`` names, which is known to be gone and is being started again.
+        """
         if wanted in (None, "", "none"):
             return None
-        taken = {int(r["port"]) for r in await self.rows() if r.get("port") and r["status"] == "running" and pid_alive(r.get("pid"))}
+        rows = await self.rows()
+        free: Callable[[int], bool]
+        if host:
+            lo, hi, what = self.host_lo, self.host_hi, "the host's service range"
+            taken = {int(r["port"]) for r in rows if on_host(r) and r.get("port") and r["status"] == "running" and (r["session_id"], r["name"]) != starting}
+            listening = await self.host.listening()
+            free = lambda port: port not in listening  # noqa: E731
+        else:
+            lo, hi, what = self.lo, self.hi, "the published range"
+            taken = {int(r["port"]) for r in rows if not on_host(r) and r.get("port") and r["status"] == "running" and pid_alive(r.get("pid"))}
+            free = port_free
         if wanted != "auto":
             port = int(wanted)
-            if not (self.lo <= port <= self.hi):
-                raise ValueError(f"port {port} is outside the published range {self.lo}-{self.hi}; use port='auto' or one inside it")
-            if port in taken or not port_free(port):
+            if not (lo <= port <= hi):
+                raise ValueError(f"port {port} is outside {what} {lo}-{hi}; use port='auto' or one inside it")
+            if port in taken or not free(port):
                 raise ValueError(f"port {port} is in use")
             return port
-        for port in range(self.lo, self.hi + 1):
-            if port not in taken and port_free(port):
+        for port in range(lo, hi + 1):
+            if port not in taken and free(port):
                 return port
-        raise ValueError(f"no free port in {self.lo}-{self.hi}; stop a service first")
+        raise ValueError(f"no free port in {lo}-{hi}; stop a service first")
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -252,12 +381,18 @@ class Services:
         if not command:
             raise ValueError("the command is empty")
         existing = await self.get(session_id, name)
-        if existing and existing["status"] == "running" and pid_alive(existing.get("pid")):
+        try:
+            running = await self._running(existing)
+        except HostDown as exc:
+            raise RuntimeError(str(exc)) from exc
+        if running and existing is not None:
             raise ValueError(f"service {name!r} is already running (pid {existing['pid']}); ServiceStop it first")
         # The directory goes through the session's own resolve, as every other path-taking tool's
         # does: a service is the one thing here that outlives the turn, and a cwd taken raw was the
         # single path into the filesystem that the project's containment did not judge.
         session_services = manager.locator_services(session_id)
+        if session_services is not None and machine_of(session_services.exec_backend) == HOST:
+            return await self._start_on_host(session_id, session_services, name=name, command=command, cwd=cwd, port=port, restart=restart)
         workdir = session_services.resolve(cwd) if session_services is not None else (Path(cwd) if cwd else state.workspace)
         if not workdir.is_absolute():
             workdir = state.workspace / workdir
@@ -307,13 +442,44 @@ class Services:
             raise RuntimeError(f"service {name!r} exited with code {proc.returncode} right after start. Log:\n{tail}")
         return self.view(await self.get(session_id, name) or {})
 
+    async def _start_on_host(self, session_id: str, session_services: Any, *, name: str, command: str, cwd: str | None, port: int | str | None, restart: bool) -> dict[str, Any]:
+        """:meth:`start` for a session whose commands run on the host: the same row, the process on the
+        host through the daemon (:class:`HostServices`), and no sandbox, as the session's Exec has none there."""
+        if session_services.remote_readonly:
+            raise ValueError(f"this session may read {session_services.workspace_dir} but not write it, and a service writes its log there")
+        workdir = str(session_services.resolve(cwd))
+        try:
+            address = self.host.address()
+            chosen = await self.allocate_port(port, host=True, starting=(session_id, name))
+            log_path = f"{session_services.logs_dir(LOG_DIR)}/{name}.log"
+            started = await self.host.start(command, cwd=workdir, log=log_path, port=chosen, host=address, watch=START_GRACE_SECONDS)
+        except HostDown as exc:
+            raise RuntimeError(f"a service of this session runs on the host, and {exc}") from exc
+        await self.app.db.execute(
+            "INSERT INTO services(session_id, name, command, cwd, port, pid, status, restart, log_path, note, started_at, stopped_at, machine, address)"
+            " VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, NULL, ?, NULL, ?, ?)"
+            " ON CONFLICT(session_id, name) DO UPDATE SET command = excluded.command, cwd = excluded.cwd, port = excluded.port, pid = excluded.pid,"
+            " status = 'running', restart = excluded.restart, log_path = excluded.log_path, note = NULL, started_at = excluded.started_at,"
+            " stopped_at = NULL, machine = excluded.machine, address = excluded.address",
+            (session_id, name, command, workdir, chosen, started.pid, int(restart), log_path, _now(), HOST, address),
+        )
+        if started.exit_code is not None:
+            await self._mark_dead(session_id, name, f"exited with code {started.exit_code} right after start")
+            tail = await self.logs(session_id, name, 40)
+            raise RuntimeError(f"service {name!r} exited with code {started.exit_code} right after start. Log:\n{tail}")
+        self._host_seen[started.pid] = (asyncio.get_running_loop().time(), True)
+        return self.view(await self.get(session_id, name) or {})
+
     async def stop(self, session_id: str, name: str, *, note: str = "stopped") -> dict[str, Any]:
         row = await self.get(session_id, name)
         if row is None:
             raise ValueError(f"no service named {name!r}")
-        pid = row.get("pid")
-        if row["status"] == "running" and pid_alive(pid):
-            await self._terminate(int(pid))
+        try:
+            if await self._running(row):
+                await self._end(row)
+        except HostDown as exc:
+            # Marked stopped, the row would hand its port out again while the server may still hold it.
+            raise RuntimeError(f"could not stop {name!r}: {exc}") from exc
         self._procs.pop((session_id, name), None)
         await self.app.db.execute("UPDATE services SET status = 'stopped', note = ?, stopped_at = ?, restart = 0 WHERE session_id = ? AND name = ?", (note, _now(), session_id, name))
         return self.view(await self.get(session_id, name) or {})
@@ -344,8 +510,11 @@ class Services:
         row = await self.get(session_id, name)
         if row is None:
             return False
-        if row["status"] == "running" and pid_alive(row.get("pid")):
-            await self._terminate(int(row["pid"]))
+        try:
+            if await self._running(row):
+                await self._end(row)
+        except HostDown as exc:
+            raise RuntimeError(f"could not stop {name!r} before removing it: {exc}") from exc
         await self.app.db.execute("DELETE FROM services WHERE session_id = ? AND name = ?", (session_id, name))
         self._procs.pop((session_id, name), None)
         return True
@@ -360,16 +529,26 @@ class Services:
         n = 0
         for row in await self.rows(session_id):
             if row["status"] == "running":
-                await self.stop(session_id, row["name"], note=note[:700])
+                try:
+                    await self.stop(session_id, row["name"], note=note[:700])
+                except RuntimeError as exc:
+                    # A host service the daemon cannot reach now keeps its row as running, which is
+                    # true as far as anyone knows; the session's other servers are still stopped.
+                    logger.warning("service %s/%s not stopped: %s", session_id, row["name"], exc)
+                    continue
                 n += 1
         return n
 
     async def stop_all(self, session_id: str) -> int:
         n = 0
         for row in await self.rows(session_id):
-            if row["status"] == "running" and pid_alive(row.get("pid")):
-                await self._terminate(int(row["pid"]))
-                n += 1
+            try:
+                if await self._running(row):
+                    await self._end(row)
+                    n += 1
+            except HostDown as exc:
+                # The session goes either way; a server left behind on the host is at least logged.
+                logger.warning("service %s/%s left running on the host: %s", session_id, row["name"], exc)
         await self.app.db.execute("DELETE FROM services WHERE session_id = ?", (session_id,))
         return n
 
@@ -377,6 +556,11 @@ class Services:
         row = await self.get(session_id, name)
         if row is None:
             raise ValueError(f"no service named {name!r}")
+        if on_host(row):
+            try:
+                return await self.host.logs(row["log_path"], lines)
+            except HostDown as exc:
+                return f"(the log is on the host at {row['log_path']}, and {exc})"
         path = Path(row["log_path"])
         manager = self.app.manager
         services = manager.locator_services(session_id) if manager is not None else None
@@ -435,8 +619,8 @@ class Services:
         assert manager is not None
         notifications = self.app.notifications
         for row in await self.rows():
-            if row["status"] != "running":
-                continue
+            if row["status"] != "running" or on_host(row):
+                continue  # the host's are looked at by watch_host, once the daemon answers
             if pid_alive(row.get("pid")):
                 continue  # survived the bot restart (reparented); the table is right
             sid, name = row["session_id"], row["name"]
@@ -465,6 +649,57 @@ class Services:
             if notifications is not None:
                 await notifications.post(Draft("system", f"Service '{name}' is not running", "It did not survive the restart; ServiceStart runs it again.", kind="service", session_id=sid, source="services"))
 
+    async def reconcile_host(self) -> None:
+        """What the table calls running on the host either still runs, is started again, or is reported.
+
+        The host's counterpart of :meth:`reconcile`, run whenever the daemon answers rather than once
+        at boot: the daemon may connect long after this process started, and a host service ends with
+        a reboot of the host while this process runs on unaware. Started again only when it was marked
+        ``restart`` and had lived :data:`HOST_RESTART_AFTER_SECONDS` (see there).
+        """
+        rows = [r for r in await self.rows() if on_host(r) and r["status"] == "running"]
+        if not rows or not self.host.available():
+            return
+        await self.refresh_host(rows, fresh=True)
+        manager = self.app.manager
+        notifications = self.app.notifications
+        for row in rows:
+            alive = self._host_seen.get(int(row.get("pid") or 0), (0.0, None))[1]
+            if alive is None:
+                return  # the daemon went while it was asked; the next look asks again
+            if alive:
+                continue
+            sid, name = row["session_id"], row["name"]
+            lived = (datetime.now(UTC) - datetime.fromisoformat(row["started_at"])).total_seconds()
+            if row.get("restart") and lived >= HOST_RESTART_AFTER_SECONDS and manager is not None:
+                try:
+                    if await manager.get_state(sid) is None:
+                        raise KeyError(f"session {sid} is gone")
+                    await self.start(sid, name=name, command=row["command"], cwd=row["cwd"], port=row.get("port") or None, restart=True)
+                    logger.warning("host service %s/%s started again", sid, name)
+                    continue
+                except Exception as exc:  # noqa: BLE001 - one service that cannot come back must not keep the others from it
+                    await self._mark_dead(sid, name, f"could not start again on the host: {exc}")
+                    if notifications is not None:
+                        await notifications.post(Draft("system", f"Service '{name}' did not come back", str(exc)[:400], kind="service", tone="warning", session_id=sid, source="services"))
+                    continue
+            why = (
+                f"it ended on the host {int(lived // 60)} min after its start, too soon to be started again unasked"
+                if row.get("restart") else "it ended on the host"
+            )
+            await self._mark_dead(sid, name, why)
+            if notifications is not None:
+                await notifications.post(Draft("system", f"Service '{name}' is not running", f"{why[0].upper()}{why[1:]}. ServiceLogs says why; ServiceStart runs it again.", kind="service", session_id=sid, source="services"))
+
+    async def watch_host(self) -> None:
+        """Look at the host's services every :data:`HOST_WATCH_SECONDS` for as long as this process runs."""
+        while True:
+            try:
+                await self.reconcile_host()
+            except Exception:  # noqa: BLE001 - the watch outlives one look that failed
+                logger.warning("looking at the host's services failed", exc_info=True)
+            await asyncio.sleep(HOST_WATCH_SECONDS)
+
     # -- service hook for the tools ---------------------------------------------------
 
     async def service(self, op: str, **kwargs: Any) -> Any:
@@ -489,4 +724,6 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.manager.service_hooks["services"] = services.service
     app.manager.delete_hooks.append(services.stop_all)
     await services.reconcile()
-    return []
+    if app.settings.native:
+        return []  # natively a host folder is this machine's own, and its services are local ones
+    return [asyncio.create_task(services.watch_host(), name="services-host-watch")]

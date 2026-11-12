@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.browser.model import Owner
 from daedalus.extensions.api_page_check import CheckResult, CheckServer, bind_free, drive
-from daedalus.extensions.services import parse_range, pid_alive
+from daedalus.extensions.services import dial_address, on_host, parse_range
 from daedalus.host.pages import PageError, PageStore, Served, store_for
 
 if TYPE_CHECKING:
@@ -57,22 +57,32 @@ class PageDesk:
         state = await manager.get_state(session_id) if manager is not None else None
         return state.session.title if state is not None else None
 
-    async def service_port(self, manifest: dict[str, Any], served: Served) -> int:
-        """A service page's port for the check: a port of the services range, or the port of the
-        named service the page's session runs. Anything outside the range is refused, so a page's
-        target cannot point a check at the API, the key proxy or a daemon of this installation."""
+    async def service_port(self, manifest: dict[str, Any], served: Served) -> tuple[str, int]:
+        """Where a service page's server is for the check: a port of the services range, or the named
+        service the page's session runs, wherever it runs. Anything outside the range (the host's range
+        for a service on the host) is refused, so a page's target cannot point a check at the API, the
+        key proxy or a daemon of this installation."""
         lo, hi = self.services_range()
+        address = "127.0.0.1"
         if isinstance(served.target, int):
             port = served.target
         else:
             rows = await self.service_rows(manifest.get("session_id"))
-            running = [r for r in rows if r.get("name") == served.target and r.get("status") == "running" and pid_alive(r.get("pid")) and r.get("port")]
-            if not running:
+            services = self.app.extensions.get("services")
+            found = None
+            for row in rows:
+                if row.get("name") == served.target and (dialled := await dial_address(services, row)) is not None:
+                    found = (row, dialled)
+                    break
+            if found is None:
                 raise PageError(f"the service {served.target!r} is not running; start it, then check again", 503)
-            port = int(running[0]["port"])
+            row, address = found
+            port = int(row["port"])
+            if on_host(row):
+                lo, hi = parse_range(self.app.settings.host_services_port_range)
         if not lo <= port <= hi:
             raise PageError(f"a check reaches only ports of the services range {lo}-{hi}, not {port}", 409)
-        return port
+        return address, port
 
     async def check(self, slug: str, *, draft: bool, session_id: str) -> CheckResult:
         browsers = self.app.extensions.get("browser")

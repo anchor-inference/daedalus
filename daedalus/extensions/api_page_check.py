@@ -280,12 +280,12 @@ HARNESS = """<!DOCTYPE html>
 class CheckServer:
     """The address one check is served at, for as long as the check lasts.
 
-    ``resolve_port`` answers a service page's port; it refuses one outside the services range, so a
+    ``resolve_port`` answers where a service page's server is; it refuses a port outside the services range, so a
     check can never be pointed at the installation's own doors through a page's target.
     """
 
     def __init__(self, store: PageStore, manifest: dict[str, Any], *, draft: bool, kit_dir: Path,
-                 resolve_port: Callable[[dict[str, Any], Served], Awaitable[int]]) -> None:
+                 resolve_port: Callable[[dict[str, Any], Served], Awaitable[tuple[str, int]]]) -> None:
         served = store.served(manifest, draft=draft)
         if served is None:
             raise PageError(f"the page {manifest['slug']!r} has nothing published yet; check its draft", 409)
@@ -382,10 +382,10 @@ class CheckServer:
             served = self.served
             if served.kind == "service":
                 try:
-                    port = await self.resolve_port(self.manifest, served)
+                    address, port = await self.resolve_port(self.manifest, served)
                 except PageError as exc:
                     return HTMLResponse(f"<p>{exc}</p>", status_code=503)
-                upstream = f"http://127.0.0.1:{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+                upstream = f"http://{address}:{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
                 return await forward_http(request, upstream, f"/pages/{slug}", strip_cookies=(CHECK_COOKIE,), page=True, read_timeout=60.0)
             if request.method not in ("GET", "HEAD"):
                 return Response(status_code=405)
@@ -400,12 +400,12 @@ class CheckServer:
                 await websocket.close(code=1008)
                 return
             try:
-                port = await self.resolve_port(self.manifest, self.served)
+                address, port = await self.resolve_port(self.manifest, self.served)
             except PageError:
                 await websocket.close(code=1011)
                 return
             query = websocket.url.query
-            await forward_websocket(websocket, f"ws://127.0.0.1:{port}/{path}" + (f"?{query}" if query else ""), f"/pages/{slug}", strip_cookies=(CHECK_COOKIE,))
+            await forward_websocket(websocket, f"ws://{address}:{port}/{path}" + (f"?{query}" if query else ""), f"/pages/{slug}", strip_cookies=(CHECK_COOKIE,))
 
         @api.api_route("/{rest:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
         async def elsewhere(rest: str) -> Response:

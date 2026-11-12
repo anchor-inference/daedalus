@@ -1235,7 +1235,7 @@ export type PageDetail = Omit<PageListing, "title"> & {
 
 export type PageAgent = { id: string; title: string; gone: boolean; running: boolean };
 
-export type ServiceView = { name: string; command: string; cwd: string; port: number | null; url: string | null; pid: number | null; status: "running" | "stopped" | "dead"; restart: boolean; note: string | null; started_at: string; stopped_at: string | null; share?: ShareView };
+export type ServiceView = { name: string; command: string; cwd: string; port: number | null; url: string | null; pid: number | null; status: "running" | "stopped" | "dead" | "unknown"; machine?: "host" | null; address?: string | null; restart: boolean; note: string | null; started_at: string; stopped_at: string | null; share?: ShareView };
 
 /** One provider's usage for the card beside the chat: a subscription's windows, or the day's metered spend. */
 export type ProviderUsage = {

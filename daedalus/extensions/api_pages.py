@@ -34,7 +34,7 @@ from starlette.datastructures import UploadFile
 from starlette.websockets import WebSocket
 
 from daedalus.extensions.api_proxy import forward_http, forward_websocket
-from daedalus.extensions.services import pid_alive
+from daedalus.extensions.services import dial_address
 from daedalus.host.pages import (
     PageError,
     PageStore,
@@ -485,18 +485,20 @@ def register(
             return None
         return asked not in ("", "0", "false", "no")
 
-    async def service_port(manifest: dict[str, Any], served: Served) -> int:
+    async def service_port(manifest: dict[str, Any], served: Served) -> tuple[str, int]:
+        """Where a service page's server is dialled: a port of this machine, or the named service
+        wherever it runs (a session in a host folder runs its services on the host)."""
         if isinstance(served.target, int):
-            return served.target
+            return "127.0.0.1", served.target
         services = app.extensions.get("services")
         rows: list[dict[str, Any]] = await services.rows(manifest.get("session_id")) if services is not None else []  # type: ignore[attr-defined]
         named = [r for r in rows if r.get("name") == served.target]
         if not named:
             raise HTTPException(503, f"no service {served.target!r} is known to this installation")
-        running = [r for r in named if r.get("status") == "running" and pid_alive(r.get("pid")) and r.get("port")]
-        if not running:
-            raise HTTPException(503, f"the service {served.target!r} is not running")
-        return int(running[0]["port"])
+        for row in named:
+            if (address := await dial_address(services, row)) is not None:
+                return address, int(row["port"])
+        raise HTTPException(503, f"the service {served.target!r} is not running")
 
     @api.api_route("/pages/{slug}/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     async def pages_serve(slug: str, path: str, request: Request) -> Response:
@@ -519,8 +521,8 @@ def register(
         if served is None:
             return _plain_page(404, "Daedalus", "This page has nothing published yet.")
         if served.kind == "service":
-            port = await service_port(manifest, served)
-            upstream = f"http://127.0.0.1:{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+            address, port = await service_port(manifest, served)
+            upstream = f"http://{address}:{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
             return await forward_http(request, upstream, f"/pages/{slug}", strip_cookies=(session_cookie, DRAFT_COOKIE), page=True, read_timeout=None)
         if request.method not in ("GET", "HEAD"):
             return _plain_page(405, "Daedalus", "This page is files; it takes no writes.")
@@ -560,12 +562,12 @@ def register(
             await websocket.close(code=1008)
             return
         try:
-            port = await service_port(manifest, served)
+            address, port = await service_port(manifest, served)
         except HTTPException:
             await websocket.close(code=1011)
             return
         query = websocket.url.query
-        upstream = f"ws://127.0.0.1:{port}/{path}" + (f"?{query}" if query else "")
+        upstream = f"ws://{address}:{port}/{path}" + (f"?{query}" if query else "")
         await forward_websocket(websocket, upstream, f"/pages/{slug}", strip_cookies=(session_cookie, DRAFT_COOKIE))
 
 

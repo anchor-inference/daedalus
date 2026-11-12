@@ -19,8 +19,10 @@ export function ServicesScreen({ onOpen, toast }: { onOpen: (id: string) => void
     invalidate("/api/services");
   };
   const all = rows ?? [];
-  const running = all.filter((r) => r.status === "running");
-  const stopped = all.filter((r) => r.status !== "running");
+  // A host service the host's daemon cannot be asked about is still believed to run: it is listed with
+  // the running ones, where its note says why its state is unknown, rather than hidden under "all".
+  const running = all.filter((r) => r.status === "running" || r.status === "unknown");
+  const stopped = all.filter((r) => r.status !== "running" && r.status !== "unknown");
   const shown = showStopped ? all : running;
   const groups = new Map<string, Row[]>();
   for (const r of shown) groups.set(r.session_id, [...(groups.get(r.session_id) ?? []), r]);

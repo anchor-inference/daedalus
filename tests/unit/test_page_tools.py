@@ -429,7 +429,7 @@ async def test_the_check_serves_the_draft_without_credentials_and_drives_four_lo
     (kit / "kit.css").write_text(":root{--bg:#000}")
     manifest = await store.require("orders")
 
-    async def no_service(manifest: dict[str, Any], served: Any) -> int:
+    async def no_service(manifest: dict[str, Any], served: Any) -> tuple[str, int]:
         raise PageError("not a service page")
 
     server = CheckServer(store, manifest, draft=True, kit_dir=kit, resolve_port=no_service)
@@ -467,8 +467,8 @@ async def test_a_page_with_nothing_published_is_checked_only_as_a_draft(tmp_path
     store = PageStore(tmp_path / "pages")
     manifest = await store.create("orders", title="Orders")
 
-    async def port(manifest: dict[str, Any], served: Any) -> int:
-        return 0
+    async def port(manifest: dict[str, Any], served: Any) -> tuple[str, int]:
+        return "127.0.0.1", 0
 
     with pytest.raises(PageError):
         CheckServer(store, manifest, draft=False, kit_dir=tmp_path, resolve_port=port)
@@ -508,7 +508,7 @@ async def test_the_desk_shares_the_apps_store_and_keeps_checks_inside_the_servic
     assert made.templates_dir == tmp_path / "skills" / "daedalus-pages" / "templates"
     assert made.services_range() == (8100, 8119)
     served = SimpleNamespace(target="nb")
-    assert await made.service_port({"session_id": "s1"}, served) == 8107
+    assert await made.service_port({"session_id": "s1"}, served) == ("127.0.0.1", 8107)
     for target in (8765, "api"):
         with pytest.raises(PageError):
             await made.service_port({"session_id": "s1"}, SimpleNamespace(target=target))
