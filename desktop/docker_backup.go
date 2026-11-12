@@ -10,10 +10,12 @@ import (
 	"strings"
 )
 
-// In Docker mode the database, the workspaces and the agent's memory are volumes, not files in the
-// data folder, so a backup that covered only the folder would miss exactly what a migration changes.
-// Each volume of the compose project is archived by a throwaway container of the agent's own image —
-// the image is there by definition and has tar — into the backup folder, and restored the same way.
+// In Docker mode the database and the agent's memory are volumes, not files in the data folder, so a
+// backup that covered only the folder would miss exactly what a migration changes. Each volume of the
+// compose project that holds the installation is archived by a throwaway container of the agent's own
+// image — the image is there by definition and has tar — into the backup folder, and restored the
+// same way; a volume that is not archived is not touched by the restore either. The volumes left out
+// are the ones notArchivedVolumes names, for the reason the data folder leaves out its workspaces.
 // The image ids the stack ran are recorded too, so a rollback can point :latest and :browser back at
 // them. Nothing here has been run against a real Docker installation yet (UPDATES.md), so the upgrade
 // refuses Docker mode outright and this is reached only by the unit tests until a restore and a
@@ -22,16 +24,42 @@ import (
 // dockerRunner runs one docker command; the tests replace it.
 type dockerRunner func(ctx context.Context, args ...string) (string, error)
 
+// notArchivedVolumes are the volumes of deploy/compose.yaml, by the name the compose file gives them,
+// that a backup leaves out: the user's working files and what is downloaded or rebuilt by itself.
+// An update changes none of them, so a rollback has nothing to put back there, and together they are
+// most of what the volumes hold — the workspaces alone took an update tens of minutes to archive.
+//
+//   - daedalus-workspaces: every session's working folder and the project folders in it;
+//   - daedalus-worktrees: self-development's worktrees and the agent's copies of the repositories;
+//   - daedalus-venv: the virtualenv, seeded from the image and synced against the checkout's lock;
+//   - daedalus-cache, searxng-cache: package and search caches, which cost only downloads to lose.
+var notArchivedVolumes = map[string]bool{
+	"daedalus-workspaces": true,
+	"daedalus-worktrees":  true,
+	"daedalus-venv":       true,
+	"daedalus-cache":      true,
+	"searxng-cache":       true,
+}
+
+// composeVolumeLabel is where compose records a volume's name in the compose file. It is read rather
+// than the volume's own name cut at the project's prefix, which a volume given a name of its own in
+// the compose file does not carry.
+const composeVolumeLabel = "com.docker.compose.volume"
+
+// projectVolumes are the compose project's volumes a backup archives.
 func projectVolumes(ctx context.Context, docker dockerRunner) ([]string, error) {
-	out, err := docker(ctx, "volume", "ls", "--quiet", "--filter", "label=com.docker.compose.project="+projectName)
+	out, err := docker(ctx, "volume", "ls", "--filter", "label=com.docker.compose.project="+projectName,
+		"--format", "{{.Name}}\t{{.Label \""+composeVolumeLabel+"\"}}")
 	if err != nil {
 		return nil, err
 	}
 	var volumes []string
 	for _, line := range strings.Split(out, "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			volumes = append(volumes, name)
+		name, key, _ := strings.Cut(strings.TrimSpace(line), "\t")
+		if name = strings.TrimSpace(name); name == "" || notArchivedVolumes[strings.TrimSpace(key)] {
+			continue
 		}
+		volumes = append(volumes, name)
 	}
 	return volumes, nil
 }
@@ -99,6 +127,8 @@ func volumeRestoreArgs(image, volume, dir, archive string) []string {
 		"--user", "0:0", "--entrypoint", "sh", image, "-c", `find /to -mindepth 1 -delete && tar -xzf "/from/$1" -C /to`, "sh", archive}
 }
 
+// restoreDocker restores the volumes the manifest names and no other: one the backup left out keeps
+// what it holds now.
 func restoreDocker(ctx context.Context, backup string, manifest *Manifest, docker dockerRunner) error {
 	tool := manifest.Images[agentImage()]
 	if tool == "" && len(manifest.Volumes) > 0 {
