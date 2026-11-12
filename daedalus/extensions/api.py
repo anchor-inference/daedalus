@@ -181,7 +181,7 @@ from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.reveal import came_through, platform_family
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_import import imported_view
-from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
+from daedalus.host.session_runner import TENANT, Attachment, FolderUnworkable, HostUnreachable, clip_title
 from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, SettingProblem, SettingRef, setting_of
 from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.memory import privacy
@@ -2337,18 +2337,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             folder = project.folder(body.folder_id) if body.folder_id else project.primary
             if folder is None:
                 raise HTTPException(404, f"{project.name} has no such folder")
-            if not folder.local(manager.projects.local_env):
-                if folder.env != "host":
-                    # Natively nothing of this process reaches into the container; only what runs
-                    # in a terminal there does.
-                    raise HTTPException(409, f"{folder.path} is a {folder.env} folder; an agent started here cannot work in it, only one started in a {folder.env} terminal can")
-                # A host folder seen from the container is worked in through the host terminal
-                # daemon, so the daemon answering is what decides, not a mount here.
-                problem = manager.host_unreachable()
-                if problem:
-                    raise HTTPException(409, f"{folder.path} is on the host, and {problem}")
-            elif not await manager.projects.ensure_reachable(folder):
-                raise HTTPException(409, f"the folder of {project.name} ({folder.path}) is not reachable from here yet; mount it and restart before starting an agent in it")
+            problem = await manager.folder_unworkable(project, folder)
+            if problem:
+                raise HTTPException(409, problem)
         elif body.folder_id:
             raise HTTPException(400, "a folder is named within a project")
         if body.kind == "chrome":
@@ -4488,10 +4479,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         project = await manager.projects.get(body.project_id)
         if project is None:
             raise HTTPException(404, "no such project")
-        if not await manager.projects.ensure_reachable(project.primary):
-            raise HTTPException(409, f"the folder of {project.name} ({project.primary.path}) is not reachable from here yet; mount it and restart")
-        moved = await manager.attach_project(session_id, project, own_directory=body.own_directory)
-        return {"id": session_id, "project_id": project.id, "project": project.name, "workspace": str(moved.workspace)}
+        try:
+            # The same test a session started in the project passes (``folder_unworkable``), so a host
+            # folder is decided by the host terminal daemon answering and not by a mount here.
+            moved = await manager.attach_project(session_id, project, own_directory=body.own_directory)
+        except FolderUnworkable as exc:
+            raise HTTPException(409, str(exc)) from exc
+        # Where its tools now work: for a host folder the path on the host, not the directory here it runs from.
+        return {"id": session_id, "project_id": project.id, "project": project.name, "workspace": str(manager.work_dir(moved))}
 
     @api.get("/api/sessions/{session_id}/checkpoints")
     async def session_checkpoints(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

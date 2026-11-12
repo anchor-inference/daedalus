@@ -688,7 +688,14 @@ class HostChatRefused(ValueError):
     or the chat named a project, whose folder decides where it runs."""
 
 
-class HostUnreachable(ValueError):
+class FolderUnworkable(ValueError):
+    """A session cannot be started in or moved into a folder now: the reason names the folder and the fix.
+
+    A ``ValueError``, so every caller that already turns a refused ``create_session`` into a message
+    for the operator says this one too."""
+
+
+class HostUnreachable(FolderUnworkable):
     """A session cannot be made in a host folder now: the host terminal daemon does not answer.
 
     A ``ValueError``, so every caller that already turns a refused ``create_session`` into a message
@@ -1661,6 +1668,27 @@ class SessionManager:
         bridge = self.host_bridge
         if bridge is None or not bridge.available():
             return BRIDGE_DOWN
+        return ""
+
+    async def folder_unworkable(self, project: Project, folder: ProjectFolder) -> str:
+        """Why an agent of this process cannot work in ``folder`` of ``project`` now, or ``""`` when it can.
+
+        One answer for starting a session and for moving one, which once disagreed: the move asked
+        only whether the folder was mounted here, so every host folder was refused with "mount it
+        and restart" although a chat started in the same project works there through the host
+        terminal daemon. A host folder seen from the container is decided by the daemon answering,
+        a folder of another environment (a device's) is refused with the way round, and a folder of
+        this process by being there.
+        """
+        if not folder.local(self.projects.local_env):
+            if folder.env != "host":
+                # Natively nothing of this process reaches into the container; only what runs in a
+                # terminal there does.
+                return f"{folder.path} is a {folder.env} folder; an agent started here cannot work in it, only one started in a {folder.env} terminal can"
+            problem = self.host_unreachable()
+            return f"{folder.path} is on the host, and {problem}" if problem else ""
+        if not await self.projects.ensure_reachable(folder):
+            return f"the folder of {project.name} ({folder.path}) is not reachable from here yet; mount it and restart before starting an agent in it"
         return ""
 
     def locator_services(self, session_id: str) -> SessionServices | None:
@@ -3375,10 +3403,19 @@ class SessionManager:
         self.register_services(state)
 
     async def attach_project(self, session_id: str, project: Project, *, own_directory: bool = False) -> SessionState:
-        """Move a session to a project root or to its private child in that project."""
+        """Move a session to a project root or to its private child in that project.
+
+        The session ends up exactly as one started in the project's primary folder: in a host folder
+        it runs from a directory of its own here and works on the host through the daemon, and its
+        private child there is made on the host. Refused with :class:`FolderUnworkable` before
+        anything changes when no agent of this process could work in that folder now.
+        """
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
+        problem = await self.folder_unworkable(project, project.primary)
+        if problem:
+            raise FolderUnworkable(problem)
         for coach_id in [*await prompt_coach.coaches_of(self, session_id), *await btws_of(self, session_id)]:
             # A prompt coach or a side question reads where its chat works; left behind it would read the
             # old place, and keep a chat's scratch project alive that the move has emptied.
@@ -3391,6 +3428,12 @@ class SessionManager:
         # The folder it worked in belongs to the project it leaves; in the new one it starts in the primary.
         metadata.pop("folder_id", None)
         metadata.pop(HOME_KEY, None)
+        host_folder = self.host_folder_of(session_id, metadata, project)
+        if host_folder is not None and own_directory:
+            # Made through the daemon before anything is stored, as for a session started there: the
+            # local inbox below is the directory the session runs from, not this one, and a daemon
+            # that cannot make it leaves the session where it was rather than in a folder it lacks.
+            await self._make_host_directory(self.folder_workspace(session_id, metadata, project), host_folder)
         await self.sessions.update_metadata(session_id, metadata)
         await self.projects.attach(session_id, project.id)
         project = await self._settle_project(project)
@@ -8883,4 +8926,4 @@ def _own_schedules(fn: Callable[..., Awaitable[Any]] | None, session_id: str) ->
     return scoped
 
 
-__all__ = ["HOME_KEY", "Attachment", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "verbatim_tail"]
+__all__ = ["HOME_KEY", "Attachment", "FolderUnworkable", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "verbatim_tail"]
