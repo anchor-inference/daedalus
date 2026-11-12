@@ -242,6 +242,10 @@ func workspaceData(t *testing.T) (Paths, string) {
 		"worktrees/selfdev/README.md":               "a worktree\n",
 		"state/checkpoints/s1/HEAD":                 "ref: refs/heads/main\n",
 		"state/models/stt/model.bin":                "weights",
+		"state/tmp/partial":                         "in flight",
+		"state/upload-staging/upload":               "in flight",
+		"daedalus/miniapp/node_modules/x/index.js":  "installed by npm ci",
+		"daedalus/miniapp/package.json":             "{}",
 	}
 	for name, body := range files {
 		full := filepath.Join(p.Data, filepath.FromSlash(name))
@@ -275,7 +279,7 @@ func TestABackupLeavesTheWorkspacesOutAndTheRestoreLeavesThemAlone(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, entry := range manifest.Entries {
-		for _, skipped := range []string{"workspaces", "worktrees", "state/checkpoints", "state/models"} {
+		for _, skipped := range []string{"workspaces", "worktrees", "state/checkpoints", "state/models", "state/tmp", "state/upload-staging", "daedalus/miniapp/node_modules"} {
 			if entry.Path == skipped || strings.HasPrefix(entry.Path, skipped+"/") {
 				t.Errorf("%s was backed up", entry.Path)
 			}
@@ -319,6 +323,9 @@ func TestABackupLeavesTheWorkspacesOutAndTheRestoreLeavesThemAlone(t *testing.T)
 		"worktrees/selfdev/README.md":               "a worktree\n",
 		"state/checkpoints/s1/HEAD":                 "later\n",
 		"state/models/stt/model.bin":                "weights",
+		"state/tmp/partial":                         "in flight",
+		"daedalus/miniapp/node_modules/x/index.js":  "installed by npm ci",
+		"daedalus/miniapp/package.json":             "{}",
 	} {
 		if got := read(t, filepath.Join(p.Data, filepath.FromSlash(name))); got != want {
 			t.Errorf("%s is %q after the restore, want %q", name, got, want)
@@ -341,10 +348,10 @@ func TestABackupLeavesTheWorkspacesOutAndTheRestoreLeavesThemAlone(t *testing.T)
 // over the work done since, nor fail on it.
 func TestARestorePassesOverWorkspacesAnOlderBackupHolds(t *testing.T) {
 	p, _ := workspaceData(t)
-	saved := notBackedUp
-	notBackedUp = map[string]bool{backupsDirName: true, "upgrade": true, "runtime": true, "launcher.json": true}
+	saved := workPaths
+	workPaths = nil
 	dir, _, err := CreateBackup(p, "desktop-v0.12.0", "native", time.Unix(1_800_000_000, 0), "", nil)
-	notBackedUp = saved
+	workPaths = saved
 	if err != nil {
 		t.Fatal(err)
 	}

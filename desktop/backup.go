@@ -32,12 +32,9 @@ import (
 // The backup holds the installation, the provider keys included, so the folder is 0700 and the
 // files 0600, like the secrets folder they are copied from: the database and the rest of state/, the
 // keys and secrets, the configuration, the checkouts an update replaces. It does not hold the work
-// done in the installation — the session workspaces, the project folders inside them, the agent's
-// own worktrees and the snapshot stores that copy the workspaces — nor what is downloaded again by
-// itself. Those are the user's working files: an update never changes them, so a rollback has
-// nothing to put back there, and they are by far the largest part of the folder. A session with a
-// hundred thousand files in a dependency tree made every update spend twenty minutes archiving,
-// hashing and reading back files no step of the update would touch. notBackedUp is the list.
+// done in the installation — the session workspaces and the project folders in them, the agent's
+// worktrees, the snapshot stores that copy the workspaces, what is downloaded or rebuilt by itself
+// (work.go has the list and the reasons) — and a restore leaves that work exactly where it is.
 const (
 	backupsDirName  = "backups"
 	backupArchive   = "data.tar.gz"
@@ -48,57 +45,21 @@ const (
 	manifestVersion = 1
 )
 
-// notBackedUp are the paths under the data folder, slash-separated, that a backup skips and a
-// restore leaves exactly where they are: neither archived, nor moved aside, nor replaced.
-//
-// The folder's own bookkeeping — the backups themselves, the upgrade's working folder, the running
-// launcher's handover file, a runtime from before it moved out of the data folder — and the work:
-//
-//   - workspaces/ holds every session's working folder, and with it every project folder the app
-//     made there; a project attached from elsewhere on the machine is not in the data folder at all
-//     (writeArchive says how a link to one is kept from bringing it in);
-//   - worktrees/ is self-development's worktrees and the agent's own copies of the repositories,
-//     fetched from their origin;
-//   - state/checkpoints/ is a git store per workspace whose objects are the workspace's files over
-//     again — the undo of a turn, derived from the workspaces and as large as they are;
-//   - state/models/ is the speech models, downloaded again when missing.
-//
-// What a rollback restores and what these were left at stay consistent: the older database knows
-// fewer sessions and checkpoints than the folders hold, which is what deleting a session already
-// leaves behind until retention runs.
+// notBackedUp are the top-level names of the data folder's own bookkeeping, which a backup skips
+// and a restore leaves where they are like the work: the backups themselves, the upgrade's working
+// folder, a runtime from before it moved out of the data folder, the running launcher's handover file.
 var notBackedUp = map[string]bool{
-	backupsDirName:      true,
-	"upgrade":           true,
-	"runtime":           true,
-	"launcher.json":     true,
-	"workspaces":        true,
-	"worktrees":         true,
-	"state/checkpoints": true,
-	"state/models":      true,
+	backupsDirName:  true,
+	"upgrade":       true,
+	"runtime":       true,
+	"launcher.json": true,
 }
 
 // backedUp says whether the entry at rel — slash-separated, relative to the data folder — is one a
-// backup holds: it is not one of notBackedUp and not inside one.
+// backup holds: neither bookkeeping nor work.
 func backedUp(rel string) bool {
-	for skipped := range notBackedUp {
-		if rel == skipped || strings.HasPrefix(rel, skipped+"/") {
-			return false
-		}
-	}
-	return true
-}
-
-// leftInPlace are the entries of notBackedUp below the top level. A restore moves a top-level name
-// aside whole, so these go aside with their parent and come straight back once it is unpacked.
-func leftInPlace() []string {
-	var nested []string
-	for skipped := range notBackedUp {
-		if strings.Contains(skipped, "/") {
-			nested = append(nested, skipped)
-		}
-	}
-	sort.Strings(nested) // a parent before anything under it
-	return nested
+	top, _, _ := strings.Cut(rel, "/")
+	return !notBackedUp[top] && !isWork(rel)
 }
 
 // BackupEntry is one thing in the archive.
@@ -529,9 +490,8 @@ func readArchive(name string, visit func(name string, header *tar.Header, body i
 
 // RestoreBackup puts the data folder back the way the backup found it. The backup is verified
 // first; what the folder holds now is not deleted but moved aside into `aside`, so a restore can
-// itself be undone by hand. What the backup does not hold (notBackedUp) is left where it is: a
-// top-level name is never moved, and a nested one goes aside with its parent and is moved straight
-// back. The restored tree is checked against the manifest before this returns.
+// itself be undone by hand. What the backup does not hold is left where it is: a top-level name is
+// never moved, and the work below one goes aside with its parent and is moved straight back. The restored tree is checked against the manifest before this returns.
 func RestoreBackup(p Paths, dir, aside string) error {
 	manifest, err := VerifyBackup(dir)
 	if err != nil {
@@ -561,11 +521,14 @@ func RestoreBackup(p Paths, dir, aside string) error {
 	if err := extractBackup(filepath.Join(dir, backupArchive), p.Data); err != nil {
 		return fmt.Errorf("the backup could not be unpacked (what was there before is in %s): %w", aside, err)
 	}
-	for _, rel := range leftInPlace() {
+	// The work below a top-level name — state/checkpoints, a checkout's node_modules — went aside
+	// with it, and comes straight back.
+	nested, err := findWork(aside)
+	if err != nil {
+		return fmt.Errorf("could not look for the work in %s to put it back: %w", aside, err)
+	}
+	for _, rel := range nested {
 		from := filepath.Join(aside, filepath.FromSlash(rel))
-		if _, err := os.Lstat(from); err != nil {
-			continue
-		}
 		to := filepath.Join(p.Data, filepath.FromSlash(rel))
 		if err := ensureParents(p.Data, filepath.Dir(to)); err != nil {
 			return fmt.Errorf("could not put %s back (it is in %s): %w", rel, aside, err)

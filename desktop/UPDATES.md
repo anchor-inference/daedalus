@@ -253,15 +253,20 @@ With the launcher closed, `daedalus-desktop upgrade [--data DIR] [--yes]`:
      mode, size and SHA-256. It is **read back** against the manifest. The folder is 0700 and the
      files 0600: it holds the keys.
 
-     The backup holds the installation — the database and the rest of `state/`, the keys, the
-     configuration, the checkouts — and not the work: `workspaces/` (every session's folder and the
-     project folders in it), `worktrees/`, `state/checkpoints/` (the workspaces' snapshot stores)
-     and `state/models/` (downloaded speech models) are neither archived nor touched by a restore,
-     which leaves them exactly as they are. An update never changes them, and archiving them made an
-     update with one large session take tens of minutes. A link is kept as a link and never followed,
-     so a project folder linked in from elsewhere stays out too; on Windows a junction is passed
-     over. In Docker mode the same goes for the `daedalus-workspaces`, `daedalus-worktrees`,
-     `daedalus-venv`, `daedalus-cache` and `searxng-cache` volumes.
+   Either way only the installation is protected — the database and the rest of `state/`, the
+   keys, the configuration, the checkouts — and not the work: `workspaces/` (every session's folder
+   and the project folders in it), `worktrees/`, `state/checkpoints/` (the workspaces' snapshot
+   stores), `state/models/` (downloaded speech models), `state/tmp/`, `state/upload-staging/` and
+   every `node_modules/` in the checkouts (`npm ci` deletes and reinstalls it whenever the app is
+   built). An update never changes the work, and copying it made an update with one large session
+   take tens of minutes. The backup neither archives it nor touches it on a restore. The fence moves
+   it by rename into `.daedalus-update/<data folder's name>/set-aside/` before the switch and back
+   into whichever tree is live after it — and after a rollback — so it is never copied, leased or
+   kept; a switch that stops before it is back leaves it there, nothing starts, and `update resolve
+   --apply` puts it back. A link is kept as a link and never followed, so a project folder linked in
+   from elsewhere stays out too; on Windows a junction is passed over. In Docker mode the
+   `daedalus-workspaces`, `daedalus-worktrees`, `daedalus-venv`, `daedalus-cache` and
+   `searxng-cache` volumes are not archived.
 
    If any of this fails, what it made — the staging folder, the journal, a backup that did not
    verify — is removed and the installation is as it was.

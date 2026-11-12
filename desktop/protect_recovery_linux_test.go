@@ -26,7 +26,7 @@ func TestARefusedRestoreIsARollbackThatFailed(t *testing.T) {
 			return
 		}
 		pre := filepath.Join(fenceControlPath(in.paths.Data), "retained", journal.Pre)
-		os.WriteFile(filepath.Join(pre, "workspaces", "notes", "today.md"), []byte("changed while kept\n"), 0o640)
+		os.WriteFile(filepath.Join(pre, "daedalus", "app.py"), []byte("changed while kept\n"), 0o640)
 	}
 	err := u.update(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "rollback could not finish") {
