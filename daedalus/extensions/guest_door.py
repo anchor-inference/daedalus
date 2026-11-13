@@ -54,6 +54,7 @@ from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.link_protocol import LinkFileError, Staged
 from daedalus.host.notify_text import render
 from daedalus.security.untrusted import inert
+from daedalus.transport.telegram.render import flatten_evidence
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -322,6 +323,8 @@ class Delivery:
     """The door's ids of files this turn uploaded to go with its answer."""
     asked: bool = False
     """The turn left a question for the operator: its task waits for input."""
+    held_files: bool = False
+    """The turn wanted to send files that wait for the operator: its task is not done until they decide."""
     progress_at: float = 0.0
     by: str = ""
     """``owner`` where the guest's owner says they wrote this themselves rather than their agent."""
@@ -443,6 +446,7 @@ class GuestBridge:
         for run_id, delivery in list(self.turns.items()):
             if delivery.link_id == link_id and manager is not None and row is not None:
                 await manager.stop_run(str(row["session_id"]), run_id)
+        await self.withdraw_asks(link_id, why="the link was revoked")
 
     async def forget_interrupted(self) -> None:
         """What a turn of the process before this one was doing when it stopped: its task was refused at the door
@@ -696,14 +700,21 @@ class GuestBridge:
         status = await delivery.done
         self.turns.pop(run_id, None)
         spent, _ = await manager.spend(run_id=run_id)
-        text = await manager.guest_answer(session_id, run_id) if status == "completed" else ""
+        # The app's own tags (a file, a run's receipt, a picture) are things to click in the operator's chat; a guest got
+        # them as raw markup, a file tag reading as if the file had been handed over when it had not.
+        text = flatten_evidence(await manager.guest_answer(session_id, run_id)) if status == "completed" else ""
         # A check of a subscription with nothing to tell says so and is answered with silence: the guest hears nothing.
         quiet = delivery.subscription and status == "completed" and text.strip().endswith(link_flows.NOTHING_YET)
         if quiet:
             text = ""
         # A turn that ended without a word, on its model-call bound for one, has not answered; files are an answer.
         ok = status == "completed" and bool(text or delivery.sent_files or quiet)
-        state = link_protocol.NEEDS_INPUT if delivery.asked and ok else link_protocol.DONE if ok else link_protocol.REFUSED
+        # A task whose files wait for the operator stays in hand until they decide: done now, an A2A client that follows the
+        # task stopped at "completed" and never looked again for the files that came after.
+        state = (
+            link_protocol.NEEDS_INPUT if delivery.asked and ok else link_protocol.WORKING if delivery.held_files and delivery.task and ok
+            else link_protocol.DONE if ok else link_protocol.REFUSED
+        )
         if delivery.task:
             await self._task_row(session_id, delivery, state if status != "cancelled" else link_protocol.CANCELLED, result=text)
         await self._answer(delivery, ok=ok, text=text, cost=spent, task_state=state if delivery.task else "")
@@ -779,7 +790,21 @@ class GuestBridge:
         text, kind, task, by = str(body.get("text") or ""), str(body.get("kind") or link_protocol.TEXT), str(body.get("task") or ""), str(body.get("from") or "")
         card = link_flows.card_view(body.get("card"))
         signed = self.signed(text=_as_door_keeps(text), kind=kind, task=task, by=by, to=await self.peer_of(link_id, conversation_id), card=card)
-        return await self.client.call("POST", f"/control/conversations/{conversation_id}/messages", json={**body, **signed})
+        owes = {"awaits_owner": True} if await self.owner_owes(link_id, conversation_id) else {}
+        return await self.client.call("POST", f"/control/conversations/{conversation_id}/messages", json={**body, **signed, **owes})
+
+    async def owner_owes(self, link_id: str, conversation_id: str) -> bool:
+        """Whether something for this guest waits on the operator: files a turn wanted to send, or a question it left them.
+
+        Said to the door with every word this side writes, and the door tells a guest that reads to wait rather than to end.
+        Without it a guest told "they follow once the owner lets them go" read "you have every reply; end the conversation"
+        from the door, and an agent that does what it reads ended it before the files could go."""
+        if await self.app.db.fetchone("SELECT 1 FROM link_files WHERE side = ? AND owner = ? AND conversation = ? AND state IN ('held', 'sending') LIMIT 1", (SIDE, link_id, conversation_id)):
+            return True
+        return await self.app.db.fetchone(
+            "SELECT 1 FROM asks WHERE resolved_at IS NULL AND json_extract(detail_json, '$.guest.link_id') = ? AND json_extract(detail_json, '$.guest.conversation') = ? LIMIT 1",
+            (link_id, conversation_id),
+        ) is not None
 
     async def say_as_owner(self, link_id: str, conversation_id: str, text: str) -> None:
         """The operator's own words to a guest: marked as theirs at the door, and read as theirs on the other side."""
@@ -798,6 +823,8 @@ class GuestBridge:
             body["files"] = delivery.sent_files
         if task_state:
             body["task_state"] = task_state
+        if ok and await self.owner_owes(delivery.link_id, delivery.conversation_id):
+            body["awaits_owner"] = True
         try:
             await self.client.call("POST", f"/control/deliveries/{delivery.message_id}/reply", json=body)
         except DoorRefused as exc:
@@ -955,6 +982,25 @@ class GuestBridge:
         for run_id, delivery in list(self.turns.items()):
             if delivery.link_id == link_id and delivery.task == task and manager is not None:
                 await manager.stop_run(str(row["session_id"]), run_id)
+        await self.withdraw_asks(link_id, task=task, why="the guest's task it was asked for was cancelled")
+
+    async def withdraw_asks(self, link_id: str, *, task: str = "", why: str) -> None:
+        """Take back the questions a guest's turn left the operator, for a task that was cancelled or a link that ended.
+        Left open, the operator answered a question about work nobody wanted any more, and the answer had nowhere to go."""
+        manager = self.app.manager
+        row = await self.known_link(link_id)
+        if getattr(manager, "asks", None) is None or row is None:
+            return
+        dropped: list[str] = []
+        for ask in await manager.asks.of_session(str(row["session_id"])):
+            info = ask.detail.get(QUESTION_REF) or {}
+            if info.get("link_id") != link_id or (task and info.get("task") != task):
+                continue
+            if await manager.asks.resolve(ask.id, "system", {"closed": why, "via": "withdrawn", "by": "link"}):
+                dropped.append(ask.id)
+        if dropped:
+            with suppress(Exception):
+                await manager.bus.publish("ask.side", {"change": "withdrawn", "ask_ids": dropped, "reason": why}, session_id=str(row["session_id"]))
 
     async def cancel_task(self, link_id: str, task: str) -> None:
         """The operator cancels a task a guest set: the door tells the guest, and the turn on it stops here."""
@@ -1020,6 +1066,7 @@ class GuestBridge:
                 link_protocol.unstage(staged)
             return f"Attached to your answer: {names}. They go to the guest with your final message.", False
         await self._hold_out(state, delivery.link_id, delivery.conversation_id, staged, note, task=delivery.task)
+        delivery.held_files = True
         return f"These files wait for the operator, who sees each one with its size and may hold some back: {names}. Tell the guest they follow once the owner lets them go.", False
 
     async def _stage_out(self, state: Any, link_id: str, paths: list[str], *, anywhere: bool) -> list[Staged] | str:
@@ -1229,11 +1276,18 @@ class GuestBridge:
                 await self.app.db.execute("UPDATE link_files SET state = 'sent', remote_id = ? WHERE id = ?", (file_id, row["id"]))
             for row in withheld:
                 await self.app.db.execute("UPDATE link_files SET state = ? WHERE id = ?", ("refused" if not send else "dropped", row["id"]))
-            if ids:
-                await self.say(link_id, conversation, {"kind": link_protocol.FILE, "files": ids, "task": task, "text": str(rows[0]["note"] or "")})
-            if withheld:
-                names = ", ".join(str(row["name"]) for row in withheld)
-                await self.say(link_id, conversation, {"kind": link_protocol.TEXT, "text": f"The owner did not let these files go: {names}."})
+            refused_words = f"The owner did not let these files go: {', '.join(str(row['name']) for row in withheld)}." if withheld else ""
+            waiting = await self.app.db.fetchone("SELECT state FROM link_tasks WHERE side = ? AND owner = ? AND task = ?", (SIDE, link_id, task)) if task else None
+            if waiting is not None and waiting["state"] == link_protocol.WORKING:
+                # The task its turn left in hand for this decision ends with it, the files on its last status.
+                words = " ".join(part for part in (str(rows[0]["note"] or ""), refused_words) if part) or "Done."
+                await self.say(link_id, conversation, {"kind": link_protocol.STATUS, "task": task, "state": link_protocol.DONE, "text": words, **({"files": ids} if ids else {})})
+                await self.app.db.execute("UPDATE link_tasks SET state = ?, updated_at = ? WHERE side = ? AND owner = ? AND task = ?", (link_protocol.DONE, datetime.now(UTC).isoformat(), SIDE, link_id, task))
+            else:
+                if ids:
+                    await self.say(link_id, conversation, {"kind": link_protocol.FILE, "files": ids, "task": task, "text": str(rows[0]["note"] or "")})
+                if withheld:
+                    await self.say(link_id, conversation, {"kind": link_protocol.TEXT, "text": refused_words})
         except (DoorUnavailable, DoorRefused, LinkFileError):
             # Back to waiting, so the operator can try again once the door is back: nothing half-sent is called sent.
             await self.app.db.execute("UPDATE link_files SET state = 'held' WHERE side = ? AND owner = ? AND batch = ? AND state = 'sending'", (SIDE, link_id, batch))

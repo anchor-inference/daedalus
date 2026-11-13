@@ -21,6 +21,7 @@ here, and :mod:`daedalus.host.link_flows` holds its rules:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -617,7 +618,10 @@ class LinkFlows:
         return action_id
 
     async def _ask(self, session_id: str, action_id: str, text: str) -> bool:
-        asked = self.manager.ask_operator(session_id, key=f"link-flow:{action_id}", tool=agent_talk.TOOL, text=text, on_answer=APPROVE_HOOK, extra={"flow": action_id})
+        # The key is an approval key like any other, twelve hex characters: the card's Allow and Deny, in the app and in
+        # Telegram, hand it to the same answer as every other card, which refuses anything else. A key that read
+        # "link-flow:<id>" put a meeting, a patch or a service on a card nobody could answer.
+        asked = self.manager.ask_operator(session_id, key=approval_key_of(action_id), tool=agent_talk.TOOL, text=text, on_answer=APPROVE_HOOK, extra={"flow": action_id})
         if not asked:
             await self.db.execute("UPDATE link_actions SET state = 'refused', result = 'the chat was not open to ask', decided_at = ? WHERE id = ?", (_stamp(), action_id))
         return asked
@@ -957,6 +961,11 @@ class LinkFlows:
                 task.cancel()
 
 
+def approval_key_of(action_id: str) -> str:
+    """The key the operator's card for an action is answered by."""
+    return hashlib.sha256(f"link-flow:{action_id}".encode()).hexdigest()[:12]
+
+
 def flows_of(app: Application | Any) -> LinkFlows | None:
     return (getattr(app, "extensions", None) or {}).get(EXTENSION_KEY)
 
@@ -970,4 +979,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(flows.serve(), name="link-flows")]
 
 
-__all__ = ["APPROVE_HOOK", "EXTENSION_KEY", "FLOW_ACTIONS", "GUEST_ACTIONS", "POLL_PREFIX", "SUB_PREFIX", "LinkFlows", "flows_of", "install"]
+__all__ = ["APPROVE_HOOK", "approval_key_of", "EXTENSION_KEY", "FLOW_ACTIONS", "GUEST_ACTIONS", "POLL_PREFIX", "SUB_PREFIX", "LinkFlows", "flows_of", "install"]

@@ -516,14 +516,12 @@ class AgentTalks:
                 return Outcome(said, failed)
             if action not in ("send", "read", "end", "task", "cancel", *flows_module.FLOW_ACTIONS):
                 return Outcome("action is one of open, send, task, cancel, read, end, contacts, ask, summary, slots, meet, apply_patch.", error=True)
+            if turn is None and action == "send" and not contact and (guest := await self._guest_for(session_id, conversation)) is not None:
+                bridge = bridge_of(self.app)
+                assert bridge is not None
+                said, failed = await bridge.send_outside_turn(state, guest[0], guest[1], text, list(files or []))
+                return Outcome(said, failed, guest[1])
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation, contact=bool(contact))
-            if isinstance(talk, Outcome) and action == "send" and turn is None and not conversation and not contact:
-                guest = await self._only_guest(session_id)
-                if guest is not None:
-                    bridge = bridge_of(self.app)
-                    assert bridge is not None
-                    said, failed = await bridge.send_outside_turn(state, guest[0], guest[1], text, list(files or []))
-                    return Outcome(said, failed)
             if isinstance(talk, Outcome):
                 return talk
             if action in flows_module.FLOW_ACTIONS and flows is not None:
@@ -555,18 +553,23 @@ class AgentTalks:
             return Outcome("This chat has no open conversation. Open one with the link the operator gave you.", error=True)
         return Outcome("Several conversations are open; say which: " + ", ".join(f"{talk['id']} ({talk['host']})" for talk in live), error=True)
 
-    async def _only_guest(self, session_id: str) -> tuple[Any, str] | None:
-        """The one guest this chat is talking to through a link of its own, when it has no conversation of its own
-        open and exactly one such guest: who a ``send`` naming nobody is for.
+    async def _guest_for(self, session_id: str, conversation: str) -> tuple[Any, str] | None:
+        """The guest at this chat's own door a ``send`` of the operator's turn is for, as ``(link row, conversation id)``:
+        the one ``conversation`` names, or, with none named and no conversation of this chat's own open, the one guest
+        there is. ``None`` when the send is for a conversation at somebody else's door, or nothing can be told.
 
-        A guest's turn ends with its answer, and a call the operator let through afterwards is carried out in
-        a turn of the main chat. That turn found no conversation, failed, and spent the operator's "Allow
-        anyway" on the failure while the guest waited for the files. With one guest there is no one else it
-        could mean; with two or none, nothing is guessed."""
+        A guest's turn ends with its answer, and a call the operator let through afterwards is carried out in a turn
+        of the main chat. That turn found no conversation, failed, and spent the operator's "Allow anyway" on the
+        failure while the guest waited for the files. With one guest there is no one else it could mean; with two,
+        the turn notes name each, and the agent names one."""
         bridge = bridge_of(self.app)
-        if bridge is None:
+        if bridge is None or (conversation and await self.talk(conversation) is not None):
             return None
         found = await bridge.open_conversations(session_id)
+        if conversation:
+            return next((guest for guest in found if guest[1] == conversation), None)
+        if any(talk["state"] != CLOSED for talk in await self.talks_of(session_id)):
+            return None
         return found[0] if len(found) == 1 else None
 
     async def talk_trusted(self, talk: Any) -> bool:
@@ -605,6 +608,8 @@ class AgentTalks:
             talk = await self.talk(str(found["talk_id"])) if found is not None and found["talk_id"] else None
             return talk is not None and await self.talk_trusted(talk)
         conversation = str(arguments.get("conversation") or "")
+        if arguments.get("action") == "send" and (guest := await self._guest_for(session_id, conversation)) is not None:
+            return str(guest[0]["tools"]) == "trusted"
         talks = await self.talks_of(session_id)
         if conversation:
             talk = next((t for t in talks if t["id"] == conversation), None)
@@ -612,9 +617,6 @@ class AgentTalks:
         live = [t for t in talks if t["state"] != CLOSED]
         if len(live) == 1:
             return await self.talk_trusted(live[0])
-        if not live and arguments.get("action") == "send":
-            guest = await self._only_guest(session_id)
-            return guest is not None and str(guest[0]["tools"]) == "trusted"
         return False
 
     async def _in_operators_words(self, session_id: str, door: agent_talk.DoorLink) -> bool:
@@ -730,7 +732,10 @@ class AgentTalks:
         if state == CLOSED:
             said = CLOSED_WORDS.get(str(talk["reason"]), CLOSED_WORDS["ended"])
         elif talk["waiting_for"] == "owner":
-            said = "Its owner has not admitted this conversation yet."
+            said = (
+                "Its owner has not admitted this conversation yet." if state == PENDING
+                else "The other agent waits for its owner to decide on what you asked: the answer comes later, and you are told, so do not wait for it in this turn."
+            )
         elif talk["waiting_for"] == OFFLINE:
             # Not "a reply is owed": an agent told that waited out its turn, or gave up, on a side that was only away.
             said = "The other side is offline: no reply comes until it is back, so do not wait for one in this turn."
@@ -803,7 +808,7 @@ class AgentTalks:
             return Outcome(self._state_line(fresh, KEPT_WORDS), talk=talk["id"])
         if settled != SENT:
             return Outcome(self._send_failure(fresh, message), error=True, talk=talk["id"])
-        return await self._reply_or_status(state, fresh, wait, OWNER_AWAY_WORDS if message["note"] == "owner_offline" else "Sent.")
+        return await self._reply_or_status(state, fresh, wait, OWNER_AWAY_WORDS if message["note"] == "owner_offline" else "Sent.", newer_than=message_id)
 
     async def _stage(self, state: SessionState, talk: Any, paths: list[str]) -> tuple[list[Staged], bool] | Outcome:
         """The files a message is to carry, made ready to go and checked against the conversation's limits, and whether
@@ -1264,7 +1269,11 @@ class AgentTalks:
     async def _read(self, state: SessionState, talk: Any, wait: int) -> Outcome:
         return await self._reply_or_status(state, talk, wait, "")
 
-    async def _reply_or_status(self, state: SessionState, talk: Any, wait: int, lead: str) -> Outcome:
+    async def _reply_or_status(self, state: SessionState, talk: Any, wait: int, lead: str, *, newer_than: int = 0) -> Outcome:
+        """What came, or where the conversation stands. ``newer_than``, for a send, is its own message: what was unread
+        from before it is handed over too, but is not the answer the send waits for. Without it a send returned at once
+        with the tail of the last exchange (the agent's own answer that followed a card of free times), and the agent
+        took that for the answer to its new question."""
         talk_id = talk["id"]
         self._readers[talk_id] = self._readers.get(talk_id, 0) + 1
         try:
@@ -1275,7 +1284,8 @@ class AgentTalks:
                 unread = await self._unread(talk_id)
                 talk = await self.talk(talk_id)
                 left = deadline - time.monotonic()
-                if unread or talk is None or talk["state"] == CLOSED or left <= 0 or talk["quiet"] or not talk["waiting_for"]:
+                answered = bool(unread) and (not newer_than or any(int(row["id"]) > newer_than for row in unread))
+                if answered or talk is None or talk["state"] == CLOSED or left <= 0 or talk["quiet"] or not talk["waiting_for"]:
                     break
                 with suppress(TimeoutError):
                     await asyncio.wait_for(news.wait(), left)
@@ -1387,6 +1397,24 @@ class AgentTalks:
                 return
             await asyncio.sleep(max(pause, MIN_CYCLE_SECONDS - (time.monotonic() - started)))
 
+    async def _glance(self, talk_id: str) -> None:
+        """One look at a quiet conversation's door, without holding it open: what the other side wrote unasked.
+
+        The door says something with nobody's message before it: the other owner's own words, files their operator let
+        go after the turn had ended, the answer their owner gave later, a subscription's news. Followed only while a
+        reply was owed, all of that sat at the door until this side happened to send again."""
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] != OPEN or not talk["token"] or talk["waiting_for"]:
+            return
+        try:
+            answer = await self.dialer.call("GET", f"{talk['base_url']}/a/messages?after={talk['cursor']}&wait=0", token=talk["token"], timeout=CALL_SECONDS)
+            if door_absent(answer):
+                return
+            if await self._took(talk, answer) is not None:
+                self.follow(talk_id)
+        except (DoorGone, NotReachable) as exc:
+            logger.debug("a look at conversation %s found no door: %s", talk_id, exc)
+
     async def _took(self, talk: Any, answer: DoorAnswer) -> float | None:
         """Take in one read. How long to wait before the next, or ``None`` when there is nothing more to look for."""
         talk_id = talk["id"]
@@ -1410,16 +1438,36 @@ class AgentTalks:
         stop = answer.body.get("stop_polling") is True
         waiting = answer.body.get("waiting_for")
         if stop and (taken or waiting == "nothing"):
-            await self._update(talk_id, waiting_for="", quiet=0)
+            if not await self._settled_by_read(talk, waiting_for="", quiet=0):
+                return 0.0
             return None
         # The door is up and has kept what was sent, but its owner's agent has not been seen: offline, read slowly.
         owed = "owner" if waiting == "owner" else OFFLINE if waiting == "owner_online" else "reply"
-        if stop or owed == OFFLINE:
-            await self._update(talk_id, waiting_for=owed, quiet=1)
+        # Waiting on a person, theirs: admitting a first contact, or deciding on files or a question. No use holding a turn
+        # for it; a first message to an owner who had not yet admitted it kept the agent's tool waiting its two minutes out.
+        if stop or owed in (OFFLINE, "owner"):
+            if not await self._settled_by_read(talk, waiting_for=owed, quiet=1):
+                return 0.0
             self._wake_readers(talk_id)
             return max(QUIET_POLL_SECONDS, answer.retry_after or 0.0)
-        await self._update(talk_id, waiting_for=owed, quiet=0)
+        await self._settled_by_read(talk, waiting_for=owed, quiet=0)
         return 0.0
+
+    async def _settled_by_read(self, talk: Any, **fields: Any) -> bool:
+        """Write what a read found the conversation waiting for, unless a message went or is going since the read left.
+
+        One statement, not a look and then a write: what a door said of the state before a send is stale once it has
+        gone. A read out before a send came back with "nothing owed" after the send had set its wait, cleared it, and
+        the follower the send started found nothing to follow: the agent was told nothing was owed, its answer unread."""
+        names = ", ".join(f"{name} = ?" for name in fields)
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                f"UPDATE agent_talks SET {names} WHERE id = ? AND sends = ? AND NOT EXISTS (SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?)",  # noqa: S608 — names are this code's
+                (*fields.values(), talk["id"], talk["sends"], talk["id"], SENDING),
+            )
+            done = cursor.rowcount > 0
+            await cursor.close()
+        return done
 
     def _reason(self, body: dict[str, Any]) -> str:
         reason = body.get("reason")
@@ -1882,6 +1930,13 @@ class AgentTalks:
             return ""
         contacts = contacts_of(self.app)
         standing = await contacts.turn_notes() if contacts is not None else ""
+        bridge = bridge_of(self.app)
+        guests = [
+            f"- A guest of this chat's link {row['label']!r} is in conversation {conversation}: AgentTalk send with conversation={conversation} "
+            "writes to them as you, text and files, if the operator's message is about them."
+            for row, conversation in (await bridge.open_conversations(state.session.id) if bridge is not None else [])
+        ]
+        standing = "\n".join(part for part in (standing, *guests) if part)
         talks = await self.talks_of(state.session.id)
         if not talks:
             return standing
@@ -1915,6 +1970,8 @@ class AgentTalks:
                     continue
                 if talk["waiting_for"]:
                     self.follow(talk["id"])
+                elif talk["state"] == OPEN and talk["token"]:
+                    self._spawn(self._glance(talk["id"]), f"agent-talk-glance:{talk['id']}")
                 if await self.db.fetchone("SELECT 1 FROM link_files WHERE side = ? AND owner = ? AND direction = 'in' AND state = 'pending'", (SIDE, talk["id"])):
                     # A fetch a restart or a dropped connection cut short goes on from where its piece file stopped.
                     self._spawn(self._fetch_files(talk["id"]), f"agent-talk-files:{talk['id']}")

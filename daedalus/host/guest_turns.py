@@ -291,7 +291,8 @@ def brief_of(topic: str, instructions: str) -> str:
 
 
 LINK_ACTIONS_NOTE = (
-    "AgentTalk works on this conversation: action 'send' with files (paths; a folder goes as one zip) sends the guest files, "
+    "AgentTalk works on this conversation: action 'send' with files (paths; a folder goes as one zip) sends the guest files, and is the only way one reaches them: "
+    "a file named in your answer reaches them as its name alone. "
     "'progress' with a short line tells a guest how a long task goes, and 'ask_owner' with a question leaves it for the operator when only they can answer or decide: "
     "then tell the guest you are checking with the owner and end the turn, and the answer comes back to you in a turn of its own."
 )

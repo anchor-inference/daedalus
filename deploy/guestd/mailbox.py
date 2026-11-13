@@ -127,6 +127,13 @@ HOST_AWAY_SECONDS = 90.0
 feed open for 25 s and dials again at once, so a minute and a half of silence is a host that is not there: a desktop
 app that was closed, or a server whose agent is restarting. The door stays up in both and keeps what is sent."""
 OFFLINE_RETRY_SECONDS = 300
+AWAITS_OWNER = "awaits_owner"
+"""A mark the host puts on what it writes while something for the guest waits on the owner: files a turn wanted to
+send, or a question it left them. A guest who reads is told to wait for it and not to end the conversation."""
+OWNER_DECIDING = (
+    "The other agent is waiting for its owner, who decides on what you asked for (files to let go, or a question). "
+    "It comes as a message here. Do not end the conversation before then, or it has nowhere to arrive."
+)
 OWNER_OFFLINE = (
     "The owner's side is offline right now. What you sent is kept here and is answered when it is back. "
     "Stop polling and tell your user; this token stays good, so you can read again later."
@@ -250,7 +257,7 @@ class Mailbox:
             **({"key": link["owner_key"], "proof": link["owner_proof"]} if link["owner_key"] else {}),
         })
 
-    def page(self, invite: str) -> tuple[int, str] | None:
+    def page(self, invite: str, *, token: str = "") -> tuple[int, str] | None:
         """The page behind an invite, or ``None`` for an invite this door never made.
 
         A GET changes nothing about a link that can still be used, not even a counter. Link previews and
@@ -260,6 +267,10 @@ class Mailbox:
         On a spent link it leaves a line for the owner, at most one per :data:`LATE_VISIT_SECONDS`. Real agents
         open with a GET, read the 410 and stop, as they should, so they never reach a refused redeem: the
         guest whose invite had been stolen came and went and the owner heard nothing.
+
+        With ``token``, the bearer of a conversation of this link that is still open, the page is shown again: the redeem
+        sends a guest back to it for files and tasks, and an agent whose fetch tool handed it a summary of the page the
+        first time had nothing left to read once its own redeem had spent the link.
         """
         link = self.store.link_by_invite(invite)
         if link is None:
@@ -270,6 +281,9 @@ class Mailbox:
             return 200, pages.page(link, base=self.public_base() or "", invite=invite, max_text=MAX_TEXT, chunk_bytes=CHUNK_BYTES)
         if link["state"] in (REVOKED, EXPIRED):
             return 410, pages.GONE_PAGE
+        conversation = self.store.conversation_by_token(token) if token else None
+        if conversation is not None and conversation["link_id"] == link["id"] and conversation["state"] != CLOSED:
+            return 200, pages.page(link, base=self.public_base() or "", invite=invite, max_text=MAX_TEXT, chunk_bytes=CHUNK_BYTES)
         self._late_visit(link)
         return 410, pages.SPENT_PAGE
 
@@ -326,7 +340,10 @@ class Mailbox:
             "a2a": "An A2A 1.0 client sends JSON-RPC to POST /a/rpc with the same header.",
         }
         if link["mode"] != STAND_IN:
-            body["more"] = "Files and tasks are described on the link's page, under the same address you redeemed."
+            body["more"] = (
+                "Files and tasks are described on the link's page, under the same address you redeemed. It is spent for anybody else now: "
+                "read it again with GET and the header Authorization: Bearer <token>."
+            )
         if conversation["state"] == PENDING:
             body["detail"] = "The owner admits a first contact by hand. You can send your first message now; it is answered once they agree."
             return Answer(201, body, 30)
@@ -614,16 +631,21 @@ class Mailbox:
         """Tasks the other side has in hand: while there are any, a guest has a reason to keep reading."""
         return [task for task in self.store.tasks_of(conversation_id) if task["state"] in (ACCEPTED, WORKING)]
 
+    def _awaits_owner(self, conversation_id: str) -> Any:
+        """The reply that said something waits on the owner, while it is still the newest word; ``None`` otherwise."""
+        last = self.store.last_reply(conversation_id)
+        return last if last is not None and last["data"] and json.loads(last["data"]).get(AWAITS_OWNER) else None
+
     def _delivered(self, conversation: Any, replies: list[Any]) -> Answer:
         over = conversation["state"] == CLOSED
-        owed = self.store.oldest_unanswered(conversation["id"]) is not None or bool(self._working(conversation["id"]))
-        body = {
-            "status": conversation["state"],
-            "messages": [self.shown(m) for m in replies],
-            "cursor": replies[-1]["id"],
-            "stop_polling": over or not owed,
-            "detail": "The conversation is closed; these are the last replies." if over else "Use cursor as after on your next read. Send a message, or end the conversation when your user's questions are answered.",
-        }
+        deciding = self._awaits_owner(conversation["id"]) is not None
+        owed = self.store.oldest_unanswered(conversation["id"]) is not None or bool(self._working(conversation["id"])) or deciding
+        detail = (
+            "The conversation is closed; these are the last replies." if over
+            else f"Use cursor as after on your next read. {OWNER_DECIDING}" if deciding
+            else "Use cursor as after on your next read. Send a message, or end the conversation when your user's questions are answered."
+        )
+        body = {"status": conversation["state"], "messages": [self.shown(m) for m in replies], "cursor": replies[-1]["id"], "stop_polling": over or not owed, "detail": detail}
         return Answer(200, body)
 
     def _quiet(self, conversation: Any, link: Any, after: int) -> Answer:
@@ -640,6 +662,10 @@ class Mailbox:
         working = [task for task in tasks if task["state"] in (ACCEPTED, WORKING)]
         if (oldest is not None or working) and self.host_away(link):
             return Answer(200, {**base, "status": "open", "waiting_for": "owner_online", "stop_polling": True, "detail": OWNER_OFFLINE}, OFFLINE_RETRY_SECONDS)
+        if oldest is None and (deciding := self._awaits_owner(conversation["id"])) is not None:
+            if now - deciding["at"] > PENDING_POLL_SECONDS:
+                return Answer(200, {**base, "status": "open", "waiting_for": "owner", "stop_polling": True, "detail": f"{OWNER_DECIDING} Stop polling for now and tell your user; your token stays good, so read again later."}, 300)
+            return Answer(200, {**base, "status": "open", "waiting_for": "owner", "stop_polling": False, "detail": f"{OWNER_DECIDING} Read again."}, RETRY_SECONDS)
         if oldest is None and working:
             latest = max(task["updated_at"] for task in working)
             if now - latest > TASK_PATIENCE_SECONDS:
@@ -680,6 +706,6 @@ class Mailbox:
 
 
 __all__ = [
-    "AGENT", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "DOOR_MARK", "HELD", "HOST_AWAY_SECONDS", "OFFLINE_RETRY_SECONDS", "OWNER_OFFLINE", "KNOWN_CLIENTS", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "QUESTION", "STAND_IN_REPLY_SECONDS",
+    "AGENT", "AWAITS_OWNER", "DEFAULT_WAIT_SECONDS", "DIRECT_REPLY_SECONDS", "DOOR_MARK", "HELD", "HOST_AWAY_SECONDS", "OFFLINE_RETRY_SECONDS", "OWNER_OFFLINE", "KNOWN_CLIENTS", "MAX_TEXT", "MAX_WAIT_SECONDS", "OPEN", "QUESTION", "STAND_IN_REPLY_SECONDS",
     "TASK_PATIENCE_SECONDS", "TEXT_ONLY", "WORKING", "Answer", "Mailbox", "limit_answer",
 ]
