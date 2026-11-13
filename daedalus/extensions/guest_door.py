@@ -54,6 +54,7 @@ from daedalus.host.guest_turns import GuestTurn, GuestTurnBusy
 from daedalus.host.link_protocol import LinkFileError, Staged
 from daedalus.host.notify_text import render
 from daedalus.security.untrusted import inert
+from daedalus.transport.telegram.render import flatten_evidence
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -699,7 +700,9 @@ class GuestBridge:
         status = await delivery.done
         self.turns.pop(run_id, None)
         spent, _ = await manager.spend(run_id=run_id)
-        text = await manager.guest_answer(session_id, run_id) if status == "completed" else ""
+        # The app's own tags (a file, a run's receipt, a picture) are things to click in the operator's chat; a guest got
+        # them as raw markup, a file tag reading as if the file had been handed over when it had not.
+        text = flatten_evidence(await manager.guest_answer(session_id, run_id)) if status == "completed" else ""
         # A check of a subscription with nothing to tell says so and is answered with silence: the guest hears nothing.
         quiet = delivery.subscription and status == "completed" and text.strip().endswith(link_flows.NOTHING_YET)
         if quiet:
@@ -986,7 +989,7 @@ class GuestBridge:
         Left open, the operator answered a question about work nobody wanted any more, and the answer had nowhere to go."""
         manager = self.app.manager
         row = await self.known_link(link_id)
-        if manager is None or row is None:
+        if getattr(manager, "asks", None) is None or row is None:
             return
         dropped: list[str] = []
         for ask in await manager.asks.of_session(str(row["session_id"])):
