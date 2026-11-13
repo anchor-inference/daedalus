@@ -85,6 +85,7 @@ class Host:
         self.steer_route = True
         self.n = 0
         self.yagni = False
+        self.bypass = False
         # How many times the app has read the session: a re-read is what once wiped a picked answer.
         self.reads = 0
         # The request "Allow similar" has a family for, and the other open ones that family answers.
@@ -101,7 +102,7 @@ class Host:
             "workspace_name": "ws", "workspace_own": True, "workspace_sessions": [], "pending": self.pending, "model": "Claude Opus 5", "provider": "claude",
             "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
             "configured_model": CONFIGURED, "effective_model": STANDBY if self.fallback else CONFIGURED, "fallback": self.fallback,
-            "thinking": self.thinking, "reasoning_effort": self.effort, "yagni": self.yagni, "brief": "",
+            "thinking": self.thinking, "reasoning_effort": self.effort, "yagni": self.yagni, "bypass": self.bypass, "brief": "",
             "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {}, "context": {"tokens": 42000, "window": 200000, "messages": 38, "summaries": 1, "operator_turns": 6},
             "messages": self.messages, "open_approvals": list(self.open),
         }
@@ -213,6 +214,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
                 HOST.effort = str(data["reasoning_effort"])
                 HOST.thinking = bool(data.get("thinking", True))
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"model": "DeepSeek Flash", "thinking": HOST.thinking, "reasoning_effort": HOST.effort}))
+        if rel == f"/api/sessions/{SESSION}/bypass":
+            HOST.bypass = bool((data or {}).get("on"))
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"bypass": HOST.bypass, "keeps": ["host.own_containers"]}))
         if rel == f"/api/sessions/{SESSION}/yagni":
             HOST.yagni = bool((data or {}).get("on"))
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"yagni": HOST.yagni}))
@@ -1053,8 +1057,8 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.locator(".mode-menu [role='menuitemradio']").count():
         problems.append("the toggles menu still offers something to choose between")
     names = page.locator(".mode-menu .mode-row .truncate").all_inner_texts()
-    # No autopilot status on this session: YAGNI is the only switch offered.
-    if names != ["YAGNI"]:
+    # No autopilot status on this session: YAGNI and "Bypass all checks" are the switches offered.
+    if names != ["YAGNI", "Bypass all checks"]:
         problems.append(f"the toggles menu lists {names}")
     focused = page.evaluate("document.activeElement?.className || ''")
     if "yagni-row" not in focused:
@@ -1075,6 +1079,41 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("after a reload the chip does not show YAGNI on")
     if page.locator(".composer .composer-mode").inner_text().strip() != "YAGNI":
         problems.append(f"with YAGNI on the chip reads {page.locator('.composer .composer-mode').inner_text()!r}")
+    # "Bypass all checks": one click and no confirmation, a line under it naming what stays refused, and once the
+    # host has it the header carries the BYPASS mark, through a reload too.
+    if page.locator(".chat-title-line .bypass-mark").count():
+        problems.append("the header shows BYPASS before the switch is on")
+    page.locator(".composer .composer-mode").click()
+    page.wait_for_selector(".mode-menu .bypass-row")
+    hint = page.locator(".mode-menu .bypass-row .sub").inner_text()
+    if "containers" not in hint or "sealed ports" not in hint:
+        problems.append(f"the bypass switch does not say what still holds: {hint!r}")
+    before = len(posts("/bypass"))
+    page.locator(".mode-menu .bypass-row").click()
+    reached(page, "/bypass", before, "the bypass switch", problems)
+    if not posts("/bypass") or posts("/bypass")[-1][2] != {"on": True}:
+        problems.append(f"the bypass switch posted {posts('/bypass')[-1:]}")
+    if page.locator(".dialog, .confirm-dialog, [role='alertdialog']").count():
+        problems.append("the bypass switch asked for a confirmation")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".mode-menu", state="detached")
+    page.reload()
+    page.wait_for_selector(".chat-title-line .bypass-mark", timeout=5000)
+    if page.locator(".chat-title-line .bypass-mark").inner_text().strip() != "BYPASS":
+        problems.append(f"the header's bypass mark reads {page.locator('.chat-title-line .bypass-mark').inner_text()!r}")
+    if "bypass" not in (page.locator(".composer .composer-mode").get_attribute("class") or "").split():
+        problems.append("after a reload the chip does not show bypass on")
+    page.locator(".composer .composer-mode").click()
+    page.wait_for_selector(".mode-menu .bypass-row")
+    if page.locator(".mode-menu .bypass-row").get_attribute("aria-checked") != "true":
+        problems.append("the bypass switch does not read on after a reload")
+    page.locator(".mode-menu .bypass-row").click()
+    page.keyboard.press("Escape")
+    page.reload()
+    page.wait_for_selector(".composer .composer-mode")
+    page.wait_for_timeout(300)
+    if page.locator(".chat-title-line .bypass-mark").count():
+        problems.append("the header keeps BYPASS once it is off")
     context.close()
     # A narrow phone mid-run: the model chip gives way, the toggles chip stays inside the row of the
     # toolbar the composer opens onto under the finger.
@@ -1098,6 +1137,7 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
         context.close()
     HOST.status = "idle"
     HOST.yagni = False
+    HOST.bypass = False
     return problems
 
 

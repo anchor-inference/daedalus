@@ -241,6 +241,14 @@ class SqliteSessionStore(ISessionStore):
         row = await self._db.fetchone("SELECT kind FROM sessions WHERE id = ?", (session_id,))
         return str(row["kind"]) if row is not None else "chat"
 
+    async def bypass(self, session_id: str) -> bool:
+        """Whether the operator set this session to bypass the checks that can be answered (migration 167)."""
+        row = await self._db.fetchone("SELECT bypass_at FROM sessions WHERE id = ?", (session_id,))
+        return row is not None and row["bypass_at"] is not None
+
+    async def set_bypass(self, session_id: str, on: bool, at: str) -> None:
+        await self._db.execute("UPDATE sessions SET bypass_at = ? WHERE id = ?", (at if on else None, session_id))
+
     async def kinds(self, ids: Sequence[str] | None = None) -> dict[str, str]:
         """Every session's kind, or those of ``ids``: one indexed read for a whole listing."""
         if ids is None:

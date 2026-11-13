@@ -179,7 +179,7 @@ from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.filesystem import foreign_paths, machine_of
 from daedalus.host.host_exec import BRIDGE_DOWN
 from daedalus.host.installation_reach import secrets_hidden_from_commands
-from daedalus.host.policy import SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
+from daedalus.host.policy import BYPASS_KEEPS, SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
@@ -794,6 +794,10 @@ class SessionCapBody(BaseModel):
 
 
 class YagniBody(BaseModel):
+    on: bool
+
+
+class BypassBody(BaseModel):
     on: bool
 
 
@@ -2628,6 +2632,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             **manager.model_status(state),
             "kind": state.kind,
             "yagni": bool(state.metadata.get("yagni")),
+            "bypass": state.bypass,
             "autopilot": await app.extensions["autopilot"].status(session_id, state) if "autopilot" in app.extensions else None,
             "usd_cap": state.metadata.get("usd_cap"),
             "brief": state.metadata.get("brief") or "",
@@ -4546,6 +4551,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def set_yagni(session_id: str, body: YagniBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
             return {"yagni": await manager.set_yagni(session_id, body.on)}
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+
+    @api.post("/api/sessions/{session_id}/bypass")
+    async def set_bypass(session_id: str, body: BypassBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator's "Bypass all checks" for one session: one click, no confirmation, their choice."""
+        try:
+            return {"bypass": await manager.set_bypass(session_id, body.on, via="app"), "keeps": list(BYPASS_KEEPS)}
         except KeyError:
             raise HTTPException(404, "no such session") from None
 

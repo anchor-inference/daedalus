@@ -73,11 +73,21 @@ class RulesGate:
         a question these rules ask is answered by them exactly as a policy question is."""
         if decision.action == DENY:
             return decision
+        if state is not None and getattr(state, "bypass", False):
+            return decision  # the operator lifted this session's checks; the policy gate does not even ask here
+        if tool == agent_talk.TOOL and state is not None and state.guest_turn is not None and state.guest_turn.trusted:
+            # A guest the operator trusts as themselves. What this turn says or sends them is no message to
+            # strangers to review: the review once judged a trusted colleague's request for a report against
+            # an older, narrower message of the operator's, and blocked it three times over.
+            return decision
         ruled = rules.ruling(rules.categories_of(tool, arguments), self.config)
         if ruled is None:
             return decision
         key = approval_key(tool, arguments)
-        if ruled.level == "handoff":
+        # Whether the other side of a link is someone the operator trusts is in the database, which this
+        # stage cannot wait for; a message over a link is settled by the pre-tool hook, which can.
+        talk = tool == agent_talk.TOOL and decision.action == ALLOW and not decision.key and not decision.reason.startswith("allowed by the operator")
+        if ruled.level == "handoff" and not talk:
             what = self.manager.redactor.redact(canonical(tool, arguments))[:300]
             if state is not None:
                 self.handoff(state, key, tool, what, ruled.category)
@@ -95,6 +105,9 @@ class RulesGate:
             standing = next((g for g in similar or () if similar_covers(g, tool, rule, family)), None)
             if standing is not None:
                 return Decision(ALLOW, f"allowed by the operator for this session: {standing.get('label')}", rule, hosts=decision.hosts)
+        if talk and (ruled.level in ("ask", "handoff") or ruled.reviewed):
+            decision.review = ruled
+            return decision
         if ruled.level == "ask":
             return Decision(ASK, f"the operator's rules ask before an action that would {rules.CATEGORY_WORDS[ruled.category]}", ruled.rule, key=key, hosts=decision.hosts)
         if ruled.reviewed:
@@ -120,6 +133,27 @@ class RulesGate:
             return None
         session_id, ruled, _ = mark
         state = self.manager.live_state(session_id)
+        if state is not None and getattr(state, "bypass", False):
+            return None  # switched on between the gate and here
+        if tool == agent_talk.TOOL and await self._trusted_counterpart(session_id, arguments):
+            # Nothing waits on a trusted counterpart: no review, no level's question, no handoff.
+            logger.info("no review of %s in session %s: the other side is trusted", tool, session_id)
+            return None
+        guest = state is not None and guest_turns.restricted(state.guest_turn) is not None
+        if ruled.level == "handoff":
+            # A message over a link the operator keeps for themselves (see :meth:`apply`, which defers it here).
+            what = self.manager.redactor.redact(canonical(tool, arguments))[:300]
+            if state is not None and not guest:
+                self.handoff(state, key, tool, what, ruled.category)
+            return HookResult(action=HookActionKind.DENY, reason=rules.handoff_text(ruled.category, what))
+        if ruled.level == "ask":
+            if guest:
+                return HookResult(action=HookActionKind.DENY, reason="refused: the operator's rules ask before this, and a guest's turn asks nobody for anything")
+            asked = Decision(ASK, f"the operator's rules ask before an action that would {rules.CATEGORY_WORDS[ruled.category]}", ruled.rule, key=key)
+            if state is not None:
+                self.manager.record_question(state, asked, tool, arguments)
+            hint = prompts.STAFF_POLICY_HINT if state is not None and self.manager.is_staff(state) else None
+            return HookResult(action=HookActionKind.DENY, reason=refusal_text(asked, hint))
         summary = rules.summarise_action(tool, arguments, self.manager.redactor.redact)
         verdict = await self._review(state, ruled, summary)
         await self._record(session_id, str(payload.get("run_id") or ""), tool, ruled, verdict, self.manager.redactor.redact(canonical(tool, arguments)))
@@ -156,6 +190,8 @@ class RulesGate:
         if ruled is None:
             return ask
         state = self.manager.live_state(session_id)
+        if state is not None and getattr(state, "bypass", False):
+            return ask
         what = self.manager.redactor.redact(f"{ask.action} {ask.element or ask.name} on {ask.origin}")[:300]
         if ruled.level == "handoff":
             if state is not None:
@@ -179,6 +215,18 @@ class RulesGate:
             self.hold_block(state, decision.key, ask.tool, what, ruled, verdict, None)
             return replace(ask, decision=Decision(DENY, verdict.reason, f"review.{ruled.category}", key=decision.key, told=rules.block_text(ruled.category, verdict.reason, decision.key)))
         return replace(ask, decision=Decision(ASK, f"the auto-review asks: {verdict.reason}", f"review.{ruled.category}", key=decision.key))
+
+    async def _trusted_counterpart(self, session_id: str, arguments: dict[str, Any]) -> bool:
+        """Whether an ``AgentTalk`` call speaks to someone the operator trusts (:meth:`AgentTalks.trusted_call`).
+        ``False`` when that cannot be told, so a doubt keeps the review rather than lifting it."""
+        hook = getattr(self.manager, "service_hooks", {}).get("agent_talk_trusted")
+        if hook is None:
+            return False
+        try:
+            return bool(await hook(session_id, arguments))
+        except Exception:  # noqa: BLE001 — a lookup that fails is no proof of trust
+            logger.warning("could not tell whether %s's counterpart is trusted", session_id, exc_info=True)
+            return False
 
     async def _review(self, state: Any, ruled: rules.Ruling, summary: rules.ActionSummary) -> rules.Verdict:
         # The one reading of who said what that knows an answer to the agent's question is the operator's.

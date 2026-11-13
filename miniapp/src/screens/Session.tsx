@@ -77,7 +77,8 @@ import { ShareSheet } from "../share";
 import { AgentsTab, TalkApprovals, agentsWaiting, useAgentTalks, useAgentsAutoOpen } from "../agenttalk";
 import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
-import { ApprovalChip } from "../browser/approvals";
+import { ApprovalChip, chromeApprovalsShown } from "../browser/approvals";
+import { BypassMark } from "../bypass";
 import { BrowserTab } from "../browser/BrowserPanel";
 import { BrowserPip } from "../browser/pip";
 import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browser/phone";
@@ -381,6 +382,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       const status = await api.post<AutopilotStatus>(`/api/sessions/${id}/autopilot`, { on });
       // Asked for and held off by the setting for the whole app: the switch alone would read as on.
       if (on && !status.enabled) toast(t("composer.autopilot.toast.disabled"));
+      load();
+    } catch (e) {
+      toast(errorText(e));
+      load();
+    }
+  }
+
+  // One click and no confirmation: the operator's choice. The header's BYPASS mark comes with the reload.
+  async function setBypass(on: boolean) {
+    try {
+      await api.post(`/api/sessions/${id}/bypass`, { on });
       load();
     } catch (e) {
       toast(errorText(e));
@@ -1796,7 +1808,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
-          sub={phoneSub}
+          // The phone's bar has no room beside the title: the BYPASS mark rides at the head of the second line,
+          // as the share tag does, so a session that asks nobody is told apart on a phone too.
+          sub={detail?.bypass ? <><BypassMark on /> {phoneSub}</> : phoneSub}
           back={main || focus?.kind === "member" ? onBack : undefined}
           onTitle={hasDetails ? () => { setDetailsFocus("session"); panel.open("details"); } : undefined}
           chip={phoneChip}
@@ -1829,6 +1843,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <span className="chat-title-line">
               <span className="chat-title truncate">{detail?.title ?? "…"}</span>
               <HostMark env={detail?.env} />
+              <BypassMark on={!!detail?.bypass} />
               <PrivateBadge on={isPrivate(detail)} />
             </span>
           )}
@@ -1993,7 +2008,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {detail?.id === id && <Composer
             ref={composer}
             above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : <TalkApprovals sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} phone={phone} toast={toast} />}
-            beside={browsers.user?.env === "user" ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
+            beside={chromeApprovalsShown(detail, browsers.user) ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
             sessionId={id}
             // A turn parked for its computer reads "waiting", the word a question uses, but nothing is
             // asked: the composer would say "Reply to the agent…". A message written now is queued for
@@ -2016,6 +2031,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onYagni={bare ? undefined : setYagni}
             autopilot={detail?.autopilot}
             onAutopilot={bare || embedded || main || orchestrating ? undefined : setAutopilot}
+            bypass={!!detail?.bypass}
+            onBypass={bare || embedded ? undefined : setBypass}
             onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
             onBtw={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}

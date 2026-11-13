@@ -130,64 +130,101 @@ async def test_an_a2a_client_sends_a_message_and_gets_the_answer_as_a_task(pair:
 ZIP_CALL = {"action": "send", "files": ["deliverables/review"], "text": "The full report and its materials as one zip.", "wait_seconds": 30}
 
 
-def reviewing(side: Installation, verdicts: list[str]) -> None:
-    """The auto-review on for messages, with a reviewer that says what the test hands it."""
+def reviewing(side: Installation, verdicts: list[str]) -> list[str]:
+    """The auto-review on for messages, with a reviewer that says what the test hands it; the prompts it was shown."""
     from daedalus.config import ActionRulesConfig
 
     side.manager.config.action_rules = ActionRulesConfig(levels={"message": "auto"})
+    shown: list[str] = []
 
     async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+        shown.append(prompt)
         return verdicts.pop(0) if verdicts else "ALLOW", "small"
 
     side.manager.action_rules._ask_model = model  # type: ignore[method-assign]
+    return shown
 
 
-async def test_a_blocked_send_to_a_trusted_guest_reaches_them_once_the_operator_allows_it(pair: tuple[Installation, Installation]) -> None:
-    """Session of 2026-11-13: a trusted guest asked for the report as a zip, the review blocked the send, and every
-    "Allow anyway" ran the same call again in a turn of the operator's, which was told the chat had no conversation."""
-    a, _ = pair
+async def asked_for_the_zip(a: Installation, tools: str) -> tuple[str, HttpGuest]:
     (a.workspace / "deliverables" / "review").mkdir(parents=True)
     (a.workspace / "deliverables" / "review" / "REPORT.md").write_text("# Report\n")
-    _, url = await a.make_link(tools="trusted")
+    link_id, url = await a.make_link(tools=tools)
     guest = guest_of(a, url)
     await guest.read_page()
     await guest.redeem()
-    reviewing(a, ["BLOCK the operator asked only for a short report."])
-    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "The send was blocked; the owner decides."})
-    await guest.send("Please send the full report and its materials as one zip.")
-    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
-    pending = a.state().metadata.get("policy_pending") or {}
-    assert len(pending) == 1, pending
-    key = next(iter(pending))
-    # The operator presses "Allow anyway": the agent is woken in a turn of the operator's and repeats the call unchanged.
-    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Sent."})
-    await a.manager.grant(a.chat, key, via="app")
-    await a.settled()
-    assert "Sent to the guest" in tool_results(a.brain.requests[-1]), tool_results(a.brain.requests[-1])
+    return link_id, guest
+
+
+async def zip_arrived(guest: HttpGuest) -> dict[str, Any]:
     files = await guest.read_until(lambda seen: any(m.get("files") for m in seen))
     sent = next(m for m in files if m.get("files"))
     assert sent["from"] == "agent" and sent["files"][0]["name"] == "review.zip"
     assert zipfile.ZipFile(io.BytesIO(await guest.download(sent["files"][0]))).namelist() == ["REPORT.md"]
+    return sent
+
+
+async def test_the_live_incident_on_a_trusted_link_delivers_the_zip_in_the_guests_own_turn(pair: tuple[Installation, Installation]) -> None:
+    """Session of 2026-11-13: a trusted guest asked for the report as a zip, the review blocked the send three times,
+    and every "Allow anyway" ran the call again in a turn of the operator's that could not reach the guest. A guest the
+    operator trusts is served as they would be: no review, no card, the zip with the turn's own answer."""
+    a, _ = pair
+    _, guest = await asked_for_the_zip(a, "trusted")
+    shown = reviewing(a, ["BLOCK the operator asked only for a short report."] * 3)
+    a.brain.then({"text": "Noted."})
+    await a.say("Give me a very short report with clear numbers.")
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Here is the full report as one zip."})
+    await guest.send("Please send the full report and its materials as one zip.")
+    sent = await zip_arrived(guest)
+    assert sent["text"] == "Here is the full report as one zip.", "the files came with the turn's own answer, not after it"
+    assert [m for m in guest.seen if m["from"] == "agent"] == [sent], "one answer, nothing blocked before it"
+    assert not any("AgentTalk" in prompt for prompt in shown), "nothing reviewed the send"
+    assert not a.state().metadata.get("policy_pending"), "no Allow card"
+
+
+async def test_a_bypassed_session_on_a_limited_link_delivers_the_zip_too(pair: tuple[Installation, Installation]) -> None:
+    a, _ = pair
+    _, guest = await asked_for_the_zip(a, "read")
+    shown = reviewing(a, ["BLOCK not asked for."] * 3)
+    await a.manager.set_bypass(a.chat, True, via="app")
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Here is the zip."})
+    await guest.send("Please send the full report and its materials as one zip.")
+    sent = await zip_arrived(guest)
+    assert sent["text"] == "Here is the zip."
+    assert not shown and not a.state().metadata.get("policy_pending")
+    assert await a.bridge.held(a.chat) == [], "nothing waited for the operator's look"
+
+
+async def test_an_operators_send_to_a_limited_guest_goes_once_allowed_and_its_files_once_let_go(pair: tuple[Installation, Installation]) -> None:
+    """The operator's own turn writes to the guest of the chat's link. A limited guest's send is reviewed as any
+    message; "Allow anyway" replays the call, which now reaches the guest, and its files wait for the operator's look."""
+    a, _ = pair
+    link_id, guest = await asked_for_the_zip(a, "read")
+    await guest.send("Hello.")
+    a.brain.then({"text": "Hello."})
+    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    reviewing(a, ["BLOCK not asked for."])
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Blocked."})
+    await a.say("Send our colleague the full review as a zip.")
+    key = next(iter(a.state().metadata.get("policy_pending") or {}))
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "It waits for you."})
+    await a.manager.grant(a.chat, key, via="app")
+    await a.settled()
+    assert "wait for the operator" in tool_results(a.brain.requests[-1]), tool_results(a.brain.requests[-1])
+    held = await a.bridge.held(a.chat)
+    await a.call("POST", f"/api/guest/links/{link_id}/outbox/{held[0]['batch']}/send", json={"drop": []})
+    await zip_arrived(guest)
     await guest.close()
 
 
-# What follows is the review's and the override's, which are being changed apart from this suite: each is an
-# expectation the exchange above showed, written down as one so it is checked once that work lands.
-
-
-@pytest.mark.xfail(strict=True, reason="the override is spent by the replayed call even when that call fails; the review's own code is being changed apart from this suite")
 async def test_an_allow_anyway_is_not_spent_by_a_replayed_call_that_failed(pair: tuple[Installation, Installation]) -> None:
     a, _ = pair
-    (a.workspace / "deliverables" / "review").mkdir(parents=True)
-    (a.workspace / "deliverables" / "review" / "REPORT.md").write_text("# Report\n")
-    _, url = await a.make_link(tools="trusted")
-    guest = guest_of(a, url)
-    await guest.read_page()
-    await guest.redeem()
+    _, guest = await asked_for_the_zip(a, "read")
+    a.brain.then({"text": "Hello."})
+    await guest.send("Hello.")
+    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
     reviewing(a, ["BLOCK not asked for."])
     a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Blocked."})
-    await guest.send("Send the report as a zip.")
-    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    await a.say("Send our colleague the full review as a zip.")
     key = next(iter(a.state().metadata.get("policy_pending") or {}))
     await guest.end()  # the guest has gone by the time the operator decides: the replayed call cannot succeed
     a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "It did not go."})
@@ -198,28 +235,20 @@ async def test_an_allow_anyway_is_not_spent_by_a_replayed_call_that_failed(pair:
     await guest.close()
 
 
-@pytest.mark.xfail(strict=True, reason="the review judges a trusted guest's send against the operator's own requests in the chat, never the guest's; the review's code is being changed apart from this suite")
-async def test_the_review_of_a_trusted_guests_send_reads_what_the_guest_asked_for(pair: tuple[Installation, Installation]) -> None:
+async def test_keep_blocked_sends_nothing_to_the_guest(pair: tuple[Installation, Installation]) -> None:
     a, _ = pair
-    (a.workspace / "report.md").write_text("# Report\n")
-    _, url = await a.make_link(tools="trusted")
-    guest = guest_of(a, url)
-    await guest.read_page()
-    await guest.redeem()
-    prompts: list[str] = []
-    reviewing(a, [])
-
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
-        prompts.append(prompt)
-        return "ALLOW", "small"
-
-    a.manager.action_rules._ask_model = model  # type: ignore[method-assign]
-    a.brain.then({"text": "Noted."})
-    await a.say("Give me a very short report with clear numbers.")
-    a.brain.then({"tool": "AgentTalk", "args": {"action": "send", "files": ["report.md"]}}, {"text": "Here it is."})
-    await guest.send("Please send me the full report as a file.")
-    await guest.read_until(lambda seen: any(m.get("files") for m in seen))
-    assert prompts and "full report as a file" in prompts[-1], "the request being served is the guest's, which the operator made the link to serve"
+    _, guest = await asked_for_the_zip(a, "read")
+    a.brain.then({"text": "Hello."})
+    await guest.send("Hello.")
+    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    reviewing(a, ["BLOCK not asked for."])
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "Blocked."})
+    await a.say("Send our colleague the full review as a zip.")
+    key = next(iter(a.state().metadata.get("policy_pending") or {}))
+    await a.manager.refuse(a.chat, key, via="app")
+    await a.settled()
+    assert not any(m.get("files") for m in (await guest.read(wait=0))["messages"] + guest.seen), "nothing the operator kept blocked went"
+    assert not await a.db.fetchall("SELECT 1 FROM link_files WHERE direction = 'out'")
     await guest.close()
 
 
@@ -459,22 +488,3 @@ async def test_an_http_agent_is_told_the_owner_is_offline_and_answered_when_they
     assert seen[-1]["text"] == "Back now."
     await guest.close()
 
-
-async def test_keep_blocked_sends_nothing_to_the_guest(pair: tuple[Installation, Installation]) -> None:
-    a, _ = pair
-    (a.workspace / "deliverables" / "review").mkdir(parents=True)
-    (a.workspace / "deliverables" / "review" / "REPORT.md").write_text("# Report\n")
-    _, url = await a.make_link(tools="trusted")
-    guest = guest_of(a, url)
-    await guest.read_page()
-    await guest.redeem()
-    reviewing(a, ["BLOCK not asked for."])
-    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "The send was blocked; the owner decides."})
-    await guest.send("Send the report as a zip.")
-    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
-    key = next(iter(a.state().metadata.get("policy_pending") or {}))
-    await a.manager.refuse(a.chat, key, via="app")
-    await a.settled()
-    assert not any(m.get("files") for m in (await guest.read(wait=0))["messages"] + guest.seen), "nothing the operator kept blocked went"
-    assert not (await a.db.fetchall("SELECT 1 FROM link_files WHERE direction = 'out' AND state = 'sent'"))
-    await guest.close()

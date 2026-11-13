@@ -411,6 +411,9 @@ class SessionState:
     kind: str = "chat"
     """What the conversation was made for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Given
     at creation and never changed; what it controls now is ``SessionManager.control_marks``."""
+    bypass: bool = False
+    """The operator set this session to bypass every check that can be answered (``sessions.bypass_at``):
+    see :meth:`SessionManager.set_bypass` for what that lifts and what stays."""
     run_origin: str = "operator"
     """Who started the current run (``operator``, ``schedule``, ``reminder``, ``subagent:…``): StaySilent and the reply routing read it."""
     guest_turn: guest_turns.GuestTurn | None = None
@@ -479,6 +482,8 @@ class SessionState:
     """Monotonic time the current run (re)started driving the model: the time cap counts from here, not from
     the run's creation, so an hour waiting on the operator's answer is not an hour of run time."""
     tool_starts: dict[str, tuple[float, str]] = field(default_factory=dict)
+    grant_calls: dict[str, tuple[str, float]] = field(default_factory=dict)
+    """Calls a one-time grant may let through, by call id: the key and when the grant ends (``_settle_grant``)."""
     """Tool calls in flight: ``call_id -> (monotonic start, tool name)``, for the timing rows."""
     tool_group_surface: dict[str, str] = field(default_factory=dict)
     """Each group's state as this process's last ``tool_surface_advertised`` for the session said:
@@ -952,6 +957,9 @@ class SessionManager:
         """The operator's terminal clients, set when the relay is installed: what a remote conversation
         runs its commands and file tools through (``daedalus.remote``)."""
         self.delete_hooks: list[Callable[[str], Awaitable[None]]] = []
+        self.bypass_hooks: list[Callable[[str, bool], Awaitable[None]]] = []
+        """Told when a session's "Bypass all checks" moves: the browser carries it to the guard of the
+        operator's Chrome, which judges a page's own redirects without asking the host."""
         self.control_marks = ControlMarks(self._announce_controls)
         """What each session controls right now (the operator's Chrome, their computer), kept apart from
         what it was made for; the browser service and the computer's watcher recompute it."""
@@ -1785,6 +1793,11 @@ class SessionManager:
         await self.sessions.create(session, project_id=project.id, kind=kind)
         project = await self._settle_project(project)
         state = SessionState(session=session, workspace=workspace, metadata=dict(meta), project=project, kind=kind)
+        if meta.get("subagent_of") and await self.sessions.bypass(str(meta["subagent_of"])):
+            # A helper does its leader's work: a check the operator lifted for the work would come back in
+            # the helper and stop the very task the leader handed it.
+            await self.sessions.set_bypass(sid, True, datetime.now(UTC).isoformat())
+            state.bypass = True
         self._states[sid] = state
         self.register_services(state)
         created: dict[str, Any] = {"title": title}
@@ -1950,6 +1963,7 @@ class SessionManager:
         self.unloadable_sessions.pop(session_id, None)
         state = SessionState(session=session, workspace=workspace, metadata=dict(session.metadata), project=project)
         state.kind = await self.sessions.kind(session_id)
+        state.bypass = await self.sessions.bypass(session_id)
         measurement = await self.db.kv_get(f"context_measurement:{session_id}", {})
         state.usage_floor_seq = int(measurement.get("floor", 0))
         state.observed_prompt_tokens = int(measurement.get("tokens", 0))
@@ -4728,6 +4742,39 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         return on
 
+    async def set_bypass(self, session_id: str, on: bool, *, via: str = "app") -> bool:
+        """Switch the session's "Bypass all checks", the operator's one click and no confirmation after it.
+
+        While it is on, in this session and the subagents it starts: no auto-review of any category, a policy
+        question is answered yes, a hold on what goes out over an agent link is not made, the operator's
+        Chrome behaves as under "skip all approvals", and the browser's sensitive-action and injection
+        questions are not asked. What stays is every refusal no answer could lift anyway (``Decision`` of
+        ``deny``): this installation's own files, keys, database and containers (``host.installation``,
+        ``host.own_containers`` — entering our own containers once broke the sandbox for every session),
+        sealed ports and public tunnels, system paths and raw devices, the operator's checkouts, the MCP
+        tools and browser rules the operator set to deny, a sign-in typed into a page, and the bounds of
+        a guest's turn, which are the link's and not a check of this session. The list the app shows under
+        the switch is :data:`daedalus.host.policy.BYPASS_KEEPS`.
+
+        Logged as an event (``session.bypass``), so the switch and when it moved are on the record."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        await self.sessions.set_bypass(session_id, on, datetime.now(UTC).isoformat())
+        state.bypass = on
+        for sub in [s for s in self._states.values() if s.metadata.get("subagent_of") == session_id]:
+            # A helper already at work follows its leader, as one started later inherits the switch.
+            await self.sessions.set_bypass(sub.session.id, on, datetime.now(UTC).isoformat())
+            sub.bypass = on
+        logger.warning("session %s: bypass all checks switched %s (via %s)", session_id, "on" if on else "off", via)
+        await self._publish(state, "session.bypass", {"on": on, "via": via})
+        for hook in self.bypass_hooks:
+            try:
+                await hook(session_id, on)
+            except Exception:  # noqa: BLE001 — the switch is the operator's and stands; a follower failing is logged
+                logger.warning("a follower of the bypass switch failed in session %s", session_id, exc_info=True)
+        return on
+
     async def _yagni_note(self, state: SessionState, history: Sequence[Message] | None = None) -> str:
         """The YAGNI note this turn has to carry, or ``""`` when the model already knows.
 
@@ -6454,6 +6501,7 @@ class SessionManager:
         elif event.type is EventType.TOOL_RESULT and self.remote is not None and state.services is not None and getattr(state.services.exec_backend, "journal", None) is not None:
             # The call has its result: the answers kept for a repeat of its requests to the terminal go.
             self._spawn_background(self.remote.journal.close_call(state.session.id, str(event.payload.get("tool_call_id") or "")), "remote-call-closed")
+        self._settle_grant(state, event)
         self._time_tool(state, event)
         self._track_tool_groups(state, event)
         self._redact_event(state, event)
@@ -6482,6 +6530,41 @@ class SessionManager:
         elif event.type.value == "tool_group_loaded" and event.payload.get("group"):
             tools = state.tool_groups_loaded.setdefault(str(event.payload["group"]), set())
             tools.update(str(name) for name in event.payload.get("tools") or ())
+
+    def _settle_grant(self, state: SessionState, event: TurnEvent) -> None:
+        """A one-time grant comes back when the call it let through failed.
+
+        The gate spends a grant as it lets the call past, before the call runs, because two calls must not
+        both pass on it. Spent there and never given back, the operator's "Allow anyway" for a file a guest
+        asked for went on a call that failed for a reason of its own ("This chat has no open conversation"),
+        and the same call, made again where it could work, was blocked again and needed a second press, which
+        went the same way. So a call that a grant may let through is noted when its input is complete (the
+        stream's ``tool_use_stop``, before the gate), and when its result is an error the grant is written
+        back with the expiry it had. A call that succeeded keeps it spent; one that never used it changes
+        nothing, since the grant is still there."""
+        p = event.payload
+        call_id = str(p.get("tool_call_id") or "")
+        if not call_id:
+            return
+        if event.type is EventType.TOOL_USE_STOP and isinstance(p.get("final_input"), dict):
+            started = state.tool_starts.get(call_id)
+            grants = state.metadata.get("policy_grants") or {}
+            if started is None or not grants:
+                return
+            key = approval_key(started[1], p["final_input"])
+            if key in grants:
+                state.grant_calls[call_id] = (key, float(grants[key]))
+        elif event.type is EventType.TOOL_RESULT:
+            noted = state.grant_calls.pop(call_id, None)
+            if noted is None or not p.get("is_error"):
+                return
+            key, until = noted
+            if until <= time.time() or key in (state.metadata.get("policy_grants") or {}):
+                return
+            for meta in (state.metadata, state.session.metadata):
+                meta["policy_grants"] = dict(list({**(meta.get("policy_grants") or {}), key: until}.items())[-20:])
+            self._spawn_background(self.sessions.update_metadata(state.session.id, state.session.metadata), f"grant-back:{state.session.id}")
+            logger.warning("session %s: the call granted by %s failed, so the grant stands for its next try", state.session.id, key)
 
     def _time_tool(self, state: SessionState, event: TurnEvent) -> None:
         """One row per tool call: name, when, how long, whether it failed. The waterfall of a run is these rows."""
@@ -7537,7 +7620,10 @@ class SessionManager:
             turn = guest_turns.restricted(state.guest_turn) if state is not None else None
             if turn is not None and (refused := self._guest_refused(state, turn, tool, arguments)) is not None:
                 return refused
-            touch = agent_talk.touch_of(state.metadata) if state is not None and turn is None else None
+            # The operator lifted the checks of this session. Not those of a guest's turn held to a link's
+            # bounds: what such a turn may do is the link's, and the guest is not who flipped the switch.
+            bypass = state is not None and state.bypass and turn is None
+            touch = agent_talk.touch_of(state.metadata) if state is not None and turn is None and not bypass else None
             standing = agent_talk.standing_of(tool) if touch is not None else "free"
             if standing == "refused":
                 return Decision("deny", agent_talk.REFUSED_WHY, agent_talk.RULE)
@@ -7557,6 +7643,18 @@ class SessionManager:
                 grants = {k for k in grants if float(state.metadata["policy_grants"][k]) - GRANT_TTL_SECONDS >= float(touch.get("at") or 0)}
                 similar = []
             decision = policy.evaluate(tool, arguments, grants=grants, similar=similar)
+            if bypass:
+                # Every question is answered yes and the operator's action rules are not applied: no review,
+                # no level's question, no handoff. A refusal stands, since no answer could lift it anyway
+                # (``policy.BYPASS_KEEPS``). No grant is spent: none was needed.
+                if decision.action == "ask":
+                    logger.info("bypass in session %s lets %s through without asking: %s (rule %s)", session_id, tool, decision.reason, decision.rule)
+                    decision = Decision("allow", f"the session bypasses checks ({decision.rule})", decision.rule, hosts=decision.hosts)
+                if decision.hosts:
+                    self._record_egress(session_id, run_id, tool, decision.hosts, decision.action)
+                if decision.action != "allow":
+                    logger.warning("policy %s %s for %s in session %s (bypass on): %s", decision.action, decision.rule, tool, session_id, decision.reason)
+                return decision
             # The operator's action rules, on top: they turn an allowed call into a question, a
             # handoff or a call a review stands before, and never loosen what the policy said.
             decision = self.action_rules.apply(state, tool, arguments, decision, grants, similar)
@@ -7659,6 +7757,10 @@ class SessionManager:
         decision = ask.decision
         if state is None:
             return False, "this session is not loaded; the action was not taken"
+        if getattr(state, "bypass", False) and decision.action == ASK:
+            # The operator lifted this session's checks: a question about a page or the desktop is one of them.
+            logger.info("bypass in session %s lets %s through without asking: %s", session_id, ask.tool, decision.reason)
+            return True, ""
         now = time.time()
         grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now}
         if decision.key in grants:
@@ -7734,6 +7836,10 @@ class SessionManager:
         decision = ask.decision
         if state is None:
             return False, "this session is not loaded; the action was not taken"
+        if getattr(state, "bypass", False) and decision.action == ASK:
+            # The operator lifted this session's checks: a question about a page or the desktop is one of them.
+            logger.info("bypass in session %s lets %s through without asking: %s", session_id, ask.tool, decision.reason)
+            return True, ""
         now = time.time()
         grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now}
         if decision.key in grants:

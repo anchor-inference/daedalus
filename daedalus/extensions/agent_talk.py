@@ -516,11 +516,11 @@ class AgentTalks:
                 return Outcome(said, failed)
             if action not in ("send", "read", "end", "task", "cancel", *flows_module.FLOW_ACTIONS):
                 return Outcome("action is one of open, send, task, cancel, read, end, contacts, ask, summary, slots, meet, apply_patch.", error=True)
-            if turn is None and action == "send" and not contact and (guest := await self._guest_addressed(session_id, conversation)) is not None:
-                if isinstance(guest, Outcome):
-                    return guest
-                said, failed = await bridge_of(self.app).write_to_guest(state, guest, text, list(files or []))  # type: ignore[union-attr]
-                return Outcome(said, failed, guest["conversation"])
+            if turn is None and action == "send" and not contact and (guest := await self._guest_for(session_id, conversation)) is not None:
+                bridge = bridge_of(self.app)
+                assert bridge is not None
+                said, failed = await bridge.send_outside_turn(state, guest[0], guest[1], text, list(files or []))
+                return Outcome(said, failed, guest[1])
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation, contact=bool(contact))
             if isinstance(talk, Outcome):
                 return talk
@@ -538,23 +538,6 @@ class AgentTalks:
         except NotReachable as exc:
             return Outcome(str(exc), error=True)
 
-    async def _guest_addressed(self, session_id: str, conversation: str) -> dict[str, str] | Outcome | None:
-        """The guest at this chat's own door a send of the operator's turn is for, or ``None`` when it is for a conversation
-        at somebody else's: the one named, or with none named and none of those open, the one guest there is."""
-        bridge = bridge_of(self.app)
-        if bridge is None:
-            return None
-        if conversation and await self.talk(conversation) is not None:
-            return None
-        guests = await bridge.open_guests(session_id)
-        if conversation:
-            return next((guest for guest in guests if guest["conversation"] == conversation), None)
-        if any(talk["state"] != CLOSED for talk in await self.talks_of(session_id)) or not guests:
-            return None
-        if len(guests) == 1:
-            return guests[0]
-        return Outcome("Several guests are in conversation with this chat; say which with conversation: " + ", ".join(f"{g['conversation']} (link {g['label']!r})" for g in guests), error=True)
-
     async def _chosen(self, session_id: str, conversation: str, *, contact: bool = False) -> Any:
         if contact:
             found = await self.talk(conversation)
@@ -569,6 +552,72 @@ class AgentTalks:
         if not live:
             return Outcome("This chat has no open conversation. Open one with the link the operator gave you.", error=True)
         return Outcome("Several conversations are open; say which: " + ", ".join(f"{talk['id']} ({talk['host']})" for talk in live), error=True)
+
+    async def _guest_for(self, session_id: str, conversation: str) -> tuple[Any, str] | None:
+        """The guest at this chat's own door a ``send`` of the operator's turn is for, as ``(link row, conversation id)``:
+        the one ``conversation`` names, or, with none named and no conversation of this chat's own open, the one guest
+        there is. ``None`` when the send is for a conversation at somebody else's door, or nothing can be told.
+
+        A guest's turn ends with its answer, and a call the operator let through afterwards is carried out in a turn
+        of the main chat. That turn found no conversation, failed, and spent the operator's "Allow anyway" on the
+        failure while the guest waited for the files. With one guest there is no one else it could mean; with two,
+        the turn notes name each, and the agent names one."""
+        bridge = bridge_of(self.app)
+        if bridge is None or (conversation and await self.talk(conversation) is not None):
+            return None
+        found = await bridge.open_conversations(session_id)
+        if conversation:
+            return next((guest for guest in found if guest[1] == conversation), None)
+        if any(talk["state"] != CLOSED for talk in await self.talks_of(session_id)):
+            return None
+        return found[0] if len(found) == 1 else None
+
+    async def talk_trusted(self, talk: Any) -> bool:
+        """Whether the operator trusts the other side of this conversation as themselves: it is a live contact's,
+        and this side's link for that contact is set to ``trusted``. A conversation through a stranger's link
+        alone is never trusted, whatever it says about itself."""
+        from daedalus.extensions.agent_contacts import LIVE  # Lazy: contacts import this module.
+
+        marks = ",".join("?" * len(LIVE))
+        row = await self.db.fetchone(
+            f"SELECT l.tools FROM link_contacts c JOIN guest_links l ON l.id = c.link_id WHERE c.talk_id = ? AND c.state IN ({marks}) AND l.revoked_at IS NULL",
+            (talk["id"], *LIVE),
+        )
+        return row is not None and row["tools"] == "trusted"
+
+    async def trusted_call(self, session_id: str, arguments: dict[str, Any]) -> bool:
+        """Whether an ``AgentTalk`` call of this session speaks to someone the operator trusts, so that nothing
+        reviews it and nothing holds it: a trusted guest's turn, a trusted contact's conversation (named, implied,
+        or the one a turn opened by its reply answers), or the one trusted guest a turn of the operator's writes to.
+        Resolved the way :meth:`tool` resolves the same call, so the answer is about where it really goes."""
+        state = self.manager.live_state(session_id)
+        if state is None:
+            return False
+        turn = state.guest_turn
+        if turn is not None and turn.kind != "reply":
+            return turn.trusted
+        if turn is not None:
+            talk = await self.talk(turn.link_id)
+            return talk is not None and str(talk["session_id"]) == session_id and await self.talk_trusted(talk)
+        if arguments.get("action") == "open":
+            return False  # a door nobody has spoken to yet
+        contact = str(arguments.get("contact") or "")
+        if contact:
+            contacts = contacts_of(self.app)
+            found = await contacts.by_name(contact) if contacts is not None else None
+            talk = await self.talk(str(found["talk_id"])) if found is not None and found["talk_id"] else None
+            return talk is not None and await self.talk_trusted(talk)
+        conversation = str(arguments.get("conversation") or "")
+        if arguments.get("action") == "send" and (guest := await self._guest_for(session_id, conversation)) is not None:
+            return str(guest[0]["tools"]) == "trusted"
+        talks = await self.talks_of(session_id)
+        if conversation:
+            talk = next((t for t in talks if t["id"] == conversation), None)
+            return talk is not None and await self.talk_trusted(talk)
+        live = [t for t in talks if t["state"] != CLOSED]
+        if len(live) == 1:
+            return await self.talk_trusted(live[0])
+        return False
 
     async def _in_operators_words(self, session_id: str, door: agent_talk.DoorLink) -> bool:
         """Whether the operator wrote this very address in this chat, in their own words.
@@ -730,7 +779,10 @@ class AgentTalks:
             staged, outside = prepared
         if kind == link_protocol.TEXT and staged:
             kind = link_protocol.FILE
-        hold = "review" if state.review_holds_send else "outside" if outside else self._why_hold(talk, clean, session_id, staged)
+        # Nothing waits for the operator on a conversation with someone they trust as themselves, nor in a session
+        # they set to bypass its checks: a hold is their look before something leaves, and they said they do not want it.
+        free = bool(getattr(state, "bypass", False)) or await self.talk_trusted(talk)
+        hold = "" if free else "review" if state.review_holds_send else "outside" if outside else self._why_hold(talk, clean, session_id, staged)
         state.review_holds_send = False
         message_id = await self._insert_message(talk["id"], US, clean, HELD if hold else SENDING, run_id, hold, kind=kind, task=task, card=card)
         for item in staged:
@@ -1167,7 +1219,8 @@ class AgentTalks:
                 await self._tell(talk, key)
                 return
             # The turn reads this conversation's runs, which hold the stranger's replies.
-            manager.touch_run(session_id)
+            if not await self.talk_trusted(talk):
+                manager.touch_run(session_id)
             if key == "gave_up":
                 await self._tell(talk, key)
             return
@@ -1265,7 +1318,10 @@ class AgentTalks:
         thought and the reverse in code: the run is touched first, so nothing can go wrong between its reading
         a stranger and its being treated as having done so."""
         # The chat whose run reads them, which for a contact written to from another chat is not the conversation's own.
-        self.manager.touch_run(reader)
+        # A contact the operator trusts as themselves does not touch it: what it says is not a stranger's, and a touched
+        # run puts every command and file change after it on a card.
+        if not await self.talk_trusted(talk):
+            self.manager.touch_run(reader)
         rules = getattr(self.manager, "action_rules", None)
         out: list[str] = []
         for row in rows:
@@ -1689,8 +1745,10 @@ class AgentTalks:
             except (RuntimeError, KeyError) as exc:
                 logger.warning("a reply could not open a turn in session %s: %s", session_id, exc)
                 return
-            # Whatever follows this turn before the operator writes is a run over a stranger's words too.
-            manager.touch_run(session_id)
+            # Whatever follows this turn before the operator writes is a run over a stranger's words too, unless the
+            # other side is a contact the operator trusts as themselves.
+            if not await self.talk_trusted(talk):
+                manager.touch_run(session_id)
             for row in unread:
                 await self.db.execute("UPDATE agent_talk_messages SET state = ?, run_id = ? WHERE id = ?", (READ, run_id, row["id"]))
             # Before the turn ends and not after: a turn cut off by a restart was still a turn.
@@ -1874,9 +1932,9 @@ class AgentTalks:
         standing = await contacts.turn_notes() if contacts is not None else ""
         bridge = bridge_of(self.app)
         guests = [
-            f"- A guest of this chat's link {guest['label']!r} is in conversation {guest['conversation']}: AgentTalk send with conversation={guest['conversation']} "
+            f"- A guest of this chat's link {row['label']!r} is in conversation {conversation}: AgentTalk send with conversation={conversation} "
             "writes to them as you, text and files, if the operator's message is about them."
-            for guest in (await bridge.open_guests(state.session.id) if bridge is not None else [])
+            for row, conversation in (await bridge.open_conversations(state.session.id) if bridge is not None else [])
         ]
         standing = "\n".join(part for part in (standing, *guests) if part)
         talks = await self.talks_of(state.session.id)
@@ -2018,6 +2076,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         return []
     manager.service_hooks["agent_talk"] = talks.tool
     manager.service_hooks["agent_talk_notes"] = talks.turn_notes
+    manager.service_hooks["agent_talk_trusted"] = talks.trusted_call
     manager.answer_hooks[ASK_HOOK] = talks.decided
     manager.on_finished(talks.on_run_finished)
     manager.delete_hooks.append(talks.on_session_deleted)

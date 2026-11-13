@@ -4023,6 +4023,20 @@ async def _service_start_marks(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _service_start_marks))
 
+# 167 — a session the operator set to bypass every check that can be answered: no auto-review, no question
+# from the policy, no hold on what goes out over a link. ``bypass_at`` is when they switched it on, NULL while
+# it is off. A column of the session and not a key of its metadata, because the metadata is rewritten whole by
+# whatever touches a session, and a switch that lifts every check must not come back on, or go off, as a side
+# effect of a title change written over an older copy.
+async def _session_bypass(conn: aiosqlite.Connection) -> None:
+    """Added only when missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(sessions)")).fetchall()}
+    if "bypass_at" not in present:
+        await conn.execute("ALTER TABLE sessions ADD COLUMN bypass_at TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_bypass))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
