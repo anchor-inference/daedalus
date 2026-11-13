@@ -5604,11 +5604,18 @@ class SessionManager:
             try:
                 if said_of_talks := await talks(state):
                     volatile.append("\n" + said_of_talks)
+                    # The notes name conversations the turn may write to with AgentTalk: a note about a tool that sits
+                    # behind a search is a step the model must spend before it can act on it.
+                    await self._queue_group_load(state, agent_talk.GROUP)
             except Exception:  # noqa: BLE001 — a turn starts without this note rather than not at all
                 logger.exception("the notes on agent talks failed for session %s", state.session.id)
         if trusted is not None:
             # The operator's whole context, and the one note that says whose message this is and how to serve it.
             volatile.append("\n" + guest_turns.turn_note(trusted))
+            # The turn's one way to hand its guest a file is AgentTalk, and a trusted turn runs on the session's own
+            # tool surface, where that group waits behind a search: asked for a report as a zip, a real model spent a
+            # step finding the tool before it could send anything. Put it within reach, as a pasted link does.
+            await self._queue_group_load(state, agent_talk.GROUP)
         elif state.metadata.get(guest_turns.SEEN_KEY):
             # Not for a trusted guest's turn: this note tells the model the turn is the operator's.
             volatile.append("\n" + guest_turns.LATER_TURN_NOTE)

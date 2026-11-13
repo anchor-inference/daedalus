@@ -322,6 +322,8 @@ class Delivery:
     """The door's ids of files this turn uploaded to go with its answer."""
     asked: bool = False
     """The turn left a question for the operator: its task waits for input."""
+    held_files: bool = False
+    """The turn wanted to send files that wait for the operator: its task is not done until they decide."""
     progress_at: float = 0.0
     by: str = ""
     """``owner`` where the guest's owner says they wrote this themselves rather than their agent."""
@@ -443,6 +445,7 @@ class GuestBridge:
         for run_id, delivery in list(self.turns.items()):
             if delivery.link_id == link_id and manager is not None and row is not None:
                 await manager.stop_run(str(row["session_id"]), run_id)
+        await self.withdraw_asks(link_id, why="the link was revoked")
 
     async def forget_interrupted(self) -> None:
         """What a turn of the process before this one was doing when it stopped: its task was refused at the door
@@ -703,7 +706,12 @@ class GuestBridge:
             text = ""
         # A turn that ended without a word, on its model-call bound for one, has not answered; files are an answer.
         ok = status == "completed" and bool(text or delivery.sent_files or quiet)
-        state = link_protocol.NEEDS_INPUT if delivery.asked and ok else link_protocol.DONE if ok else link_protocol.REFUSED
+        # A task whose files wait for the operator stays in hand until they decide: done now, an A2A client that follows the
+        # task stopped at "completed" and never looked again for the files that came after.
+        state = (
+            link_protocol.NEEDS_INPUT if delivery.asked and ok else link_protocol.WORKING if delivery.held_files and delivery.task and ok
+            else link_protocol.DONE if ok else link_protocol.REFUSED
+        )
         if delivery.task:
             await self._task_row(session_id, delivery, state if status != "cancelled" else link_protocol.CANCELLED, result=text)
         await self._answer(delivery, ok=ok, text=text, cost=spent, task_state=state if delivery.task else "")
@@ -779,7 +787,21 @@ class GuestBridge:
         text, kind, task, by = str(body.get("text") or ""), str(body.get("kind") or link_protocol.TEXT), str(body.get("task") or ""), str(body.get("from") or "")
         card = link_flows.card_view(body.get("card"))
         signed = self.signed(text=_as_door_keeps(text), kind=kind, task=task, by=by, to=await self.peer_of(link_id, conversation_id), card=card)
-        return await self.client.call("POST", f"/control/conversations/{conversation_id}/messages", json={**body, **signed})
+        owes = {"awaits_owner": True} if await self.owner_owes(link_id, conversation_id) else {}
+        return await self.client.call("POST", f"/control/conversations/{conversation_id}/messages", json={**body, **signed, **owes})
+
+    async def owner_owes(self, link_id: str, conversation_id: str) -> bool:
+        """Whether something for this guest waits on the operator: files a turn wanted to send, or a question it left them.
+
+        Said to the door with every word this side writes, and the door tells a guest that reads to wait rather than to end.
+        Without it a guest told "they follow once the owner lets them go" read "you have every reply; end the conversation"
+        from the door, and an agent that does what it reads ended it before the files could go."""
+        if await self.app.db.fetchone("SELECT 1 FROM link_files WHERE side = ? AND owner = ? AND conversation = ? AND state IN ('held', 'sending') LIMIT 1", (SIDE, link_id, conversation_id)):
+            return True
+        return await self.app.db.fetchone(
+            "SELECT 1 FROM asks WHERE resolved_at IS NULL AND json_extract(detail_json, '$.guest.link_id') = ? AND json_extract(detail_json, '$.guest.conversation') = ? LIMIT 1",
+            (link_id, conversation_id),
+        ) is not None
 
     async def say_as_owner(self, link_id: str, conversation_id: str, text: str) -> None:
         """The operator's own words to a guest: marked as theirs at the door, and read as theirs on the other side."""
@@ -798,6 +820,8 @@ class GuestBridge:
             body["files"] = delivery.sent_files
         if task_state:
             body["task_state"] = task_state
+        if ok and await self.owner_owes(delivery.link_id, delivery.conversation_id):
+            body["awaits_owner"] = True
         try:
             await self.client.call("POST", f"/control/deliveries/{delivery.message_id}/reply", json=body)
         except DoorRefused as exc:
@@ -955,6 +979,25 @@ class GuestBridge:
         for run_id, delivery in list(self.turns.items()):
             if delivery.link_id == link_id and delivery.task == task and manager is not None:
                 await manager.stop_run(str(row["session_id"]), run_id)
+        await self.withdraw_asks(link_id, task=task, why="the guest's task it was asked for was cancelled")
+
+    async def withdraw_asks(self, link_id: str, *, task: str = "", why: str) -> None:
+        """Take back the questions a guest's turn left the operator, for a task that was cancelled or a link that ended.
+        Left open, the operator answered a question about work nobody wanted any more, and the answer had nowhere to go."""
+        manager = self.app.manager
+        row = await self.known_link(link_id)
+        if manager is None or row is None:
+            return
+        dropped: list[str] = []
+        for ask in await manager.asks.of_session(str(row["session_id"])):
+            info = ask.detail.get(QUESTION_REF) or {}
+            if info.get("link_id") != link_id or (task and info.get("task") != task):
+                continue
+            if await manager.asks.resolve(ask.id, "system", {"closed": why, "via": "withdrawn", "by": "link"}):
+                dropped.append(ask.id)
+        if dropped:
+            with suppress(Exception):
+                await manager.bus.publish("ask.side", {"change": "withdrawn", "ask_ids": dropped, "reason": why}, session_id=str(row["session_id"]))
 
     async def cancel_task(self, link_id: str, task: str) -> None:
         """The operator cancels a task a guest set: the door tells the guest, and the turn on it stops here."""
@@ -998,38 +1041,9 @@ class GuestBridge:
         turn = state.guest_turn
         if turn.tools == "none":
             return "This turn cannot read the chat's folder, so it sends no files.", True
-        if not paths:
-            return "files names what to send: paths in the chat's folder. A folder goes as one zip.", True
-        if len(paths) > link_protocol.MAX_FILES:
-            return f"At most {link_protocol.MAX_FILES} files at once.", True
-        fs = state.services.fs if state.services is not None else None
-        if fs is not None and getattr(fs, "remote", False):
-            return "Files go only from a chat whose folder is on this machine.", True
-        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
-        chosen: list[Path] = []
-        for path in paths:
-            given = Path(str(path)).expanduser()
-            real = Path(os.path.realpath(given if given.is_absolute() else root / given))
-            if not turn.trusted and not real.is_relative_to(root):
-                return f"{path} is outside this chat's folder, and a guest's turn sends nothing from there.", True
-            if not real.exists():
-                return f"There is no {path}.", True
-            if state.services is not None and state.services.is_protected(real):
-                return f"{path} is part of this installation, and does not leave it.", True
-            chosen.append(real)
-        try:
-            staged = await asyncio.to_thread(link_protocol.stage, chosen, self.app.settings.state_dir / link_protocol.STAGING)
-        except (LinkFileError, OSError) as exc:
-            return f"Could not get the files ready: {exc}", True
-        try:
-            view = (await self.client.call("GET", f"/control/links/{delivery.link_id}")).get("link") or {}
-        except (DoorUnavailable, DoorRefused) as exc:
-            link_protocol.unstage(staged)
-            return f"The door is out of reach, so nothing was sent: {exc}", True
-        why = link_protocol.check_limits((s.size for s in staged), file_mb=float(view.get("file_mb") or 0), day_mb=float(view.get("day_mb") or 0), used_today=_whole(view.get("files_today_bytes")))
-        if why:
-            link_protocol.unstage(staged)
-            return f"Not sent: {why}.", True
+        staged = await self._staged(state, delivery.link_id, paths, anywhere=turn.trusted, where="a guest's turn")
+        if isinstance(staged, str):
+            return staged, True
         names = ", ".join(s.name for s in staged)
         session_id = state.session.id
         if turn.trusted:
@@ -1049,8 +1063,96 @@ class GuestBridge:
                 session_id, delivery.link_id, delivery.conversation_id, "out", item.name, item.size, item.sha256, str(item.path), "held", task=delivery.task, batch=batch,
                 note=" ".join(note.split())[:500], run_id=state.run_id or "",
             )
+        delivery.held_files = True
         await self._tell_files_held(session_id, delivery.link_id)
         return f"These files wait for the operator, who sees each one with its size and may hold some back: {names}. Tell the guest they follow once the owner lets them go.", False
+
+    async def _staged(self, state: Any, link_id: str, paths: list[str], *, anywhere: bool, where: str) -> list[Staged] | str:
+        """``paths`` made ready to go over ``link_id`` and checked against its limits, or why not. ``anywhere`` lets a
+        file come from outside the chat's folder; the installation's own files never go."""
+        if not paths:
+            return "files names what to send: paths in the chat's folder. A folder goes as one zip."
+        if len(paths) > link_protocol.MAX_FILES:
+            return f"At most {link_protocol.MAX_FILES} files at once."
+        fs = state.services.fs if state.services is not None else None
+        if fs is not None and getattr(fs, "remote", False):
+            return "Files go only from a chat whose folder is on this machine."
+        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
+        chosen: list[Path] = []
+        for path in paths:
+            given = Path(str(path)).expanduser()
+            real = Path(os.path.realpath(given if given.is_absolute() else root / given))
+            if not anywhere and not real.is_relative_to(root):
+                return f"{path} is outside this chat's folder, and {where} sends nothing from there."
+            if not real.exists():
+                return f"There is no {path}."
+            if state.services is not None and state.services.is_protected(real):
+                return f"{path} is part of this installation, and does not leave it."
+            chosen.append(real)
+        try:
+            staged = await asyncio.to_thread(link_protocol.stage, chosen, self.app.settings.state_dir / link_protocol.STAGING)
+        except (LinkFileError, OSError) as exc:
+            return f"Could not get the files ready: {exc}"
+        try:
+            view = (await self.client.call("GET", f"/control/links/{link_id}")).get("link") or {}
+        except (DoorUnavailable, DoorRefused) as exc:
+            link_protocol.unstage(staged)
+            return f"The door is out of reach, so nothing was sent: {exc}"
+        why = link_protocol.check_limits((s.size for s in staged), file_mb=float(view.get("file_mb") or 0), day_mb=float(view.get("day_mb") or 0), used_today=_whole(view.get("files_today_bytes")))
+        if why:
+            link_protocol.unstage(staged)
+            return f"Not sent: {why}."
+        return staged
+
+    # -- the operator's own turn writing to a guest ------------------------------------
+
+    async def open_guests(self, session_id: str) -> list[dict[str, str]]:
+        """The guests of this chat's direct links whose conversations are open: what a turn of the operator's may write to."""
+        out: list[dict[str, str]] = []
+        rows = await self.app.db.fetchall("SELECT id, label FROM guest_links WHERE session_id = ? AND mode = 'direct' AND revoked_at IS NULL ORDER BY created_at", (session_id,))
+        for row in rows:
+            try:
+                view = (await self.client.call("GET", f"/control/links/{row['id']}")).get("link") or {}
+            except (DoorUnavailable, DoorRefused):
+                continue
+            for conversation in view.get("conversations") or []:
+                if conversation.get("state") == "open" and link_protocol.CONVERSATION.fullmatch(str(conversation.get("id") or "")):
+                    out.append({"link_id": str(row["id"]), "label": str(row["label"]), "conversation": str(conversation["id"])})
+        return out
+
+    async def write_to_guest(self, state: Any, guest: dict[str, str], text: str, paths: list[str]) -> tuple[str, bool]:
+        """A message of the agent's to a guest of this chat's link, written in a turn of the operator's own: their words
+        asked for it, so it goes at once, files with it. Signed as the agent's, never as the owner's own words.
+
+        Before this a turn of the operator's could not reach a guest at all. A guest asked for a report as a zip, the
+        call that would send it was held for the operator, and when they let it go it ran again in a turn of theirs,
+        which was told the chat had no conversation: the guest never got the file."""
+        words = text.strip()
+        if not words and not paths:
+            return "text is the message to send, and files what goes with it.", True
+        staged: list[Staged] = []
+        if paths:
+            prepared = await self._staged(state, guest["link_id"], paths, anywhere=True, where="this turn")
+            if isinstance(prepared, str):
+                return prepared, True
+            staged = prepared
+        session_id = state.session.id
+        ids: list[str] = []
+        try:
+            for item in staged:
+                file_id = await self._upload(guest["conversation"], item)
+                ids.append(file_id)
+                await self._file_row(session_id, guest["link_id"], guest["conversation"], "out", item.name, item.size, item.sha256, item.source, "sent", remote_id=file_id, run_id=state.run_id or "")
+            body: dict[str, Any] = {"kind": link_protocol.FILE if ids else link_protocol.TEXT, "text": words[:MAX_GUEST_TEXT]}
+            if ids:
+                body["files"] = ids
+            await self.say(guest["link_id"], guest["conversation"], body)
+        except (DoorUnavailable, DoorRefused, LinkFileError) as exc:
+            return f"It did not reach the guest: {exc}", True
+        finally:
+            link_protocol.unstage(staged)
+        names = f", with {', '.join(s.name for s in staged)}" if staged else ""
+        return f"Sent to the guest of the link {guest['label']!r}{names}.", False
 
     async def _upload(self, conversation_id: str, item: Staged) -> str:
         made = await self.client.call("POST", f"/control/conversations/{conversation_id}/files", json={"name": item.name, "size": item.size, "sha256": item.sha256})
@@ -1164,11 +1266,18 @@ class GuestBridge:
                 await self.app.db.execute("UPDATE link_files SET state = 'sent', remote_id = ? WHERE id = ?", (file_id, row["id"]))
             for row in withheld:
                 await self.app.db.execute("UPDATE link_files SET state = ? WHERE id = ?", ("refused" if not send else "dropped", row["id"]))
-            if ids:
-                await self.say(link_id, conversation, {"kind": link_protocol.FILE, "files": ids, "task": task, "text": str(rows[0]["note"] or "")})
-            if withheld:
-                names = ", ".join(str(row["name"]) for row in withheld)
-                await self.say(link_id, conversation, {"kind": link_protocol.TEXT, "text": f"The owner did not let these files go: {names}."})
+            refused_words = f"The owner did not let these files go: {', '.join(str(row['name']) for row in withheld)}." if withheld else ""
+            waiting = await self.app.db.fetchone("SELECT state FROM link_tasks WHERE side = ? AND owner = ? AND task = ?", (SIDE, link_id, task)) if task else None
+            if waiting is not None and waiting["state"] == link_protocol.WORKING:
+                # The task its turn left in hand for this decision ends with it, the files on its last status.
+                words = " ".join(part for part in (str(rows[0]["note"] or ""), refused_words) if part) or "Done."
+                await self.say(link_id, conversation, {"kind": link_protocol.STATUS, "task": task, "state": link_protocol.DONE, "text": words, **({"files": ids} if ids else {})})
+                await self.app.db.execute("UPDATE link_tasks SET state = ?, updated_at = ? WHERE side = ? AND owner = ? AND task = ?", (link_protocol.DONE, datetime.now(UTC).isoformat(), SIDE, link_id, task))
+            else:
+                if ids:
+                    await self.say(link_id, conversation, {"kind": link_protocol.FILE, "files": ids, "task": task, "text": str(rows[0]["note"] or "")})
+                if withheld:
+                    await self.say(link_id, conversation, {"kind": link_protocol.TEXT, "text": refused_words})
         except (DoorUnavailable, DoorRefused, LinkFileError):
             # Back to waiting, so the operator can try again once the door is back: nothing half-sent is called sent.
             await self.app.db.execute("UPDATE link_files SET state = 'held' WHERE side = ? AND owner = ? AND batch = ? AND state = 'sending'", (SIDE, link_id, batch))

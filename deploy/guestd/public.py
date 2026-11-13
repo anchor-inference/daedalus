@@ -143,16 +143,16 @@ class PublicDoor:
         key = invite if known else address
         if redeem:
             return self.redeem(invite, method, address, key, header(scope, CLIENT_KIND_HEADER), raw_header(scope, KEY_HEADER), raw_header(scope, PROOF_HEADER))
-        return self.page(invite, method, address, key, "application/json" in header(scope, b"accept"))
+        return self.page(invite, method, address, key, "application/json" in header(scope, b"accept"), token=bearer(scope))
 
-    def page(self, invite: str, method: str, address: str, key: str, as_data: bool = False) -> Response:
+    def page(self, invite: str, method: str, address: str, key: str, as_data: bool = False, *, token: str = "") -> Response:
         if method not in ("GET", "HEAD"):
             return refused(405, "This address is read with GET. Redeeming is POST to /redeem under it.")
         if not self.pages.allow(key):
             return refused(429, "Too many requests.", 60)
         if as_data and (card := self.mailbox.card(invite)) is not None:
             return as_json(card)
-        found = self.mailbox.page(invite)
+        found = self.mailbox.page(invite, token=token)
         if found is None:
             self.failures.failed(address)
             return refused(404, "No such link.")

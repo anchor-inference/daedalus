@@ -516,6 +516,11 @@ class AgentTalks:
                 return Outcome(said, failed)
             if action not in ("send", "read", "end", "task", "cancel", *flows_module.FLOW_ACTIONS):
                 return Outcome("action is one of open, send, task, cancel, read, end, contacts, ask, summary, slots, meet, apply_patch.", error=True)
+            if turn is None and action == "send" and not contact and (guest := await self._guest_addressed(session_id, conversation)) is not None:
+                if isinstance(guest, Outcome):
+                    return guest
+                said, failed = await bridge_of(self.app).write_to_guest(state, guest, text, list(files or []))  # type: ignore[union-attr]
+                return Outcome(said, failed, guest["conversation"])
             talk = await self._chosen(session_id, turn.link_id if turn is not None else conversation, contact=bool(contact))
             if isinstance(talk, Outcome):
                 return talk
@@ -532,6 +537,23 @@ class AgentTalks:
             return Outcome(f"The conversation with {talk['host']} is ended.", talk=talk["id"])
         except NotReachable as exc:
             return Outcome(str(exc), error=True)
+
+    async def _guest_addressed(self, session_id: str, conversation: str) -> dict[str, str] | Outcome | None:
+        """The guest at this chat's own door a send of the operator's turn is for, or ``None`` when it is for a conversation
+        at somebody else's: the one named, or with none named and none of those open, the one guest there is."""
+        bridge = bridge_of(self.app)
+        if bridge is None:
+            return None
+        if conversation and await self.talk(conversation) is not None:
+            return None
+        guests = await bridge.open_guests(session_id)
+        if conversation:
+            return next((guest for guest in guests if guest["conversation"] == conversation), None)
+        if any(talk["state"] != CLOSED for talk in await self.talks_of(session_id)) or not guests:
+            return None
+        if len(guests) == 1:
+            return guests[0]
+        return Outcome("Several guests are in conversation with this chat; say which with conversation: " + ", ".join(f"{g['conversation']} (link {g['label']!r})" for g in guests), error=True)
 
     async def _chosen(self, session_id: str, conversation: str, *, contact: bool = False) -> Any:
         if contact:
@@ -1311,6 +1333,24 @@ class AgentTalks:
                 return
             await asyncio.sleep(max(pause, MIN_CYCLE_SECONDS - (time.monotonic() - started)))
 
+    async def _glance(self, talk_id: str) -> None:
+        """One look at a quiet conversation's door, without holding it open: what the other side wrote unasked.
+
+        The door says something with nobody's message before it: the other owner's own words, files their operator let
+        go after the turn had ended, the answer their owner gave later, a subscription's news. Followed only while a
+        reply was owed, all of that sat at the door until this side happened to send again."""
+        talk = await self.talk(talk_id)
+        if talk is None or talk["state"] != OPEN or not talk["token"] or talk["waiting_for"]:
+            return
+        try:
+            answer = await self.dialer.call("GET", f"{talk['base_url']}/a/messages?after={talk['cursor']}&wait=0", token=talk["token"], timeout=CALL_SECONDS)
+            if door_absent(answer):
+                return
+            if await self._took(talk, answer) is not None:
+                self.follow(talk_id)
+        except (DoorGone, NotReachable) as exc:
+            logger.debug("a look at conversation %s found no door: %s", talk_id, exc)
+
     async def _took(self, talk: Any, answer: DoorAnswer) -> float | None:
         """Take in one read. How long to wait before the next, or ``None`` when there is nothing more to look for."""
         talk_id = talk["id"]
@@ -1804,6 +1844,13 @@ class AgentTalks:
             return ""
         contacts = contacts_of(self.app)
         standing = await contacts.turn_notes() if contacts is not None else ""
+        bridge = bridge_of(self.app)
+        guests = [
+            f"- A guest of this chat's link {guest['label']!r} is in conversation {guest['conversation']}: AgentTalk send with conversation={guest['conversation']} "
+            "writes to them as you, text and files, if the operator's message is about them."
+            for guest in (await bridge.open_guests(state.session.id) if bridge is not None else [])
+        ]
+        standing = "\n".join(part for part in (standing, *guests) if part)
         talks = await self.talks_of(state.session.id)
         if not talks:
             return standing
@@ -1837,6 +1884,8 @@ class AgentTalks:
                     continue
                 if talk["waiting_for"]:
                     self.follow(talk["id"])
+                elif talk["state"] == OPEN and talk["token"]:
+                    self._spawn(self._glance(talk["id"]), f"agent-talk-glance:{talk['id']}")
                 if await self.db.fetchone("SELECT 1 FROM link_files WHERE side = ? AND owner = ? AND direction = 'in' AND state = 'pending'", (SIDE, talk["id"])):
                     # A fetch a restart or a dropped connection cut short goes on from where its piece file stopped.
                     self._spawn(self._fetch_files(talk["id"]), f"agent-talk-files:{talk['id']}")

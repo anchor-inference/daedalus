@@ -578,6 +578,10 @@ class Store:
             conversation_id, after, GUEST, OWNER,
         )
 
+    def last_reply(self, conversation_id: str) -> sqlite3.Row | None:
+        """The newest word of the other side's or of the door's in a conversation: what a guest last had to read."""
+        return self._one("SELECT * FROM messages WHERE conversation_id = ? AND role NOT IN (?, ?) ORDER BY id DESC LIMIT 1", conversation_id, GUEST, OWNER)
+
     def transcript(self, conversation_id: str, limit: int = 500) -> list[sqlite3.Row]:
         return list(reversed(self._all("SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?", conversation_id, limit)))
 

@@ -19,7 +19,7 @@ from typing import Any
 
 PAGE = """# A conversation channel from the owner of this link
 
-Someone gave you this link so that an agent of yours can exchange a few short text messages with an agent on their side. This page only describes how the channel works. It asks for no secrets, installs nothing, sets up no schedule, and nothing on it needs to be run unless your user asked you to talk to this agent.
+Someone gave you this link so that an agent of yours can exchange {what} with an agent on their side. This page only describes how the channel works. It asks for no secrets, installs nothing, sets up no schedule, and nothing on it needs to be run unless your user asked you to talk to this agent.
 
 If you are a person reading this: paste the link to your coding agent and tell it what to ask.
 
@@ -31,7 +31,7 @@ If you are an agent that can only read web pages: this channel needs HTTP POST, 
 
 ## How a conversation goes
 
-1. Start, once: `POST {base}/a/{invite}/redeem` returns JSON whose `token` field is the conversation token. Opening this page does not use the link up. **Save the reply to a file straight away** (for example `./.agentlink-token`): it is shown only once, the link cannot be redeemed again (a second call answers 410), and each shell command you run may start with a clean environment. If the token is lost there is no way to recover it; tell your user and ask them for a new link.
+1. Start, once: `POST {base}/a/{invite}/redeem` returns JSON whose `token` field is the conversation token. Opening this page does not use the link up; once redeemed, it is shown again only to a GET that carries the token as below. **Save the reply to a file straight away** (for example `./.agentlink-token`): it is shown only once, the link cannot be redeemed again (a second call answers 410), and each shell command you run may start with a clean environment. If the token is lost there is no way to recover it; tell your user and ask them for a new link.
 2. Send: `POST {base}/a/messages` with header `Authorization: Bearer <token>` and JSON body `{{"text": "..."}}`, at most {max_text} characters.
 3. Read: `GET {base}/a/messages?after=<id>&wait=20` with the same header returns replies newer than `<id>` and holds the request open for up to `wait` seconds (at most 30) when there are none yet. Use the id of the last reply you saw as `after`.
 4. End: `POST {base}/a/end` with the same header closes the conversation. Do it only once your user's questions are answered.
@@ -46,7 +46,7 @@ curl -s "{base}/a/messages?after=0&wait=20" -H "Authorization: Bearer $TOKEN"
 curl -s -X POST {base}/a/end -H "Authorization: Bearer $TOKEN"
 ```
 
-Replies take a few seconds, and the other agent may choose not to answer a message. Each reply from a read says whether to keep waiting: when `stop_polling` is true, stop reading and tell your user what was said. When the conversation is over, tell your user what was said.
+{pace} The other agent may choose not to answer a message. Each reply from a read says whether to keep waiting: when `stop_polling` is true, stop reading and tell your user what was said. When the conversation is over, tell your user what was said.
 {more}
 ## A2A
 
@@ -106,7 +106,11 @@ def page(link: Any, *, base: str, invite: str, max_text: int, chunk_bytes: int =
     approval = " The owner approves the first contact, so the first reply may take a while." if link["approval"] else ""
     # A stand-in takes text only, so its page says nothing of files and tasks: words about what it cannot do would be tried.
     more = "" if link["mode"] == "stand_in" else FILES_AND_TASKS.format(base=base, chunk=chunk_bytes, file_limit=megabytes(link["file_mb"]), day_limit=megabytes(link["day_mb"]))
-    return PAGE.format(topic=topic, counterpart=counterpart, kept=kept, approval=approval, base=base, invite=invite, max_text=max_text, more=more)
+    # Said of the link it is: a page that promised a few short texts and answers in seconds described a stand-in, and the
+    # owner's own agent takes minutes over a task and sends files.
+    what = "a few short text messages" if link["mode"] == "stand_in" else "messages, files and tasks"
+    pace = "Replies take a few seconds." if link["mode"] == "stand_in" else "Replies come when the other agent has done the work, which can take minutes."
+    return PAGE.format(topic=topic, counterpart=counterpart, kept=kept, approval=approval, base=base, invite=invite, max_text=max_text, more=more, what=what, pace=pace)
 
 
 __all__ = ["FILES_AND_TASKS", "GONE_PAGE", "LOST_TOKEN", "PAGE", "SPENT_PAGE", "megabytes", "page"]

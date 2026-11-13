@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 
 from .files import CHUNK_BYTES, FileRefused
 from .limits import Rate
-from .mailbox import KEY, SIGNATURE, Mailbox, contact_of, signed_of
+from .mailbox import AWAITS_OWNER, KEY, SIGNATURE, Mailbox, contact_of, signed_of
 from .public import read_body
 from .standin import FAILED_TEXT
 from .store import (
@@ -476,6 +476,9 @@ class ControlDoor:
         signed = signed_of(body.get("signed")) if isinstance(body, dict) else None
         if signed is not None:
             data["signed"] = signed
+        if isinstance(body, dict) and body.get("awaits_owner") is True:
+            # Something for the guest waits on the owner: a guest reading after this is told to wait, not to end.
+            data[AWAITS_OWNER] = True
         return data
 
     def resume(self, conversation_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -612,7 +615,8 @@ class ControlDoor:
         if task is not None:
             if task["state"] not in OPEN_TASK_STATES:
                 return
-            wanted = body.get("task_state") if body.get("task_state") in (DONE, NEEDS_INPUT, REFUSED_TASK) else DONE if ok else REFUSED_TASK
+            # ``working``: the turn ended with the task still in hand, its files waiting for the owner's decision.
+            wanted = body.get("task_state") if body.get("task_state") in (DONE, NEEDS_INPUT, REFUSED_TASK, WORKING) and ok else DONE if ok else REFUSED_TASK
             store.move_task(task["id"], wanted)
             store.add_reply(conversation["id"], AGENT if ok else DOOR, text if ok else FAILED_TEXT, kind=STATUS, task_id=task["id"], data={"state": wanted, **({"files": files} if files else {}), **marks})
             return
