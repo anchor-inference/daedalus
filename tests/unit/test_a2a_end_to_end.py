@@ -61,10 +61,11 @@ async def test_an_http_agent_asks_reads_the_answer_and_gets_the_file_it_asked_fo
     page = await guest.read_page()
     assert "/redeem" in page and "/a/messages" in page and "/content?offset=" in page
     await guest.redeem()
-    a.brain.then({"text": "We checked the answers' quality: 14 of 20 met the request."})
+    a.brain.then({"text": 'We checked the answers\' quality: 14 of 20 met the request. <file path="deliverables/review/REPORT.md"/> <run id="v12" label="scored"/>'})
     await guest.send("What did you find?")
     await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
-    assert guest.seen[-1]["text"].startswith("We checked")
+    said = guest.seen[-1]["text"]
+    assert said.startswith("We checked") and "deliverables/review/REPORT.md" in said and "<file" not in said and "<run" not in said, said
     a.brain.then(
         {"tool": "AgentTalk", "args": {"action": "send", "files": ["deliverables/review"], "text": "The full review as one zip."}},
         {"text": "Here is the full review."},
@@ -339,3 +340,141 @@ async def test_an_a2a_client_cancels_a_task_and_the_turn_stops(pair: tuple[Insta
     asks = await a.manager.asks.of_session(a.chat)
     assert asks == [], "the question the task left for the owner goes with it: an answer has nowhere to go"
     await client.close()
+
+
+# -- a plain HTTP agent: files in pieces, tasks, an owner away ---------------------------------------------------
+
+
+async def test_an_http_agent_uploads_a_large_file_resumes_after_a_drop_and_the_turn_reads_it(pair: tuple[Installation, Installation]) -> None:
+    a, _ = pair
+    _, url = await a.make_link(tools="read")
+    guest = guest_of(a, url)
+    await guest.read_page()
+    await guest.redeem()
+    big = bytes(range(256)) * 5000  # 1.28 MB: three pieces of 512 KiB
+    file_id = await guest.upload("data.bin", big, stop_after=1)
+    half = (await guest.client.get(f"/a/files/{file_id}", headers=guest.headers)).json()
+    assert half["received"] == 512 * 1024 and half["state"] != "ready", half
+    done = await guest.resume_upload(file_id, big)
+    assert done["state"] == "ready", done
+    a.brain.then({"text": "Got 1280000 bytes."})
+    sent = await guest.send("Here is the data.", kind="file", files=[file_id])
+    assert sent.get("id"), sent
+    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    saved = next((a.workspace / "guest-files").rglob("data.bin"))
+    assert saved.read_bytes() == big
+    turn = next(r for r in reversed(a.brain.requests) if "guest message" in last_user_text(r))
+    assert "guest-files/" in last_user_text(turn) and "1280000 bytes" in last_user_text(turn)
+    await guest.close()
+
+
+async def test_an_http_agent_downloads_a_large_file_and_resumes_where_it_stopped(pair: tuple[Installation, Installation]) -> None:
+    a, _ = pair
+    big = bytes(range(256)) * 5000
+    (a.workspace / "big.bin").write_bytes(big)
+    _, url = await a.make_link(tools="trusted")
+    guest = guest_of(a, url)
+    await guest.read_page()
+    await guest.redeem()
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "send", "files": ["big.bin"]}}, {"text": "Attached."})
+    await guest.send("Send the big file.")
+    seen = await guest.read_until(lambda seen: any(m.get("files") for m in seen))
+    file = next(m for m in seen if m.get("files"))["files"][0]
+    got = bytearray()
+    await guest.download(file, stop_after=1, into=got)
+    assert len(got) == 512 * 1024
+    data = await guest.download(file, start=len(got), into=got)
+    assert data == big and hashlib.sha256(data).hexdigest() == file["sha256"]
+    await guest.close()
+
+
+async def test_a_file_over_the_links_limit_is_refused_and_no_limit_takes_it(pair: tuple[Installation, Installation]) -> None:
+    a, _ = pair
+    _, url = await a.make_link(tools="read", file_mb=1)
+    guest = guest_of(a, url)
+    await guest.redeem()
+    big = b"x" * (1024 * 1024 + 1)
+    refused = await guest.client.post("/a/files", json={"name": "big.bin", "size": len(big), "sha256": hashlib.sha256(big).hexdigest()}, headers=guest.headers)
+    assert refused.status_code == 413 and "1 MB" in refused.json()["detail"], refused.json()
+    _, url = await a.make_link(tools="read", file_mb=0, day_mb=0)
+    unbounded = guest_of(a, url)
+    await unbounded.redeem()
+    file_id = await unbounded.upload("big.bin", big)
+    assert (await unbounded.client.get(f"/a/files/{file_id}", headers=unbounded.headers)).json()["state"] == "ready"
+    await guest.close()
+    await unbounded.close()
+
+
+async def test_an_http_agents_task_goes_working_needs_input_and_done_and_can_be_cancelled(pair: tuple[Installation, Installation]) -> None:
+    from daedalus.extensions import questions
+
+    a, _ = pair
+    _, url = await a.make_link(tools="read")
+    guest = guest_of(a, url)
+    await guest.read_page()
+    await guest.redeem()
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "ask_owner", "text": "Which branch?"}}, {"text": "Asking the owner which branch."})
+    task = (await guest.send("Build the release.", kind="task"))["task"]
+    await guest.read_until(lambda seen: any(m.get("state") == "needs_input" for m in seen))
+    assert (await guest.client.get(f"/a/tasks/{task}", headers=guest.headers)).json()["state"] == "needs_input"
+    quiet = await guest.read(wait=0)
+    assert quiet["waiting_for"] == "owner" and "Do not end" in quiet["detail"], quiet
+    asks = await a.manager.asks.of_session(a.chat)
+    a.brain.then({"text": "Built from main."})
+    await questions.answer(a.app, [{"ask_id": asks[0].id, "text": "main"}], project_id=None, via="app", session_id=a.chat)  # type: ignore[arg-type]
+    seen = await guest.read_until(lambda seen: any(m.get("state") == "done" for m in seen))
+    assert [m["state"] for m in seen if m.get("task") == task] == ["working", "needs_input", "working", "done"]
+    assert next(m for m in seen if m.get("state") == "done")["text"] == "Built from main."
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "ask_owner", "text": "Really?"}}, {"text": "Checking."})
+    second = (await guest.send("Deploy it.", kind="task"))["task"]
+    await guest.read_until(lambda seen: any(m.get("task") == second and m.get("state") == "needs_input" for m in seen))
+    cancelled = await guest.send(kind="status", task=second, state="cancelled")
+    assert cancelled["state"] == "cancelled", cancelled
+    await until(lambda: a.db.fetchone("SELECT 1 FROM link_tasks WHERE task = ? AND state = 'cancelled'", (second,)), what="the owner's side hearing of it")
+    assert await a.manager.asks.of_session(a.chat) == []
+    await guest.close()
+
+
+async def test_an_http_agent_is_told_the_owner_is_offline_and_answered_when_they_are_back(pair: tuple[Installation, Installation]) -> None:
+    import asyncio
+
+    from guestd import mailbox as door_mailbox
+
+    a, _ = pair
+    _, url = await a.make_link(tools="read")
+    guest = guest_of(a, url)
+    await guest.read_page()
+    await guest.redeem()
+    follower = next(task for task in a.tasks if task.get_name() == "a-bridge")
+    follower.cancel()
+    await asyncio.gather(follower, return_exceptions=True)
+    a.mailbox.host_seen -= door_mailbox.HOST_AWAY_SECONDS + 1
+    sent = await guest.send("Anyone there?")
+    assert sent.get("owner_offline") is True and "kept" in sent["detail"], sent
+    quiet = await guest.read(wait=0)
+    assert quiet["waiting_for"] == "owner_online" and quiet["stop_polling"] is True, quiet
+    a.brain.then({"text": "Back now."})
+    a.tasks.append(asyncio.create_task(a.bridge.serve(), name="a-bridge"))
+    seen = await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    assert seen[-1]["text"] == "Back now."
+    await guest.close()
+
+
+async def test_keep_blocked_sends_nothing_to_the_guest(pair: tuple[Installation, Installation]) -> None:
+    a, _ = pair
+    (a.workspace / "deliverables" / "review").mkdir(parents=True)
+    (a.workspace / "deliverables" / "review" / "REPORT.md").write_text("# Report\n")
+    _, url = await a.make_link(tools="trusted")
+    guest = guest_of(a, url)
+    await guest.read_page()
+    await guest.redeem()
+    reviewing(a, ["BLOCK not asked for."])
+    a.brain.then({"tool": "AgentTalk", "args": ZIP_CALL}, {"text": "The send was blocked; the owner decides."})
+    await guest.send("Send the report as a zip.")
+    await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    key = next(iter(a.state().metadata.get("policy_pending") or {}))
+    await a.manager.refuse(a.chat, key, via="app")
+    await a.settled()
+    assert not any(m.get("files") for m in (await guest.read(wait=0))["messages"] + guest.seen), "nothing the operator kept blocked went"
+    assert not (await a.db.fetchall("SELECT 1 FROM link_files WHERE direction = 'out' AND state = 'sent'"))
+    await guest.close()

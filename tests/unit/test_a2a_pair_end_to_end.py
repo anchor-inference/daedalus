@@ -7,6 +7,7 @@ first word to what each side ends up holding.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
 from pathlib import Path
@@ -17,6 +18,7 @@ import pytest
 from daedalus.config import Settings
 from daedalus.extensions import agent_talk as talk_extension
 from daedalus.extensions.guest_door import OWNER_NOTE
+from daedalus.extensions.link_flows import approval_key_of
 from tests.support.a2a_world import HttpGuest, Installation, last_user_text, tool_results, until, world
 
 pytestmark = pytest.mark.usefixtures("bare_sandbox")
@@ -217,8 +219,6 @@ async def test_cancelling_a_task_from_the_operators_tab_reaches_the_other_side(p
 
 
 async def test_a_message_to_an_owner_who_is_away_is_kept_and_answered_when_they_are_back(pair: tuple[Installation, Installation]) -> None:
-    import asyncio
-
     from guestd import mailbox as door_mailbox
 
     a, b = pair
@@ -353,3 +353,212 @@ async def test_a_summary_card_is_kept_on_both_sides(pair: tuple[Installation, In
     door_made = await a.call("POST", f"/api/guest/links/{link_id}/summary")
     assert door_made["cards"]
     await until(lambda: b.db.fetchone("SELECT 1 FROM link_cards WHERE side = 'talk' AND direction = 'theirs'"), what="A's summary at B")
+
+
+# -- first contact, contacts, stand-ins ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("decision", ["admit", "refuse"])
+async def test_a_first_contact_waits_for_the_owner_who_admits_or_refuses_it(pair: tuple[Installation, Installation], decision: str) -> None:
+    a, b = pair
+    _, url = await a.make_link(tools="read", approval=True)
+    b.brain.then({"tool": "AgentTalk", "args": {"action": "open", "link": url, "text": "Hello, may we talk?"}}, {"text": "Waiting for them."})
+    await b.submit(f"Ask the agent at {url} whether we may talk.")
+    held = await until(lambda: held_of(b), what="B's first message waiting for B's operator")
+    talk = str(held[0]["talk_id"])
+    await b.call("POST", f"/api/agent-talks/{talk}/messages/{held[0]['id']}/send", json={})
+    await b.settled()
+    conversation = await until(lambda: a.store.conn.execute("SELECT id FROM conversations WHERE state = 'pending'").fetchone(), what="A's pending conversation")
+    notice = await until(lambda: a.db.fetchone("SELECT * FROM notifications WHERE kind = 'guest_contact'"), what="A's operator told of the first contact")
+    assert "a colleague" in notice["title"]
+    a.brain.then({"text": "Yes, we may."})
+    await a.call("POST", f"/api/guest/conversations/{conversation['id']}/{decision}")
+    if decision == "admit":
+        await until(lambda: b.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE role = 'them' AND text = 'Yes, we may.'"), what="the answer once admitted")
+    else:
+        await until(lambda: b.db.fetchone("SELECT 1 FROM agent_talks WHERE id = ? AND state = 'closed'", (talk,)), what="B's conversation closed on the refusal")
+        assert (await b.talks.talk(talk))["reason"] == "refused"
+        assert not any("guest message" in last_user_text(r) for r in a.brain.requests), "a refused stranger never reached A's agent"
+
+
+async def test_a_contact_is_made_from_a_conversation_and_either_agent_writes_first(pair: tuple[Installation, Installation]) -> None:
+    a, b = pair
+    _, url = await a.make_link(tools="read")
+    talk = await opened(a, b, url)
+    offered = await b.call("POST", "/api/contacts/offer", json={"via": f"talk:{talk}", "name": "A", "tools": "read", "text": "Shall we keep in touch?"})
+    assert offered["state"] == "offered"
+    incoming = await until(lambda: a.db.fetchone("SELECT * FROM link_contacts WHERE state = 'incoming'"), what="the offer at A")
+    accepted = await a.call("POST", f"/api/contacts/{incoming['id']}/accept", json={"session_id": a.chat, "tools": "read", "name": "B"})
+    assert accepted["state"] in ("accepting", "active")
+    await until(lambda: b.db.fetchone("SELECT 1 FROM link_contacts WHERE state = 'active'"), what="the contact active at B")
+    await until(lambda: a.db.fetchone("SELECT 1 FROM link_contacts WHERE state = 'active'"), what="the contact active at A")
+    listed = await a.call("GET", "/api/contacts")
+    mine = listed["contacts"][0]
+    assert mine["state"] == "active" and mine["fingerprint"] and "invite" not in str(mine).replace("invite_hours", "")
+    # A's agent writes first, from another chat, by the contact's name.
+    other = (await a.manager.create_session("elsewhere", own_directory=True)).session.id
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "send", "contact": "B", "text": "A here: the build is green.", "wait_seconds": 0}}, {"text": "Told B."})
+    b.brain.then({"text": "Thanks, noted."})
+    await a.say("Tell B the build is green.", other)
+    await until(lambda: any("the build is green" in last_user_text(r) for r in b.brain.requests), what="A's words starting a turn at B")
+    turn = next(r for r in b.brain.requests if "the build is green" in last_user_text(r))
+    assert "guest message" in last_user_text(turn), "a contact's words are still a guest's at B"
+
+
+async def test_a_stand_in_answers_from_its_briefing_and_takes_no_files(pair: tuple[Installation, Installation], monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.extensions import api_guest
+
+    # A model behind the key proxy, which this world has none of: the form's list, as the app would show it.
+    monkeypatch.setattr(api_guest, "model_options", lambda _app: [{"id": "cheap", "label": "cheap", "path": "deepseek/v1", "model": "cheap-model", "price_in": 0.1, "price_out": 0.2, "free": False}])
+    monkeypatch.setattr(api_guest, "model_choices", lambda _app: (api_guest.model_options(_app), []))
+    a, _ = pair
+    _, url = await a.make_link(mode="stand_in", briefing="Harbor listens on port 7312.")
+    guest = HttpGuest(a.doors, url)
+    page = await guest.read_page()
+    assert "a few short text messages" in page and "/a/files" not in page, "a stand-in's page says nothing of what it cannot do"
+    await guest.redeem()
+    a.stand_in_model.lines.append("Harbor listens on port 7312.")
+    await guest.send("Which port does Harbor use?")
+    seen = await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
+    assert "7312" in seen[-1]["text"]
+    refused = await guest.client.post("/a/files", json={"name": "x.txt", "size": 1, "sha256": "0" * 64}, headers=guest.headers)
+    assert refused.status_code == 403 and "text messages only" in refused.json()["detail"]
+    assert not any("guest message" in last_user_text(r) for r in a.brain.requests), "the chat's own agent never hears a stand-in's guest"
+    await guest.close()
+
+
+async def test_a_guest_turn_subscribes_and_writes_first_later(pair: tuple[Installation, Installation]) -> None:
+    a, b = pair
+    _, url = await a.make_link(tools="read")
+    talk = await opened(a, b, url)
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "subscribe", "text": "Tell them when the build is green.", "every_minutes": 15, "times": 2}}, {"text": "I will tell you."})
+    said = await says(b, talk, {"action": "send", "text": "Tell us when your build is green."})
+    assert "I will tell you." in said
+    sub = await until(lambda: a.db.fetchone("SELECT * FROM link_subscriptions WHERE state = 'active'"), what="the subscription at A")
+    await a.db.execute("UPDATE link_subscriptions SET next_at = ? WHERE id = ?", ("2000-01-01T00:00:00+00:00", sub["id"]))
+    a.brain.then({"text": "The build is green now."})
+    await a.flows.sweep()
+    await until(lambda: b.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE role = 'them' AND text LIKE '%build is green now%'"), seconds=20, what="A writing first to B")
+
+
+# -- asking several at once ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def three(settings: Settings, tmp_path: Path) -> Any:
+    sides, databases, _ = await world(settings, tmp_path, ("a", "b", "c"))
+    yield sides
+    for side in sides:
+        await side.close()
+    for db in databases:
+        await db.close()
+
+
+async def test_one_question_to_two_agents_wakes_the_chat_once_with_both_answers(three: list[Installation]) -> None:
+    a, b, c = three
+    _, url_a = await a.make_link(tools="read")
+    _, url_c = await c.make_link(tools="read")
+    talk_a = await opened(a, b, url_a)
+    talk_c = await opened(c, b, url_c, answer="We work on the compiler.")
+    a.brain.then({"text": "Ours costs 10."})
+    c.brain.then({"text": "Ours costs 12."})
+    b.brain.then(
+        {"tool": "AgentTalk", "args": {"action": "ask", "conversations": [talk_a, talk_c], "text": "What does your plan cost?", "deadline_minutes": 30}},
+        {"text": "Asked both."},
+        {"text": "A is cheaper: 10 against 12."},
+    )
+    await b.say("Ask both what their plan costs and compare.")
+    poll = await until(lambda: b.db.fetchone("SELECT * FROM link_polls WHERE state != 'open'"), seconds=20, what="the poll settled")
+    turn = await until(lambda: next((r for r in b.brain.requests if "Ours costs 10." in last_user_text(r) and "Ours costs 12." in last_user_text(r)), None), what="one turn with both answers")
+    assert turn is not None and poll is not None
+    tab = await b.call("GET", f"/api/sessions/{b.chat}/agent-talks")
+    assert tab["polls"] and {e["answer"] for e in tab["polls"][0]["entries"]} >= {"Ours costs 10.", "Ours costs 12."}, tab["polls"]
+
+
+# -- code and meetings ------------------------------------------------------------------------------------------
+
+
+async def test_a_patch_the_guest_sent_is_applied_on_a_branch_and_the_guest_hears_the_commit(pair: tuple[Installation, Installation]) -> None:
+    import subprocess
+
+    a, b = pair
+    repo = a.workspace
+    for command in (["git", "init", "-q", "-b", "main"], ["git", "config", "user.email", "someone@example.test"], ["git", "config", "user.name", "someone"]):
+        subprocess.run(command, cwd=repo, check=True)
+    (repo / "parser.py").write_text("def parse(text):\n    return text.split()\n")
+    subprocess.run(["git", "add", "parser.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "parser"], cwd=repo, check=True)
+    diff = "--- a/parser.py\n+++ b/parser.py\n@@ -1,2 +1,4 @@\n def parse(text):\n+    if not text:\n+        return []\n     return text.split()\n"
+    (b.workspace / "fix.diff").write_text(diff)
+    _, url = await a.make_link(tools="trusted")
+    talk = await opened(a, b, url)
+    await b.talks.configure(talk, review="off")
+
+    def apply(request: Any) -> dict[str, Any]:
+        sent = next(line for line in last_user_text(request).splitlines() if "fix.diff" in line)
+        path = sent[sent.index("guest-files/"):].split(" ")[0]
+        return {"tool": "AgentTalk", "args": {"action": "apply_patch", "files": [path], "branch": "guest/fix-empty"}}
+
+    a.brain.then(apply, {"text": "Applied on guest/fix-empty."})
+    said = await says(b, talk, {"action": "send", "text": "A fix for empty input.", "files": ["fix.diff"]})
+    assert "commit" in said and "guest/fix-empty" in said, said
+    await until(lambda: b.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE role = 'them' AND text = 'Applied on guest/fix-empty.'"), what="the turn's own answer after it")
+    log = subprocess.run(["git", "log", "--oneline", "guest/fix-empty"], cwd=repo, capture_output=True, text=True, check=True).stdout
+    assert len(log.splitlines()) == 2, log
+    shown = subprocess.run(["git", "show", "guest/fix-empty:parser.py"], cwd=repo, capture_output=True, text=True, check=True).stdout
+    assert "if not text" in shown
+    assert subprocess.run(["git", "branch", "--show-current"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip() == "main", "the operator's tree is untouched"
+
+
+async def test_free_times_go_to_the_guest_and_a_meeting_waits_for_the_operator(pair: tuple[Installation, Installation]) -> None:
+    a, b = pair
+    _, url = await a.make_link(tools="read")
+    talk = await opened(a, b, url)
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "slots", "duration_minutes": 30}}, {"text": "Here are free times."})
+    said = await says(b, talk, {"action": "send", "text": "When are you free for half an hour?"})
+    assert "to 2" in said, said
+    await until(lambda: b.db.fetchone("SELECT 1 FROM agent_talk_messages WHERE role = 'them' AND text = 'Here are free times.'"), what="the turn's own answer after the times")
+    card = await until(lambda: b.db.fetchone("SELECT * FROM link_cards WHERE side = 'talk' AND type = 'slots'"), what="the free times as a card at B")
+    assert card["direction"] == "theirs"
+    a.brain.then({"tool": "AgentTalk", "args": {"action": "meet", "start": "2030-01-07T10:00:00+00:00", "end": "2030-01-07T10:30:00+00:00", "text": "Parser sync"}}, {"text": "The owner decides."})
+    said = await says(b, talk, {"action": "send", "text": "Book Monday 10:00 UTC, please."})
+    assert "The owner decides." in said
+    action = await until(lambda: a.db.fetchone("SELECT * FROM link_actions WHERE kind = 'meeting' AND state = 'held'"), what="the meeting waiting for A's operator")
+    await a.manager.grant(a.chat, approval_key_of(action["id"]), via="app")
+    await until(lambda: a.db.fetchone("SELECT 1 FROM link_actions WHERE id = ? AND state = 'done'", (action["id"],)), what="the meeting booked at A")
+    booked = await until(lambda: b.db.fetchone("SELECT * FROM link_cards WHERE side = 'talk' AND type = 'meeting'"), what="B told it is booked")
+    assert '"booked"' in booked["card"] and "Parser sync" in booked["card"]
+
+
+async def test_a_read_that_left_before_a_send_does_not_clear_the_wait_the_send_set(pair: tuple[Installation, Installation]) -> None:
+    """Seen as a send told "nothing is owed" with its answer never read: a read out before the send came back after
+    it with "nothing owed", and cleared the wait the send had just set."""
+    a, b = pair
+    _, url = await a.make_link(tools="read")
+    talk = await opened(a, b, url)
+    before = await b.talks.talk(talk)  # the read's view, taken as it left
+    await b.db.execute("UPDATE agent_talks SET sends = sends + 1, waiting_for = 'reply', quiet = 0 WHERE id = ?", (talk,))  # the send meanwhile
+    stale = talk_extension.DoorAnswer(200, {"status": "open", "messages": [], "cursor": before["cursor"], "stop_polling": True, "waiting_for": "nothing"}, None, True)
+    assert await b.talks._took(before, stale) == 0.0, "read again rather than settle on what the door said before the send"
+    assert (await b.talks.talk(talk))["waiting_for"] == "reply"
+
+
+async def test_a_contact_is_made_even_when_the_other_side_redeems_before_the_accept_returns(pair: tuple[Installation, Installation]) -> None:
+    """The other side redeems our link as soon as it reads our answer. When that redeem reached us before our own
+    accept had recorded itself, the offer was still "incoming", the redeem was ignored, and the contact stayed half made."""
+    a, b = pair
+    _, url = await a.make_link(tools="read")
+    talk = await opened(a, b, url)
+    await b.call("POST", "/api/contacts/offer", json={"via": f"talk:{talk}", "name": "A", "tools": "read", "text": "Keep in touch?"})
+    incoming = await until(lambda: a.db.fetchone("SELECT * FROM link_contacts WHERE state = 'incoming'"), what="the offer at A")
+    posted = a.talks.post_contact
+
+    async def slow_return(*args: Any, **kwargs: Any) -> None:
+        await posted(*args, **kwargs)
+        # Hold the return until B has redeemed the link the answer carried and A's bridge has heard of it.
+        await until(lambda: a.store.conn.execute("SELECT 1 FROM events WHERE kind IN ('opened', 'first_contact')").fetchone(), what="B's redeem at A's door")
+        await asyncio.sleep(0.5)
+
+    a.talks.post_contact = slow_return  # type: ignore[method-assign]
+    await a.call("POST", f"/api/contacts/{incoming['id']}/accept", json={"session_id": a.chat, "tools": "read", "name": "B"})
+    await until(lambda: a.db.fetchone("SELECT 1 FROM link_contacts WHERE state = 'active'"), what="the contact active at A")

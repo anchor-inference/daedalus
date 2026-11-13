@@ -316,11 +316,22 @@ class Contacts:
         link_id, url, hashed = await self._make_link(session_id, label, tools)
         try:
             talk_id = await self.talks.open_contact(session_id, str(contact["invite"]), str(contact["key"]))
-            await self.talks.post_contact(talk_id, identity.contact(invite=url, name=await self.self_name(), answer="accept"), "")
         except ContactError:
             await self._drop_link(link_id)
             raise
+        # Accepting before the answer goes, not after: the other side redeems our link as soon as it reads the answer,
+        # and a redeem that arrived first found the offer still "incoming" and was ignored, leaving the contact
+        # half made here for good. Undone if the answer does not go.
         await self._update(contact_id, state=ACCEPTING, name=label, session_id=session_id, link_id=link_id, talk_id=talk_id, our_invite_hash=hashed, invite="")
+        try:
+            await self.talks.post_contact(talk_id, identity.contact(invite=url, name=await self.self_name(), answer="accept"), "")
+        except ContactError:
+            await self._update(
+                contact_id, state=INCOMING, name=str(contact["name"]), session_id=str(contact["session_id"] or ""), link_id=str(contact["link_id"] or ""),
+                talk_id=str(contact["talk_id"] or ""), our_invite_hash=str(contact["our_invite_hash"] or ""), invite=str(contact["invite"]),
+            )
+            await self._drop_link(link_id)
+            raise
         return await self.contact(contact_id)
 
     async def decline(self, contact_id: str) -> None:

@@ -683,7 +683,10 @@ class AgentTalks:
         if state == CLOSED:
             said = CLOSED_WORDS.get(str(talk["reason"]), CLOSED_WORDS["ended"])
         elif talk["waiting_for"] == "owner":
-            said = "Its owner has not admitted this conversation yet."
+            said = (
+                "Its owner has not admitted this conversation yet." if state == PENDING
+                else "The other agent waits for its owner to decide on what you asked: the answer comes later, and you are told, so do not wait for it in this turn."
+            )
         elif talk["waiting_for"] == OFFLINE:
             # Not "a reply is owed": an agent told that waited out its turn, or gave up, on a side that was only away.
             said = "The other side is offline: no reply comes until it is back, so do not wait for one in this turn."
@@ -753,7 +756,7 @@ class AgentTalks:
             return Outcome(self._state_line(fresh, KEPT_WORDS), talk=talk["id"])
         if settled != SENT:
             return Outcome(self._send_failure(fresh, message), error=True, talk=talk["id"])
-        return await self._reply_or_status(state, fresh, wait, OWNER_AWAY_WORDS if message["note"] == "owner_offline" else "Sent.")
+        return await self._reply_or_status(state, fresh, wait, OWNER_AWAY_WORDS if message["note"] == "owner_offline" else "Sent.", newer_than=message_id)
 
     async def _stage(self, state: SessionState, talk: Any, paths: list[str]) -> tuple[list[Staged], bool] | Outcome:
         """The files a message is to carry, made ready to go and checked against the conversation's limits, and whether
@@ -1213,7 +1216,11 @@ class AgentTalks:
     async def _read(self, state: SessionState, talk: Any, wait: int) -> Outcome:
         return await self._reply_or_status(state, talk, wait, "")
 
-    async def _reply_or_status(self, state: SessionState, talk: Any, wait: int, lead: str) -> Outcome:
+    async def _reply_or_status(self, state: SessionState, talk: Any, wait: int, lead: str, *, newer_than: int = 0) -> Outcome:
+        """What came, or where the conversation stands. ``newer_than``, for a send, is its own message: what was unread
+        from before it is handed over too, but is not the answer the send waits for. Without it a send returned at once
+        with the tail of the last exchange (the agent's own answer that followed a card of free times), and the agent
+        took that for the answer to its new question."""
         talk_id = talk["id"]
         self._readers[talk_id] = self._readers.get(talk_id, 0) + 1
         try:
@@ -1224,7 +1231,8 @@ class AgentTalks:
                 unread = await self._unread(talk_id)
                 talk = await self.talk(talk_id)
                 left = deadline - time.monotonic()
-                if unread or talk is None or talk["state"] == CLOSED or left <= 0 or talk["quiet"] or not talk["waiting_for"]:
+                answered = bool(unread) and (not newer_than or any(int(row["id"]) > newer_than for row in unread))
+                if answered or talk is None or talk["state"] == CLOSED or left <= 0 or talk["quiet"] or not talk["waiting_for"]:
                     break
                 with suppress(TimeoutError):
                     await asyncio.wait_for(news.wait(), left)
@@ -1374,16 +1382,36 @@ class AgentTalks:
         stop = answer.body.get("stop_polling") is True
         waiting = answer.body.get("waiting_for")
         if stop and (taken or waiting == "nothing"):
-            await self._update(talk_id, waiting_for="", quiet=0)
+            if not await self._settled_by_read(talk, waiting_for="", quiet=0):
+                return 0.0
             return None
         # The door is up and has kept what was sent, but its owner's agent has not been seen: offline, read slowly.
         owed = "owner" if waiting == "owner" else OFFLINE if waiting == "owner_online" else "reply"
-        if stop or owed == OFFLINE:
-            await self._update(talk_id, waiting_for=owed, quiet=1)
+        # Waiting on a person, theirs: admitting a first contact, or deciding on files or a question. No use holding a turn
+        # for it; a first message to an owner who had not yet admitted it kept the agent's tool waiting its two minutes out.
+        if stop or owed in (OFFLINE, "owner"):
+            if not await self._settled_by_read(talk, waiting_for=owed, quiet=1):
+                return 0.0
             self._wake_readers(talk_id)
             return max(QUIET_POLL_SECONDS, answer.retry_after or 0.0)
-        await self._update(talk_id, waiting_for=owed, quiet=0)
+        await self._settled_by_read(talk, waiting_for=owed, quiet=0)
         return 0.0
+
+    async def _settled_by_read(self, talk: Any, **fields: Any) -> bool:
+        """Write what a read found the conversation waiting for, unless a message went or is going since the read left.
+
+        One statement, not a look and then a write: what a door said of the state before a send is stale once it has
+        gone. A read out before a send came back with "nothing owed" after the send had set its wait, cleared it, and
+        the follower the send started found nothing to follow: the agent was told nothing was owed, its answer unread."""
+        names = ", ".join(f"{name} = ?" for name in fields)
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                f"UPDATE agent_talks SET {names} WHERE id = ? AND sends = ? AND NOT EXISTS (SELECT 1 FROM agent_talk_messages WHERE talk_id = ? AND state = ?)",  # noqa: S608 — names are this code's
+                (*fields.values(), talk["id"], talk["sends"], talk["id"], SENDING),
+            )
+            done = cursor.rowcount > 0
+            await cursor.close()
+        return done
 
     def _reason(self, body: dict[str, Any]) -> str:
         reason = body.get("reason")

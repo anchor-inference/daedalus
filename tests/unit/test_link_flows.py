@@ -19,7 +19,7 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.config import Settings
 from daedalus.extensions import link_flows as flows_module
-from daedalus.extensions.link_flows import APPROVE_HOOK, LinkFlows
+from daedalus.extensions.link_flows import APPROVE_HOOK, LinkFlows, approval_key_of
 from daedalus.host import link_flows
 from daedalus.host.link_flows import PatchError
 from daedalus.stores.database import Database
@@ -422,7 +422,7 @@ async def test_a_limited_guests_patch_waits_for_the_operator(settings: Settings,
     await answered(bridge, state.session.id)
     action = await db.fetchone("SELECT * FROM link_actions")
     assert action["state"] == "held" and "+1 −1" in json.loads(action["args"])["stat"]
-    assert f"link-flow:{action['id']}" in (state.metadata.get("policy_pending") or {}), "the operator is asked on a card"
+    assert approval_key_of(action["id"]) in (state.metadata.get("policy_pending") or {}), "the operator is asked on a card"
     assert not git(root, "branch", "--list", "fix/x"), "nothing applied before the operator"
     await flows.approved(state.session.id, {"flow": action["id"]}, True)
     commit = git(root, "rev-parse", "fix/x")

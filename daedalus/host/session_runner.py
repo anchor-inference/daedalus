@@ -4276,6 +4276,8 @@ class SessionManager:
         Masked here as well because the words now leave: the model reads placeholders, but a tool's
         output or a file the turn read may hold the real thing, and from here on nobody reviews it.
         """
+        from daedalus.transport.telegram.render import flatten_evidence  # Lazy: the Telegram package imports this module.
+
         for message in reversed(await self.sessions.list_transcript(session_id, limit=400)):
             if message.role is MessageRole.assistant and message.metadata.get("daedalus.run_id") == run_id:
                 # The last message and no other: text written on the way, between two tool calls, is the
@@ -4284,6 +4286,9 @@ class SessionManager:
                 # The trailing headline is a note to this system, and its anchors are the turn's facts. A
                 # real turn held a value back in its answer and then named it there, on the way out.
                 text = prompts.split_headline(text)[0]
+                # The app's own tags (a file, a run's receipt, a picture) are things to click in the operator's chat; a
+                # guest got them as raw markup, a file tag reading as if the file had been handed over when it had not.
+                text = flatten_evidence(text)
                 return redact.redact(self.redactor.conceal_named(text)) if text else ""
         return ""
 
