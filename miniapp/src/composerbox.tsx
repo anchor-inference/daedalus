@@ -103,6 +103,9 @@ export type ComposerProps = {
   /** The session's autopilot switch, beside YAGNI in the toggles menu. */
   autopilot?: AutopilotStatus | null;
   onAutopilot?: (on: boolean) => void;
+  /** The session's "Bypass all checks", last in the toggles menu. */
+  bypass?: boolean;
+  onBypass?: (on: boolean) => void;
   place?: ComposerPlace;
   targetProject?: string;
   targetWorkspace?: string;
@@ -757,7 +760,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])}
             onChanged={(id, name) => setSecrets((list) => (name === null ? list.filter((other) => other.id !== id) : list.map((other) => (other.id === id ? { ...other, name } : other))))} />}
           {props.onYagni
-            ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
+            ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
           {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}

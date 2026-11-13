@@ -16,6 +16,16 @@ export const APPROVAL_MODES: { id: ApprovalMode; icon: IconName; label: string; 
   { id: "skip", icon: "alert", label: "approvals.skip", sub: "approvals.skip.sub" },
 ];
 
+/** Whether the composer offers the chip: only while the conversation is in the operator's Chrome now. The
+ *  conversation's choice of browser stays "user" once switched, so that alone kept the chip in a chat that had
+ *  borrowed the operator's Chrome for one task long after it let go; the chip then set approvals for nothing the
+ *  chat was doing. So it is shown for a chat started as a browser chat, and for any other only while it holds a
+ *  tab group in that Chrome (`controlling`, which the host clears as the chat lets go and a reload reads again). */
+export function chromeApprovalsShown(detail: { kind?: string; controlling?: string[] } | null | undefined, user: { env?: string } | null | undefined): boolean {
+  if (!detail || user?.env !== "user") return false;
+  return detail.kind === "chrome" || (Array.isArray(detail.controlling) && detail.controlling.includes("chrome"));
+}
+
 /** The chip and its menu, for a conversation the caller knows is in the operator's Chrome (the app
  *  from the conversation's browser choice; the side panel lists no other). A read that fails shows
  *  the default rather than nothing: the composer is not the place to report an unavailable browser.

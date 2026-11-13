@@ -1481,6 +1481,8 @@ export type SessionDetail = {
   messages: MessageView[];
   /** YAGNI: the host tells the model in the next turn, never in the system prompt. */
   yagni?: boolean;
+  /** "Bypass all checks": no review, no policy question, no hold in this session; hard refusals stay. */
+  bypass?: boolean;
   /** The session's autopilot switch; null for a host without autopilot. */
   autopilot?: AutopilotStatus | null;
   usd_cap?: number | null;

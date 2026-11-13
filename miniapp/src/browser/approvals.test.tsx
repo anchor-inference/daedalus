@@ -10,7 +10,30 @@ vi.mock("../ui", async (real) => ({
   confirmAsync: async () => { confirmed.asked += 1; return confirmed.answer; },
 }));
 
-import { ApprovalChip } from "./approvals";
+import { ApprovalChip, chromeApprovalsShown } from "./approvals";
+
+describe("where the chip is offered", () => {
+  const chrome = { env: "user" };
+
+  it("is offered to a browser chat and to a chat holding the operator's Chrome now", () => {
+    expect(chromeApprovalsShown({ kind: "chrome", controlling: [] }, chrome)).toBe(true);
+    expect(chromeApprovalsShown({ kind: "chat", controlling: ["chrome"] }, chrome)).toBe(true);
+  });
+
+  it("goes once an ordinary chat lets the operator's Chrome go, though its choice still says their Chrome", () => {
+    // The choice of browser stays "user" after a borrowed task; the chip stayed with it, in a chat that no
+    // longer did anything in Chrome. A reload reads `controlling` again, so it does not come back either.
+    expect(chromeApprovalsShown({ kind: "chat", controlling: [] }, chrome)).toBe(false);
+    expect(chromeApprovalsShown({ kind: "chat" }, chrome)).toBe(false);
+    expect(chromeApprovalsShown({ kind: "chat", controlling: ["computer"] }, chrome)).toBe(false);
+  });
+
+  it("is never offered where the conversation's browser is not the operator's Chrome", () => {
+    expect(chromeApprovalsShown({ kind: "chrome", controlling: ["chrome"] }, { env: "agent" })).toBe(false);
+    expect(chromeApprovalsShown({ kind: "chrome" }, undefined)).toBe(false);
+    expect(chromeApprovalsShown(null, chrome)).toBe(false);
+  });
+});
 
 describe("the approval chip", () => {
   let host: HTMLDivElement;

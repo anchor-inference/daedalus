@@ -148,6 +148,17 @@ APPROVAL_MODES = ("manual", "auto", "skip")
 and the routine asks through and still asks before buying, sending, deleting or signing in; ``skip``
 asks about nothing. None of them touches a refusal: a policy denial, a sealed port, a metadata
 address or a cookie value is refused before any question is."""
+BYPASS_KEEPS = (
+    "host.installation", "host.own_containers", "egress.sealed_port", "egress.tunnel", "shell.machine", "shell.rawdevice", "shell.forkbomb",
+    "shell.rm_root", "shell.rm_protected", "shell.rm_workspaces", "shell.system_write", "shell.chmod_root", "shell.protected_write", "shell.wait",
+    "git.operator_repo", "git.operator_push", "browser.scheme", "browser.rule", "mcp.denied", "session.capabilities",
+)
+"""The refusals a session set to "Bypass all checks" still meets: every ``deny`` of the policy, which no answer
+could lift in any session, so bypassing a check cannot lift it either. They guard the installation itself (its
+keys, database and launcher; its own containers, whose entering from outside once broke the sandbox for every
+session; its sealed ports), the machine (system paths, raw devices, a fork bomb), the operator's checkouts, and
+what the operator refused by name (an MCP tool, a site's browser rule). The gate does not consult this list: it
+lets a ``deny`` stand and turns only questions into yes, and the list is what the app and the API say about it."""
 
 
 def approval_mode_lifts(mode: str, decision: Decision, kinds: Iterable[str]) -> bool:
@@ -1203,4 +1214,4 @@ def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kin
     return Decision(ASK, f"this would {words} on {host or page_origin}", "browser.sensitive", key=key)
 
 
-__all__ = ["ALLOW", "APPROVAL_MODES", "ASK", "BROWSER_NAV_TOOLS", "CONSEQUENTIAL_KINDS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "approval_mode_lifts", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]
+__all__ = ["ALLOW", "APPROVAL_MODES", "BYPASS_KEEPS", "ASK", "BROWSER_NAV_TOOLS", "CONSEQUENTIAL_KINDS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "approval_mode_lifts", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]

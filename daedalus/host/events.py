@@ -92,6 +92,14 @@ class SessionControlling(TypedDict):
     controlling: list[str]
 
 
+class SessionBypass(TypedDict):
+    """The operator switched the session's "Bypass all checks" on or off (``SessionManager.set_bypass``).
+    Kept with the other events, so when the checks were lifted, and from where, stays on the record."""
+
+    on: bool
+    via: str
+
+
 class SessionCreated(TypedDict):
     """A session exists. Without it a chat the agent, a subagent, an import or a fork made, or one
     made without a first message, reached the open lists only at their next minute's poll."""
@@ -769,6 +777,7 @@ REGISTRY: dict[str, EventSpec] = {
     "session.unread_result": EventSpec(SessionUnreadResult),
     "session.controlling": EventSpec(SessionControlling),
     "session.created": EventSpec(SessionCreated),
+    "session.bypass": EventSpec(SessionBypass),
     "session.deleted": EventSpec(SessionDeleted),
     "session.jobs": EventSpec(SessionJobs),
     "ask.pending": EventSpec(AskPending),
