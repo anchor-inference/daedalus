@@ -41,7 +41,7 @@ from daedalus.tools.browser import BROWSER_TOOLS
 from tests.support.fake_browserd import Element, FakeBrowserd
 from tests.unit.test_browser_service import wait_until
 
-UNTOUCHED = {"sites": [], "approvals": "manual", "chrome": "", "chrome_name": "", "held": False}
+UNTOUCHED = {"sites": [], "approvals": "manual", "chosen": "manual", "bypass": False, "chrome": "", "chrome_name": "", "held": False}
 
 
 @pytest.fixture

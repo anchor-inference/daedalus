@@ -2011,6 +2011,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "yagni":
         # The composer's toggles chip: a harness that reads the switch back answers this itself.
         return 200, "application/json", "{}"
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "bypass":
+        # "Bypass all checks" in the toggles menu: on or off as asked, and the refusals that stay.
+        on = bool(body.get("on")) if isinstance(body, dict) else False
+        return 200, "application/json", json.dumps({"bypass": on, "keeps": ["host.installation", "host.own_containers", "egress.sealed_port"]})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "autopilot":
         # The session's autopilot switch, in the toggles menu: on as asked, the installation's master switch on.
         on = bool(body.get("on")) if method.upper() == "POST" and isinstance(body, dict) else False

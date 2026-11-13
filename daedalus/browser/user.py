@@ -195,13 +195,26 @@ class UserChoices:
         return saved if isinstance(saved, dict) else {}
 
     async def get(self, session_id: str) -> dict[str, Any]:
+        """The conversation's choice. ``approvals`` is the mode in force: ``skip`` while the session bypasses its
+        checks (``sessions.bypass_at``), whatever the operator chose here, which ``chosen`` keeps for when it is
+        switched off again. Read here, where every reader of the mode reads it, so none can miss the switch."""
         entry = (await self._all()).get(session_id) or {}
         env = entry.get("env") if entry.get("env") in CHOICES else AGENT
-        approvals = entry.get("approvals") if entry.get("approvals") in APPROVAL_MODES else "manual"
+        chosen = entry.get("approvals") if entry.get("approvals") in APPROVAL_MODES else "manual"
+        bypass = await self._bypass(session_id)
         return {
-            "env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []], "approvals": approvals,
-            "chrome": str(entry.get("chrome") or ""), "chrome_name": str(entry.get("chrome_name") or ""), "held": bool(entry.get("held")),
+            "env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []], "approvals": "skip" if bypass else chosen,
+            "chosen": chosen, "bypass": bypass, "chrome": str(entry.get("chrome") or ""), "chrome_name": str(entry.get("chrome_name") or ""), "held": bool(entry.get("held")),
         }
+
+    async def _bypass(self, session_id: str) -> bool:
+        if not session_id:
+            return False
+        try:
+            row = await self.db.fetchone("SELECT bypass_at FROM sessions WHERE id = ?", (session_id,))
+        except Exception:  # noqa: BLE001 — a store without the column (a test's) has no session bypassing anything
+            return False
+        return row is not None and row["bypass_at"] is not None
 
     async def env(self, session_id: str | None) -> str:
         if not session_id:

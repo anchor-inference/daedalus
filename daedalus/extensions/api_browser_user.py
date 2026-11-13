@@ -221,7 +221,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def browser_approvals(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """How this conversation asks in the operator's Chrome: ``manual``, ``auto`` or ``skip``."""
         choice = await session_choice(session_id)
-        return {"mode": choice["approvals"], "env": choice["env"], "warning": SKIP_WARNING}
+        return {"mode": choice["approvals"], "env": choice["env"], "bypass": choice["bypass"], "warning": SKIP_WARNING}
 
     @api.put("/api/sessions/{session_id}/browser-approvals")
     async def browser_approvals_set(session_id: str, body: ApprovalsBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

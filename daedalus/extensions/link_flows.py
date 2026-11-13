@@ -162,13 +162,17 @@ class LinkFlows:
         if action == "meet":
             return await self._talk_meet(state, talk, text, extra)
         if action == "apply_patch":
-            return await self._request_patch(state, TALK, talk["id"], "", str(talk["host"]), files, extra, level="")
+            return await self._request_patch(state, TALK, talk["id"], "", str(talk["host"]), files, extra, level=await self._talk_level(state, talk))
         return "Not an action of a conversation.", True
 
     async def guest_action(self, state: Any, delivery: Any, action: str, *, text: str, files: list[str], extra: dict[str, Any]) -> tuple[str, bool]:
         """``AgentTalk`` in a guest's turn at our door, for the conversation that turn answers."""
         turn = state.guest_turn
         level = "trusted" if turn.trusted else turn.tools
+        if getattr(state, "bypass", False) and level != "none":
+            # The operator lifted this session's checks: what waits for their yes at the link's level goes at once.
+            # What the level does not allow at all (titles in the calendar, a patch with no folder) stays out.
+            level = "trusted" if link_flows.standing(level, action) == link_flows.ASK else level
         if action not in GUEST_ACTIONS:
             return "Not an action of a guest's turn.", True
         if action == "unsubscribe":
@@ -857,11 +861,25 @@ class LinkFlows:
             return "The operator could not be asked, so nothing was booked.", True
         return "The meeting waits for the operator. The guest hears when it is booked or declined.", False
 
+    async def _talk_level(self, state: Any, talk: Any) -> str:
+        """``trusted`` for a conversation with a contact the operator trusts as themselves, or in a session set to
+        bypass its checks: what such a conversation asks for is done at once. ``""`` (always asked) otherwise."""
+        from daedalus.extensions.agent_talk import talks_of  # Lazy: agent_talk imports this module.
+
+        talks = talks_of(self.app)
+        return "trusted" if getattr(state, "bypass", False) or (talks is not None and await talks.talk_trusted(talk)) else ""
+
     async def _talk_meet(self, state: Any, talk: Any, text: str, extra: dict[str, Any]) -> tuple[str, bool]:
         card = self._meeting(text, extra)
         if card is None:
             return "start and end are ISO 8601 times with their zone, the end after the start; text is the meeting's title.", True
         args = {"title": card["title"], "start": card["start"], "end": card["end"], "timezone": card["timezone"], "with": str(talk["host"])}
+        if await self._talk_level(state, talk) == "trusted":
+            action_id = await self._action(TALK, talk["id"], "", state.session.id, "meeting", args, "running")
+            row = await self.db.fetchone("SELECT * FROM link_actions WHERE id = ?", (action_id,))
+            result = await self._carry_out(row)
+            failed = (await self.db.fetchone("SELECT state FROM link_actions WHERE id = ?", (action_id,)))["state"] == "failed"
+            return result, failed
         action_id = await self._action(TALK, talk["id"], "", state.session.id, "meeting", args, "held")
         # Always the operator's: the time came from a stranger, and a calendar entry outlives this turn.
         if not await self._ask(state.session.id, action_id, f"Book “{card['title']}” with {talk['host']}, {card['start']} to {card['end']}"):

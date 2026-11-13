@@ -94,6 +94,32 @@ describe("the chip and its menu", () => {
     expect(document.querySelector(".autopilot-row")).toBeNull();
   });
 
+  it("offers bypass with one click and no confirmation, says what still holds, and marks the chip in red", async () => {
+    const onBypass = vi.fn();
+    await act(async () => root.render(<TogglesSelect yagni={false} onYagni={() => {}} bypass={false} onBypass={onBypass} sheet={false} />));
+    await act(async () => chip().click());
+    const row = document.querySelector<HTMLButtonElement>(".bypass-row")!;
+    expect(row.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(row.getAttribute("aria-checked")).toBe("false");
+    expect(row.querySelector(".truncate")?.textContent).toBe("Bypass all checks");
+    // The hint under the switch names what stays refused; nothing hides it behind a tooltip.
+    const hint = row.querySelector(".sub")!.textContent!;
+    expect(hint).toContain("containers");
+    expect(hint).toContain("sealed ports");
+    expect(row.getAttribute("title")).toBeNull();
+    await act(async () => row.click());
+    expect(onBypass).toHaveBeenCalledWith(true);
+    expect(document.querySelector(".confirm, .dialog")).toBeNull();
+    expect(chip().classList.contains("bypass")).toBe(true);
+    expect(chip().querySelector(".mode-bypass")?.textContent).toBe("Bypass all checks");
+    expect(chip().title).toBe("Agent · Bypass all checks");
+    // Where the session offers no switch, there is no row.
+    await act(async () => root.render(<TogglesSelect yagni={false} onYagni={() => {}} sheet={false} />));
+    expect(document.querySelector(".bypass-row")).toBeNull();
+    setLang("ru");
+    expect(togglesTitle(false, false, true)).toBe("Агент · Без проверок");
+  });
+
   it("opens a sheet on a phone, in Russian too", async () => {
     setLang("ru");
     await act(async () => root.render(<TogglesSelect yagni={false} onYagni={() => {}} sheet />));

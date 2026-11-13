@@ -1060,6 +1060,8 @@ class BrowserAgent:
         cfg = self.service.config()
         if self.monitor is None or not (cfg.injection_monitor or (group.get("env") == USER_ENV and cfg.user.monitor)):
             return
+        if caller.owner.session_id and (await self.service.choices.get(caller.owner.session_id))["bypass"]:
+            return  # the operator lifted this session's checks, and a hit here is a question put to them
         origin = origin_of(url)
         if not origin.startswith("http"):
             return

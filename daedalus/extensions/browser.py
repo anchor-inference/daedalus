@@ -413,6 +413,9 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     manager.delete_hooks.append(session_deleted)
     manager.project_delete_hooks.append(project_deleted)
+    # The guard of the operator's Chrome judges a page's own redirects without asking the host: it is told
+    # when a session's "Bypass all checks" makes every site its approval mode lets through, and when it stops.
+    manager.bypass_hooks.append(lambda session_id, on: service.sync_session_grants(session_id))
     manager.answer_hooks[SWITCH_ASK] = lambda session_id, request, allowed: chrome_answered(app, service, session_id, allowed)
     manager.answer_hooks[WEBGL_ASK] = lambda session_id, request, allowed: webgl_answered(service, session_id, request, allowed)
     manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))

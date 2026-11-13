@@ -1000,39 +1000,15 @@ class GuestBridge:
             return "This turn cannot read the chat's folder, so it sends no files.", True
         if not paths:
             return "files names what to send: paths in the chat's folder. A folder goes as one zip.", True
-        if len(paths) > link_protocol.MAX_FILES:
-            return f"At most {link_protocol.MAX_FILES} files at once.", True
-        fs = state.services.fs if state.services is not None else None
-        if fs is not None and getattr(fs, "remote", False):
-            return "Files go only from a chat whose folder is on this machine.", True
-        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
-        chosen: list[Path] = []
-        for path in paths:
-            given = Path(str(path)).expanduser()
-            real = Path(os.path.realpath(given if given.is_absolute() else root / given))
-            if not turn.trusted and not real.is_relative_to(root):
-                return f"{path} is outside this chat's folder, and a guest's turn sends nothing from there.", True
-            if not real.exists():
-                return f"There is no {path}.", True
-            if state.services is not None and state.services.is_protected(real):
-                return f"{path} is part of this installation, and does not leave it.", True
-            chosen.append(real)
-        try:
-            staged = await asyncio.to_thread(link_protocol.stage, chosen, self.app.settings.state_dir / link_protocol.STAGING)
-        except (LinkFileError, OSError) as exc:
-            return f"Could not get the files ready: {exc}", True
-        try:
-            view = (await self.client.call("GET", f"/control/links/{delivery.link_id}")).get("link") or {}
-        except (DoorUnavailable, DoorRefused) as exc:
-            link_protocol.unstage(staged)
-            return f"The door is out of reach, so nothing was sent: {exc}", True
-        why = link_protocol.check_limits((s.size for s in staged), file_mb=float(view.get("file_mb") or 0), day_mb=float(view.get("day_mb") or 0), used_today=_whole(view.get("files_today_bytes")))
-        if why:
-            link_protocol.unstage(staged)
-            return f"Not sent: {why}.", True
+        # A trusted guest never waits, and neither does anything in a session the operator set to bypass its
+        # checks: the hold is the operator's look before a file leaves, which they said they do not want here.
+        at_once = turn.trusted or bool(getattr(state, "bypass", False))
+        staged = await self._stage_out(state, delivery.link_id, paths, anywhere=turn.trusted)
+        if isinstance(staged, str):
+            return staged, True
         names = ", ".join(s.name for s in staged)
         session_id = state.session.id
-        if turn.trusted:
+        if at_once:
             try:
                 for item in staged:
                     file_id = await self._upload(delivery.conversation_id, item)
@@ -1043,14 +1019,103 @@ class GuestBridge:
             finally:
                 link_protocol.unstage(staged)
             return f"Attached to your answer: {names}. They go to the guest with your final message.", False
+        await self._hold_out(state, delivery.link_id, delivery.conversation_id, staged, note, task=delivery.task)
+        return f"These files wait for the operator, who sees each one with its size and may hold some back: {names}. Tell the guest they follow once the owner lets them go.", False
+
+    async def _stage_out(self, state: Any, link_id: str, paths: list[str], *, anywhere: bool) -> list[Staged] | str:
+        """The files to go to a guest of ``link_id``, made ready and checked against the link's limits, or why not.
+        ``anywhere``: a path outside the chat's folder may go too, as it may for a trusted guest."""
+        if len(paths) > link_protocol.MAX_FILES:
+            return f"At most {link_protocol.MAX_FILES} files at once."
+        fs = state.services.fs if state.services is not None else None
+        if fs is not None and getattr(fs, "remote", False):
+            return "Files go only from a chat whose folder is on this machine."
+        root = Path(os.path.realpath(state.services.workspace_dir if state.services is not None else state.workspace))
+        chosen: list[Path] = []
+        for path in paths:
+            given = Path(str(path)).expanduser()
+            real = Path(os.path.realpath(given if given.is_absolute() else root / given))
+            if not anywhere and not real.is_relative_to(root):
+                return f"{path} is outside this chat's folder, and a guest's turn sends nothing from there."
+            if not real.exists():
+                return f"There is no {path}."
+            if state.services is not None and state.services.is_protected(real):
+                return f"{path} is part of this installation, and does not leave it."
+            chosen.append(real)
+        try:
+            staged = await asyncio.to_thread(link_protocol.stage, chosen, self.app.settings.state_dir / link_protocol.STAGING)
+        except (LinkFileError, OSError) as exc:
+            return f"Could not get the files ready: {exc}"
+        try:
+            view = (await self.client.call("GET", f"/control/links/{link_id}")).get("link") or {}
+        except (DoorUnavailable, DoorRefused) as exc:
+            link_protocol.unstage(staged)
+            return f"The door is out of reach, so nothing was sent: {exc}"
+        why = link_protocol.check_limits((s.size for s in staged), file_mb=float(view.get("file_mb") or 0), day_mb=float(view.get("day_mb") or 0), used_today=_whole(view.get("files_today_bytes")))
+        if why:
+            link_protocol.unstage(staged)
+            return f"Not sent: {why}."
+        return staged
+
+    async def _hold_out(self, state: Any, link_id: str, conversation_id: str, staged: list[Staged], note: str, *, task: str = "") -> None:
         batch = secrets.token_hex(6)
         for item in staged:
             await self._file_row(
-                session_id, delivery.link_id, delivery.conversation_id, "out", item.name, item.size, item.sha256, str(item.path), "held", task=delivery.task, batch=batch,
+                state.session.id, link_id, conversation_id, "out", item.name, item.size, item.sha256, str(item.path), "held", task=task, batch=batch,
                 note=" ".join(note.split())[:500], run_id=state.run_id or "",
             )
-        await self._tell_files_held(session_id, delivery.link_id)
-        return f"These files wait for the operator, who sees each one with its size and may hold some back: {names}. Tell the guest they follow once the owner lets them go.", False
+        await self._tell_files_held(state.session.id, link_id)
+
+    async def open_conversations(self, session_id: str) -> list[tuple[Any, str]]:
+        """The guests of this chat's live direct links whose conversation is open, as ``(link row, conversation id)``.
+        Asked of the door, which alone knows whether a guest's conversation is still open; a door out of reach
+        knows of none."""
+        found: list[tuple[Any, str]] = []
+        for row in await self.app.db.fetchall("SELECT * FROM guest_links WHERE session_id = ? AND mode = 'direct' AND revoked_at IS NULL ORDER BY created_at", (session_id,)):
+            try:
+                view = (await self.client.call("GET", f"/control/links/{row['id']}")).get("link") or {}
+            except (DoorUnavailable, DoorRefused):
+                continue
+            found += [(row, str(c["id"])) for c in view.get("conversations") or [] if isinstance(c, dict) and c.get("state") == "open" and c.get("id")]
+        return found
+
+    async def send_outside_turn(self, state: Any, row: Any, conversation_id: str, text: str, paths: list[str]) -> tuple[str, bool]:
+        """``AgentTalk`` send in a turn of the operator's to the one guest this chat is talking to through its link.
+
+        The way back to a guest once their turn has ended. Without it the operator's "Allow anyway" on a file
+        the guest asked for was spent on a turn of the main chat, which has no conversation of its own, and
+        the agent was told "This chat has no open conversation" while the guest waited for the file. What a
+        guest's turn could not send without the operator stays held here too: files to a guest whose link is
+        not trusted wait for them, unless the session bypasses its checks."""
+        link_id = str(row["id"])
+        trusted = str(row["tools"]) == "trusted"
+        words = text.strip()
+        if not paths and not words:
+            return "text is the message to send.", True
+        names = ""
+        ids: list[str] = []
+        if paths:
+            staged = await self._stage_out(state, link_id, paths, anywhere=trusted)
+            if isinstance(staged, str):
+                return staged, True
+            names = ", ".join(item.name for item in staged)
+            if not (trusted or getattr(state, "bypass", False)):
+                await self._hold_out(state, link_id, conversation_id, staged, words)
+                return f"To the guest of “{row['label']}”: these files wait for the operator, who may hold some back: {names}. The text goes with them.", False
+            try:
+                for item in staged:
+                    file_id = await self._upload(conversation_id, item)
+                    ids.append(file_id)
+                    await self._file_row(state.session.id, link_id, conversation_id, "out", item.name, item.size, item.sha256, item.source, "sent", remote_id=file_id, run_id=state.run_id or "")
+            except (DoorUnavailable, DoorRefused, LinkFileError) as exc:
+                return f"The files did not reach the door: {exc}", True
+            finally:
+                link_protocol.unstage(staged)
+        try:
+            await self.say(link_id, conversation_id, {"kind": link_protocol.FILE if ids else link_protocol.TEXT, "files": ids, "text": words[:MAX_GUEST_TEXT]} if ids else {"text": words[:MAX_GUEST_TEXT]})
+        except (DoorUnavailable, DoorRefused) as exc:
+            return f"The message did not reach the door: {exc}", True
+        return f"Sent to the guest of “{row['label']}”" + (f", with {names}." if names else "."), False
 
     async def _upload(self, conversation_id: str, item: Staged) -> str:
         made = await self.client.call("POST", f"/control/conversations/{conversation_id}/files", json={"name": item.name, "size": item.size, "sha256": item.sha256})
