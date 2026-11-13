@@ -487,4 +487,3 @@ async def test_an_http_agent_is_told_the_owner_is_offline_and_answered_when_they
     seen = await guest.read_until(lambda seen: any(m["from"] == "agent" for m in seen))
     assert seen[-1]["text"] == "Back now."
     await guest.close()
-
