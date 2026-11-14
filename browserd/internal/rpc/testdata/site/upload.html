@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Upload</title>
+<style>
+  .hidden-input { visibility: hidden; width: 0; height: 0; position: absolute; bottom: 100%; }
+</style></head>
+<body>
+<main>
+  <h1>Upload</h1>
+  <!-- A form of the kind a React upload widget makes: the input hidden behind a button of the
+       page's own, its files read by a listener on the document (as React's delegated onChange is)
+       and the field emptied afterwards so the same file can be chosen again. -->
+  <form id="appeal">
+    <div class="attach">
+      <button type="button" id="attach" onclick="document.getElementById('files').click()">Attach</button>
+      <input type="file" id="files" class="hidden-input" multiple>
+    </div>
+    <ul id="attached"></ul>
+  </form>
+  <!-- A button whose input is made on the fly and never put in the document. -->
+  <section>
+    <button type="button" id="make" onclick="pick()">Add a picture</button>
+    <p id="picked">Nothing picked</p>
+  </section>
+  <!-- A field that swallows what it is given: the files never reach the page. -->
+  <section>
+    <input type="file" id="sink" aria-label="Sink">
+  </section>
+  <section>
+    <button type="button" id="plain">Not an upload</button>
+  </section>
+</main>
+<script>
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "files") return;
+  const list = document.getElementById("attached");
+  for (const f of e.target.files) {
+    const li = document.createElement("li");
+    li.textContent = "attached " + f.name + " " + f.size;
+    list.appendChild(li);
+  }
+  e.target.value = "";
+});
+function pick() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.addEventListener("change", () => {
+    document.getElementById("picked").textContent = "picked " + Array.from(input.files, (f) => f.name + " " + f.size).join(", ");
+  });
+  input.click();
+}
+window.addEventListener("change", (e) => {
+  if (e.target.id !== "sink") return;
+  e.stopImmediatePropagation();
+  e.target.value = "";
+}, true);
+</script>
+</body></html>

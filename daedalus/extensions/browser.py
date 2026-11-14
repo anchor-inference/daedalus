@@ -224,7 +224,10 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
             line = f"- Browser: the operator gave this conversation their own Chrome, and several are connected: «{name}». Name one with BrowserOpen(chrome=…) before you work there."
         # Said up front because an agent refused on the developer console told the operator nothing
         # could be done, when its own browser opens the store: the limit is Chrome's, not the task's.
-        line += " Chrome keeps every extension off the Chrome Web Store and its developer console: for those, ask the operator to switch to «Agent's browser», which opens them."
+        line += " Chrome keeps every extension off the Chrome Web Store and its developer console: your own browser opens them."
+        # Said up front because an agent told "work in your own browser" by the operator answered that only
+        # they could switch it: it can, and leaving their Chrome needs no one's yes.
+        line += " BrowserOpen(chrome='agent') moves this conversation to your own browser when the operator wants it there or their Chrome is away."
         # Only while the conversation is in their Chrome: switched back to the agent's browser, "work in
         # their Chrome" would send the agent somewhere it cannot go.
         if state.metadata.get(PANEL_SESSION_KEY):

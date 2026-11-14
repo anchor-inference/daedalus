@@ -271,7 +271,8 @@ function Defaults({ user, setUser }: { user: BrowserUserSettings; setUser: (patc
 }
 
 /** The panel header's switch: which browser this conversation's agent uses. Only the operator moves
- *  it; the first move to their Chrome in a conversation asks once, with what the agent can do there. */
+ *  it into their Chrome, and the first move there in a conversation asks once, with what the agent can
+ *  do there; the agent may move it back to its own browser itself, and the switch redraws on that too. */
 export function BrowserSwitch({ sessionId, user, consent, toast }: { sessionId: string; user: BrowserUserChoice; consent?: string; toast: (text: string) => void }) {
   const [busy, setBusy] = useState(false);
   async function choose(env: "agent" | "user") {

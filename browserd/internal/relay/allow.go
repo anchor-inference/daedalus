@@ -26,6 +26,9 @@ var refusedMethods = map[string]bool{
 	"Network.deleteCookies": true, "Network.clearBrowserCookies": true, "Network.clearBrowserCache": true,
 	// Deprecated, and it sets the download behaviour of the whole browser context.
 	"Page.setDownloadBehavior": true,
+	// It names files by their path on the daemon's computer, which is not the operator's, and Chrome
+	// lets an extension name no local file anyway: an upload there carries the bytes instead.
+	"DOM.setFileInputFiles": true,
 }
 
 // Emulation is allowed for focus, media and the device metrics only: the agent's window keeps

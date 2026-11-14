@@ -169,7 +169,7 @@ async def test_the_first_switch_asks_for_consent_once_and_the_result_names_the_o
     text, _ = await rig.call(sid, "BrowserTabs")
     assert text.startswith("[in the operator's own Chrome «Work»]")
     # The prompt says who switches, without the conversation's state in it (it stays cacheable).
-    assert "Only the operator switches browsers" in prompts.BROWSER
+    assert "Only the operator moves a conversation into their Chrome" in prompts.BROWSER
 
 
 async def test_a_closed_chrome_is_said_plainly_and_never_falls_back_to_the_agents_browser(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
@@ -514,7 +514,7 @@ async def test_the_turn_line_says_where_the_conversation_is_and_stays_the_same_b
     await rig.switch(sid)
     third = (await rig.manager._with_turn_context(state, message)).content_blocks[0].text  # type: ignore[union-attr]
     assert "- Browser: the operator gave this conversation their own Chrome «Work»; the browser tools work there." in third
-    assert "Chrome Web Store" in third and "«Agent's browser»" in third
+    assert "Chrome Web Store" in third and "BrowserOpen(chrome='agent')" in third
     # The static rules point at the ask, with both languages' words, and keep the conversation's state out.
     assert "BrowserAskOperatorChrome" in prompts.BROWSER and "в моём браузере" in prompts.BROWSER and "«Work»" not in prompts.BROWSER
     hint = rig.manager.tools.get("BrowserAskOperatorChrome").search_hint  # type: ignore[union-attr]
@@ -1001,14 +1001,14 @@ async def test_the_store_is_refused_before_anything_is_asked_or_opened_with_what
     text, failed = await rig.call(sid, "BrowserOpen", url=devconsole)
     assert failed and "Chrome lets no extension open or control the Chrome Web Store" in text, text
     # What works, by the tools' real names, and the conclusion the session reached ruled out.
-    assert "«Agent's browser»" in text and "BrowserOpen(url=" in text and "BrowserLogin(url_or_domain='accounts.google.com'" in text and "BrowserHandoff" in text
+    assert "BrowserOpen(chrome='agent', url=" in text and "BrowserLogin(url_or_domain='accounts.google.com'" in text and "BrowserHandoff" in text
     assert "It is not impossible" in text and "Not allowed" not in text
     assert not chrome.groups, "the operator's window was not touched"
     assert not rig.pending(sid), "no site question for a page Chrome will refuse anyway"
     sid = await opened(rig, chrome)
     for tool, arguments in (("BrowserNavigate", {"url": "https://chromewebstore.google.com/"}), ("BrowserTabs", {"action": "new", "url": "https://chromewebstore.google.com/detail/x"})):
         text, failed = await rig.call(sid, tool, **arguments)
-        assert failed and "Chrome Web Store" in text and "«Agent's browser»" in text, (tool, text)
+        assert failed and "Chrome Web Store" in text and "BrowserOpen(chrome='agent'" in text, (tool, text)
     assert tabs_of(chrome, sid) == ["https://tax.example.com/documents"], "no tab opened, none moved"
     assert not [m for m, p in chrome.calls if m == "page.navigate" and "google.com" in str(p.get("url"))]
     assert not rig.pending(sid)
@@ -1028,7 +1028,7 @@ async def test_chromes_not_allowed_on_an_address_the_host_did_not_know_is_told_t
     sid = await opened(rig, chrome)
     chrome.fail["page.navigate"] = (-32603, "opening the page: Page.navigate: Not allowed (-32000)", {})
     text, failed = await rig.call(sid, "BrowserNavigate", url="https://intranet.example.com/")
-    assert failed and "Chrome refused to let the extension open https://intranet.example.com/" in text and "«Agent's browser»" in text, text
+    assert failed and "Chrome refused to let the extension open https://intranet.example.com/" in text and "BrowserOpen(chrome='agent'" in text, text
     assert "lost its debugger" not in text
     listing, _ = await rig.call(sid, "BrowserTabs")
     assert "dead" not in listing, "a refused navigation leaves the tab where it was"
@@ -1256,7 +1256,9 @@ async def test_a_conversation_held_from_a_side_panel_stays_in_that_chrome(rig: R
     await rig.call(sid, "BrowserClose")
     await left(rig, chrome, "c1")
     text, failed = await rig.call(sid, "BrowserOpen")
-    assert failed and "«Work», which is not connected" in text and "BrowserOpen(chrome" not in text, text
+    assert failed and "«Work», which is not connected" in text and "BrowserOpen(chrome=…)" not in text, text
+    # Nothing slides to the other computer, but the way into the agent's own browser is named.
+    assert "BrowserOpen(chrome='agent')" in text, text
 
 
 async def test_a_conversation_held_from_a_panel_that_will_not_come_back_is_let_go(rig: Rig, chrome: FakeBrowserd) -> None:
@@ -1361,3 +1363,72 @@ async def test_a_conversation_from_before_loses_what_it_was_granted_and_a_native
         assert old["env"] == USER and old["consented"] and old["sites"] == [] and old["approvals"] == "manual"
         assert bound["sites"] == ["mail.example"] and bound["approvals"] == "auto", "one that knows its Chrome keeps them"
         assert [g["device"] for g in await db.kv_get("browser.panel.grants", [])] == ["c1"]
+
+
+# -- the agent's own way back --------------------------------------------------------------------------
+
+
+async def test_the_chrome_away_error_names_the_agents_own_browser_beside_the_others(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
+    """The refusal the operator's "try it now, in your own browser" met: it named their other Chrome and
+    nothing else, and the agent told them only they could switch it back."""
+    await second_chrome(rig, chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen", chrome="Work")
+    await rig.call(sid, "BrowserClose")
+    await left(rig, chrome, "c1")
+    text, failed = await rig.call(sid, "BrowserOpen", url="https://mail.example.com/")
+    assert failed and "«Work», which is not connected" in text and "«MacBook»" in text and "BrowserOpen(chrome='agent')" in text, text
+    assert "needs no approval" in text and not agents_browser.groups
+
+
+async def test_the_agent_moves_itself_to_its_own_browser_and_the_app_shows_it(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
+    from daedalus.host.events import EventFilter  # noqa: PLC0415
+
+    subscription = rig.manager.bus.subscribe(EventFilter(types=("browser.user",)), name="test")
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen", chrome="Work")
+    await rig.call(sid, "BrowserClose")
+    chrome.chrome_left("c1")
+    pending_before = dict(rig.pending(sid))
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="agent")
+    assert not failed and "Moved this conversation from the operator's Chrome «Work» to your own browser" in text, text
+    # Nothing was asked: leaving their Chrome lowers what the agent reaches.
+    assert rig.pending(sid) == pending_before
+    assert agents_browser.groups and not [g for g in chrome.groups.values() if g.labels.get("session_id") == sid]
+    choice = await rig.service.choices.get(sid)
+    assert choice["env"] == "agent" and choice["chrome"] == "c1", "the conversation still belongs to that Chrome for the operator's next switch"
+    async with asyncio.timeout(5):
+        async for event in subscription:
+            # The event the app's switch and the side panel redraw on, as for the operator's own switch.
+            if event.session_id == sid and event.payload["kind"] == "switched" and event.payload["reason"] == "agent":
+                break
+    headers = {"x-daedalus-token": "tok"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        listing = (await client.get(f"/api/browsers?session={sid}", headers=headers)).json()
+    assert listing["user"]["env"] == "agent", listing["user"]
+    # Again in its own browser, the word is harmless: it opens there, as BrowserOpen does.
+    text, failed = await rig.call(sid, "BrowserOpen", chrome="agent")
+    assert not failed and "Browser already open" in text and "Moved" not in text, text
+
+
+async def test_the_agent_still_cannot_move_itself_into_the_operators_chrome(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen", chrome="agent")
+    for name in ("Work", "c1"):
+        text, failed = await rig.call(sid, "BrowserOpen", chrome=name)
+        assert failed and "BrowserAskOperatorChrome" in text, text
+    assert (await rig.service.choices.get(sid))["env"] == "agent" and not chrome.groups
+
+
+async def test_the_turn_line_and_the_tool_name_the_way_back(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    state = await rig.manager.get_state(sid)
+    line = await browser_extension.chrome_line(rig.manager, rig.service, state)
+    assert "BrowserOpen(chrome='agent')" in line and "ask the operator to switch" not in line, line
+    description = rig.manager.tools.get("BrowserOpen").definition.description  # type: ignore[union-attr]
+    assert "chrome='agent'" in description and "needs no approval" in description
+    assert "BrowserOpen(chrome='agent')" in prompts.BROWSER and "в своём браузере" in prompts.BROWSER

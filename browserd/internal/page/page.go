@@ -293,6 +293,8 @@ func (p *Model) TabEvent(t *browser.Tab, e cdp.Event) {
 				return
 			}
 		}
+	case "Page.fileChooserOpened":
+		p.chooserEvent(t, e)
 	case "Page.lifecycleEvent":
 		var l struct {
 			FrameID string `json:"frameId"`

@@ -54,6 +54,14 @@ logger = logging.getLogger(__name__)
 AGENT = "agent"
 """A conversation's browser when it is not the operator's Chrome: the agent's own, wherever it runs."""
 CHOICES = (AGENT, USER)
+OWN_BROWSER = AGENT
+"""``BrowserOpen(chrome='agent')``: the agent's own browser, which it may move a conversation back to
+itself. Leaving the operator's Chrome for the sandbox lowers what it can reach, so it asks nobody; the
+other way stays the operator's switch or their yes."""
+OWN_BROWSER_HINT = (
+    "BrowserOpen(chrome='agent') moves this conversation to your own browser instead (not signed in as the operator, "
+    "so it needs no approval; their logins and site approvals are not there)"
+)
 
 SECOND_LEVEL = frozenset({"co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go", "gob", "nic", "mil", "ltd", "plc", "spb", "msk"})
 """Labels that, under a two-letter country domain, are a registry's own (``co.uk``, ``com.au``,
@@ -787,7 +795,8 @@ def _frame(data: bytes | str | None) -> dict[str, Any] | None:
 
 
 def not_connected(reason: str) -> EnvUnavailable:
-    return EnvUnavailable(f"your Chrome is not connected to Daedalus: {reason or 'the extension has not connected'}", env=USER, reason="chrome_not_connected")
+    """No Chrome of the operator's to open the conversation's browser in; the way back to the agent's own is said."""
+    return EnvUnavailable(f"the operator's Chrome is not connected to Daedalus: {reason or 'the extension has not connected'}. {OWN_BROWSER_HINT[:1].upper()}{OWN_BROWSER_HINT[1:]}.", env=USER, reason="chrome_not_connected")
 
 
 def chrome_away(name: str, others: list[dict[str, Any]]) -> EnvUnavailable:
@@ -795,13 +804,17 @@ def chrome_away(name: str, others: list[dict[str, Any]]) -> EnvUnavailable:
     must not happen by itself: the agent would act on the wrong computer, signed in as someone else's
     idea of the operator, so it is told, and only naming the other moves it."""
     text = f"this conversation works in the operator's Chrome «{name or 'Chrome'}», which is not connected to Daedalus now, so nothing was opened"
+    # The way back to the agent's own browser is named every time: told only of the operator's other
+    # Chromes, an agent asked to work "in your own browser" concluded only the operator could move it.
     if others:
-        text += f". To work in another one instead, name it with BrowserOpen(chrome=…); the operator's site approvals start over there:\n{chrome_list(others)}"
+        text += f". To work in another of theirs instead, name it with BrowserOpen(chrome=…); the operator's site approvals start over there:\n{chrome_list(others)}\nOr {OWN_BROWSER_HINT}."
+    else:
+        text += f". {OWN_BROWSER_HINT[:1].upper()}{OWN_BROWSER_HINT[1:]}."
     return EnvUnavailable(text, env=USER, reason="chrome_not_connected")
 
 
 __all__ = [
     "ANTI_BOT_WORDS", "AGENT", "CHOICES", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
-    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "anti_bot", "chrome_away", "chrome_entry", "chrome_forbids", "chrome_list", "chrome_state",
+    "BROWSER_SCHEMES", "OWN_BROWSER", "OWN_BROWSER_HINT", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "anti_bot", "chrome_away", "chrome_entry", "chrome_forbids", "chrome_list", "chrome_state",
     "live_chromes", "named_chrome", "normal_code", "not_connected", "site_granted", "site_of", "split",
 ]

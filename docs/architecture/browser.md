@@ -226,7 +226,7 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
 | `check`, `uncheck` | `ref` | clicks the box when its state differs |
 | `scroll` | `ref`; `ref` and `direction`; `direction`; or `text` | the element into view; the pane that scrolls the element (itself or its nearest ancestor that scrolls) by 80 % of its height or width; the page (or the pane that scrolls in its place) by 80 % of a screen; or the first visible text holding `text` to the middle of the viewport. `direction` is `up`, `down`, `left` or `right` |
 | `drag` | `ref`, `to_ref` | press on one, move, release on the other |
-| `upload` | `ref`, `upload_ids` | the files put with `upload.put` are set on the file input |
+| `upload` | `ref`, `upload_ids` (not for a dry run) | the files put with `upload.put` are set on the file input `ref` names: itself, the one a label stands for, the one inside it, or the only one near it; failing those, `ref` is clicked with the file chooser intercepted and the files go to the input the chooser opened for |
 
 - `element` is required: the agent's own description of what it acts on ("the Add to cart button").
   It goes into the `action` event and the audit, beside the accessible name the daemon finds.
@@ -319,8 +319,17 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
 - `upload.put` streams a file into `<state>/uploads/<group>/<upload_id>/<name>` in chunks of at most
   512 KiB: the first call without `upload_id` and at offset 0 creates it, later calls continue it at
   exactly its size. `name` is one plain file name. At most `max_upload_bytes` (100 MiB) a file.
-  `page.act {action: "upload"}` sets the files on the input (`DOM.setFileInputFiles`). The files stay
-  until the group closes: Chromium reads a chosen file when the form is sent, not when it is chosen.
+  `page.act {action: "upload"}` sets the files on the input (`DOM.setFileInputFiles`), a hidden or
+  unsized one too: it is never clicked, so it is not held to an element's size. In the operator's
+  Chrome the paths are on another computer and an extension may name no local file, so the bytes
+  cross in pieces of 512 KiB and the script puts them in the input with the `input` and `change`
+  events a choice sends. Either way the result is proved, not assumed: the input holds the files, or
+  the page's `change` event saw them (a widget that empties its field after reading it), and
+  `effects.uploaded {files, how, cleared}` says so; otherwise the action fails with `data.reason:
+  "not_attached"`. An error from before anything reached the page, and an upload that attached
+  nothing, carry `data.not_done: true`, which is how the host knows the operator's one-time approval
+  was not used. The files stay until the group closes: Chromium reads a chosen file when the form is
+  sent, not when it is chosen.
   The daemon never sees a workspace path: the host reads the file through its walls.
 - Downloads are saved by Chromium under the state directory (`Browser.setDownloadBehavior
   allowAndName`) and kept there per group until the group closes or `download.delete`.

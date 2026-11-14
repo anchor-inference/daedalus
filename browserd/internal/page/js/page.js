@@ -1248,6 +1248,30 @@
     return el ? who(el) : null;
   }
 
+  // fileTarget is the file input an upload named by r goes to: r itself, the input a label stands
+  // for, the one inside r, or the only one near it (up to its form). Sites hide the input (0×0,
+  // visibility: hidden) behind a button of their own, and an agent that named the button, or the
+  // hidden input it found, was refused both ways while the files never reached the page. "" when
+  // there is none, or more than one at the nearest level that has any: then a click on r may still
+  // open a chooser, which the daemon intercepts.
+  function fileTarget(r) {
+    const el = lookup(r);
+    if (!el) return { error: "stale", ref: r };
+    const isFile = (n) => !!n && tag(n) === "input" && inputType(n) === "file";
+    if (isFile(el)) return { ref: r, how: "itself" };
+    const label = tag(el) === "label" ? el : el.closest && el.closest("label");
+    if (label && isFile(label.control)) return { ref: ref(label.control), how: "label" };
+    const inside = el.querySelectorAll ? el.querySelectorAll("input[type=file]") : [];
+    if (inside.length === 1) return { ref: ref(inside[0]), how: "inside" };
+    if (inside.length > 1) return { ref: "", how: "" };
+    for (let n = el.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
+      const near = n.querySelectorAll("input[type=file]");
+      if (near.length === 1) return { ref: ref(near[0]), how: "near" };
+      if (near.length > 1 || tag(n) === "form" || tag(n) === "body") break;
+    }
+    return { ref: "", how: "" };
+  }
+
   // scroller is the element that scrolls el's content along the axis: el itself or an ancestor, or
   // null for the window.
   function scroller(el, horizontal) {
@@ -2322,7 +2346,7 @@
   globalThis.__browserd = {
     blocker, closerRef,
     recordInfo, recordValue, headline,
-    snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
+    snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, fileTarget, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
     route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot, inspect,
     loginFields, markSecret, locate,

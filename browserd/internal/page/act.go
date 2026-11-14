@@ -165,7 +165,35 @@ func fieldForbidden(ref, kind string) *wire.Error {
 
 // Act performs one action: it finds the element, refuses a secret field, classifies what the action
 // would do, and, unless it is a dry run, dispatches it as real input and reports what changed.
+//
+// An error from before anything reached the page carries not_done in its data, and so does an
+// upload whose files did not attach. The host gives back the operator's one-time approval for such a
+// call: an Allow was once spent on an upload refused as "no size", and the retry asked again.
 func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResult, error) {
+	sent := false
+	res, err := p.act(ctx, t, ap, &sent)
+	if err != nil && !sent {
+		return nil, notDone(err)
+	}
+	return res, err
+}
+
+// notDone marks err as the failure of an action that did nothing on the page.
+func notDone(err error) error {
+	var we *wire.Error
+	if !asWire(err, &we) {
+		we = wire.Errorf(wire.CodeInternal, "%v", err)
+	}
+	data, _ := we.Data.(map[string]any)
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["not_done"] = true
+	we.Data = data
+	return we
+}
+
+func (p *Model) act(ctx context.Context, t *browser.Tab, ap ActParams, sent *bool) (*ActResult, error) {
 	if err := p.checkAct(ap); err != nil {
 		return nil, err
 	}
@@ -213,10 +241,27 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		}
 		ref = local
 	}
+	upload := (*uploadTarget)(nil)
+	if ap.Action == "upload" && ref != "" {
+		if upload, err = p.fileTarget(ctx, t, d, ref); err != nil {
+			return nil, err
+		}
+		if upload.Ref != "" {
+			ref = upload.Ref
+			if upload.How != "itself" {
+				res.Ref = ref
+			}
+		}
+	}
 	if ref != "" && !pointed {
 		fn := "prepare"
 		if ap.Action == "scroll" && ap.Direction != "" {
 			fn = "measure" // the pane is scrolled where it is, not first brought to the middle
+		}
+		if upload != nil && upload.Ref != "" {
+			// Files are set on the input, never clicked into it: a hidden one (0×0, visibility: hidden,
+			// as sites keep theirs) takes them as well as a shown one, and is not scrolled to.
+			fn = "measure"
 		}
 		if fn == "prepare" && !ap.DryRun {
 			// A dry run is asked what an action would do; it scrolls only as far as prepare must.
@@ -227,7 +272,7 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		}
 		b := pr.Box
 		res.Box, res.Element = &b, &pr.Element
-		if ap.Action != "scroll" && ap.Action != "press" && (b.W < 1 || b.H < 1) {
+		if ap.Action != "scroll" && ap.Action != "press" && (upload == nil || upload.Ref == "") && (b.W < 1 || b.H < 1) {
 			return nil, wire.Errorf(wire.CodeForbidden, "%s has no size on the page; it cannot be acted on", ap.Ref)
 		}
 		pt := aim(b, id)
@@ -314,7 +359,11 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	}
 	p.m.Publish("action", event)
 
+	*sent = true
 	err = p.dispatch(ctx, t, ap, d, ref, pr, res, id, g)
+	if up, ok := res.Effects["uploaded"].(map[string]any); ok && upload != nil && upload.Ref != "" {
+		up["how"] = upload.How
+	}
 	if _, gone := t.Detached(); gone && err != nil {
 		// The action took the tab to a page the extension cannot drive, and the input's last reply
 		// was lost with the debugger: what was done is reported, with the tab's state in effects.
@@ -522,7 +571,8 @@ func (p *Model) checkAct(ap ActParams) error {
 			return wire.Errorf(wire.CodeInvalidParams, "drag needs to_ref")
 		}
 	case "upload":
-		if len(ap.UploadIDs) == 0 || len(ap.UploadIDs) > 20 {
+		// A dry run is asked where the files would go before the host has handed them in.
+		if (len(ap.UploadIDs) == 0 && !ap.DryRun) || len(ap.UploadIDs) > 20 {
 			return wire.Errorf(wire.CodeInvalidParams, "upload needs 1-20 upload_ids from upload.put")
 		}
 	default:
@@ -874,18 +924,27 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		}
 		return p.mouse(ctx, t, "mouseReleased", b, "left", 1, 0)
 	case "upload":
-		if !pr.Element.File {
-			return wire.Errorf(wire.CodeInvalidParams, "%s is not a file input", ref)
-		}
 		paths, err := p.uploadPaths(t.Group.ID, ap.UploadIDs)
 		if err != nil {
-			return err
+			return notDone(err)
 		}
-		obj, err := p.object(ctx, t, d, "element", ref)
-		if err != nil {
-			return err
+		if pr.Element.File {
+			obj, err := p.object(ctx, t, d, "element", ref)
+			if err != nil {
+				return notDone(err)
+			}
+			return p.attachFiles(ctx, t, d, obj, paths, "itself", res) // how it was found is said by act
 		}
-		return t.CallIn(ctx, d.session, "DOM.setFileInputFiles", map[string]any{"files": paths, "objectId": obj}, nil)
+		// Not a file input and none found near it: a button that opens the page's chooser, from an
+		// input made on the fly or kept elsewhere. The click opens it and the files go to the input
+		// the chooser belongs to, which the browser names.
+		if disabled {
+			return notDone(wire.Errorf(wire.CodeForbidden, "%s is disabled", ref))
+		}
+		if err := hit(); err != nil {
+			return notDone(err)
+		}
+		return p.uploadThroughChooser(ctx, t, d, ref, pt, paths, res, g)
 	}
 	return fmt.Errorf("unknown action %q", ap.Action)
 }

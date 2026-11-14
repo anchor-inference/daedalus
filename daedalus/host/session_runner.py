@@ -91,6 +91,7 @@ from daedalus.host import (
     action_rules,
     agent_talk,
     attached_files,
+    call_scope,
     capabilities,
     guest_turns,
     launcher_bridge,
@@ -482,8 +483,8 @@ class SessionState:
     """Monotonic time the current run (re)started driving the model: the time cap counts from here, not from
     the run's creation, so an hour waiting on the operator's answer is not an hour of run time."""
     tool_starts: dict[str, tuple[float, str]] = field(default_factory=dict)
-    grant_calls: dict[str, tuple[str, float]] = field(default_factory=dict)
-    """Calls a one-time grant may let through, by call id: the key and when the grant ends (``_settle_grant``)."""
+    grant_calls: dict[str, dict[str, float]] = field(default_factory=dict)
+    """Calls one-time grants may let through, by call id: each key and when its grant ends (``_settle_grant``)."""
     """Tool calls in flight: ``call_id -> (monotonic start, tool name)``, for the timing rows."""
     tool_group_surface: dict[str, str] = field(default_factory=dict)
     """Each group's state as this process's last ``tool_surface_advertised`` for the session said:
@@ -6541,7 +6542,13 @@ class SessionManager:
         went the same way. So a call that a grant may let through is noted when its input is complete (the
         stream's ``tool_use_stop``, before the gate), and when its result is an error the grant is written
         back with the expiry it had. A call that succeeded keeps it spent; one that never used it changes
-        nothing, since the grant is still there."""
+        nothing, since the grant is still there.
+
+        A browser action's grant is keyed by what the page is, known only inside the tool, so the browser
+        gate notes it as it spends it (:meth:`browser_gate`), and the tool takes the note back once the
+        action happened (:meth:`grant_used`): a step that went through keeps its grant spent though a
+        later step failed. An upload once spent an Allow on a call the page refused before any file left,
+        and the retry asked again; three more Allows went the same way."""
         p = event.payload
         call_id = str(p.get("tool_call_id") or "")
         if not call_id:
@@ -6553,18 +6560,29 @@ class SessionManager:
                 return
             key = approval_key(started[1], p["final_input"])
             if key in grants:
-                state.grant_calls[call_id] = (key, float(grants[key]))
+                state.grant_calls.setdefault(call_id, {})[key] = float(grants[key])
         elif event.type is EventType.TOOL_RESULT:
             noted = state.grant_calls.pop(call_id, None)
-            if noted is None or not p.get("is_error"):
+            if not noted or not p.get("is_error"):
                 return
-            key, until = noted
-            if until <= time.time() or key in (state.metadata.get("policy_grants") or {}):
+            held = state.metadata.get("policy_grants") or {}
+            back = {key: until for key, until in noted.items() if until > time.time() and key not in held}
+            if not back:
                 return
             for meta in (state.metadata, state.session.metadata):
-                meta["policy_grants"] = dict(list({**(meta.get("policy_grants") or {}), key: until}.items())[-20:])
+                meta["policy_grants"] = dict(list({**(meta.get("policy_grants") or {}), **back}.items())[-20:])
             self._spawn_background(self.sessions.update_metadata(state.session.id, state.session.metadata), f"grant-back:{state.session.id}")
-            logger.warning("session %s: the call granted by %s failed, so the grant stands for its next try", state.session.id, key)
+            logger.warning("session %s: the call granted by %s failed, so the grant stands for its next try", state.session.id, ", ".join(back))
+
+    def grant_used(self, session_id: str, key: str) -> None:
+        """The action a browser grant let through happened: the grant stays spent however the call ends."""
+        state = self._states.get(session_id)
+        scope = call_scope.current()
+        if state is None or scope is None:
+            return
+        noted = state.grant_calls.get(scope.tool_call_id)
+        if noted is not None:
+            noted.pop(key, None)
 
     def _time_tool(self, state: SessionState, event: TurnEvent) -> None:
         """One row per tool call: name, when, how long, whether it failed. The waterfall of a run is these rows."""
@@ -7762,8 +7780,13 @@ class SessionManager:
             logger.info("bypass in session %s lets %s through without asking: %s", session_id, ask.tool, decision.reason)
             return True, ""
         now = time.time()
-        grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now}
+        held = state.metadata.get("policy_grants") or {}
+        grants = {k for k, until in held.items() if float(until) > now}
         if decision.key in grants:
+            scope = call_scope.current()
+            if scope is not None and scope.tool_call_id:
+                # Given back if the call fails with its action undone (``_settle_grant``).
+                state.grant_calls.setdefault(scope.tool_call_id, {})[decision.key] = float(held[decision.key])
             self._consume_grant(state, decision.key)
             return True, ""
         pending = dict(state.metadata.get("policy_pending") or {})

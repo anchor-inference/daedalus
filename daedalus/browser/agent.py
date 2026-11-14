@@ -60,7 +60,15 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import ANTI_BOT_WORDS, CONSENT, anti_bot, chrome_forbids, chrome_list, site_granted
+from daedalus.browser.user import (
+    ANTI_BOT_WORDS,
+    CONSENT,
+    OWN_BROWSER,
+    anti_bot,
+    chrome_forbids,
+    chrome_list,
+    site_granted,
+)
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import (
     ALLOW,
@@ -97,6 +105,13 @@ NAVIGATE_TIMEOUT_MS = 30_000
 UNFINISHED = "The page is there to read, though something on it has not finished arriving. If what you came for is missing, BrowserWait(until='load'), or until='text' with the words you expect."
 """Said of a navigation that returned once the page was parsed, without its load event. It is no failure:
 a page's load also waits for every frame of its advertising, which it may never finish."""
+UPLOAD_HOW = {
+    "label": " the label stands for",
+    "inside": " inside the element named",
+    "near": " beside the element named (the page keeps it hidden)",
+    "chooser": " the file chooser opened for, by clicking the element named",
+}
+"""How the daemon found the file input from the element the agent named (``effects.uploaded.how``)."""
 UPLOAD_MAX_FILES = 10
 UPLOAD_MAX_BYTES = 100 << 20
 DOWNLOAD_MAX_BYTES = 500 << 20
@@ -627,9 +642,9 @@ def chrome_forbids_text(url: str, kind: str, name: str) -> str:
         f"{cause}. You work in the operator's Chrome «{name}» only through the Daedalus extension, so the page cannot be opened "
         "for you there. This "
         "is Chrome's own rule, not a setting or a missing permission: a retry here, another tab or BrowserNavigate fails the "
-        "same way. It is not impossible — your own browser has no such limit and opens these pages. Ask the operator to "
-        "switch this conversation to «Agent's browser» in the browser panel's header (or to open the page in their Chrome "
-        "themselves, and tell them what to do there). Once switched: BrowserOpen(url=…) opens it; at Google's sign-in call "
+        "same way. It is not impossible — your own browser has no such limit and opens these pages. Move this conversation "
+        "there yourself with BrowserOpen(chrome='agent', url=…) and tell the operator you did, since their logins are not "
+        "there (or ask them to open the page in their Chrome themselves, and tell them what to do there). In your browser: at Google's sign-in call "
         "BrowserLogin(url_or_domain='accounts.google.com', reason=…) so they sign in through the app's private form, or "
         "BrowserHandoff(reason='login', what=…) for them to sign in in the live view themselves. Should Google refuse that "
         "sign-in (\"This browser or app may not be secure\"), the page is the operator's to do in their own Chrome: give them "
@@ -696,6 +711,11 @@ class Caller:
     ask_operator: AskOperator | None = None
     """How the caller's request to work in the operator's Chrome reaches the operator, or ``None`` for
     a caller whose browser cannot move there (a command-line member has no conversation to switch)."""
+    used: Callable[[str], None] | None = None
+    """Told the key of a one-time grant whose action happened, or may have (a timeout), so the grant
+    stays spent even when the call as a whole fails later (a later step). A grant whose action is
+    known not to have happened is not told, and the host gives it back when the call fails. ``None``
+    for a caller whose gate keeps no such account."""
     operator_words: Callable[[], Sequence[str]] | None = None
     """The operator's own passages in the caller's conversation, read when a site is about to be asked
     about: a site they named by address there is theirs already. ``None`` for a caller with no
@@ -1125,6 +1145,10 @@ class BrowserAgent:
         return f"The operator's Chromes connected now:\n{chrome_list(live)}" if live else "None of the operator's Chromes is connected now."
 
     async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False, why: str | None = None, chrome: str | None = None) -> str:
+        left = ""
+        if (chrome or "").strip().casefold() == OWN_BROWSER:
+            left = await self._leave_user(caller)
+            chrome = ""
         # Opened blank and then sent to the address, so the address meets the network wall as any
         # navigation does: an ask becomes the operator's question, not a failed start.
         if url and await self.service.env_for(caller.owner) == USER_ENV:
@@ -1166,7 +1190,13 @@ class BrowserAgent:
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
         connected, name, _ = self.service.user_connection()
-        if connected and self.service.user_offered():
+        if left:
+            head = (
+                f"Moved this conversation from the operator's Chrome «{left}» to your own browser, and the app shows it there now. "
+                f"Browser {'opened' if opened['created'] else 'already open'} ({where}): not signed in as the operator, so a site may need a login here. "
+                "Going back into their Chrome is theirs to decide (BrowserAskOperatorChrome)."
+            )
+        elif connected and self.service.user_offered():
             # Said in the result because a model asked for "my browser" opened its own and reported
             # the page as the operator's: the line lets it see the difference and ask instead.
             head = (
@@ -1174,6 +1204,20 @@ class BrowserAgent:
                 "If the operator asked for their own browser, call BrowserAskOperatorChrome instead of working here."
             )
         return f"{head} Tabs:\n{await self._tabs_text(group['id'])}{unfinished}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
+
+    async def _leave_user(self, caller: Caller) -> str:
+        """``BrowserOpen(chrome='agent')``: the conversation leaves the operator's Chrome for the agent's
+        own browser, by the agent's choice; the name of the Chrome it left, ``""`` when it was not in one."""
+        session_id = caller.owner.session_id if caller.owner.kind == "session" else None
+        if not session_id:
+            return ""  # a staff member's command-line browser is always its own
+        if await self.service.env_for(caller.owner) != USER_ENV:
+            return ""
+        name = await self._chrome_name(caller)
+        if not await self.service.leave_user(session_id):
+            return ""
+        await self.service.audit(group_id(caller.owner, env=USER_ENV, chrome=await self.service.choices.chrome_of(session_id)), USER_ENV, caller.actor, "leave", {"to": "agent", "chrome": name})
+        return name or "Chrome"
 
     async def open_webgl(self, caller: Caller, mode: str, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> tuple[str, bool]:
         """``BrowserOpen(webgl=mode)``: the browser in that WebGL mode, then opened as usual.
@@ -1732,8 +1776,12 @@ class BrowserAgent:
                 raise
             if kinds:
                 typed = text or "".join(n for n, _ in uploads)
+                # An upload's question is about the files leaving for the site, not about which element
+                # of the page takes them: an agent that tried the hidden input, then the button over it,
+                # then the input again was asked three times for one Allow's worth of files.
+                keyed = "" if action == "upload" else name
                 decision = browser_sensitive(
-                    tool="BrowserAct", group=group["id"], host=host_of(url), page_origin=origin_of(url), kinds=kinds, action=action, name=name, text=typed, rules=self.service.config().rules,
+                    tool="BrowserAct", group=group["id"], host=host_of(url), page_origin=origin_of(url), kinds=kinds, action=action, name=keyed, text=typed, rules=self.service.config().rules,
                     env=str(group.get("env") or ""),
                 )
                 decided = "allowed"
@@ -1765,8 +1813,16 @@ class BrowserAgent:
             result = await self.service.call(group["id"], "page.act", base, what=f"{action} on the page", timeout=45.0)
         except BrowserError as exc:
             failure = _older(exc, step)
+            if grant and exc.details.get("not_done"):
+                # Nothing reached the page, so the operator's Allow was not used: the host gives it back
+                # when this call ends in an error (SessionManager._settle_grant), and the retry passes.
+                caller.notes.append("Nothing was done, so the operator's approval for it still stands: the same action passes once when you retry it. Do not ask them again.")
+            elif grant and caller.used is not None:
+                caller.used(grant)
             await refused(explain(failure))
             raise failure from None
+        if grant and caller.used is not None:
+            caller.used(grant)
         self._told(group, current, (result.get("effects") or {}).get("dialogs_auto"))
         done = result.get("element") if isinstance(result.get("element"), dict) else {}
         assert isinstance(done, dict)
@@ -1883,6 +1939,13 @@ class BrowserAgent:
         if effects.get("dialog"):
             dialog = effects["dialog"]
             said.append(f"The page opened a {dialog.get('type') or 'dialog'}: \"{str(dialog.get('message') or '')[:300]}\"; answer it with BrowserDialog.")
+        uploaded = effects.get("uploaded") if isinstance(effects.get("uploaded"), dict) else None
+        if uploaded:
+            files = [str(f) for f in uploaded.get("files") or []]
+            how = UPLOAD_HOW.get(str(uploaded.get("how") or ""), "")
+            said.append(f"Attached {_count(len(files), 'file')} to the file input{how}: {', '.join(files)[:500]}.")
+            if uploaded.get("cleared"):
+                said.append("The page read them and emptied its field, as upload widgets do: its own list of files (or a message of its) is what shows them now.")
         if effects.get("download"):
             download = effects["download"]
             said.append(f"It downloaded {download.get('name')} ({_size(int(download.get('size') or 0))}); BrowserDownload(name) copies it to you.")

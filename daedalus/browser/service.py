@@ -64,7 +64,9 @@ from daedalus.browser.model import (
 )
 from daedalus.browser.owners import BrowserOwners
 from daedalus.browser.user import (
+    AGENT,
     ANTI_BOT_WORDS,
+    OWN_BROWSER_HINT,
     UserChoices,
     anti_bot,
     chrome_away,
@@ -531,8 +533,9 @@ class Browsers:
 
     async def env_for(self, owner: Owner) -> str:
         """Where this owner's browser is now: the operator's Chrome when the operator switched its
-        conversation there, else the agent's own. Only the operator's switch decides it; nothing the
-        owner passes does, which is how an agent can never move itself into the operator's Chrome."""
+        conversation there, else the agent's own. Only the operator's switch puts it there; nothing the
+        owner passes does, which is how an agent can never move itself into the operator's Chrome. The
+        agent may move it back out (:meth:`leave_user`), which only lowers what it reaches."""
         if owner.kind == "session" and owner.session_id and self.user_offered() and await self.choices.env(owner.session_id) == USER:
             return USER
         return self.agent_env()
@@ -593,7 +596,7 @@ class Browsers:
             return next((c for c in live if c["chrome"] == here), {"chrome": here, "profile_name": label})
         if asked is not None:
             if bound and choice["held"] and asked["chrome"] != bound:
-                raise ChromeElsewhere(f"the operator holds this conversation from the side panel of their Chrome «{label or bound}», so it stays there", reason="held_by_panel", chrome=bound)
+                raise ChromeElsewhere(f"the operator holds this conversation from the side panel of their Chrome «{label or bound}», so it stays there; {OWN_BROWSER_HINT}", reason="held_by_panel", chrome=bound)
             return asked
         if bound:
             found = next((c for c in live if c["chrome"] == bound), None)
@@ -605,7 +608,7 @@ class Browsers:
             return live[0]
         if not live:
             raise not_connected(self.user_connection()[2])
-        raise ChromeChoice(f"several of the operator's Chromes are connected; say which with BrowserOpen(chrome=…), by name or id:\n{chrome_list(live)}", reason="chrome_choice")
+        raise ChromeChoice(f"several of the operator's Chromes are connected; say which with BrowserOpen(chrome=…), by name or id:\n{chrome_list(live)}\nOr {OWN_BROWSER_HINT}.", reason="chrome_choice")
 
     async def find_user(self, owner: Owner) -> dict[str, Any] | None:
         """The owner's open group in the operator's Chrome, whichever Chrome that is."""
@@ -625,6 +628,18 @@ class Browsers:
             with contextlib.suppress(Exception):
                 await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)
         return choice
+
+    async def leave_user(self, session_id: str) -> bool:
+        """The agent's own move of its conversation out of the operator's Chrome into its own browser,
+        ``BrowserOpen(chrome='agent')``; whether it was there. No approval: the sandbox reaches less than
+        the operator's signed-in Chrome, and the operator asked an agent for "your own browser" and was
+        told only they could switch it. Through the operator's switch path, so the app and the side panel
+        redraw on the same event and show where the conversation really is; the consent given stays."""
+        if await self.choices.env(session_id) != USER:
+            return False
+        await self.switch_conversation(session_id, AGENT, consent=False)
+        logger.info("session %s moved itself from the operator's Chrome to its own browser", session_id)
+        return True
 
     async def call_extension(self, op: str, args: dict[str, Any], chrome: str) -> None:
         """One of the side panel's operations on one Chrome, down its own relay, through the user

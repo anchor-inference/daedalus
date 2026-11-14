@@ -229,9 +229,14 @@ def _caller(context: ToolContext) -> Caller | None:
         return [text for _, text in operator_passages(list(getattr(engine, "history", None) or ()))]
 
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
+    def used(key: str) -> None:
+        settled = getattr(manager, "grant_used", None)
+        if settled is not None:
+            settled(context.session_id, key)
+
     return Caller(
         owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules,
-        ask_operator=ask_operator, operator_words=operator_words,
+        ask_operator=ask_operator, operator_words=operator_words, used=used,
     )
 
 
@@ -257,7 +262,8 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
         "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. It opens the operator's "
         "own Chrome only when they switched this conversation there; when they ask for their browser and have not, call "
         "BrowserAskOperatorChrome instead. When several of their Chromes are connected, chrome names one, by name or id, "
-        "and the conversation stays in it; chrome='?' lists them and opens nothing. Chrome lets no extension open the Chrome Web Store (its developer console "
+        "and the conversation stays in it; chrome='?' lists them and opens nothing; chrome='agent' moves the conversation out "
+        "of their Chrome into your own browser, which needs no approval (asked for \"your own browser\", do this). Chrome lets no extension open the Chrome Web Store (its developer console "
         "included) or the browser's own pages, so their Chrome never shows you those; your own browser opens the store. "
         + NETWORK_ASK + " Your browser starts without WebGL. For a 3D page (three.js, a map, a canvas game) call "
         "BrowserOpen(webgl='gpu'): the machine has a GPU and the operator allowed it, so it is not asked; the browser "
@@ -386,7 +392,8 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "submit=true presses Enter after), press (keys: 'Enter', 'Tab', 'Escape', 'Ctrl+A'), select (option by label), "
         "check, uncheck, scroll (a ref into view; direction 'up', 'down', 'left' or 'right' scrolls the page, or with a "
         "ref the pane it is in; text scrolls to the first place that says it), drag (to to_ref), upload (paths of any "
-        f"files in your workspace, of any type up to {UPLOAD_MAX_BYTES >> 20} MiB, or file handles, into a file input). element is required: say in words what you act on ('the Add to cart "
+        f"files in your workspace, of any type up to {UPLOAD_MAX_BYTES >> 20} MiB, or file handles: ref is the file input, "
+        "hidden ones included, or the button that opens the page's chooser; the result says the files arrived). element is required: say in words what you act on ('the Add to cart "
         "button'). x and y (CSS pixels of the viewport) click or hover at a point instead of a ref, where the operator "
         "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "

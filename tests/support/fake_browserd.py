@@ -85,6 +85,13 @@ class Element:
     """Its form's method, lower case, when it is in one."""
     detaches: bool = False
     """A click on it opens what the debugger cannot follow (a PDF viewer): the tab is dead after."""
+    file_input: str = ""
+    """The ref of the file input beside it that an upload named by it goes to, as the daemon finds one
+    (a page's own button over its hidden input)."""
+    opens_chooser: bool = False
+    """A click on it opens the page's file chooser, which the daemon intercepts for an upload."""
+    swallows: bool = False
+    """A file input whose files never reach the page: the daemon proves the upload and refuses it."""
 
     @property
     def secret(self) -> bool:
@@ -226,6 +233,8 @@ class FakeBrowserd:
         self.downloads: dict[str, dict[str, Any]] = {}
         self.download_bytes: dict[str, bytes] = {}
         self.uploads: dict[str, dict[str, Any]] = {}
+        self.uploaded_to: list[tuple[str, list[str]]] = []
+        """Every upload that reached a page: the file input's ref and the files' names."""
         self.pages: dict[str, Page] = {}
         """URL → the page a navigation there shows; an unknown URL is a blank page with that URL."""
         self.human_typed: set[str] = set()
@@ -1346,13 +1355,22 @@ class FakeBrowserd:
         element = tab.page.elements.get(ref) if ref else None
         if ref and element is None:
             raise _Fail(1103, f"{ref} is not on the page any more", {"ref": ref})
+        named = ref
+        if action == "upload" and element is not None and element.type != "file" and element.file_input:
+            # The daemon's fileTarget: the input beside the button named.
+            ref = element.file_input
+            element = tab.page.elements[ref]
+        retargeted = ref != named
+        to_input = action == "upload" and element is not None and element.type == "file"
+        if element is not None and action not in ("scroll", "press") and not to_input and (element.box["w"] < 1 or element.box["h"] < 1):
+            raise _Fail(1004, f"{named} has no size on the page; it cannot be acted on", {"not_done": True})
         box = dict(element.box) if element is not None else {"x": 0.0, "y": 0.0, "w": 1280.0, "h": 800.0}
         point = {"x": box["x"] + box["w"] / 2, "y": box["y"] + box["h"] / 2}
         sensitive = self._sensitive(group, tab, element, action, str(params.get("keys") or "")) if element is not None else {"kinds": [], "evidence": {}}
         described = {"role": element.role, "name": element.name, "tag": element.tag, "type": element.type, "autocomplete": element.autocomplete, "href": element.href, "form_action": element.form_action,
                      "secret": element.secret, "secret_kind": element.field_kind() if element.secret else "", "disabled": False, "checked": element.checked, "file": element.type == "file", "select": element.tag == "select"} if element is not None else {}
         if params.get("dry_run"):
-            return {"action_id": "", "ok": True, "effects": {}, "element": described, "point": point, "box": box, "sensitive": sensitive, **({"ref": ref} if pointed else {})}
+            return {"action_id": "", "ok": True, "effects": {}, "element": described, "point": point, "box": box, "sensitive": sensitive, **({"ref": ref} if pointed or retargeted else {})}
         keys = str(params.get("keys") or "")
         typing = action in ("type", "select") or (action == "press" and keys not in ("Enter", "Tab"))
         handed_over = action == "type" and bool(params.get("operator_secret"))
@@ -1381,7 +1399,16 @@ class FakeBrowserd:
             element.checked = action == "check"
         if action == "upload":
             names = [self.uploads[u]["name"] for u in params.get("upload_ids") or [] if u in self.uploads]
-            effects["uploaded"] = names
+            how = "near" if retargeted else "itself"
+            if not to_input:
+                if element is None or not element.opens_chooser:
+                    raise _Fail(-32602, f"{ref} is not a file input, none is near it, and clicking it opened no file chooser", {"not_done": True, "reason": "no_chooser"})
+                how = "chooser"
+            if element is not None and element.swallows:
+                raise _Fail(1004, f"the files did not attach: the file input holds 0 of the {len(names)} after the upload, and the page was not told of them",
+                            {"not_done": True, "reason": "not_attached", "now": []})
+            self.uploaded_to.append((ref, names))
+            effects["uploaded"] = {"files": names, "how": how, "cleared": False}
         if action == "scroll":
             wanted = str(params.get("text") or "").strip()
             if wanted:
