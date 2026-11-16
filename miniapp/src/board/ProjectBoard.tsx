@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type Project } from "../api";
 import { Skeleton, copyText } from "../ui/components";
+import { SelectionList } from "../ui/selection";
 import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { absTime, relTime } from "../format";
@@ -769,7 +770,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     catch (error) { if (error instanceof ApiError && error.status === 409) launchOperation.current = null; toast(errorText(error)); }
     finally { setBusy(false); }
   }
-  const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
   if (granting && task) return (
     <Sheet title={t(grantBundle === "execution" ? "pboard.grant.execution.title" : "pboard.grant.title")} onClose={() => navigate(taskPath)} className="pboard-sheet">
@@ -811,12 +811,18 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const depsPicker = candidates.length === 0 ? (
     <div className="sub">{t("pboard.depends.none")}</div>
   ) : (
-    <div className="pboard-deps" role="group" aria-label={t("pboard.depends")}>
-      {candidates.map((other) => (
-        <button key={other.id} type="button" className="chip select" aria-pressed={deps.includes(other.id)} onClick={() => toggleDep(other.id)} title={other.title}>
-          <span className="ptask-chip-text">{other.title}</span>
-        </button>
-      ))}
+    // A board's tasks grow past what a wall of title chips can show: each title was cut and nothing said
+    // which column a task stood in. Grouped by column and searchable, with the chosen ones listed.
+    <div className="pboard-deps">
+      <SelectionList
+        label={t("pboard.depends")}
+        items={candidates.map((other) => ({ id: other.id, label: other.title || t("goal.card.untitled"), group: other.status, keywords: other.id }))}
+        groups={["doing", "review", "todo", "blocked", "done", "dropped"].map((status) => ({ id: status, label: t(`board.col.${status}`) }))}
+        value={deps}
+        onChange={setDeps}
+        chosenLabel={t("pboard.depends.chosen")}
+        emptyChosen={t("ptask.deps.none")}
+      />
     </div>
   );
   const priorityControl = (
@@ -1024,7 +1030,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
 
   const depsValue = (
     <>
-      {deps.length > 0 ? (
+      {depsOpen ? null : deps.length > 0 ? (
         <ul className="ptask-deps">
           {deps.map((id) => {
             const other = titles[id];
@@ -1035,7 +1041,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
             </li>;
           })}
         </ul>
-      ) : !depsOpen && <span className="faint">{t("ptask.deps.none")}</span>}
+      ) : <span className="faint">{t("ptask.deps.none")}</span>}
       {depsOpen && depsPicker}
     </>
   );

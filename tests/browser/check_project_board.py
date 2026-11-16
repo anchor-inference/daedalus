@@ -187,7 +187,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator("#ptask-done_when").fill("An address outside the zones is refused politely")
     sheet.locator("#ptask-folder").select_option(project()["folders"][0]["id"])
     expect(sheet.locator(".sub.attn")).to_have_count(0)
-    sheet.locator(".pboard-deps").get_by_role("button", name="Checkout").click()
+    sheet.locator(".pboard-deps").get_by_role("option", name="Checkout").click()
     sheet.get_by_role("radio", name="P2", exact=True).click()
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)

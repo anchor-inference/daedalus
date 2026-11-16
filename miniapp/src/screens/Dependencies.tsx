@@ -4,7 +4,7 @@ import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
-import { Dropdown } from "../ui/index";
+import { SelectionSingle } from "../ui/index";
 import { Row } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
@@ -131,7 +131,9 @@ export function DependenciesTab() {
       {/* The planner's model is a setting of the request, so it is a row like every other choice; the
           actions follow on their own line. */}
       <Row title={t("deps.model")} stack data-setting="dependencies.model">
-        <Dropdown id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked || !view.models.length} onChange={setPreset} options={view.models.length ? view.models.map((model) => ({ id: model.id, label: model.label })) : [{ id: "", label: t("deps.noModels") }]} />
+        {view.models.length
+          ? <SelectionSingle id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} items={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+          : <span className="sub">{t("deps.noModels")}</span>}
       </Row>
       <div className="deps-request-actions"><div className="btnrow">
         <button className="btn primary" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}><Icon name="bolt" size={15} /> {t(planning ? "deps.planning" : "deps.prepare")}</button>

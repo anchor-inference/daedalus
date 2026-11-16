@@ -50,10 +50,12 @@ import guests from "./guestlinks.css?raw";
 import settingsDialog from "./screens/settings.css?raw";
 import explorerPanel from "./explorerpanel.css?raw";
 import launcher from "./navlauncher.css?raw";
+import selection from "./ui/selection.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
-// Terminals page, the task dialog, the agent link, the Files tab and the More launcher keep their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher;
+// Terminals page, the task dialog, the agent link, the Files tab, the More launcher and the in-place
+// selection list keep their looks beside their components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher + "\n" + selection;
 
 type Rule = { selector: string; media: string; body: string };
 

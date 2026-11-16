@@ -76,8 +76,6 @@ select.field.ptask-select { width: 100%; }
 .ptask-dep-dot.review { background: var(--state-waiting); }
 .ptask-dep-dot.done { background: var(--state-done); }
 .ptask-dep-dot.blocked { background: var(--state-failed); }
-.ptask .pboard-deps .chip.select { white-space: normal; text-align: left; }
-.ptask-chip-text { overflow-wrap: anywhere; min-width: 0; }
 .ptask-folder { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 
 .ptask-action { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--line); min-width: 0; }

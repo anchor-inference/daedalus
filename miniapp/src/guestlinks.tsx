@@ -14,7 +14,8 @@ import { LinkActions, LinkCardView, LinkSubscriptions, Summaries } from "./linkf
 import { BackgroundNote } from "./backgroundnote";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
-import { Dropdown, Segmented, Switch, useCopied } from "./ui/components";
+import { Segmented, Switch, useCopied } from "./ui/components";
+import { SelectionSingle } from "./ui/selection";
 import { Sheet } from "./ui/dialogs";
 import { confirmAsync, errorText } from "./ui";
 import "./guestlinks.css";
@@ -650,10 +651,11 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
           {door.models.length === 0 ? (
             <div className="sub guest-problem" data-guest-nomodel="">{t("guest.nomodel")}</div>
           ) : (
-            <div className="settings-row">
+            <div className="settings-row stack">
               <span className="settings-row-text"><span className="settings-row-title">{t("guest.field.model")}</span></span>
               <div className="settings-row-ctl">
-                <Dropdown value={modelId} options={door.models.map((model) => ({ id: model.id, label: model.label, hint: priceHint(model) }))} onChange={setModelId} label={t("guest.field.model")} id="guest-model" />
+                <SelectionSingle id="guest-model" label={t("guest.field.model")} value={modelId} onChange={setModelId}
+                  items={door.models.map((model) => ({ id: model.id, label: model.label, detail: model.path || model.model, facts: [priceHint(model)], keywords: model.model }))} />
               </div>
             </div>
           )}

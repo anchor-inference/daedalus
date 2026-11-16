@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type BriefSection, type JournalEntry, type Project } from "../api";
 import { Skeleton } from "../ui/components";
+import { SelectionSingle } from "../ui/selection";
 import { Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
@@ -457,11 +458,10 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
       {error && <p className="form-hint" role="alert">{modelRefused ? t("focus.enable.model.refused") : error}</p>}
       <details className="focus-enable-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
       <summary>{t("focus.enable.advanced")}</summary>
-      <label className="field" htmlFor="orch-model">{t("focus.enable.model")}</label>
-      <select id="orch-model" className="field" value={model} onChange={(e) => { setModel(e.target.value); setError(""); }}>
-        <option value="">{fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short")}</option>
-        {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-      </select>
+      <span className="field">{t("focus.enable.model")}</span>
+      <SelectionSingle id="orch-model" label={t("focus.enable.model")} value={model} onChange={(next) => { setModel(next); setError(""); }}
+        defaultOption={{ label: fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short") }}
+        items={presets.map((p) => ({ id: p.id, label: p.label }))} />
       <div className="sub form-hint">{t("focus.enable.model.hint")}</div>
       <fieldset className="autonomy-choice">
         <legend className="field">{t("focus.enable.autonomy")}</legend>

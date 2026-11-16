@@ -2591,11 +2591,14 @@ a.memory-source:hover { color: var(--fg); }
 .model-price { border-top: 1px solid var(--line); }
 .model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
 .model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-/* A session's helper models: the choice, then the list it allows, under the model line of Details. */
+/* Which models helpers may use: three labelled ways stacked, each saying what it allows, then the list. */
 .dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
-/* Its own title rather than the 64px label of the lines above, which broke it into a word a line. */
-.dt-subagent-models-title { color: var(--fg-2); min-width: 0; }
-.subagent-models { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.subagent-models { display: grid; gap: var(--space-2); min-width: 0; width: 100%; }
+.subm-modes { display: grid; gap: 2px; }
+.subm-mode { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-2); border-radius: var(--radius-sm); cursor: pointer; min-width: 0; }
+.subm-mode:hover { background: var(--surface-1); }
+.subm-mode.on { background: var(--surface-2); }
+.subm-mode input { margin: 0; flex: none; accent-color: var(--accent); }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
@@ -2615,9 +2618,6 @@ a.memory-source:hover { color: var(--fg); }
 .settings-subhead { margin: 18px 0 2px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 /* The compact dropdown (components.tsx): the value and a caret, the list floating over the page. */
 .dropdown { position: relative; display: inline-flex; min-width: 0; max-width: min(340px, 100%); }
-/* Reserve the control lane independently of how many choices its caption contains. */
-.settings-row-ctl > .dropdown[data-multi] { width: 340px; }
-.settings-row-ctl > .dropdown[data-multi] > .dropdown-btn { width: 100%; justify-content: space-between; }
 .dropdown-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(340px, 100%); min-height: var(--ctl-h-sm); padding: 4px 8px 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; }
 .dropdown-btn:hover:not(:disabled) { border-color: var(--line-strong); }
 .dropdown-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -2632,7 +2632,6 @@ a.memory-source:hover { color: var(--fg); }
 .dropdown-item .ic { flex: none; color: var(--fg-2); }
 .dropdown-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dropdown-item-text .sub { font-size: var(--fs-12); }
-.dropdown-order { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; }
 /* A phone keeps a compact control beside its words; a control that cannot be compact takes its own
    right-aligned line under them (Row's `stack`), rather than squeezing the title to a word a line. */
 /* On a phone a row holding a value to pick or type — a dropdown, a multi-select, a number, a line
@@ -3977,8 +3976,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; }
 .pboard-moves .sub { align-self: center; }
 .pboard-sheet textarea.field { resize: vertical; font: inherit; }
-.pboard-deps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
-.pboard-deps .chip { max-width: 100%; min-width: 0; }
+.pboard-deps { margin-bottom: 4px; min-width: 0; }
 .pboard-notes { max-height: 180px; overflow: auto; }
 .pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .pcard-review .chip { flex: none; }
@@ -4776,11 +4774,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .harness-agents { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 12px; }
 .harness-agent { display: grid; gap: 2px; min-width: 0; }
 .harness-offer { display: grid; gap: 6px; }
-.harness-offer-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 12px; }
-.harness-offer-model { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: var(--row-h-dense); cursor: pointer; }
-.harness-offer-model input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
-/* A thumb on a touch tablet keeps the desktop's row tokens, so the ticks are given the touch row here. */
-@media (pointer: coarse) { .harness-offer-model { min-height: var(--row-h-touch); } }
 .harness-offer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .harness-check-line.failed { color: var(--bad); }
 .harness-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

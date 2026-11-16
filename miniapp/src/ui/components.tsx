@@ -103,47 +103,12 @@ export function Dropdown<T extends string>({ value, options, onChange, label, id
   );
 }
 
-/** Several of a list, in the order they were picked: the same compact button, showing the picked
- *  ones joined (or `none`), and a list that stays open while choices are ticked on and off. A row of
- *  toggle chips did this before, and with no choices to show it left the row with no control at all. */
-export function MultiDropdown<T extends string>({ values, options, onChange, label, none, id, disabled, className = "" }: {
-  values: T[];
-  options: DropdownOption<T>[];
-  onChange: (next: T[]) => void;
-  label: string;
-  none: string;
-  id?: string;
-  disabled?: boolean;
-  className?: string;
-}) {
-  const shown = values.length ? values.map((v) => options.find((o) => o.id === v)?.label ?? v).join(", ") : none;
-  return (
-    <PickList
-      options={options}
-      chosen={(o) => values.includes(o.id)}
-      order={(o) => (values.includes(o.id) ? values.indexOf(o.id) + 1 : 0)}
-      shown={shown}
-      value={values.join(",")}
-      onPick={(o) => onChange(values.includes(o.id) ? values.filter((v) => v !== o.id) : [...values, o.id])}
-      keepOpen
-      multi
-      label={label}
-      id={id}
-      disabled={disabled || options.length === 0}
-      className={className}
-    />
-  );
-}
-
-function PickList<T extends string>({ options, chosen, order, shown, value, onPick, keepOpen, multi, label, id, invalid, disabled, className = "" }: {
+function PickList<T extends string>({ options, chosen, shown, value, onPick, label, id, invalid, disabled, className = "" }: {
   options: DropdownOption<T>[];
   chosen: (o: DropdownOption<T>) => boolean;
-  order?: (o: DropdownOption<T>) => number;
   shown: string;
   value: string;
   onPick: (o: DropdownOption<T>) => void;
-  keepOpen?: boolean;
-  multi?: boolean;
   label: string;
   id?: string;
   invalid?: boolean;
@@ -193,10 +158,8 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
   }
   function pick(option: DropdownOption<T>) {
     if (option.disabled) return;
-    if (!keepOpen) {
-      setOpen(false);
-      button.current?.focus();
-    }
+    setOpen(false);
+    button.current?.focus();
     onPick(option);
   }
   function step(from: number, by: number): number {
@@ -229,7 +192,7 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
     }
   }
   return (
-    <span ref={wrap} className={`dropdown ${className}`.trim()} data-multi={multi ? "" : undefined}>
+    <span ref={wrap} className={`dropdown ${className}`.trim()}>
       <button
         ref={button}
         id={id}
@@ -251,10 +214,9 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
         <Icon name="chevron" size={14} />
       </button>
       {open && (
-        <span ref={list} id={listId} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} className={`dropdown-list ${up ? "up" : ""}`}>
+        <span ref={list} id={listId} role="listbox" aria-label={label} className={`dropdown-list ${up ? "up" : ""}`}>
           {options.map((option, i) => {
             const on = chosen(option);
-            const n = order?.(option) ?? 0;
             return (
               <span
                 key={option.id}
@@ -272,8 +234,7 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
                   <span>{option.label}</span>
                   {option.hint && <span className="sub">{option.hint}</span>}
                 </span>
-                {/* Several picked: the place each has in the order, which is the order they are tried in. */}
-                {on && (multi ? <span className="dropdown-order">{n}</span> : <Icon name="check" size={14} />)}
+                {on && <Icon name="check" size={14} />}
               </span>
             );
           })}

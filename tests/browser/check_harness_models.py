@@ -73,7 +73,7 @@ def route(page: Page, harnesses: HarnessesStub, team: TeamStub) -> None:
 
 
 def ticked(page: Page) -> list[str]:
-    return page.eval_on_selector_all(".harness-offer-model", "els => els.filter(e => e.querySelector('input').checked).map(e => e.dataset.model)")
+    return page.eval_on_selector_all(".harness-offer .sel-list [role=option]", "els => els.filter(e => e.getAttribute('aria-selected') === 'true').map(e => e.dataset.id)")
 
 
 def model_select(page: Page) -> dict[str, list[str]]:
@@ -110,15 +110,15 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page.wait_for_selector(".harness-table .harness-row", timeout=15000)
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
     offer = page.locator(".harness-row-details .harness-offer")
-    expect(offer.locator(".harness-offer-model")).to_have_count(len(ALL))
-    got = page.eval_on_selector_all(".harness-row-details .harness-offer-model", "els => els.map(e => e.dataset.model)")
+    expect(offer.locator(".sel-list [role=option]")).to_have_count(len(ALL))
+    got = page.eval_on_selector_all(".harness-row-details .harness-offer .sel-list [role=option]", "els => els.map(e => e.dataset.id)")
     check.that(got == ALL, f"{lang}: the checklist lists {got}")
     check.that(ticked(page) == [], f"{lang}: with no choice the checklist starts ticked at {ticked(page)}")
     expect(offer.locator("[data-offer='save']")).to_be_disabled()
     expect(offer.locator("[data-offer='all']")).to_be_disabled()
 
     for model in PICKED:
-        offer.locator(f".harness-offer-model[data-model='{model}']").click()
+        offer.locator(f".sel-list [role=option][data-id='{model}']").click()
     offer.locator("[data-offer='save']").click()
     expect(page.locator(".harness-row[data-harness='claude'] .harness-models")).to_have_attribute("data-chosen", "true", timeout=5000)
     expect(page.locator(".harness-row[data-harness='claude'] .harness-models-of")).to_contain_text(words["of"])
@@ -155,12 +155,12 @@ def touch(browser, lang: str, check: Check, viewport: dict[str, int], name: str)
     check.that(bool(page.evaluate("matchMedia('(pointer: coarse)').matches")), f"{lang} {name}: the page is not given a coarse pointer")
     wide = page.locator(".harness-table").count() > 0
     page.locator(".harness-row[data-harness='claude'] .harness-name" if wide else ".harness-card[data-harness='claude'] .harness-card-more").tap()
-    rows = page.locator(".harness-offer-model")
+    rows = page.locator(".harness-offer .sel-list [role=option]")
     expect(rows).to_have_count(len(ALL), timeout=5000)
-    heights = page.eval_on_selector_all(".harness-offer-model", "els => els.map(e => e.getBoundingClientRect().height)")
+    heights = page.eval_on_selector_all(".harness-offer .sel-list [role=option]", "els => els.map(e => e.getBoundingClientRect().height)")
     check.that(min(heights) >= 44, f"{lang} {name}: the ticks are {min(heights)} px high")
     for model in PICKED:
-        page.locator(f".harness-offer-model[data-model='{model}']").tap()
+        page.locator(f".harness-offer .sel-list [role=option][data-id='{model}']").tap()
     save = page.locator("[data-offer='save']")
     box = save.bounding_box()
     check.that(bool(box and box["height"] >= 32), f"{lang} {name}: Save is {box} high")

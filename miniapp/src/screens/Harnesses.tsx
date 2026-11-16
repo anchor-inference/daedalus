@@ -17,7 +17,7 @@ import { relTime, relTimeLong } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle, useMedia } from "../ui/index";
+import { PageHeader, SelectionList, screenTitle, useMedia } from "../ui/index";
 import { invalidate, prime, useQuery } from "../store";
 import { HarnessBadge } from "../team/parts";
 import type { Harness } from "../team/team";
@@ -241,7 +241,6 @@ function OfferedModels({ row, onOffer }: { row: HarnessRow; onOffer: (models: st
   if (all.length === 0) return <div className="sub">{t("harness.models.offer.none")}</div>;
   const sending = offeredToSend(draft, all);
   const changed = JSON.stringify(sending) !== JSON.stringify(row.models_chosen ? offeredToSend(initial, all) : null);
-  const toggle = (model: string) => setDraft((d) => (d.includes(model) ? d.filter((m) => m !== model) : [...d, model]));
   async function save(models: string[] | null) {
     setBusy(true);
     try {
@@ -253,14 +252,17 @@ function OfferedModels({ row, onOffer }: { row: HarnessRow; onOffer: (models: st
   return (
     <div className="harness-offer" data-harness={row.harness}>
       <div className="sub">{t("harness.models.offer.hint")}</div>
-      <div className="harness-offer-list" role="group" aria-label={t("harness.models.offer")}>
-        {all.map((m) => (
-          <label key={m} className="harness-offer-model" data-model={m}>
-            <input type="checkbox" checked={draft.includes(m)} disabled={busy} onChange={() => toggle(m)} />
-            <span className="mono truncate">{m}</span>
-          </label>
-        ))}
-      </div>
+      {/* A CLI lists its models as "family/model" ids, often dozens of them; they are grouped by the
+          family before the slash and searchable, where a wall of ticks cut each id short. */}
+      <SelectionList
+        label={t("harness.models.offer")}
+        items={all.map((m) => ({ id: m, label: m.includes("/") ? m.slice(m.indexOf("/") + 1) : m, group: m.includes("/") ? m.slice(0, m.indexOf("/")) : undefined, keywords: m }))}
+        value={draft}
+        onChange={setDraft}
+        disabled={busy}
+        chosenLabel={t("harness.models.offered")}
+        emptyChosen={t("harness.models.offered.all")}
+      />
       <div className="harness-offer-actions">
         <button
           className="btn small"

@@ -2058,10 +2058,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # a change answers the choice it was given. check_model_settings.py draws the others.
         chosen = body if method.upper() == "PUT" and isinstance(body, dict) else {}
         mode = chosen.get("mode") or "all"
-        options = [{"id": "default", "label": "Test model"}, {"id": "fast", "label": "Fast model"}]
-        allowed = [o["id"] for o in options] if mode == "all" else ["default"] if mode == "session" else [p for p in chosen.get("presets") or [] if p in ("default", "fast")]
+        # The options are the models the pictures' settings describe, so each row has its provider, window and price.
+        options = [{"id": "deepseek-flash", "label": "DeepSeek Flash"}, {"id": "claude-opus-5", "label": "Claude Opus 5"}, {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna"}, {"id": "qwen-local", "label": "Local Qwen3.8"}]
+        ids = [o["id"] for o in options]
+        allowed = ids if mode == "all" else ["deepseek-flash"] if mode == "session" else [p for p in chosen.get("presets") or [] if p in ids]
         return 200, "application/json", json.dumps({"mode": mode, "presets": list(chosen.get("presets") or []), "inherited": not chosen.get("mode"), "from_parent": False, "allowed": allowed,
-                                                    "default": {"mode": "all", "presets": []}, "session_preset": "default", "options": options})
+                                                    "default": {"mode": "all", "presets": []}, "session_preset": "deepseek-flash", "options": options})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "tool-groups":
         # Every session's Details lists its tool groups; a change or a "Load now" answers the same list.
         return 200, "application/json", json.dumps(session_tool_groups())

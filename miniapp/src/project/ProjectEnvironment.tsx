@@ -7,6 +7,7 @@ import { api } from "../api";
 import { t } from "../i18n";
 import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
+import { SelectionList } from "../ui/index";
 
 type Repo = { url: string; branch: string; folder: string };
 type Seed = { path: string; content: string };
@@ -37,10 +38,6 @@ export function environmentStatus(view: EnvironmentView | undefined): string {
   if (!view || !view.configured) return "";
   if (!view.needs_preparation) return t("env.state.nothing");
   return t(`env.state.${view.state}`) + (view.stale ? ` · ${t("env.stale")}` : "");
-}
-
-function toggle(list: string[], name: string, on: boolean): string[] {
-  return on ? [...new Set([...list, name])].sort() : list.filter((item) => item !== name);
 }
 
 export function ProjectEnvironment({ projectId, toast }: { projectId: string; toast: (message: string) => void }) {
@@ -136,17 +133,13 @@ function EnvironmentContent({ projectId, toast }: { projectId: string; toast: (m
     <label className="field">{t("env.mcp")}</label>
     <div className="sub">{t("env.subset.hint")}</div>
     {data.choices.mcp.length === 0 && <div className="sub">{t("env.mcp.none")}</div>}
-    {data.choices.mcp.map((name) => <label className="toggle-row" key={name}>
-      <input type="checkbox" checked={draft.mcp.includes(name)} onChange={(event) => set({ mcp: toggle(draft.mcp, name, event.target.checked) })} />
-      <span className="mono">{name}</span>
-    </label>)}
+    {data.choices.mcp.length > 0 && <SelectionList label={t("env.mcp")} items={data.choices.mcp.map((name) => ({ id: name, label: name }))}
+      value={draft.mcp} onChange={(mcp) => set({ mcp: [...mcp].sort() })} emptyChosen={t("env.subset.all")} />}
 
     <label className="field">{t("env.skills")}</label>
     {data.choices.skills.length === 0 && <div className="sub">{t("env.skills.none")}</div>}
-    {data.choices.skills.map((name) => <label className="toggle-row" key={name}>
-      <input type="checkbox" checked={draft.skills.includes(name)} onChange={(event) => set({ skills: toggle(draft.skills, name, event.target.checked) })} />
-      <span className="mono">{name}</span>
-    </label>)}
+    {data.choices.skills.length > 0 && <SelectionList label={t("env.skills")} items={data.choices.skills.map((name) => ({ id: name, label: name }))}
+      value={draft.skills} onChange={(skills) => set({ skills: [...skills].sort() })} emptyChosen={t("env.subset.all")} />}
 
     <label className="field" htmlFor={`env-goal-${projectId}`}>{t("env.goal")}</label>
     <textarea id={`env-goal-${projectId}`} className="field" rows={3} value={draft.goal} placeholder={t("env.goal.placeholder")}

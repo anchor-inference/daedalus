@@ -2,8 +2,8 @@
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
-- the picker (a compact dropdown in the row's control lane) offers the session's own model first, then
-  every preset under the model picker's label;
+- the picker (the chosen model as a row, its list opened in place by Change) offers the session's own
+  model first, then every preset under the model picker's label;
 - a choice is saved through the settings save with its revision, and after a reload the picker shows
   the value the host holds;
 - a preset deleted after it was chosen is shown as missing, not as whichever option comes first, and
@@ -31,7 +31,7 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 OWN = {"en": "The session's own model", "ru": "Модель самой сессии"}
-MISSING = {"en": "missing", "ru": "нет такой"}
+MISSING = {"en": "No longer configured", "ru": "Больше не настроено"}
 
 
 class Host:
@@ -96,8 +96,8 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     host = Host()
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
     picker = page.locator("#compaction-preset")
-    picker.click()
-    labels = page.locator(".dropdown-list [role=option] .dropdown-item-text > span:first-child").all_inner_texts()
+    picker.locator(".sel-current button").click()
+    labels = picker.locator(".sel-list [role=option] .sel-name").all_inner_texts()
     print(f"[{lang}] options: {labels}")
     if labels[:1] != [OWN[lang]] or labels[1:] != [p["label"] for p in SETTINGS["presets"].values()]:
         say(f"the options read {labels}")
@@ -108,7 +108,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if "flash" not in hint.lower():
         say(f"the hint reads {hint!r}")
 
-    page.locator(".dropdown-list [role=option][data-value='deepseek-flash']").click()
+    picker.locator(".sel-list [role=option][data-id='deepseek-flash']").click()
     page.wait_for_timeout(800)
     last = host.puts[-1] if host.puts else {}
     print(f"[{lang}] saved: {last.get('compaction')} at {last.get('base_revision')}")
@@ -132,9 +132,9 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     host = Host("retired-model")
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
     picker = page.locator("#compaction-preset")
-    chosen = picker.inner_text()
-    print(f"[{lang}] missing: {chosen!r}, invalid {picker.get_attribute('aria-invalid')}")
-    if picker.get_attribute("data-value") != "retired-model" or MISSING[lang] not in chosen or picker.get_attribute("aria-invalid") != "true":
+    chosen = picker.locator(".sel-current").inner_text()
+    print(f"[{lang}] missing: {chosen!r}, marked {picker.get_attribute('data-missing')!r}")
+    if picker.get_attribute("data-value") != "retired-model" or MISSING[lang] not in chosen or picker.get_attribute("data-missing") != "":
         say(f"a deleted preset reads {chosen!r} ({picker.get_attribute('data-value')!r})")
     words = page.locator("#compaction-words")
     words.fill("1000")
@@ -152,10 +152,10 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:
         say(f"Settings → Limits scrolls sideways on a phone: {width}")
-    # The picker's list floats over the page; on a phone it must stay inside the screen.
+    # The picker's list opens in place; on a phone it must stay inside the screen.
     page.locator("#compaction-preset").scroll_into_view_if_needed()
-    page.locator("#compaction-preset").tap()
-    box = page.locator(".dropdown-list").bounding_box() or {"x": -1, "width": 0}
+    page.locator("#compaction-preset .sel-current button").tap()
+    box = page.locator("#compaction-preset .sel-list").bounding_box() or {"x": -1, "width": 0}
     print(f"[{lang}] phone list: {box}")
     if box["x"] < 0 or box["x"] + box["width"] > 390.5:
         say(f"the picker's list leaves the phone's screen: {box}")
