@@ -28,6 +28,7 @@ import { placeOf, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
 import { openSchedules } from "../schedules/host";
+import { useScheduleActions } from "../schedules/actions";
 import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
@@ -643,19 +644,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     };
   }, [provider, detail?.usage.c]);
 
+  // The card's run and delete are the schedule commands the Schedules dialog sends, revision and
+  // command identity included. The card used to call `/api/schedules/{id}/run` and `DELETE
+  // /api/schedules/{id}`, routes that left when schedules became revisioned recurring work; every press
+  // answered 404 and the toast read "Not Found" for a schedule that plainly existed.
+  const scheduleCommands = useScheduleActions(toast, undefined);
   async function scheduleAction(sc: Schedule, action: "run" | "delete") {
-    try {
-      if (action === "delete") {
-        if (!(await confirmAsync(t("session.sched.delete.title", { name: sc.name })))) return;
-        await api.delete(`/api/schedules/${sc.id}`);
-      } else {
-        const r = await api.post<{ session_id: string }>(`/api/schedules/${sc.id}/run`);
-        if (r.session_id !== id) onOpen?.(r.session_id);
-      }
-      loadSchedules();
-    } catch (e) {
-      toast(errorText(e));
+    if (action === "delete") {
+      if (!(await confirmAsync(t("session.sched.delete.title", { name: sc.name })))) return;
+      await scheduleCommands.remove(sc);
+    } else {
+      await scheduleCommands.runNow(sc);
     }
+    loadSchedules();
   }
 
   const status = (detail?.status ?? "idle") as Status;

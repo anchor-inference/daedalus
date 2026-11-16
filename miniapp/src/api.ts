@@ -129,10 +129,41 @@ function authHeaders(): Record<string, string> {
 
 export class ApiError extends Error {
   /** `data` is the error body as the host sent it: some refusals carry fields beside `detail`, such as
-   *  the `code`, `running` and `cap` of a terminal refused at the machine's cap. */
-  constructor(public status: number, message: string, public data: Record<string, unknown> = {}) {
+   *  the `code`, `running` and `cap` of a terminal refused at the machine's cap. `bare` says the host
+   *  gave no reason of its own, only the status: the message is then HTTP's stock phrase ("Not
+   *  Found"), which is no sentence for the operator, and `errorText` says it in their language. */
+  constructor(public status: number, message: string, public data: Record<string, unknown> = {}, public bare = false) {
     super(message);
   }
+}
+
+// What a server says when it has nothing to say: Starlette's default detail is the status's phrase,
+// and a request to a path no route serves comes back as exactly `{"detail": "Not Found"}`. Shown as it
+// stands, that was the whole toast when the schedule card called routes that had moved.
+const STOCK_PHRASES: Record<number, string[]> = {
+  400: ["Bad Request"], 401: ["Unauthorized"], 403: ["Forbidden"], 404: ["Not Found"], 405: ["Method Not Allowed"],
+  409: ["Conflict"], 410: ["Gone"], 413: ["Payload Too Large", "Request Entity Too Large", "Content Too Large"],
+  422: ["Unprocessable Entity", "Unprocessable Content"], 429: ["Too Many Requests"],
+  500: ["Internal Server Error"], 502: ["Bad Gateway"], 503: ["Service Unavailable"], 504: ["Gateway Timeout"],
+};
+
+/** Whether ``said`` is only the status's own phrase, or nothing. */
+function stockReason(status: number, said: string): boolean {
+  const phrase = said.trim().toLowerCase();
+  return !phrase || (STOCK_PHRASES[status] ?? []).some((stock) => stock.toLowerCase() === phrase);
+}
+
+/** The host's reason, wherever the error body keeps it: a string `detail`, FastAPI's list of field
+ *  errors, or a refusal object such as a revision conflict's `{reason, current_revision}`, whose text
+ *  used to be dropped for "Request failed (409)". */
+function reasonOf(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((d: any) => (d && d.msg ? `${(d.loc ?? []).slice(-1)[0] ?? ""}: ${d.msg}` : JSON.stringify(d))).join("; ");
+  if (detail && typeof detail === "object") {
+    const said = (detail as Record<string, unknown>).reason ?? (detail as Record<string, unknown>).message ?? (detail as Record<string, unknown>).detail;
+    if (typeof said === "string") return said;
+  }
+  return "";
 }
 
 async function archiveError(response: Response): Promise<ApiError> {
@@ -143,9 +174,11 @@ async function archiveError(response: Response): Promise<ApiError> {
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
     detail = parsed?.detail ?? detail;
   } catch { /* a proxy may return plain text */ }
-  const message = typeof detail === "string" && detail ? detail : response.status >= 500
+  const said = reasonOf(detail);
+  const bare = stockReason(response.status, said);
+  const message = said && !bare ? said : response.status >= 500
     ? `Server unavailable (${response.status})` : `Request failed (${response.status})`;
-  return new ApiError(response.status, message, data);
+  return new ApiError(response.status, message, data, bare);
 }
 
 /** A request with the caller's credential, in whichever mode the app runs. An `<img src>` carries no
@@ -183,9 +216,10 @@ async function call<T>(method: string, path: string, body?: unknown, responseTyp
     } catch {
       /* ignore */
     }
-    if (Array.isArray(detail)) detail = detail.map((d: any) => (d && d.msg ? `${(d.loc ?? []).slice(-1)[0] ?? ""}: ${d.msg}` : JSON.stringify(d))).join("; ");
-    const text = typeof detail === "string" && detail ? detail : response.status >= 500 ? `Server unavailable (${response.status})` : `Request failed (${response.status})`;
-    throw new ApiError(response.status, text, data);
+    const said = reasonOf(detail);
+    const bare = stockReason(response.status, said);
+    const text = said && !bare ? said : response.status >= 500 ? `Server unavailable (${response.status})` : `Request failed (${response.status})`;
+    throw new ApiError(response.status, text, data, bare);
   }
   return (responseType === "text" ? await response.text() : await response.json()) as T;
 }
@@ -211,8 +245,9 @@ function upload<T>(path: string, form: FormData, onProgress?: (fraction: number)
         /* a proxy's HTML page */
       }
       if (xhr.status >= 200 && xhr.status < 300) return resolve(parsed as T);
-      const detail = typeof parsed?.detail === "string" && parsed.detail ? parsed.detail : `Request failed (${xhr.status})`;
-      reject(new ApiError(xhr.status, detail, parsed && typeof parsed === "object" ? parsed : {}));
+      const said = reasonOf(parsed?.detail);
+      const bare = stockReason(xhr.status, said);
+      reject(new ApiError(xhr.status, said && !bare ? said : `Request failed (${xhr.status})`, parsed && typeof parsed === "object" ? parsed : {}, bare));
     };
     xhr.send(form);
   });

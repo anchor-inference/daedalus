@@ -45,7 +45,9 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
     return history;
   };
 
-  async function run<T>(key: string, work: () => Promise<T>): Promise<T | undefined> {
+  /** ``failed`` names the command for the toast when it fails. A 404 on a schedule means it is gone,
+   *  and the toast says so rather than "Not Found". */
+  async function run<T>(key: string, failed: string, work: () => Promise<T>, gone: string | null = t("sched.error.missing")): Promise<T | undefined> {
     setBusy(key);
     try {
       const result = await work();
@@ -53,7 +55,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
     } catch (e) {
       // Changed elsewhere first: the next press is a new command on what the host now holds.
       if (e instanceof ApiError && e.status === 409) delete pending.current[key];
-      toast(errorText(e));
+      toast(e instanceof ApiError && e.status === 404 && gone ? gone : errorText(e, failed));
       return undefined;
     } finally {
       setBusy(null);
@@ -73,7 +75,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
     approvalDays: days,
     requireApproval: !!proposals?.require_approval,
 
-    runNow: (s: ScheduleRow) => run(`${s.id}:run`, async () => {
+    runNow: (s: ScheduleRow) => run(`${s.id}:run`, t("sched.error.run"), async () => {
       const history = await current(s);
       const body = { expected_schedule_revision: revisionOf(s), expected_collection_revision: history.collection_revision! };
       await api.post(`/api/recurring/${encodeURIComponent(s.id)}/run`, { ...body, client_operation_id: operationId(`${s.id}:run`, body) });
@@ -81,7 +83,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
     }),
 
     /** Pause, or resume and approve again: a resumed schedule that kept no approval would sit there and never fire. */
-    setEnabled: (s: ScheduleRow, enabled: boolean) => run(`${s.id}:enabled`, async () => {
+    setEnabled: (s: ScheduleRow, enabled: boolean) => run(`${s.id}:enabled`, t(enabled ? "sched.error.resume" : "sched.error.pause"), async () => {
       const history = await current(s);
       const body = { enabled, expected_schedule_revision: revisionOf(s), expected_collection_revision: history.collection_revision! };
       const changed = await api.patch<{ schedule_revision: number; entity_revision: number }>(`/api/recurring/${encodeURIComponent(s.id)}`, { ...body, client_operation_id: operationId(`${s.id}:enabled`, body) });
@@ -89,12 +91,12 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       if (enabled) await approveRevision(s, changed.schedule_revision, changed.entity_revision, `${s.id}:enabled`);
     }),
 
-    approve: (s: ScheduleRow) => run(`${s.id}:approve`, async () => {
+    approve: (s: ScheduleRow) => run(`${s.id}:approve`, t("sched.error.approve"), async () => {
       const history = await current(s);
       await approveRevision(s, history.schedule_revision, history.collection_revision!, s.id);
     }),
 
-    save: (s: ScheduleRow, edit: ScheduleEdit) => run(`${s.id}:save`, async () => {
+    save: (s: ScheduleRow, edit: ScheduleEdit) => run(`${s.id}:save`, t("sched.error.save"), async () => {
       const history = await current(s);
       const body = { ...edit, expected_schedule_revision: revisionOf(s), expected_collection_revision: history.collection_revision! };
       const changed = await api.patch<{ schedule_revision: number; entity_revision: number }>(`/api/recurring/${encodeURIComponent(s.id)}`, { ...body, client_operation_id: operationId(`${s.id}:save`, body) });
@@ -103,7 +105,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       return true;
     }),
 
-    remove: (s: ScheduleRow) => run(`${s.id}:remove`, async () => {
+    remove: (s: ScheduleRow) => run(`${s.id}:remove`, t("sched.error.remove"), async () => {
       const history = await current(s);
       const body = { expected_schedule_revision: revisionOf(s), expected_collection_revision: history.collection_revision! };
       await api.post(`/api/recurring/${encodeURIComponent(s.id)}/remove`, { ...body, client_operation_id: operationId(`${s.id}:remove`, body) });
@@ -111,7 +113,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       return true;
     }),
 
-    decide: (p: ScheduleProposal, action: "accept" | "withdraw" | "review-files") => run(`${p.id}:${action}`, async () => {
+    decide: (p: ScheduleProposal, action: "accept" | "withdraw" | "review-files") => run(`${p.id}:${action}`, t("sched.error.decide"), async () => {
       const revision = proposals?.collection_revisions[proposalScope(p)];
       if (!Number.isInteger(revision)) throw new Error(t("sched.approval.refresh"));
       const body = { request_digest: p.request_digest, expected_proposal_revision: p.proposal_revision, expected_collection_revision: revision!,
@@ -120,7 +122,7 @@ export function useScheduleActions(toast: (text: string) => void, proposals: Pro
       const answer = await api.post<{ id?: string }>(`/api/recurring/proposals/${encodeURIComponent(p.id)}/${action}`, { ...body, client_operation_id: operationId(key, body) });
       delete pending.current[key];
       return answer;
-    }),
+    }, null),
   };
 }
 
