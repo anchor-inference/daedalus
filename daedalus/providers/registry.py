@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -23,6 +23,7 @@ from daedalus.config import (
     reasoning_replay_for,
 )
 from daedalus.host.setting_refs import provider_key
+from daedalus.providers.accounts import AccountRouter
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import windows_from_catalog
 from daedalus.providers.image_fit import FittedImages
@@ -42,6 +43,9 @@ from daedalus.providers.pricing import (
     with_cache_write,
 )
 from daedalus.providers.tls import shared_context
+
+if TYPE_CHECKING:
+    from daedalus.stores.subscription_accounts import SubscriptionAccounts
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +83,15 @@ class ProviderRegistry:
         image_loader: ImageLoader | None = None,
         admission: InferenceAdmission | None = None,
         fitted_images: FittedImages | None = None,
+        accounts: SubscriptionAccounts | None = None,
     ) -> None:
         self._settings = settings
         self._fitted_images = fitted_images
         self._usage_sink = usage_sink
         self._image_loader = image_loader
         self._admission = admission
+        self.accounts = AccountRouter(accounts, self._account_for) if accounts is not None else None
+        """Which subscription account each call goes out on; None where accounts are not kept (a bare registry in a test)."""
         self._providers: dict[str, OpenAICompatibleProvider] = {}
         self._retired: list[OpenAICompatibleProvider] = []
         self._users: dict[OpenAICompatibleProvider, int] = {}
@@ -106,6 +113,16 @@ class ProviderRegistry:
         if config is None:
             return False
         return any(p.provider == provider_id and p.model == model and p.images for p in config.presets.values())
+
+    def _account_for(self, provider_id: str, model: str) -> str:
+        """The account the operator chose for this model, "" for the upstream's default.
+
+        One choice per endpoint and model, as for the OpenRouter route: the adapter sees only those two, so the
+        settings write it to every preset of the pair."""
+        config = getattr(self, "_config", None)
+        if config is None:
+            return ""
+        return next((p.account for p in config.presets.values() if p.provider == provider_id and p.model == model and p.account), "")
 
     def _context_refusal(self, provider_id: str, model: str, window: int) -> None:
         # Looked up on every call rather than bound at construction: the service that listens is
@@ -153,6 +170,7 @@ class ProviderRegistry:
                 admission=self._admission,
                 context_refusal=self._context_refusal,
                 fitted_images=self._fitted_images,
+                accounts=self.accounts,
             )
         self._config = config
         self._retired.extend(p for pid, p in self._providers.items() if pid not in fresh)

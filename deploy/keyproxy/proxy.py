@@ -51,8 +51,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import accounts
 import clients
 import httpx
+from accounts import ACCOUNT_HEADER, AccountRefused, account_id
 from aiohttp import web
 from claude import (
     CLAUDE_API,
@@ -141,7 +143,7 @@ BUDGET_CACHE_SECONDS = 30.0
 BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",), ("endpoints",), ("endpoints", "zdr"))
 """Reading a balance, the model list or a model's providers spends nothing; only completions are refused over budget.
 Matched on path segments (a leading ``v1`` ignored), so a ``…/deepseek/v1`` base_url behaves the same."""
-HOP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "authorization", "x-api-key", "api-key", "x-goog-api-key", "cookie", "proxy-authorization"}
+HOP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "authorization", "x-api-key", "api-key", "x-goog-api-key", "cookie", "proxy-authorization", ACCOUNT_HEADER}
 DROP_RESPONSE_HEADERS = {"content-length", "transfer-encoding", "connection", "content-encoding"}
 """The body is streamed decoded, so the upstream's framing and encoding headers no longer describe it."""
 _spend_cache: tuple[float, float] = (0.0, 0.0)
@@ -158,10 +160,38 @@ OPENCODE_AUTH = OpencodeAuth(lookup=lambda var: settings().get(var, ""))
 CLAUDE_AUTH = ClaudeAuth(Path(os.environ.get("KEYPROXY_CLAUDE_AUTH", os.path.expanduser("~/.claude/.credentials.json"))))
 """The operator's subscriptions: served as ``/codex/v1``, ``/grok/v1`` and ``/claude/v1`` with the CLIs' own logins."""
 _usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+"""Per ``<upstream>@<account>``: one account's windows say nothing about another's."""
 USAGE_CACHE_SECONDS = 60.0
-_claude_usage_retry_at = 0.0
-_claude_header_snapshot: dict[str, Any] = {}
-"""The 5h and weekly windows read off the latest Claude model reply, with when they were read."""
+_claude_usage_retry_at: dict[str, float] = {}
+"""Per account, when the usage endpoint may be asked again after it refused with a 429."""
+_claude_header_snapshots: dict[str, dict[str, Any]] = {}
+"""Per account, the 5h and weekly windows read off its latest Claude model reply, with when they were read."""
+_account_auths: dict[tuple[str, Path], Any] = {}
+"""The login object of each account other than the default, kept so its refresh lock is shared by every call."""
+
+
+def login_auth(upstream: str, account: str = "") -> Any:
+    """The login that signs ``upstream`` for ``account`` ("" is the default, the CLI's own).
+
+    Derived from the module's default login at call time, never captured, so whatever points that
+    default somewhere else (a test, the native launcher's paths) points the accounts there as well."""
+    default = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH}[upstream]
+    if not account:
+        return default
+    path = accounts.login_path(default.path, account)
+    found = _account_auths.get((upstream, path))
+    if found is None:
+        found = _account_auths[(upstream, path)] = type(default)(path)
+    return found
+
+
+def request_account(request: web.Request) -> str:
+    """The account the bot named for this request, "" for the default; raises AccountRefused."""
+    return account_id(request.headers.get(ACCOUNT_HEADER, ""))
+
+
+def account_refusal(exc: AccountRefused) -> web.Response:
+    return web.json_response({"error": {"message": str(exc), "type": "invalid_request_error"}}, status=exc.status)
 CLAUDE_USAGE_BACKOFF_SECONDS = 120.0
 
 
@@ -839,7 +869,7 @@ def _stamp_grok_model(headers: dict[str, str], body: bytes) -> None:
         headers["x-grok-model-override"] = model
 
 
-def served_headers(upstream: str, model: str) -> dict[str, str]:
+def served_headers(upstream: str, model: str, account: str = "") -> dict[str, str]:
     """Which upstream, and which model name, this response was really produced against.
 
     The proxy routes by the name in the path and never substitutes one upstream or model for
@@ -848,7 +878,7 @@ def served_headers(upstream: str, model: str) -> dict[str, str]:
     that field can only ever say what the caller already asked for. These headers say what the
     proxy actually sent, so the difference is visible if one ever appears.
     """
-    return {"x-keyproxy-upstream": upstream, **({"x-keyproxy-model": model} if model else {})}
+    return {"x-keyproxy-upstream": upstream, **({"x-keyproxy-model": model} if model else {}), "x-keyproxy-account": account or accounts.DEFAULT_ACCOUNT}
 
 
 def refusal_headers(headers: httpx.Headers) -> dict[str, str]:
@@ -865,7 +895,11 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     client: httpx.AsyncClient = request.app["client"]
     tail = rest.strip("/").removeprefix("v1/")
     try:
-        headers = await CLAUDE_AUTH.headers(client)
+        account = request_account(request)
+    except AccountRefused as exc:
+        return account_refusal(exc)
+    try:
+        headers = await login_auth("claude", account).headers(client)
     except SubscriptionError as exc:
         return web.json_response({"error": {"message": str(exc), "type": "subscription_error"}}, status=502)
     if tail == "models":
@@ -884,10 +918,10 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "anthropic", **limits.get(m, {})} for m in models if m]})
     if tail != "chat/completions":
         return web.json_response({"error": {"message": f"claude serves chat/completions and models, not {tail!r}", "type": "invalid_request_error"}}, status=404)
-    return await serve_messages(request, "claude", headers, login=True)
+    return await serve_messages(request, "claude", headers, login=True, account=account)
 
 
-async def serve_messages(request: web.Request, name: str, headers: dict[str, str], *, login: bool) -> web.StreamResponse:
+async def serve_messages(request: web.Request, name: str, headers: dict[str, str], *, login: bool, account: str = "") -> web.StreamResponse:
     """One chat completion answered through Anthropic's Messages API, for the Claude login or the API key.
 
     ``login`` is the Claude Code route: its body carries the CLI's identity, its betas and URL are the
@@ -959,9 +993,9 @@ async def serve_messages(request: web.Request, name: str, headers: dict[str, str
     if login:
         await clients.verify("claude", response.status_code)
         if windows := claude_header_windows(response.headers):
-            _claude_header_snapshot.update(windows=windows, at=time.monotonic())
+            _claude_header_snapshots[account] = {"windows": windows, "at": time.monotonic()}
     chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names, keep_thinking=not steered)
-    served = served_headers(name, str(payload.get("model") or model))
+    served = served_headers(name, str(payload.get("model") or model), account)
     captured = bytearray()
     try:
         if not stream:
@@ -998,17 +1032,24 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
     client: httpx.AsyncClient = request.app["client"]
     tail = rest.strip("/").removeprefix("v1/")
     try:
-        headers = await CODEX_AUTH.headers(client)
+        account = request_account(request)
+    except AccountRefused as exc:
+        return account_refusal(exc)
+    auth = login_auth("codex", account)
+    try:
+        headers = await auth.headers(client)
     except SubscriptionError as exc:
         return web.json_response({"error": {"message": str(exc), "type": "subscription_error"}}, status=502)
     if tail == "models":
         models = list(CODEX_FALLBACK_MODELS)
         try:
-            usage = await _codex_usage(client, headers)
+            usage = await _codex_usage(client, headers, account)
             models = sorted(set(models) | set(usage.get("models") or []))  # the plan's usage table names only some of them
         except SubscriptionError:
             pass
-        windows = {**CODEX_FALLBACK_CATALOGUE, **codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")}
+        # The catalogue is the CLI's, not the account's: an account signed in but never run by the CLI has
+        # none of its own, so the default login's stands under whatever the account's adds.
+        windows = {**CODEX_FALLBACK_CATALOGUE, **codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json"), **codex_cached_windows(auth.path.parent / "models_cache.json")}
         models = sorted(set(models) | {m for m, w in windows.items() if w.get("listed")})
         return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "openai", **{k: v for k, v in windows.get(m, {}).items() if k != "listed"}} for m in models]})
     if tail != "chat/completions":
@@ -1056,7 +1097,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             payload = {"error": {"message": raw[:400], "type": "upstream_error"}}
         return web.json_response(payload, status=response.status_code, headers=refusal_headers(response.headers))
     chunks = responses_events_to_chunks(_sse_lines(response, timing), model=model)
-    served = served_headers("codex", str(sent.get("model") or model))
+    served = served_headers("codex", str(sent.get("model") or model), account)
     try:
         if not stream:
             return web.json_response(await collect_completion(chunks, model=model), headers=served)
@@ -1106,39 +1147,39 @@ def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-async def _codex_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:
-    cached = _usage_cache.get("codex")
+async def _codex_usage(client: httpx.AsyncClient, headers: dict[str, str], account: str = "") -> dict[str, Any]:
+    cached = _usage_cache.get(f"codex@{account}")
     if cached and time.monotonic() - cached[0] < USAGE_CACHE_SECONDS:
         return cached[1]
     response = await client.get(CODEX_BASE + "/wham/usage", headers={**headers, "accept": "application/json"})
     if response.status_code != 200:
         raise SubscriptionError(f"codex usage: HTTP {response.status_code}")
     view = codex_usage_view(response.json())
-    _usage_cache["codex"] = (time.monotonic(), view)
+    _usage_cache[f"codex@{account}"] = (time.monotonic(), view)
     return view
 
 
-async def _grok_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:
-    cached = _usage_cache.get("grok")
+async def _grok_usage(client: httpx.AsyncClient, headers: dict[str, str], account: str = "") -> dict[str, Any]:
+    cached = _usage_cache.get(f"grok@{account}")
     if cached and time.monotonic() - cached[0] < USAGE_CACHE_SECONDS:
         return cached[1]
     response = await client.get(GROK_BASE + "/billing?format=credits", headers={**headers, "accept": "application/json"})
     if response.status_code != 200:
         raise SubscriptionError(f"grok usage: HTTP {response.status_code}")
     view = grok_usage_view(response.json())
-    _usage_cache["grok"] = (time.monotonic(), view)
+    _usage_cache[f"grok@{account}"] = (time.monotonic(), view)
     return view
 
 
-async def _opencode_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:
-    cached = _usage_cache.get("opencode")
+async def _opencode_usage(client: httpx.AsyncClient, headers: dict[str, str], account: str = "") -> dict[str, Any]:
+    cached = _usage_cache.get(f"opencode@{account}")
     if cached and time.monotonic() - cached[0] < USAGE_CACHE_SECONDS:
         return cached[1]
     response = await client.get(OPENCODE_GO_BASE + "/usage", headers={**headers, "accept": "application/json"})
     if response.status_code != 200:
         raise SubscriptionError(f"opencode usage: HTTP {response.status_code}")
     view = opencode_usage_view(response.json())
-    _usage_cache["opencode"] = (time.monotonic(), view)
+    _usage_cache[f"opencode@{account}"] = (time.monotonic(), view)
     return view
 
 
@@ -1152,36 +1193,38 @@ async def _claude_profile(client: httpx.AsyncClient, headers: dict[str, str]) ->
     return {}
 
 
-def _with_header_windows(view: dict[str, Any], taken: float) -> dict[str, Any]:
+def _with_header_windows(view: dict[str, Any], taken: float, account: str = "") -> dict[str, Any]:
     """``view`` with its 5h and weekly windows replaced by the reply headers' when those are newer.
 
     The usage endpoint can refuse for hours, and a snapshot from before that is stale by the same
     hours; the reply headers move with every model call. Per-model windows (Fable) exist only in the
     endpoint's answer, so they are kept from it.
     """
-    windows = _claude_header_snapshot.get("windows")
-    if not windows or _claude_header_snapshot.get("at", 0.0) <= taken:
+    snapshot = _claude_header_snapshots.get(account) or {}
+    windows = snapshot.get("windows")
+    if not windows or snapshot.get("at", 0.0) <= taken:
         return view
     rest = [w for w in view.get("windows") or [] if w.get("name") not in ("5h", "weekly")]
     merged = [*windows, *rest]
     return {**view, "windows": merged, "limit_reached": any(float(w.get("used_percent") or 0) >= 100 for w in merged)}
 
 
-async def _claude_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:
+async def _claude_usage(client: httpx.AsyncClient, headers: dict[str, str], account: str = "") -> dict[str, Any]:
     """Quota for the Usage screen. The usage endpoint rate-limits independently of inference;
     a 429 is served from the last good snapshot (or profile) instead of hammering it, and the
-    5h and weekly windows come from the latest model reply's headers when those are newer."""
-    global _claude_usage_retry_at
-    cached = _usage_cache.get("claude")
+    5h and weekly windows come from the latest model reply's headers when those are newer.
+    Every account keeps its own snapshot and its own wait: they are separate plans."""
+    cached = _usage_cache.get(f"claude@{account}")
     now = time.monotonic()
+    retry_at = _claude_usage_retry_at.get(account, 0.0)
     if cached and now - cached[0] < USAGE_CACHE_SECONDS:
-        return _with_header_windows(cached[1], cached[0])
-    if now < _claude_usage_retry_at and cached:
-        return _with_header_windows(cached[1], cached[0])
-    light = await CLAUDE_AUTH.usage_headers(client)
-    if now < _claude_usage_retry_at:
+        return _with_header_windows(cached[1], cached[0], account)
+    if now < retry_at and cached:
+        return _with_header_windows(cached[1], cached[0], account)
+    light = await login_auth("claude", account).usage_headers(client)
+    if now < retry_at:
         profile = await _claude_profile(client, light)
-        return _with_header_windows(claude_usage_view({}, profile), 0.0)
+        return _with_header_windows(claude_usage_view({}, profile), 0.0, account)
     usage = await client.get(CLAUDE_API + "/api/oauth/usage", headers=light)
     if usage.status_code == 429:
         retry = usage.headers.get("retry-after")
@@ -1189,30 +1232,131 @@ async def _claude_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> d
             wait = max(CLAUDE_USAGE_BACKOFF_SECONDS, float(retry or 0))
         except ValueError:
             wait = CLAUDE_USAGE_BACKOFF_SECONDS
-        _claude_usage_retry_at = now + wait
+        _claude_usage_retry_at[account] = now + wait
         if cached:
-            return _with_header_windows(cached[1], cached[0])
-        return _with_header_windows(claude_usage_view({}, await _claude_profile(client, light)), 0.0)
+            return _with_header_windows(cached[1], cached[0], account)
+        return _with_header_windows(claude_usage_view({}, await _claude_profile(client, light)), 0.0, account)
     if usage.status_code != 200:
         raise SubscriptionError(f"claude usage: HTTP {usage.status_code}")
     view = claude_usage_view(usage.json(), await _claude_profile(client, light))
-    _usage_cache["claude"] = (now, view)
+    _usage_cache[f"claude@{account}"] = (now, view)
     return view
 
 
+def account_auth(upstream: str, account: str) -> Any:
+    """The login, or for OpenCode Go the key, that signs ``upstream`` for ``account``."""
+    if upstream == "opencode":
+        return OpencodeAuth(env_var=accounts.key_variable("OPENCODE_API_KEY", account), lookup=lambda var: settings().get(var, ""))
+    return login_auth(upstream, account)
+
+
+def extra_accounts(upstream: str) -> list[str]:
+    """The accounts of ``upstream`` beyond its default: a home of their own for a login, a key for a plan."""
+    if upstream in accounts.LOGIN_UPSTREAMS:
+        return accounts.listed_logins(login_auth(upstream).path)
+    if upstream in DEFAULT_UPSTREAMS:
+        return accounts.listed_keys(DEFAULT_UPSTREAMS[upstream][1], settings())
+    return []
+
+
+USAGE_FETCHERS = (("codex", _codex_usage), ("grok", _grok_usage), ("claude", _claude_usage), ("opencode", _opencode_usage))
+
+
+async def _usage_of(client: httpx.AsyncClient, name: str, fetch: Any, account: str) -> dict[str, Any]:
+    auth = account_auth(name, account)
+    if not auth.available():
+        return {"provider": name, "logged_in": False}
+    try:
+        return {"logged_in": True, **await fetch(client, await auth.headers(client), account)}
+    except (SubscriptionError, httpx.HTTPError, ValueError) as exc:
+        return {"provider": name, "logged_in": True, "error": str(exc)[:200]}
+
+
 async def handle_subscriptions_usage(request: web.Request) -> web.Response:
-    """Subscription quota windows, for the Usage screen; a missing login is reported, not an error."""
+    """Subscription quota windows, for the Usage screen; a missing login is reported, not an error.
+
+    The default login's view is the upstream's, as it always was; every other account's is under its
+    ``accounts``, so a reader that knows nothing of accounts still reads the one it knew."""
     client: httpx.AsyncClient = request.app["client"]
     out: dict[str, Any] = {}
-    for name, auth, fetch in (("codex", CODEX_AUTH, _codex_usage), ("grok", GROK_AUTH, _grok_usage), ("claude", CLAUDE_AUTH, _claude_usage), ("opencode", OPENCODE_AUTH, _opencode_usage)):
-        if not auth.available():
-            out[name] = {"provider": name, "logged_in": False}
-            continue
-        try:
-            out[name] = {"logged_in": True, **await fetch(client, await auth.headers(client))}
-        except (SubscriptionError, httpx.HTTPError, ValueError) as exc:
-            out[name] = {"provider": name, "logged_in": True, "error": str(exc)[:200]}
+    for name, fetch in USAGE_FETCHERS:
+        out[name] = await _usage_of(client, name, fetch, "")
+        extra = extra_accounts(name)
+        if extra:
+            out[name]["accounts"] = {account: await _usage_of(client, name, fetch, account) for account in extra}
     return web.json_response(out)
+
+
+def accounts_view() -> dict[str, Any]:
+    """Every account of every subscription upstream: whether it can sign a call, and who it says it is.
+
+    Read from the files and the keys file alone, so Settings can show it without spending a call."""
+    view: dict[str, list[dict[str, Any]]] = {}
+    for upstream in accounts.LOGIN_UPSTREAMS:
+        rows = []
+        for account in ["", *extra_accounts(upstream)]:
+            auth = login_auth(upstream, account)
+            rows.append({"id": account or accounts.DEFAULT_ACCOUNT, "kind": CLI_LOGIN, "configured": credential_readable(auth), **accounts.identity(upstream, auth.path)})
+        view[upstream] = rows
+    env = settings()
+    for upstream in accounts.KEYED_PLANS:
+        variable = DEFAULT_UPSTREAMS[upstream][1]
+        view[upstream] = [{"id": account or accounts.DEFAULT_ACCOUNT, "kind": API_KEY, "configured": bool(env.get(accounts.key_variable(variable, account), "")), "email": "", "plan": ""}
+                          for account in ["", *accounts.listed_keys(variable, env)]]
+    return {"writable": bool(KEYS_FILE), "upstreams": view}
+
+
+async def handle_accounts(request: web.Request) -> web.Response:
+    """The subscription accounts this proxy can serve, for the bot alone. Never a token or a key."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    return web.json_response(accounts_view())
+
+
+async def handle_account(request: web.Request) -> web.Response:
+    """Prepare (POST) or forget (DELETE) one account, for the bot alone.
+
+    For a CLI login, POST makes the account's home so its CLI can be signed in there, and answers the
+    folder's name relative to the CLI's own (the bot knows the operator's home; this process may see the
+    folder under another path, as a container does). For a plan, POST stores the body's ``key``.
+    DELETE removes the account's home or its key. The default login is never removed from here."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    upstream = request.match_info["upstream"].lower()
+    try:
+        account = account_id(request.match_info["account"])
+        if not account:
+            raise AccountRefused(400, "the default account is the CLI's own login or the plan's own key")
+    except AccountRefused as exc:
+        return account_refusal(exc)
+    try:
+        if upstream in accounts.LOGIN_UPSTREAMS:
+            default = login_auth(upstream).path
+            if request.method == "DELETE":
+                accounts.forget_login(default, account)
+                _account_auths.pop((upstream, accounts.login_path(default, account)), None)
+            else:
+                accounts.prepare_login(default, account)
+            return web.json_response({"upstream": upstream, "id": account, "home": f"{accounts.ACCOUNTS_DIR}/{account}"})
+        if upstream not in accounts.KEYED_PLANS:
+            return web.json_response({"error": f"{upstream!r} has no accounts"}, status=404)
+        if not KEYS_FILE:
+            return web.json_response({"error": "this key proxy reads its keys from its environment only; put the key in keyproxy.env"}, status=409)
+        key = ""
+        if request.method == "POST":
+            try:
+                body = await request.json()
+            except (ValueError, UnicodeDecodeError):
+                body = None
+            # A newline would end the line and turn the rest of the key into a variable of its own.
+            key = (str(body.get("key") or "") if isinstance(body, dict) else "").replace("\r", "").replace("\n", "").strip()
+            if not key:
+                return web.json_response({"error": "no key given"}, status=400)
+        write_env_value(KEYS_FILE, accounts.key_variable(DEFAULT_UPSTREAMS[upstream][1], account), key)
+    except OSError as exc:
+        logger.warning("could not change account %s of %s: %s", account, upstream, type(exc).__name__)
+        return web.json_response({"error": f"the key proxy could not change the account ({type(exc).__name__})"}, status=500)
+    return web.json_response({"upstream": upstream, "id": account, "configured": bool(key)})
 
 
 async def handle(request: web.Request) -> web.StreamResponse:
@@ -1225,10 +1369,24 @@ async def handle(request: web.Request) -> web.StreamResponse:
     table = upstreams()
     client: httpx.AsyncClient = request.app["client"]
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
+    try:
+        account = request_account(request)
+    except AccountRefused as exc:
+        return account_refusal(exc)
+    if account and name in DEFAULT_UPSTREAMS:
+        # Another key for the same upstream: the address is the upstream's, the key the account's. Without
+        # one the call is refused rather than signed with the default key, which is the account the
+        # operator asked to spare.
+        key = settings().get(accounts.key_variable(DEFAULT_UPSTREAMS[name][1], account), "")
+        if not key:
+            return web.json_response({"error": {"message": f"account {account!r} of {name!r} has no key in the key proxy", "type": "no_credential"}}, status=503)
+        table = {**table, name: (table.get(name, (DEFAULT_UPSTREAMS[name][0], ""))[0], key)}
+    elif account and name != "grok":
+        return web.json_response({"error": {"message": f"{name!r} has no accounts", "type": "invalid_request_error"}}, status=400)
     if name == "grok":
         # A subscription, not a key: no USD budget applies, the CLI's identity travels with the call.
         try:
-            headers.update(await GROK_AUTH.headers(client))
+            headers.update(await login_auth("grok", account).headers(client))
         except SubscriptionError as exc:
             return web.json_response({"error": {"message": str(exc), "type": "subscription_error"}}, status=502)
         base, key = GROK_BASE, ""
@@ -1280,7 +1438,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
     for k, v in response.headers.items():
         if k.lower() not in DROP_RESPONSE_HEADERS:
             out.headers[k] = v
-    out.headers.update(served_headers(name, request_model))
+    out.headers.update(served_headers(name, request_model, account))
     await out.prepare(request)
     outcome = "done"
     try:
@@ -1519,6 +1677,9 @@ def make_app() -> web.Application:
     app.router.add_get("/settings", handle_settings)
     app.router.add_put("/settings/{name}", handle_set_setting)
     app.router.add_get("/subscriptions/usage", handle_subscriptions_usage)
+    app.router.add_get("/accounts", handle_accounts)
+    app.router.add_post("/accounts/{upstream}/{account}", handle_account)
+    app.router.add_delete("/accounts/{upstream}/{account}", handle_account)
     app.router.add_get("/clients", handle_clients)
     app.router.add_post("/clients/check", handle_clients_check)
     app.router.add_post(r"/clients/{name}/{action:update|revert}", handle_client_action)

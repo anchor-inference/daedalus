@@ -129,6 +129,7 @@ from daedalus.extensions import (
     api_skill_quality,
     api_staff,
     api_staff_reports,
+    api_subscription_accounts,
     api_terminal_side,
     api_two_factor,
     api_update_drains,
@@ -959,6 +960,8 @@ class PresetPatch(BaseModel):
     """Sent as null, it goes back to what the model is known for; the one field where null is a value."""
     openrouter_providers: list[str] | None = None
     """The OpenRouter providers to limit the model to; an empty list hands the routing back to OpenRouter."""
+    account: str | None = None
+    """The subscription account the model's calls go out on; "" goes back to the upstream's default account."""
 
 
 CONTEXT_WINDOW_WAIT_SECONDS = 12.0
@@ -1784,6 +1787,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
+    # Settings → Models → Accounts: several accounts per subscription, the default, the fallover.
+    api_subscription_accounts.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_recurring.register(api, app, auth)
     api_resource_profiles.register(api, app, auth)
@@ -6038,6 +6043,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """A model call that bypassed the bot (curl against the key proxy) is booked like any other, at the provider's prices."""
         return await direct_usage_booking(manager)(body)
 
+    def _account_label(provider_id: str, account: str) -> str:
+        """The name the operator gave the account that answered a call, "" when it has none or there is none."""
+        router = manager.providers.accounts
+        if not account or router is None or provider_id not in manager.providers.available():
+            return ""
+        return router.label(manager.providers.get(provider_id).endpoint, account)
+
     @api.get("/api/usage")
     async def usage(days: int = 7, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         since = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -6051,7 +6063,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         recent = await app.db.fetchall(
             "SELECT u.at, u.provider_id, u.model, u.purpose, u.session_id, u.run_id, u.input_tokens, u.output_tokens,"
             " u.cache_read_tokens, u.reasoning_tokens, u.cost_usd, u.duration_ms, u.first_byte_ms, u.first_token_ms,"
-            " u.output_tokens_per_second, u.raw, s.title session_title"
+            " u.output_tokens_per_second, u.raw, u.account, s.title session_title"
             " FROM usage_events u LEFT JOIN sessions s ON s.id = u.session_id ORDER BY u.seq DESC LIMIT 200"
         )
         by_session = await app.db.fetchall(
@@ -6062,7 +6074,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         )
         return {
             "daily": [dict(r) for r in rows],
-            "recent": [{**dict(r), "raw": json.loads(r["raw"])} for r in recent],
+            "recent": [{**dict(r), "raw": json.loads(r["raw"]), "account_label": _account_label(r["provider_id"], r["account"])} for r in recent],
             "sessions": [dict(r) for r in by_session],
             "subscriptions": await subscription_usage(),
             # Read after the subscriptions, so the reading just taken is in its own forecast.
@@ -7123,6 +7135,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             entry["images"] = True
         source = sent.pop("context_window_source", None)
         chosen = sent.pop("openrouter_providers", None)
+        account = sent.pop("account", None)
         before = list(entry.get("openrouter_providers") or [])
         was = (entry.get("provider"), entry.get("model"))
         for key, value in sent.items():
@@ -7146,7 +7159,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             sibling = next((p for p in raw["presets"].values() if (p.get("provider"), p.get("model")) == pair and p.get("openrouter_providers")), {})
             entry["openrouter_providers"] = list(sibling.get("openrouter_providers") or [])
             entry["openrouter_providers_gone"] = list(sibling.get("openrouter_providers_gone") or [])
+        if account is None and pair != was:
+            # The account is the pair's, like the route: a call cannot tell two presets of one model apart.
+            entry["account"] = next((str(p.get("account")) for p in raw["presets"].values() if (p.get("provider"), p.get("model")) == pair and p.get("account")), "")
         raw["presets"][preset_id] = entry
+        if account is not None:
+            for preset in raw["presets"].values():
+                if (preset.get("provider"), preset.get("model")) == pair:
+                    preset["account"] = account.strip()
         if chosen is not None:
             _choose_openrouter_providers(raw, entry, chosen, listing, catalogue)
             find_window = find_window or (entry["openrouter_providers"] != before and entry.get("context_window_source") != "manual")

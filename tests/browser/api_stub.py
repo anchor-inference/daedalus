@@ -607,6 +607,43 @@ KEYPROXY_CLIENT_UPDATED: dict[str, object] = {
 """What ``POST /api/keyproxy/clients/claude/update`` answers: the version moved, three header values kept."""
 
 
+def _account(upstream: str, id_: str, label: str, *, default: bool = False, email: str = "", plan: str = "", configured: bool = True,
+             rest: str = "", rest_hours: float = 0, windows: tuple[tuple[str, float], ...] = (), calls: int = 0, last_minutes: float = 0) -> dict[str, object]:
+    now = datetime.now(UTC)
+    home = {"claude": ("CLAUDE_CONFIG_DIR", ".claude", "claude auth login --claudeai"), "codex": ("CODEX_HOME", ".codex", "codex login --device-auth")}.get(upstream)
+    command = "" if home is None else (home[2] if id_ == "default" else f'{home[0]}="/home/operator/{home[1]}/daedalus-accounts/{id_}" {home[2]}')
+    return {
+        "upstream": upstream, "id": id_, "label": label, "position": 0, "default": default, "configured": configured,
+        "email": email, "plan": plan, "resting": bool(rest), "rest_reason": rest,
+        "resting_until": (now + timedelta(hours=rest_hours)).isoformat() if rest else None,
+        "usage": {"windows": [{"name": n, "used_percent": u} for n, u in windows], "limit_reached": any(u >= 100 for _, u in windows), "error": ""} if windows else None,
+        "calls_24h": calls, "last_call_at": (now - timedelta(minutes=last_minutes)).isoformat() if calls else None,
+        "created_at": (now - timedelta(days=3)).isoformat(), "last_served_at": None, "sign_in_command": command,
+    }
+
+
+SUBSCRIPTION_ACCOUNTS: dict[str, object] = {
+    "proxy": {"reachable": True, "state": "ok", "error": ""},
+    "terminal": True,
+    "upstreams": [
+        {"upstream": "claude", "providers": ["claude"], "sign_in": "terminal", "default_account": "default", "fallover": True, "accounts": [
+            _account("claude", "default", "personal", default=True, email="someone@example.org", plan="max", rest="quota", rest_hours=2.5, windows=(("5h", 100.0), ("weekly", 64.0)), calls=41, last_minutes=38),
+            _account("claude", "k3v9q2ma", "work", email="operator@example.com", plan="team", windows=(("5h", 12.0), ("weekly", 31.0)), calls=17, last_minutes=2),
+            _account("claude", "p7x2w4nb", "spare", configured=False),
+        ]},
+        {"upstream": "codex", "providers": ["codex"], "sign_in": "terminal", "default_account": "default", "fallover": True, "accounts": [
+            _account("codex", "default", "", default=True, email="someone@example.org", plan="plus", windows=(("5h", 8.0), ("weekly", 22.0)), calls=6, last_minutes=95),
+        ]},
+        {"upstream": "opencode", "providers": ["opencode"], "sign_in": "key", "default_account": "default", "fallover": False, "accounts": [
+            _account("opencode", "default", "", default=True, plan="OpenCode Go", windows=(("5 h", 3.0), ("weekly", 1.0), ("monthly", 40.0))),
+            _account("opencode", "z8m1c5re", "team key", plan="OpenCode Go"),
+        ]},
+    ],
+}
+"""Settings → Models → Providers → Subscription accounts: Claude with its own sign-in spent and resting, a work account
+answering, and a third not signed in yet; Codex with one account; OpenCode Go with a second key and fallover off."""
+
+
 
 
 GATES: dict[str, object] = {
@@ -628,6 +665,8 @@ GATES: dict[str, object] = {
     "/api/keyproxy": KEYPROXY_VIEW,
     # The key proxy card lists the imitated CLIs' versions; check_keyproxy_clients.py updates one.
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
+    # The subscriptions' accounts on the same tab; check_accounts.py adds and removes one of its own.
+    "/api/subscription-accounts": SUBSCRIPTION_ACCOUNTS,
     # Where the rail, its More launcher and the phone drawer put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
     "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},

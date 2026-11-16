@@ -37,7 +37,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         async with app.db.transaction() as conn:
             async with conn.execute(
                 "SELECT o.id,o.session_id,o.run_id,o.project_id,o.provider_id,o.model,o.status,"
-                "o.failure_class,o.provider_code,o.reset_at,o.reset_source,o.retry_after_at,o.observed_at,"
+                "o.failure_class,o.provider_code,o.reset_at,o.reset_source,o.retry_after_at,o.observed_at,o.account,"
                 "h.id AS hold_id,CASE WHEN e.state IN ('failed','cancelled') AND h.state = 'resume_queued'"
                 " THEN 'invalidated' WHEN e.state = 'unknown' THEN 'unknown' ELSE h.state END AS hold_state"
                 " FROM provider_failure_observations o"

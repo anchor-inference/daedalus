@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
@@ -2284,6 +2284,26 @@ function stepCount(items: Activity[]): number {
 }
 
 /**
+ * Which subscription account answered, on an endpoint that has more than one.
+ *
+ * Quiet while the turn stayed on one account; marked, with the account it left and why, when a call of
+ * it was refused for its limit and moved on, because that move also cost the turn its prompt cache.
+ */
+function AccountChip({ account }: { account: TurnAccount }) {
+  const name = account.label || account.id;
+  const moved = account.movedFrom;
+  const reason = moved ? (DICT[`accounts.reason.${moved.reason}`] ? t(`accounts.reason.${moved.reason}`) : moved.reason) : "";
+  return (
+    <div className="fallback-note" data-turn-account={account.id}>
+      <span className={`chip ${moved ? "attn" : ""}`} title={moved ? t("accounts.turn.moved.why", { from: moved.label || moved.id, reason }) : undefined}>
+        <Icon name="user" size={14} />
+        <span className="truncate">{moved ? t("accounts.turn.moved", { to: name, from: moved.label || moved.id }) : t("accounts.turn", { name })}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
  * The one line that says this answer is not the configured model's.
  *
  * It sits above the answer rather than under it, because it changes how the answer is read and the
@@ -2514,6 +2534,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </Fragment>
       ))}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
+      {turn.account && (turn.answer || live) && <AccountChip account={turn.account} />}
       {turn.answer && (turn.media?.length ? (
         <div className={`answer answer-with-media ${live ? "streaming" : ""}`} data-quote={turn.answerSeq ?? ""}>
           {splitMediaAnswer(turn.answer, turn.media).map((part, index) => part.kind === "text"

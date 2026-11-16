@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
@@ -45,6 +45,7 @@ from protocore.providers.openai_compat.wire import reasoning_envelope, replayed_
 
 from daedalus import __version__
 from daedalus.config import keyproxy_upstream, login_route
+from daedalus.providers.accounts import FALLOVER_CLASSES, AccountRouter, account_header
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import stated_window
 from daedalus.providers.dsml import DsmlGuard
@@ -456,6 +457,8 @@ class UsageRecord:
     """From sending the attempt that answered to its first token: text, reasoning or a tool call."""
     output_tokens_per_second: float | None = None
     """The output rate over the generation alone, from the first token to the last."""
+    account: str = ""
+    """The subscription account that answered; "" for an endpoint with only its default login or key."""
 
 
 MIN_RATE_TOKENS = 16
@@ -532,6 +535,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         routing_for: Callable[[str], Sequence[str]] | None = None,
         route_refusal: Callable[[str, str], None] | None = None,
         on_unreachable: UnreachableNotice | None = None,
+        accounts: AccountRouter | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
 
@@ -547,8 +551,12 @@ class OpenAICompatibleProvider(ILLMProvider):
 
         ``on_unreachable(endpoint id, request, retry_in)`` hears every pause spent waiting for an endpoint
         that refused the connection (``retry_in`` seconds), and ``None`` once it answers again, so the
-        run's screen can say what it is waiting for rather than look stuck."""
+        run's screen can say what it is waiting for rather than look stuck.
+
+        ``accounts`` chooses the subscription account each call goes out on and moves a call that one
+        account refused for its limit to the next (:mod:`daedalus.providers.accounts`)."""
         self.endpoint = endpoint
+        self._accounts = accounts
         self._context_refusal = context_refusal
         self._routing_for = routing_for or (lambda _model: ())
         self._route_refusal = route_refusal
@@ -595,13 +603,14 @@ class OpenAICompatibleProvider(ILLMProvider):
         guard = DsmlGuard()
         keep_reasoning = replays_reasoning(self.endpoint)
         details: list[dict[str, Any]] = []
+        route = self._route(request)
         try:
             silent = 0
             patience: Patience | None = None
             while True:
                 refused: BaseException | httpx.Response | None = None
                 try:
-                    opened = await self._open_stream(request, body, silent)
+                    opened = await self._open_stream(request, body, silent, route[0] if route else "")
                 except httpx.HTTPError as exc:
                     if not unreachable(exc):
                         raise
@@ -626,6 +635,12 @@ class OpenAICompatibleProvider(ILLMProvider):
                 if opened is not None:
                     if await self._steered_after_refusal(body, opened[0]):
                         continue
+                    if await self._moved_on(request, opened[0], route):
+                        # The next account is a new upstream: its own first-byte allowance, and a word to
+                        # the core's idle watchdog before it is waited for.
+                        silent = 0
+                        yield ProviderDelta(kind=ProviderDeltaKind.progress)
+                        continue
                     break
                 silent += 1
                 if silent > self.endpoint.first_byte_retries:
@@ -643,7 +658,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                     if response.status_code == 400:
                         logger.warning("%s rejected a request; message shape: %s", self.endpoint.id, message_shape(body["messages"]))
                     text = raw.decode("utf-8", "replace")
-                    await self._observe_failure(request, reservation, response.status_code, text, response.headers)
+                    await self._observe_failure(request, reservation, response.status_code, text, response.headers, route[0] if route else "")
                     self._raise_for_status(response.status_code, text, response.headers)
                 async for data in _sse_data(lines):
                     if data is None:
@@ -720,13 +735,13 @@ class OpenAICompatibleProvider(ILLMProvider):
         for delta_out in self._close_tools(open_tools, resolved_finish):
             yield delta_out
         normalized = normalize_usage(usage_raw or {})
-        await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation, timing=timing)
+        await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation, timing=timing, account=route[0] if route else "")
         yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=normalized)
         kept = (reasoning_envelope(self.endpoint.id, request.model, details, normalized["reasoning_tokens"]),) if details else None
         yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish), reasoning_items=kept)
 
     async def _open_stream(self, request: LLMRequest, body: dict[str, Any],
-                           attempt: int) -> tuple[httpx.Response, AsyncIterator[str], CallTiming] | None:
+                           attempt: int, account: str = "") -> tuple[httpx.Response, AsyncIterator[str], CallTiming] | None:
         """Send the request and wait for its first line back; ``None`` when nothing came in time.
 
         The timing returned starts at this attempt's send and holds the arrival of that first line,
@@ -747,7 +762,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         refusal (status 400 and up) is an answer, so its body is read with no deadline.
         """
         timeout = self.endpoint.first_byte_timeout_seconds
-        sent = self._client.build_request("POST", self._url("/chat/completions"), json=body, headers=self._headers(request))
+        sent = self._client.build_request("POST", self._url("/chat/completions"), json=body, headers=self._headers(request, account))
         began = time.monotonic()
         response: httpx.Response | None = None
         lines: AsyncIterator[str] | None = None
@@ -831,11 +846,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         started = time.monotonic()
         reservation = await self._admit(request, body)
         try:
-            data = await self._post(body, request, reservation)
+            route = self._route(request)
+            data = await self._post(body, request, reservation, route)
             text = _message_text(data)
             usage_raw = data.get("usage") or {}
             normalized = normalize_usage(usage_raw)
-            cost = await self._record_usage(request, "structured", usage_raw, normalized, started, reservation)
+            cost = await self._record_usage(request, "structured", usage_raw, normalized, started, reservation, account=route[0] if route else "")
             finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
             parsed = parse_json_text(text)
             if parsed is None:
@@ -863,11 +879,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         started = time.monotonic()
         reservation = await self._admit(request, body)
         try:
-            data = await self._post(body, request, reservation)
+            route = self._route(request)
+            data = await self._post(body, request, reservation, route)
             text = _message_text(data)
             usage_raw = data.get("usage") or {}
             normalized = normalize_usage(usage_raw)
-            cost = await self._record_usage(request, "text", usage_raw, normalized, started, reservation)
+            cost = await self._record_usage(request, "text", usage_raw, normalized, started, reservation, account=route[0] if route else "")
             finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
             return LLMResponse(
                 message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=text)]),
@@ -1045,13 +1062,16 @@ class OpenAICompatibleProvider(ILLMProvider):
                 body["reasoning_effort"] = effort
 
     async def _post(self, body: dict[str, Any], request: LLMRequest | None = None,
-                    reservation: str | None = None) -> dict[str, Any]:
+                    reservation: str | None = None, route: list[str] | None = None) -> dict[str, Any]:
+        """One whole answer. ``route`` is the call's account chain (:meth:`_route`); its first entry is the
+        account that answered once this returns, since a move to the next account drops the one before."""
+        route = route if route is not None else []
         patience: Patience | None = None
         while True:
             refused: BaseException | httpx.Response | None = None
             try:
                 response = await self._client.post(
-                    self._url("/chat/completions"), json=body, headers=self._headers(request)
+                    self._url("/chat/completions"), json=body, headers=self._headers(request, route[0] if route else "")
                 )
             except httpx.HTTPError as exc:
                 if not unreachable(exc):
@@ -1071,11 +1091,14 @@ class OpenAICompatibleProvider(ILLMProvider):
             elif patience is not None:
                 await self._answered_again(request, patience)
                 patience = None
-            if not await self._steered_after_refusal(body, response):
-                break
+            if await self._steered_after_refusal(body, response):
+                continue
+            if request is not None and await self._moved_on(request, response, route):
+                continue
+            break
         if response.status_code >= 400:
             if request is not None:
-                await self._observe_failure(request, reservation, response.status_code, response.text, response.headers)
+                await self._observe_failure(request, reservation, response.status_code, response.text, response.headers, route[0] if route else "")
             self._raise_for_status(response.status_code, response.text, response.headers)
         data = response.json()
         if "error" in data and not data.get("choices"):
@@ -1168,10 +1191,43 @@ class OpenAICompatibleProvider(ILLMProvider):
             return LLMTimeoutError(f"{self.endpoint.id}: {exc}", classified=verdict or _verdict("timeout", True))
         return LLMProviderError(f"{self.endpoint.id}: transport error: {exc}", classified=verdict)
 
+    def _route(self, request: LLMRequest) -> list[str]:
+        """The accounts this call may go out on, first one first; [] where the endpoint has no accounts."""
+        if self._accounts is None:
+            return []
+        obs = request.observability
+        return self._accounts.chain(self.endpoint, request.model, obs.session_id if obs is not None else None)
+
+    async def _moved_on(self, request: LLMRequest, response: httpx.Response, route: list[str]) -> bool:
+        """Whether ``response`` refused the call for its account's limit and the call now goes to the next one.
+
+        Read before any failure is recorded, like a steered refusal: a refusal another account absorbs is
+        that account's rest (:meth:`AccountRouter.limited`), not a failing provider. ``route`` loses its
+        first entry, so what is left starts with the account the call goes out on now.
+
+        The request is sent again unchanged. The prompt cache it had on the account before is not where it
+        is going: the first answer from the next account reads the whole prompt as new input.
+        """
+        if self._accounts is None or len(route) < 2 or response.status_code < 400:
+            return False
+        text = (await response.aread()).decode("utf-8", "replace")
+        evidence = failure_evidence(response.status_code, text, response.headers, provider_kind=self.endpoint.kind,
+                                    provider_host=(urlsplit(self.endpoint.base_url).hostname or "").lower())
+        if evidence.failure_class not in FALLOVER_CLASSES:
+            return False
+        refused = route.pop(0)
+        await response.aclose()
+        await self._accounts.limited(self.endpoint, refused, replace(evidence, account=refused))
+        logger.warning("%s: account %s refused %s with %s; sending it on account %s", self.endpoint.id, refused, request.model, evidence.failure_class, route[0])
+        await self._accounts.switched(self.endpoint, request, refused, route[0], evidence.failure_class)
+        return True
+
     async def _observe_failure(self, request: LLMRequest, reservation: str | None, status: int,
-                               text: str, headers: httpx.Headers) -> FailureEvidence:
+                               text: str, headers: httpx.Headers, account: str = "") -> FailureEvidence:
         evidence = failure_evidence(status, text, headers, provider_kind=self.endpoint.kind,
                                     provider_host=(urlsplit(self.endpoint.base_url).hostname or "").lower())
+        if account:
+            evidence = replace(evidence, account=account)
         if self._context_refusal is not None and status in (400, 413, 422):
             window = stated_window(text)
             if window:
@@ -1194,9 +1250,9 @@ class OpenAICompatibleProvider(ILLMProvider):
     def _url(self, path: str) -> str:
         return self.endpoint.base_url.rstrip("/") + path
 
-    def _headers(self, request: LLMRequest | None = None) -> dict[str, str]:
+    def _headers(self, request: LLMRequest | None = None, account: str = "") -> dict[str, str]:
         # The key proxy meters calls that do not carry this mark (a shell's curl); the bot records its own.
-        headers = {"content-type": "application/json", "x-daedalus-metered": "1", **self.endpoint.extra_headers}
+        headers = {"content-type": "application/json", "x-daedalus-metered": "1", **self.endpoint.extra_headers, **account_header(account)}
         if self.endpoint.api_key:
             headers["authorization"] = f"Bearer {self.endpoint.api_key}"
         if self.endpoint.kind == "opencode":
@@ -1273,6 +1329,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         reservation: str | None = None,
         *,
         timing: CallTiming | None = None,
+        account: str = "",
     ) -> float | None:
         """Price the call and book it. ``timing`` is a streamed call's clock; a call answered whole has
         none, since its first byte is its whole answer and ``duration_ms`` already says how long that
@@ -1327,8 +1384,12 @@ class OpenAICompatibleProvider(ILLMProvider):
                     first_byte_ms=first_byte_ms,
                     first_token_ms=first_token_ms,
                     output_tokens_per_second=rate,
+                    account=account,
                 )
             )
+        if account and self._accounts is not None:
+            obs = request.observability
+            await self._accounts.served(self.endpoint, account, obs.session_id if obs is not None else None)
         return cost
 
 

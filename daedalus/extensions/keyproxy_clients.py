@@ -60,7 +60,8 @@ def origin(app: Application | Any) -> str:
     return base if any(is_keyproxy_url(p.base_url) for p in app.config.providers.values()) else ""
 
 
-async def _token(app: Application | Any) -> str:
+async def proxy_token(app: Application | Any) -> str:
+    """The bot's API token, which the key proxy takes as proof that a call is the bot's own."""
     token = (getattr(app, "extensions", None) or {}).get("api_token")
     if token:
         return str(token)
@@ -72,7 +73,7 @@ async def _call(app: Application | Any, method: str, path: str, body: dict[str, 
     base = origin(app)
     if not base:
         raise ProxyUnavailable(409, "this installation has no key proxy")
-    headers = {"x-daedalus-token": await _token(app)}
+    headers = {"x-daedalus-token": await proxy_token(app)}
     try:
         async with httpx.AsyncClient(timeout=CALL_TIMEOUT_SECONDS) as client:
             response = await client.request(method, base + path, headers=headers, json=body)
@@ -257,4 +258,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [asyncio.create_task(_watch(app), name="keyproxy-clients")]
 
 
-__all__ = ["ProxyUnavailable", "announce", "check_now", "check_once", "describe", "install", "origin", "revert", "update"]
+__all__ = ["ProxyUnavailable", "announce", "check_now", "check_once", "describe", "install", "origin", "proxy_token", "revert", "update"]

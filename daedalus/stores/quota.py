@@ -219,6 +219,11 @@ async def record_subscriptions(db: Database, subscriptions: dict[str, Any], *, a
     for account, view in subscriptions.items():
         if isinstance(view, dict) and view.get("logged_in") and isinstance(view.get("windows"), list):
             kept += await record(db, str(account), [w for w in view["windows"] if isinstance(w, dict)], source="keyproxy", at=at)
+        # Every account beyond the default is its own plan with its own windows: kept as ``<upstream>@<id>``,
+        # so its forecast is never drawn from another account's readings.
+        for extra, other in ((view.get("accounts") or {}) if isinstance(view, dict) else {}).items():
+            if isinstance(other, dict) and other.get("logged_in") and isinstance(other.get("windows"), list):
+                kept += await record(db, f"{account}@{extra}", [w for w in other["windows"] if isinstance(w, dict)], source="keyproxy", at=at)
     return kept
 
 

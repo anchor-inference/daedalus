@@ -224,6 +224,13 @@ describe("the step in progress", () => {
     const spoke = liveAfter(state, "content_block_delta", { run_id: "r", delta: { type: "text_delta", text: "Hi" } });
     expect(applyLive(base, spoke, Date.now()).providerWait).toBe(false);
   });
+
+  it("names the subscription account a call moved to, and the one it left, as the host says it", () => {
+    let state = liveAfter(EMPTY_LIVE, "message_start", { run_id: "r" });
+    state = liveAfter(state, "account_switch", { run_id: "r", provider: "claude", from: "default", to: "k3v9", from_label: "personal", to_label: "work", reason: "quota" });
+    const turn = applyLive(liveBase(buildTurns([user(1, "go")])), state, Date.now());
+    expect(turn.account).toEqual({ id: "k3v9", label: "work", movedFrom: { id: "default", label: "personal", reason: "quota" } });
+  });
 });
 
 describe("applyLive", () => {
