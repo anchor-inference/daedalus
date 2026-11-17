@@ -84,6 +84,8 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
   const seen = useRef<Map<string, WaitingQuestion> | null>(null);
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  const fatesRef = useRef(fates);
+  fatesRef.current = fates;
   const filesRef = useRef(files);
   filesRef.current = files;
   const root = useRef<HTMLDivElement>(null);
@@ -137,6 +139,27 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
     }
   });
 
+  // An answer the host held for the translator settles on the same events: it reached the session ("answered"),
+  // and the card leaves as sent; or it could not and the question waits again ("opened"), and the card,
+  // which kept the draft, says why. A window that only read the list (a reload) has the host's mark instead.
+  useEvent(["ask.side"], (event) => {
+    const p = event.payload ?? {};
+    if ((p.change !== "answered" && p.change !== "opened") || !Array.isArray(p.ask_ids)) return;
+    const ids = p.ask_ids.map(String).filter((id) => fatesRef.current[id]?.kind === "translating" || !!seen.current?.get(id)?.translating);
+    if (!ids.length) return;
+    if (p.change === "answered") {
+      for (const id of ids) sent.current.add(id);
+      setGhosts((g) => ({ ...g, ...Object.fromEntries(ids.map((id) => [id, g[id] ?? seen.current?.get(id)]).filter(([, q]) => q)) }));
+      setFates((f) => ({ ...f, ...Object.fromEntries(ids.map((id) => [id, { kind: "sent" } as CardFate])) }));
+      setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !ids.includes(id))));
+      setFiles((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.includes(id))));
+    } else {
+      for (const id of ids) sent.current.delete(id);
+      setGhosts((g) => Object.fromEntries(Object.entries(g).filter(([id]) => !ids.includes(id))));
+      setFates((f) => ({ ...f, ...Object.fromEntries(ids.map((id) => [id, { kind: "refused", error: String(p.reason ?? "") } as CardFate])) }));
+    }
+  });
+
   // A card that left is taken off after its moment on screen.
   useEffect(() => {
     const timers = Object.entries(fates)
@@ -170,9 +193,9 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
     for (const [id, q] of Object.entries(ghosts)) if (!byId.has(id)) byId.set(id, q);
     return [...byId.values()];
   }, [questions, ghosts]);
-  const answerable = shown.filter((q) => !fates[q.id] || fates[q.id].kind === "refused");
+  const answerable = shown.filter((q) => { const fate = fateOfCard(q, fates[q.id]); return !fate || fate.kind === "refused"; });
   const batch = batchOf(answerable, drafts, files);
-  const waiting = (questions ?? []).length;
+  const waiting = (questions ?? []).filter((q) => !q.translating).length;
   // While a send is out: the language the operator's typed words are being translated into, when any are.
   // A question the host translated by itself belongs to a translated session, whose answers it translates
   // back before the agent gets them — seconds in which the button alone would only look stuck.
@@ -264,10 +287,14 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
         if (fate.kind === "refused") sent.current.delete(outcome.ask_id);
       }
       const gone = outcomes.filter((o) => nextFates[o.ask_id].kind !== "refused").map((o) => o.ask_id);
-      setGhosts((g) => ({ ...g, ...Object.fromEntries(gone.map((id) => [id, byId.get(id)!]).filter(([, q]) => q)) }));
+      // A held answer keeps its draft until it has reached the session: one that comes back is the operator's
+      // words again, not an empty card. Its ghost carries the answer as the host recorded it, which it shows.
+      const held = new Map(outcomes.filter((o) => nextFates[o.ask_id].kind === "translating").map((o) => [o.ask_id, o.ask]));
+      const done = gone.filter((id) => !held.has(id));
+      setGhosts((g) => ({ ...g, ...Object.fromEntries(gone.map((id) => [id, byId.get(id) && { ...byId.get(id)!, ...(held.get(id) ? { resolution: held.get(id)!.resolution } : {}) }]).filter(([, q]) => q)) }));
       setFates((f) => ({ ...f, ...nextFates }));
-      setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !gone.includes(id))));
-      setFiles((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !gone.includes(id))));
+      setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !done.includes(id))));
+      setFiles((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !done.includes(id))));
       if (stale) toast(t("questions.fate.stale"));
       else if (failed.length) toast(t("focus.ask.failed", { reason: failed[0] }));
       else if (lost) toast(t("questions.sent.some", { n: answered, lost }));
@@ -297,7 +324,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       key={q.id}
       q={q}
       draft={drafts[q.id]}
-      fate={fates[q.id]}
+      fate={fateOfCard(q, fates[q.id])}
       fresh={fresh.has(q.id)}
       files={files[q.id] ?? []}
       onChange={(update) => change(q, update)}
@@ -328,7 +355,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
                 ) : (
                   <span className="truncate">{group.name || t("main.ask.newproject")}</span>
                 )}
-                <span className="questions-count num">{group.items.filter((q) => !fates[q.id]).length || ""}</span>
+                <span className="questions-count num">{group.items.filter((q) => !fateOfCard(q, fates[q.id])).length || ""}</span>
               </header>
               {sections(group.items).flatMap((s) => s.items).map(card)}
             </section>
@@ -338,7 +365,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
             <section key={s.key} className={`questions-section ${s.key}`} aria-label={t(`questions.section.${s.key}`)}>
               <header className="questions-section-head">
                 <span>{t(`questions.section.${s.key}`)}</span>
-                <span className="questions-count num">{s.items.filter((q) => !fates[q.id]).length || ""}</span>
+                <span className="questions-count num">{s.items.filter((q) => !fateOfCard(q, fates[q.id])).length || ""}</span>
               </header>
               {s.items.map(card)}
             </section>
@@ -357,6 +384,12 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       </footer>
     </div>
   );
+}
+
+/** A card's fate: what this window saw happen to it, or, for a window that only read the list, the host's
+ *  word that its answer is with the translator. */
+function fateOfCard(q: WaitingQuestion, fate: CardFate | undefined): CardFate | undefined {
+  return fate ?? (q.translating ? { kind: "translating", to: q.translating.to } : undefined);
 }
 
 function answersTranslatedInto(batch: QuestionAnswer[], questions: WaitingQuestion[]): string {
@@ -509,6 +542,7 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
         </>
       )}
       {translated.line}
+      {fate?.kind === "translating" && <div className="q-answer">{heldWords(asked)}</div>}
       {q.suggestion && <div className="q-suggestion"><Icon name="conductor" size={12} />{t("main.ask.suggests", { text: q.suggestion })}</div>}
       {!gone && chips.length > 0 && (
         <div
@@ -583,6 +617,14 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
   );
 }
 
+/** The answer the host took, as the operator gave it: the options picked and the words beside them. */
+function heldWords(q: WaitingQuestion): string {
+  const r = q.resolution ?? {};
+  const picked = (r.selected ?? []).join(", ");
+  const words = r.note || r.text || "";
+  return picked && words ? `${picked} — ${words}` : picked || words;
+}
+
 /** What a draft still lacks, in a few words. */
 function whyNotReady(q: WaitingQuestion, d: Draft): string {
   if (isPermission(q)) return d.choice === "because" ? t("questions.why.reason") : "";
@@ -591,6 +633,7 @@ function whyNotReady(q: WaitingQuestion, d: Draft): string {
 
 function FateLine({ fate, onDismiss }: { fate: CardFate; onDismiss: () => void }) {
   if (fate.kind === "stale") return <span className="q-fate warn"><Icon name="alert" size={13} />{t("questions.fate.stale")}</span>;
+  if (fate.kind === "translating") return <span className="q-fate faint" role="status" data-fate="translating"><span className="live-dot" />{t("translation.out.pending", { lang: fate.to.toUpperCase() })}</span>;
   if (fate.kind === "sent") {
     return fate.failed ? (
       <span className="q-fate bad"><Icon name="alert" size={13} />{t("focus.ask.failed", { reason: fate.failed })}</span>

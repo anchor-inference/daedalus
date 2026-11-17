@@ -271,7 +271,8 @@ async def test_an_answer_that_cannot_reach_the_session_leaves_its_question_waiti
     again = await manager.asks.get(logo.id)
     assert again is not None and again.open and again.resolution == {}
     assert [q["id"] for q in await questions.waiting(app, session_id=sid)] == [logo.id]
-    assert (await side_events(manager, sid))[-1] == {"change": "opened", "ask_ids": [logo.id]}
+    # With the reason: a window whose answer the host held for the translator learns there why it came back.
+    assert (await side_events(manager, sid))[-1] == {"change": "opened", "ask_ids": [logo.id], "reason": "daily budget exceeded"}
 
 
 async def test_a_list_answers_only_its_own_session_and_the_operator_can_put_one_aside(app: Any) -> None:

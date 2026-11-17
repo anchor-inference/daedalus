@@ -216,6 +216,8 @@ class Application:
         resumed = await self.manager.resume_unfinished()
         if resumed:
             await self.notice(f"Resumed {len(resumed)} run(s) after restart.", kind="startup", quiet=True)
+        # After the runs, which a message delivered first would have found idle and started a second time.
+        await self.manager.resume_translating()
         if stale := self.manager.stale_runs:
             # Natively the agent is a process under the launcher, so closing the window is a stop.
             # A run that was working when it happened is worth a line: the operator's question the

@@ -312,7 +312,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const sideQuestions = panelContext === "session";
   const questionScope = useMemo<QuestionScope | null>(() => (orchestrating ? { projectId: focus!.projectId } : main ? "all" : sideQuestions ? { sessionId: id } : null), [orchestrating, focus?.projectId, main, sideQuestions, id]);
   const questions = useQuestions(questionScope);
-  const waiting = questions.questions?.length ?? 0;
+  // An answered side question still with the translator stays on the list, as translating; it no longer
+  // waits for the operator, so it is not counted.
+  const waiting = questions.questions?.filter((q) => !q.translating).length ?? 0;
   // A session's side questions have a tab only while some wait (or the tab is open, so the cards just
   // answered can say so before they go); the orchestrator's and the main chat's lists always do.
   const questionsShown = !!questionScope && (!sideQuestions || panelTabs.includes("questions"));
@@ -959,8 +961,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       } else if (event === "message_translating") {
         const list = readTranslating(p.translating);
         setDetail((prev) => (prev ? { ...prev, translating: list } : prev));
-        const settled = p.settled as { id?: string; text?: string; outcome?: string; error?: string } | undefined;
-        if (settled?.id) {
+        const settled = p.settled as { id?: string; kind?: string; text?: string; outcome?: string; state?: string; error?: string } | undefined;
+        if (settled?.id && settled.kind === "answer") {
+          // The card's answer: it reached the agent and the run goes on, or it came back and the card,
+          // which kept what was picked, offers it again. Its words went as written when the translator failed.
+          if (settled.outcome === "refused") toast(t("translation.answer.refused", { reason: settled.error ?? "" }));
+          else if (settled.state === "failed") toast(t("translation.answer.failed", { reason: settled.error ?? "" }));
+          refreshSoon("state");
+        } else if (settled?.id && settled.kind === "side") {
+          // The Questions tab hears the same outcome on its own events and draws it on the cards.
+          refreshSoon("tail");
+        } else if (settled?.id) {
           const done = settled.id;
           if (settled.outcome === "refused") {
             // The host could not deliver it after all: the words go back into the field, as a stop's do.
@@ -1415,7 +1426,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function answer(answers: Answer[]) {
     try {
-      await api.post(`/api/sessions/${id}/answer`, { answers });
+      const result = await api.post<{ translating?: TranslatingMessage }>(`/api/sessions/${id}/answer`, { answers });
+      // Taken, and with the translator: the card says so at once rather than offer the options again
+      // until the session is read.
+      const held = result?.translating;
+      if (held?.id) setDetail((prev) => (prev ? { ...prev, translating: [...(prev.translating ?? []).filter((m) => m.id !== held.id), held] } : prev));
     } finally {
       // Refused too: a question someone else answered is then drawn as answered rather than left
       // offering options whose send can only be refused again.
@@ -2126,6 +2141,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             questions={detail?.pending?.questions ?? null}
             answered={detail?.pending?.answered ?? null}
             onAnswer={answer}
+            answerTranslating={heldAnswer(detail?.translating)}
             approval={approval}
             onApprove={approve}
             similar={similar && similar.key === approval?.key ? similar.label : null}
@@ -2485,10 +2501,17 @@ function readTranslating(raw: unknown): TranslatingMessage[] {
  * host acknowledged it, for as long as the host lists it.
  */
 export function pendingRows(sending: SendingMessage[], host: TranslatingMessage[] | undefined): { id: string; text: string; translating: string }[] {
-  const listed = host ?? [];
+  // Answers are the question card's to draw, and side answers the Questions tab's; only messages are bubbles.
+  const listed = (host ?? []).filter((h) => (h.kind ?? "message") === "message");
   const own = sending.map((m) => ({ id: m.id, text: m.text, translating: m.translating && (!m.acked || listed.some((h) => h.id === m.id)) ? m.translating : "" }));
   const others = listed.filter((h) => !sending.some((m) => m.id === h.id)).map((h) => ({ id: h.id, text: h.text, translating: h.to }));
   return [...own, ...others];
+}
+
+/** The operator's answer to the waiting question while the translator has it, as the question card draws it. */
+export function heldAnswer(host: TranslatingMessage[] | undefined): { text: string; to: string } | null {
+  const held = (host ?? []).find((h) => h.kind === "answer");
+  return held ? { text: held.text, to: held.to } : null;
 }
 
 /** A message sent and not yet in the transcript; while the translator has it, it says so under the words. */

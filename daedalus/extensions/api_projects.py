@@ -994,8 +994,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         staged: list[Attachment] = []
         try:
             items = await read_batch(request, staged)
+            # A session's side answers with words for its translator are acknowledged before it answers; the
+            # held batch keeps its files, which it moves out of the staging this removes below.
             return await questions.answer(app, [i.model_dump(exclude_none=True) for i in items], project_id=project_id, via=via,
-                                          session_id=session_id, uploads=staged)
+                                          session_id=session_id, uploads=staged, background_translation=session_id is not None)
         except questions.Unanswerable as exc:
             raise HTTPException(400, str(exc)) from exc
         except RuntimeError as exc:

@@ -131,6 +131,9 @@ export type ComposerProps = {
   onSteer?: (message: QueuedMessage) => void;
   questions?: Question[] | null;
   onAnswer?: (answers: Answer[]) => Promise<void>;
+  /** The operator's answer to the waiting question, taken by the host and still with the translator: the
+   *  card shows it as translating instead of offering the options again. */
+  answerTranslating?: { text: string; to: string } | null;
   /** The waiting question was settled elsewhere: drawn as answered, with who and what, in place of
    *  options whose send could only be refused. */
   answered?: PendingAnswered | null;
@@ -652,7 +655,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       {asking && !approval && props.onAnswer && (
-        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} />
+        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} held={props.answerTranslating ?? null} />
       )}
       {paletteItems.length + skillItems.length > 0 && (
         <div className="palette" role="listbox">

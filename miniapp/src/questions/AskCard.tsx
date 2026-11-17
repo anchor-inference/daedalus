@@ -46,12 +46,15 @@ type Props = {
   /** The agent's language when the session translates: what the operator typed is translated before the
    *  agent gets it, which can take seconds, and the card says so rather than only "Sending…". */
   translateTo?: string;
+  /** The answer the host took and is translating for the agent: the card shows it, translating, and takes
+   *  no other until it reaches the agent or comes back. What was picked here stays for that case. */
+  held?: { text: string; to: string } | null;
   toast: (text: string) => void;
 };
 
 const MISSING_KEY: Record<Missing, string> = { pick: "ask.need.pick", pickAny: "ask.need.pickAny", write: "ask.need.write", other: "ask.need.other" };
 
-export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast, translateTo }, ref) {
+export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast, translateTo, held }, ref) {
   const n = questions.length;
   const [drafts, setDrafts] = useState<AskDraft[]>(() => blankDrafts(questions));
   const [step, setStep] = useState(0);
@@ -89,7 +92,7 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
   }
 
   async function primary() {
-    if (sending) return;
+    if (sending || held) return;
     if (!enabled) {
       // Pressed while something is missing (the Reply circle is always live): show where.
       moved.current = true;
@@ -158,6 +161,25 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
         ? plural("ask.need.more", left.length, { which: left.map((i) => questions[i].header || `${i + 1}`).join(", ") })
         : missing ? t(MISSING_KEY[missing]) : "";
   const label = sending ? t("ask.sending") : go === "next" ? t("ask.next") : go === "review" ? t("ask.review") : n > 1 ? t("ask.send.all") : t("ask.send.one");
+
+  if (held) {
+    // Drawn in place of the steps; the card keeps what was picked in them, so a refusal hands it back.
+    return (
+      <section ref={root} className={`ask held ${phone ? "phone" : ""}`} role="group" aria-label={t("composer.question")} data-held="translating">
+        <header className="ask-head">
+          <Icon name="question" size={14} />
+          <span className="ask-eyebrow">{t("composer.question")}</span>
+        </header>
+        <div className="ask-body">
+          <p className="ask-held-q">{questions.map((x) => x.translation?.question || x.question).join(" · ")}</p>
+          <p className="ask-held-a">{held.text}</p>
+        </div>
+        <footer className="ask-foot">
+          <span className="ask-hint" role="status"><span className="live-dot" />{t("translation.out.pending", { lang: held.to.toUpperCase() })}</span>
+        </footer>
+      </section>
+    );
+  }
 
   return (
     <section ref={root} className={`ask ${phone ? "phone" : ""}`} role="group" aria-label={t("composer.question")} data-step={reviewing ? "review" : step} data-steps={n} onKeyDown={onKeyDown}>

@@ -194,11 +194,15 @@ export type CardFate =
   | { kind: "withdrawn"; reason: string; hadDraft: boolean; agent?: boolean }
   | { kind: "elsewhere" }
   | { kind: "aside" }
-  | { kind: "refused"; error: string };
+  | { kind: "refused"; error: string }
+  // Taken, and its typed words with the translator on their way to the session: the card stays, shows the
+  // answer as translating, and takes no input until the host says it got there or it waits again.
+  | { kind: "translating"; to: string };
 
 /** How a card leaves or stays once the host answered its item. */
 export function fateOf(outcome: QuestionOutcome, line: (ask: NonNullable<QuestionOutcome["ask"]>) => string): CardFate {
   if (outcome.state === "answered" && outcome.applied === false) return { kind: "stale" };
+  if (outcome.state === "answered" && outcome.translating) return { kind: "translating", to: outcome.translating.to };
   if (outcome.state === "answered") return outcome.delivered === false && outcome.error ? { kind: "sent", failed: outcome.error } : { kind: "sent" };
   if (outcome.state === "conflict") {
     if (outcome.withdrawn) return { kind: "withdrawn", reason: String(outcome.ask?.resolution?.closed ?? ""), hadDraft: true };

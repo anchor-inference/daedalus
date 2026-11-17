@@ -27,6 +27,7 @@ from daedalus.stores.staff import TITLE_MAX, Ask, StaffError
 
 if TYPE_CHECKING:
     from daedalus.app import Application
+    from daedalus.host.held_inputs import HeldInput, WaitTurn
     from daedalus.host.session_runner import Attachment, SessionManager, SessionState
 
 logger = logging.getLogger(__name__)
@@ -257,41 +258,109 @@ def delivery_text(answered: Sequence[tuple[Ask, Sequence[str]]], said: dict[str,
     return head + "\n\n" + "\n\n".join(blocks)
 
 
-async def deliver(app: Application, session_id: str, answered: Sequence[tuple[Ask, Sequence[str]]], attachments: Sequence[Attachment]) -> str:
+async def deliver(app: Application, session_id: str, answered: Sequence[tuple[Ask, Sequence[str]]], attachments: Sequence[Attachment], *, hold_as: str = "") -> str:
     """Hand a batch of answers to the session that asked: a steer while it works, a turn when idle.
 
     Returns the error text when it could not be delivered (no model, the daily budget spent, a
     read-only folder for the files). The questions are then opened again, so an answer that never
     reached the agent is asked for again rather than lost behind a closed row; the caller shows the
-    error on each card."""
+    error on each card.
+
+    ``hold_as`` (the app's sends) acknowledges a batch with typed words in a translated session at once:
+    it is kept under that id until the translator is done and delivered then, in its place among the
+    session's other held inputs (:mod:`daedalus.host.held_inputs`), with ``""`` returned now. A refusal
+    after that opens the questions again in the same way and says so on the session's stream."""
     manager = _manager(app)
-    said: dict[str, str] = {}
-    translated: dict[str, Any] | None = None
     state = await manager.get_state(session_id)
     languages = manager.translations.pair_of(state) if state is not None else None
-    if state is not None and languages is not None:
-        # The options chosen are the agent's own words already; what the operator typed is translated, as
-        # their messages are, so the agent reads one language. The row keeps the words as typed.
-        for ask_row, _files in answered:
-            r = ask_row.resolution
-            picked = ", ".join(str(s) for s in r.get("selected") or [])
-            typed = str(r.get("note") or "") if picked else str(r.get("text") or "")
-            if typed.strip():
-                words = await manager.translations.answer_words(state, typed)
-                said[ask_row.id] = f"{picked} — {words}" if picked else words
-        # The chat shows the operator's side, with "show what the agent got", as for a message of theirs.
-        operator, agent = languages
-        translated = {"direction": "out", "state": "done", "from": operator, "to": agent, "text": delivery_text(answered, shown=True)}
+    if hold_as and languages is not None and any(_typed(ask_row).strip() for ask_row, _files in answered):
+        manager.held.kinds.setdefault("side", lambda held, wait_turn: _deliver_held(app, held, wait_turn))
+        await manager.held.hold(
+            session_id, held_id=hold_as, kind="side",
+            entry={"text": "\n".join(answer_words(ask_row) for ask_row, _files in answered), "from": languages[0], "to": languages[1],
+                   "ask_ids": [ask_row.id for ask_row, _files in answered]},
+            delivery={"asks": [{"id": ask_row.id, "files": list(files)} for ask_row, files in answered]},
+            attachments=list(attachments),
+        )
+        # Other windows read the list again, where the questions are now answered and translating.
+        await _announce(manager, session_id, "translating", [ask_row.id for ask_row, _files in answered])
+        return ""
+    said, translated = await _translated(manager, state, answered)
     try:
         await manager.submit(session_id, delivery_text(answered, said), list(attachments), steer=True, as_answer=False, origin=ORIGIN, translated=translated)
     except (RuntimeError, KeyError, OSError) as exc:
         logger.warning("could not hand the side answers to %s", session_id, exc_info=True)
-        reopened = [a.id for a, _ in answered if await manager.asks.reopen(a.id)]
-        if reopened:
-            await _announce(manager, session_id, "opened", reopened)
+        await _reopen(manager, session_id, answered, str(exc) or type(exc).__name__)
         return f"{exc or type(exc).__name__}; the question waits again"
     await _announce(manager, session_id, "answered", [a.id for a, _ in answered])
     return ""
+
+
+def _typed(ask_row: Ask) -> str:
+    """What the operator wrote in an answer: the note beside a chosen option, or the answer itself."""
+    r = ask_row.resolution
+    return str(r.get("note") or "") if r.get("selected") else str(r.get("text") or "")
+
+
+async def _translated(manager: SessionManager, state: SessionState | None, answered: Sequence[tuple[Ask, Sequence[str]]]) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """The answers' words as the agent is to read them, and the mark of the message that carries them."""
+    languages = manager.translations.pair_of(state) if state is not None else None
+    if state is None or languages is None:
+        return {}, None
+    said: dict[str, str] = {}
+    failed = ""
+    # The options chosen are the agent's own words already; what the operator typed is translated, as
+    # their messages are, so the agent reads one language. The row keeps the words as typed.
+    for ask_row, _files in answered:
+        picked = ", ".join(str(s) for s in ask_row.resolution.get("selected") or [])
+        if (typed := _typed(ask_row)).strip():
+            words, error = await manager.translations.answer_words(state, typed)
+            failed = failed or error
+            said[ask_row.id] = f"{picked} — {words}" if picked else words
+    # The chat shows the operator's side, with "show what the agent got", as for a message of theirs; or,
+    # when the translator failed, that the words went as written.
+    operator, agent = languages
+    mark: dict[str, Any] = {"direction": "out", "state": "failed" if failed else "done", "from": operator, "to": agent, "text": delivery_text(answered, shown=True)}
+    if failed:
+        mark["error"] = failed
+    return said, mark
+
+
+async def _reopen(manager: SessionManager, session_id: str, answered: Sequence[tuple[Ask, Sequence[str]]], reason: str) -> None:
+    reopened = [a.id for a, _ in answered if await manager.asks.reopen(a.id)]
+    if reopened:
+        # With the reason: a window whose answer was held hears here that it came back, and why.
+        await _announce(manager, session_id, "opened", reopened, reason=reason[:REASON_MAX])
+
+
+async def _deliver_held(app: Application, held: HeldInput, wait_turn: WaitTurn) -> dict[str, Any]:
+    """A held batch of answers, translated and handed on in its turn; refused with the questions open again."""
+    manager = _manager(app)
+    session_id = held.session_id
+    if (receipt := await manager.live.receipt(session_id, held.id)) is not None and receipt["status"] != "accepted":
+        # Handed on by the process before a restart, which stopped before it could clear the row.
+        return {}
+    answered: list[tuple[Ask, list[str]]] = []
+    for item in held.delivery.get("asks") or []:
+        if (ask_row := await manager.asks.get(str(item.get("id") or ""))) is not None:
+            answered.append((ask_row, [str(name) for name in item.get("files") or []]))
+    if not answered:
+        raise RuntimeError("the questions are gone")
+    state = await manager.get_state(session_id)
+    said, translated = await _translated(manager, state, answered)
+    await wait_turn()
+    try:
+        # Under the held id, which a receipt keeps: delivered once even if a restart comes before the row goes.
+        await manager.submit(session_id, delivery_text(answered, said), held.attachments, steer=True, as_answer=False, origin=ORIGIN,
+                             translated=translated, client_message_id=held.id)
+    except (RuntimeError, KeyError, OSError) as exc:
+        if manager.shutting_down:
+            raise
+        logger.warning("could not hand the side answers to %s", session_id, exc_info=True)
+        await _reopen(manager, session_id, answered, str(exc) or type(exc).__name__)
+        raise RuntimeError(f"{exc or type(exc).__name__}; the question waits again") from exc
+    await _announce(manager, session_id, "answered", [a.id for a, _ in answered])
+    return {"state": str((translated or {}).get("state") or ""), **({"error": str(translated["error"])[:300]} if translated and translated.get("error") else {})}
 
 
 async def _announce(manager: SessionManager, session_id: str, change: str, ask_ids: list[str], *, reason: str = "") -> None:
@@ -316,6 +385,8 @@ async def install(app: Application) -> list[Any]:
         return await service(app, op, **kwargs)
 
     manager.service_hooks["side_questions"] = hook
+    # Here as well as where a batch is first held: a batch the last process held is delivered at the start.
+    manager.held.kinds["side"] = lambda held, wait_turn: _deliver_held(app, held, wait_turn)
 
     async def stopped(session_id: str, run_id: str) -> None:
         await withdraw_stopped(app, session_id, run_id)

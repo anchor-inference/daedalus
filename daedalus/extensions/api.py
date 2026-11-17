@@ -4494,10 +4494,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/sessions/{session_id}/answer")
     async def answer(session_id: str, body: AnswerBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            run_id = await manager.answer(session_id, body.answers, via=front_of(_))
+            # Typed words in a translated session go to the translator after the answer is acknowledged: the
+            # card says they are translating, and does not sit on "Sending…" for as long as it takes.
+            run_id = await manager.answer(session_id, body.answers, via=front_of(_), background_translation=True)
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
-        return {"run_id": run_id}
+        held = next((entry for entry in manager.translating(session_id) if entry.get("kind") == "answer"), None) if not run_id else None
+        return {"run_id": run_id, **({"translating": held} if held else {})}
 
     @api.delete("/api/sessions/{session_id}")
     async def delete_session(session_id: str, keep_workspace: bool = False, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

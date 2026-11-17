@@ -10168,6 +10168,8 @@ Object.assign(DICT, {
   "translation.out.failed": { en: "Not translated — sent as written", ru: "Не переведено — отправлено как есть" },
   "translation.out.pending": { en: "Translating to {lang}…", ru: "Перевожу на {lang}…" },
   "translation.out.refused": { en: "Not sent: {reason}. Your words are back in the field.", ru: "Не отправлено: {reason}. Ваши слова снова в поле ввода." },
+  "translation.answer.refused": { en: "Answer not sent: {reason}. The question waits for it again.", ru: "Ответ не отправлен: {reason}. Вопрос снова ждёт ответа." },
+  "translation.answer.failed": { en: "Not translated — the answer went as written: {reason}", ru: "Не переведено — ответ отправлен как есть: {reason}" },
   "translation.in.pending": { en: "Translating into {lang}…", ru: "Перевожу на {lang}…" },
   "translation.in.done": { en: "Translated {from} → {to}", ru: "Переведено {from} → {to}" },
   "translation.in.original": { en: "Original ({from})", ru: "Оригинал ({from})" },

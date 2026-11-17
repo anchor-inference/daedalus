@@ -86,6 +86,10 @@
 .ask-foot { display: flex; align-items: center; gap: var(--space-2); padding-top: 10px; border-top: 1px solid var(--line); }
 .ask-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg-3); font-size: var(--fs-12); }
 .ask-hint.need { color: var(--fg-2); }
+/* The answer the host took and is translating: the question in a line, the answer under it, no controls. */
+.ask.held .ask-held-q { margin: 0; color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.ask.held .ask-held-a { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask.held .ask-hint { text-align: left; }
 .ask-foot .btn { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ctl-h); }
 .ask-foot .btn .ic { margin: 0; vertical-align: 0; }
 .ask-back { background: transparent; border-color: transparent; color: var(--fg-2); padding-left: 6px; }

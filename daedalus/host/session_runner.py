@@ -119,6 +119,7 @@ from daedalus.host.events import AppEvent, EventBus, EventFilter
 from daedalus.host.filesystem import foreign_paths
 from daedalus.host.foreign_sessions import harness_name
 from daedalus.host.handoff import Handoff
+from daedalus.host.held_inputs import HeldInput, HeldInputs
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
@@ -295,9 +296,11 @@ class HostEventType(StrEnum):
     """The run's model endpoint refused the connection and the request waits for it: ``{provider, retry_in}``,
     then ``retry_in: None`` once it answers or the wait is over. Live only."""
     TRANSLATING = "message_translating"
-    """The operator's messages still with the translator, whole (``translating``: ``{id, text, from, to, at}``
-    each), and the one that just left it (``settled``: ``{id, text, outcome, state?, error?}``, ``outcome``
-    being ``sent`` or ``refused``). Live only; a window that opens meanwhile reads the list off the session."""
+    """The operator's inputs still with the translator, whole (``translating``: ``{id, kind, text, from, to,
+    at, files}`` each, ``kind`` being ``message``, ``answer`` (with ``question``, the call it answers) or
+    ``side`` (with ``ask_ids``)), and the one that just left it (``settled``: ``{id, kind, text, outcome,
+    state?, error?}``, ``outcome`` being ``sent`` or ``refused``). Live only; a window that opens meanwhile
+    reads the list off the session."""
     ACCOUNT_SWITCH = "account_switch"
     """A call of the run was refused for its subscription account's limit and went on another account:
     ``{provider, from, to, from_label, to_label, reason}``. Live only; the turn's stamp keeps the account."""
@@ -368,6 +371,15 @@ class Attachment:
     """The blob an image was kept as, once ingested: what the model is shown alongside the words."""
     shown: dict[str, Any] | None = None
     """How the app draws the file once ingested (``attached_files``): the model reads the list in the text."""
+
+
+def _translation_outcome(marks: Sequence[dict[str, Any] | None]) -> dict[str, Any]:
+    """What a held input's ``settled`` event says of its translation: ``failed`` with the reason when any
+    of its words went untranslated, which the app says beside them, else ``done``."""
+    failed = next((mark for mark in marks if mark and mark.get("state") == "failed"), None)
+    if failed is not None:
+        return {"state": "failed", "error": str(failed.get("error") or "")[:300]}
+    return {"state": "done" if any(marks) else ""}
 
 
 def _file_sha256(path: Path) -> str:
@@ -981,12 +993,9 @@ class SessionManager:
         self.control_marks = ControlMarks(self._announce_controls)
         self.translations = translation.Translations(self)
         """The translator between the operator's language and the one a session's agent works in."""
-        self._translating: dict[str, dict[str, dict[str, Any]]] = {}
-        """Per session, the operator's messages acknowledged and still with the translator, by the client's
-        id, oldest first: what the app draws as "translating" until each reaches the session."""
-        self._translation_tail: dict[str, asyncio.Task[Any]] = {}
-        """Per session, the last of those messages' deliveries: the next one waits for it, so the agent
-        reads them in the order they were sent however long each translation took."""
+        self.held = HeldInputs(self)
+        """The operator's words acknowledged and still with the translator, kept until they reach the session."""
+        self.held.kinds.update(message=self._deliver_held_message, answer=self._deliver_held_answer)
         """What each session controls right now (the operator's Chrome, their computer), kept apart from
         what it was made for; the browser service and the computer's watcher recompute it."""
         """Called with the session id before a session is removed (extensions release what they hold for it)."""
@@ -1068,6 +1077,8 @@ class SessionManager:
         await self.workspace_units.load()
         await self.bus.start()
         await self.presence.load()
+        # Listed from the start, before they are delivered: a window opened meanwhile still draws them.
+        await self.held.load()
         self.bus.on(EventFilter(types=("presence",)), self._on_presence, name="unread-result")
         # The policy is built inside a tool call and cannot wait on a query; this is where the project
         # roots it compares against are read — and where a folder of our own that is not on disk is
@@ -1144,6 +1155,9 @@ class SessionManager:
             _done, unfinished = await asyncio.wait(housekeeping, timeout=grace)
             if unfinished:
                 logger.warning("%d run(s) were still being written down after %.0f s; the shutdown cancels them", len(unfinished), grace)
+        # Before the runs: a delivery waiting for the translator would otherwise be waited for below, and
+        # then refused for the stopping process. Interrupted, it keeps its row for the next start.
+        await self.held.stop()
         tasks = [t for s in self._states.values() for t in (s.task, s.outage_task, s.housekeeping) if t and not t.done()]
         for task in tasks:
             task.cancel()
@@ -3963,18 +3977,15 @@ class SessionManager:
         )
 
     def translating(self, session_id: str) -> list[dict[str, Any]]:
-        """The operator's messages of a session acknowledged and still with the translator, oldest first."""
-        return [dict(entry) for entry in self._translating.get(session_id, {}).values()]
+        """The operator's inputs of a session acknowledged and still with the translator, oldest first."""
+        return self.held.listed(session_id)
 
-    async def _announce_translating(self, session_id: str, settled: dict[str, Any] | None = None) -> None:
-        payload: dict[str, Any] = {"session_id": session_id, "translating": self.translating(session_id)}
-        if settled is not None:
-            payload["settled"] = settled
-        state = self._states.get(session_id)
-        try:
-            await self._notify_sinks(session_id, HostEvent(HostEventType.TRANSLATING, (state.run_id if state is not None else "") or "", payload))
-        except Exception:  # noqa: BLE001 — the list is on the session; a window that missed the event reads it there
-            logger.warning("could not announce the translating messages of session %s", session_id, exc_info=True)
+    async def resume_translating(self) -> int:
+        """Translate and deliver what the last process acknowledged and did not get to hand on.
+
+        Called once the runs it left behind are resumed: a message delivered before its run was would
+        start a second one, and an answer needs the question it answers restored."""
+        return await self.held.resume()
 
     async def _translate_then_submit(
         self, state: SessionState, text: str, attachments: Sequence[Attachment], *,
@@ -3990,11 +4001,11 @@ class SessionManager:
         session refuses later (the daily budget, a folder gone) is ``settled`` as ``refused`` with the
         reason and the words, which the app puts back into the composer.
 
-        The translations run side by side; the deliveries do not. Each waits for the one sent before it,
-        so two messages sent a second apart reach the agent — or its queue, where waiting messages are
-        merged as always — in the order they were written, whichever translation came back first."""
+        The translations run side by side; the deliveries do not (:mod:`daedalus.host.held_inputs`), so two
+        messages sent a second apart reach the agent — or its queue, where waiting messages are merged as
+        always — in the order they were written, whichever translation came back first."""
         session_id = state.session.id
-        if client_message_id in self._translating.get(session_id, {}):
+        if self.held.holds(session_id, client_message_id):
             return "held"  # the same send again, while its first copy is still with the translator
         if (receipt := await self.live.receipt(session_id, client_message_id)) is not None:
             return "known" if receipt["status"] != "accepted" else ""
@@ -4002,58 +4013,52 @@ class SessionManager:
             raise NoModelConfigured
         if expected_running is not None and bool(state.running) != expected_running:
             raise RuntimeError("the run changed since the message was composed; review its destination and send again")
+        if self.held.holds(session_id, client_message_id):
+            return "held"  # the same send, racing its first copy through the receipt read
         languages = self.translations.pair_of(state)
         operator, agent = languages if languages is not None else ("", "")
         shown = translation.without_reply_quote(text, {"daedalus.reply_to": reply_to} if reply_to else {})
-        self._translating.setdefault(session_id, {})[client_message_id] = {"id": client_message_id, "text": shown, "from": operator, "to": agent, "at": datetime.now(UTC).isoformat(), "files": [Path(a.name or a.path.name).name for a in attachments]}
-        # The front deletes its staged files when this call returns: the delivery keeps its own, renamed.
-        kept: list[Attachment] = []
-        for item in attachments:
-            moved = item.path.with_name(f"{item.path.name}.translating")
-            item.path.rename(moved)
-            kept.append(replace(item, path=moved))
-        # Placed in the order with no await between the check above and here: two sends racing through an
-        # await could otherwise each take the other for the one before.
-        previous = self._translation_tail.get(session_id)
-        task = self._spawn_background(
-            self._deliver_translated(state, text, kept, client_message_id=client_message_id, previous=previous, shown=shown, kwargs=kwargs),
-            f"translate-send:{session_id}",
+        await self.held.hold(
+            session_id, held_id=client_message_id, kind="message", entry={"text": shown, "from": operator, "to": agent},
+            delivery={"text": text, "kwargs": kwargs}, attachments=list(attachments),
         )
-        self._translation_tail[session_id] = task
         return "held"
 
-    async def _deliver_translated(
-        self, state: SessionState, text: str, attachments: list[Attachment], *,
-        client_message_id: str, previous: asyncio.Task[Any] | None, shown: str, kwargs: dict[str, Any],
-    ) -> None:
-        session_id = state.session.id
-        settled: dict[str, Any] = {"id": client_message_id, "text": shown}
-        try:
-            # Said by the delivery itself, so it always reaches a window before the same message's "settled".
-            await self._announce_translating(session_id)
-            outgoing = await self.translations.outgoing(state, text)
-            if previous is not None and not previous.done():
-                # Its outcome is its own to report; only its place in the order matters here.
-                await asyncio.wait([previous])
-            await self.submit(session_id, text, attachments, client_message_id=client_message_id, _outgoing=outgoing, **kwargs)
-            settled.update(outcome="sent", state=str((outgoing.mark or {}).get("state") or ""))
-            if outgoing.mark and outgoing.mark.get("error"):
-                settled["error"] = str(outgoing.mark["error"])[:300]
-        except asyncio.CancelledError:
-            settled.update(outcome="refused", error="the bot stopped before the message was delivered")
-            raise
-        except Exception as exc:  # noqa: BLE001 — whatever refused it, the words go back to the operator
-            logger.warning("session %s: a translated message could not be delivered: %s", session_id, exc)
-            settled.update(outcome="refused", error=str(exc) or type(exc).__name__)
-        finally:
-            self._translating.get(session_id, {}).pop(client_message_id, None)
-            if not self._translating.get(session_id):
-                self._translating.pop(session_id, None)
-            if self._translation_tail.get(session_id) is asyncio.current_task():
-                self._translation_tail.pop(session_id, None)
-            for item in attachments:
-                item.path.unlink(missing_ok=True)
-            await self._announce_translating(session_id, settled)
+    async def _deliver_held_message(self, held: HeldInput, wait_turn: Callable[[], Awaitable[None]]) -> dict[str, Any]:
+        session_id = held.session_id
+        if (receipt := await self.live.receipt(session_id, held.id)) is not None and receipt["status"] != "accepted":
+            # Handed on by the process before the restart, which stopped before it could clear the row.
+            return {}
+        state = await self.get_state(session_id)
+        if state is None:
+            raise RuntimeError("the session is gone")
+        text = str(held.delivery.get("text") or "")
+        outgoing = await self.translations.outgoing(state, text)
+        await wait_turn()
+        await self.submit(session_id, text, held.attachments, client_message_id=held.id, _outgoing=outgoing, **dict(held.delivery.get("kwargs") or {}))
+        return _translation_outcome([outgoing.mark])
+
+    async def _deliver_held_answer(self, held: HeldInput, wait_turn: Callable[[], Awaitable[None]]) -> dict[str, Any]:
+        session_id = held.session_id
+        delivery = held.delivery
+        state = await self.get_state(session_id)
+        if state is None:
+            raise RuntimeError("the session is gone")
+        answers = [dict(answer) for answer in delivery.get("answers") or []]
+        marks: list[dict[str, Any] | None] = []
+        for answer in answers:
+            custom = answer.get("custom")
+            if isinstance(custom, str) and custom.strip():
+                outgoing = await self.translations.outgoing(state, custom)
+                answer["custom"] = outgoing.text
+                marks.append(outgoing.mark)
+        await wait_turn()
+        state = await self.get_state(session_id)
+        if state is None or state.pending is None or state.pending.tool_call_id != delivery.get("question"):
+            raise RuntimeError("the question was answered meanwhile")
+        await self.answer(session_id, answers, via=str(delivery.get("via") or "app"), source=str(delivery.get("source") or "user"),
+                          claimed=True, attachments=list(delivery.get("files") or []), _translated=True)
+        return _translation_outcome(marks)
 
     async def submit(
         self,
@@ -4102,9 +4107,10 @@ class SessionManager:
         ``translated`` is the translation mark of a text the caller already put into the agent's language
         (answers to side questions): the operator's own version rides in it, as on a translated message of theirs.
         ``background_translation`` lets a front that draws the message itself (the app) be answered before the
-        translator is: the message is acknowledged with ``""`` at once, announced as translating, and handed
-        on once translated, in the order sent (:meth:`_translate_then_submit`). It needs a
-        ``client_message_id``, which is what the app matches its row by; without one the call waits as before.
+        translator is: the message is acknowledged with ``""`` at once, announced as translating, kept until
+        delivered across a restart, and handed on once translated, in the order sent
+        (:meth:`_translate_then_submit`). It needs a ``client_message_id``, which is what the app matches its
+        row by; without one the call waits as before.
         ``guest`` makes this a guest's turn (:mod:`daedalus.host.guest_turns`). It only ever starts a run
         of its own and raises ``GuestTurnBusy`` otherwise: placed in a running turn or a queue it would
         be read by a run with the operator's tools, and a queued item is merged with whatever else waits.
@@ -4125,21 +4131,24 @@ class SessionManager:
         if _outgoing is not None:
             # Translated already, by the background delivery that acknowledged this message.
             text, mark = _outgoing.text, _outgoing.mark
-        elif origin == "operator" and guest is None and _provider_resume is None and not answering:
-            # A reply to a question is translated where every answer is, in ``answer``: translated here as
-            # well, it would cost a second call that returns the same English.
+        elif origin == "operator" and guest is None and _provider_resume is None:
             held = ""
             if background_translation and client_message_id and text.strip() and self.translations.pair_of(state) is not None:
                 # The translator may take seconds — up to its whole time limit — and the operator, who
                 # pressed send, saw a frozen composer for all of it: the reply to the send waited for it.
+                # A reply to the agent's question is held the same way; its delivery answers the question
+                # with the words already translated.
                 held = await self._translate_then_submit(
                     state, text, attachments, client_message_id=client_message_id, expected_running=expected_running, reply_to=reply_to,
                     kwargs={"steer": steer, "follow_up": follow_up, "as_answer": as_answer, "via": via, "address": address, "reply_to": reply_to,
-                            "secrets": secrets, "autopilot": autopilot, "visitor": visitor, "operator_words": operator_words},
+                            "secrets": list(secrets), "autopilot": autopilot, "visitor": visitor,
+                            "operator_words": None if operator_words is None else list(operator_words)},
                 )
                 if held == "held":
                     return ""
-            if held != "known":
+            # A reply to a question is translated where every answer is, in ``answer``: translated here as
+            # well, it would cost a second call that returns the same English.
+            if held != "known" and not answering:
                 outgoing = await self.translations.outgoing(state, text)
                 text, mark = outgoing.text, outgoing.mark
         if mark is None and translated:
@@ -4271,7 +4280,7 @@ class SessionManager:
                         receipt, created = await self.live.accept(session_id, client_message_id, "input", receipt_payload)
                         if not created and receipt["status"] != "accepted":
                             return str(receipt["run_id"] or state.run_id or "")
-                    run_id = await self.answer(session_id, [{"custom": body}], via=via, attachments=shown)
+                    run_id = await self.answer(session_id, [{"custom": body}], via=via, attachments=shown, _translated=_outgoing is not None)
                     if client_message_id:
                         await self.live.consume(session_id, client_message_id, run_id=run_id, step_id="answer", message_seq=None)
                     return run_id
@@ -4697,7 +4706,10 @@ class SessionManager:
         body = (text.strip() + "\n\n" if text.strip() else "") + "Attached files:\n" + "\n".join(lines)
         return body, image_refs
 
-    async def answer(self, session_id: str, answers: list[dict[str, Any]], *, via: str, source: str = "user", claimed: bool = False, attachments: Sequence[dict[str, Any]] = ()) -> str:
+    async def answer(
+        self, session_id: str, answers: list[dict[str, Any]], *, via: str, source: str = "user", claimed: bool = False,
+        attachments: Sequence[dict[str, Any]] = (), background_translation: bool = False, _translated: bool = False,
+    ) -> str:
         """Resume a run paused on AskUser with the operator's answers.
 
         ``via`` says where it was answered (app, telegram, timeout, cli, …): the other fronts retire
@@ -4708,12 +4720,19 @@ class SessionManager:
         request row elsewhere is answered once, by whoever updates that row first. ``attachments`` are
         the files a free-text reply carried, as the app draws them (``attached_files``): the model reads
         their list in the reply's words, and the record rides beside them on the result.
+        ``background_translation`` acknowledges an answer with typed words in a translated session at once,
+        with ``""``, and answers the question once they are translated (:mod:`daedalus.host.held_inputs`);
+        ``_translated`` is that delivery, whose words are in the agent's language already.
         """
         async with self.db.transaction() as conn:
             await assert_admission_open_in(conn)
         state = await self.get_state(session_id)
         if state is None or state.pending is None or state.engine is None:
             raise RuntimeError("no pending question for this session")
+        if not _translated and self.held.holds_kind(session_id, "answer"):
+            # The operator's answer is with the translator: a second one, from another window or front,
+            # would answer the question under it and leave theirs to be refused.
+            raise RuntimeError("an answer to this question is already being translated for the agent")
         if state.pending.kind == EXTERNAL_CALL:
             # A turn waiting for the operator's terminal asked nothing: its calls are answered by the
             # terminal when it reconnects, or ended with Stop.
@@ -4728,11 +4747,24 @@ class SessionManager:
                     raise RuntimeError(refusal)
             if state.pending is not pending:
                 raise RuntimeError("the question was answered meanwhile")
+        typed = [str(a.get("custom")) for a in answers if isinstance(a.get("custom"), str) and str(a.get("custom")).strip()]
+        if (background_translation and not _translated and typed and source in ("user", "operator")
+                and (languages := self.translations.pair_of(state)) is not None):
+            # The translator may take its whole time limit, and the card showed "Sending…" for all of it.
+            # The claims above are made: the delivery answers as the one that won them.
+            words = "; ".join([*(str(s) for a in answers for s in a.get("selected") or []), *typed])
+            await self.held.hold(
+                session_id, held_id=f"answer:{pending.tool_call_id}", kind="answer",
+                entry={"text": words, "from": languages[0], "to": languages[1], "question": pending.tool_call_id},
+                delivery={"answers": [dict(a) for a in answers], "via": via, "source": source, "question": pending.tool_call_id,
+                          "files": [dict(entry) for entry in attachments]},
+            )
+            return ""
         questions = [q.get("question", "") for q in pending.payload.get("questions", [])]
         shaped = []
         for index, answer in enumerate(answers):
             custom = answer.get("custom")
-            if isinstance(custom, str) and custom.strip() and source in ("user", "operator"):
+            if isinstance(custom, str) and custom.strip() and source in ("user", "operator") and not _translated:
                 # Typed in the operator's language, read by an agent that works in its own: the words go
                 # the way a message does. The options picked are the agent's own labels and stay as they are.
                 custom = (await self.translations.outgoing(state, custom)).text

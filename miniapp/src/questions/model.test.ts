@@ -141,6 +141,9 @@ describe("a send", () => {
     expect(leaves({ kind: "sent" })).toBe(true);
     expect(leaves({ kind: "conflict", by: "operator", line: "" })).toBe(false);
     expect(leaves({ kind: "refused", error: "x" })).toBe(false);
+    // Taken and with the translator: the card stays until the host says the answer reached the session.
+    expect(fateOf(o({ delivered: false, translating: { to: "en" } }), line)).toEqual({ kind: "translating", to: "en" });
+    expect(leaves({ kind: "translating", to: "en" })).toBe(false);
   });
 });
 

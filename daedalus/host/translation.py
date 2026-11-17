@@ -556,18 +556,19 @@ class Translations:
                 logger.warning("could not announce the translation of question %s", ask_id, exc_info=True)
         return mark
 
-    async def answer_words(self, state: SessionState, words: str) -> str:
+    async def answer_words(self, state: SessionState, words: str) -> tuple[str, str]:
         """The operator's own words in an answer to a side question, as the agent is to read them: in its
-        language when the session is translated, as written otherwise or when the translator fails."""
+        language when the session is translated, as written otherwise or when the translator fails — and
+        then the reason beside them, which the delivery's mark carries so the chat says they went as written."""
         languages = self.pair_of(state)
         if languages is None or not words.strip():
-            return words
+            return words, ""
         operator, agent = languages
         try:
-            return await self.translate(words, operator, agent, session_id=state.session.id)
+            return await self.translate(words, operator, agent, session_id=state.session.id), ""
         except TranslationFailed as exc:
             logger.warning("session %s: an answer to a side question goes untranslated: %s", state.session.id, exc)
-            return words
+            return words, str(exc) or type(exc).__name__
 
     async def _mark(self, state: SessionState, key: str, message: Message, mark: dict[str, Any]) -> Message:
         """Write the mark onto the transcript row alone and have the app read the end of the chat again.

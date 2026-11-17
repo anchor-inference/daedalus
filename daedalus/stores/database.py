@@ -4102,6 +4102,25 @@ CREATE TABLE IF NOT EXISTS session_share_visitors (
 );
 """)
 
+# The operator's words acknowledged in a translated session and still with the translator: a message, an
+# answer to the agent's question, a batch of side answers (``daedalus.host.held_inputs``). They lived in
+# memory, and a restart while the translator had them lost words the operator had been told were on their
+# way. ``seq`` is the order they were acknowledged in, which is the order they are delivered in; ``entry``
+# is what the app draws meanwhile and ``delivery`` what hands them on. A row goes once its input is
+# delivered or refused, and with its session.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS translating_inputs (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('message', 'answer', 'side')),
+    entry TEXT NOT NULL,
+    delivery TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (session_id, id)
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

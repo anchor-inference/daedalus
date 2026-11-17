@@ -122,7 +122,17 @@ async def waiting(app: Application, project_id: str | None = None, *, session_id
     # The language a card's "Translate" asks for, on every card: the tab has no other way to know it.
     into = {"translate_into": manager.config.translation.operator_language}
     if session_id is not None:
-        return [{**_side_view(a), **into} for a in await side_questions.waiting(app, session_id)]
+        listed = [{**_side_view(a), **into} for a in await side_questions.waiting(app, session_id)]
+        # Answered, and with the translator on the way to the session: still the operator's to see, as
+        # translating, until it gets there or comes back open.
+        for entry in manager.translating(session_id):
+            if entry.get("kind") != "side":
+                continue
+            for ask_id in entry.get("ask_ids") or []:
+                held = await manager.asks.get(str(ask_id))
+                if held is not None and all(item["id"] != held.id for item in listed):
+                    listed.append({**_side_view(held), **into, "translating": {"to": entry.get("to") or "", "id": entry["id"]}})
+        return listed
     projects = {p.id: p for p in await manager.projects.list()}
     names = {pid: p.name for pid, p in projects.items()}
     if project_id is not None:
@@ -183,6 +193,7 @@ async def answer(
     via: str,
     session_id: str | None = None,
     uploads: Sequence[Attachment] = (),
+    background_translation: bool = False,
 ) -> dict[str, Any]:
     """Answer several requests at once. Every item has its own outcome — answered, lost to an answer
     given elsewhere, refused for its shape, or gone — and one never stops the others. The answers
@@ -190,7 +201,10 @@ async def answer(
     questions as one message.
 
     ``uploads`` are the files sent with the batch; an item names its own by their places in it
-    (``files``). ``session_id`` is the list of one session's side questions, which answers nothing else."""
+    (``files``). ``session_id`` is the list of one session's side questions, which answers nothing else.
+    ``background_translation`` (the app) answers at once when a session's answers carry words for its
+    translator: their items say ``translating`` instead of waiting, and the session's stream says when
+    they have reached it or, refused, that the questions wait again."""
     manager = app.manager
     assert manager is not None
     team = app.extensions.get("staff")
@@ -288,11 +302,15 @@ async def answer(
             if files:
                 handed.setdefault(ask.project_id, []).append((ask, files, result))
     for sid, answered_here in sides.items():
+        held_as = f"side:{batch_id}" if background_translation else ""
         failed = await side_questions.deliver(app, sid, [(a, names) for a, names, _, _ in answered_here],
-                                              [f for _, _, files, _ in answered_here for f in files])
+                                              [f for _, _, files, _ in answered_here for f in files], hold_as=held_as)
+        held = manager.held.entry(sid, held_as) if held_as else None
         for *_, result in answered_here:
-            result["delivered"] = not failed
+            result["delivered"] = not failed and held is None
             result["error"] = failed
+            if held is not None:
+                result["translating"] = {"to": held.get("to") or ""}
     for pid, with_files in handed.items():
         # Before the batch is announced, so the orchestrator woken by it already has the files.
         failed = await _hand_files(app, pid, with_files, via=via)

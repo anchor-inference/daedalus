@@ -1428,9 +1428,12 @@ export type OperatorSteps = {
  *  session's inbox, served at `/api/sessions/<id>/attachments`; `kept` is the id of one kept by handle. */
 export type MessageAttachment = { name: string; mime?: string; size?: number | null; file?: string; kept?: string };
 
-/** An operator's message the host has acknowledged and is still translating for the agent: drawn as
- *  "translating" in the conversation until it reaches the session or is handed back. */
-export type TranslatingMessage = { id: string; text: string; from: string; to: string; at: string; files?: string[] };
+/** What the operator sent that the host has acknowledged and is still translating for the agent: a
+ *  message (drawn as "translating" in the conversation), an answer to the agent's question (`question`,
+ *  the call it answers: its card says "translating") or a batch of side answers (`ask_ids`: their cards in
+ *  the Questions tab do). Each stays listed until it reaches the session or is handed back, across a
+ *  restart of the host too. An entry without `kind` is a message. */
+export type TranslatingMessage = { id: string; kind?: "message" | "answer" | "side"; text: string; from: string; to: string; at: string; files?: string[]; question?: string; ask_ids?: string[] };
 
 export type MessageTranslation = { direction: "in" | "out"; state: "pending" | "done" | "failed"; from: string; to: string; alternate?: string; error?: string };
 
@@ -1906,6 +1909,9 @@ export type WaitingQuestion = Ask & {
   session_id?: string | null;
   /** The operator's language, which the card's "Translate" asks for; absent on a host without it. */
   translate_into?: string;
+  /** Answered, and its typed words still with the translator on their way to the session (`to`, the
+   *  agent's language): the card shows the answer as translating until it gets there or comes back open. */
+  translating?: { to: string; id: string };
 };
 
 /** One answer of a batch sent from the list. `files` are the places of its files among the batch's uploads. */
@@ -1925,6 +1931,8 @@ export type QuestionOutcome = {
   answered_by?: string;
   withdrawn?: boolean;
   ask?: Ask;
+  /** The answer was taken and its typed words are with the translator; `to` is the agent's language. */
+  translating?: { to: string };
 };
 
 /** What GET /api/main answers: the main orchestrator's chat as the app draws it. */

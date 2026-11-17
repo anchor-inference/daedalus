@@ -163,4 +163,22 @@ describe("in a translated session", () => {
     expect(hint()).toBe("Sending…");
     await act(async () => release());
   });
+
+  it("shows an answer the host took as translating, takes no other, and hands the picks back when it returns", async () => {
+    const onSend = vi.fn(async (_answers: Answer[]) => undefined);
+    const ref = createRef<AskCardHandle>();
+    await act(async () => root.render(<AskCard ref={ref} questions={[SEND]} phone={false} onSend={onSend} toast={() => undefined} translateTo="en" />));
+    await click($$(".ask-opt")[1]);
+    await act(async () => root.render(<AskCard ref={ref} questions={[SEND]} phone={false} onSend={onSend} toast={() => undefined} translateTo="en" held={{ text: "No; не сейчас", to: "en" }} />));
+    expect($(".ask")!.dataset.held).toBe("translating");
+    expect($(".ask-held-a")!.textContent).toBe("No; не сейчас");
+    expect(hint()).toBe("Translating to EN…");
+    expect($(".ask-go")).toBeNull();
+    await act(async () => ref.current!.go());
+    expect(onSend).not.toHaveBeenCalled();
+    // Refused after all: the card is the operator's again, with what they picked.
+    await act(async () => root.render(<AskCard ref={ref} questions={[SEND]} phone={false} onSend={onSend} toast={() => undefined} translateTo="en" held={null} />));
+    expect($(".ask")!.dataset.held).toBeUndefined();
+    expect($$(".ask-opt.on").length).toBe(1);
+  });
 });
