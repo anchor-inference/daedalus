@@ -39,6 +39,9 @@ class FailureEvidence:
     reset_source: str | None
     retry_after_at: str | None
     digest: str
+    account: str = ""
+    """The subscription account the refused call went out on; "" for an endpoint without accounts. Not in the
+    digest: the digest names the refusal, and the same refusal on two accounts is the same fact twice."""
 
 
 def _future(value: str, observed: datetime, *, duration: bool = False) -> str | None:

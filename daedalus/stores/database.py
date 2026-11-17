@@ -4037,6 +4037,44 @@ async def _session_bypass(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_bypass))
 
+# 168 — more than one account per subscription (a CLI login or a prepaid plan's key, served by the key proxy).
+# The default account is the login the upstream always had and has no row until it is renamed, moved or rested;
+# every other account is a row, and its credential lives with the key proxy, never here. ``resting_until`` with
+# ``rest_reason`` keeps an account that was refused for its limit out of the chain while another can answer.
+# ``subscription_upstreams`` holds, per upstream, the account a model uses unless it names its own and whether
+# a call moves on to the next account when one is refused for a limit. A call's ``account`` is the one that
+# answered it (usage) or refused it (a failure observation); "" for every call before, and for an upstream
+# with no accounts.
+SUBSCRIPTION_ACCOUNTS_SQL = """
+CREATE TABLE IF NOT EXISTS subscription_accounts (
+    upstream TEXT NOT NULL,
+    id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    resting_until TEXT,
+    rest_reason TEXT NOT NULL DEFAULT '',
+    last_served_at TEXT,
+    PRIMARY KEY (upstream, id)
+);
+CREATE TABLE IF NOT EXISTS subscription_upstreams (
+    upstream TEXT PRIMARY KEY,
+    default_account TEXT NOT NULL DEFAULT 'default',
+    fallover INTEGER NOT NULL DEFAULT 1 CHECK (fallover IN (0, 1))
+);
+"""
+
+
+async def _subscription_accounts(conn: aiosqlite.Connection) -> None:
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    for table in ("usage_events", "provider_failure_observations"):
+        present = {row[1] for row in await (await conn.execute(f"PRAGMA table_info({table})")).fetchall()}
+        if "account" not in present:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN account TEXT NOT NULL DEFAULT ''")
+
+
+MIGRATIONS.append(DataMigration(SUBSCRIPTION_ACCOUNTS_SQL, _subscription_accounts))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

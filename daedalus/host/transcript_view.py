@@ -145,6 +145,9 @@ def message_view(message: Message) -> dict[str, Any]:
         "model": str(produced.get("model") or ""),
         "provider": str(produced.get("provider") or ""),
         "fallback": produced.get("fallback") if isinstance(produced.get("fallback"), dict) else None,
+        # The subscription account that answered, when the endpoint has several (see ``_model_record``).
+        "account": str(produced.get("account") or "") or None,
+        "account_label": str(produced.get("account_label") or "") or None,
         "media": message.metadata.get("daedalus.media", []) if isinstance(message.metadata, dict) else [],
         # The YAGNI switch this turn told the model about (``on``/``off``): the note itself is
         # in the turn context, which no reader is shown, so the app marks the message instead.

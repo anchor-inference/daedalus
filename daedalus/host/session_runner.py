@@ -200,6 +200,7 @@ from daedalus.stores.sqlite import (
     message_text,
 )
 from daedalus.stores.staff import AsksStore, StaffStore
+from daedalus.stores.subscription_accounts import SubscriptionAccounts
 from daedalus.stores.update_drains import UpdateDrainActive, UpdateDrainPaused, assert_admission_open_in
 from daedalus.terminals import endpoint as terminal_endpoint
 from daedalus.terminals.bridge import HostBridge
@@ -291,6 +292,9 @@ class HostEventType(StrEnum):
     PROVIDER_WAIT = "provider_wait"
     """The run's model endpoint refused the connection and the request waits for it: ``{provider, retry_in}``,
     then ``retry_in: None`` once it answers or the wait is over. Live only."""
+    ACCOUNT_SWITCH = "account_switch"
+    """A call of the run was refused for its subscription account's limit and went on another account:
+    ``{provider, from, to, from_label, to_label, reason}``. Live only; the turn's stamp keeps the account."""
 
 
 @dataclass(slots=True)
@@ -915,11 +919,16 @@ class SessionManager:
         """Every tool but the main orchestrator's, MCP proxies included; a session sees the part its policy admits."""
         self.dispatcher_tools = ToolRegistry()
         """The main orchestrator's tools and the few shared ones it may call, and nothing else."""
+        self.subscription_accounts = SubscriptionAccounts(db)
+        """The operator's accounts per subscription, read once at start and written through after."""
         self.providers = ProviderRegistry(
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
+            accounts=self.subscription_accounts,
         )
         self.providers.on_unreachable = self._provider_unreachable
+        if self.providers.accounts is not None:
+            self.providers.accounts.on_switch = self._account_switched
         # In Docker a stdio server starts inside this container, which is not the machine a session
         # working in a host folder runs its Exec on: what the agent checks there (adb, a paired phone,
         # an installed CLI) is not what the server sees. Every error and the app say where it ran.
@@ -1036,6 +1045,7 @@ class SessionManager:
     async def start(self, *, recovering: bool | None = None) -> None:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
+        await self.subscription_accounts.load()
         await self.memory_entries.file_unfiled()
         await self.secrets.load()
         operator_secrets.install(self.secrets)
@@ -4699,6 +4709,22 @@ class SessionManager:
         payload = {"provider": provider_id, "retry_in": None if retry_in is None else round(retry_in, 1)}
         await self._notify_sinks(state.session.id, HostEvent(HostEventType.PROVIDER_WAIT, state.run_id or "", payload))
 
+    async def _account_switched(self, endpoint: Any, request: LLMRequest, from_account: str, to_account: str, reason: str) -> None:
+        """Say on the run's screen that its call moved to another account, and why, as it happens.
+
+        The turn's stamp says which account answered once the turn is over; this is for the moment itself,
+        when the operator may be watching an answer that has paused for the move."""
+        obs = request.observability
+        session_id = obs.session_id if obs is not None else None
+        state = self._states.get(session_id) if session_id else None
+        if state is None or not state.running:
+            return
+        router = self.providers.accounts
+        payload = {"provider": endpoint.id, "from": from_account, "to": to_account, "reason": reason,
+                   "from_label": router.label(endpoint, from_account) if router is not None else "",
+                   "to_label": router.label(endpoint, to_account) if router is not None else ""}
+        await self._notify_sinks(state.session.id, HostEvent(HostEventType.ACCOUNT_SWITCH, state.run_id or "", payload))
+
     async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         """One short request to a preset for a helper around the operator's messages.
 
@@ -6337,6 +6363,16 @@ class SessionManager:
         }
         if status["fallback"] is not None:
             record["fallback"] = status["fallback"]
+        # The subscription account that answered, while the endpoint has more than one: an operator with two
+        # Claude plans reads from the turn which one it spent. Absent for an endpoint with only its default.
+        adapter = getattr(state.engine, "llm", None) if state.engine is not None else None
+        endpoint = getattr(adapter, "endpoint", None)
+        router = self.providers.accounts
+        if router is not None and endpoint is not None and endpoint.id == record["provider"]:
+            account = router.last_served(endpoint, state.session.id)
+            if account:
+                record["account"] = account
+                record["account_label"] = router.label(endpoint, account)
         return record
 
     def _model_change(self, state: SessionState, event: TurnEvent) -> TurnEvent | None:

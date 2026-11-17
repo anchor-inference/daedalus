@@ -57,12 +57,12 @@ class ProviderHolds:
             await conn.execute(
                 "INSERT INTO provider_failure_observations(id,session_id,run_id,inference_reservation_id,"
                 "execution_attempt_id,project_id,provider_id,provider_kind,provider_source_digest,model,status,failure_class,"
-                "provider_code,reset_at,reset_source,retry_after_at,evidence_digest,observed_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "provider_code,reset_at,reset_source,retry_after_at,evidence_digest,observed_at,account)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (observation_id, observer.session_id, observer.run_id, reservation_id, attempt_id,
                  run["project_id"] or None, endpoint.id, endpoint.kind, endpoint.source_digest(), request.model, evidence.status,
                  evidence.failure_class, evidence.provider_code, evidence.reset_at, evidence.reset_source,
-                 evidence.retry_after_at, evidence.digest, now()),
+                 evidence.retry_after_at, evidence.digest, now(), evidence.account),
             )
             return observation_id
 

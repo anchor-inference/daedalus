@@ -1434,6 +1434,11 @@ def scroll_to_action_rules(page: Page) -> None:
     page.locator(".action-rules").evaluate("(card) => card.scrollIntoView({ block: 'start' })")
 
 
+def scroll_to_accounts(page: Page) -> None:
+    """The subscriptions' accounts come after the list of clients on the providers tab."""
+    page.locator('[data-setting="accounts"]').evaluate("(card) => card.scrollIntoView({ block: 'start' })")
+
+
 def scroll_to_voices(page: Page) -> None:
     """The settings body scrolls inside itself, so a full-page shot would still show only the top of it.
 
@@ -2289,6 +2294,25 @@ def run_harnesses() -> int:
     return UNHANDLED.report()
 
 
+def run_accounts() -> int:
+    """Settings → Models → Providers → Subscription accounts, on a desktop and on a phone (``ONLY=accounts``)."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        page = desk.new_page()
+        page.route("**/api/**", stub)
+        shot(page, "settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
+        desk.close()
+        phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
+        page = phone.new_page()
+        page.route("**/api/**", stub)
+        shot(page, "phone-settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
+        phone.close()
+        browser.close()
+    return UNHANDLED.report()
+
+
 def run_staff() -> int:
     """A command-line member's own view (M5): the terminal with the column beside it on a desktop,
     the Feed on a desktop, and the Feed with the request above the composer on a phone (``ONLY=staff``)."""
@@ -2419,6 +2443,7 @@ def run() -> int:
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)
         shot(page, "settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
+        shot(page, "settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
         shot(page, "settings-rules", "settings/rules", wait=".action-rules .ar-row[data-category]", before=scroll_to_action_rules, settle=600)
         shot(page, "session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_tool_groups, settle=300)
         # And the same install where the owner met its absence: under the two lines on the voice card
@@ -3045,4 +3070,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run_notes() if only == "notes" else run_canvas() if only == "canvas" else run_features() if only == "features" else run())
+    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_accounts() if only == "accounts" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run_notes() if only == "notes" else run_canvas() if only == "canvas" else run_features() if only == "features" else run())

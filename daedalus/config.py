@@ -592,6 +592,10 @@ class ModelPresetConfig(BaseModel):
     openrouter_providers_gone: list[str] = Field(default_factory=list)
     """Which of those the listing no longer offers, for the model's settings to say. Written by the daily check
     and after a refusal; the choice itself stays, because a provider that comes back should be used again."""
+    account: str = ""
+    """The subscription account this model's calls go out on (an id from Settings → Accounts), "" for the
+    upstream's default account. Like the OpenRouter route it is one choice per endpoint and model, written to
+    every preset of the pair; an id that no longer exists is the default again (``SubscriptionAccounts.chain``)."""
 
     def display(self, preset_id: str = "") -> str:
         if self.label:

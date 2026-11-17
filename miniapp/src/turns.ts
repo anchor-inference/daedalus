@@ -7,7 +7,7 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, SubagentNotice, ToolImage } from "./api";
+import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, SubagentNotice, ToolImage, TurnAccount } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
@@ -20,7 +20,7 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
  */
 /** `stepAt` is when what the agent does now between tools began: the latest model message's start or
  *  tool result, which the live bar times a step by when no tool is running. */
-export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; stepAt?: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[]; /** The model endpoint refused the connection and the run waits for it to come back. */ providerWait?: boolean };
+export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; stepAt?: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[]; /** The model endpoint refused the connection and the run waits for it to come back. */ providerWait?: boolean; /** The run's call moved to another subscription account after the first was refused for its limit. */ account?: TurnAccount | null };
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, stepAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
 export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
@@ -57,6 +57,8 @@ export type Turn = {
   /** The model that wrote this turn's answer, and what it stood in for when it was not the configured one. */
   model?: string;
   fallback?: ModelFallback | null;
+  /** The subscription account that answered, where the endpoint has more than one. */
+  account?: TurnAccount | null;
   media?: MediaPresentation[];
   /** Last meaningful stream event. Transport keepalives never update this clock. */
   lastActivityAt?: number | null;
@@ -244,11 +246,12 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     // and finished on another is answered by the one that finished it, which is the one the reader read.
     current.model = m.model || current.model;
     current.fallback = m.fallback ?? null;
+    current.account = m.account ? { id: m.account, label: m.account_label ?? "" } : null;
     // A turn's messages each carry their own: the last one replacing the rest left an earlier
     // message's reference with nothing to draw.
     current.media = mergeMedia(current.media, m.media);
     if (m.imported?.harness) current.imported = m.imported.harness;
-    mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
+    mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.account ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
     if (current.answer) {
       // Text that turned out not to be final becomes a note.
       current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
@@ -357,6 +360,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
     t.model = live.model;
     t.fallback = live.fallback;
   }
+  if (live.account) t.account = live.account;
   t.endedAt = now;
   t.lastActivityAt = live.lastActivityAt;
   t.providerWait = !!live.providerWait;
@@ -738,6 +742,9 @@ export function liveAfter(state: LiveState, event: string, p: Record<string, any
   // The host's word that the endpoint is being waited for, every pause, and that the wait is over. It counts
   // as activity: the run is doing the one thing it can, and "no new events" would read as a hang.
   if (event === "provider_wait") return { ...state, providerWait: p.retry_in != null, lastActivityAt: meaningful };
+  // A call refused for its subscription account's limit went on to the next account: said at once, since
+  // the answer paused for it, and kept on the turn until the stored stamp names the account that answered.
+  if (event === "account_switch") return { ...state, account: { id: String(p.to ?? ""), label: String(p.to_label ?? ""), movedFrom: { id: String(p.from ?? ""), label: String(p.from_label ?? ""), reason: String(p.reason ?? "") } }, lastActivityAt: meaningful };
   if (event === "message_start") return { ...state, providerWait: false, text: "", thinking: "", ended: false, startedAt: state.startedAt ?? meaningful, stepAt: meaningful, lastActivityAt: meaningful };
   // Which model is speaking, said before the message it belongs to. `fallback: false` is the run coming
   // back to the model it was configured with, and it takes the note away rather than leaving it standing.

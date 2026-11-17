@@ -1356,6 +1356,8 @@ export type SubagentView = {
 
 /** A model answering in place of the configured one: what it replaced, what took over, and why. */
 export type ModelFallback = { from: string; to: string; reason: string };
+/** Which subscription account answered a turn, and the one it moved from when the first was refused for its limit. */
+export type TurnAccount = { id: string; label: string; movedFrom?: { id: string; label: string; reason: string } | null };
 
 export type MediaItem = { id: string; kind: "image" | "animation" | "video" | "audio" | "file"; mime_type: string; filename: string; byte_size: number; width?: number | null; height?: number | null; alt: string; caption: string; url?: string };
 export type MediaPresentation = { id: string; layout: "single" | "album"; items: MediaItem[] };
@@ -1420,6 +1422,9 @@ export type MessageView = {
   provider?: string;
   /** Set when that model was not the one the session was set to answer with. */
   fallback?: ModelFallback | null;
+  /** The subscription account that answered, when its endpoint has more than one (an id and the operator's name for it). */
+  account?: string | null;
+  account_label?: string | null;
   media?: MediaPresentation[];
   /** Set on the row that closes a run which produced no answer. */
   outcome?: RunOutcome | null;
@@ -2296,6 +2301,8 @@ export type Preset = {
   openrouter_providers?: string[];
   /** Which of those OpenRouter no longer lists. */
   openrouter_providers_gone?: string[];
+  /** The subscription account the model's calls use; empty for the subscription's default account. */
+  account?: string;
 };
 
 /** The operator's levels for what the agent does in the world (`[action_rules]`). */

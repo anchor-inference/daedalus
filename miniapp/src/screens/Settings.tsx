@@ -51,6 +51,7 @@ import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
+import { SubscriptionAccountsCard, accountName, useSubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
 import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
 import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
@@ -214,9 +215,11 @@ function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Pres
 }
 
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
+function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
+  /** The subscription behind this model's client, when it has more than one account to choose from. */
+  accounts?: SubscriptionUpstream;
   price?: PriceView;
   onPriceSaved: (next: Settings) => void;
   toast: (text: string) => void;
@@ -331,6 +334,20 @@ function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPri
               </span>
             </Row>
             {routed && <PresetRoutes p={p} onPatch={onPatch} />}
+            {accounts && accounts.accounts.length > 1 && (
+              <Row title={t("settings.preset.account")} desc={t("settings.preset.account.sub")} stack data-setting={`presets.${id}.account`}>
+                <Dropdown
+                  id={`preset-account-${id}`}
+                  label={t("settings.preset.account")}
+                  value={accounts.accounts.some((a) => a.id === p.account) ? (p.account as string) : ""}
+                  onChange={(account) => onPatch({ account })}
+                  options={[
+                    { id: "", label: t("settings.preset.account.default", { name: accountName(accounts.accounts.find((a) => a.id === accounts.default_account) ?? { id: accounts.default_account, label: "" }) }) },
+                    ...accounts.accounts.map((a) => ({ id: a.id, label: accountName(a) })),
+                  ]}
+                />
+              </Row>
+            )}
           </div>
           <ModelPrice id={id} view={price} onSaved={onPriceSaved} toast={toast} />
           <div className="btnrow mrow-foot">
@@ -1095,6 +1112,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     return tab === "free" || tab === "providers" ? tab : "my";
   });
   const [status, setStatus] = useState<any>(null);
+  // Names only, for a model's account choice: the quota reading is the accounts card's, on the providers tab.
+  const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
   const dialog = useRef<HTMLDivElement>(null);
@@ -1367,6 +1386,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     id={id}
                     p={p}
                     routed={s.providers[p.provider]?.kind === "openrouter"}
+                    accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
                     onDemandByModel={s.on_demand_defaults?.[id]}
                     windowSources={s.context_window_sources?.[id]}
                     price={s.prices?.[id]}
@@ -1502,6 +1522,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
               <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
             </div>}
+            {modelsTab === "providers" && <SubscriptionAccountsCard toast={toast} />}
             {modelsTab === "providers" && <KeyproxyCard toast={toast} onChanged={rereadSettings} />}
           </>
         );
