@@ -80,10 +80,10 @@
 /* The mic and Send keep the same reserved slot; draft state cannot resize the field. */
 .composer-row { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
 .composer-row > .iconbtn.plus, .composer-tools .mic, .composer-tools .roundbtn.primary { width:var(--composer-toolbar-h); height:var(--composer-toolbar-h); }
-.composer-row .composer-mode { height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding-inline:var(--space-2); font-size:var(--fs-12); }
+.composer-row .composer-mode, .composer-row .agentlang-chip { height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding-inline:var(--space-2); font-size:var(--fs-12); }
 @media (pointer:coarse) {
   :root { --composer-toolbar-h:var(--row-h-touch); }
-  .composer-row .composer-mode { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
+  .composer-row .composer-mode, .composer-row .agentlang-chip { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
 }
 
 /* The field owns the boundary; its toolbar reads as one row rather than separate boxed inputs. */
@@ -97,7 +97,7 @@
 .composer-row .model-select { flex:0 1 auto; max-width:240px; color:var(--fg); }
 .composer-row .model-select > .ic { display:none; }
 .composer-row .model-select > .ic:last-child { display:block; }
-.composer-row .composer-mode { background:var(--surface-2); padding-inline:var(--space-2); flex:0 1 auto; }
+.composer-row .composer-mode, .composer-row .agentlang-chip { background:var(--surface-2); padding-inline:var(--space-2); flex:0 1 auto; }
 .composer-row .composer-mode > .ic { display:none; }
 .composer-row span.composer-mode { cursor:default; }
 .composer-tools .roundbtn.primary { border-radius:var(--radius-sm); margin-left:var(--space-2); }
@@ -112,7 +112,7 @@
 @container (max-width:560px) {
   .composer-row { gap:var(--space-1); }
   .composer-row .model-select { max-width:none; padding-inline:var(--space-2); }
-  .composer-row .composer-mode { flex:none; max-width:45%; padding-inline:var(--space-2); }
+  .composer-row .composer-mode, .composer-row .agentlang-chip { flex:none; max-width:45%; padding-inline:var(--space-2); }
 }
 
 /* The approval mode of a conversation in the operator's Chrome: a quiet chip beside the mode, its word
@@ -163,7 +163,7 @@
   .start-mark > .ic { color:var(--accent); }
   .start-mark h1 { font-size:var(--fs-20); font-weight:600; letter-spacing:-0.01em; }
   .start-composer, .start-where, .start-live { width:100%; max-width:720px; }
-  .start-composer .composer-row .composer-mode { flex:none; }
+  .start-composer .composer-row .composer-mode, .start-composer .composer-row .agentlang-chip { flex:none; }
   /* The chat's composer pads itself off the conversation's edges; here the box is the column, so the
      chips and the live rows under it start where its border does. */
   .start-composer.composer { padding:0; }

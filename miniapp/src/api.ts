@@ -1368,6 +1368,11 @@ export type OperatorSteps = {
  *  session's inbox, served at `/api/sessions/<id>/attachments`; `kept` is the id of one kept by handle. */
 export type MessageAttachment = { name: string; mime?: string; size?: number | null; file?: string; kept?: string };
 
+export type MessageTranslation = { direction: "in" | "out"; state: "pending" | "done" | "failed"; from: string; to: string; alternate?: string; error?: string };
+
+/** The language a session's agent works in, and the operator's own: `agent` "" is no translation. */
+export type SessionTranslation = { agent: string; operator: string; active: boolean; explicit: boolean; /** The settings' default, when the host names it. */ default?: string };
+
 export type MessageView = {
   run_id?: string | null;
   role: "system" | "user" | "assistant" | "tool";
@@ -1414,6 +1419,10 @@ export type MessageView = {
   /** A message that came over an agent link (origin `guest:<link>`): who the link was made for and what
    *  the turn it started could do. The text is the guest's words, never the operator's. */
   guest?: { label: string; tools: string; kind?: "reply"; by?: "owner" } | null;
+  /** The message crossed languages: an operator's message translated for the agent (`out`, `text` is the
+   *  operator's words and `alternate` what the agent got), or the agent's final answer translated for the
+   *  operator (`in`, `text` is the translation once `done` and `alternate` the original). */
+  translation?: MessageTranslation | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
@@ -1481,6 +1490,8 @@ export type SessionDetail = {
   messages: MessageView[];
   /** YAGNI: the host tells the model in the next turn, never in the system prompt. */
   yagni?: boolean;
+  /** The language the agent works in here; absent on a host older than translation. */
+  translation?: SessionTranslation;
   /** "Bypass all checks": no review, no policy question, no hold in this session; hard refusals stay. */
   bypass?: boolean;
   /** The session's autopilot switch; null for a host without autopilot. */
@@ -2007,6 +2018,9 @@ export type Question = {
   options?: { label: string; description?: string | null; preview?: string | null }[];
   multiSelect?: boolean;
   allow_custom?: boolean;
+  /** The question in the operator's language when the agent works in another: shown in place of the
+   *  original, in the same order as `options`. The answer still names the original labels. */
+  translation?: { question: string; options: { label: string; description: string }[] };
 };
 
 /** How many notifications want the operator: unseen ones worth a badge, and open requests. */
@@ -2316,6 +2330,9 @@ export type Settings = {
   assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number };
   /** Autopilot: the master switch, the judge's model, the turns after one message, the daily allowance. */
   autopilot?: { enabled: boolean; preset?: string; max_continuations: number; usd_per_day: number };
+  /** Talking to the agent in another language: the operator's own, the default for the agent, the
+   *  translator's model ("" automatic, `suggested` naming what that resolves to) and its time limit. */
+  translation?: { operator_language: string; agent_language: string; preset: string; timeout_seconds: number; suggested?: string };
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;

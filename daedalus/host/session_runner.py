@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -103,6 +104,7 @@ from daedalus.host import (
     summaries,
     summary_calls,
     tool_groups,
+    translation,
     user_style,
 )
 from daedalus.host.btw import BTW_KEY, btw_of, btws_of
@@ -766,6 +768,8 @@ def _steer_cards(items: Sequence[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         files = [str(entry.get("name") or "") for entry in item.get("attachments") or [] if isinstance(entry, dict)]
         if files and "caption" in item:
             text = str(item.get("caption") or "")
+        if (said := _written_words(item)) is not None:
+            text = said  # the operator's own words, not the translation the agent will be given
         card: dict[str, Any] = {"id": str(item.get("id") or ""), "kind": kind, "text": text[:STEER_CARD_CHARS], "queued_at": item.get("queued_at")}
         if len(text) > STEER_CARD_CHARS:
             card["truncated"] = True
@@ -962,6 +966,8 @@ class SessionManager:
         """Told when a session's "Bypass all checks" moves: the browser carries it to the guard of the
         operator's Chrome, which judges a page's own redirects without asking the host."""
         self.control_marks = ControlMarks(self._announce_controls)
+        self.translations = translation.Translations(self)
+        """The translator between the operator's language and the one a session's agent works in."""
         """What each session controls right now (the operator's Chrome, their computer), kept apart from
         what it was made for; the browser service and the computer's watcher recompute it."""
         """Called with the session id before a session is removed (extensions release what they hold for it)."""
@@ -1230,13 +1236,20 @@ class SessionManager:
         for question in pending.payload.get("questions") or []:
             if not isinstance(question, dict):
                 continue
+            # Every reader of this event shows it to the operator (a notification, a project's topic), so it
+            # carries the question in their language when there is a translation. An option is answered by
+            # its place in the list, never by these words, so the agent still gets its own label back.
+            shown = question.get("translation") if isinstance(question.get("translation"), dict) else {}
+            options = [option for option in question.get("options") or [] if isinstance(option, dict)]
+            shown_options = [o for o in shown.get("options") or [] if isinstance(o, dict)]
+            if len(shown_options) != len(options):
+                shown_options = []
             questions.append(
                 {
-                    "question": str(question.get("question") or ""),
+                    "question": str(shown.get("question") or question.get("question") or ""),
                     "options": [
-                        {"label": str(option.get("label") or ""), "description": str(option.get("description") or "")}
-                        for option in question.get("options") or []
-                        if isinstance(option, dict)
+                        {"label": str((shown_options[i] if shown_options else option).get("label") or ""), "description": str((shown_options[i] if shown_options else option).get("description") or "")}
+                        for i, option in enumerate(options)
                     ],
                     "multi": bool(question.get("multiSelect")),
                     "custom": bool(question.get("allow_custom")),
@@ -3968,7 +3981,23 @@ class SessionManager:
         # in with each value the operator handed over put back as its placeholder. A password pasted into a
         # message by habit is then still not in the transcript, the model's input or the provider's logs.
         text = self.redactor.conceal_named(text)
-        words = operator_words_metadata(origin, text, operator_words)
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        # The operator's words as they wrote them. When the agent works in another language it is sent a
+        # translation, and this is what the receipt compares a retry against (a second translation of the
+        # same words need not be the same text), what names the chat, and what the app shows.
+        written = text
+        mark: dict[str, Any] | None = None
+        answering = as_answer and state.pending is not None and state.pending.kind != EXTERNAL_CALL
+        if origin == "operator" and guest is None and _provider_resume is None and not answering:
+            # A reply to a question is translated where every answer is, in ``answer``: translated here as
+            # well, it would cost a second call that returns the same English.
+            outgoing = await self.translations.outgoing(state, text)
+            text, mark = outgoing.text, outgoing.mark
+        words = operator_words_metadata(origin, text, operator_words if mark is None else None)
+        if mark is not None:
+            words = {**words, translation.METADATA_KEY: mark}
         if reply_to:
             # Rides with the operator's words on every copy of the message, so the app draws what it answers.
             words = {**words, "daedalus.reply_to": dict(reply_to)}
@@ -3976,12 +4005,10 @@ class SessionManager:
             words = {**words, "daedalus.autopilot": dict(autopilot)}
         if guest is not None:
             words = {**words, guest_turns.METADATA_KEY: guest.as_metadata()}
-        state = await self.get_state(session_id)
-        if state is None:
-            raise KeyError(session_id)
         if secrets and (handed := self.secrets.named(secrets, session_id)):
             lines = "\n".join(operator_secrets.attachment_text(secret) for secret in handed)
             text = f"{text.rstrip()}\n\n{lines}" if text.strip() else lines
+            written = f"{written.rstrip()}\n\n{lines}" if written.strip() else lines
             words = {**words, "daedalus.secrets": [{"name": secret.name, "scope": secret.scope_kind} for secret in handed]}
         if origin == "operator":
             # Writing to a session is having read it: the unread mark of its last result goes.
@@ -4049,7 +4076,7 @@ class SessionManager:
                     }
                 )
             receipt_payload = {
-                "text": text,
+                "text": written,
                 "steer": steer,
                 "follow_up": follow_up,
                 "as_answer": as_answer,
@@ -4099,7 +4126,7 @@ class SessionManager:
                     return run_id
                 # Made before the item, so the item can name the row: a withdrawal deletes it by that key.
                 waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
-                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
+                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(written, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -4168,7 +4195,7 @@ class SessionManager:
                 # rewrite them); the transcript keeps the operator's words as sent, in a hidden row the
                 # item names so that a withdrawal can delete it.
                 waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
-                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
+                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(written, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -4208,8 +4235,8 @@ class SessionManager:
                 state.session.metadata.pop("autotitle", None)
                 provisional = state.session.title
                 await self.sessions.update_metadata(session_id, dict(state.metadata))
-                source = text
-                if attachments and text in {"File attached.", "Files attached."}:
+                source = written
+                if attachments and written in {"File attached.", "Files attached."}:
                     # Those two sentences are what an upload says when the operator typed nothing.
                     # They are the same for every file, so a title taken from them would be too.
                     source = ", ".join(Path(item.name or item.path.name).name for item in attachments)
@@ -4553,11 +4580,18 @@ class SessionManager:
         questions = [q.get("question", "") for q in pending.payload.get("questions", [])]
         shaped = []
         for index, answer in enumerate(answers):
+            custom = answer.get("custom")
+            if isinstance(custom, str) and custom.strip() and source in ("user", "operator"):
+                # Typed in the operator's language, read by an agent that works in its own: the words go
+                # the way a message does. The options picked are the agent's own labels and stay as they are.
+                custom = (await self.translations.outgoing(state, custom)).text
+                if state.pending is not pending:
+                    raise RuntimeError("the question was answered meanwhile")
             shaped.append(
                 {
                     "question": answer.get("question") or (questions[index] if index < len(questions) else ""),
                     "selected": list(answer.get("selected") or []),
-                    "custom": answer.get("custom"),
+                    "custom": custom,
                 }
             )
         result = json.dumps({"answers": shaped, "source": source}, ensure_ascii=False)
@@ -4742,6 +4776,26 @@ class SessionManager:
                 meta.pop("yagni", None)
         await self.sessions.update_metadata(session_id, state.session.metadata)
         return on
+
+    async def set_agent_language(self, session_id: str, language: str | None) -> dict[str, Any]:
+        """Set the language the agent works in for one session: a code, ``""`` for none, ``None`` to follow
+        the settings' default. Takes effect with the next message; what was said before stays as it was.
+
+        The agent is not told: it reads every message in its own language and answers in kind, which is
+        the whole point, and a note about the switch would be one more message in a language it was
+        never meant to see."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        if language is not None and language and language not in translation.LANGUAGES:
+            raise ValueError(f"unknown language {language!r}")
+        for meta in (state.metadata, state.session.metadata):
+            if language is None:
+                meta.pop(translation.SESSION_KEY, None)
+            else:
+                meta[translation.SESSION_KEY] = language
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        return translation.session_view(state.metadata, self.config)
 
     async def set_bypass(self, session_id: str, on: bool, *, via: str = "app") -> bool:
         """Switch the session's "Bypass all checks", the operator's one click and no confirmation after it.
@@ -5058,9 +5112,15 @@ class SessionManager:
         state.model_change_reason = ""
         state.model_stamps.clear()
         pinned = fork_identity(state.metadata)
+        config = self.config
+        if (languages := self.translations.pair_of(state)) is not None and config.answer_language not in ("", "auto"):
+            # The operator's fixed answer language is theirs to read, and here they read the translator's
+            # words: the agent answers in the language it is spoken to, or the translator would be handed
+            # text already in the operator's language and the history would hold two languages.
+            config = config.model_copy(update={"answer_language": translation.LANGUAGES[languages[1]]})
         engine = build_engine(
             deps=deps,
-            config=self.config,
+            config=config,
             max_iterations=bounds.max_iterations if bounds is not None else 0,
             run_id=run_id,
             session_id=state.session.id,
@@ -6066,7 +6126,14 @@ class SessionManager:
         if status in ("completed", "failed", "cancelled"):
             # A run parked on a question is not finished; an interrupted one never reaches here.
             finished = self._finished_payload(state, run_id, status, duration_s)
-            await self._publish(state, "run.finished", finished)
+            translating = status == "completed" and finished["operator_facing"] and self.translations.pair_of(state) is not None
+            # The answer is announced once, in the operator's language: the notification and Telegram wait
+            # for ``answer.translated``, which carries the summary translated (or the original, marked).
+            announced = {**{key: value for key, value in finished.items() if key != "summary"}, "translating": True} if translating else finished
+            await self._publish(state, "run.finished", announced)
+            if translating:
+                self.translations.begin(run_id)
+                self._spawn_background(self.translations.incoming(state, run_id, finished), f"translate:{run_id}")
             await self._publish_status(state, "failed" if status == "failed" else "idle")
             if status != "cancelled" and finished["operator_facing"] and not finished["watched"] and not finished["telegram"]:
                 await self._mark_unread(state, run_id)
@@ -6483,12 +6550,19 @@ class SessionManager:
             # while the first token of that model is still on its way.
             await self._dispatch_event(state, change)
         if event.type is EventType.TOOL_CALL_PENDING and event.payload.get("kind") == "ask_user":
+            asked = copy.deepcopy(dict(event.payload.get("ask_user_payload") or {}))
+            # Translated before anyone is told of it, so every front shows the question once, in the
+            # operator's language; a failure leaves it as the agent wrote it. Copied, because the core
+            # keeps its own: the translation is for the reader, never for the model's record.
+            await self.translations.question(state, asked)
+            if any(isinstance(question, dict) and question.get("translation") for question in asked.get("questions") or []):
+                event.payload["ask_user_payload"] = asked
             pending = PendingQuestion(
                 session_id=state.session.id,
                 run_id=event.run_id,
                 tool_call_id=str(event.payload.get("tool_call_id")),
                 kind="ask_user",
-                payload=dict(event.payload.get("ask_user_payload") or {}),
+                payload=asked,
             )
             state.pending = pending
             await self.db.execute(
@@ -8528,11 +8602,15 @@ class SessionManager:
         a helper parked by the budget, a report that cannot reach its leader yet — has no event to
         ride, and the chat would show it only on the next full read."""
         await self.sessions.append_transcript(session_id, [message])
+        await self.announce_transcript(session_id)
+
+    async def announce_transcript(self, session_id: str) -> None:
+        """Have the app read the end of a conversation again: a row was added or changed outside a run's events."""
         state = self._states.get(session_id)
         try:
             await self._notify_sinks(session_id, HostEvent(HostEventType.TRANSCRIPT_NOTE, (state.run_id if state is not None else "") or "", {"session_id": session_id}))
-        except Exception:  # noqa: BLE001 — the line is written; a front that missed the event sees it on its next read
-            logger.warning("could not announce a note in session %s", session_id, exc_info=True)
+        except Exception:  # noqa: BLE001 — the row is written; a front that missed the event sees it on its next read
+            logger.warning("could not announce a transcript change in session %s", session_id, exc_info=True)
 
     async def _settle_stale_runs(self, resumed: list[str], parked: list[str] | None = None) -> None:
         """A run row still 'running' that nobody drives is a leftover of the previous process: closed as cancelled."""
@@ -8705,7 +8783,9 @@ def _returned_message(item: dict[str, Any]) -> dict[str, Any]:
     the text the model would have been given, which carries the host's notes and the files' paths —
     and the names of the files, which cannot travel back into the field and are said instead."""
     files = [str(entry.get("name") or "") for entry in item.get("attachments") or [] if isinstance(entry, dict) and entry.get("name")]
-    if "caption" in item:
+    if (said := _written_words(item)) is not None:
+        words = said
+    elif "caption" in item:
         words = str(item.get("caption") or "")
     elif item.get("operator_words"):
         words = "\n\n".join(str(part) for part in item["operator_words"])
@@ -8738,7 +8818,13 @@ def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any
 # core places, or the one that opens the next turn, is written later from the queue item alone, so the item
 # has to carry it. It used to be dropped there: a message with a secret attached showed the host's note
 # about the secret as the operator's words and no chip.
-_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot", attached_files.METADATA_KEY)
+_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot", attached_files.METADATA_KEY, translation.METADATA_KEY)
+
+
+def _written_words(item: dict[str, Any]) -> str | None:
+    """The operator's own words of a queued item that the agent is to get translated; ``None`` for any other."""
+    mark = (item.get("display") or {}).get(translation.METADATA_KEY)
+    return str(mark["text"]) if isinstance(mark, dict) and isinstance(mark.get("text"), str) else None
 
 
 def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
@@ -8771,6 +8857,14 @@ def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     marks = [(item.get("display") or {}).get("daedalus.autopilot") for item in items]
     if items and all(marks):
         merged["daedalus.autopilot"] = marks[-1]
+    translated = [(item.get("display") or {}).get(translation.METADATA_KEY) for item in items]
+    if any(isinstance(mark, dict) for mark in translated):
+        # One row for several messages, joined as the model reads them: the operator's side is joined the
+        # same way, each item in its own words, so the row shows what was written and what was sent.
+        first = next(mark for mark in translated if isinstance(mark, dict))
+        said = [_written_words(item) or prompts.without_host_notes(str(item.get("text") or "")) for item in items]
+        states = {str(mark.get("state")) for mark in translated if isinstance(mark, dict)}
+        merged[translation.METADATA_KEY] = {**first, "text": "\n\n".join(said), "state": "failed" if "failed" in states else "done"}
     return merged
 
 

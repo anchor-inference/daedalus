@@ -920,6 +920,33 @@ SESSION_TAIL = 600
 """How many messages the host answers ``GET /api/sessions/<id>`` with when no ``tail`` is asked for."""
 
 
+def session_translation(agent: str = "en", *, operator: str = "ru", explicit: bool = False) -> dict[str, object]:
+    """A session's language as the host reports it: the agent's, the operator's, and whether it translates."""
+    return {"agent": agent, "operator": operator, "active": bool(agent) and agent != operator, "explicit": explicit, "default": "en"}
+
+
+CODE_BLOCK = "```python\ndef retry(call, attempts=3):\n    for _ in range(attempts):\n        if call():\n            return True\n    return False\n```"
+
+TRANSLATED_EXCHANGE = {
+    # The operator's words in Russian with a code block, and the English the agent got with the block untouched.
+    "asked": "Почему эта функция иногда возвращает False, хотя вызов в итоге проходит?\n\n" + CODE_BLOCK,
+    "asked_en": "Why does this function sometimes return False even though the call eventually succeeds?\n\n" + CODE_BLOCK,
+    # The agent's English answer, and the Russian the operator reads by default.
+    "answer_en": "The loop returns `False` only after `attempts` failures, so a call that succeeds on the fourth try is reported as a failure. Raise `attempts` or retry with a backoff in `retry`.",
+    "answer": "Цикл возвращает `False` только после `attempts` неудач, поэтому вызов, который проходит с четвёртой попытки, считается провалом. Увеличьте `attempts` или повторяйте с паузой в `retry`.",
+}
+
+
+def translated_messages(message, first_seq: int = 201) -> list[dict]:  # type: ignore[no-untyped-def]
+    """A translated exchange, built with a check's own ``message`` maker: what the operator wrote and the
+    agent got, and the answer the operator reads beside the agent's original."""
+    x = TRANSLATED_EXCHANGE
+    return [
+        message(first_seq, "user", x["asked"], translation={"direction": "out", "state": "done", "from": "ru", "to": "en", "alternate": x["asked_en"]}),
+        message(first_seq + 1, "assistant", x["answer"], translation={"direction": "in", "state": "done", "from": "en", "to": "ru", "alternate": x["answer_en"]}),
+    ]
+
+
 def session_page(detail: dict, params: dict[str, str]) -> dict:
     """One page of a session, as the host reads it: the newest ``tail`` messages, older than
     ``before=<seq>`` when that is given.
@@ -2011,6 +2038,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "yagni":
         # The composer's toggles chip: a harness that reads the switch back answers this itself.
         return 200, "application/json", "{}"
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "language":
+        # The composer's language chip: the agent works in what was asked (null follows the default,
+        # English here) and the operator reads Russian. A check that reads the choice back answers it itself.
+        asked = body.get("agent") if isinstance(body, dict) else None
+        agent = "en" if asked is None else str(asked)
+        return 200, "application/json", json.dumps(session_translation(agent, explicit=asked is not None))
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "bypass":
         # "Bypass all checks" in the toggles menu: on or off as asked, and the refusals that stay.
         on = bool(body.get("on")) if isinstance(body, dict) else False
@@ -2423,7 +2456,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load", "TRANSLATED_EXCHANGE", "session_translation", "translated_messages"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

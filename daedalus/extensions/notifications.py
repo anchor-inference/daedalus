@@ -938,7 +938,7 @@ class NotificationService:
             ))
 
 
-ROUTED_EVENTS = ("run.finished", "ask.", "permission.", "staff.status", "task.moved", "terminal.notify", "presence", "browser.needs_you", "browser.returned", "browser.closed")
+ROUTED_EVENTS = ("run.finished", "answer.translated", "ask.", "permission.", "staff.status", "task.moved", "terminal.notify", "presence", "browser.needs_you", "browser.returned", "browser.closed")
 
 
 class NotificationRouter:
@@ -954,6 +954,7 @@ class NotificationRouter:
     async def handle(self, event: AppEvent) -> None:
         handler = {
             "run.finished": self._run_finished,
+            "answer.translated": self._answer_translated,
             "ask.pending": self._ask_pending,
             "ask.answered": self._answered,
             "permission.pending": self._permission_pending,
@@ -985,6 +986,17 @@ class NotificationRouter:
             # A question cannot outlive the run that asked it. A policy refusal can: its grant is
             # used by the agent's next run, and the dock and the Telegram buttons keep offering it.
             await self.service.resolve_session(sid, "expired", via="run", prefixes=("ask",))
+        if p.get("translating") and p.get("status") == "completed":
+            # Announced by ``answer.translated``, with the summary in the operator's language.
+            return
+        await self._announce_finished(event)
+
+    async def _answer_translated(self, event: AppEvent) -> None:
+        await self._announce_finished(event)
+
+    async def _announce_finished(self, event: AppEvent) -> None:
+        p = event.payload
+        sid = event.session_id
         status = p.get("status")
         title = str(p.get("title") or sid or "")
         held = frozenset(str(c) for c in p.get("controlling") or ())

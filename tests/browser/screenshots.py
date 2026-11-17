@@ -578,6 +578,9 @@ def usage_data() -> dict:
 
 
 SETTINGS = {
+    # Settings → Chat → Translation: the operator writes Russian, the agent works in English by default,
+    # and the translator is left to the host, which names the cheap model it picks.
+    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
     # Settings → Navigation: the layout the app ships with.
     "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.

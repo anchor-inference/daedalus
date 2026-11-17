@@ -2,7 +2,7 @@
 // actions are supplied by the parent so the card also works inside the voice page.
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, SkillEntry, SlashCommand } from "./api";
+import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
 import { Banner, BottomSheet, SheetRow } from "./ui/phone";
@@ -12,6 +12,7 @@ import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
 import { TogglesSelect } from "./toggles";
+import { AgentLangSelect, type AgentLangChoice } from "./agentlang";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
@@ -106,6 +107,11 @@ export type ComposerProps = {
   /** The session's "Bypass all checks", last in the toggles menu. */
   bypass?: boolean;
   onBypass?: (on: boolean) => void;
+  /** The language the agent works in here, and the settings' default for it; the chip is shown only
+   *  where the session can be told one (`onAgentLang`). */
+  translation?: SessionTranslation;
+  translationDefault?: string;
+  onAgentLang?: (choice: AgentLangChoice) => void;
   place?: ComposerPlace;
   targetProject?: string;
   targetWorkspace?: string;
@@ -762,6 +768,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.onYagni
             ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
+          {props.onAgentLang && props.translation && <AgentLangSelect state={props.translation} defaultAgent={props.translationDefault} onChoose={props.onAgentLang} sheet={phone} />}
           {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">

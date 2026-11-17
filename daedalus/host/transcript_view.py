@@ -30,13 +30,13 @@ from protocore.contracts.types import (
 )
 from protocore.runtime.wire_format import is_compacted_placeholder, parse_compacted_placeholder
 
-from daedalus.host import attached_files, prompts
+from daedalus.host import attached_files, prompts, translation
 from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import operator_secrets, redact
 from daedalus.tools.websearch import sources_of
 
-VIEW_VERSION = 17
+VIEW_VERSION = 18
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -119,6 +119,14 @@ def message_view(message: Message) -> dict[str, Any]:
     if message.role is MessageRole.assistant:
         body, headline = split_headline(body)
         body = redact.redact(body)
+    # A message that went through the translator is shown in the operator's language, with the other side
+    # as the alternate the app offers: what the agent got for the operator's words, the original for an answer.
+    read = body
+    body, translated = translation.view_of(message.metadata, message.role, body) if isinstance(message.metadata, dict) else (body, None)
+    if translated is not None and message.role is MessageRole.assistant:
+        body = redact.redact(body)
+        if translated.get("alternate"):
+            translated["alternate"] = redact.redact(translated["alternate"])
     archived = message.metadata.get("daedalus.archived") if isinstance(message.metadata, dict) else None
     # Who really answered. Absent on every turn written before the host started recording it, and on
     # every turn that is not the model's — so the app shows the note where there is one and nothing
@@ -163,7 +171,10 @@ def message_view(message: Message) -> dict[str, Any]:
         # The files the message carried, for the app's thumbnails and cards. A message written before
         # the host recorded them has them read back from the list the model was given, which is why a
         # stored view from before this field is recomputed.
-        "attachments": attached_files.of(message.metadata, body) if message.role is MessageRole.user else [],
+        "attachments": attached_files.of(message.metadata, read) if message.role is MessageRole.user else [],
+        # Set on a message the translator stood in front of (``translation.view_of``): the direction, how far
+        # it got, the two languages and the other text. The model never reads this field or its source.
+        "translation": translated,
         # A guest's message: who holds the link and what the turn could do, for the chat's mark.
         "guest": {
             "label": str(guest.get("label") or ""), "tools": str(guest.get("tools") or ""), **({"kind": "reply"} if guest.get("kind") == "reply" else {}),

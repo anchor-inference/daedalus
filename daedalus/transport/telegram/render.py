@@ -559,14 +559,15 @@ class RunRenderer:
             lines.append("files: " + ", ".join(sorted(v.changed_files))[:300])
         return "\n".join(lines)[:4000]
 
-    async def finish(self, status: str, *, workspace: Path, quiet: bool = False) -> None:
+    async def finish(self, status: str, *, workspace: Path, quiet: bool = False, held: bool = False) -> None:
         """Send the final answer and freeze the status message.
 
         Delivery degrades in steps and never ends in silence: rich Markdown, then plain
         text per chunk, then the whole answer as a file, and as a last resort an explicit
         note that Telegram refused it (the text is still in the workspace and the Mini App).
         ``quiet`` (an unattended run that called StaySilent) keeps the final reply out of
-        the chat; the status message records that the run chose silence.
+        the chat; the status message records that the run chose silence. ``held`` keeps it out
+        too, because it is being translated and :meth:`deliver_final` sends the translation.
         """
         v = self.view
         v.state = status
@@ -576,6 +577,9 @@ class RunRenderer:
         if quiet:
             v.final_sent = True
             v.narration.append("🤫 quiet run: nothing needed the operator's attention")
+            final = ""
+        if held and final:
+            v.final_sent = True
             final = ""
         if self._tick_task is not None:
             self._tick_task.cancel()
@@ -601,7 +605,7 @@ class RunRenderer:
                 except Exception:  # noqa: BLE001
                     pass
                 v.draft_sent = ""
-        elif not final and status == "completed" and not v.tools:
+        elif not final and not held and status == "completed" and not v.tools:
             await self.outbox.send_text("(the agent finished without a reply)", markdown=False)
         if v.widgets and not quiet:
             await self._say_widgets()
@@ -617,6 +621,16 @@ class RunRenderer:
                 await self._show_status(summary)
             except Exception:  # noqa: BLE001
                 pass
+
+    async def deliver_final(self, final: str, workspace: Path) -> None:
+        """Send an answer that was held back by :meth:`finish`, the same way an answer is sent."""
+        await self._deliver_final(flatten_evidence(redact(final)), workspace)
+        if self.streaming and self.view.draft_id and self.view.draft_sent:
+            try:
+                await self.outbox.send_draft(self.view.draft_id, "")
+            except Exception:  # noqa: BLE001
+                pass
+            self.view.draft_sent = ""
 
     async def _deliver_final(self, final: str, workspace: Path) -> None:
         v = self.view

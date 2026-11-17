@@ -194,7 +194,7 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
                 <li key={i} className={`ask-review-row ${line ? "" : "missing"}`}>
                   <span className="ask-review-q">
                     {x.header && <span className="ask-chip">{x.header}</span>}
-                    <span className="ask-review-text">{x.question}</span>
+                    <span className="ask-review-text">{x.translation?.question || x.question}</span>
                   </span>
                   <span className="ask-review-a">{line || t("ask.review.none")}</span>
                   <button type="button" className="ask-review-edit" onClick={() => moveTo(i)} aria-label={t("ask.review.edit.label", { i: i + 1 })}>
@@ -250,7 +250,11 @@ function QuestionStep({ q, draft, name, phone, peek, onPeek, onPick, onOther, on
     <div className="ask-options" role={kind === "multi" ? "group" : "radiogroup"} data-layout={kind === "pair" ? "pair" : "list"} aria-label={q.question}>
       {options.map((o, i) => {
         const on = draft.selected.includes(o.label);
-        const { text, recommended } = optionLabel(o.label);
+        // A translated option is shown in the operator's words; the value stays the agent's own label,
+        // which is what the agent matches the answer against.
+        const said = q.translation?.options[i];
+        const { text, recommended } = optionLabel(said?.label || o.label);
+        const description = said ? said.description || o.description : o.description;
         return (
           <label key={o.label} className={`ask-opt ${on ? "on" : ""}`} data-label={o.label}
             onMouseEnter={preview ? () => onPeek(o.label) : undefined} onMouseLeave={preview ? () => onPeek(null) : undefined}>
@@ -258,7 +262,7 @@ function QuestionStep({ q, draft, name, phone, peek, onPeek, onPick, onOther, on
             {kind !== "pair" && <span className="ask-mark" aria-hidden />}
             <span className="ask-opt-main">
               <span className="ask-opt-label">{text}{recommended && <span className="ask-rec">{t("ask.recommended")}</span>}</span>
-              {o.description && <span className="ask-opt-desc">{o.description}</span>}
+              {description && <span className="ask-opt-desc">{description}</span>}
             </span>
             {!phone && i < 9 && <kbd className="ask-key" aria-hidden>{i + 1}</kbd>}
           </label>
@@ -279,7 +283,7 @@ function QuestionStep({ q, draft, name, phone, peek, onPeek, onPick, onOther, on
     <>
       <div className="ask-q">
         {q.header && <span className="ask-chip">{q.header}</span>}
-        <p className="ask-text">{q.question}</p>
+        <p className="ask-text">{q.translation?.question || q.question}</p>
         <span className="ask-kind">
           {t(ask)}
           {kind === "multi" && draft.selected.length > 0 && <span className="num"> · {plural("ask.chosen", draft.selected.length)}</span>}
