@@ -935,6 +935,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             await existing(project)
         return {"questions": await questions.waiting(app, project)}
 
+    @api.post("/api/asks/{ask_id}/translate")
+    async def translate_question(ask_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A question of the Questions tab in the operator's language, on request: its title, text and
+        options beside the agent's own words, which stay what an answer names. A translator that failed
+        is a ``failed`` state, not an error, so the card says why beside the words it keeps."""
+        try:
+            return {"translation": await manager.translations.ask(ask_id, asked=True)}
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from None
+
     @api.get("/api/sessions/{session_id}/questions")
     async def session_questions(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One session's side questions, at the session's own path: the Chrome side panel reaches the

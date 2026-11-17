@@ -3966,6 +3966,7 @@ class SessionManager:
         autopilot: dict[str, Any] | None = None,
         guest: guest_turns.GuestTurn | None = None,
         visitor: dict[str, str] | None = None,
+        translated: dict[str, Any] | None = None,
         _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
@@ -3987,6 +3988,8 @@ class SessionManager:
         ``visitor`` marks words a live link's visitor wrote (its link and the name they gave), which the app
         labels so the operator can tell who wrote what (:mod:`daedalus.extensions.session_share`). It changes
         nothing else: a visitor drives the session as the operator does.
+        ``translated`` is the translation mark of a text the caller already put into the agent's language
+        (answers to side questions): the operator's own version rides in it, as on a translated message of theirs.
         ``guest`` makes this a guest's turn (:mod:`daedalus.host.guest_turns`). It only ever starts a run
         of its own and raises ``GuestTurnBusy`` otherwise: placed in a running turn or a queue it would
         be read by a run with the operator's tools, and a queued item is merged with whatever else waits.
@@ -4009,6 +4012,8 @@ class SessionManager:
             # well, it would cost a second call that returns the same English.
             outgoing = await self.translations.outgoing(state, text)
             text, mark = outgoing.text, outgoing.mark
+        if mark is None and translated:
+            mark = dict(translated)
         words = operator_words_metadata(origin, text, operator_words if mark is None else None)
         if mark is not None:
             words = {**words, translation.METADATA_KEY: mark}
@@ -6158,14 +6163,22 @@ class SessionManager:
         if status in ("completed", "failed", "cancelled"):
             # A run parked on a question is not finished; an interrupted one never reaches here.
             finished = self._finished_payload(state, run_id, status, duration_s)
-            translating = status == "completed" and finished["operator_facing"] and self.translations.pair_of(state) is not None
+            # Every finished answer of a translated chat is translated, whatever woke the run: a job's end, a
+            # project's events or a schedule answer in the chat the operator reads, and gating this on
+            # ``operator_facing`` left those in the agent's language. What that flag governs — the "finished"
+            # notification and Telegram holding the answer for its translation — stays with it: a run that
+            # announced nothing before announces nothing now (``pair_of`` already leaves out the sessions
+            # nobody reads as a chat: subagents, staff, side windows).
+            translating = status == "completed" and self.translations.pair_of(state) is not None
+            held = translating and bool(finished["operator_facing"])
             # The answer is announced once, in the operator's language: the notification and Telegram wait
             # for ``answer.translated``, which carries the summary translated (or the original, marked).
-            announced = {**{key: value for key, value in finished.items() if key != "summary"}, "translating": True} if translating else finished
+            announced = {**{key: value for key, value in finished.items() if key != "summary"}, "translating": True} if held else finished
             await self._publish(state, "run.finished", announced)
-            if translating:
+            if held:
                 self.translations.begin(run_id)
-                self._spawn_background(self.translations.incoming(state, run_id, finished), f"translate:{run_id}")
+            if translating:
+                self._spawn_background(self.translations.incoming(state, run_id, finished, announce=held), f"translate:{run_id}")
             await self._publish_status(state, "failed" if status == "failed" else "idle")
             if status != "cancelled" and finished["operator_facing"] and not finished["watched"] and not finished["telegram"]:
                 await self._mark_unread(state, run_id)

@@ -128,7 +128,7 @@ def walk(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     HOST.messages = [message(201, "user", x["asked"], translation={"direction": "out", "state": "failed", "from": "ru", "to": "en", "error": "timed out"}),
                      message(202, "assistant", x["answer_en"], translation={"direction": "in", "state": "failed", "from": "en", "to": "ru", "error": "timed out"})]
     page.reload()
-    expect(page.locator(".answer-translation[data-translation='failed']")).to_have_text(words["failed"])
+    expect(page.locator(".answer-translation[data-translation='failed']")).to_contain_text(words["failed"])
     expect(page.locator(".msg.user [data-translation='out-failed']")).to_be_visible()
 
     # A question in the operator's language; the answer names the agent's own label.

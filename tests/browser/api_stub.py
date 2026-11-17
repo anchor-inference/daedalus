@@ -2120,6 +2120,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         asked = body.get("agent") if isinstance(body, dict) else None
         agent = "en" if asked is None else str(asked)
         return 200, "application/json", json.dumps(session_translation(agent, explicit=asked is not None))
+    if method.upper() == "POST" and len(parts) == 7 and parts[2] == "sessions" and parts[4] == "messages" and parts[6] == "translate":
+        # "Translate" under one of the agent's texts: the stub has no translator and answers with no
+        # translation, which leaves the text as it was. A check that reads the result answers it itself.
+        return 200, "application/json", json.dumps({"seq": int(parts[5]) if parts[5].isdigit() else 0, "text": "", "translation": None})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "asks" and parts[4] == "translate":
+        # "Translate" on a question card: no translator here, so the card keeps the agent's words.
+        return 200, "application/json", json.dumps({"translation": {"state": "failed", "from": "", "to": "ru", "error": "no translator in this stub"}})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "bypass":
         # "Bypass all checks" in the toggles menu: on or off as asked, and the refusals that stay.
         on = bool(body.get("on")) if isinstance(body, dict) else False

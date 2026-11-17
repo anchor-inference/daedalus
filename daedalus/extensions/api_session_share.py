@@ -160,6 +160,9 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("POST", _S + "/policy/refuse", SESSION),
         ("PUT", _S + "/browser-approvals", SESSION),
         ("POST", _S + "/transcribe", SESSION),
+        # A note or an answer in the operator's language on request: the visitor already runs the agent on
+        # the operator's account, and this one writes only the display copy of a row of this session.
+        ("POST", _S + r"/messages/[0-9]{1,12}/translate", SESSION),
         ("DELETE", _S + f"/transcribe/{_ID}", SESSION),
         ("POST", _S + f"/widgets/{_ID}/page", SESSION),
         ("PUT", _S + f"/widgets/{_ID}/storage/.{{1,400}}", SESSION),

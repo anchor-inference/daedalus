@@ -6,7 +6,7 @@ export type IconName =
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
-  | "hand" | "ffwd"
+  | "hand" | "ffwd" | "translate"
   | "monitor" | "laptop"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
@@ -57,6 +57,8 @@ const PATHS: Record<IconName, string> = {
   pen: "M4 20l4-1 11-11-3-3L5 16zM13 6l3 3",
   search: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM20 20l-4-4",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
+  // A character over a letter: the agent's text in the operator's language, on request.
+  translate: "M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6",
   attach: "M21 12l-8 8a5 5 0 0 1-7-7l9-9a3 3 0 0 1 4 4l-9 9a1 1 0 0 1-2-2l8-8",
   image: "M4 5h16v14H4zM8 13l3-3 4 4 2-2 3 3",
   question: "M9 9a3 3 0 1 1 4 3c-1 .5-1 1-1 2M12 17h.01",

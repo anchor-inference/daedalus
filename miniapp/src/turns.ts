@@ -24,7 +24,7 @@ export type LiveState = { runId?: string; text: string; thinking: string; tools:
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, stepAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
 export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
-export type NoteItem = { kind: "note"; text: string; seq?: number; /** When the message that carried it was written. */ at?: number };
+export type NoteItem = { kind: "note"; text: string; seq?: number; /** When the message that carried it was written. */ at?: number; /** Its translation, when the operator asked for one (or the answer it once was had one). */ translation?: MessageTranslation };
 export type ThinkItem = { kind: "thinking"; text: string };
 export type SummaryItem = { kind: "summary"; text: string; reason: string };
 /** A group the run loaded without a search of its own to show for it: a held-back tool called by name. */
@@ -217,7 +217,7 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       // The core compacted mid-run: a step inside the turn, where the summarised work used to be.
       if (!current) current = open(`a${m.seq ?? i}`, at);
       if (current.answer) {
-        current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
+        current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt, translation: current.answerTranslation });
         current.answer = "";
         current.answerSeq = undefined;
         current.answerAt = undefined;
@@ -259,14 +259,14 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.account ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}:${translationMark(m.translation)}`);
     if (current.answer) {
       // Text that turned out not to be final becomes a note.
-      current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
+      current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt, translation: current.answerTranslation });
       current.answer = "";
       current.answerSeq = undefined;
       current.answerAt = undefined;
       current.answerTranslation = undefined;
     }
     if (m.thinking) current.activity.push({ kind: "thinking", text: m.thinking });
-    if (m.text && m.tool_calls.length) current.activity.push({ kind: "note", text: m.text, seq: m.seq ?? undefined, at: at || undefined });
+    if (m.text && m.tool_calls.length) current.activity.push({ kind: "note", text: m.text, seq: m.seq ?? undefined, at: at || undefined, translation: m.translation ?? undefined });
     else if (m.text) { current.answer = m.text; current.answerSeq = m.seq ?? undefined; current.answerAt = at || undefined; current.answerTranslation = m.translation ?? undefined; }
     for (const c of m.tool_calls) {
       const r = results.get(c.id);
@@ -345,7 +345,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   const thinkingKnown = t.activity.some((a) => a.kind === "thinking" && a.text === live.thinking);
   if (t.answer && ((live.text && live.text !== t.answer) || (live.thinking && !thinkingKnown) || fresh.length)) {
     // Something newer is streaming, so the text before it was not the final answer.
-    t.activity.push({ kind: "note", text: t.answer, seq: t.answerSeq, at: t.answerAt });
+    t.activity.push({ kind: "note", text: t.answer, seq: t.answerSeq, at: t.answerAt, translation: t.answerTranslation });
     t.answer = "";
     t.answerSeq = undefined;
     t.answerAt = undefined;
@@ -389,7 +389,7 @@ export function currentStep(turn: Turn, live: LiveState): { tool?: ToolItem; sin
 }
 
 /** A stretch of a turn as the transcript draws it: the steps between two texts, or a text. */
-export type Segment = { kind: "work"; items: Activity[] } | { kind: "text"; text: string; seq?: number; at?: number };
+export type Segment = { kind: "work"; items: Activity[] } | { kind: "text"; text: string; seq?: number; at?: number; translation?: MessageTranslation };
 
 /**
  * The turn's activity cut at every text the agent wrote between its steps, for the transcript
@@ -409,7 +409,7 @@ export function splitActivity(items: readonly Activity[]): Segment[] {
     }
     if (work.length) out.push({ kind: "work", items: work });
     work = [];
-    out.push({ kind: "text", text: item.text, seq: item.seq, at: item.at });
+    out.push({ kind: "text", text: item.text, seq: item.seq, at: item.at, translation: item.translation });
   }
   if (work.length) out.push({ kind: "work", items: work });
   return out;

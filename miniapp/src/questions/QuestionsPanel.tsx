@@ -25,6 +25,7 @@ import { go } from "../shell";
 import { invalidate } from "../store";
 import { isMac } from "../terminal/keys";
 import { errorText } from "../ui";
+import { useAskTranslation } from "./asktranslate";
 import { QUESTIONS_KEY, answerPath, dismissPath, useQuestions, type QuestionScope } from "./data";
 import {
   EMPTY,
@@ -390,7 +391,10 @@ function bodyOf(q: WaitingQuestion): string {
   return lines.slice(first + 1).join("\n").trim();
 }
 
-function QuestionCard({ q, draft, fate, fresh, files, onChange, onClear, onDismiss, onAttach, onUnattach, onPutAside }: CardProps) {
+function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, onDismiss, onAttach, onUnattach, onPutAside }: CardProps) {
+  // Drawn in the operator's language when there is a translation; what the card answers is still `asked`.
+  const translated = useAskTranslation(asked);
+  const q = translated.shown;
   const d = draft ?? EMPTY;
   const filesOk = takesFiles(q);
   const picker = useRef<HTMLInputElement>(null);
@@ -427,7 +431,7 @@ function QuestionCard({ q, draft, fate, fresh, files, onChange, onClear, onDismi
           if (c === "because" && d.choice !== "because") window.setTimeout(() => field.current?.focus(), 0);
         },
       }))
-    : q.options.map((o) => ({ key: o, label: o, on: d.selected.includes(o), pick: () => onChange((x) => toggleOption(q, x, o)) }));
+    : q.options.map((o, i) => ({ key: o, label: translated.label(o, i), on: d.selected.includes(o), pick: () => onChange((x) => toggleOption(q, x, o)) }));
   const multi = !permission && q.multi;
   const chipsRef = useRef<HTMLDivElement>(null);
   const [focusAt, setFocusAt] = useState(() => Math.max(0, chips.findIndex((c) => c.on)));
@@ -470,6 +474,7 @@ function QuestionCard({ q, draft, fate, fresh, files, onChange, onClear, onDismi
             )}
             {q.urgent && <span className="q-flag urgent">{t("questions.urgent")}</span>}
             {q.host && <span className="q-flag host" title={t("main.ask.host")}><Icon name="lock" size={11} />{t("questions.host")}</span>}
+            {!gone && translated.offer}
           </div>
         </div>
         <code className="q-short">{q.short_id}</code>
@@ -490,6 +495,7 @@ function QuestionCard({ q, draft, fate, fresh, files, onChange, onClear, onDismi
           )}
         </>
       )}
+      {translated.line}
       {q.suggestion && <div className="q-suggestion"><Icon name="conductor" size={12} />{t("main.ask.suggests", { text: q.suggestion })}</div>}
       {!gone && chips.length > 0 && (
         <div

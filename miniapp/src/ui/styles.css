@@ -5914,3 +5914,21 @@ body.resizing .kind-tabs-pill { transition: none; }
 .answer-translation.failed { color:var(--warn); }
 .answer-translation .linkbtn { color:var(--accent); font-size:var(--fs-12); }
 .answer-translation .linkbtn:hover { text-decoration:underline; }
+.answer-translation-error { min-width:0; max-width:48ch; color:var(--fg-3); }
+/* "Translate" under a note between steps, which has no row of actions to hold it. A line of its own
+   under every note made a long run's notes twice as far apart, so it takes no room: a small chip over
+   the corner of the note's last line, there while the pointer is on the note or on the chip. The delay
+   before it fades lets the pointer cross the gap from the text to the chip. */
+.answer-translation.offer { position:relative; display:block; height:0; margin:0; z-index:1; }
+.answer-translation.offer .linkbtn { position:absolute; right:0; bottom:var(--space-1); display:inline-flex; align-items:center; gap:var(--space-1); padding:2px var(--space-2); border:1px solid var(--line); border-radius:var(--radius-pill); background:var(--surface-1); color:var(--fg-2); opacity:0; pointer-events:none; transition:opacity .12s ease .3s; }
+.answer.interim:hover + .answer-translation.offer .linkbtn, .note:hover > .answer-translation.offer .linkbtn,
+.answer-translation.offer .linkbtn:hover, .answer-translation.offer .linkbtn:focus-visible { opacity:1; pointer-events:auto; transition-delay:0s; }
+.answer-translation.offer .linkbtn:hover { color:var(--accent); text-decoration:none; }
+/* "Translate" on a question card sits in the line under its title, quiet until pointed at. */
+.q-translate { display:inline-flex; align-items:center; gap:var(--space-1); color:var(--fg-3); font-size:inherit; }
+.q-translate:hover { color:var(--accent); }
+/* A touch screen has no hover: the chip is a quiet line under the note instead. */
+@media (hover: none) {
+  .answer-translation.offer { height:auto; margin-top:var(--space-1); }
+  .answer-translation.offer .linkbtn { position:static; opacity:1; pointer-events:auto; padding:0; border:0; background:none; color:var(--fg-3); }
+}

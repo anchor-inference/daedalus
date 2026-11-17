@@ -1872,6 +1872,8 @@ export type WaitingQuestion = Ask & {
   files?: boolean;
   /** The session that left a side question; null for every other request. */
   session_id?: string | null;
+  /** The operator's language, which the card's "Translate" asks for; absent on a host without it. */
+  translate_into?: string;
 };
 
 /** One answer of a batch sent from the list. `files` are the places of its files among the batch's uploads. */
