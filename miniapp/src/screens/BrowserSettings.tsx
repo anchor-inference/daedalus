@@ -20,6 +20,7 @@ import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { Dropdown, Switch, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
+import { ModelPicker, type ModelCatalogue } from "../modelitems";
 import { ProcedureEditor } from "../browser/steps";
 import { DEFAULT_USER, YourChrome } from "../browser/yourchrome";
 
@@ -110,8 +111,8 @@ export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; s
       <Recording b={b} set={set} toast={toast} />
       <Watch b={b} set={set} />
       <Network b={b} set={set} />
-      <Monitor b={b} set={set} presets={Object.keys(s.presets ?? {})} />
-      <Reading b={b} set={set} presets={Object.keys(s.presets ?? {})} />
+      <Monitor b={b} set={set} catalogue={s} />
+      <Reading b={b} set={set} catalogue={s} />
       <Graphics b={b} set={set} envs={envs} />
       <SiteNotes toast={toast} />
     </div>
@@ -385,7 +386,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
   );
 }
 
-function Monitor({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; presets: string[] }) {
+function Monitor({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; catalogue: ModelCatalogue }) {
   return (
     <div className="card bs-monitor">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.monitor.title")}</div>
@@ -394,19 +395,19 @@ function Monitor({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
         <Switch checked={b.injection_monitor} onChange={(injection_monitor) => set({ injection_monitor })} label={t("bs.monitor.mode")} />
       </Row>
       <Row title={t("bs.monitor.model")} stack data-setting="browser.injection_monitor_preset">
-        <Dropdown id="browser-monitor-model" label={t("bs.monitor.model")} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
+        <ModelPicker id="browser-monitor-model" label={t("bs.monitor.model")} catalogue={catalogue} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
       </Row>
     </div>
   );
 }
 
-function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; presets: string[] }) {
+function Reading({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; catalogue: ModelCatalogue }) {
   return (
     <div className="card bs-reading">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.agent.title")}</div>
       <div className="sub">{t("bs.agent.sub")}</div>
       <Row title={t("bs.agent.extract")} stack data-setting="browser.extract_preset">
-        <Dropdown id="browser-extract-model" label={t("bs.agent.extract")} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
+        <ModelPicker id="browser-extract-model" label={t("bs.agent.extract")} catalogue={catalogue} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
       </Row>
       <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")} data-setting="browser.point_clicks">
         <Switch checked={b.point_clicks} onChange={(point_clicks) => set({ point_clicks })} label={t("bs.agent.point")} />

@@ -51,7 +51,7 @@ class Host:
 
     def __init__(self, bs: BrowserStub) -> None:
         self.bs = bs
-        self.settings = {"revision": "s1", "browser": copy.deepcopy(BROWSER), "presets": {"p": {}, "q": {}}, "providers": {}, "model": {"preset": "p", "chain": []}}
+        self.settings = {"revision": "s1", "browser": copy.deepcopy(BROWSER), "presets": {"p": {"provider": "deepseek", "model": "p", "label": "P"}, "q": {"provider": "deepseek", "model": "q", "label": "Q"}}, "providers": {}, "model": {"preset": "p", "chain": []}}
         self.puts: list[dict] = []
 
     def route(self, route) -> None:  # type: ignore[no-untyped-def]
@@ -205,13 +205,13 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"LAN sites were saved as {host.settings['browser'].get('lan_sites')!r}")
 
     # Reading for the agent and clicks at a point: off until switched, then saved with the rest.
-    # A switch and a compact picker in their rows, like every other browser setting.
+    # A switch, and the model drawn as its row with its list opened in place.
     point = page.locator(".bs-reading [role=switch]")
     if point.get_attribute("aria-checked") != "false":
         say("clicks at a point are not off by default")
     point.click()
-    page.locator("#browser-extract-model").click()
-    page.locator(".dropdown-list [role=option][data-value='q']").click()
+    page.locator("#browser-extract-model .sel-current button").click()
+    page.locator("#browser-extract-model [role=option][data-id='q']").click()
     page.wait_for_timeout(900)
     saved = host.settings["browser"]
     print(f"[{lang}] reading: point {saved.get('point_clicks')}, model {saved.get('extract_preset')!r}")

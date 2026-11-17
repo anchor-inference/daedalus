@@ -3,8 +3,9 @@
 Settings → Models: a model whose built-in price was overridden says so beside the default it replaced and
 offers Reset, which asks the host to remove the override; typing a rate and saving sends it; a negative
 rate is refused in the card; a login on a plan offers the switch to per-token; a model on a prepaid
-provider says the provider decides. A session's Details: the three-way choice, and "Chosen" asks the host
-for the list. Both languages, a desktop and a phone, light and dark; with SHOTS set, pictures of each.
+provider says the provider decides. A session's Details: the three ways, "Chosen" asks the host for the
+list, which is searchable, takes a range on a shift-click, removes from its chosen list, and goes back
+to the default. Both languages, a desktop and a phone, light and dark; with SHOTS set, pictures of each.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 8163 /tmp/app-root &
@@ -125,12 +126,36 @@ def details(browser, lang: str, width: int, scheme: str, failures: list[str]) ->
     page.locator(f"{scope} [data-prop='helpers']").click()
     box = page.locator(f"{scope} .dt-subagent-models")
     box.wait_for()
-    if words["subm"] not in box.inner_text():
-        failures.append(f"{where}: the helper models page has no picker: {box.inner_text()!r}")
+    if box.get_by_role("radiogroup", name=words["subm"]).count() != 1:
+        failures.append(f"{where}: the helper models page has no choice of ways: {box.inner_text()!r}")
     box.get_by_role("radio", name=words["chosen"]).click()
     page.wait_for_timeout(200)
     if {"mode": "chosen", "presets": []} not in sent:
         failures.append(f"{where}: Chosen sent {sent}")
+    # The list is in place: every model under its provider with its window, searchable, taken by group.
+    rows = box.locator(".sel-list [role=option]")
+    if rows.count() != 4 or "128" not in box.locator(".sel-list [data-id='deepseek-flash']").inner_text():
+        failures.append(f"{where}: the list shows {rows.count()} rows: {box.locator('.sel-list').inner_text()!r}")
+    box.locator(".sel-search-field").fill("luna")
+    if rows.count() != 1:
+        failures.append(f"{where}: a search for luna leaves {rows.count()} rows")
+    box.locator(".sel-search-field").fill("")
+    box.locator(".sel-list [data-id='deepseek-flash']").click()
+    page.wait_for_timeout(200)
+    box.locator(".sel-list [data-id='qwen-local']").click(modifiers=["Shift"])
+    page.wait_for_timeout(300)
+    if not sent or sent[-1] != {"mode": "chosen", "presets": ["deepseek-flash", "claude-opus-5", "gpt-5.6-luna", "qwen-local"]}:
+        failures.append(f"{where}: a click and a shift-click sent {sent[-2:]}")
+    if box.locator(".sel-chosen-list > li").count() != 4:
+        failures.append(f"{where}: the chosen list holds {box.locator('.sel-chosen-list > li').count()} models")
+    box.locator(".sel-chosen-list > li").first.locator(".sel-remove").click()
+    page.wait_for_timeout(300)
+    if sent[-1] != {"mode": "chosen", "presets": ["claude-opus-5", "gpt-5.6-luna", "qwen-local"]}:
+        failures.append(f"{where}: removing the first sent {sent[-1]}")
+    box.locator(".sel-inherit button").click()
+    page.wait_for_timeout(300)
+    if sent[-1] != {"mode": None, "presets": []}:
+        failures.append(f"{where}: Use the default sent {sent[-1]}")
     if SHOTS:
         box.scroll_into_view_if_needed()
         box.screenshot(path=f"{SHOTS}/subagent-models-{lang}-{width}-{scheme}.png")

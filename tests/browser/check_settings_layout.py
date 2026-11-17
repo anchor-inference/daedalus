@@ -51,19 +51,19 @@ def main() -> int:
                 page.goto(f"{BASE}/settings/tools{suffix}")
                 page.wait_for_selector(".tgroup")
                 assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => r.querySelector('.tgroup-use-text').getBoundingClientRect().right <= r.querySelector('.dropdown-btn').getBoundingClientRect().left - 7)")
-                multi = page.locator(".settings-row-ctl > .dropdown[data-multi]").first
-                button = multi.locator(".dropdown-btn")
-                button.scroll_into_view_if_needed()
-                before = button.bounding_box()
-                button.click()
+                # The fallbacks are an in-place list: ticking rows must not shift its search field sideways
+                # or change its width, the way a summary button that grew with its caption once did.
+                fallbacks = page.locator("#search-fallbacks")
+                search = fallbacks.locator(".sel-search")
+                search.scroll_into_view_if_needed()
+                before = search.bounding_box()
                 for _ in range(3):
-                    multi.locator(".dropdown-item").nth(0).click()
-                    after = button.bounding_box()
+                    fallbacks.locator(".sel-list [role=option]").nth(0).click()
+                    after = search.bounding_box()
                     assert before and after and abs(before["x"] - after["x"]) < 1 and abs(before["width"] - after["width"]) < 1, (before, after)
-                page.keyboard.press("Escape")
                 context.close()
         browser.close()
-    print("Settings layout: cards, font selection, usage lanes and stable multiselect passed at four widths in both themes")
+    print("Settings layout: cards, font selection, usage lanes and a stable fallback list passed at four widths in both themes")
     return UNHANDLED.report()
 
 

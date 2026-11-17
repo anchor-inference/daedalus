@@ -5,24 +5,17 @@
 // summarises with the session's own model instead), so the picker must still show it — as missing —
 // rather than silently displaying the first option and leaving the operator to believe it is in use.
 
-import type { Preset } from "./api";
 import { t } from "./i18n";
-import { Dropdown } from "./ui/components";
+import { ModelPicker, type ModelCatalogue } from "./modelitems";
 import { Row } from "./settingsrow";
 
-export type CompactionOption = { value: string; label: string; missing?: boolean };
-
-/** The empty choice first, then every preset under the model picker's own label, then a missing current one. */
-export function compactionOptions(presets: Record<string, Preset> | undefined, current: string): CompactionOption[] {
-  const options: CompactionOption[] = [{ value: "", label: t("settings.compaction.model.own") }];
-  for (const [id, p] of Object.entries(presets ?? {})) options.push({ value: id, label: p.label || `${p.provider}/${p.model}` });
-  if (current && !(current in (presets ?? {}))) options.push({ value: current, label: t("settings.compaction.model.missing", { id: current }), missing: true });
-  return options;
+/** Whether the chosen summary model is one that no longer exists. */
+export function compactionMissing(presets: ModelCatalogue["presets"] | undefined, current: string): boolean {
+  return !!current && !(current in (presets ?? {}));
 }
 
-export function CompactionModelSelect({ presets, value, onSave }: { presets: Record<string, Preset> | undefined; value: string; onSave: (preset: string) => void }) {
-  const options = compactionOptions(presets, value);
-  const missing = options.some((o) => o.missing);
+export function CompactionModelSelect({ catalogue, value, onSave }: { catalogue: ModelCatalogue; value: string; onSave: (preset: string) => void }) {
+  const missing = compactionMissing(catalogue.presets, value);
   return (
     <Row
       title={t("settings.compaction.model")}
@@ -30,7 +23,7 @@ export function CompactionModelSelect({ presets, value, onSave }: { presets: Rec
       stack
       data-setting="compaction.preset"
     >
-      <Dropdown id="compaction-preset" label={t("settings.compaction.model")} value={value} invalid={missing} onChange={onSave} options={options.map((o) => ({ id: o.value, label: o.label }))} />
+      <ModelPicker id="compaction-preset" label={t("settings.compaction.model")} catalogue={catalogue} value={value} onChange={onSave} defaultOption={{ label: t("settings.compaction.model.own") }} />
     </Row>
   );
 }

@@ -12,8 +12,9 @@ import { NumRow, Row } from "../settingsrow";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { Sheet, toast } from "../ui/dialogs";
-import { Dropdown, Switch } from "../ui/index";
+import { Switch } from "../ui/index";
 import { undoToast } from "../memory/undo";
+import { ModelPicker } from "../modelitems";
 
 type MemorySection = NonNullable<Settings["memory"]>;
 
@@ -30,10 +31,6 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
   // The whole section goes back each time: the host merges a section's fields into what it has, so a
   // list sent alone replaces the list, which is what turning one subject off must do.
   const put = (patch: Partial<MemorySection>) => save({ memory: { ...memory, ...patch } });
-  const presets = Object.entries(s.presets ?? {});
-  const presetOptions = presets.map(([id, p]) => ({ id, label: p.label || `${p.provider}/${p.model}` }));
-  const missing = !!memory.classify_preset && !(memory.classify_preset in (s.presets ?? {}));
-  const synthesisMissing = !!memory.synthesis_preset && !(memory.synthesis_preset in (s.presets ?? {}));
   // The master switch is the list being non-empty; "on" with nothing chosen yet is this page's own
   // state, shown until a subject is picked or the page is left.
   const [revealed, setRevealed] = useState(false);
@@ -71,13 +68,13 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
           <Switch checked={memory.paused} label={t("settings.memory.paused")} onChange={(paused) => put({ paused })} />
         </Row>
         <Row title={t("settings.memory.synthesis")} desc={t("settings.memory.synthesis.sub")} stack data-setting="memory.synthesis_preset">
-          <Dropdown
+          <ModelPicker
             id="memory-synthesis"
             label={t("settings.memory.synthesis")}
+            catalogue={s}
             value={memory.synthesis_preset}
-            invalid={synthesisMissing}
             onChange={(synthesis_preset) => put({ synthesis_preset })}
-            options={[{ id: "", label: t("settings.memory.synthesis.default") }, ...presetOptions, ...(synthesisMissing ? [{ id: memory.synthesis_preset, label: t("settings.compaction.model.missing", { id: memory.synthesis_preset }) }] : [])]}
+            defaultOption={{ label: t("settings.memory.synthesis.default") }}
           />
         </Row>
         <NumRow id="memory-budget" setting="memory.synthesis_usd_per_day" title={t("settings.memory.budget")} desc={t("settings.memory.budget.sub")} unit="$"
@@ -104,13 +101,13 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
       </div>
       <div className="card">
         <Row title={t("settings.memory.classify")} desc={t("settings.memory.classify.sub")} stack data-setting="memory.classify_preset">
-          <Dropdown
+          <ModelPicker
             id="memory-classify"
             label={t("settings.memory.classify")}
+            catalogue={s}
             value={memory.classify_preset}
-            invalid={missing}
             onChange={(classify_preset) => put({ classify_preset })}
-            options={[{ id: "", label: t("settings.memory.classify.none") }, ...presetOptions, ...(missing ? [{ id: memory.classify_preset, label: t("settings.compaction.model.missing", { id: memory.classify_preset }) }] : [])]}
+            defaultOption={{ label: t("settings.memory.classify.none") }}
           />
         </Row>
         <Row title={t("settings.memory.tidy")} desc={t("settings.memory.tidy.sub")} data-setting="memory.consolidate">

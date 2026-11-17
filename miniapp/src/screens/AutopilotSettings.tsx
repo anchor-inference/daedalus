@@ -9,21 +9,21 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type AutopilotOverview, type Settings, type UserStyle } from "../api";
 import { plural, t } from "../i18n";
 import { NumRow, Row } from "../settingsrow";
-import { Dropdown, Switch } from "../ui/index";
+import { ModelPicker } from "../modelitems";
+import { Switch } from "../ui/index";
 import { confirmAsync, errorText } from "../ui";
 import { timeAgo } from "../ui/components";
 import { usd } from "../format";
 
-type SaveProps = { s: Settings; save: (patch: Partial<Settings>) => void; presetLabel: (id: string) => string };
+type SaveProps = { s: Settings; save: (patch: Partial<Settings>) => void };
 
-export function AutopilotSettings({ s, save, presetLabel }: SaveProps) {
+export function AutopilotSettings({ s, save }: SaveProps) {
   const pilot = s.autopilot ?? { enabled: false, preset: "", max_continuations: 3, usd_per_day: 0.2 };
   const put = (patch: Partial<typeof pilot>) => save({ autopilot: { ...pilot, ...patch } });
   const [overview, setOverview] = useState<AutopilotOverview | null>(null);
   useEffect(() => {
     api.get<AutopilotOverview>("/api/autopilot").then(setOverview).catch(() => setOverview(null));
   }, [pilot.enabled, pilot.usd_per_day]);
-  const presets = Object.keys(s.presets ?? {});
   const verdicts = overview?.verdicts_today ?? {};
   return (
     <div className="card" data-section="autopilot">
@@ -32,8 +32,8 @@ export function AutopilotSettings({ s, save, presetLabel }: SaveProps) {
         <Switch checked={pilot.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.autopilot.enabled")} />
       </Row>
       <Row title={t("settings.autopilot.preset")} desc={t("settings.autopilot.preset.sub")} stack data-setting="autopilot.preset">
-        <Dropdown id="autopilot-preset" label={t("settings.autopilot.preset")} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
-          options={[{ id: "", label: t("settings.autopilot.preset.same") }, ...presets.map((p) => ({ id: p, label: presetLabel(p) }))]} />
+        <ModelPicker id="autopilot-preset" label={t("settings.autopilot.preset")} catalogue={s} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
+          defaultOption={{ label: t("settings.autopilot.preset.same") }} />
       </Row>
       <NumRow id="autopilot-turns" setting="autopilot.max_continuations" title={t("settings.autopilot.turns")} desc={t("settings.autopilot.turns.sub")}
         value={pilot.max_continuations} min={0} max={20} step={1} onSave={(max_continuations) => put({ max_continuations })} />

@@ -155,8 +155,8 @@ def desktop(page: Page, lang: str) -> None:
     page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
     card = page.locator('[data-card="main-orchestrator"]')
     expect(card).to_be_visible()
-    # The choice is a compact picker in the card's row; its button shows the value it holds.
-    expect(card.locator(".dropdown-btn")).to_contain_text(words["middle"])
+    # The choice is the chosen model drawn as its row, tagged as the mid-tier one.
+    expect(card.locator(".sel-current")).to_contain_text(words["middle"])
 
 
 def phone(page: Page, lang: str) -> None:

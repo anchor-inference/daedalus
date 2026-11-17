@@ -15,7 +15,8 @@ import type { ActionRulesSettings, Settings } from "./api";
 import { DICT, t } from "./i18n";
 import { useQuery } from "./store";
 import { Row } from "./settingsrow";
-import { Dropdown, Switch, timeAgo } from "./ui/components";
+import { ModelPicker } from "./modelitems";
+import { Switch, timeAgo } from "./ui/components";
 import { go } from "./ui/index";
 
 export type ActionRulesInfo = {
@@ -73,7 +74,6 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
   const put = (patch: Partial<ActionRulesSettings>) => save({ action_rules: { ...current, ...patch } });
   const setLevel = (category: string, level: string) => void put({ levels: { ...current.levels, [category]: level } });
   const setReview = (category: string, on: boolean) => void put({ review: on ? [...new Set([...current.review, category])] : current.review.filter((c) => c !== category) });
-  const presets = Object.keys(s.presets ?? {});
   return (
     <>
       <div className="card action-rules" data-testid="action-rules">
@@ -130,7 +130,7 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
         <div className="section-title" style={{ marginTop: 0 }}>{t("rules.review.title")}</div>
         <div className="sub">{t("rules.review.sub")}</div>
         <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
-          <Dropdown id="action-review-model" label={t("rules.review.model")} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} options={[{ id: "", label: t("rules.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
+          <ModelPicker id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
         </Row>
         <Row title={t("rules.injection")} desc={t("rules.injection.sub")}>
           <Switch checked={current.injection_model} onChange={(injection_model) => void put({ injection_model })} label={t("rules.injection")} />

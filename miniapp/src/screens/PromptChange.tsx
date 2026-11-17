@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Sheet } from "../ui/dialogs";
+import { SelectionSingle } from "../ui/selection";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { duration } from "../format";
@@ -124,10 +125,9 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
       </div>
       <label htmlFor="prompt-change-request">{t("settings.rules.assistant.request")}</label>
       <textarea id="prompt-change-request" className="field" rows={3} maxLength={2000} value={instruction} disabled={planning || busy} onChange={(event) => setInstruction(event.target.value)} placeholder={t("settings.rules.assistant.placeholder")} />
+      <SelectionSingle label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
+        items={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
       <div className="prompt-change-actions">
-        <select className="field compact" aria-label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={(event) => setPreset(event.target.value)}>
-          {(view?.models ?? []).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-        </select>
         <button className="btn primary" disabled={planning || busy || !instruction.trim() || !preset} onClick={() => void request()}>
           <Icon name="bolt" size={15} /> {t("settings.rules.assistant.prepare")}
         </button>

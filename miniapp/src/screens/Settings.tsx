@@ -18,6 +18,7 @@ import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
 import { ModelPrice } from "../modelprice";
 import { SubagentModelsPicker } from "../subagentmodels";
+import { ModelPicker, modelItems } from "../modelitems";
 import { FreeModels } from "./FreeModels";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
@@ -25,7 +26,7 @@ import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { describeIntegration, type IntegrationRow } from "../integrationHealth";
-import { Dropdown, MultiDropdown, Segmented, Switch } from "../ui/index";
+import { Dropdown, Segmented, SelectionList, Switch } from "../ui/index";
 import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
@@ -213,7 +214,7 @@ function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Pres
 }
 
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
+function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
   price?: PriceView;
@@ -227,7 +228,6 @@ function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPri
   inChain: boolean;
   providers: string[];
   onDefault: () => void;
-  onChain: () => void;
   onPatch: (patch: Partial<Preset>) => void;
   onDelete: () => void;
   onLookup: (provider: string) => Promise<string[] | null>;
@@ -331,11 +331,6 @@ function PresetRow({ id, p, routed, onDemandByModel, windowSources, price, onPri
               </span>
             </Row>
             {routed && <PresetRoutes p={p} onPatch={onPatch} />}
-            {!isDefault && (
-              <Row title={t("settings.preset.usefallback")} desc={t("settings.preset.fallback.title")}>
-                <Switch checked={inChain} onChange={() => onChain()} label={t("settings.preset.usefallback")} />
-              </Row>
-            )}
           </div>
           <ModelPrice id={id} view={price} onSaved={onPriceSaved} toast={toast} />
           <div className="btnrow mrow-foot">
@@ -679,13 +674,15 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
         />
       </Row>
       <Row title={t("settings.search.fallbacks")} desc={t("settings.search.fallbacks.sub")} stack data-setting="tools.web.search.fallback">
-        <MultiDropdown
+        <SelectionList
           id="search-fallbacks"
           label={t("settings.search.fallbacks")}
-          none={t("settings.search.fallbacks.none")}
-          values={fallbackIds.filter((id) => id !== search.backend)}
+          emptyChosen={t("settings.search.fallbacks.none")}
+          chosenLabel={t("settings.search.fallbacks.chosen")}
+          ordered
+          value={fallbackIds.filter((id) => id !== search.backend)}
           onChange={(fallback) => saveSearch({ fallback })}
-          options={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !fallbackIds.includes(b.id) && !usable(b) }))}
+          items={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, detail: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, facts: [t(b.needs_key ? "settings.search.keyed" : "settings.search.keyless")], disabled: !usable(b) }))}
         />
       </Row>
       <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
@@ -978,7 +975,7 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         </Row>
         <NumRow id="heartbeat-max" setting="heartbeat.max_runs_per_day" title={t("settings.heartbeat.max")} value={hb.max_runs_per_day} min={0} onSave={(v) => put({ max_runs_per_day: v })} />
         <Row title={t("settings.heartbeat.preset")} stack data-setting="heartbeat.preset">
-          <Dropdown id="heartbeat-preset" label={t("settings.heartbeat.preset")} value={hb.preset} onChange={(preset) => put({ preset })} options={[{ id: "", label: t("settings.heartbeat.default") }, ...presets.map((p) => ({ id: p, label: presetName(s, p) }))]} />
+          <ModelPicker id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
         </Row>
       </div>
       <div className="card" data-setting="heartbeat.text">
@@ -1380,7 +1377,6 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     inChain={(s.model.chain ?? []).includes(id)}
                     providers={providerIds}
                     onDefault={() => save({ model: { preset: id } as any })}
-                    onChain={() => save({ model: { chain: (s.model.chain ?? []).includes(id) ? s.model.chain.filter((c) => c !== id) : [...(s.model.chain ?? []), id] } as any })}
                     onPatch={(patch) => void patchPreset(id, patch)}
                     onDelete={() => void removePreset(id)}
                     onLookup={lookupProviderModels}
@@ -1399,19 +1395,36 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 </button>
                 <span className="sub faint" style={{ alignSelf: "center" }}>{t("settings.models.add.hint")}</span>
               </div>
-              <div className="sub" style={{ marginTop: 10 }} data-setting="model.chain">{t("settings.models.chain", { chain: (s.model.chain ?? []).length ? s.model.chain.join(" → ") : t("settings.models.chain.none") })}</div>
+              {/* The whole chain in one place, in its order. It was a switch inside each model's
+                  expanded row and a line of ids joined by arrows: nobody could see the set at once
+                  or change the order without switching models off and on again. */}
+              {Object.keys(s.presets ?? {}).length > 1 && (
+                <Row title={t("settings.models.chain.title")} desc={t("settings.models.chain.sub")} stack data-setting="model.chain">
+                  <SelectionList
+                    id="model-chain"
+                    label={t("settings.models.chain.title")}
+                    ordered
+                    chosenLabel={t("settings.models.chain.chosen")}
+                    emptyChosen={t("settings.models.chain.empty")}
+                    {...modelItems(s, (id) => id !== s.model.preset)}
+                    value={(s.model.chain ?? []).filter((id) => id !== s.model.preset)}
+                    onChange={(chain) => save({ model: { chain } as any })}
+                  />
+                </Row>
+              )}
             </div>
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card">
                 <div className="section-title" style={{ marginTop: 0 }}>{t("settings.orchestrator.title")}</div>
                 <div className="sub">{t("settings.orchestrator.sub")}</div>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack data-setting="orchestrator.preset">
-                  <Dropdown
+                  <ModelPicker
                     id="orchestrator-preset"
                     label={t("settings.orchestrator.title")}
+                    catalogue={s}
                     value={orchestratorPreset(s.presets, s.orchestrator?.preset, s.orchestrator?.strongest)}
                     onChange={(preset) => save({ orchestrator: { preset } })}
-                    options={Object.keys(s.presets).map((id) => ({ id, label: presetName(s, id) + (id === s.orchestrator?.strongest ? ` · ${t("settings.orchestrator.strongest")}` : "") }))}
+                    tag={(id) => (id === s.orchestrator?.strongest ? t("settings.orchestrator.strongest") : undefined)}
                   />
                 </Row>
               </div>
@@ -1421,12 +1434,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <div className="section-title" style={{ marginTop: 0 }}>{t("settings.main.title")}</div>
                 <div className="sub">{t("settings.main.sub")}</div>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack data-setting="dispatcher.preset">
-                  <Dropdown
+                  <ModelPicker
                     id="main-preset"
                     label={t("settings.main.title")}
+                    catalogue={s}
                     value={mainPreset(s.presets, s.dispatcher?.preset, s.dispatcher?.middle)}
                     onChange={(preset) => save({ dispatcher: { preset } })}
-                    options={Object.keys(s.presets).map((id) => ({ id, label: presetName(s, id) + (id === s.dispatcher?.middle ? ` · ${t("settings.main.middle")}` : "") }))}
+                    tag={(id) => (id === s.dispatcher?.middle ? t("settings.main.middle") : undefined)}
                   />
                 </Row>
               </div>
@@ -1437,15 +1451,15 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
               <div className="sub">{t("settings.vision.sub")}</div>
               <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
-                <Dropdown
+                {/* Only the models that see images are offered; the one in use stays listed even if
+                    it does not, so the row names it rather than calling it missing. */}
+                <ModelPicker
                   id="vision-preset"
                   label={t("settings.vision.title")}
+                  catalogue={s}
                   value={s.vision.preset}
                   onChange={(preset) => save({ vision: { ...s.vision, preset } })}
-                  options={[
-                    ...Object.keys(s.presets ?? {}).filter((id) => s.presets[id].images).map((id) => ({ id, label: presetName(s, id) })),
-                    ...(s.presets?.[s.vision.preset]?.images ? [] : [{ id: s.vision.preset, label: s.vision.preset || t("settings.vision.none") }]),
-                  ]}
+                  keep={(id, p) => p.images || id === s.vision.preset}
                 />
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
@@ -1459,12 +1473,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <a href={pathFor("settings", "rules")} onClick={(e) => go(e, pathFor("settings", "rules"))}>{t("settings.review.rules")}</a>
               </div>
               <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
-                <Dropdown
+                <ModelPicker
                   id="models-review-preset"
                   label={t("rules.review.model")}
+                  catalogue={s}
                   value={s.action_rules?.review_preset ?? ""}
                   onChange={(review_preset) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_preset } })}
-                  options={[{ id: "", label: t("rules.model.auto") }, ...Object.keys(s.presets ?? {}).map((id) => ({ id, label: presetName(s, id) }))]}
+                  defaultOption={{ label: t("rules.model.auto") }}
                 />
               </Row>
             </div>
@@ -1535,7 +1550,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
               <SubagentModelsPicker
                 value={s.subagents?.models ?? { mode: "all", presets: [] }}
-                options={Object.entries(s.presets ?? {}).map(([pid, p]) => ({ id: pid, label: p.label || `${p.provider}/${p.model}` }))}
+                {...modelItems(s)}
                 onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
               />
             </Row>
@@ -1549,7 +1564,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
             <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} {...shipped(s.compaction?.max_words ?? 1200, 1200, () => save({ compaction: { ...s.compaction, max_words: 1200 } }), `1200 ${t("settings.unit.words")}`)} />
             <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} {...shipped(s.compaction?.core_trigger_ratio ?? 0.85, 0.85, () => save({ compaction: { ...s.compaction, core_trigger_ratio: 0.85 } }))} />
-            <CompactionModelSelect presets={s.presets} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
+            <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
             <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
             {/* A heading of their own: they trailed the compaction fields with nothing to say they
                 were a different subject. */}
@@ -1592,7 +1607,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
             </div>
-            <AutopilotSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />
+            <AutopilotSettings s={s} save={save} />
             <UserStyleCard toast={toast} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>

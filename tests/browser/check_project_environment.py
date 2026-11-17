@@ -86,7 +86,7 @@ def run() -> int:
         section.get_by_label("Folder name").fill("api")
         section.get_by_role("button", name="Add a file").click()
         section.get_by_label("File content").fill("Run the tests before you hand in.")
-        section.get_by_label("github").check()
+        section.get_by_role("listbox", name="MCP servers").get_by_role("option", name="github").click()
         section.get_by_role("button", name="Save", exact=True).click()
         expect(prepare).to_be_enabled()
         sent = writes[-1]["spec"]
