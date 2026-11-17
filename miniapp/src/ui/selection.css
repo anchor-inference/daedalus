@@ -12,8 +12,14 @@
 .sel-inherit-text .sub { overflow-wrap: anywhere; }
 
 .sel-search { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); }
-.sel-search:focus-within { border-color: var(--accent); }
+/* One ring, on the box the reader sees as the field: the same ring the settings search draws. The
+   field inside is borderless and must stay ringless, and `outline: none` on its class alone lost to
+   the app-wide `:focus-visible` rule that is bundled after this file, so the field drew a second ring
+   from the search icon to the edge, overlapping the box. An accent border under the ring read as a
+   second ring as well, so the border keeps its colour. */
+.sel-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sel-search-field { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); outline: none; padding: 0; min-height: var(--ctl-h-sm); }
+.sel-search-field:focus-visible { outline: none; }
 .sel-search-field::-webkit-search-cancel-button { cursor: pointer; }
 
 .sel-bar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; font-size: var(--fs-12); color: var(--fg-2); }

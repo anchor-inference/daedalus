@@ -47,6 +47,8 @@ QUESTIONS: list[tuple[str, str]] = [
     ("change the app language to Russian", "setting:language"),
     ("отвечай всегда по-английски, где это настроить", "setting:answer_language"),
     ("set the language the agent answers in", "setting:answer_language"),
+    ("use a cheaper model for translation", "setting:translation.preset"),
+    ("где настроить переводчик", "setting:translation.preset|section:translation"),
     # Limits and the history.
     ("set a spend limit per run", "setting:limits.usd_per_run"),
     ("как ограничить общие расходы на модели", "setting:limits.usd_total"),
@@ -133,7 +135,7 @@ def test_the_settings_index_is_whole_and_names_real_configuration() -> None:
     known: set[str] = set()
     for name in ("model", "presets", "providers", "prompt", "vision", "tools", "mcp", "self_change", "limits", "balance", "scheduler",
                  "notifications", "compaction", "heartbeat", "asr", "stt", "companion", "terminals", "browser", "navigation", "telegram",
-                 "orchestrator", "dispatcher", "answer_language", "action_rules", "assist", "autopilot", "memory", "subagents", "disk"):
+                 "orchestrator", "dispatcher", "answer_language", "translation", "action_rules", "assist", "autopilot", "memory", "subagents", "disk"):
         known.update(describe_section(name))
     for field in raw["fields"]:
         assert field["section"] in sections, field["anchor"]
