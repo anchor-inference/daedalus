@@ -2628,6 +2628,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # A summary written ahead of the trigger while the session goes on: shown, never as blocking.
             "compaction_background": state.background_compacting,
             "run_id": state.run_id,
+            # The operator's messages acknowledged and still with the translator: drawn as translating after
+            # a reload too, not only by the window that sent them.
+            "translating": manager.translating(session_id),
             # Where its files are: for a session working on the host, the folder there and not its
             # directory here, which holds only the inbox. The app places a turn's absolute paths by it
             # and roots the file pane at it, so the host path is the one that finds them.
@@ -3262,6 +3265,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 secrets=() if visitor else body.secrets,
                 via=front_of(_),
                 visitor=visitor,
+                # The app draws the message itself, as translating, and should not wait on the translator.
+                background_translation=True,
             )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
@@ -3269,8 +3274,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+        # Read before any await: the delivery runs on its own and takes the message off the list when done.
+        translating = translating_entry(session_id, body.client_message_id)
         receipt = await manager.live.receipt(session_id, body.client_message_id) if body.client_message_id else None
-        return {"run_id": run_id, **({"receipt": receipt} if receipt is not None else {})}
+        return {"run_id": run_id, **({"receipt": receipt} if receipt is not None else {}), **({"translating": translating} if translating else {})}
+
+    def translating_entry(session_id: str, client_message_id: str | None) -> dict[str, Any] | None:
+        """The acknowledged message still with the translator, which the send is answered with instead of a receipt."""
+        return next((entry for entry in manager.translating(session_id) if client_message_id and entry["id"] == client_message_id), None)
 
     @api.post("/api/sessions/{session_id}/upload")
     async def upload(
@@ -3327,7 +3338,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 client_message_id=client_message_id or None,
                 secrets=[] if visitor_mark(_) else [name.strip() for name in secret_names.split(",") if name.strip()],
                 visitor=visitor_mark(_),
+                # A translated message keeps its files: the delivery renames them away from the staging below.
+                background_translation=True,
             )
+            translating = translating_entry(session_id, client_message_id)
         except ReceiptConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except RuntimeError as exc:
@@ -3340,6 +3354,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "run_id": run_id,
             "files": [item.stored_name or item.name or item.path.name for item in attachments],
             **({"receipt": receipt} if receipt is not None else {}),
+            **({"translating": translating} if translating else {}),
         }
 
     @api.get("/api/asr")

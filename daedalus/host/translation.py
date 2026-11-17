@@ -238,7 +238,7 @@ def view_of(metadata: dict[str, Any], role: MessageRole, body: str) -> tuple[str
     if mark["direction"] == "out" and role is MessageRole.user:
         # The operator's own words as written; the model read ``body``, which is offered as the alternate
         # only when it differs, i.e. when the translator really produced it.
-        words = _without_reply_quote(other, metadata)
+        words = without_reply_quote(other, metadata)
         if state == "done":
             view["alternate"] = body
         return words, view
@@ -252,7 +252,8 @@ async def _same(text: str) -> str:
     return text
 
 
-def _without_reply_quote(text: str, metadata: dict[str, Any]) -> str:
+def without_reply_quote(text: str, metadata: dict[str, Any]) -> str:
+    """The operator's words without the quote of what they answer, which the message carries for the model."""
     if metadata.get("daedalus.reply_to") and text.startswith("[In reply to: «"):
         return text.split("\n", 1)[1] if "\n" in text else ""
     return text
@@ -636,4 +637,5 @@ __all__ = [
     "session_view",
     "translator_preset",
     "view_of",
+    "without_reply_quote",
 ]

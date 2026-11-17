@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation, type TranslatingMessage } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
@@ -204,7 +204,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const sessionCanvases = useQuery<{ items: { id: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
-  const [sendingMessages, setSendingMessages] = useState<{ id: string; text: string }[]>([]);
+  // `translating` is the agent's language while the words are with the translator, "" once they are not;
+  // `acked` once the host said it has them, after which only its own list keeps them "translating".
+  const [sendingMessages, setSendingMessages] = useState<SendingMessage[]>([]);
   // The streaming turn's state is not React state: a token must repaint the turn it belongs to,
   // not the screen. The components that show it subscribe; everything else never hears about it.
   const liveRef = useRef<LiveStore | null>(null);
@@ -954,6 +956,27 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         cutMessages(Number(p.seq), Number(p.through));
         live.reset();
         void load(true);
+      } else if (event === "message_translating") {
+        const list = readTranslating(p.translating);
+        setDetail((prev) => (prev ? { ...prev, translating: list } : prev));
+        const settled = p.settled as { id?: string; text?: string; outcome?: string; error?: string } | undefined;
+        if (settled?.id) {
+          const done = settled.id;
+          if (settled.outcome === "refused") {
+            // The host could not deliver it after all: the words go back into the field, as a stop's do.
+            setSendingMessages((current) => current.filter((m) => m.id !== done));
+            if (settled.text) composer.current?.insert(settled.text, false);
+            toast(t("translation.out.refused", { reason: settled.error ?? "" }));
+          } else {
+            // Kept as a plain bubble until its transcript row is read, which a window that opened while it
+            // was translating has no bubble of its own for.
+            setSendingMessages((current) => current.some((m) => m.id === done)
+              ? current.map((m) => (m.id === done ? { ...m, translating: "", acked: true } : m))
+              : [...current, { id: done, text: settled.text ?? "", translating: "", acked: true }]);
+          }
+          void loadQueued();
+          refreshSoon("tail");
+        }
       } else if (event === "steer_changed") {
         steerRoute.current = "ok";
         setQueuedInput((q) => queuedAfter(q, p));
@@ -965,7 +988,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
     }
     return stop;
-  }, [id, live, load, loadQueued, refresh, refreshSoon, takeReturned]);
+  }, [id, live, load, loadQueued, refresh, refreshSoon, takeReturned, toast]);
 
   // The settled conversation, built once per message that lands. A turn whose messages did not
   // change comes back as the same object, so `memo` on the view holds and a streamed token
@@ -1346,12 +1369,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // re-read so its card — the one that offers to steer instead — is there before the stream says so.
   async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void, secrets?: string[]): Promise<"sent" | "queued"> {
     const reply = orchestrating ? currentReply(id) : null;
-    let result: { receipt?: { status: string } };
+    let result: { receipt?: { status: string }; translating?: TranslatingMessage };
     const pendingId = clientMessageId ?? crypto.randomUUID();
     const pendingText = text || [...files.map((file) => file.name), ...(secrets ?? []).map((name) => `🔒 ${name}`)].join(", ");
     // Submission can wait behind a busy run for several seconds. Show the operator's words
     // immediately, then let the durable transcript replace this temporary bubble.
-    setSendingMessages((current) => [...current, { id: pendingId, text: pendingText }]);
+    const translating = detail?.translation?.active ? detail.translation.agent : "";
+    setSendingMessages((current) => [...current, { id: pendingId, text: pendingText, translating, acked: false }]);
     setSuggestion("");
     stick.current = true;
     try {
@@ -1363,11 +1387,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         form.append("expected_running", followUp ? "true" : "false");
         for (const f of files) form.append("files", f, f.name);
         if (secrets?.length) form.append("secrets", secrets.join(","));
-        result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
+        result = await api.upload<typeof result>(`/api/sessions/${id}/upload`, form, onProgress);
       } else {
-        result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: pendingId, reply, secrets }));
+        result = await api.post<typeof result>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: pendingId, reply, secrets }));
       }
-      if (result.receipt?.status !== "queued" && result.receipt?.status !== "consumed") throw new Error(t("composer.delivery.unconfirmed"));
+      // A translated session's send is answered as soon as the host has the words, before the translator
+      // is: the bubble stays "translating" until the host's change event says where the message went.
+      const held = result.translating?.id === pendingId;
+      if (!held && result.receipt?.status !== "queued" && result.receipt?.status !== "consumed") throw new Error(t("composer.delivery.unconfirmed"));
+      setSendingMessages((current) => current.map((m) => (m.id === pendingId ? { ...m, translating: held ? m.translating || result.translating!.to : "", acked: true } : m)));
     } catch (error) {
       setSendingMessages((current) => current.filter((message) => message.id !== pendingId));
       throw error;
@@ -1382,7 +1410,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
     if (followUp) void loadQueued();
     load();
-    return result.receipt!.status === "queued" ? "queued" : "sent";
+    return result.receipt?.status === "queued" ? "queued" : "sent";
   }
 
   async function answer(answers: Answer[]) {
@@ -1998,7 +2026,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
                 {/* A message the host is holding is drawn once, as its card above the composer, where
                     its Steer and × are; the bubble here would be the same words a second time. */}
-                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><UserWords text={pending.text} /></div></div></div></div>)}
+                {pendingRows(sendingMessages, detail?.translating).filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <PendingMessage key={pending.id} text={pending.text} translating={pending.translating} />)}
                 </SubagentOpener.Provider>
                 </RunSpeeds.Provider>
                 </AwaitingCall.Provider>
@@ -2439,6 +2467,46 @@ function SystemNoteRow({ note, cacheKey, run, translation }: { note: SystemNote;
       {way && <p className="sysnote-way">{way}</p>}
       {open && <Md className="sysnote-body" text={body} cacheKey={cacheKey && `${cacheKey}${agentSide ? "a" : ""}`} />}
       {open && translation && <OutgoingTranslation translation={translation} agentSide={agentSide} onFlip={() => setAgentSide(!agentSide)} />}
+    </div>
+  );
+}
+
+type SendingMessage = { id: string; text: string; translating: string; acked: boolean };
+
+function readTranslating(raw: unknown): TranslatingMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((it): it is TranslatingMessage => !!it && typeof it === "object" && typeof (it as TranslatingMessage).id === "string");
+}
+
+/**
+ * The operator's messages on their way, as the conversation draws them under the last turn: this window's
+ * own sends, and the host's list of messages still with the translator, which is all a window opened (or
+ * reloaded) meanwhile has. A send of this window is "translating" while its request is out and, once the
+ * host acknowledged it, for as long as the host lists it.
+ */
+export function pendingRows(sending: SendingMessage[], host: TranslatingMessage[] | undefined): { id: string; text: string; translating: string }[] {
+  const listed = host ?? [];
+  const own = sending.map((m) => ({ id: m.id, text: m.text, translating: m.translating && (!m.acked || listed.some((h) => h.id === m.id)) ? m.translating : "" }));
+  const others = listed.filter((h) => !sending.some((m) => m.id === h.id)).map((h) => ({ id: h.id, text: h.text, translating: h.to }));
+  return [...own, ...others];
+}
+
+/** A message sent and not yet in the transcript; while the translator has it, it says so under the words. */
+function PendingMessage({ text, translating }: { text: string; translating: string }) {
+  return (
+    <div className="turn">
+      <div className="turn-content">
+        <div className="msg-wrap">
+          <div className={`msg user${translating ? " translating" : ""}`} data-pending={translating ? "translating" : "sent"}>
+            <UserWords text={text} />
+            {translating && (
+              <span className="msg-translation pending" role="status" data-translation="out-pending">
+                <span className="live-dot" />{t("translation.out.pending", { lang: translating.toUpperCase() })}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

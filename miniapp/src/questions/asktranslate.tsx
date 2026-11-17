@@ -13,7 +13,7 @@ import { errorText } from "../ui";
 /** What the host keeps in a question's `detail.translation`. */
 export type AskTranslation = { state: "pending" | "done" | "failed"; from: string; to: string; title?: string; text?: string; options?: string[]; error?: string; asked?: boolean };
 
-function markOf(q: WaitingQuestion): AskTranslation | null {
+export function markOf(q: WaitingQuestion): AskTranslation | null {
   const mark = (q.detail as Record<string, unknown> | undefined)?.translation;
   return mark && typeof mark === "object" && typeof (mark as AskTranslation).state === "string" ? (mark as AskTranslation) : null;
 }

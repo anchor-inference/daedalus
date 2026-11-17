@@ -10,7 +10,7 @@
 // card; they are this device's only until Send, and go with the batch as one multipart request.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { api, type QuestionOutcome, type WaitingQuestion } from "../api";
+import { api, type QuestionAnswer, type QuestionOutcome, type WaitingQuestion } from "../api";
 import { nameIncoming, pastedFiles } from "../attachfiles";
 import { AttachmentCard } from "../composerbox";
 import { useEvent } from "../events";
@@ -25,7 +25,7 @@ import { go } from "../shell";
 import { invalidate } from "../store";
 import { isMac } from "../terminal/keys";
 import { errorText } from "../ui";
-import { useAskTranslation } from "./asktranslate";
+import { markOf, useAskTranslation } from "./asktranslate";
 import { QUESTIONS_KEY, answerPath, dismissPath, useQuestions, type QuestionScope } from "./data";
 import {
   EMPTY,
@@ -173,6 +173,10 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
   const answerable = shown.filter((q) => !fates[q.id] || fates[q.id].kind === "refused");
   const batch = batchOf(answerable, drafts, files);
   const waiting = (questions ?? []).length;
+  // While a send is out: the language the operator's typed words are being translated into, when any are.
+  // A question the host translated by itself belongs to a translated session, whose answers it translates
+  // back before the agent gets them — seconds in which the button alone would only look stuck.
+  const translatingTo = sending ? answersTranslatedInto(batch, shown) : "";
 
   const change = useCallback((q: WaitingQuestion, update: (d: Draft) => Draft) => {
     const id = q.id;
@@ -343,7 +347,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       </div>
       <footer className={`questions-send ${batch.length ? "ready" : ""}`}>
         <span className="questions-send-info">
-          {batch.length ? plural("questions.ready", batch.length, { of: waiting }) : waiting ? plural("questions.waiting", waiting) : t("questions.nothing")}
+          {translatingTo ? <span className="questions-translating" role="status"><span className="live-dot" />{t("translation.out.pending", { lang: translatingTo.toUpperCase() })}</span> : batch.length ? plural("questions.ready", batch.length, { of: waiting }) : waiting ? plural("questions.waiting", waiting) : t("questions.nothing")}
           <span className="questions-keys" title={t("questions.keys")}><kbd>{isMac() ? "⌘" : "Ctrl"}</kbd><kbd>↵</kbd></span>
         </span>
         <button className="btn primary questions-send-btn" disabled={sending || batch.length === 0} onClick={() => void send()}>
@@ -353,6 +357,15 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       </footer>
     </div>
   );
+}
+
+function answersTranslatedInto(batch: QuestionAnswer[], questions: WaitingQuestion[]): string {
+  for (const item of batch) {
+    if (!(item.text ?? item.note ?? "").trim()) continue;
+    const mark = markOf(questions.find((q) => q.id === item.ask_id) ?? ({} as WaitingQuestion));
+    if (mark && !mark.asked && mark.from) return mark.from;
+  }
+  return "";
 }
 
 // ── one card ─────────────────────────────────────────────────────────────────────────────────

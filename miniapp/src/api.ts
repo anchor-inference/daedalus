@@ -1428,6 +1428,10 @@ export type OperatorSteps = {
  *  session's inbox, served at `/api/sessions/<id>/attachments`; `kept` is the id of one kept by handle. */
 export type MessageAttachment = { name: string; mime?: string; size?: number | null; file?: string; kept?: string };
 
+/** An operator's message the host has acknowledged and is still translating for the agent: drawn as
+ *  "translating" in the conversation until it reaches the session or is handed back. */
+export type TranslatingMessage = { id: string; text: string; from: string; to: string; at: string; files?: string[] };
+
 export type MessageTranslation = { direction: "in" | "out"; state: "pending" | "done" | "failed"; from: string; to: string; alternate?: string; error?: string };
 
 /** The language a session's agent works in, and the operator's own: `agent` "" is no translation. */
@@ -1521,6 +1525,8 @@ export type SessionDetail = {
   /** The summary being written ahead of the trigger; the session is not compacting while it is. */
   compaction_background?: Compacting | null;
   run_id: string | null;
+  /** The operator's messages still with the translator, oldest first. */
+  translating?: TranslatingMessage[];
   workspace: string;
   workspace_name?: string;
   workspace_own?: boolean;

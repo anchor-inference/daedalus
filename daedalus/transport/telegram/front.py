@@ -2301,6 +2301,11 @@ class TelegramFront:
         if not text:
             text = "Files attached." if len(buffer.attachments) > 1 else "File attached."
         was_running = state.running and state.pending is None
+        if self.manager.translations.pair_of(state) is not None:
+            # The message is translated before the agent gets it, which can take seconds with nothing else
+            # to show for them: "typing…" says the bot has it. One call, never retried, never in the way.
+            with suppress(Exception):
+                await self.bot.send_chat_action(key[0], "typing", message_thread_id=key[1] or None)
         try:
             await self.manager.submit(state.session.id, text, buffer.attachments, via="telegram", address={"chat_id": key[0], "thread_id": key[1]})
         except NoModelConfigured as exc:

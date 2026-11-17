@@ -144,3 +144,23 @@ describe("a batch", () => {
     expect($$(".ask-opt.on").length).toBe(1);
   });
 });
+
+describe("in a translated session", () => {
+  it("says typed words are being translated while the answer is out, and only for typed words", async () => {
+    let release: () => void = () => undefined;
+    const held = (): Promise<void> => new Promise((resolve) => { release = resolve; });
+    const onSend = vi.fn(held);
+    const ref = createRef<AskCardHandle>();
+    await act(async () => root.render(<AskCard ref={ref} questions={[SUBJECT]} phone={false} onSend={onSend} toast={() => undefined} translateTo="en" />));
+    await type(field()!, "Отчёт за неделю");
+    await click(primary());
+    expect(hint()).toBe("Translating to EN…");
+    expect($(".ask-hint .live-dot")).not.toBeNull();
+    await act(async () => release());
+    await act(async () => root.render(<AskCard ref={ref} key="picked" questions={[SEND]} phone={false} onSend={onSend} toast={() => undefined} translateTo="en" />));
+    await click($$(".ask-opt")[0]);
+    await click(primary());
+    expect(hint()).toBe("Sending…");
+    await act(async () => release());
+  });
+});

@@ -10166,6 +10166,8 @@ Object.assign(DICT, {
   "translation.out.agent": { en: "Show what the agent got ({lang})", ru: "Показать, что получил агент ({lang})" },
   "translation.out.mine": { en: "Show my words", ru: "Показать мои слова" },
   "translation.out.failed": { en: "Not translated — sent as written", ru: "Не переведено — отправлено как есть" },
+  "translation.out.pending": { en: "Translating to {lang}…", ru: "Перевожу на {lang}…" },
+  "translation.out.refused": { en: "Not sent: {reason}. Your words are back in the field.", ru: "Не отправлено: {reason}. Ваши слова снова в поле ввода." },
   "translation.in.pending": { en: "Translating into {lang}…", ru: "Перевожу на {lang}…" },
   "translation.in.done": { en: "Translated {from} → {to}", ru: "Переведено {from} → {to}" },
   "translation.in.original": { en: "Original ({from})", ru: "Оригинал ({from})" },

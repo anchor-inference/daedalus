@@ -5056,6 +5056,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .questions-send { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-3) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: 0 -8px 16px -12px rgba(0, 0, 0, 0.35); }
 .questions-send-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--fg-2); }
 .questions-send.ready .questions-send-info { color: var(--fg); }
+.questions-translating { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--fg-2); }
 .questions-keys { display: inline-flex; gap: 2px; }
 .questions-keys kbd { font: var(--fs-11) var(--mono); padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--fg-3); }
 .questions-send-btn { flex: none; gap: 6px; }
@@ -5963,6 +5964,12 @@ body.resizing .kind-tabs-pill { transition: none; }
 .msg-translation:hover { color:var(--fg); text-decoration:underline; }
 .msg-translation.failed { cursor:default; color:var(--warn); }
 .msg-translation.failed:hover { text-decoration:none; }
+/* Sent, and still with the translator: the words are the operator's and stay fully legible; only the line
+   under them, with the pulse every other "working" state uses, says the agent has not got them yet. */
+.msg-translation.pending { display:flex; align-items:center; gap:var(--space-2); cursor:default; }
+.msg-translation.pending:hover { color:var(--fg-3); text-decoration:none; }
+.msg-translation.pending .live-dot { flex:none; }
+.ask-hint .live-dot { display:inline-block; margin-right:var(--space-2); vertical-align:middle; }
 .answer-translation { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2); margin-top:var(--space-1); color:var(--fg-3); font-size:var(--fs-12); }
 .answer-translation .live-dot { flex:none; }
 .answer-translation.failed { color:var(--warn); }

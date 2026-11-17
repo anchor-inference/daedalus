@@ -652,7 +652,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       {asking && !approval && props.onAnswer && (
-        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} />
+        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} />
       )}
       {paletteItems.length + skillItems.length > 0 && (
         <div className="palette" role="listbox">

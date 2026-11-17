@@ -43,12 +43,15 @@ type Props = {
   questions: Question[];
   phone: boolean;
   onSend: (answers: Answer[]) => Promise<void>;
+  /** The agent's language when the session translates: what the operator typed is translated before the
+   *  agent gets it, which can take seconds, and the card says so rather than only "Sending…". */
+  translateTo?: string;
   toast: (text: string) => void;
 };
 
 const MISSING_KEY: Record<Missing, string> = { pick: "ask.need.pick", pickAny: "ask.need.pickAny", write: "ask.need.write", other: "ask.need.other" };
 
-export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast }, ref) {
+export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast, translateTo }, ref) {
   const n = questions.length;
   const [drafts, setDrafts] = useState<AskDraft[]>(() => blankDrafts(questions));
   const [step, setStep] = useState(0);
@@ -143,7 +146,11 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
 
   const missing = q ? missingOf(q, draft) : null;
   const left = unanswered(questions, drafts);
-  const hint = sending
+  // Only words the operator typed go through the translator; the options picked are the agent's own.
+  const translating = sending && !!translateTo && toAnswers(questions, drafts).some((a) => !!a.custom?.trim());
+  const hint = translating
+    ? <><span className="live-dot" />{t("translation.out.pending", { lang: translateTo!.toUpperCase() })}</>
+    : sending
     ? t("ask.sending")
     : enabled
       ? (phone ? "" : t(go === "send" ? "ask.key.send" : "ask.key.next"))
