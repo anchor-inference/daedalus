@@ -115,6 +115,14 @@ export function dayLabel(iso: string | number | Date | null | undefined): string
   return absDate(at);
 }
 
+/** What an idle session still waits for, in words: its own running jobs, else its helpers at work; ""
+ *  for nothing. Two numbers, not one sum: summed, the header said "waiting for 3 jobs" over a Jobs
+ *  list of one, the other two being helpers that the list rightly does not show. */
+export function waitingWords(jobs: number, helpers: number): string {
+  if (jobs > 0) return plural("session.jobs.waiting", jobs);
+  return helpers > 0 ? plural("session.subagents.waiting", helpers) : "";
+}
+
 /** "4s", "2m 14s", "1h 44m", "2d 3h" — a duration in milliseconds as people read it. */
 export function duration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));

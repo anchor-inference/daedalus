@@ -25,6 +25,30 @@ export const SUBAGENTS_EVENT_DEBOUNCE_MS = 250;
  *  live line and its cost come from this read; with nothing working nothing is fetched. */
 export const SUBAGENTS_POLL_MS = 5000;
 
+/** How wide an open helper's view must be for the list of helpers to stand beside its conversation.
+ *  Narrower, the list (about a third of this) would leave the conversation too little, so it folds
+ *  into a button and opens over the conversation instead. */
+export const SUBAGENT_RAIL_ROOM = 560;
+
+/** Whether the list of helpers shows: what the operator chose, or else whether there is room for it. */
+export function railShown(roomy: boolean, choice: boolean | null): boolean {
+  return choice ?? roomy;
+}
+
+/** Whether ``element`` is at least ``width`` wide, kept current as the panel is dragged or the window turns. */
+export function useRoomFor(element: HTMLElement | null, width: number): boolean {
+  const [roomy, setRoomy] = useState(false);
+  useEffect(() => {
+    if (!element) return;
+    setRoomy(element.getBoundingClientRect().width >= width);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setRoomy(entry.contentRect.width >= width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element, width]);
+  return roomy;
+}
+
 /** Where a subagent opens by default: its leader's chat with the Subagents tab on the helper. */
 export function subagentPath(leaderId: string, childId: string): string {
   return pathFor("agents", leaderId, { panel: "subagents", sub: childId });
@@ -206,23 +230,61 @@ export function SubagentsTab({ leaderId, selected, onSelect, onOpenFull, chat, t
     }
   };
 
+  // The list beside an open helper: stands beside the conversation when the panel has the room, and
+  // folds into a button that lays it over the conversation when it has not (a narrow panel, a phone).
+  // Switching helpers used to mean going back to the list and down to the next card.
+  const [openBox, setOpenBox] = useState<HTMLDivElement | null>(null);
+  const roomy = useRoomFor(openBox, SUBAGENT_RAIL_ROOM);
+  const [railChoice, setRailChoice] = useState<boolean | null>(null);
+  // A choice made at one width is not carried to the other: open over a narrow conversation it was a
+  // passing look, and closed beside a wide one it would hide the list where it fits.
+  useEffect(() => setRailChoice(null), [roomy]);
+
   const current = selected ? children?.find((c) => c.session_id === selected) : undefined;
   if (selected) {
     const state = current ? subagentState(current) : "idle";
     const stop = () => stopOne(selected);
+    const several = (children?.length ?? 0) > 1;
+    const railOpen = several && railShown(roomy, railChoice);
+    const ordered = children ? [...subagentGroups(children).active, ...subagentGroups(children).finished] : [];
+    const pick = (id: string) => {
+      if (!roomy) setRailChoice(false);
+      if (id !== selected) onSelect(id);
+    };
     return (
-      <div className="subagents subagent-open">
-        <div className="subagent-head">
-          <button type="button" className="iconbtn small" onClick={() => onSelect(null)} aria-label={t("subagents.back")} title={t("subagents.back")}><Icon name="back" size={16} /></button>
-          <span className={`sub-dot ${state}`} aria-hidden="true" />
-          <span className="subagent-head-copy">
-            <b className="truncate">{current?.name || current?.title || selected}</b>
-            {current && <small className="truncate">{subagentLine(current, Date.now())}</small>}
-          </span>
-          {state === "running" && <button type="button" className="iconbtn small" onClick={stop} aria-label={t("task.stop")} title={t("task.stop")}><Icon name="stop" size={16} /></button>}
-          <button type="button" className="iconbtn small subagent-full" onClick={() => onOpenFull(selected)} aria-label={t("subagents.full")} title={t("subagents.full")}><Icon name="expand" size={16} /></button>
+      <div ref={setOpenBox} className={`subagents subagent-open ${roomy ? "roomy" : "tight"}`} data-rail={railOpen ? "open" : "closed"}>
+        {railOpen && (
+          <nav className={`subagent-rail ${roomy ? "docked" : "over"}`} aria-label={t("session.subagents.open")}>
+            {ordered.map((child) => {
+              const phase = subagentPhase(child);
+              const name = child.name || child.title || child.session_id;
+              return (
+                <button key={child.session_id} type="button" className="subagent-rail-row" data-subagent={child.session_id} aria-current={child.session_id === selected ? "true" : undefined} title={subagentLine(child, Date.now())} onClick={() => pick(child.session_id)}>
+                  <span className={`sub-dot ${subagentState(child)}`} aria-hidden="true" />
+                  <span className="subagent-rail-copy">
+                    <span className="truncate">{name}</span>
+                    <small className="truncate">{t(PHASE_WORD[phase])}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
+        {railOpen && !roomy && <div className="subagent-rail-scrim" aria-hidden="true" onClick={() => setRailChoice(false)} />}
+        <div className="subagent-main">
+          <div className="subagent-head">
+            {several && <button type="button" className={`iconbtn small subagent-rail-toggle ${railOpen ? "on" : ""}`} onClick={() => setRailChoice(!railOpen)} aria-expanded={railOpen} aria-label={t(railOpen ? "subagents.rail.hide" : "subagents.rail.show")} title={t(railOpen ? "subagents.rail.hide" : "subagents.rail.show")}><Icon name="sidebar" size={16} /></button>}
+            <button type="button" className="iconbtn small subagent-back" onClick={() => onSelect(null)} aria-label={t("subagents.back")} title={t("subagents.back")}><Icon name="back" size={16} /></button>
+            <span className={`sub-dot ${state}`} aria-hidden="true" />
+            <span className="subagent-head-copy">
+              <b className="truncate">{current?.name || current?.title || selected}</b>
+              {current && <small className="truncate">{subagentLine(current, Date.now())}</small>}
+            </span>
+            {state === "running" && <button type="button" className="iconbtn small" onClick={stop} aria-label={t("task.stop")} title={t("task.stop")}><Icon name="stop" size={16} /></button>}
+            <button type="button" className="iconbtn small subagent-full" onClick={() => onOpenFull(selected)} aria-label={t("subagents.full")} title={t("subagents.full")}><Icon name="expand" size={16} /></button>
+          </div>
+          {children !== null && !current ? <div className="empty">{t("subagents.gone")}</div> : chat(selected)}
         </div>
-        {children !== null && !current ? <div className="empty">{t("subagents.gone")}</div> : chat(selected)}
       </div>
     );
   }

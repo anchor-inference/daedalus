@@ -4,7 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
-import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
+import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
 import { PrivateBadge, isPrivate } from "../privatechat";
@@ -360,6 +360,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [gallery, setGallery] = useState<{ items: HostSource[]; index: number } | null>(null);
   const [filesGeneration, setFilesGeneration] = useState(0);
   const [receipt, setReceipt] = useState<string | null>(null);
+  // The job the Jobs tab shows in place of its list; another chat starts on the list.
+  const [jobOpen, setJobOpen] = useState<string | null>(null);
+  useEffect(() => setJobOpen(null), [id]);
   const [dragging, setDragging] = useState(0);
   const [providerUsage, setProviderUsage] = useState<ProviderUsage | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -1649,7 +1652,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   }, [panel.state.tab, sourcesOf, turns]);
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
-  // receipt, and any other run id is a background job — its log is a file in the workspace.
+  // receipt, and any other run id is a background job — it opens in the Jobs tab,
+  // following its output (a job the host no longer knows says so there and offers its log as a file).
   useEffect(() => {
     const workspace = detail?.workspace ?? "";
     const on = (e: Event) => {
@@ -1657,7 +1661,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       if (!cited) return;
       if (cited.kind === "run") {
         if (/^v\d+$/.test(cited.id)) setReceipt(cited.id);
-        else openPreview({ base: sessionBase(id), path: `.jobs/${cited.id}.log` });
+        else { setJobOpen(cited.id); panel.open("jobs"); }
         return;
       }
       const rel = workspaceRelative(cited.path, workspace);
@@ -1666,7 +1670,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     };
     document.addEventListener(EVIDENCE_EVENT, on);
     return () => document.removeEventListener(EVIDENCE_EVENT, on);
-  }, [id, detail?.workspace, toast, openPreview, openFromChat]);
+  }, [id, detail?.workspace, toast, openPreview, openFromChat, panel.open]);
   // A snapshot from the panel, for this conversation's composer: the picture as an attachment and its
   // address as a line of the draft. The field is not focused on a phone, where the sheet covers it.
   useEffect(() => {
@@ -1811,7 +1815,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { icon: "trash", label: t("session.delete"), danger: true, onSelect: remove },
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
-  const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
+  const idleWaiting = !busy && !saving && !compacting && status !== "failed";
+  const jobsPending = idleWaiting ? detail?.background_count ?? 0 : 0;
+  const waitingLine = idleWaiting ? waitingWords(jobsPending, detail?.subagents_running ?? 0) : "";
   // The folder the chat works in, while it is being carried between the container and the host.
   const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
   const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
@@ -1826,7 +1832,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     : busy ? <LiveSub status={status} base={tail} live={live} />
     : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
     : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
-    : jobsPending > 0 ? <StateSub tone="running">{plural("session.jobs.waiting", jobsPending)}</StateSub>
+    : waitingLine ? <StateSub tone="running">{waitingLine}</StateSub>
     : ahead ? <span>{t("session.compacting.ahead", { what: compactionStage(ahead) })}</span>
     : remote ? <span className="ph-chat-remote">{remotePlace(remote)}</span>
     : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
@@ -1898,7 +1904,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {remote && remoteNow && <><span className="sep">·</span><RemoteHead b={remote} state={remoteNow} /></>}
               {compacting ? null : (busy || saving) && !remotePaused ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
-                : jobsPending > 0 ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => panel.open("jobs")}>{plural("session.jobs.waiting", jobsPending)}</button></> : null}
+                : waitingLine ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button></> : null}
               {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
               {folderMove && <><span className="sep">·</span><MoveLive job={folderMove} compact /></>}
             </span>
@@ -2188,7 +2194,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               />
             : undefined}
             files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
-            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} /> : undefined}
+            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} openJob={jobOpen} onOpenJob={setJobOpen} /> : undefined}
           />
         )}
       </div>
@@ -2957,9 +2963,10 @@ export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPre
   }, [detail?.messages]);
   const tail = busy ? liveBase(turns, detail?.run_id) : null;
   const settled = tail ? turns.slice(0, -1) : turns;
-  // The panel scrolls, not this list: it follows the end while the reader is at it, as the chat does,
-  // and lands there once when the conversation first arrives.
-  const scroller = () => box.current?.closest<HTMLElement>(".panel-body, .sheet-body") ?? null;
+  // The helper's column scrolls, not this list (it is a column of its own so the list of helpers can
+  // stand still beside it): it follows the end while the reader is at it, as the chat does, and lands
+  // there once when the conversation first arrives.
+  const scroller = () => box.current?.closest<HTMLElement>(".subagent-main, .panel-body, .sheet-body") ?? null;
   const landed = useRef(false);
   const follow = useCallback(() => {
     const el = scroller();

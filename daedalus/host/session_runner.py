@@ -122,6 +122,7 @@ from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
+from daedalus.host.job_log import task_state
 from daedalus.host.policy import (
     ASK,
     SERVER_GRANT_HOURS,
@@ -210,7 +211,6 @@ from daedalus.terminals.model import device_env
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
 from daedalus.tools.shell import RemoteJob, guest_limits_status, guest_sandbox_status, stop_job
-from daedalus.tools.shell import outcome as shell_outcome
 from daedalus.tools.shell import title as shell_title
 
 logger = logging.getLogger(__name__)
@@ -2138,18 +2138,27 @@ class SessionManager:
         for row in rows:
             archived = bool(row["metadata"].get("archived"))
             unread = bool(row["metadata"].get("unread_result"))
-            # Running jobs only: every job the session ever started was counted, so a session whose jobs had
-            # all ended long ago still looked as if it waited for something.
-            background = sum(1 for job in self.jobs.get(row["id"], {}).values() if job.running) + children.get(row["id"], 0)
             row.update(
                 {
                     "archived": archived,
-                    "background_count": background,
+                    "background_count": self.running_jobs(row["id"]),
+                    "subagents_running": children.get(row["id"], 0),
                     "unread_result": unread,
                     "needs_attention": row["status"] in ("failed", "waiting") or unread,
                 }
             )
         return rows
+
+    def running_jobs(self, session_id: str) -> int:
+        """How many of the session's own background jobs still run: the one number every Jobs counter shows.
+
+        Running jobs only: every job the session ever started was counted, so a session whose jobs had
+        all ended long ago still looked as if it waited for something. And its own jobs only: the
+        helpers it was waiting for were added in, so the Jobs tab said three over a list of one and
+        the operator went looking for jobs that were never there. A helper's jobs are its own session's
+        and are listed there; how many helpers still work is ``subagents_running``, told apart.
+        """
+        return sum(1 for job in self.jobs.get(session_id, {}).values() if job.running)
 
     async def task_views(self, session_id: str) -> list[dict[str, Any]]:
         """Every background job of a session, as one operator-facing list.
@@ -2162,13 +2171,11 @@ class SessionManager:
         a second list read out of the transcript, which named the same jobs again without their state.
         """
         out: list[dict[str, Any]] = []
-        states = {"succeeded": "done", "failed": "failed", "killed": "cancelled", "timed_out": "failed", "lost": "lost"}
         quiet_limit = self.config.tools.jobs.quiet_minutes * 60.0
         overdue_limit = self.config.tools.jobs.max_hours * 3600.0
         mono = time.monotonic()
         for job in self.jobs.get(session_id, {}).values():
-            word = shell_outcome(job)
-            state = "running" if word is None else states[word]
+            state, word = task_state(job)
             started = job.started_at or time.time() - max(0.0, mono - job.started)
             try:
                 active = datetime.fromtimestamp(job.log.stat().st_mtime, UTC)
@@ -2220,8 +2227,7 @@ class SessionManager:
         state = self._states.get(session_id)
         if state is None:
             return
-        running = sum(1 for job in self.jobs.get(session_id, {}).values() if job.running)
-        await self._publish(state, "session.jobs", {"job_id": job_id, "change": change, "running": running})
+        await self._publish(state, "session.jobs", {"job_id": job_id, "change": change, "running": self.running_jobs(session_id)})
 
     async def delete_session(self, session_id: str, *, delete_workspace: bool = True) -> bool:
         """Remove a session entirely: its run, records, events and (optionally) its workspace."""

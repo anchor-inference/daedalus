@@ -1128,6 +1128,33 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .jobs .task-flag.overdue { color: var(--bad); }
 .jobs .task-where { color: var(--fg-3); }
 .jobs .task-row > .ic { color: var(--muted); }
+/* One job, opened in the Jobs tab: a head that stays, its output in a box that scrolls by itself (so the
+   head and the line saying how it ended never scroll away), and how it ended under them. */
+.panel-body.tab-jobs:has(> .job-view) { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.job-view { display: flex; flex-direction: column; flex: 1; min-height: 0; font-size: var(--fs-13); }
+.job-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border-bottom: 1px solid var(--line); }
+.job-head .dot.failed { background: var(--bad); }
+.job-head .dot.cancelled, .job-head .dot.lost { background: var(--fg-3); animation: none; }
+.job-head-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.job-head-copy b { font-size: var(--fs-mono); font-weight: 600; }
+.job-head-copy small { color: var(--fg-3); font-size: var(--fs-11); }
+.job-head .task-flag { color: var(--warn); }
+.job-live { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--accent); font-size: var(--fs-11); font-weight: 600; }
+.job-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.job-log-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
+.job-log { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 12px; background: var(--surface-1); }
+.job-log:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.job-log-text { margin: 0; color: var(--fg); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.job-wait { padding: 4px 0; }
+.job-gone { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.job-earlier { display: block; margin: 0 0 6px; padding: 0; border: 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.job-earlier:hover { color: var(--info); text-decoration: underline; }
+.job-latest { position: absolute; right: 12px; bottom: 10px; z-index: 2; gap: 5px; box-shadow: var(--shadow-pop); }
+.job-end { padding: 6px 12px; border-top: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.job-end.done { color: var(--ok); }
+.job-end.failed { color: var(--bad); }
+.job-end.cancelled, .job-end.lost { color: var(--fg-3); }
+@media (prefers-reduced-motion: reduce) { .job-live i { animation: none; } }
 .receipt summary { list-style: none; cursor: pointer; }
 .receipt summary::-webkit-details-marker { display: none; }
 .receipt .filetext { margin-top: 6px; }
@@ -3700,6 +3727,23 @@ input.field[type="range"] {
 .subagent-head-copy { display:flex; flex-direction:column; flex:1; min-width:0; }
 .subagent-head-copy b { font-size:var(--fs-13); }
 .subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-11); }
+/* An open helper: the list of the leader's helpers down its left side, its conversation in a column that
+   scrolls by itself so the list stands still beside it. With the room the list is docked; without it
+   (a narrow panel, a phone) it folds into the head's button and opens over the conversation. */
+.panel-body.tab-subagents:has(> .subagent-open) { padding:0; overflow:hidden; display:flex; flex-direction:column; }
+.subagent-open { position:relative; display:flex; flex:1; min-height:0; }
+.subagent-main { flex:1; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px 16px; }
+.subagent-rail { flex:none; display:flex; flex-direction:column; gap:2px; width:184px; padding:6px; overflow-y:auto; overscroll-behavior:contain; border-right:1px solid var(--line); background:var(--surface-1); }
+.subagent-rail.over { position:absolute; top:0; bottom:0; left:0; z-index:4; width:min(240px, 82%); box-shadow:var(--shadow-pop); }
+.subagent-rail-scrim { position:absolute; inset:0; z-index:3; background:color-mix(in srgb, var(--bg) 45%, transparent); }
+.subagent-rail-row { display:flex; flex:none; align-items:center; gap:8px; min-height:var(--row-h); padding:0 8px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
+/* A pointer's hover only: a tap on a phone left the row it opened the list from shaded like a second current one. */
+@media (hover: hover) { .subagent-rail-row:hover { background:color-mix(in srgb, var(--fg) 5%, transparent); color:var(--fg); } }
+.subagent-rail-row[aria-current="true"] { background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--fg); font-weight:600; }
+.subagent-rail-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.subagent-rail-copy { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
+.subagent-rail-copy small { color:var(--fg-3); font-size:var(--fs-11); font-weight:400; }
+.subagent-rail-toggle.on { color:var(--accent); }
 .subagent-chat { padding-top:12px; }
 .subagent-chat .msg-wrap, .subagent-chat .answer { max-width:none; }
 .sysnote-open { flex:none; padding:0; border:0; background:none; color:var(--info); font:inherit; font-size:var(--fs-12); cursor:pointer; }

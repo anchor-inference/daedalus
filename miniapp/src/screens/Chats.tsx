@@ -8,7 +8,7 @@
 import { CompanionFace } from "../companionavatar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Project, type SessionList, type SessionSummary } from "../api";
-import { relTime, shortModel, untilShort } from "../format";
+import { relTime, shortModel, untilShort, waitingWords } from "../format";
 import { type Folder, type Row, agentName, arrange, dayGroup, kindOf, liveRow, splitPinned } from "../grouping";
 import { pinCommand } from "../pins";
 import { plural, t } from "../i18n";
@@ -99,7 +99,7 @@ function RowMeta({ row, fork }: { row: Row; fork?: number }) {
   return (
     <>
       <PrivateMark on={isPrivate(s)} size={11} />
-      {live ? <span className={s.status}>{statusWord(s.status)}</span> : !s.metadata?.loop && <span>{s.status === "idle" && s.background_count ? plural("session.jobs.waiting", s.background_count) : statusWord(s.status)}</span>}
+      {live ? <span className={s.status}>{statusWord(s.status)}</span> : !s.metadata?.loop && <span>{(s.status === "idle" && waitingWords(s.background_count ?? 0, s.subagents_running ?? 0)) || statusWord(s.status)}</span>}
       {extra && (live || !s.metadata?.loop) && <span className="ph-sep" />}
       {extra && <span className="ph-ell">{extra}</span>}
     </>

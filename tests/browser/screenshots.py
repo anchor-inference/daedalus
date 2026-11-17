@@ -55,6 +55,7 @@ from api_stub import (  # noqa: E402
     file_search,
     folders,
     fulfil_shared,
+    job_log,
     notification_preferences,
     session_tasks,
     session_tool_groups,
@@ -1045,6 +1046,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, {"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 30, "keep_last": 50})
         if tail == "tasks":
             return respond(route, session_tasks(sid))
+        if tail.startswith("tasks/") and tail.endswith("/log"):
+            status, piece = job_log(sid, tail.split("/")[1], urlsplit(url).query)
+            return respond(route, piece, status=status)
         if tail == "subagents":
             return respond(route, {"subagents": subagents_of(sid)})
         if tail == "mcp":
