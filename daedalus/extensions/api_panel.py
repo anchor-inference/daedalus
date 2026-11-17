@@ -304,11 +304,15 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
 
     @api.get("/api/panel/settings")
     async def panel_settings(who: dict[str, Any] = Depends(panel)) -> dict[str, Any]:
-        """What the model picker reads, and nothing else of the settings: the presets, each provider's
-        kind and name for its mark, and the default. No address, no key."""
-        raw = app.config.model_dump(mode="json")
-        providers = {pid: {"kind": conf.get("kind", ""), "name": conf.get("name") or "", "billing": conf.get("billing") or ""} for pid, conf in (raw.get("providers") or {}).items()}
-        return {"presets": raw.get("presets") or {}, "providers": providers, "model": {"preset": (raw.get("model") or {}).get("preset", "")}}
+        return picker_settings(app)
 
 
-__all__ = ["FORWARDED", "OWN", "PANEL_UPLOAD_MAX", "SCOPE_KEY", "PanelDoor", "panel_token", "register"]
+def picker_settings(app: Application) -> dict[str, Any]:
+    """What the model picker reads, and nothing else of the settings: the presets, each provider's kind
+    and name for its mark, and the default. No address, no key. A live link's visitor reads the same."""
+    raw = app.config.model_dump(mode="json")
+    providers = {pid: {"kind": conf.get("kind", ""), "name": conf.get("name") or "", "billing": conf.get("billing") or ""} for pid, conf in (raw.get("providers") or {}).items()}
+    return {"presets": raw.get("presets") or {}, "providers": providers, "model": {"preset": (raw.get("model") or {}).get("preset", "")}}
+
+
+__all__ = ["FORWARDED", "OWN", "PANEL_UPLOAD_MAX", "SCOPE_KEY", "PanelDoor", "panel_token", "picker_settings", "register"]

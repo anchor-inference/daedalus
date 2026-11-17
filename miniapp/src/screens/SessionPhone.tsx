@@ -20,7 +20,7 @@ export type SessionRow = { icon: IconName; label: string; value?: ReactNode; dan
  * session's details, where the full title, the model and the context are; the second line is the
  * live state while something happens and the model with its effort otherwise.
  */
-export function SessionTopBar({ title, sub, back, onTitle, chip, onMenu, editing, shared, secret }: { title: string; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean }) {
+export function SessionTopBar({ title, sub, back, onTitle, chip, onMenu, editing, shared, secret, bare }: { title: string; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean; /** No drawer to open: a live link's page has no app around the chat. */ bare?: boolean }) {
   // A chat anyone can open says so on the bar itself, not only inside the ⋮ sheet: the desktop's
   // header chip has no room here, so it rides at the head of the second line.
   const share = shared ? <span className={`chip ph-share-tag ${shared === "public" ? "bad" : "attn"}`}>{t(shared === "public" ? "session.share.chip.public" : "session.share.chip.key")}</span> : null;
@@ -30,6 +30,7 @@ export function SessionTopBar({ title, sub, back, onTitle, chip, onMenu, editing
       title={editing ?? <span className="chat-title">{title}</span>}
       sub={editing ? undefined : <><PrivateBadge on={!!secret} />{share}{sub}</>}
       back={back}
+      bare={bare}
       onTitle={editing ? undefined : onTitle}
       titleLabel={onTitle ? t("session.phone.title", { title }) : undefined}
       actions={<>{chip}<IconButton icon="vdots" label={t("session.actions")} onClick={onMenu} popup="menu" /></>}

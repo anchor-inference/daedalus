@@ -75,6 +75,8 @@ import { worktreeFolders } from "../project/worktreefolders";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
+import { LiveLinkChip } from "../livelink";
+import { inShare } from "../visit";
 import { AgentsTab, TalkApprovals, agentsWaiting, useAgentTalks, useAgentsAutoOpen } from "../agenttalk";
 import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
@@ -188,9 +190,13 @@ export type SessionScreenProps = {
   /** Drawn inside a small window that has a title bar of its own (the prompt coach's): no header, no
    *  terminals, no panel, and none of the chat's own tools in the composer — only the conversation. */
   bare?: boolean;
+  /** Opened by a live link's visitor (``visitapp.tsx``): the conversation and its panel as the operator has
+   *  them, without what reaches past the session — sharing it, deleting or moving it, a side chat, the
+   *  switches that lift the operator's checks — and without writing an address the link does not have. */
+  visit?: boolean;
 };
 
-export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false, embedded = false, bare = false }: SessionScreenProps) {
+export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false, embedded = false, bare = false, visit = false }: SessionScreenProps) {
   // Each pane says which session it shows, so a split view reports both and the voice screen's
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
@@ -230,7 +236,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     [focus?.projectId, focus?.kind, id, main],
   );
   const tabsNow = useRef<PanelTab[]>([]);
-  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded || bare ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded || bare, shown: () => tabsNow.current });
+  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded || bare || visit ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded || bare, shown: () => tabsNow.current });
   // The prompt coach's window over this chat, with the draft it was opened on; `raise` brings an open
   // window back up when the button is pressed again. It belongs to this chat and closes when the chat changes.
   const [coach, setCoach] = useState<{ draft: string; raise: number } | null>(null);
@@ -1688,7 +1694,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const phoneTiles: SessionTile[] = phone && !pane ? [
     { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
     { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
-    ...(computer.view !== "hidden" ? [{ id: "computer", icon: "monitor" as IconName, label: t("cu.button"), attn: computer.view === "mine" || computer.view === "paused", onSelect: () => setComputerOpen(true) }] : []),
+    ...(computer.view !== "hidden" && !visit ? [{ id: "computer", icon: "monitor" as IconName, label: t("cu.button"), attn: computer.view === "mine" || computer.view === "paused", onSelect: () => setComputerOpen(true) }] : []),
     ...(hasBrowser ? [{ id: "browser", icon: "globe" as IconName, label: t("panel.tab.browser"), attn: !!browserShown?.needs_you, onSelect: openBrowser }] : []),
     ...(questionsShown ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
     ...(panelTabs.includes("files") && hasDetails ? [{ id: "files", icon: "folder" as IconName, label: t("panel.tab.files"), onSelect: () => panel.open("files") }] : []),
@@ -1699,17 +1705,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
     ...(panelTabs.includes("agents") ? [{ id: "agents", icon: "bots" as IconName, label: t("panel.tab.agents"), count: talksWaiting || undefined, attn: guestHeld.length > 0 || agentTalks.some((talk) => talk.held > 0), onSelect: openAgents }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
-    ...(sessionCanvases?.length ? [{ id: "canvas", icon: "grid" as IconName, label: t("session.phone.canvas"), count: sessionCanvases.length, onSelect: () => navigate(pathFor("canvas", null, { session: id })) }] : []),
+    ...(sessionCanvases?.length && !visit ? [{ id: "canvas", icon: "grid" as IconName, label: t("session.phone.canvas"), count: sessionCanvases.length, onSelect: () => navigate(pathFor("canvas", null, { session: id })) }] : []),
   ] : [];
   const contextPct = detail?.context?.window ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   // A chat that is still alone in a project of its own can become a project from its own menu too.
   const makeProject = makeProjectCommand(detail?.project, () => setPromoting(true));
   // A link is made from an ordinary chat: not the main chat, a project's orchestrator or a helper's own.
-  const guestable = !!detail && !main && !orchestrating && !detail.subagent_of;
+  const guestable = !!detail && !main && !orchestrating && !visit && !detail.subagent_of;
   // The folder the chat works in, and whether it can be carried between the host and the container.
   const sessionFolder = detail?.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail?.project?.folders?.[0] ?? null;
-  const environments = useQuery<ProjectEnvironments>(sessionFolder && !focus && !main && !orchestrating ? "/api/project-environments" : null, { staleMs: 60000 }).data;
-  const folderMovable = !!sessionFolder && !focus && !main && !orchestrating && movable(sessionFolder, environments);
+  const environments = useQuery<ProjectEnvironments>(sessionFolder && !focus && !main && !orchestrating && !visit ? "/api/project-environments" : null, { staleMs: 60000 }).data;
+  const folderMovable = !!sessionFolder && !focus && !main && !orchestrating && !visit && movable(sessionFolder, environments);
   const copySessionId = async () => {
     const ok = await copyText(id);
     if (!ok) toast(id);
@@ -1720,7 +1726,21 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
   // The strip's copy differs in one thing: its "Change model" opens the picker under the strip's own chip,
   // not under the composer's pill on the other side of the window.
-  const sessionMenuFrom = (modelAnchor?: { current: HTMLElement | null }): MenuItem[] => [
+  const sessionMenuFrom = (modelAnchor?: { current: HTMLElement | null }): MenuItem[] => visit ? [
+    ...(hasDetails ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
+    ...(hasDetails
+      ? [
+          "-" as const,
+          { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
+          ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
+          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+          ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
+        ]
+      : []),
+    "-",
+    { label: t("session.copyid"), icon: "copy", ticks: true, onSelect: copySessionId },
+    { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
+  ] : [
     { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
     ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
     // A session in a project's focus mode stays in its project; the orchestrator's chat has no
@@ -1756,7 +1776,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ];
   const sessionMenu = sessionMenuFrom();
   const stripMenu = sessionMenuFrom(stripModel);
-  const phoneRows: SessionRow[] = phone && !pane ? [
+  // A visitor's menus keep what stays inside the session; the host refuses the rest whatever is pressed.
+  const phoneRows: SessionRow[] = phone && !pane && visit ? [
+    { icon: "copy", label: t("session.copyid"), onSelect: () => void copySessionId() },
+    { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
+  ] : phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
     ...(folderMovable ? [{ icon: "forward" as IconName, label: t(sessionFolder!.env === "container" ? "move.tohost" : "move.tocontainer"), onSelect: () => setMovingFolder(true) }] : []),
@@ -1816,8 +1840,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           onTitle={hasDetails ? () => { setDetailsFocus("session"); panel.open("details"); } : undefined}
           chip={phoneChip}
           onMenu={() => setPhoneSheet("menu")}
-          shared={detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
+          shared={!visit && detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
           secret={isPrivate(detail)}
+          bare={visit}
         />
         {offline && <Banner strip tone="warn" icon="reload" className="ph-chat-strip">{t("session.phone.reconnecting")}</Banner>}
         {remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
@@ -1879,7 +1904,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         ) : null}
         {offline && <span className="head-status offline">{t("session.reconnecting")}</span>}
         <div className="head-actions">
-          {detail?.share && detail.share.mode !== "local" && (
+          {!visit && <LiveLinkChip sessionId={id} onOpen={() => setSharing(true)} />}
+          {!visit && detail?.share && detail.share.mode !== "local" && (
             <button type="button" className={`chip ${detail.share.mode === "public" ? "bad" : "attn"}`} onClick={() => setSharing(true)}>
               {t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key")}
             </button>
@@ -1896,8 +1922,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
           <ChatSearch sessionId={id} onPick={openMessage} />
-          {!!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
-          <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />
+          {!visit && !!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
+          {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
           <TerminalButton dock={terminalDock} phone={phone} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
@@ -2004,7 +2030,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {/* Words selected in one of the agent's answers can be replied to from a pill over them: the
               reply waits in this composer as a card, and the side question can take the passage instead. */}
           {detail?.id === id && <SelectionReply sessionId={id} scroller={scroller} phone={phone}
-            onAskAside={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined
+            onAskAside={bare || embedded || visit || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined
               : (quote) => setBtw((open) => ({ question: "", prefill: `${quote.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n")}\n\n`, ask: (open?.ask ?? 0) + 1 }))} />}
           {detail?.id === id && <Composer
             ref={composer}
@@ -2029,13 +2055,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             suggestion={suggestion}
             onSuggestionUsed={() => setSuggestion("")}
             yagni={!!detail?.yagni}
-            onYagni={bare ? undefined : setYagni}
+            onYagni={bare || visit ? undefined : setYagni}
             autopilot={detail?.autopilot}
-            onAutopilot={bare || embedded || main || orchestrating ? undefined : setAutopilot}
+            onAutopilot={bare || embedded || visit || main || orchestrating ? undefined : setAutopilot}
             bypass={!!detail?.bypass}
-            onBypass={bare || embedded ? undefined : setBypass}
-            onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
-            onBtw={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
+            onBypass={bare || embedded || visit ? undefined : setBypass}
+            onCoach={bare || embedded || visit || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
+            onBtw={bare || embedded || visit || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
             targetProject={detail?.project?.id}
             targetWorkspace={detail?.workspace}
@@ -2429,7 +2455,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // The operator's words alone: the files are drawn above the bubble, so the list written for the model goes.
   const words = turn.user ? withoutAttachedList(turn.user.text) : "";
   // A message that was only files has no bubble, unless something else is said in one.
-  const bubble = !!turn.user && !!(words.trim() || inbound || fromPage || turn.user.autopilot || turn.user.yagni || turn.user.reply_to || turn.user.secrets?.length);
+  const bubble = !!turn.user && !!(words.trim() || inbound || fromPage || turn.user.visitor || turn.user.autopilot || turn.user.yagni || turn.user.reply_to || turn.user.secrets?.length);
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
   // Split, every text the agent wrote between its steps is a reply of its own and cuts the steps
   // into blocks around it; merged, the texts fold into one block of steps with the tool calls.
@@ -2451,9 +2477,11 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
     ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
   ];
+  // A fork is a new session, which a live link's visitor could not open: their menus leave it out.
+  const forkable = !inShare();
   const turnMenu: MenuItem[] | undefined = settled
     ? [
-        { label: t("session.fork.action"), icon: "fork", onSelect: () => onTurnAction!("fork", seq!) },
+        ...(forkable ? [{ label: t("session.fork.action"), icon: "fork" as IconName, onSelect: () => onTurnAction!("fork", seq!) }] : []),
         ...(canRevert ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
       ]
     : undefined;
@@ -2481,6 +2509,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {bubble && !fromGuest && <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
+            {turn.user.visitor && <span className="msg-origin msg-visitor" title={t("turn.visitor.title")}>{turn.user.visitor.name ? t("turn.visitor.named", { name: turn.user.visitor.name }) : t("turn.visitor")}</span>}
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
@@ -2495,7 +2524,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             actions={
               settled
                 ? ([
-                    { icon: "fork", label: t("session.fork.action"), onSelect: () => onTurnAction!("fork", seq!) },
+                    ...(forkable ? [{ icon: "fork", label: t("session.fork.action"), onSelect: () => onTurnAction!("fork", seq!) }] : []),
                     ...(canRevert ? [{ icon: "undo", label: t("session.revert.action.menu"), danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
                   ] as MessageAction[])
                 : []

@@ -1,5 +1,6 @@
 // Who can open this dialog from outside the app. The same three choices a hosted service has:
 // only here, a private link, or anyone with the link. The page those links open is read-only.
+// Below them, the live link (livelink.tsx): a link that hands the conversation itself over.
 
 import { useState } from "react";
 import { api, ShareMode, ShareView } from "./api";
@@ -8,6 +9,7 @@ import { Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { confirmAsync, errorText } from "./ui";
+import { LiveLinkSection } from "./livelink";
 
 const MODES: ShareMode[] = ["local", "key", "public"];
 
@@ -79,6 +81,7 @@ export function ShareSheet({
           )}
         </>
       )}
+      <LiveLinkSection sessionId={sessionId} toast={toast} />
     </Sheet>
   );
 }

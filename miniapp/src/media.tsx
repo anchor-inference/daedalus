@@ -9,6 +9,7 @@ import { downloadHref, openOrSave, saveFromPanel, useBlobUrl, type PreviewSource
 import { ArtifactCard } from "./artifact";
 import { bytes } from "./format";
 import { sourceKey, viewerKind, type HostSource } from "./mediaroute";
+import { routed } from "./visit";
 export { mediaCopyText, splitMediaAnswer, withoutMediaRefs } from "./mediaformat";
 
 // A clip opened from a chat used to start at the browser's full volume. A tenth is loud enough
@@ -26,7 +27,7 @@ function source(sessionId: string, presentationId: string, item: MediaItem): str
   // A remote item is already a URL. Routing it through the content endpoint would only download
   // it onto this machine, which is what attaching by link is there to avoid.
   if (item.url) return item.url;
-  return `/api/sessions/${encodeURIComponent(sessionId)}/media/${encodeURIComponent(presentationId)}/${encodeURIComponent(item.id)}/content`;
+  return routed(`/api/sessions/${encodeURIComponent(sessionId)}/media/${encodeURIComponent(presentationId)}/${encodeURIComponent(item.id)}/content`);
 }
 
 /** Where a press on "download" fetches an attached item, and the name it is saved under. */

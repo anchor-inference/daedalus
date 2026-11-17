@@ -4,7 +4,10 @@ package main
 //
 // A tunnel maps one address to one place, and an installation has two things to show through it with
 // different risks: /a/, where strangers' agents reach the guest door's front, and /s/, where shared
-// services run pages an agent wrote. This is the place they share. It knows two ports and no others,
+// services run pages an agent wrote. A live link to one session, /v/, is served by the same services
+// door as /s/ and goes there too: the host's door behind that port decides what a link's token reaches,
+// and the link's page holds nothing in a cookie or in storage that a page under /s/ could read. This is
+// the place they share. It knows two ports and no others,
 // and the app's port is not among them: nothing here can be talked into reaching the API, the app or a
 // terminal, because no code in this program has heard of them. Everything else gets a 404 from here.
 //
@@ -246,7 +249,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
-	toDoor, toServices := strings.HasPrefix(path, "/a/"), strings.HasPrefix(path, "/s/")
+	toDoor, toServices := strings.HasPrefix(path, "/a/"), strings.HasPrefix(path, "/s/") || strings.HasPrefix(path, "/v/")
 	if (!toDoor && !toServices) || !cleanPath(r) {
 		refuse(w, http.StatusNotFound, notHere)
 		return

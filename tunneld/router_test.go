@@ -100,7 +100,7 @@ func (r *rig) ask(t *testing.T, method, path string, header http.Header, body io
 func TestOnlyTheTwoPrefixesReachAnything(t *testing.T) {
 	r := newRig(t, nil)
 	for _, path := range []string{
-		"/", "/app", "/app/", "/api", "/api/status", "/api/auth/me", "/api/cli/pair/start", "/ws/terminal", "/pages/x/", "/c/slug", "/healthz", "/a", "/s",
+		"/", "/app", "/app/", "/api", "/api/status", "/api/auth/me", "/api/cli/pair/start", "/ws/terminal", "/pages/x/", "/c/slug", "/healthz", "/a", "/s", "/v", "/vx/y",
 		"/admin", "/a.txt", "/s.txt", "/ab/c", "/sx/y", "/favicon.ico", "/.well-known/daedalus-other", "/API/status",
 	} {
 		answer := r.ask(t, http.MethodGet, path, nil, nil)
@@ -118,6 +118,7 @@ func TestAPathCannotClimbOutOfItsPrefix(t *testing.T) {
 	for _, path := range []string{
 		"/s/../api/status", "/a/../api/status", "/s/%2e%2e/api/status", "/s/x/..%2f..%2fapi", "/s/x/%2E%2E/%2E%2E/api", "/a/.%2e/api", "/s/%2e./api",
 		"/s/x/../../api", "/s//api", "/s/x\\..\\api", "/s/x%5c..%5capi", "/s/x%2fapi", "/s/x%00/api", "/a/./x",
+		"/v/../api/status", "/v/t/%2e%2e/%2e%2e/api", "/v//api",
 	} {
 		answer := r.ask(t, http.MethodGet, path, nil, nil)
 		if answer.StatusCode != http.StatusNotFound {
@@ -142,6 +143,13 @@ func TestEachPrefixGoesToItsOwnDoor(t *testing.T) {
 	}
 	if got := r.services.last(); got.URL.Path != "/s/slug/page" || got.URL.RawQuery != "x=1" {
 		t.Fatalf("/s/ arrived as %s", got.URL)
+	}
+	// A live link is the services door's too.
+	if answer := r.ask(t, http.MethodGet, "/v/token/api/share", nil, nil); answer.StatusCode != http.StatusOK {
+		t.Fatalf("live link: %d", answer.StatusCode)
+	}
+	if got := r.services.last(); got.URL.Path != "/v/token/api/share" || r.door.count() != 1 {
+		t.Fatalf("/v/ arrived as %s", got.URL)
 	}
 }
 

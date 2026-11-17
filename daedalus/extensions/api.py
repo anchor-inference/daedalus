@@ -125,6 +125,7 @@ from daedalus.extensions import (
     api_secrets,
     api_services_door,
     api_session_import,
+    api_session_share,
     api_settings_changes,
     api_skill_quality,
     api_staff,
@@ -1644,6 +1645,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         device = request.scope.get(remote_door.SCOPE_KEY)
         if isinstance(device, dict):
             return {"user_id": settings.owner_user_id, "via": "device", **device}
+        # A live link's visitor, checked by its door with the route and the session before this runs; the
+        # routes the link does not open never get here (``api_session_share``). The visitor acts as the
+        # operator in that one session, which is what the link was made to hand over.
+        shared = request.scope.get(api_session_share.SCOPE_KEY)
+        if isinstance(shared, dict):
+            return {"user_id": settings.owner_user_id, "via": "share", **shared}
         header = request.headers.get("authorization", "")
         if header.startswith("tma "):
             if not settings.telegram_bot_token:
@@ -1666,6 +1673,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if cookie and verify_session_cookie(await session_secret(), cookie) == settings.owner_user_id:
             return {"user_id": settings.owner_user_id, "via": "cookie"}
         raise HTTPException(401, "authentication required")
+
+    def visitor_mark(who: dict[str, Any]) -> dict[str, str] | None:
+        """The mark a live link's visitor puts on what they send, so the chat says who wrote it."""
+        if who.get("via") != "share":
+            return None
+        return {"share": str(who.get("share") or ""), "name": str(who.get("name") or "")}
 
     def front_of(who: dict[str, Any]) -> str:
         """The front an answer, a grant or a message came through, as the events record it: a
@@ -2874,11 +2887,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         flt = EventFilter(types=wanted or streamed_types(), session_id=session or None)
         presence = manager.presence
 
+        # A live link's visitor is not the operator looking: counted as presence, their open page would
+        # hold back the operator's notifications for a conversation the operator is not watching.
+        visiting = _.get("via") == "share"
+
         async def opened() -> None:
-            await presence.stream_opened(client, kind)
+            if not visiting:
+                await presence.stream_opened(client, kind)
 
         async def closed() -> None:
-            await presence.stream_closed(client, kind)
+            if not visiting:
+                await presence.stream_closed(client, kind)
 
         frames = event_stream(
             manager.bus, flt, after=cursor, is_disconnected=request.is_disconnected, client=client, kind=kind,
@@ -3188,6 +3207,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         text, reply = body.text, None
         if _.get("via") == "panel":
             await panel_wrote(session_id, _)
+        visitor = visitor_mark(_)
         if body.reply_to is not None:
             # The message names what it answers, in words the model reads and a reference the app
             # draws: a complaint about a member's missing instruction was once taken for one about
@@ -3208,8 +3228,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 expected_running=body.expected_running,
                 client_message_id=body.client_message_id or None,
                 reply_to=reply,
-                secrets=body.secrets,
+                # The operator's secrets are the operator's to hand over, never a visitor's.
+                secrets=() if visitor else body.secrets,
                 via=front_of(_),
+                visitor=visitor,
             )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
@@ -3273,7 +3295,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 follow_up=follow_up,
                 expected_running=expected_running,
                 client_message_id=client_message_id or None,
-                secrets=[name.strip() for name in secret_names.split(",") if name.strip()],
+                secrets=[] if visitor_mark(_) else [name.strip() for name in secret_names.split(",") if name.strip()],
+                visitor=visitor_mark(_),
             )
         except ReceiptConflict as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -4441,6 +4464,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # dialog that asked has already told the operator the number.
         terminals = app.extensions.get("terminals")
         ended = await terminals.close_owned("session", session_id, actor="operator") if terminals is not None else 0  # type: ignore[attr-defined]
+        # Its live links go with its rows; a visitor's page still open on it is cut here, not left streaming.
+        shares = app.extensions.get("session_shares")
+        if shares is not None:
+            await shares.cut_session(session_id)  # type: ignore[attr-defined]
         return {"deleted": await manager.delete_session(session_id, delete_workspace=not keep_workspace), "terminals_ended": ended}
 
     @api.delete("/api/sessions/{session_id}/telegram")
@@ -7274,6 +7301,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # The side panel's door goes last: it looks up the operator's handlers it forwards to.
     api_panel.register(api, app, new_body=NewSessionBody)
     api_remote.register(api, app, auth)
+    # A live link's door: outermost, so a visitor's request is checked before any guard of the operator's.
+    api_session_share.register(api, app, auth)
 
     # -- static mini app ------------------------------------------------------------
 

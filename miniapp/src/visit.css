@@ -1,0 +1,14 @@
+/* A live link's page: the session's screen alone, under a strip that says whose conversation it is. */
+.visit { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; background: var(--wash, var(--bg)); }
+.visit > .main { flex: 1; min-height: 0; }
+.visit-bar { flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-3); font-size: var(--fs-12); color: var(--fg-2); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); border-bottom: 1px solid var(--line); }
+.visit-bar-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visit-bar-until { flex: none; color: var(--fg-3); }
+.visit-name { display: flex; align-items: center; gap: var(--space-1); }
+.visit-name .field { width: 12em; min-height: 0; padding: 2px 8px; }
+.visit-name-btn { flex: none; }
+.visit-gone { margin: auto; display: grid; justify-items: center; gap: var(--space-2); max-width: 32em; padding: var(--space-4); text-align: center; color: var(--fg-2); }
+.visit-gone b { color: var(--fg); font-size: var(--fs-16); }
+@media (max-width: 1023px) {
+  .visit-bar-until { display: none; }
+}

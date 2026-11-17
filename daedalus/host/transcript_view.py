@@ -54,6 +54,9 @@ ANSWER_MAX_CHARS = 20_000
 """Ceiling on an answered question the listing carries whole: a hundred questions of two hundred
 characters each. Past it the answer is clipped like any other result rather than bloat the listing."""
 
+VISITOR_KEY = "daedalus.visitor"
+"""A message a live link's visitor wrote: ``{"share", "name"}``, for the chat's label."""
+
 _SUMMARY_WRAP_RE = re.compile(r"</?compacted-turn[^>]*>")
 _NUDGE_MARKERS = ("[internal control", "tool repeatedly failed with the same error", "has been disabled for the rest of this run", "The run has reached its budget")
 
@@ -63,6 +66,13 @@ def _autopilot_mark(metadata: Any) -> dict[str, str] | None:
     if not isinstance(mark, dict) or not mark.get("kind"):
         return None
     return {key: str(mark[key]) for key in ("kind", "label", "question") if mark.get(key)}
+
+
+def _visitor_mark(metadata: Any) -> dict[str, str] | None:
+    mark = metadata.get(VISITOR_KEY) if isinstance(metadata, dict) else None
+    if not isinstance(mark, dict):
+        return None
+    return {"name": str(mark.get("name") or "")[:60]}
 
 
 def _looks_like_core_nudge(text: str) -> bool:
@@ -172,6 +182,8 @@ def message_view(message: Message) -> dict[str, Any]:
             "label": str(guest.get("label") or ""), "tools": str(guest.get("tools") or ""), **({"kind": "reply"} if guest.get("kind") == "reply" else {}),
             **({"by": "owner"} if guest.get("by") == "owner" else {}),
         } if guest else None,
+        # A live link's visitor wrote this, not the operator: the name they gave, empty when none.
+        "visitor": _visitor_mark(message.metadata) if message.role is MessageRole.user else None,
         # The operator's secrets attached to the message, by name and scope; never a value.
         "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.
@@ -313,4 +325,4 @@ class TranscriptViewBuilder:
         return message_view(message)
 
 
-__all__ = ["TOOL_RESULT_PREVIEW_CHARS", "VIEW_VERSION", "TranscriptViewBuilder", "full_tool_result", "message_view", "tool_image_entries"]
+__all__ = ["TOOL_RESULT_PREVIEW_CHARS", "VIEW_VERSION", "VISITOR_KEY", "TranscriptViewBuilder", "full_tool_result", "message_view", "tool_image_entries"]

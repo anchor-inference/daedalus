@@ -4,12 +4,19 @@ import { ContextMenuHost } from "./ui/context-menu";
 import { App } from "./App";
 import { QuickChat } from "./quick/QuickChat";
 import { SidePanel } from "./sidepanel/SidePanel";
+import { VisitApp } from "./visitapp";
+import { installShareTransport, shareToken } from "./visit";
 import "./ui/styles.css";
 import "./ui/desktop.css";
 import "./ui/phone.css";
 
+// A live link's page (/v/<token>/ on the services door) puts every request under its token before
+// anything asks for one, and is not an installable app: it is one conversation, for as long as the link lasts.
+const visiting = shareToken();
+if (visiting) installShareTransport(visiting);
+
 // Installable as an app: the service worker keeps the shell and the hashed assets; nothing of the API is cached.
-if ("serviceWorker" in navigator && window.location.protocol === "https:") {
+if (!visiting && "serviceWorker" in navigator && window.location.protocol === "https:") {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/app/sw.js", { scope: "/app/" }).catch(() => undefined);
   });
@@ -22,7 +29,7 @@ const route = window.location.pathname.replace(/\/+$/, "");
 const render = () =>
   root.render(
     <React.StrictMode>
-      {route === "/app/quick" ? <QuickChat /> : route === "/app/panel" ? <><SidePanel /><ContextMenuHost /></> : <><App /><ContextMenuHost /></>}
+      {visiting ? <><VisitApp /><ContextMenuHost /></> : route === "/app/quick" ? <QuickChat /> : route === "/app/panel" ? <><SidePanel /><ContextMenuHost /></> : <><App /><ContextMenuHost /></>}
     </React.StrictMode>,
   );
 

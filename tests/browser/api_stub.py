@@ -1844,6 +1844,41 @@ def link_export(method: str, parts: list[str]) -> tuple[int, str, str | bytes] |
     return 405, "application/json", json.dumps({"detail": "method not allowed"})
 
 
+class LiveLinks:
+    """A session's live links as the host keeps them: none until one is made, and a revoked one stays listed."""
+
+    BASE = "https://services.example.org"
+
+    def __init__(self) -> None:
+        self.links: dict[str, list[dict]] = {}
+
+    def view(self, sid: str) -> dict:
+        return {"links": self.links.get(sid, []), "reach": "outside", "base": self.BASE}
+
+    def answer(self, method: str, sid: str, link_id: str, body: object) -> tuple[int, str, str]:
+        rows = self.links.setdefault(sid, [])
+        if method == "POST" and not link_id:
+            hours = (body or {}).get("expires_hours") if isinstance(body, dict) else None
+            at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+            until = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + hours * 3600)) if hours else None
+            row = {"id": f"shr_{len(rows) + 1:016x}", "url": f"{self.BASE}/v/{'k' * 43}/", "created_at": at, "expires_at": until, "revoked_at": None,
+                   "active": True, "last_seen_at": None, "connections": 0, "visitors": []}
+            rows.insert(0, row)
+            return 200, "application/json", json.dumps(row)
+        if method == "DELETE" and link_id:
+            row = next((item for item in rows if item["id"] == link_id), None)
+            if row is None:
+                return 404, "application/json", json.dumps({"detail": "no such link"})
+            row.update(active=False, url="", revoked_at=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()))
+            return 200, "application/json", json.dumps(self.view(sid))
+        if method == "GET" and not link_id:
+            return 200, "application/json", json.dumps(self.view(sid))
+        return 404, "application/json", json.dumps({"detail": "Not Found"})
+
+
+LIVE = LiveLinks()
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -1881,6 +1916,8 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     flowed = flows_answer(method, path)
     if flowed is not None:
         return flowed[0], "application/json", json.dumps(flowed[1])
+    if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "live-shares":
+        return LIVE.answer(method.upper(), parts[3], parts[5] if len(parts) > 5 else "", body)
     if path.startswith("/api/agent-talks/") or (len(parts) == 5 and parts[2] == "sessions" and parts[4] == "agent-talks"):
         answered = TALKS.answer(method, path, body)
         if answered is not None:

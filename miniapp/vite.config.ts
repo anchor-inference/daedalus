@@ -24,6 +24,16 @@ function pageKit(): Plugin {
 export default defineConfig({
   plugins: [react(), pageKit()],
   base: "/app/",
+  // One build serves the operator's app at /app/ and a live link's page at /v/<token>/, whose files the
+  // services door serves at /v/assets/. A chunk loaded later is asked for where the page itself came
+  // from, which the page's address says at run time; a stylesheet names its fonts beside itself.
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "js") return { runtime: `(location.pathname.startsWith("/v/")?"/v/":"/app/")+${JSON.stringify(filename)}` };
+      if (hostType === "css") return { relative: true };
+      return undefined;
+    },
+  },
   build: { outDir: "dist", emptyOutDir: true },
   server: {
     port: 5173,
