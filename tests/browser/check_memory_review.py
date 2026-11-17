@@ -164,7 +164,7 @@ def check_tidy(browser, width: int, lang: str, problems: list[str]) -> None:  # 
     probe.update({"id": "m-probe", "text": "The secret word is LANTERN."})
     memory.records += [twin, probe]
     count = len(memory.records)
-    page = open_page(browser, width, lang, memory, "settings/memory", [])
+    page = open_page(browser, width, lang, memory, "settings/memory-upkeep", [])
     page.wait_for_selector('[data-setting="memory.tidy_now"] [data-action="memory-tidy-now"]', timeout=20000)
     page.locator('[data-action="memory-tidy-now"]').click()
     dialog = page.locator(".sheet-backdrop.confirm .dialog")

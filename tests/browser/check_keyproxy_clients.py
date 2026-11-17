@@ -3,7 +3,7 @@
 The reported fault: the key proxy presented Claude Code as a version the vendor had left behind, and
 the only fix was a new image. What is checked:
 
-- Settings → Models → Providers lists each imitated CLI inside the key proxy card with the version it
+- Settings → Key proxy lists each imitated CLI inside the key proxy card with the version it
   presents; Claude Code, one release behind, says the newer one is out and offers Update;
 - Update posts ``/api/keyproxy/clients/claude/update``, the row then says it is up to date and waits
   for its first request, names the header values the update kept, and offers Revert;
@@ -64,7 +64,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.set_default_timeout(8000)
     page.route("**/api/**", stub)
     page.route("**/api/keyproxy/clients**", record)
-    page.goto(f"{BASE}/settings/models?tab=providers&token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/keyproxy?token=t&lang={lang}")
     section = page.locator('[data-setting="keyproxy.clients"]')
     section.scroll_into_view_if_needed()
     expect(section.locator(".section-title")).to_have_text(words["title"])
@@ -99,7 +99,7 @@ def notification(browser, lang: str) -> list[str]:  # type: ignore[no-untyped-de
     acted: list[dict[str, object]] = []
     entry = {
         "id": 72, "at": "2026-10-24T10:00:00Z", "updated_at": "2026-10-24T10:00:00Z", "category": "system", "kind": "keyproxy_client", "level": "normal", "tone": "info",
-        "title": "Claude Code in the key proxy is 2.1.296; 2.1.310 is out", "body": "The key proxy presents your Claude Code subscription as version 2.1.296.", "link": "/app/settings/models?tab=providers",
+        "title": "Claude Code in the key proxy is 2.1.296; 2.1.310 is out", "body": "The key proxy presents your Claude Code subscription as version 2.1.296.", "link": "/app/settings/keyproxy",
         "session_id": None, "run_id": None, "project_id": None, "staff_id": None, "terminal_id": None, "source": "keyproxy", "dedupe_key": "keyproxy:claude:2.1.310",
         "request_ref": "keyproxy:claude:2.1.310", "count": 1, "seen": False, "resolved": None, "needs_you": True, "delivered": {},
         "actions": [{"id": "update", "label": words["update"], "style": "primary", "quick": False}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}],

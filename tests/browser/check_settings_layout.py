@@ -31,7 +31,7 @@ def main() -> int:
 
                 page.route("**/api/settings", save)
                 suffix = f"?token=t&lang=ru&scheme={scheme}"
-                for section, selector in (("components", ".comp-grid"), ("voice", ".stt-list")):
+                for section, selector in (("components", ".comp-grid"), ("speech-models", ".stt-list")):
                     page.goto(f"{BASE}/settings/{section}{suffix}")
                     page.wait_for_selector(f"{selector} > div")
                     page.wait_for_timeout(250)
@@ -39,7 +39,7 @@ def main() -> int:
                         heights = grid.evaluate("g => [...g.children].map(c => c.getBoundingClientRect().height)")
                         if width >= 760:
                             assert max(heights) - min(heights) < 1, (width, scheme, section, heights)
-                page.goto(f"{BASE}/settings/appearance{suffix}")
+                page.goto(f"{BASE}/settings/text{suffix}")
                 panel = page.locator(".settings-font")
                 panel.wait_for()
                 assert panel.locator(".settings-faces").evaluate("e => e.clientHeight <= 280")
@@ -51,6 +51,8 @@ def main() -> int:
                 page.goto(f"{BASE}/settings/tools{suffix}")
                 page.wait_for_selector(".tgroup")
                 assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => r.querySelector('.tgroup-use-text').getBoundingClientRect().right <= r.querySelector('.dropdown-btn').getBoundingClientRect().left - 7)")
+                page.goto(f"{BASE}/settings/search{suffix}")
+                page.wait_for_selector("#search-fallbacks")
                 # The fallbacks are an in-place list: ticking rows must not shift its search field sideways
                 # or change its width, the way a summary button that grew with its caption once did.
                 fallbacks = page.locator("#search-fallbacks")

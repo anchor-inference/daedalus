@@ -1,4 +1,4 @@
-"""Several accounts per subscription, in Settings → Models → Providers.
+"""Several accounts per subscription, in Settings → Subscription accounts.
 
 What is checked:
 
@@ -71,7 +71,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.set_default_timeout(8000)
     page.route("**/api/**", stub)
     page.route("**/api/subscription-accounts**", accounts)
-    page.goto(f"{BASE}/settings/models?tab=providers&token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/accounts?token=t&lang={lang}")
     card = page.locator('[data-setting="accounts"]')
     card.scroll_into_view_if_needed()
     expect(card.locator(".section-title").first).to_have_text(words["title"])
@@ -108,7 +108,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     if sent[:2] != [("POST", "subscription-accounts/claude", {"label": "second work"}), ("POST", "subscription-accounts/claude/n3w4cc0t/login", {})]:
         problems.append(f"{lang} {width}: Add account sent {sent[:2]}")
 
-    page.goto(f"{BASE}/settings/models?tab=providers&token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/accounts?token=t&lang={lang}")
     work = page.locator('[data-account-upstream="claude"] [data-account="k3v9q2ma"]')
     work.scroll_into_view_if_needed()
     work.locator('[data-action="remove"]').click()

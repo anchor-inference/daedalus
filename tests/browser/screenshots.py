@@ -1437,12 +1437,12 @@ def open_more(page: Page) -> None:
 
 
 def scroll_to_action_rules(page: Page) -> None:
-    """The levels grid is under the working rules' editor; the picture is about the grid and its log."""
+    """The levels grid heads Approvals; the picture is about the grid and its log, from its top."""
     page.locator(".action-rules").evaluate("(card) => card.scrollIntoView({ block: 'start' })")
 
 
 def scroll_to_accounts(page: Page) -> None:
-    """The subscriptions' accounts come after the list of clients on the providers tab."""
+    """The subscriptions' accounts, from the card's top: the picture is about the rows, not the page's header."""
     page.locator('[data-setting="accounts"]').evaluate("(card) => card.scrollIntoView({ block: 'start' })")
 
 
@@ -2309,12 +2309,12 @@ def run_accounts() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
+        shot(page, "settings-accounts", "settings/accounts", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
         desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page = phone.new_page()
         page.route("**/api/**", stub)
-        shot(page, "phone-settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
+        shot(page, "phone-settings-accounts", "settings/accounts", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
         phone.close()
         browser.close()
     return UNHANDLED.report()
@@ -2450,8 +2450,8 @@ def run() -> int:
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)
         shot(page, "settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
-        shot(page, "settings-accounts", "settings/models?tab=providers", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
-        shot(page, "settings-rules", "settings/rules", wait=".action-rules .ar-row[data-category]", before=scroll_to_action_rules, settle=600)
+        shot(page, "settings-accounts", "settings/accounts", wait="[data-setting='accounts'] .account-row", before=scroll_to_accounts, settle=700)
+        shot(page, "settings-rules", "settings/approvals", wait=".action-rules .ar-row[data-category]", before=scroll_to_action_rules, settle=600)
         shot(page, "session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_tool_groups, settle=300)
         # And the same install where the owner met its absence: under the two lines on the voice card
         # that say the browser is doing the listening and the speaking.
@@ -2774,7 +2774,7 @@ def run_features() -> int:
             try_on_host(card)
             card.locator("[data-mcp-server='files']").evaluate("(row) => row.scrollIntoView({ block: 'start' })")
 
-        shot(page, "settings-mcp", "settings/tools", wait=".settings-stage", before=mcp_settings, settle=700)
+        shot(page, "settings-mcp", "settings/mcp", wait=".settings-stage", before=mcp_settings, settle=700)
 
         def review_block(pg: Page) -> None:
             pg.wait_for_selector('.composer .dock.approval[data-kind="blocked"]', timeout=10000)
@@ -2957,7 +2957,7 @@ def run_browser() -> int:
         print("wrote session-browser-replay")
         page.locator(".panel .bp-replay-live").click()
 
-        # Settings → Environments, the browser half: what runs, the profiles, the limits on the shared load bar.
+        # Settings → Environments, the browser half: what runs, and its limits on the shared load bar.
         bs.running = [{"env": "container", "id": "b1a2b3c4", "profile": f"project-{P1}", "started_at": ago(minutes=12), "rss_bytes": 318 << 20, "cpu_percent": 3.1, "tabs": 2,
                        "memory_basis": "cgroup", "groups": [{"id": "g1", "owner": {"kind": "session", "id": S1, "label": "Bakery site"}, "url": "https://shop.example.com/", "title": "Rye flour"}]}]
         bs.profiles = [

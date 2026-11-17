@@ -159,7 +159,7 @@ class SettingsChanges:
             if speech is not None and speech.installed(model.id) is None:
                 problems.append(
                     f"{change.path}: the local model {model.id!r} is not downloaded on this machine, so nothing could hear with it. "
-                    f"The operator downloads it under Settings → Voice & speech ({SPEECH_MODELS.link()}); "
+                    f"The operator downloads it under Settings → Recognition models ({SPEECH_MODELS.link()}); "
                     "give them that link, and make this change once it is installed"
                 )
         return problems

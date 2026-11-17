@@ -42,7 +42,10 @@ function ProseStepper({ prefs, update }: { prefs: Prefs; update: (patch: Partial
   );
 }
 
-export function AppearancePanel() {
+/** Two sections draw from here: the look (`theme`) — language, theme, colours, contrast, the companion
+ *  — and `text`: typefaces, sizes, the column and how messages sit in it. One component still, since
+ *  both read and write the same preferences of this browser. */
+export function AppearancePanel({ part }: { part: "theme" | "text" }) {
   const [prefs, update, replace] = usePrefs();
   const [pet, setPet] = usePetPreference();
   const [petModel, setPetModel] = usePetModel();
@@ -72,73 +75,8 @@ export function AppearancePanel() {
 
   const color = (key: ColorKey, fallback: string) => prefs.colors[key] ?? fallback;
 
-  return (
+  if (part === "text") return (
     <>
-      {/* The language and the companion live here, not in the More launcher: they are settings of this
-          browser like the theme, and a menu of places had grown two switches nobody looked for there. */}
-      <div className="section-title">{t("settings.group.langtheme")}</div>
-      <div className="card">
-        <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language"><LangPicker /></Row>
-      </div>
-      <p className="sub">{t("theme.lead")}</p>
-      <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
-        {THEMES.map((item) => (
-          <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
-            <span className="settings-swatch" style={{ background: item.wash }} />
-            <span>{t(`theme.${item.id}`)}</span>
-          </button>
-        ))}
-      </div>
-      <div className="card">
-        <Row title={t("theme.follow")} data-setting="appearance.follow" desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
-          <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
-        </Row>
-        {prefs.follow && (
-          <>
-            <Row title={t("theme.follow.dark")}>
-              <Dropdown label={t("theme.follow.dark")} value={prefs.dark} onChange={(dark: ThemeId) => update({ dark })} options={THEMES.filter((item) => !item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
-            </Row>
-            <Row title={t("theme.follow.light")}>
-              <Dropdown label={t("theme.follow.light")} value={prefs.light} onChange={(light: ThemeId) => update({ light })} options={THEMES.filter((item) => item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
-            </Row>
-          </>
-        )}
-      </div>
-
-      <div className="section-title">{t("settings.group.companion")}</div>
-      <div className="card">
-        <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
-        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
-          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
-            <option value="">{t("pet.model.off")}</option>
-            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
-          </select>
-        </Row>}
-      </div>
-
-      <div className="section-title">{t("theme.colors")}</div>
-      <p className="sub">{t("theme.colors.lead")}</p>
-      <div className="card" data-setting="appearance.colors">
-        {(["bg", "surface", "fg", "fg2", "accent", "send"] as const).map((key) => {
-          const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : key === "fg2" ? resolved.fg2 : key === "accent" ? resolved.accent : resolved.send.startsWith("#") ? resolved.send : resolved.accent;
-          const value = color(key, fallback);
-          return (
-            <Row key={key} title={t(`theme.color.${key}`)} htmlFor={`theme-color-${key}`}>
-              <span className="settings-color">
-                <span className="mono sub">{value}</span>
-                <input id={`theme-color-${key}`} type="color" value={value} aria-label={t(`theme.color.${key}`)} onChange={(e) => update({ colors: { [key]: e.target.value } })} />
-              </span>
-            </Row>
-          );
-        })}
-        <Row title={t("theme.wash")} desc={t("theme.wash.sub")} data-setting="appearance.wash">
-          <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
-        </Row>
-        <div className="btnrow">
-          <button type="button" className="btn small" onClick={() => replace(resetColors())}>{t("theme.reset")}</button>
-        </div>
-      </div>
-
       <div className="section-title">{t("theme.font")}</div>
       <p className="sub">{t("theme.font.lead")}</p>
       <div className="card settings-font" data-setting="appearance.font">
@@ -190,14 +128,87 @@ export function AppearancePanel() {
         <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </div>
 
-      <div className="section-title">{t("theme.more")}</div>
+      <div className="section-title">{t("theme.layout")}</div>
       <div className="card">
         <Row title={t("theme.radius")} data-setting="appearance.radius"><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></Row>
         <Row title={t("theme.motion")} data-setting="appearance.motion"><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
-        <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")} data-setting="appearance.contrast"><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
-        <Row title={t("theme.code")} desc={t("theme.code.sub")} data-setting="appearance.code"><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
         <Row title={t("theme.replies")} desc={t("theme.replies.sub")} data-setting="appearance.replies"><Segmented label={t("theme.replies")} value={prefs.replies} onChange={(replies) => update({ replies })} options={([{ id: "split" as const, label: t("theme.replies.split") }, { id: "merged" as const, label: t("theme.replies.merged") }])} /></Row>
         <Row title={t("theme.bubble")} data-setting="appearance.bubble"><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* The language and the companion live here, not in the More launcher: they are settings of this
+          browser like the theme, and a menu of places had grown two switches nobody looked for there. */}
+      <div className="section-title">{t("settings.group.langtheme")}</div>
+      <div className="card">
+        <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language"><LangPicker /></Row>
+      </div>
+      <p className="sub">{t("theme.lead")}</p>
+      <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
+        {THEMES.map((item) => (
+          <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
+            <span className="settings-swatch" style={{ background: item.wash }} />
+            <span>{t(`theme.${item.id}`)}</span>
+          </button>
+        ))}
+      </div>
+      <div className="card">
+        <Row title={t("theme.follow")} data-setting="appearance.follow" desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
+          <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
+        </Row>
+        {prefs.follow && (
+          <>
+            <Row title={t("theme.follow.dark")}>
+              <Dropdown label={t("theme.follow.dark")} value={prefs.dark} onChange={(dark: ThemeId) => update({ dark })} options={THEMES.filter((item) => !item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+            </Row>
+            <Row title={t("theme.follow.light")}>
+              <Dropdown label={t("theme.follow.light")} value={prefs.light} onChange={(light: ThemeId) => update({ light })} options={THEMES.filter((item) => item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+            </Row>
+          </>
+        )}
+      </div>
+
+      <div className="section-title">{t("theme.colors")}</div>
+      <p className="sub">{t("theme.colors.lead")}</p>
+      <div className="card" data-setting="appearance.colors">
+        {(["bg", "surface", "fg", "fg2", "accent", "send"] as const).map((key) => {
+          const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : key === "fg2" ? resolved.fg2 : key === "accent" ? resolved.accent : resolved.send.startsWith("#") ? resolved.send : resolved.accent;
+          const value = color(key, fallback);
+          return (
+            <Row key={key} title={t(`theme.color.${key}`)} htmlFor={`theme-color-${key}`}>
+              <span className="settings-color">
+                <span className="mono sub">{value}</span>
+                <input id={`theme-color-${key}`} type="color" value={value} aria-label={t(`theme.color.${key}`)} onChange={(e) => update({ colors: { [key]: e.target.value } })} />
+              </span>
+            </Row>
+          );
+        })}
+        <Row title={t("theme.wash")} desc={t("theme.wash.sub")} data-setting="appearance.wash">
+          <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
+        </Row>
+        <div className="btnrow">
+          <button type="button" className="btn small" onClick={() => replace(resetColors())}>{t("theme.reset")}</button>
+        </div>
+      </div>
+
+      <div className="section-title">{t("theme.more")}</div>
+      <div className="card">
+        <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")} data-setting="appearance.contrast"><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
+        <Row title={t("theme.code")} desc={t("theme.code.sub")} data-setting="appearance.code"><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
+      </div>
+
+      <div className="section-title">{t("settings.group.companion")}</div>
+      <div className="card">
+        <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
+        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
+          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
+            <option value="">{t("pet.model.off")}</option>
+            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
+          </select>
+        </Row>}
       </div>
     </>
   );

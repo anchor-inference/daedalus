@@ -18,7 +18,7 @@ import { navigate, pathFor } from "./router";
 
 export type ModelChoice = { clear: true } | { preset: string } | { model: string };
 
-/** Where "Add model" leads: Settings → Models & providers with its add sheet already open. A model
+/** Where "Add model" leads: Settings → Models with its add sheet already open. A model
  *  typed by hand into the picker used to stand in for this, and it ran a session on a provider/model
  *  pair nothing had described, with no price, no context window and no way to pick it again. */
 export const ADD_MODEL_PATH = pathFor("settings", "models", { add: "1" });
@@ -199,7 +199,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
           <Icon name="chevron" size={14} />
         </button>;
       })}
-      {browsing && freeGroup && providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}
+      {browsing && freeGroup && providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "free-models")}>{t("free.chat.add")}</a></div>}
       {!browsing && matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
       {!browsing && matched.map(([id, p]) => {
         const current = isCurrent(id, p, model);
@@ -332,7 +332,7 @@ function PhoneModelList(p: PhoneListProps) {
         <span className="provider-mark provider-free" aria-hidden="true"><Icon name="model" size={18} /></span>
         <span className="grow model-text"><span>{t("composer.model.free")}</span><span className="sub">{t("composer.model.free.sub")}</span></span><Icon name="chevron" size={16} />
       </button>}
-      {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}
+      {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "free-models")}>{t("free.chat.add")}</a></div>}
       {!p.browsing && p.matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
       {!p.browsing && p.matched.map(row)}
       <button type="button" role="menuitem" className="model-row model-add" onClick={p.addModel}><Icon name="plus" size={18} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={16} /></button>

@@ -40,6 +40,7 @@ import { Capabilities, componentsNeedAttention } from "../capabilities";
 import { NotificationSettings } from "./NotificationSettings";
 import { ActionRules, DEFAULT_RULES } from "../actionrules";
 import { EnvironmentsTab } from "./Environments";
+import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
@@ -54,7 +55,7 @@ import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
 import { SubscriptionAccountsCard, accountName, useSubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
-import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
+import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, sectionOfAnchor, type SectionGroup } from "./settingsindex";
 import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
@@ -776,13 +777,11 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
   );
 }
 
-/** Tools & search: the tool groups first — the one card here that changes what every request costs —
- *  then what each tool that reaches out may do. Speech-to-text moved to Voice & speech, and the
- *  image model to Models & providers, where the operator goes looking for a model. */
+/** Tools: the tool groups first — the one card here that changes what every request costs — then what
+ *  the tools that read a page or run a command may do. Web search and the MCP servers are sections of
+ *  their own, each a whole card of choices. */
 function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; onSettings: (next: Settings) => void }) {
   const web = s.tools.web;
-  // Read again after a search key is saved: which backends can be picked depends on it.
-  const reread = () => { api.get<Settings>("/api/settings").then(onSettings).catch(() => undefined); };
   return (
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
@@ -795,16 +794,12 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
         <TextBlock setting="tools.web.user_agent" label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
       </div>
 
-      <SearchBlock s={s} save={save} toast={toast} reload={reread} />
-
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.exec.title")}</div>
         <NumRow setting="limits.tool_timeout_seconds" title={t("settings.exec.timeout")} desc={t("settings.exec.timeout.hint")} unit={t("settings.unit.seconds")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} />
         <NumRow setting="tools.exec.background_after_seconds" title={t("settings.exec.background")} desc={t("settings.exec.background.hint")} unit={t("settings.unit.seconds")} value={s.tools.exec.background_after_seconds} min={1} step={30} onSave={(v) => save({ tools: { exec: { background_after_seconds: v } } })} />
         <NumRow setting="tools.exec.max_output_chars" title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
       </div>
-
-      <McpServers toast={toast} />
     </>
   );
 }
@@ -1080,7 +1075,13 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "desktop" | "devices" | "address" | "navigation" | "models" | "rules" | "translation" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section =
+  | "appearance" | "text" | "notifications" | "voice" | "dictation" | "speech-models" | "navigation" | "desktop" | "security"
+  | "models" | "tasks" | "providers" | "accounts" | "keyproxy" | "free-models"
+  | "chat" | "rules" | "approvals" | "memory" | "memory-upkeep" | "translation" | "budget" | "limits" | "context" | "schedules"
+  | "tools" | "search" | "browser" | "browser-safety" | "environments"
+  | "telegram" | "mcp" | "devices" | "address"
+  | "components" | "dependencies" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1091,11 +1092,24 @@ const SECTIONS = GROUPS.flatMap((group) => group.sections);
 const sectionLabel = (id: Section) => t(`settings.sec.${id}`);
 
 /** Sections that were pages of their own and are now part of another: an address written down, sent
- *  in a notification or bookmarked still lands on the setting, scrolled to the part it named. */
+ *  in a notification or bookmarked still lands on the setting, scrolled to the part it named. The
+ *  models page's tabs are sections of their own now, so its old `?tab=` addresses are here too. A row
+ *  that moved needs no entry: an address naming it goes to the section the index says holds it. */
 const MOVED: Record<string, { to: Section; anchor?: string }> = {
   terminals: { to: "environments", anchor: "terminal-sessions" },
-  browser: { to: "environments", anchor: "browser-sessions" },
+  heartbeat: { to: "schedules" },
+  "models?tab=providers": { to: "providers" },
+  "models?tab=free": { to: "free-models" },
 };
+
+/** Where an address naming `section`, perhaps with a tab and a row, belongs now; nothing when it is right. */
+function movedTo(section: string | null | undefined, search: string, row: string | null): { to: Section; anchor?: string } | undefined {
+  if (!section) return undefined;
+  const home = row ? sectionOfAnchor(row) : null;
+  if (home && home !== section && SECTIONS.some((x) => x.id === home)) return { to: home as Section };
+  const tab = new URLSearchParams(search).get("tab");
+  return (tab ? MOVED[`${section}?tab=${tab}`] : undefined) ?? MOVED[section];
+}
 
 /** Settings: a dialog over the screen it was opened from on a desktop, a full-screen stack of two
  *  levels on a phone. `onClose` is the shell's way back to that screen. */
@@ -1105,12 +1119,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   // `?add=1` on the models section opens the add sheet straight away: the composer's model picker
   // sends the operator here to add a model, and landing on the list would leave one more click to find.
   const [adding, setAdding] = useState(() => section === "models" && new URLSearchParams(window.location.search).get("add") === "1");
-  const [modelsTab, setModelsTab] = useState<"my" | "free" | "providers">(() => {
-    const tab = new URLSearchParams(window.location.search).get("tab");
-    return tab === "free" || tab === "providers" ? tab : "my";
-  });
   const [status, setStatus] = useState<any>(null);
-  // Names only, for a model's account choice: the quota reading is the accounts card's, on the providers tab.
+  // Names only, for a model's account choice: the quota reading is the accounts card's, in its own section.
   const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
@@ -1124,21 +1134,28 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   const close = onClose ?? (() => navigate(modeHome(storedMode(), wide)));
   useDialogKeys({ dialog, search: searchField, query, clear: () => setQuery(""), onClose: close });
   const covered = useCovered();
-  const moved = section ? MOVED[section] : undefined;
+  const target = settingTarget();
+  const moved = movedTo(section, window.location.search, target);
+  const movedTarget = moved?.to;
+  const movedAnchor = moved?.anchor;
   // The public address is the native installation's alone, and whether this is one only the host knows.
   const native = useQuery<PublicAddress>(ADDRESS, { staleMs: 20000 }).data?.native;
   const named: Section | null = moved ? moved.to : SECTIONS.some((x) => x.id === section) ? (section as Section) : null;
   const current = named === "address" && native === false ? null : named;
   useEffect(() => {
-    if (!moved) return;
-    navigate(pathFor("settings", moved.to) + window.location.search + window.location.hash, { replace: true });
-  }, [moved]);
-  // The part an old address named is scrolled to once it has drawn, which for the browser half is
-  // after its own listing answers; a few tries rather than a guess at how long that takes.
+    if (!movedTarget) return;
+    // The tab is spent once it has chosen the section; the rest of the query (`add=1`) stays.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("tab");
+    const rest = params.toString();
+    navigate(pathFor("settings", movedTarget) + (rest ? `?${rest}` : "") + window.location.hash, { replace: true });
+  }, [movedTarget]);
+  // The part an old address named is scrolled to once it has drawn, which for a card that reads its
+  // own listing is after that answers; a few tries rather than a guess at how long that takes.
   const [anchor, setAnchor] = useState<string | null>(null);
   useEffect(() => {
-    if (moved?.anchor) setAnchor(moved.anchor);
-  }, [moved]);
+    if (movedAnchor) setAnchor(movedAnchor);
+  }, [movedAnchor]);
   useEffect(() => {
     if (!anchor) return;
     let tries = 0;
@@ -1153,14 +1170,18 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     return () => window.clearInterval(timer);
   }, [anchor]);
   const shown: Section | null = current ?? (wide ? "models" : null);
+  // The list of sections is taller than the dialog: the open one is brought into it, or a link to
+  // About opened a page whose own entry sat below the fold of the list beside it.
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(".settings-link.active")?.scrollIntoView({ block: "nearest" });
+  }, [shown]);
   // A link to one setting (`#<key>`, from an error's button or a link in the agent's answer): the tab
   // that holds it is opened, the row is scrolled to once it has drawn and blinks, and the name leaves
   // the address so a reload does not blink it again and the next press of the same link is a change
   // the page sees.
-  const target = settingTarget();
   useEffect(() => {
-    if (!target || !shown) return;
-    if (shown === "models") setModelsTab(target.startsWith("providers.") ? "providers" : "my");
+    // Not while the address is on its way to the section that holds the row: it is not on this one.
+    if (!target || !shown || movedTarget) return;
     let cancelled = false;
     void revealSetting(target, { root: dialog.current ?? document }).then(() => {
       if (!cancelled) clearSettingTarget();
@@ -1168,7 +1189,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     return () => {
       cancelled = true;
     };
-  }, [target, shown]);
+  }, [target, shown, movedTarget]);
   useEffect(() => {
     api.get<Settings>("/api/settings").then(setS).catch((e) => toast((e as Error).message));
     api.get("/api/status").then(setStatus).catch(() => setStatus(null));
@@ -1353,7 +1374,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   );
 
   const body = (sec: Section) => {
-    if (sec === "appearance") return <AppearancePanel />;
+    if (sec === "appearance") return <AppearancePanel part="theme" />;
+    if (sec === "text") return <AppearancePanel part="text" />;
     if (sec === "desktop") return <DesktopPanel />;
     if (sec === "devices") return <DevicesPanel toast={toast} />;
     if (sec === "address") return <PublicAddressPanel />;
@@ -1363,73 +1385,79 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     switch (sec) {
       case "models":
         return (
-          <>
-            <div className="segmented" role="tablist" aria-label={t("settings.models.title")} style={{ marginBottom: 18 }}>
-              <button role="tab" aria-selected={modelsTab === "my"} className={modelsTab === "my" ? "on" : ""} onClick={() => setModelsTab("my")}>{t("settings.models.title")}</button>
-              <button role="tab" aria-selected={modelsTab === "free"} className={modelsTab === "free" ? "on" : ""} onClick={() => setModelsTab("free")}>{t("free.tab")}</button>
-              <button role="tab" aria-selected={modelsTab === "providers"} className={modelsTab === "providers" ? "on" : ""} onClick={() => setModelsTab("providers")}>{t("settings.providers.title")}</button>
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.models.title")}</div>
+            <div className="sub">{t("settings.models.sub")}</div>
+            <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
+              <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
+            </Row>
+            <div className="mlist" data-setting="model.preset">
+              {Object.entries(s.presets ?? {}).map(([id, p]) => (
+                <PresetRow
+                  key={id}
+                  id={id}
+                  p={p}
+                  routed={s.providers[p.provider]?.kind === "openrouter"}
+                  accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
+                  onDemandByModel={s.on_demand_defaults?.[id]}
+                  windowSources={s.context_window_sources?.[id]}
+                  price={s.prices?.[id]}
+                  onPriceSaved={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })}
+                  toast={toast}
+                  onRefreshWindow={() => void refreshWindow(id)}
+                  isDefault={s.model.preset === id}
+                  inChain={(s.model.chain ?? []).includes(id)}
+                  providers={providerIds}
+                  onDefault={() => save({ model: { preset: id } as any })}
+                  onPatch={(patch) => void patchPreset(id, patch)}
+                  onDelete={() => void removePreset(id)}
+                  onLookup={lookupProviderModels}
+                />
+              ))}
             </div>
-            {modelsTab === "free" && <div className="card" data-setting="models.free"><FreeModels onSaved={(_, next) => setS(next)} toast={toast} /></div>}
-            {modelsTab === "my" && <>
-            <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.models.title")}</div>
-              <div className="sub">{t("settings.models.sub")}</div>
-              <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
-                <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
+            {Object.keys(s.presets ?? {}).length === 0 && (
+              <div className="empty">
+                <b>{t("settings.models.empty")}</b>
+                <div className="sub">{t("settings.models.empty.sub")}</div>
+              </div>
+            )}
+            <div className="btnrow" data-setting="models.add">
+              <button className="btn primary" onClick={() => setAdding(true)}>
+                <Icon name="plus" size={14} /> {t("settings.models.add")}
+              </button>
+              <span className="sub faint" style={{ alignSelf: "center" }}>{t("settings.models.add.hint")}</span>
+            </div>
+            {/* The whole chain in one place, in its order. It was a switch inside each model's
+                expanded row and a line of ids joined by arrows: nobody could see the set at once
+                or change the order without switching models off and on again. */}
+            {Object.keys(s.presets ?? {}).length > 1 && (
+              <Row title={t("settings.models.chain.title")} desc={t("settings.models.chain.sub")} stack data-setting="model.chain">
+                <SelectionList
+                  id="model-chain"
+                  label={t("settings.models.chain.title")}
+                  ordered
+                  chosenLabel={t("settings.models.chain.chosen")}
+                  emptyChosen={t("settings.models.chain.empty")}
+                  {...modelItems(s, (id) => id !== s.model.preset)}
+                  value={(s.model.chain ?? []).filter((id) => id !== s.model.preset)}
+                  onChange={(chain) => save({ model: { chain } as any })}
+                />
               </Row>
-              <div className="mlist" data-setting="model.preset">
-                {Object.entries(s.presets ?? {}).map(([id, p]) => (
-                  <PresetRow
-                    key={id}
-                    id={id}
-                    p={p}
-                    routed={s.providers[p.provider]?.kind === "openrouter"}
-                    accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
-                    onDemandByModel={s.on_demand_defaults?.[id]}
-                    windowSources={s.context_window_sources?.[id]}
-                    price={s.prices?.[id]}
-                    onPriceSaved={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })}
-                    toast={toast}
-                    onRefreshWindow={() => void refreshWindow(id)}
-                    isDefault={s.model.preset === id}
-                    inChain={(s.model.chain ?? []).includes(id)}
-                    providers={providerIds}
-                    onDefault={() => save({ model: { preset: id } as any })}
-                    onPatch={(patch) => void patchPreset(id, patch)}
-                    onDelete={() => void removePreset(id)}
-                    onLookup={lookupProviderModels}
-                  />
-                ))}
-              </div>
-              {Object.keys(s.presets ?? {}).length === 0 && (
-                <div className="empty">
-                  <b>{t("settings.models.empty")}</b>
-                  <div className="sub">{t("settings.models.empty.sub")}</div>
-                </div>
-              )}
-              <div className="btnrow" data-setting="models.add">
-                <button className="btn primary" onClick={() => setAdding(true)}>
-                  <Icon name="plus" size={14} /> {t("settings.models.add")}
-                </button>
-                <span className="sub faint" style={{ alignSelf: "center" }}>{t("settings.models.add.hint")}</span>
-              </div>
-              {/* The whole chain in one place, in its order. It was a switch inside each model's
-                  expanded row and a line of ids joined by arrows: nobody could see the set at once
-                  or change the order without switching models off and on again. */}
-              {Object.keys(s.presets ?? {}).length > 1 && (
-                <Row title={t("settings.models.chain.title")} desc={t("settings.models.chain.sub")} stack data-setting="model.chain">
-                  <SelectionList
-                    id="model-chain"
-                    label={t("settings.models.chain.title")}
-                    ordered
-                    chosenLabel={t("settings.models.chain.chosen")}
-                    emptyChosen={t("settings.models.chain.empty")}
-                    {...modelItems(s, (id) => id !== s.model.preset)}
-                    value={(s.model.chain ?? []).filter((id) => id !== s.model.preset)}
-                    onChange={(chain) => save({ model: { chain } as any })}
-                  />
-                </Row>
-              )}
+            )}
+          </div>
+        );
+      case "tasks":
+        return (
+          <>
+            {/* Which models subagents may run on: it sat under Limits, but it is a choice of model and belongs with the others. */}
+            <div className="card">
+              <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
+                <SubagentModelsPicker
+                  value={s.subagents?.models ?? { mode: "all", presets: [] }}
+                  {...modelItems(s)}
+                  onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
+                />
+              </Row>
             </div>
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card">
@@ -1482,13 +1510,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
             </div>
-            {/* The same setting as under Rules, here too: the operator came to the models page looking
+            {/* The same setting as under Approvals, here too: the operator came to the models looking
                 for which model reviews a push, and it was only on a page about permissions. */}
             <div className="card" data-card="action-review">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.review.title")}</div>
               <div className="sub">
                 {t("settings.review.sub")}{" "}
-                <a href={pathFor("settings", "rules")} onClick={(e) => go(e, pathFor("settings", "rules"))}>{t("settings.review.rules")}</a>
+                <a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a>
               </div>
               <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
                 <ModelPicker
@@ -1501,29 +1529,35 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 />
               </Row>
             </div>
-            {/* Beside the auxiliary models it governs: the summary model (Limits) and the vision model above. */}
+            {/* Beside the auxiliary models it governs: the summary model (Context) and the vision model above. */}
             <div className="card" data-card="auxiliary-fallback">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.auxiliary.title")}</div>
               <Row title={t("settings.auxiliary.fallback")} desc={t("settings.auxiliary.fallback.sub")} data-setting="model.fallback_to_session">
                 <Switch checked={s.model.fallback_to_session ?? true} onChange={(fallback_to_session) => save({ model: { fallback_to_session } as any })} label={t("settings.auxiliary.fallback")} />
               </Row>
             </div>
-            </>}
-            {modelsTab === "providers" && <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.providers.title")}</div>
-              <div className="sub">{t("settings.providers.sub")}</div>
-              <div className="mlist" data-setting="providers.list">
-                {providerIds.map((id) => (
-                  <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
-                ))}
-              </div>
-              <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
-              <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
-            </div>}
-            {modelsTab === "providers" && <SubscriptionAccountsCard toast={toast} />}
-            {modelsTab === "providers" && <KeyproxyCard toast={toast} onChanged={rereadSettings} />}
           </>
         );
+      case "providers":
+        return (
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.providers.title")}</div>
+            <div className="sub">{t("settings.providers.sub")}</div>
+            <div className="mlist" data-setting="providers.list">
+              {providerIds.map((id) => (
+                <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
+              ))}
+            </div>
+            <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
+            <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
+          </div>
+        );
+      case "accounts":
+        return <SubscriptionAccountsCard toast={toast} />;
+      case "keyproxy":
+        return <KeyproxyCard toast={toast} onChanged={rereadSettings} />;
+      case "free-models":
+        return <div className="card" data-setting="models.free"><FreeModels onSaved={(_, next) => setS(next)} toast={toast} /></div>;
       case "translation":
         return <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />;
       case "rules":
@@ -1531,7 +1565,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           <>
             <PromptChange onApplied={(rules) => setS({ ...s, prompt: { ...s.prompt, rules } })} />
             <RulesEditor rules={s.prompt.rules} fallback={s.prompt.default_rules ?? ""} onSave={(rules) => save({ prompt: { rules } })} />
-            <ActionRules s={s} save={save} />
+          </>
+        );
+      case "approvals":
+        return (
+          <>
+            {/* The two rules about the agent's own code first: the action grid's review log grows as it
+                loads, and a link to a row below it landed on a row the log had just pushed away. */}
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.selfchange")}</div>
               <div className="sub">{t("settings.selfchange.sub")}</div>
@@ -1544,6 +1584,25 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <Segmented label={t("settings.selfchange.rebuild")} value={s.self_change.auto_rebuild ? "on" : "off"} onChange={(state) => save({ self_change: { ...s.self_change, auto_rebuild: state === "on" } })} options={(["off", "on"] as const).map((id) => ({ id, label: t(`settings.selfchange.rebuild.${id}`) }))} />
               </Row>
             </div>
+            <ActionRules s={s} save={save} />
+          </>
+        );
+      case "budget":
+        return (
+          <>
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.budget.caps")}</div>
+              <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
+              <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
+              <TotalCaps s={s} save={save} />
+            </div>
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.balance.title")}</div>
+              <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack data-setting="balance.thresholds_usd">
+                <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
+              </Row>
+              <NumRow id="balance-poll" setting="balance.poll_seconds" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
+            </div>
           </>
         );
       case "limits":
@@ -1552,18 +1611,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <div className="section-title" style={{ marginTop: 0 }}>{t("settings.limits.title")}</div>
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
-            <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
-              <SubagentModelsPicker
-                value={s.subagents?.models ?? { mode: "all", presets: [] }}
-                {...modelItems(s)}
-                onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
-              />
-            </Row>
-            <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
-            <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
-            <TotalCaps s={s} save={save} />
             <NumRow id="limits-disk" setting="disk.workspace_soft_limit_gb" title={t("settings.limits.disk")} desc={t("settings.limits.disk.sub")} unit={t("disk.limit.unit")} step="1" value={s.disk?.workspace_soft_limit_gb ?? 20} min={0} onSave={(v) => save({ disk: { workspace_soft_limit_gb: v } })} {...shipped(s.disk?.workspace_soft_limit_gb ?? 20, 20, () => save({ disk: { workspace_soft_limit_gb: 20 } }), `20 ${t("disk.limit.unit")}`)} />
-            <div className="section-title">{t("settings.compaction")}</div>
+          </div>
+        );
+      case "context":
+        return (
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>
             <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} {...shipped(s.compaction?.auto_ratio ?? 0.8, 0.8, () => save({ compaction: { ...s.compaction, auto_ratio: 0.8 } }))} />
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
@@ -1571,39 +1625,43 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} {...shipped(s.compaction?.core_trigger_ratio ?? 0.85, 0.85, () => save({ compaction: { ...s.compaction, core_trigger_ratio: 0.85 } }))} />
             <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
             <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
-            {/* A heading of their own: they trailed the compaction fields with nothing to say they
-                were a different subject. */}
-            <div className="section-title">{t("settings.balance.title")}</div>
-            <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack data-setting="balance.thresholds_usd">
-              <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
-            </Row>
-            <NumRow id="balance-poll" setting="balance.poll_seconds" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
           </div>
         );
       case "memory":
-        return <MemorySettings s={s} save={save} />;
+        return <MemorySettings s={s} save={save} part="memory" />;
+      case "memory-upkeep":
+        return <MemorySettings s={s} save={save} part="upkeep" />;
       case "navigation":
         return <NavigationSettings s={s} save={save} selfdev={caps.data?.selfdev?.mode ?? "server"} />;
       case "environments":
         return <EnvironmentsTab s={s} save={save} toast={toast} />;
+      case "browser":
+        return <BrowserSettingsTab s={s} save={save} toast={toast} part="browser" />;
+      case "browser-safety":
+        return <BrowserSettingsTab s={s} save={save} toast={toast} part="safety" />;
       case "tools":
         return <ToolsTab s={s} save={save} toast={toast} onSettings={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })} />;
+      case "search":
+        // Read again after a search key is saved: which backends can be picked depends on it.
+        return <SearchBlock s={s} save={save} toast={toast} reload={rereadSettings} />;
+      case "mcp":
+        return <McpServers toast={toast} />;
       case "voice":
         return (
           <>
             <VoiceSettings />
-            <AsrSettingsCard s={s} save={save} />
-            <SpeechModels />
             <TtsVoices />
           </>
         );
+      case "dictation":
+        return <AsrSettingsCard s={s} save={save} />;
+      case "speech-models":
+        return <SpeechModels />;
       case "components":
         return <ComponentsTab toast={toast} />;
       case "dependencies":
         return <DependenciesTab />;
-      case "chat": {
-        const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
-        const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
+      case "chat":
         return (
           <>
             <div className="card">
@@ -1614,30 +1672,41 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             </div>
             <AutopilotSettings s={s} save={save} />
             <UserStyleCard toast={toast} />
-            <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>
-              <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
-                <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
-              </Row>
-              {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
-                  what they mean, which nothing on the page said. */}
-              <Row title={t("settings.chat.verbosity")} desc={t("settings.chat.verbosity.sub")} data-setting="telegram.verbosity">
-                <Segmented label={t("settings.chat.verbosity")} value={String(s.telegram.verbosity)} onChange={(v) => tg({ verbosity: Number(v) })} options={["0", "1", "2"].map((v) => ({ id: v, label: v }))} />
-              </Row>
-              <Row title={t("settings.chat.reactions")} desc={t("settings.chat.reactions.sub")} data-setting="telegram.reactions">
-                <Switch checked={!!s.telegram.reactions} onChange={(reactions) => tg({ reactions })} label={t("settings.chat.reactions")} />
-              </Row>
-              <Row title={t("settings.chat.topicemoji")} desc={t("settings.chat.topicemoji.sub")} data-setting="telegram.topic_status_emoji">
-                <Switch checked={!!s.telegram.topic_status_emoji} onChange={(topic_status_emoji) => tg({ topic_status_emoji })} label={t("settings.chat.topicemoji")} />
-              </Row>
-              <Row title={t("settings.chat.forward")} desc={t("settings.chat.forward.sub")} data-setting="telegram.forward_unknown_commands">
-                <Switch checked={!!s.telegram.forward_unknown_commands} onChange={(forward_unknown_commands) => tg({ forward_unknown_commands })} label={t("settings.chat.forward")} />
-              </Row>
-              <NumRow id="chat-stale" setting="telegram.stale_after_seconds" title={t("settings.chat.stale")} desc={t("settings.chat.stale.sub")} unit={t("settings.unit.seconds")} value={s.telegram.stale_after_seconds} min={0} onSave={(v) => tg({ stale_after_seconds: v })} />
-              <NumRow id="chat-maxfile" setting="telegram.max_inbound_file_mb" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
-              <NumRow id="chat-caption" setting="telegram.photo_caption_wait_seconds" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
-              <NumRow id="chat-slowtool" setting="telegram.slow_tool_seconds" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
-            </div>
+          </>
+        );
+      case "telegram": {
+        const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
+        const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
+        return (
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>
+            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
+              <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
+            </Row>
+            {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
+                what they mean, which nothing on the page said. */}
+            <Row title={t("settings.chat.verbosity")} desc={t("settings.chat.verbosity.sub")} data-setting="telegram.verbosity">
+              <Segmented label={t("settings.chat.verbosity")} value={String(s.telegram.verbosity)} onChange={(v) => tg({ verbosity: Number(v) })} options={["0", "1", "2"].map((v) => ({ id: v, label: v }))} />
+            </Row>
+            <Row title={t("settings.chat.reactions")} desc={t("settings.chat.reactions.sub")} data-setting="telegram.reactions">
+              <Switch checked={!!s.telegram.reactions} onChange={(reactions) => tg({ reactions })} label={t("settings.chat.reactions")} />
+            </Row>
+            <Row title={t("settings.chat.topicemoji")} desc={t("settings.chat.topicemoji.sub")} data-setting="telegram.topic_status_emoji">
+              <Switch checked={!!s.telegram.topic_status_emoji} onChange={(topic_status_emoji) => tg({ topic_status_emoji })} label={t("settings.chat.topicemoji")} />
+            </Row>
+            <Row title={t("settings.chat.forward")} desc={t("settings.chat.forward.sub")} data-setting="telegram.forward_unknown_commands">
+              <Switch checked={!!s.telegram.forward_unknown_commands} onChange={(forward_unknown_commands) => tg({ forward_unknown_commands })} label={t("settings.chat.forward")} />
+            </Row>
+            <NumRow id="chat-stale" setting="telegram.stale_after_seconds" title={t("settings.chat.stale")} desc={t("settings.chat.stale.sub")} unit={t("settings.unit.seconds")} value={s.telegram.stale_after_seconds} min={0} onSave={(v) => tg({ stale_after_seconds: v })} />
+            <NumRow id="chat-maxfile" setting="telegram.max_inbound_file_mb" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
+            <NumRow id="chat-caption" setting="telegram.photo_caption_wait_seconds" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
+            <NumRow id="chat-slowtool" setting="telegram.slow_tool_seconds" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
+          </div>
+        );
+      }
+      case "schedules":
+        return (
+          <>
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.scheduler")}</div>
               <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack data-setting="scheduler.topic_mode">
@@ -1647,15 +1716,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <Switch checked={!!s.scheduler.require_approval} onChange={(require_approval) => save({ scheduler: { ...s.scheduler, require_approval } })} label={t("settings.chat.schedapproval")} />
               </Row>
             </div>
+            <HeartbeatTab s={s} toast={toast} />
           </>
         );
-      }
       case "notifications":
         return <NotificationSettings toast={toast} />;
       case "security":
         return <SecurityTab toast={toast} />;
-      case "heartbeat":
-        return <HeartbeatTab s={s} toast={toast} />;
       case "about": {
         const logout = async () => {
           try {

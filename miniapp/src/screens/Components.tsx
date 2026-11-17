@@ -127,7 +127,7 @@ function Card({
 
       <div className="btnrow comp-actions">
         {entry.how === "models" && (
-          <a className="btn small" href={pathFor("settings", "voice")} onClick={(e) => go(e, pathFor("settings", "voice"))}>
+          <a className="btn small" href={pathFor("settings", entry.id === "stt-models" ? "speech-models" : "voice")} onClick={(e) => go(e, pathFor("settings", entry.id === "stt-models" ? "speech-models" : "voice"))}>
             {t("comp.models.open")}
           </a>
         )}

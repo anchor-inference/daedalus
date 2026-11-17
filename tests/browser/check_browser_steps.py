@@ -179,7 +179,7 @@ def settings(browser, scenes, lang: str, problems: list[str]) -> None:  # type: 
     host = Host(bs)
     page = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
-    page.goto(f"{BASE}/settings/environments?token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
     row = page.locator(".bs-note[data-kind='procedure']")
     row.wait_for(timeout=15000)
     text = row.inner_text()
@@ -209,7 +209,7 @@ def settings(browser, scenes, lang: str, problems: list[str]) -> None:  # type: 
     phone = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark").new_page()
     bs.notes = [dict(PROCEDURE)]
     phone.route("**/api/**", Host(bs).route)
-    phone.goto(f"{BASE}/settings/environments?token=t&lang={lang}")
+    phone.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
     phone.wait_for_selector(".bs-note[data-kind='procedure']", timeout=15000)
     phone.locator(".bs-note[data-kind='procedure'] .btn:not(.primary):not(.danger)").first.click()
     phone.wait_for_selector(".bs-note .bp-proc", timeout=5000)

@@ -1,9 +1,10 @@
-// Settings → Environments → browser sessions: the agent's browser as the operator runs it — which Chromium, whether its
-// sandbox holds, what runs now and what it costs, the profiles that keep its logins, how many may run
-// at once, how long an idle one lives, what is recorded, where the agent may act only while watched,
-// which local sites and addresses on the local network it may be let into, the injection monitor, the model that reads
-// a page for the agent and whether it may click at a point, which WebGL the agent may turn on in its
-// browser without asking, and the site notes agents proposed.
+// The agent's browser as the operator runs it, over three sections of Settings. Environments: which
+// Chromium, whether its sandbox holds, what runs now and what it costs, how many may run at once and
+// how long an idle one lives. Browser: the operator's own Chrome, the profiles that keep its logins,
+// what is recorded, the model that reads a page for the agent and whether it may click at a point,
+// which WebGL the agent may turn on without asking, and the site notes agents proposed. Browser safety:
+// where the agent may act only while watched, which local sites and addresses on the local network it
+// may be let into, and the injection monitor.
 //
 // Everything here is the host's `[browser]` section; the host hands the daemon its part at once, so a
 // cap typed here is the daemon's cap, not a number only the load bar believes. What cannot be undone —
@@ -67,7 +68,7 @@ const NOTES = "/api/browsers/notes";
  *  apart would otherwise race, the second sent against the revision the first had just replaced. */
 const SAVE_GATHER_MS = 350;
 
-export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; toast: (text: string) => void; onDraft?: (cap: number | null) => void }) {
+export function BrowserSettingsTab({ s, save, toast, onDraft, part }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; toast: (text: string) => void; onDraft?: (cap: number | null) => void; part: "capacity" | "browser" | "safety" }) {
   const saved: BrowserSettings = { ...DEFAULT_BROWSER, ...(s.browser ?? {}) };
   const [draft, setDraft] = useState<Partial<BrowserSettings>>({});
   // What is shown is what was saved with what is about to be: a button answers at once.
@@ -101,17 +102,25 @@ export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; s
       </div>
     );
   }
-  return (
+  if (part === "capacity") return (
     <div className="bs">
-      <YourChrome user={{ ...DEFAULT_USER, ...(b.user ?? {}) }} setUser={(patch) => set({ user: { ...DEFAULT_USER, ...(b.user ?? {}), ...patch } })} toast={toast} />
       <Environments envs={envs} />
       <Running toast={toast} />
       <Limits b={b} set={set} onDraft={onDraft} />
-      <Profiles toast={toast} />
-      <Recording b={b} set={set} toast={toast} />
+    </div>
+  );
+  if (part === "safety") return (
+    <div className="bs">
       <Watch b={b} set={set} />
       <Network b={b} set={set} />
       <Monitor b={b} set={set} catalogue={s} />
+    </div>
+  );
+  return (
+    <div className="bs">
+      <YourChrome user={{ ...DEFAULT_USER, ...(b.user ?? {}) }} setUser={(patch) => set({ user: { ...DEFAULT_USER, ...(b.user ?? {}), ...patch } })} toast={toast} />
+      <Profiles toast={toast} />
+      <Recording b={b} set={set} toast={toast} />
       <Reading b={b} set={set} catalogue={s} />
       <Graphics b={b} set={set} envs={envs} />
       <SiteNotes toast={toast} />

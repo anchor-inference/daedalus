@@ -6,6 +6,7 @@
 /// <reference types="vite/client" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DICT, LANGS, plural, setLang, t } from "./i18n";
+import SETTINGS_INDEX from "./screens/settings-index.json";
 
 // Every source file under src/, as text. Read through the bundler rather than from disk: the app
 // has no Node types, and importing the modules themselves would run code that wants a browser.
@@ -75,6 +76,8 @@ const SAME_IN_BOTH = [
   "settings.chat.telegram",
   "settings.exec.title",
   "settings.search.title",
+  "settings.sec.keyproxy",
+  "settings.sec.telegram",
   "settings.web.title",
   // Keys on the keyboard, written as their caps are printed: the same on either layout.
   "side.key.archive",
@@ -249,7 +252,7 @@ describe("the keys the code asks for", () => {
       ["flow.action.state.", ["held", "running", "done", "refused", "failed", "revoked"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
-      ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about", "memory"]],
+      ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "schedules", "about", "memory"]],
       ["theme.", listed("./appearance.ts", "THEME_IDS")],
       ["tool.group.", ["Exec", "Read", "Write", "Edit", "search", "WebFetch", "SendFile", "other"]],
       ["tool.board.", ["get", "list"]],
@@ -341,7 +344,7 @@ describe("the keys the code asks for", () => {
     ];
     const missing = families.flatMap(([prefix, names]) => names.map((n) => prefix + n)).filter((key) => !(key in DICT));
     // The section hints sit beside the section names, and a hint nobody wrote is a blank line.
-    const hints = ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"].map((s) => `settings.sec.${s}.hint`).filter((k) => !(k in DICT));
+    const hints = SETTINGS_INDEX.sections.map((s) => `settings.sec.${s.id}.hint`).filter((k) => !(k in DICT));
     // Every tool the timeline names has a verb while it runs and one after it.
     const verbs = ["Exec", "Read", "Write", "Edit", "Find", "WebSearch", "WebFetch", "SendFile", "ImageView", "Skill", "Verify", "SubAgent", "SpawnAgent", "AskPeer", "HistorySearch", "ChatSearch", "RecentChats", "ServiceStart", "ServiceStop"]
       .flatMap((name) => [`tool.${name}.on`, `tool.${name}.off`])

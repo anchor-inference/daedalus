@@ -1131,7 +1131,7 @@ class TelegramFront:
         await message.answer(
             "Bound. Create sessions with /new <title>; each topic is a session. "
             + (f"The {opened} session(s) that were already open have topics of their own now. " if opened else "")
-            + "Mini App → Settings → Chat puts them back in the private chat if you prefer it."
+            + "Mini App → Settings → Telegram puts them back in the private chat if you prefer it."
         )
 
     async def cmd_detach(self, message: Message) -> None:

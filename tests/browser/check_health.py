@@ -37,9 +37,9 @@ PROBED = [{**ROWS[0], "state": "token_rejected", "severity": "fail", "detail": "
 
 WORDS = {
     "en": {"title": "Integrations", "rejected": "Token rejected", "signin": "Sign-in required", "signin_fix": "sign in to this server again",
-           "nokey_fix": "Add the key in Settings → Models.", "idle": "Connects when a session turns it on", "details": "Details"},
+           "nokey_fix": "Add the key in Settings → Providers.", "idle": "Connects when a session turns it on", "details": "Details"},
     "ru": {"title": "Интеграции", "rejected": "Токен отклонён", "signin": "Нужен вход", "signin_fix": "заново войти на этот сервер",
-           "nokey_fix": "Добавьте ключ в Настройки → Модели.", "idle": "Подключится, когда сессия его включит", "details": "Подробности"},
+           "nokey_fix": "Добавьте ключ в Настройки → Клиенты.", "idle": "Подключится, когда сессия его включит", "details": "Подробности"},
 }
 
 

@@ -93,7 +93,7 @@ def _dangling_references(current: RuntimeConfig, candidate: RuntimeConfig) -> li
     problems: list[ConfigProblem] = []
     chosen = candidate.compaction.preset
     if chosen and chosen != current.compaction.preset and chosen not in candidate.presets:
-        problems.append(ConfigProblem(group="runtime", path="compaction.preset", message=f"no such model preset {chosen!r} for the summary model; pick one from Settings → Models"))
+        problems.append(ConfigProblem(group="runtime", path="compaction.preset", message=f"no such model preset {chosen!r} for the summary model; pick one from Settings → Context"))
     # The default model and its fallbacks are chosen in the app through a patch that refuses an unknown
     # id itself; a candidate built any other way (the agent's SettingsChange) met no such check, and a
     # default naming nothing would leave every new run without a model.

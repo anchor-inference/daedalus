@@ -1,4 +1,4 @@
-// The model the history summariser runs on, chosen in Settings → Limits & budget.
+// The model the history summariser runs on, chosen in Settings → Context.
 //
 // It sits apart from the settings screen so the one surprising rule can be tested on its own: a
 // preset that was chosen here and later deleted stays in the configuration (the runtime quietly

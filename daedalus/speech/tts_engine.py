@@ -120,7 +120,7 @@ def require_sherpa() -> Any:
     except ImportError as exc:  # pragma: no cover - exercised only where the extra is absent
         raise TtsError(
             "speaking here needs the speech extra: run `uv sync --extra speech` in the runtime, "
-            "or configure a speech endpoint instead (Settings → Voice)"
+            "or configure a speech endpoint instead (Settings → Voice mode)"
         ) from exc
     return sherpa_onnx
 

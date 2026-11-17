@@ -61,7 +61,7 @@ def main() -> int:
                     problems.append(f"{name}: old choice {old!r} draws {got}px, not {want}")
             # The stepper: down to the floor, up to the ceiling, then back to usual.
             page.evaluate("([k]) => localStorage.removeItem(k)", [KEY])
-            page.goto(f"{BASE}/settings/appearance?token=t&lang=en")
+            page.goto(f"{BASE}/settings/text?token=t&lang=en")
             stepper = page.locator(".prose-stepper")
             stepper.wait_for()
             smaller = stepper.get_by_label("Smaller answer text")

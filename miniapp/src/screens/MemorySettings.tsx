@@ -1,7 +1,7 @@
-// Settings → Memory: whether memory learns from chats, whether the agent may search them, the model
-// and the daily budget of the background pass, what its last pass did and "update now", pause and reset; the sensitive subjects behind their
-// master switch; the categorising model and the tidying; import and export. The list itself lives on
-// the Memory screen.
+// Settings → Memory and Memory upkeep. Memory: whether memory learns from chats, whether the agent may
+// search them, the model and the daily budget of the background pass, what its last pass did and
+// "update now", pause; the sensitive subjects behind their master switch. Upkeep: the categorising
+// model and the tidying; import, export and reset. The list itself lives on the Memory screen.
 
 import { useRef, useState } from "react";
 import { api, MemoryStatus, MemoryTidy, SENSITIVE_SUBJECTS, Settings } from "../api";
@@ -26,7 +26,7 @@ const DEFAULTS: Required<MemorySection> = {
 /** The word the reset sheet asks for, in the language the page is in; the host takes either. */
 const RESET_WORD = () => t("settings.memory.reset.word");
 
-export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial<Settings>) => void }) {
+export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: Partial<Settings>) => void; part: "memory" | "upkeep" }) {
   const memory = { ...DEFAULTS, ...(s.memory ?? {}) };
   // The whole section goes back each time: the host merges a section's fields into what it has, so a
   // list sent alone replaces the list, which is what turning one subject off must do.
@@ -55,7 +55,7 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
     }
   }
 
-  return (
+  if (part === "memory") return (
     <>
       <div className="card memory-settings-main">
         <Row title={t("settings.memory.generate")} desc={t("settings.memory.generate.sub")} data-setting="memory.generate">
@@ -99,6 +99,11 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
           </>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <>
       <div className="card">
         <Row title={t("settings.memory.classify")} desc={t("settings.memory.classify.sub")} stack data-setting="memory.classify_preset">
           <ModelPicker

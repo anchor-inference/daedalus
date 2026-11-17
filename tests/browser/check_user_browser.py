@@ -112,7 +112,7 @@ def card_page(browser, host: Host, lang: str, width: int = 1440, height: int = 9
     page.route("**/api/**", host.route)
     if feed is not None:
         page.route("**/api/events**", feed.route)
-    page.goto(f"{BASE}/settings/environments?token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
     page.wait_for_selector(".bs-chrome", timeout=15000)
     return page
 

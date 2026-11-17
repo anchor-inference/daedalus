@@ -434,7 +434,7 @@ async def test_a_speech_model_that_is_not_here_is_refused_with_the_way_to_get_it
     app = make_app(db)
     app.speech = Speech()
     service = ext.SettingsChanges(app)
-    with pytest.raises(rules.ChangeRefused, match=r"not downloaded.*/app/settings/voice#stt\.models"):
+    with pytest.raises(rules.ChangeRefused, match=r"not downloaded.*/app/settings/speech-models#stt\.models"):
         await propose(service, {"asr": {"transcriber": "gigaam-ru"}})
     with pytest.raises(rules.ChangeRefused, match="no speech recogniser.*gigaam-ru"):
         await propose(service, {"asr": {"fallback": "whisper-huge"}})
@@ -448,6 +448,6 @@ async def test_settings_get_gives_the_address_of_each_row_it_knows(db: Database)
     app.settings = SimpleNamespace(bot_repo_dir=REPO)
     service = ext.SettingsChanges(app)
     asr = await service.get("asr")
-    assert asr["fields"]["asr.transcriber"]["link"] == "/app/settings/voice#asr.transcriber"
+    assert asr["fields"]["asr.transcriber"]["link"] == "/app/settings/dictation#asr.transcriber"
     listing = {s["name"]: s for s in (await service.get(None))["sections"]}
-    assert listing["asr"]["link"] == "/app/settings/voice" and listing["compaction"]["link"] == "/app/settings/limits"
+    assert listing["asr"]["link"] == "/app/settings/dictation" and listing["compaction"]["link"] == "/app/settings/context"

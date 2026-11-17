@@ -59,8 +59,8 @@ def main() -> int:
         page.locator(".free-catalog .mrow", has_text="Free One").get_by_role("button").click()
         expect(page.get_by_text("Модель не прошла проверку", exact=False)).to_be_visible()
         in_settings = True
-        page.goto(f"{BASE}/settings/models?token=t&tab=free&lang=ru")
-        expect(page.get_by_role("tab", name="Бесплатные")).to_have_attribute("aria-selected", "true")
+        page.goto(f"{BASE}/settings/free-models?token=t&lang=ru")
+        expect(page.locator('.settings-link[data-section="free-models"]')).to_have_attribute("aria-current", "page")
         page.locator(".free-catalog .pick", has_text="OpenRouter").click()
         expect(page.locator(".free-catalog a[href='https://openrouter.ai/settings/keys']")).to_contain_text("OpenRouter")
         browser.close()

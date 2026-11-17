@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from daedalus.app import Application
 
 logger = logging.getLogger(__name__)
-SETTINGS_PAGE = "/app/settings/tools"
+SETTINGS_PAGE = "/app/settings/mcp"
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:

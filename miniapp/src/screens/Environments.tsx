@@ -1,5 +1,6 @@
 // Settings → Environments: terminals and the agent's browser, one page because they are one decision —
-// how many may run at once on this machine, and for how long.
+// how many may run at once on this machine, and for how long. The rest of the browser's settings are
+// the Browser and Browser safety sections.
 //
 // The machine's load bar is drawn once, at the top. Each half drew its own before, the same bar twice
 // on one page with a different draft in each; now both caps, as they are typed, feed the one bar, so
@@ -37,7 +38,7 @@ export function EnvironmentsTab({ s, save, toast }: { s: Settings; save: (patch:
         )}
       </div>
       <div id="terminal-sessions"><TerminalCap s={s} save={save} onDraft={onTerminals} /></div>
-      <div id="browser-sessions"><BrowserSettingsTab s={s} save={save} toast={toast} onDraft={onBrowsers} /></div>
+      <div id="browser-sessions"><BrowserSettingsTab s={s} save={save} toast={toast} onDraft={onBrowsers} part="capacity" /></div>
     </>
   );
 }

@@ -1,4 +1,4 @@
-// Settings → Voice & speech → voice notes: which transcriber turns a recording into words, what is
+// Settings → Voice input: which transcriber turns a recording into words, what is
 // tried when it fails, and the cloud endpoint's own fields under whichever of the two chose it.
 //
 // Self-contained on purpose: it takes the settings and a save, fetches the installed local models
@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import type { Settings } from "../api";
 import { t } from "../i18n";
-import { Dropdown, Switch } from "../ui/index";
+import { Dropdown, Switch, go } from "../ui/index";
+import { pathFor } from "../router";
 import { Row, TextBlock } from "../settingsrow";
 import { SpeechModel, fetchSttView } from "../sttview";
 import { CLOUD, transcriberChoices } from "../asrchoices";
@@ -29,12 +30,9 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
   const put = (patch: Partial<Asr>) => save({ asr: { ...asr, api_key: "", ...patch } });
   const anyLocal = models.some((m) => m.installed);
   const primary = transcriberChoices(models, transcriber);
-  // The catalogue of local models is further down the same page; the link takes the reader there
-  // rather than to another screen.
-  const toCatalogue = (e: React.MouseEvent) => {
-    e.preventDefault();
-    document.getElementById("speech-models")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  // The catalogue of local models is a section of its own, Recognition models; the link opens it on
+  // the catalogue's row.
+  const catalogue = `${pathFor("settings", "speech-models")}#stt.models`;
   const second = transcriberChoices(models, fallback, transcriber);
 
   // The endpoint's own fields, under whichever row chose it: the transcriber's when it is the
@@ -79,7 +77,7 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
     <div className="card asr-card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.asr.title")}</div>
       <div className="sub">{t("settings.asr.sub")}</div>
-      <Row data-setting="asr.transcriber" title={t("settings.asr.engine")} desc={!anyLocal ? <>{t("settings.asr.nolocal")} <a href="#speech-models" onClick={toCatalogue}>{t("settings.asr.nolocal.link")}</a></> : undefined} stack>
+      <Row data-setting="asr.transcriber" title={t("settings.asr.engine")} desc={!anyLocal ? <>{t("settings.asr.nolocal")} <a href={catalogue} onClick={(e) => go(e, catalogue)}>{t("settings.asr.nolocal.link")}</a></> : undefined} stack>
         <Dropdown id="asr-transcriber" label={t("settings.asr.engine")} value={transcriber} invalid={primary.some((o) => o.missing && o.value === transcriber)} onChange={(next) => put({ transcriber: next, fallback: fallback === next ? "" : fallback })} options={primary.map((o) => ({ id: o.value, label: o.label }))} />
       </Row>
       {transcriber === CLOUD && cloudFields}

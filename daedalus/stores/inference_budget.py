@@ -38,11 +38,11 @@ def describe(key: str) -> str:
     """The cap behind a balance key, named where the operator can change it."""
     kind, _, rest = key.partition(":")
     if kind == "daily":
-        return "the daily spending cap (usd_per_day in Settings → Limits); it reopens at midnight UTC"
+        return "the daily spending cap (usd_per_day in Settings → Budget); it reopens at midnight UTC"
     if kind == "total":
-        return "the total spending cap (limits.usd_total in Settings → Limits)"
+        return "the total spending cap (limits.usd_total in Settings → Budget)"
     if kind == "provider":
-        return f"the total cap for provider {rest.rsplit(':', 1)[0]!r} (limits.usd_total_per_provider in Settings → Limits)"
+        return f"the total cap for provider {rest.rsplit(':', 1)[0]!r} (limits.usd_total_per_provider in Settings → Budget)"
     if kind == "run":
         return "this run's spending cap (limits.usd_per_run, or the orchestrator's own); a new message starts a new run"
     if kind == "session":

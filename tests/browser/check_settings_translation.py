@@ -5,7 +5,7 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
 - the Settings search finds the Translation section and every one of its rows by "translate",
   "translation", "translator", "language", "перевод", "переводчик" and "язык" — the words an operator
   types, which once found nothing because the card sat at the foot of Chat & scheduler;
-- the section is in the list under Work, opens from it at ``/app/settings/translation`` under its own
+- the section is in the list under Agent, opens from it at ``/app/settings/translation`` under its own
   title, and holds the answer language beside the translation card; Working rules no longer does;
 - a link to one of its rows opens the section on that row;
 - the translator is chosen with the same in-place model picker as the other models, and its search
@@ -88,14 +88,14 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
             shot(page, f"search-{word}-{lang}{'-phone' if phone else ''}.png")
     field.fill("")
 
-    # The section in the list, under Work, opened from it.
+    # The section in the list, under Agent, opened from it.
     if phone:
         page.goto(f"{BASE}/settings/translation?token=t&lang={lang}")
     else:
         link = page.locator('.settings-link[data-section="translation"]')
         group = link.evaluate("(a) => { const ids = [...a.parentElement.querySelectorAll('.settings-link')].map((x) => x.dataset.section); return ids; }")
-        if "rules" not in group or "models" not in group:
-            say(f"Translation is not listed under Work: {group}")
+        if "rules" not in group or "memory" not in group:
+            say(f"Translation is not listed under Agent: {group}")
         link.click()
     page.wait_for_selector('[data-setting="translation.preset"]', timeout=10000)
     path = page.evaluate("location.pathname")

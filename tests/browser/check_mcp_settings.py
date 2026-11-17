@@ -37,7 +37,7 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
         return stub(r)
 
     page.route("**/api/**", route)
-    page.goto(f"{BASE}/settings/tools?token=t&lang={LANG}&mcp=tracker&mcp_linked=1")
+    page.goto(f"{BASE}/settings/mcp?token=t&lang={LANG}&mcp=tracker&mcp_linked=1")
     card = page.locator("[data-setting='mcp.servers']")
     card.wait_for(timeout=15000)
     card.scroll_into_view_if_needed()

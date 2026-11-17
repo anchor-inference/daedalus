@@ -1,4 +1,4 @@
-"""Settings → Limits & budget, the context compaction's summary model, driven in a real browser.
+"""Settings → Context, the compaction's summary model, and Settings → Budget, driven in a real browser.
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
@@ -83,11 +83,11 @@ def say_into(problems: list[str], lang: str):  # type: ignore[no-untyped-def]
     return lambda text: problems.append(f"[{lang}] {text}")
 
 
-def opened(browser, host: Host, lang: str, viewport: dict, **context):  # type: ignore[no-untyped-def]
+def opened(browser, host: Host, lang: str, viewport: dict, section: str = "context", **context):  # type: ignore[no-untyped-def]
     page = browser.new_context(viewport=viewport, color_scheme="dark", **context).new_page()
     page.route("**/api/**", host.route)
-    page.goto(f"{BASE}/settings/limits?token=t&lang={lang}")
-    page.wait_for_selector("#compaction-preset", timeout=15000)
+    page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
+    page.wait_for_selector("#compaction-preset" if section == "context" else '[data-setting="limits.usd_total"]', timeout=15000)
     return page
 
 
@@ -151,7 +151,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth, document.querySelector('#compaction-preset').getBoundingClientRect().right]")
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:
-        say(f"Settings → Limits scrolls sideways on a phone: {width}")
+        say(f"Settings → Context scrolls sideways on a phone: {width}")
     # The picker's list opens in place; on a phone it must stay inside the screen.
     page.locator("#compaction-preset").scroll_into_view_if_needed()
     page.locator("#compaction-preset .sel-current button").tap()
@@ -167,7 +167,7 @@ def spending(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     host.settings["limits"]["usd_total"] = 4
     host.settings["limits"]["usd_total_per_provider"] = {"deepseek": 5}
     host.settings["providers"] = {"deepseek": {"kind": "deepseek", "pricing": {}}}
-    page = opened(browser, host, lang, {"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    page = opened(browser, host, lang, {"width": 390, "height": 844}, "budget", is_mobile=True, has_touch=True)
     meter = page.locator(".spend-meter")
     expect(meter).to_contain_text("$3.42")
     expect(meter).to_contain_text("$1.12")

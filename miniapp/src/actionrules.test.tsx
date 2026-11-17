@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Settings → Rules: a level picked in the grid is saved as the `action_rules` section, the review's
+// Settings → Approvals: a level picked in the grid is saved as the `action_rules` section, the review's
 // switch follows the level (always on at "on command", nothing to switch at "asks" or "hands to you"),
 // and the review log shows what was decided.
 

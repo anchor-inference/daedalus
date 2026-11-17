@@ -143,12 +143,12 @@ async def _config(ctx: DoctorContext) -> list[Check]:
         out.append(Check("default model", True, f"{pid} = {preset.display(pid)}", "ok"))
         provider = cfg.providers.get(preset.provider)
         if provider is None:
-            out.append(Check("default provider", False, f"preset {pid} uses provider '{preset.provider}', which is not configured", "fail", "add the provider in Settings → Models, or pick another default preset"))
+            out.append(Check("default provider", False, f"preset {pid} uses provider '{preset.provider}', which is not configured", "fail", "add the provider in Settings → Providers, or pick another default preset"))
         else:
             source = provider_key_source(st, provider)
             fine = source != "missing"
             detail = {"key": "configured", "proxy": "held by the key proxy", "keyless": "no API key (fine for a keyless self-hosted endpoint)"}.get(source, "no API key")
-            out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Models → provider"))
+            out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Providers"))
             if provider.kind == "llamacpp":
                 out.append(Check("pricing for the default model", True, "local llama.cpp inference is recorded at $0 and does not consume spending caps", "ok"))
             elif provider.billing == "subscription":
@@ -235,15 +235,15 @@ def _local_speech(ctx: DoctorContext) -> Check:
     chosen = ctx.config.stt.local_model
     if not chosen:
         return Check("local speech", True, "none: a transcription endpoint or the browser does the listening", "ok",
-                     "pick a model in Settings → Voice → Speech recognition to recognise speech on this machine")
+                     "pick a model in Settings → Recognition models to recognise speech on this machine")
     try:
         model = catalog.get(chosen)
     except KeyError:
         return Check("local speech", False, f"{chosen} is configured but is not in the catalog", "fail",
-                     "pick a model again in Settings → Voice → Speech recognition")
+                     "pick a model again in Settings → Recognition models")
     if not Downloads(ctx.settings.state_dir / "models" / "stt").is_installed(model.id):
         return Check("local speech", False, f"{model.label} is selected but was never downloaded", "fail",
-                     "download it in Settings → Voice → Speech recognition")
+                     "download it in Settings → Recognition models")
     try:
         import sherpa_onnx  # noqa: F401  # Lazy: the engine is an optional extra and this asks whether it is here
     except ImportError:
@@ -310,15 +310,15 @@ def _local_voice(ctx: DoctorContext) -> Check:
         endpoint = bool(ctx.config.companion.tts.provider or ctx.config.companion.tts.url)
         return Check("local voice", True,
                      "none: a speech endpoint speaks" if endpoint else "none: the browser's own synthesiser speaks",
-                     "ok", "pick a voice in Settings → Voice → Voice (speech synthesis) to speak on this machine")
+                     "ok", "pick a voice in Settings → Voice mode → Voice (speech synthesis) to speak on this machine")
     try:
         voice = tts_catalog.get(chosen)
     except KeyError:
         return Check("local voice", False, f"{chosen} is configured but is not in the catalog", "fail",
-                     "pick a voice again in Settings → Voice → Voice (speech synthesis)")
+                     "pick a voice again in Settings → Voice mode → Voice (speech synthesis)")
     if not Downloads(ctx.settings.state_dir / "models" / "tts", lookup=tts_catalog.get).is_installed(voice.id):
         return Check("local voice", False, f"{voice.label} is selected but was never downloaded", "fail",
-                     "download it in Settings → Voice → Voice (speech synthesis)")
+                     "download it in Settings → Voice mode → Voice (speech synthesis)")
     try:
         import sherpa_onnx  # noqa: F401  # Lazy: the engine is an optional extra and this asks whether it is here
     except ImportError:
@@ -328,7 +328,7 @@ def _local_voice(ctx: DoctorContext) -> Check:
     if not voice.keeps_up:
         return Check("local voice", True,
                      f"{voice.label} active; it renders slower than speech ({voice.rtf:.2f}x), so answers begin a beat late{_voice_load_note()}",
-                     "warn", "pick a faster voice in Settings → Voice if the delay is noticeable")
+                     "warn", "pick a faster voice in Settings → Voice mode if the delay is noticeable")
     return Check("local voice", True, f"{voice.label} active ({voice.language}, {voice.sample_rate // 1000} kHz){_voice_load_note()}", "ok")
 
 
@@ -409,7 +409,7 @@ async def _state(ctx: DoctorContext) -> list[Check]:
     private = not st.secrets_dir.exists() or (st.secrets_dir.stat().st_mode & 0o077) == 0
     out.append(Check("secrets dir", private, "private" if private else f"{st.secrets_dir} is readable by others", "ok" if private else "warn", f"chmod 700 {st.secrets_dir}"))
     budget = st.state_dir / "BUDGET_EXCEEDED"
-    out.append(Check("daily budget", not budget.exists(), "within budget" if not budget.exists() else f"exceeded: {budget.read_text(encoding='utf-8').strip()[:120]}", "ok" if not budget.exists() else "warn", "runs resume at 00:00 UTC, or raise the daily cap in Settings → Limits"))
+    out.append(Check("daily budget", not budget.exists(), "within budget" if not budget.exists() else f"exceeded: {budget.read_text(encoding='utf-8').strip()[:120]}", "ok" if not budget.exists() else "warn", "runs resume at 00:00 UTC, or raise the daily cap in Settings → Budget"))
     if ctx.guard is not None:
         n = getattr(ctx.guard, "unclean_boots", 0)
         skipped = getattr(ctx.guard, "skip_recovery", False)
@@ -803,7 +803,7 @@ async def _user_browser(ctx: DoctorContext, service: Any) -> Check:
         each = "; ".join(f"Chrome «{c.get('profile_name') or 'Chrome'}» connected ({c.get('transport') or '?'}), extension {c.get('ext_version') or '?'}, Chrome {c.get('chrome_version') or '?'}" for c in connected)
         return Check(name, True, each, "ok")
     why = str(relay.get("last_error") or "no Chrome has connected since the service started")
-    return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Environments → Your Chrome")
+    return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Browser → Your Chrome")
 
 
 async def _token_counter(ctx: DoctorContext) -> list[Check]:
@@ -940,13 +940,13 @@ async def _providers(ctx: DoctorContext) -> list[Check]:
             detail = describe_discovery(discovered)
             if discovered.sleeping:
                 return Check(f"llama.cpp {label}", False, detail, "warn", "wait for the model to wake or finish loading")
-            return Check(f"llama.cpp {label}", discovered.reachable, detail, "ok" if discovered.reachable else "fail", "check the server and base_url in Settings → Models")
+            return Check(f"llama.cpp {label}", discovered.reachable, detail, "ok" if discovered.reachable else "fail", "check the server and base_url in Settings → Providers")
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(base.rstrip("/") + "/models", headers={"authorization": f"Bearer {key}"} if key else {})
             ok = response.status_code < 500 and response.status_code != 401
             detail = f"HTTP {response.status_code}" + (" (key rejected)" if response.status_code == 401 else "")
-            return Check(f"provider {pid}", ok, f"{shown} → {detail}", "ok" if ok else "fail", "check the key and base_url in Settings → Models")
+            return Check(f"provider {pid}", ok, f"{shown} → {detail}", "ok" if ok else "fail", "check the key and base_url in Settings → Providers")
         except Exception as exc:  # noqa: BLE001 — a typo in base_url raises InvalidURL, not HTTPError
             return Check(f"provider {pid}", False, f"{shown} unreachable: {type(exc).__name__}", "fail", "network, proxy or a wrong base_url")
 

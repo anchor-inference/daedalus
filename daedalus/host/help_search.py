@@ -243,11 +243,9 @@ class Hit:
     snippet: str = ""
 
 
-def setting_link(section: str, anchor: str = "", tab: str | None = None) -> str:
+def setting_link(section: str, anchor: str = "") -> str:
     """The app address of a settings section, or of one row of it."""
     path = f"{SETTINGS_PATH}/{quote(section)}"
-    if tab:
-        path += f"?tab={quote(tab)}"
     return f"{path}#{quote(anchor, safe='.*')}" if anchor else path
 
 
@@ -289,7 +287,7 @@ def settings_entries(index: dict) -> list[Entry]:
             title_en=f"{owner.get('title', {}).get('en', item['section'])} › {item['title']['en']}",
             title_ru=f"{owner.get('title', {}).get('ru', item['section'])} › {item['title']['ru']}",
             about_en=item["about"]["en"], about_ru=item["about"]["ru"],
-            link=setting_link(item["section"], item["anchor"], item.get("tab")),
+            link=setting_link(item["section"], item["anchor"]),
             config=item.get("config"), phrases=_phrases(names),
         ))
     return out
@@ -500,7 +498,7 @@ def config_links(root: Path) -> dict[str, str]:
     """Each configuration path the settings index knows, with the address of the row that edits it."""
     index = load_settings_index(root) or {}
     return {
-        item["config"]: setting_link(item["section"], item["anchor"], item.get("tab"))
+        item["config"]: setting_link(item["section"], item["anchor"])
         for item in index.get("fields", []) if item.get("config")
     }
 

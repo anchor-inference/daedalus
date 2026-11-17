@@ -59,7 +59,7 @@ def open_rules(browser, width: int, lang: str, saved: list[dict]) -> Page:  # ty
 
     page.route("**/api/settings", settings)
     page.route("**/api/settings/validate", validate)
-    page.goto(f"{BASE}/settings/rules?token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/approvals?token=t&lang={lang}")
     page.wait_for_selector(".action-rules .ar-row[data-category]", timeout=20000)
     page.wait_for_selector(".ar-log-entry", timeout=10000)
     return page

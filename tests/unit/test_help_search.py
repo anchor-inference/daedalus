@@ -145,10 +145,10 @@ def test_the_settings_index_is_whole_and_names_real_configuration() -> None:
             assert field["config"] in known, f"{field['anchor']}: {field['config']} is not a configuration path"
 
 
-def test_a_link_names_the_section_the_tab_and_the_row() -> None:
-    assert setting_link("voice", "asr.transcriber") == "/app/settings/voice#asr.transcriber"
-    assert setting_link("models", "providers.list", "providers") == "/app/settings/models?tab=providers#providers.list"
-    assert setting_link("limits") == "/app/settings/limits"
+def test_a_link_names_the_section_and_the_row() -> None:
+    assert setting_link("dictation", "asr.transcriber") == "/app/settings/dictation#asr.transcriber"
+    assert setting_link("providers", "providers.list") == "/app/settings/providers#providers.list"
+    assert setting_link("budget") == "/app/settings/budget"
 
 
 @pytest.mark.asyncio
@@ -160,7 +160,7 @@ async def test_docs_search_answers_with_the_link_and_the_configuration_path(monk
     monkeypatch.setattr("daedalus.tools._common.services_for", lambda _: services)
     found = await docs_search().invoke(context, {"query": "Как мне включить STT?"})
     first = found.content.splitlines()[0]
-    assert "(/app/settings/voice#asr.transcriber)" in first and "`asr.transcriber`" in first
+    assert "(/app/settings/dictation#asr.transcriber)" in first and "`asr.transcriber`" in first
     assert first.index("Распознавание речи") < first.index("Speech recognition"), "a Russian question reads Russian first"
     assert found.metadata["settings"] >= 1
     english = await docs_search().invoke(context, {"query": "change the app language"})

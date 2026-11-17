@@ -4,7 +4,7 @@ The wizard runs before this program exists, so it can only write its choice down
 (``DAEDALUS_STT_MODEL``, which :func:`daedalus.config._seed_from_setup` turns into the voice-note
 transcriber and records as ``stt-model:<id>`` in ``seeded``; the environment is read there and only
 there). The model itself is downloaded here, by the same :class:`~daedalus.speech.models.Downloads`
-that Settings → Voice & speech drives, so its card there shows the bar moving and a failure in the
+that Settings → Recognition models drives, so its card there shows the bar moving and a failure in the
 words it always uses.
 
 It is fetched once. The marker goes into ``seeded`` only when the model is installed: a native first

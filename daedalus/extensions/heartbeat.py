@@ -240,7 +240,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             if arg in ("on", "off"):
                 cfg.enabled = arg == "on"
                 await app.save_config(app.config)
-                await message.answer(f"heartbeat {'on' if cfg.enabled else 'off'}" + ("" if heartbeat.read().strip() else " (HEARTBEAT.md is empty: edit it in the Mini App → Settings → Heartbeat)"))
+                await message.answer(f"heartbeat {'on' if cfg.enabled else 'off'}" + ("" if heartbeat.read().strip() else " (HEARTBEAT.md is empty: edit it in the Mini App → Settings → Scheduled runs)"))
                 return
             if arg == "run":
                 try:
@@ -254,7 +254,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             await message.answer(
                 f"heartbeat: {'on' if st['enabled'] else 'off'}{'' if st['armed'] or not st['enabled'] else ' (file empty → idle)'} · every {st['interval_minutes']} min · "
                 f"active {st['active_hours']} UTC · today {st['runs_today']}/{st['max_runs_per_day']} · last {st['last_run'] or 'never'}\n"
-                "usage: /heartbeat on|off|run — the prompt is HEARTBEAT.md (Mini App → Settings → Heartbeat)"
+                "usage: /heartbeat on|off|run — the prompt is HEARTBEAT.md (Mini App → Settings → Scheduled runs)"
             )
 
         front.command_hooks["heartbeat"] = cmd_heartbeat

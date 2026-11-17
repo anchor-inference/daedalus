@@ -2,11 +2,12 @@
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
-- the address ``/app/settings/voice#asr.transcriber`` opened directly scrolls Settings → Voice & speech
-  to the speech-recognition row and makes it blink, and the fragment leaves the address afterwards;
-- an answer in a conversation that links the row — as a Markdown link, and as a bare address — is a
-  link the app opens itself (the page is not reloaded) and lands on the blinking row; Back returns to
-  the conversation;
+- the address ``/app/settings/dictation#asr.transcriber`` opened directly scrolls Settings → Voice
+  input to the speech-recognition row and makes it blink, and the fragment leaves the address afterwards;
+- an answer in a conversation that links the row — as a Markdown link, as a bare address, and by the
+  address it had before Voice & speech was split (``/app/settings/voice#asr.transcriber``, as an old
+  answer still holds it) — is a link the app opens itself (the page is not reloaded) and lands on the
+  blinking row; Back returns to the conversation;
 - the Settings search finds the row by a word that is not in its title ("STT", "диктовка") and goes
   straight to it.
 
@@ -28,10 +29,11 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 ROW = "asr.transcriber"
-ADDRESS = f"/app/settings/voice#{ROW}"
+ADDRESS = f"/app/settings/dictation#{ROW}"
+OLD_ADDRESS = f"/app/settings/voice#{ROW}"
 ANSWER = {
-    "en": f"Speech recognition for the chat is in [Voice & speech → Speech recognition]({ADDRESS}). The same row: {ADDRESS}.",
-    "ru": f"Распознавание речи в чате — в [Голос и речь → Распознавание речи]({ADDRESS}). Та же строка: {ADDRESS}.",
+    "en": f"Speech recognition for the chat is in [Voice input → Speech recognition]({ADDRESS}). The same row: {ADDRESS}. Formerly [here]({OLD_ADDRESS}).",
+    "ru": f"Распознавание речи в чате — в [Голосовой ввод → Распознавание речи]({ADDRESS}). Та же строка: {ADDRESS}. Раньше [здесь]({OLD_ADDRESS}).",
 }
 SEARCH = {"en": "STT", "ru": "диктовка"}
 
@@ -73,7 +75,7 @@ def landed(page, say, how: str, *, marker: bool) -> None:  # type: ignore[no-unt
     print(f"  {how}: {state}")
     if not state.get("inView"):
         say(f"{how}: the row is not in view: {state}")
-    if not state.get("path", "").endswith("/settings/voice"):
+    if not state.get("path", "").endswith("/settings/dictation"):
         say(f"{how}: opened {state.get('path')}")
     if state.get("hash"):
         say(f"{how}: the address still names the row: {state.get('hash')}")
@@ -89,16 +91,16 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     page.route("**/api/**", route_for(lang))
 
     # Straight to the address.
-    page.goto(f"{BASE}/settings/voice?token=t&lang={lang}#{ROW}")
+    page.goto(f"{BASE}/settings/dictation?token=t&lang={lang}#{ROW}")
     landed(page, say, "direct address", marker=False)
 
-    # From an answer in a conversation: the Markdown link, then the bare address.
-    for index, how in ((0, "markdown link"), (1, "bare address")):
+    # From an answer in a conversation: the Markdown link, the bare address, then the old address.
+    for href, index, how in ((ADDRESS, 0, "markdown link"), (ADDRESS, 1, "bare address"), (OLD_ADDRESS, 0, "old address")):
         page.goto(f"{BASE}/agents/{S2}?token=t&lang={lang}")
         page.wait_for_selector(".composer .composer-field", timeout=15000)
-        links = page.locator(f'a[data-app-link][href="{ADDRESS}"]')
+        links = page.locator(f'a[data-app-link][href="{href}"]')
         try:
-            links.nth(1).wait_for(timeout=8000)
+            links.nth(index).wait_for(timeout=8000)
         except Exception:  # noqa: BLE001
             say(f"the answer's addresses are not links ({links.count()} found)")
             break

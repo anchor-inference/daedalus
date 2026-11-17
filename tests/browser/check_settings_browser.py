@@ -1,20 +1,19 @@
-"""Settings → Environments, the browser half, driven in a real browser.
+"""The agent's browser in Settings — Environments, Browser and Browser safety — driven in a real browser.
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
-- the environment says which Chromium runs and that its sandbox holds;
+- Environments: the environment says which Chromium runs and that its sandbox holds;
 - the running browser is listed with its owner and its memory, and Close asks first, then closes it;
 - the cap is saved on blur, and the load bar follows it as it is typed: terminals and browsers on one
   track, the browsers' part named in words, and a cap the machine cannot carry beside the terminals
   turns the bar bad and warns — without refusing the value;
-- a profile is cleared and deleted only after asking, and never while its browser runs;
-- the recording's default, watch mode and its sites, the local network's addresses, the model that
-  reads a page for the agent and the switch for clicks at a point are saved as the host's `[browser]`
-  section;
-- a site note waiting for the operator is approved or discarded at once, and an approved one is
-  removed only after asking;
-- the old /settings/browser address lands on Environments;
-- nothing on the page scrolls sideways on a phone.
+- Browser: a profile is cleared and deleted only after asking, and never while its browser runs; the
+  recording's default, the model that reads a page for the agent and the switch for clicks at a point
+  are saved as the host's `[browser]` section; a site note waiting for the operator is approved or
+  discarded at once, and an approved one is removed only after asking;
+- Browser safety: watch mode and its sites, local sites and the local network's addresses are saved
+  in the same section;
+- nothing on any of the three pages scrolls sideways on a phone.
 
 Exit 0 when every step holds.
 """
@@ -159,6 +158,8 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say("a cap of 0 was sent")
 
     # Profiles: the running one cannot be touched; the other is cleared and deleted after asking.
+    page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
+    page.wait_for_selector(".bs-profiles .bs-row", timeout=15000)
     busy = page.locator(".bs-profiles .bs-row[data-profile='project-bakery'] button")
     if not all(busy.nth(i).is_disabled() for i in range(busy.count())):
         say("a running profile's buttons are enabled")
@@ -176,33 +177,11 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     if ("POST", "/api/browsers/profiles/container/session-old/clear") not in calls or ("DELETE", "/api/browsers/profiles/container/session-old") not in calls:
         say(f"the profile was not cleared and deleted: {calls}")
 
-    # The rest of the section is the host's [browser].
+    # The rest of the page is the host's [browser].
     page.locator(".bs-recording [role=switch]").first.click()
-    page.locator(".bs-watch [role=switch]").first.click()
-    page.locator("#browser-watch").fill("mail.google.com\n*.bank.example\n\nmail.google.com")
-    page.locator("#browser-lan").fill("10.0.5.20, 10.0.5.0/24")
-    page.locator("#browser-cap").focus()
     page.wait_for_timeout(900)
-    saved = host.settings["browser"]
-    print(f"[{lang}] saved: record {saved['record_frames']}, watch {saved['watch_mode']} {saved['watch_domains']}, lan {saved['lan_allow']}")
-    if not saved["record_frames"] or not saved["watch_mode"]:
-        say("the recording's default or watch mode was not saved")
-    if saved["watch_domains"] != ["mail.google.com", "*.bank.example"] or saved["lan_allow"] != ["10.0.5.20", "10.0.5.0/24"]:
-        say(f"the lists were saved as {saved['watch_domains']} and {saved['lan_allow']}")
-
-    # Local sites: asked about by default, opened for every port when the operator says so.
-    page.locator("#browser-local-sites").click()
-    page.locator(".dropdown-list [role=option][data-value='allow']").click()
-    page.wait_for_timeout(900)
-    if host.settings["browser"].get("local_sites") != "allow":
-        say(f"local sites were saved as {host.settings['browser'].get('local_sites')!r}")
-
-    # The rest of the LAN: asked about by default, kept to the list when the operator says so.
-    page.locator("#browser-lan-sites").click()
-    page.locator(".dropdown-list [role=option][data-value='listed']").click()
-    page.wait_for_timeout(900)
-    if host.settings["browser"].get("lan_sites") != "listed":
-        say(f"LAN sites were saved as {host.settings['browser'].get('lan_sites')!r}")
+    if not host.settings["browser"]["record_frames"]:
+        say("the recording's default was not saved")
 
     # Reading for the agent and clicks at a point: off until switched, then saved with the rest.
     # A switch, and the model drawn as its row with its list opened in place.
@@ -248,6 +227,35 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     calls = [(m, p) for m, p, _ in bs.requests if "/notes/" in p]
     if calls != [("POST", "/api/browsers/notes/n1/approve"), ("DELETE", "/api/browsers/notes/n3"), ("DELETE", "/api/browsers/notes/n2")]:
         say(f"the notes were answered with {calls}")
+
+    # Browser safety: where it waits for the operator, and which local addresses it may open.
+    page.goto(f"{BASE}/settings/browser-safety?token=t&lang={lang}")
+    page.wait_for_selector(".bs-watch", timeout=15000)
+    page.locator(".bs-watch [role=switch]").first.click()
+    page.locator("#browser-watch").fill("mail.google.com\n*.bank.example\n\nmail.google.com")
+    page.locator("#browser-lan").fill("10.0.5.20, 10.0.5.0/24")
+    page.locator("#browser-lan").blur()
+    page.wait_for_timeout(900)
+    saved = host.settings["browser"]
+    print(f"[{lang}] saved: watch {saved['watch_mode']} {saved['watch_domains']}, lan {saved['lan_allow']}")
+    if not saved["watch_mode"] or not saved["record_frames"]:
+        say("watch mode was not saved, or its save lost the recording's default")
+    if saved["watch_domains"] != ["mail.google.com", "*.bank.example"] or saved["lan_allow"] != ["10.0.5.20", "10.0.5.0/24"]:
+        say(f"the lists were saved as {saved['watch_domains']} and {saved['lan_allow']}")
+
+    # Local sites: asked about by default, opened for every port when the operator says so.
+    page.locator("#browser-local-sites").click()
+    page.locator(".dropdown-list [role=option][data-value='allow']").click()
+    page.wait_for_timeout(900)
+    if host.settings["browser"].get("local_sites") != "allow":
+        say(f"local sites were saved as {host.settings['browser'].get('local_sites')!r}")
+
+    # The rest of the LAN: asked about by default, kept to the list when the operator says so.
+    page.locator("#browser-lan-sites").click()
+    page.locator(".dropdown-list [role=option][data-value='listed']").click()
+    page.wait_for_timeout(900)
+    if host.settings["browser"].get("lan_sites") != "listed":
+        say(f"LAN sites were saved as {host.settings['browser'].get('lan_sites')!r}")
     page.context.close()
 
 
@@ -257,15 +265,13 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     host = Host(bs)
     page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
-    # The address Browser had as a page of its own: kept working, it lands on the merged page.
-    page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
-    page.wait_for_selector(".bs-running .bs-row", timeout=15000)
-    if "/settings/environments" not in page.url:
-        say(f"the old address stayed at {page.url}")
-    width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth, Math.max(...[...document.querySelectorAll('.bs *')].map(e => e.getBoundingClientRect().right))]")
-    print(f"[{lang}] phone widths: {width}")
-    if width[0] > width[1] or width[2] > width[1] + 0.5:
-        say(f"Settings → Environments scrolls sideways on a phone: {width}")
+    for section, drawn in (("environments", ".bs-running .bs-row"), ("browser", ".bs-profiles .bs-row"), ("browser-safety", ".bs-watch")):
+        page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
+        page.wait_for_selector(drawn, timeout=15000)
+        width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth, Math.max(...[...document.querySelectorAll('.bs *')].map(e => e.getBoundingClientRect().right))]")
+        print(f"[{lang}] phone widths on {section}: {width}")
+        if width[0] > width[1] or width[2] > width[1] + 0.5:
+            say(f"Settings → {section} scrolls sideways on a phone: {width}")
     page.context.close()
 
 

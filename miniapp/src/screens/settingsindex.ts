@@ -11,16 +11,16 @@ import index from "./settings-index.json";
 import type { IconName } from "../icons";
 import type { Lang } from "../i18n";
 
-export type SectionGroup = "you" | "work" | "system";
+export type SectionGroup = "you" | "models" | "agent" | "tools" | "integrations" | "system";
 type Words = Record<Lang, string>;
 
 export type IndexSection = { id: string; group: SectionGroup; icon: IconName; title: Words; about: Words; synonyms: string[] };
-export type IndexField = { section: string; anchor: string; config: string | null; tab?: string; title: Words; about: Words; synonyms: string[] };
+export type IndexField = { section: string; anchor: string; config: string | null; title: Words; about: Words; synonyms: string[] };
 
 export const INDEX_SECTIONS = index.sections as IndexSection[];
 export const INDEX_FIELDS = index.fields as IndexField[];
 
-const ORDER: SectionGroup[] = ["you", "work", "system"];
+const ORDER: SectionGroup[] = ["you", "models", "agent", "tools", "integrations", "system"];
 
 /** The sections grouped the way the page lists them, in the order the table gives. */
 export const SECTION_GROUPS: { id: SectionGroup; sections: { id: string; icon: IconName }[] }[] = ORDER.map((group) => ({
@@ -28,11 +28,34 @@ export const SECTION_GROUPS: { id: SectionGroup; sections: { id: string; icon: I
   sections: INDEX_SECTIONS.filter((section) => section.group === group).map(({ id, icon }) => ({ id, icon })),
 }));
 
-/** The address that opens a field's section, on its tab when it has one, and names its row. */
+/** The address that opens a field's section and names its row. */
 export function fieldPath(field: IndexField): string {
-  const tab = field.tab ? `?tab=${encodeURIComponent(field.tab)}` : "";
-  return `/app/settings/${encodeURIComponent(field.section)}${tab}#${field.anchor}`;
+  return `/app/settings/${encodeURIComponent(field.section)}#${field.anchor}`;
 }
+
+/**
+ * The section a row lives on, by its anchor: the index's own word for a row it lists, and for the
+ * rows drawn once per model, provider or account (whose anchors carry that id) the section that
+ * draws them. Null for an anchor no section claims, a message's own `#m12` among them.
+ *
+ * The page asks this of every address that names a row, so a link written before the row moved —
+ * a bookmark, a notification kept in the bell, an answer in an old chat — still opens the section
+ * the row is on now rather than one where it is missing.
+ */
+export function sectionOfAnchor(anchor: string): string | null {
+  const field = INDEX_FIELDS.find((item) => item.anchor === anchor);
+  if (field) return field.section;
+  const drawn = DRAWN.find(([prefix]) => anchor.startsWith(prefix));
+  return drawn ? drawn[1] : null;
+}
+
+const DRAWN: [string, string][] = [
+  ["presets.", "models"],
+  ["providers.", "providers"],
+  ["limits.usd_total_per_provider.", "budget"],
+  ["accounts.", "accounts"],
+  ["keyproxy.", "keyproxy"],
+];
 
 /** The fields of the page's search box: those whose title or any name contains what was typed, in either
  *  language, because a reader of the Russian page may well type "STT". */

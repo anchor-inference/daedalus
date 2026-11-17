@@ -6,10 +6,13 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
   a warning line in the conversation, with the button to the row;
 - a /compact the host refuses about the summary model (409 with ``setting``) raises a red toast in
   the corner — the banner on a phone — with the button, and the same line in the conversation;
-- the toast's button opens Settings → Limits, where the summary model's row is in view and blinks
+- the toast's button opens Settings → Context, where the summary model's row is in view and blinks
   (it carries the highlight class), and the address no longer names the row afterwards;
-- the conversation's warning opens Settings → Models with the vision model's row in view and blinking;
-- the auxiliary fallback stays separate, and automatic session fallback is off until switched on.
+- the conversation's warning names the vision model on the page it was on before the sections were
+  split (Models), as a notice kept in an old conversation does; its button still opens the row, now
+  on Settings → Models for tasks, in view and blinking;
+- the auxiliary fallback stays separate there, and automatic session fallback, on Settings → Models,
+  is off until switched on.
 
 Exit 0 when every step holds.
 """
@@ -46,6 +49,7 @@ def route(r) -> None:  # type: ignore[no-untyped-def]
     if rel == "/api/commands":
         return respond(r, COMMANDS)
     if rel == f"/api/sessions/{S2}/stream":
+        # The page the vision model was on before Models was split: the notice is an old one.
         frame = setting_notice_frame("vision", "fallback", "no vision model is configured", "models", "vision.preset", model="main")
         return respond(r, "event: hello\ndata: {}\n\n" + frame, content_type="text/event-stream")
     return stub(r)
@@ -74,7 +78,7 @@ def wait_for_flash(page, key: str) -> dict:  # type: ignore[no-untyped-def]
 def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> None:  # type: ignore[no-untyped-def]
     where = f"[{lang} {viewport['width']}]"
     say = lambda text: problems.append(f"{where} {text}")  # noqa: E731
-    stub.command_refusal = setting_refusal(REFUSED, "limits", "compaction.preset")  # type: ignore[attr-defined]
+    stub.command_refusal = setting_refusal(REFUSED, "context", "compaction.preset")  # type: ignore[attr-defined]
     page = browser.new_context(viewport=viewport, color_scheme="dark", **context).new_page()
     page.route("**/api/**", route)
     page.goto(f"{BASE}/agents/{S2}?token=t&lang={lang}")
@@ -127,7 +131,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     print(f"{where} summary row: {state}")
     if not state.get("found") or not state.get("inView") or not state.get("flash"):
         say(f"the summary model's row is not in view and highlighted: {state}")
-    if not state.get("path", "").endswith("/settings/limits"):
+    if not state.get("path", "").endswith("/settings/context"):
         say(f"the button opened {state.get('path')}")
     page.wait_for_timeout(600)
     if page.evaluate("location.hash"):
@@ -145,11 +149,15 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     print(f"{where} vision row: {state}")
     if not state.get("found") or not state.get("inView") or not state.get("flash"):
         say(f"the vision model's row is not in view and highlighted: {state}")
+    if not state.get("path", "").endswith("/settings/tasks"):
+        say(f"the old notice's button opened {state.get('path')}, not the section the row is on now")
     switch = page.locator('[data-setting="model.fallback_to_session"] [role=switch], [data-setting="model.fallback_to_session"] input[type=checkbox]').first
     checked = switch.get_attribute("aria-checked") or str(switch.is_checked()).lower()
     print(f"{where} fallback switch: {checked}")
     if checked != "true":
         say(f"the fallback switch is not on by default: {checked}")
+    page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
+    page.wait_for_selector('[data-setting="model.auto_fallback"]', timeout=15000)
     automatic = page.locator('[data-setting="model.auto_fallback"] [role=switch], [data-setting="model.auto_fallback"] input[type=checkbox]').first
     automatic_checked = automatic.get_attribute("aria-checked") or str(automatic.is_checked()).lower()
     if automatic_checked != "false":

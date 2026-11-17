@@ -1,4 +1,4 @@
-// Settings → Environments → terminal sessions: the machine-wide cap on running terminals. The load
+// Settings → Environments, terminal sessions: the machine-wide cap on running terminals. The load
 // bar it moves is drawn once, at the top of the page (Environments.tsx).
 //
 // The cap has no upper bound on purpose. The bar follows the value as it is typed, and a value the

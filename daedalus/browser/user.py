@@ -521,7 +521,7 @@ class Pairing:
             if not match:
                 self.attempts.failed(address)
                 logger.warning("a pairing code was refused as wrong or expired")
-                raise PairingRefused("the code is wrong or has expired; make a new one in the app (Settings → Environments → Your Chrome)")
+                raise PairingRefused("the code is wrong or has expired; make a new one in the app (Settings → Browser → Your Chrome)")
             await self.db.kv_set(self.CODES, [])
             token = secrets.token_urlsafe(32)
             stamp = self.now().isoformat()

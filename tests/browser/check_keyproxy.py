@@ -3,10 +3,10 @@
 The reported fault: an operator with a Keenable key had no field to put it in. The search backends
 were keyed only by editing keyproxy.env by hand and restarting the stack. What is checked:
 
-- Settings → Tools shows a key field for each search backend, and a key typed there is sent to
+- Settings → Web search shows a key field for each search backend, and a key typed there is sent to
   ``PUT /api/keyproxy/KEYPROXY_KEY_KEENABLE``; the field is empty again afterwards and the row says
   the key is stored, without the key ever coming back;
-- Settings → Models → Providers has the key proxy card with the model, search and own-upstream
+- Settings → Key proxy has the key proxy card with the model, search and own-upstream
   groups, an upstream of the operator's own can be added (address and key written), and the daily
   cap is written as a number;
 - where a command could read the keys (no sandbox hides them), the card says so, and only there;
@@ -87,7 +87,7 @@ def run(width: int) -> list[str]:
         page.route("**/api/**", stub)
         page.route("**/api/keyproxy**", proxy.route)
 
-        page.goto(f"{BASE}/settings/tools?token=t&lang=en")
+        page.goto(f"{BASE}/settings/search?token=t&lang=en")
         keys = page.locator('[data-setting="tools.web.search.keys"]')
         keys.scroll_into_view_if_needed()
         expect(keys).to_be_visible()
@@ -102,9 +102,9 @@ def run(width: int) -> list[str]:
         if "kn-secret" in page.content():
             problems.append(f"{width}: the key is still on the page after it was saved")
         if phone and (outside := page.evaluate(OUTSIDE)):
-            problems.append(f"{width}: Tools reaches past the screen: {outside}")
+            problems.append(f"{width}: Web search reaches past the screen: {outside}")
 
-        page.goto(f"{BASE}/settings/models?tab=providers&token=t&lang=en")
+        page.goto(f"{BASE}/settings/keyproxy?token=t&lang=en")
         card = page.locator('[data-setting="keyproxy.upstreams"]')
         card.scroll_into_view_if_needed()
         for title in ("Model providers", "Web search", "Your own upstreams"):
@@ -123,7 +123,7 @@ def run(width: int) -> list[str]:
             problems.append(f"{width}: the new upstream was not written as key then address: {proxy.writes[-2:]}")
 
         if phone and (outside := page.evaluate(OUTSIDE)):
-            problems.append(f"{width}: Models reaches past the screen: {outside}")
+            problems.append(f"{width}: Key proxy reaches past the screen: {outside}")
 
         # Where nothing hides keyproxy.env from a command, the card the keys are typed in says so.
         if card.locator("[data-keys-readable]").count():

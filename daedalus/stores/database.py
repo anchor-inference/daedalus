@@ -2240,7 +2240,7 @@ CREATE INDEX IF NOT EXISTS calendar_hooks_pending ON calendar_hooks(id) WHERE de
 """, _calendar_entries))
 
 # The auto-review's decisions (``daedalus/host/action_rules.py``): what was reviewed, the verdict and
-# why, for Settings → Rules. No foreign key to the session: the log outlives a deleted session, which
+# why, for Settings → Approvals. No foreign key to the session: the log outlives a deleted session, which
 # is when "what did it send, and who let it" is asked.
 MIGRATIONS.append("""
 CREATE TABLE IF NOT EXISTS action_reviews (

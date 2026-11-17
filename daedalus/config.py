@@ -1027,7 +1027,7 @@ class LimitsConfig(BaseModel):
     cap here once stopped real work part-way, which is why it is off unless the operator sets one."""
     tool_timeout_seconds: float = 900.0
     usd_per_day: float = Field(default=0.0, ge=0)
-    """Cap on priced spend across the installation in one UTC day; 0 = none. Set in Settings → Limits
+    """Cap on priced spend across the installation in one UTC day; 0 = none. Set in Settings → Budget
     like every other cap. It once lived in the supervisor's environment, where the operator could not
     change it from the app and a run stopped at a cap they believed they had raised."""
     usd_per_run: float = Field(default=5.0, ge=0)
@@ -2918,7 +2918,7 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
     as ``local``. ``DAEDALUS_VOICE``: ``cloud`` transcribes through the ``openai`` provider; ``local``
     needs nothing here (the launcher installs the speech extra natively; a container has it in its
     image), and ``off`` is the empty default. ``DAEDALUS_STT_MODEL``: the local model the wizard's
-    speech step chose, made the voice-note transcriber exactly as Settings → Voice & speech makes
+    speech step chose, made the voice-note transcriber exactly as Settings → Voice input makes
     it; :func:`daedalus.speech.setup_model.fetch_setup_model` downloads it once the app is up.
 
     Each answer is applied once and recorded in ``seeded``: deleting the preset or clearing the ASR

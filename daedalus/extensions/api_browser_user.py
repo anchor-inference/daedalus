@@ -1,4 +1,4 @@
-"""The routes of the operator's own Chrome: the card in Settings → Environments, a conversation's switch,
+"""The routes of the operator's own Chrome: the card in Settings → Browser, a conversation's switch,
 and — on a server — the two public doors a paired Chrome comes in by.
 
 ``/api/browser/user*`` are the operator's (the app's authentication). ``POST /api/browser/pair`` and

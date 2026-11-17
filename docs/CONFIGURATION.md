@@ -15,7 +15,7 @@ url = "https://example.com/mcp"
 headers = { Authorization = "Bearer ..." }
 ```
 
-Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app. A server is added in one step: paste its command, its address or the JSON block from its README into the field in Settings → Tools & search or in a chat's Details › MCP servers, press *Try*, and the server is started once without being saved, so you see whether it answers, where it runs, what it wrote to stderr and its tools before you add it. Added from a chat, it is switched on in that chat. The agent does the same with `McpAdd`, which also switches on a server that answers.
+Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app. A server is added in one step: paste its command, its address or the JSON block from its README into the field in Settings → MCP servers or in a chat's Details › MCP servers, press *Try*, and the server is started once without being saved, so you see whether it answers, where it runs, what it wrote to stderr and its tools before you add it. Added from a chat, it is switched on in that chat. The agent does the same with `McpAdd`, which also switches on a server that answers.
 
 In Docker a stdio server runs inside the Daedalus container unless it is set to run on the host machine, where your `adb`, paired devices, signed-in CLIs and files are. The host terminal starts it there and carries its stdin and stdout back; natively the two places are the same machine:
 
@@ -80,7 +80,7 @@ trim_window_share = 0.075    # and this share of the model's window (4 character
 [tools.groups.browser]       # how a group of tools reaches a run: eager (always in the tool list),
 load = "lazy"                # auto (while it fits), lazy (one catalogue line; the agent loads it with
                              # ToolSearch). Lazy by default: browser, self_development, scheduling,
-                             # loop, docs, learning, mcp_oauth. Settings → Tools & search shows each group's
+                             # loop, docs, learning, mcp_oauth. Settings → Tools shows each group's
                              # cost and how often it was used; a session can choose its own mode.
 
 [policy]                     # tool policy on top of the built-in rules (daedalus/host/policy.py)

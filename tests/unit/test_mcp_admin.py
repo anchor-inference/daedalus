@@ -175,7 +175,7 @@ async def test_the_sign_in_finishes_on_the_apps_callback(tmp_path: Path, monkeyp
         forged = await browser.get("/api/mcp/oauth/callback", params={"code": "c", "state": "not-it"})
         assert forged.status_code == 400
         back = await browser.get("/api/mcp/oauth/callback", params={"code": "c", "state": state})
-        assert back.status_code == 303 and back.headers["location"] == "/app/settings/tools?mcp=remote&mcp_linked=1"
+        assert back.status_code == 303 and back.headers["location"] == "/app/settings/mcp?mcp=remote&mcp_linked=1"
         assert (await browser.get("/api/mcp/servers")).json()["servers"][0]["oauth"]["linked"] is True
         removed = await browser.delete("/api/mcp/servers/remote")
         assert removed.status_code == 200 and removed.json()["servers"] == []

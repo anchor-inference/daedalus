@@ -1,4 +1,4 @@
-// Settings → Rules: how much of what it does in the world the agent decides on its own.
+// Settings → Approvals: how much of what it does in the world the agent decides on its own.
 //
 // One row per category of action (sending to people, publishing, paying…), one choice per row of four
 // levels from "does it" to "hands it to you", and whether a small model reviews the action against
@@ -76,7 +76,7 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
   const setReview = (category: string, on: boolean) => void put({ review: on ? [...new Set([...current.review, category])] : current.review.filter((c) => c !== category) });
   return (
     <>
-      <div className="card action-rules" data-testid="action-rules">
+      <div className="card action-rules" data-testid="action-rules" data-setting="action_rules">
         <div className="section-title" style={{ marginTop: 0 }}>{t("rules.actions.title")}</div>
         <div className="sub">{t("rules.actions.sub")}</div>
         <div className="ar-grid" role="table" aria-label={t("rules.actions.title")}>

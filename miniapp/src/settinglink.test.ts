@@ -11,7 +11,7 @@ import {
 } from "./settinglink";
 import { localEntry, ToastQueue, URGENT_MS } from "./toasts";
 
-const SUMMARY = { page: "limits", key: "compaction.preset" };
+const SUMMARY = { page: "context", key: "compaction.preset" };
 
 describe("the reference", () => {
   it("is read only when it is a page and a key", () => {
@@ -27,10 +27,10 @@ describe("the reference", () => {
     expect(settingOfError(new Error("plain"))).toBeNull();
   });
 
-  it("becomes the section's address naming the row, with the providers tab for a key", () => {
-    expect(settingPath(SUMMARY)).toBe("/app/settings/limits#compaction.preset");
-    expect(settingPath({ page: "models", key: "providers.opencode.api_key" })).toBe("/app/settings/models?tab=providers#providers.opencode.api_key");
-    expect(settingPath({ page: "models", key: "vision.preset" })).toBe("/app/settings/models#vision.preset");
+  it("becomes the section's address naming the row", () => {
+    expect(settingPath(SUMMARY)).toBe("/app/settings/context#compaction.preset");
+    expect(settingPath({ page: "providers", key: "providers.opencode.api_key" })).toBe("/app/settings/providers#providers.opencode.api_key");
+    expect(settingPath({ page: "tasks", key: "vision.preset" })).toBe("/app/settings/tasks#vision.preset");
   });
 
   it("quotes a key in its selector, so a provider id cannot break out of it", () => {
@@ -113,7 +113,7 @@ describe("notices", () => {
     const notice = noticeFromEvent("s1", { kind: "compaction", outcome: "fallback", detail: "cheap/flash: usage limit exceeded", model: "main/big", setting: SUMMARY });
     expect(notice).toMatchObject({ tone: "warning", sessionId: "s1", setting: SUMMARY });
     expect(notice?.body).toContain("main/big");
-    expect(noticeFromEvent("s1", { kind: "vision", outcome: "failed", setting: { page: "models", key: "vision.preset" } })?.tone).toBe("error");
+    expect(noticeFromEvent("s1", { kind: "vision", outcome: "failed", setting: { page: "tasks", key: "vision.preset" } })?.tone).toBe("error");
     expect(noticeFromEvent("s1", { kind: "vision", outcome: "failed" })).toBeNull();
   });
 });
@@ -125,7 +125,7 @@ describe("the toast of a setting", () => {
     const entry = localEntry(notice(7, "warning"));
     expect(entry.id).toBe(-7);
     expect(entry.setting).toEqual(SUMMARY);
-    expect(entry.link).toBe("/app/settings/limits#compaction.preset");
+    expect(entry.link).toBe("/app/settings/context#compaction.preset");
     expect(ToastQueue.duration(entry)).toBe(URGENT_MS);
   });
 

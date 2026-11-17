@@ -44,7 +44,7 @@ def register(api: FastAPI, app: Any, auth: Callable[..., Any]) -> None:
         """A recording to make meeting notes from; answers at once with the job to follow."""
         meetings = service()
         if not meetings.available():
-            raise HTTPException(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)")
+            raise HTTPException(409, "speech-to-text is not set up (Settings → Voice input)")
         state = await app.manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")

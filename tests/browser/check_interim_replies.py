@@ -147,7 +147,7 @@ def main() -> None:
         # The setting is where the other display choices are.
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         page.route("**/api/**", stub)
-        page.goto(f"{BASE}/settings/appearance?token=t&lang=ru")
+        page.goto(f"{BASE}/settings/text?token=t&lang=ru")
         expect(page.get_by_text("Ответы агента между шагами")).to_be_visible(timeout=10000)
         page.get_by_role("radio", name="В шагах").click()
         stored = page.evaluate("() => JSON.parse(localStorage.getItem('daedalus.appearance') || '{}').replies")

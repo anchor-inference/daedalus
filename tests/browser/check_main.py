@@ -151,8 +151,8 @@ def desktop(page: Page, lang: str) -> None:
     page.wait_for_timeout(300)
     assert any(p[0] == "/api/dispatches/d7k2m9/cancel" for p in main.posts), main.posts
 
-    # Settings → Models: the main orchestrator's own choice, preselected with the mid-tier preset.
-    page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
+    # Settings → Models for tasks: the main orchestrator's own choice, preselected with the mid-tier preset.
+    page.goto(f"{BASE}/settings/tasks?token=t&lang={lang}")
     card = page.locator('[data-card="main-orchestrator"]')
     expect(card).to_be_visible()
     # The choice is the chosen model drawn as its row, tagged as the mid-tier one.

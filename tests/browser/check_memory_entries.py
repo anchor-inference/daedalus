@@ -219,7 +219,7 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
     memory = MemoryStub()
     page = open_page(browser, width, lang, memory, "settings/memory", saved)
     page.wait_for_selector('[data-setting="memory.generate"] [role=switch]', timeout=20000)
-    for anchor in ("memory.search_chats", "memory.paused", "memory.synthesis_preset", "memory.synthesis_usd_per_day", "memory.reset", "memory.import", "memory.export"):
+    for anchor in ("memory.search_chats", "memory.paused", "memory.synthesis_preset", "memory.synthesis_usd_per_day"):
         if not page.locator(f'[data-setting="{anchor}"]').count():
             problems.append(f"{where}: no {anchor} row")
     page.locator('[data-setting="memory.generate"] [role=switch]').click()
@@ -240,6 +240,12 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
     page.wait_for_function("words => document.querySelector('.memory-learning').innerText.includes(words)", arg=WORDS[lang]["counts"], timeout=8000)
     if not wrote(memory, "POST", "/api/memory/synthesis/run"):
         problems.append(f"{where}: Update now asked for nothing")
+    # Reset is under Memory upkeep, with the import and the export.
+    page.goto(f"{BASE}/settings/memory-upkeep?token=t&lang={lang}")
+    page.wait_for_selector('[data-setting="memory.reset"]', timeout=20000)
+    for anchor in ("memory.reset", "memory.import", "memory.export"):
+        if not page.locator(f'[data-setting="{anchor}"]').count():
+            problems.append(f"{where}: no {anchor} row on Memory upkeep")
     page.locator('[data-action="memory-reset"]').click()
     confirm = page.locator('[data-action="reset-confirm"]')
     if not confirm.is_disabled():

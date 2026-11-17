@@ -1228,7 +1228,7 @@ session working there) and handed over with `upload.put`; a command-line member 
   did, and where the page is now.
 - **Site notes.** `BrowserNote(note, host?)` proposes one line (at most 400 characters) about a site
   for later visits (`host` defaults to the current tab's); the operator approves or discards it in
-  Settings → Environments, and only an approved note is shown — once per owner and site, after a result,
+  Settings → Browser, and only an approved note is shown — once per owner and site, after a result,
   outside the fence and labelled as the operator's approval, not the page's words. Notes are kept in
   the host's `kv` table (`browser.site_notes`) per project (or for every agent, from a chat of its
   own), at most five approved per site and twenty waiting per scope; the audit row is `note`.
@@ -1425,7 +1425,7 @@ the daemon's private figure under the cost profile `browser`, beside the termina
 
 ### Settings, watch mode and the injection monitor
 
-`[browser]` in the host's configuration is Settings → Environments: `running_cap`, `idle_close_minutes`,
+`[browser]` in the host's configuration is Settings → Environments, Browser and Browser safety: `running_cap`, `idle_close_minutes`,
 `record_frames` (the default for a new group), `record_takeover`, `record_retention_days`,
 `record_max_mb`, `lan_allow`, `watch_mode` and `watch_domains`, `injection_monitor` and
 `injection_monitor_preset`, `extract_preset` (the model `BrowserText(query=…)` reads with) and

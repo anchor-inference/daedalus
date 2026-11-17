@@ -42,7 +42,7 @@ CALL_TIMEOUT_SECONDS = 45.0
 """An update with nothing cached asks the registry first, which the proxy allows twenty seconds."""
 NOTED_FILE = "keyproxy-clients-announced.json"
 """Per client, the release already offered and the automatic revert already reported, so a restart repeats neither."""
-LINK = "/app/settings/models?tab=providers"
+LINK = "/app/settings/keyproxy"
 """Where the key proxy's card is, client versions included."""
 
 

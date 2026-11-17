@@ -483,7 +483,7 @@ async def test_a_chrome_that_is_not_connected_is_said_plainly_and_nothing_is_ask
         while rig.service.user_connection()[0]:
             await asyncio.sleep(0.02)
     text, failed = await rig.call(sid, "BrowserAskOperatorChrome", reason="read a page")
-    assert failed and "not connected" in text and "Settings → Environments → Your Chrome" in text and "Chrome closed the connection" in text
+    assert failed and "not connected" in text and "Settings → Browser → Your Chrome" in text and "Chrome closed the connection" in text
     assert not rig.pending(sid) and not agents_browser.groups and not chrome.groups
 
 
@@ -491,7 +491,7 @@ async def test_a_chrome_that_is_not_connected_is_said_plainly_and_nothing_is_ask
 async def test_an_installation_that_does_not_offer_the_operators_chrome_says_so(rig: Rig) -> None:
     sid = await rig.session()
     text, failed = await rig.call(sid, "BrowserAskOperatorChrome", reason="read a page")
-    assert failed and "not offered" in text and "Settings → Environments → Your Chrome" in text
+    assert failed and "not offered" in text and "Settings → Browser → Your Chrome" in text
     assert not rig.pending(sid)
     state = await rig.manager.get_state(sid)
     assert state is not None

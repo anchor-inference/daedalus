@@ -79,7 +79,7 @@ def require_sherpa() -> Any:
     except ImportError as exc:  # pragma: no cover - exercised only where the extra is absent
         raise SpeechError(
             "local speech recognition needs the speech extra: run `uv sync --extra speech` in the runtime, "
-            "or use a transcription endpoint instead (Settings → Tools → Voice notes)"
+            "or use a transcription endpoint instead (Settings → Voice input)"
         ) from exc
     return sherpa_onnx
 

@@ -101,7 +101,7 @@ voice = "alloy"
 format = "mp3"               # mp3 | opus | pcm
 ```
 
-Both models are chosen in the app as well, under **Settings → Voice & speech**, and a change applies
+Both models are chosen in the app as well, under **Settings → Voice mode**, and a change applies
 to the next turn with no restart. An installation that had a `[voice]` section has it moved to
 `[companion]` on the first start, every key as it was.
 
@@ -126,7 +126,7 @@ neither, the page still works from the keyboard and says why the microphone is m
 
 **Speaking back.** Three ways, tried in that order, and the first is the one to use.
 
-**A voice that runs here.** **Settings → Voice & speech → Voice (speech synthesis)** is a catalog of eighteen
+**A voice that runs here.** **Settings → Voice mode → Voice (speech synthesis)** is a catalog of eighteen
 voices — Supertonic at the top of it, Piper in ten languages including three Russian ones, and Kokoro
 and KittenTTS for English — between thirteen and three hundred and fifty megabytes each. Pick one,
 press **Play sample** to hear it say a sentence in its own language, and press **Use this one**. From
@@ -167,8 +167,8 @@ and it works for the session.
 ## Speech recognition in the chat is not the companion
 
 Dictating into the composer and the voice notes you send in the chat or in Telegram are turned into text
-by the speech recognition set in **Settings → Voice & speech → Speech recognition for the chat**
-([/app/settings/voice#asr.transcriber](/app/settings/voice#asr.transcriber)), the `[asr]` section: a
+by the speech recognition set in **Settings → Voice input → Speech recognition for the chat**
+([/app/settings/dictation#asr.transcriber](/app/settings/dictation#asr.transcriber)), the `[asr]` section: a
 local model downloaded under the same section (no key, nothing leaves the machine), or an
 OpenAI-compatible `/audio/transcriptions` endpoint. Nothing on the companion page changes it. The
 agent can switch it for you with `SettingsChange` — `{"asr": {"transcriber": "gigaam-ru"}}` for a

@@ -319,8 +319,8 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = new_context(browser, viewport={"width": 1280, "height": 900})
     page = context.new_page()
     page.route("**/api/**", settings_stub)
-    # The card lives on Voice & speech now, its two choices compact pickers in their rows.
-    page.goto(f"{BASE}/settings/voice?token=t&scheme=dark&lang=en")
+    # The card lives on Voice input, its two choices compact pickers in their rows.
+    page.goto(f"{BASE}/settings/dictation?token=t&scheme=dark&lang=en")
     page.wait_for_selector("#asr-transcriber", timeout=15000)
 
     def offered_by(picker: str) -> list[str]:

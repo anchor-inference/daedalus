@@ -1,4 +1,4 @@
-"""Settings → Rules: the action categories, their levels and the auto-review's decision log.
+"""Settings → Approvals: the action categories, their levels and the auto-review's decision log.
 
 The levels themselves are a section of the settings (``[action_rules]``) and are saved with them;
 this answers what the screen needs beside them: the categories in the order the host knows them,

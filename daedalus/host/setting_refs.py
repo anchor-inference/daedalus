@@ -32,27 +32,27 @@ class SettingRef:
     def link(self) -> str:
         """The app address that opens the section, scrolls to the row and highlights it.
 
-        The row is the fragment (``/app/settings/limits#compaction.preset``), the same form the
+        The row is the fragment (``/app/settings/context#compaction.preset``), the same form the
         settings index gives the agent, so every way to a row is one address the app reads one way."""
         return f"{SETTINGS_PATH}/{quote(self.page)}#{quote(self.key, safe='.')}"
 
 
-COMPACTION_MODEL = SettingRef("limits", "compaction.preset")
-VISION_MODEL = SettingRef("models", "vision.preset")
-VISION_OUTPUT = SettingRef("models", "vision.max_output_tokens")
-AUXILIARY_FALLBACK = SettingRef("models", "model.fallback_to_session")
-SPEECH_RECOGNITION = SettingRef("voice", "asr.transcriber")
-LOCAL_SPEECH_MODEL = SettingRef("voice", "stt.local_model")
-SPEECH_MODELS = SettingRef("voice", "stt.models")
+COMPACTION_MODEL = SettingRef("context", "compaction.preset")
+VISION_MODEL = SettingRef("tasks", "vision.preset")
+VISION_OUTPUT = SettingRef("tasks", "vision.max_output_tokens")
+AUXILIARY_FALLBACK = SettingRef("tasks", "model.fallback_to_session")
+SPEECH_RECOGNITION = SettingRef("dictation", "asr.transcriber")
+LOCAL_SPEECH_MODEL = SettingRef("speech-models", "stt.local_model")
+SPEECH_MODELS = SettingRef("speech-models", "stt.models")
 """The catalogue of local speech models, where one is downloaded."""
-SPEND_CAP = SettingRef("limits", "limits.usd_total")
-RUN_SPEND_CAP = SettingRef("limits", "limits.usd_per_run")
-WEB_SEARCH = SettingRef("tools", "tools.web.search.backend")
+SPEND_CAP = SettingRef("budget", "limits.usd_total")
+RUN_SPEND_CAP = SettingRef("budget", "limits.usd_per_run")
+WEB_SEARCH = SettingRef("search", "tools.web.search.backend")
 
 
 def provider_spend_cap(provider_id: str) -> SettingRef:
-    """One provider's total spend cap, on Settings → Limits."""
-    return SettingRef("limits", f"limits.usd_total_per_provider.{provider_id}")
+    """One provider's total spend cap, on Settings → Budget."""
+    return SettingRef("budget", f"limits.usd_total_per_provider.{provider_id}")
 
 
 def preset_images(preset_id: str) -> SettingRef:
@@ -61,8 +61,8 @@ def preset_images(preset_id: str) -> SettingRef:
 
 
 def provider_key(provider_id: str) -> SettingRef:
-    """The key of one provider endpoint, on the providers tab of Settings → Models."""
-    return SettingRef("models", f"providers.{provider_id}.api_key")
+    """The key of one provider endpoint, on Settings → Providers."""
+    return SettingRef("providers", f"providers.{provider_id}.api_key")
 
 
 class SettingProblem(RuntimeError):

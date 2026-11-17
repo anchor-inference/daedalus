@@ -260,10 +260,16 @@ function UpstreamBlock({ row, terminal, toast, reload }: { row: SubscriptionUpst
   );
 }
 
-/** Settings → Models → Providers: every subscription's accounts. Hidden where no model goes through one. */
+/** Settings → Subscription accounts: every subscription's accounts. The card is the whole section, so
+ *  with no subscription behind any model it says so rather than leaving the page blank. */
 export function SubscriptionAccountsCard({ toast }: { toast: (text: string) => void }) {
   const { data, load } = useSubscriptionAccounts();
-  if (!data || !data.upstreams.length) return null;
+  if (!data || !data.upstreams.length) return (
+    <div className="card accounts-card" data-setting="accounts">
+      <div className="section-title" style={{ marginTop: 0 }}>{t("accounts.title")}</div>
+      <div className="sub">{t(data ? "accounts.none" : "common.loading")}</div>
+    </div>
+  );
   return (
     <div className="card accounts-card" data-setting="accounts">
       <div className="section-title" style={{ marginTop: 0 }}>{t("accounts.title")}</div>

@@ -423,7 +423,7 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             refused = await save_patch(app, {"heartbeat": {"enabled": arg == "on"}})
             if refused:
                 return refused
-            return f"heartbeat {'on' if app.config.heartbeat.enabled else 'off'}" + ("" if heartbeat.read().strip() else " (HEARTBEAT.md is empty: fill it in Settings → Heartbeat)")
+            return f"heartbeat {'on' if app.config.heartbeat.enabled else 'off'}" + ("" if heartbeat.read().strip() else " (HEARTBEAT.md is empty: fill it in Settings → Scheduled runs)")
         if arg == "run":
             try:
                 started = await heartbeat.fire(manual=True)
@@ -434,7 +434,7 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
         return (
             f"heartbeat: {'on' if st['enabled'] else 'off'}{'' if st['armed'] or not st['enabled'] else ' (file empty → idle)'} · every {st['interval_minutes']} min · "
             f"active {st['active_hours']} UTC · today {st['runs_today']}/{st['max_runs_per_day']} · last {st['last_run'] or 'never'}\n"
-            "usage: /heartbeat on|off|run — the prompt is HEARTBEAT.md (Settings → Heartbeat)"
+            "usage: /heartbeat on|off|run — the prompt is HEARTBEAT.md (Settings → Scheduled runs)"
         )
     if name == "balance":
         monitor = app.extensions.get("balance")

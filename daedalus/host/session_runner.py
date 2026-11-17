@@ -222,7 +222,7 @@ COMPUTER_LIVE_SECONDS = 3.0
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
-BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it in Settings → Limits"
+BUDGET_WAY_OUT = "the daily cap reopens at 00:00 UTC, or sooner if the operator raises it in Settings → Budget"
 """What lifts the daily cap, in the words every refusal and notice uses. They used to point at a
 ``/budget reset`` that no front has ever had, so the operator was sent to look for a command."""
 RECOVERY_REASONS = frozenset({"transient_llm_error_retry", "model_fallback_triggered", "soft_stop_notified", "llm_context_window_exceeded", "context_window_recovered", "reasoning_length_cut_retry", "continue_prompt_injected", "max_output_token_recovery"})
@@ -8191,7 +8191,7 @@ class SessionManager:
         return False
 
     async def _log_override(self, state: SessionState, approved: Sequence[dict[str, Any]], what: str, via: str) -> None:
-        """The operator's override in the review log beside the block it lifted, for Settings → Rules."""
+        """The operator's override in the review log beside the block it lifted, for Settings → Approvals."""
         for item in approved:
             blocked = item.get("blocked") if isinstance(item, dict) else None
             if not isinstance(blocked, dict):
@@ -8432,11 +8432,11 @@ class SessionManager:
         if provider_id and provider_cap > 0:
             spent, _ = await self.spend(provider_id=provider_id, since=since)
             if spent >= provider_cap:
-                return "provider_cap", f"total cap for provider {provider_id!r} reached: ${spent:.2f} spent of ${provider_cap:.2f} (limits.usd_total_per_provider); raise it or reset the counter in Settings → Limits"
+                return "provider_cap", f"total cap for provider {provider_id!r} reached: ${spent:.2f} spent of ${provider_cap:.2f} (limits.usd_total_per_provider); raise it or reset the counter in Settings → Budget"
         if limits.usd_total > 0:
             spent, _ = await self.spend(since=since)
             if spent >= limits.usd_total:
-                return "total_cap", f"total spend cap reached: ${spent:.2f} spent of ${limits.usd_total:.2f} (limits.usd_total); raise it or reset the counter in Settings → Limits"
+                return "total_cap", f"total spend cap reached: ${spent:.2f} spent of ${limits.usd_total:.2f} (limits.usd_total); raise it or reset the counter in Settings → Budget"
         return None
 
     async def _enforce_caps(self, state: SessionState, run_id: str) -> None:

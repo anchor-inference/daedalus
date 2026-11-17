@@ -419,7 +419,7 @@ LOG_KEEP_DAYS = 90
 
 
 class ReviewLog:
-    """Every review the host made, newest first, for Settings → Rules. Kept ninety days."""
+    """Every review the host made, newest first, for Settings → Approvals. Kept ninety days."""
 
     def __init__(self, db: Any) -> None:
         self.db = db

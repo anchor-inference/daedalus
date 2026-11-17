@@ -70,7 +70,7 @@ line, and the desktop launcher's status page prints the same one.
 
 ## Action rules
 
-The policy decides what a call may *touch*. Settings → Working rules decides how much of what the agent *does
+The policy decides what a call may *touch*. Settings → Approvals decides how much of what the agent *does
 in the world* it decides on its own. Every tool call is sorted into the categories it acts in
 (`daedalus/host/action_rules.py` holds the table, and a new tool that acts on the world gets a line
 there):
@@ -109,7 +109,7 @@ with the next run, a restart or a second answer, a second press grants nothing, 
 orchestrator cannot press it. An ask is an ordinary approval request. The review **fails closed**: a timeout (`review_timeout_seconds`), an error or an
 answer that is neither word asks you. It never sees a secret: everything it reads goes through the
 redactor first, so it reads `«secret:…»` placeholders, not values. Every decision is logged and shown
-under Settings → Working rules for ninety days. It is on by default for `message`, `publish` and `payment`.
+under Settings → Approvals for ninety days. It is on by default for `message`, `publish` and `payment`.
 
 **Pages that talk to the agent.** Every fetched page, browser read, search result and MCP reply is
 already fenced as data. Its text is also scanned for what reads like instructions to an AI agent —

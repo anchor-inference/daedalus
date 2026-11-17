@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The summary model picker in Settings → Limits & budget: the session's own model first, every
+// The summary model picker in Settings → Context: the session's own model first, every
 // preset with its provider, and a preset deleted since it was chosen shown as missing.
 
 import { act } from "react";

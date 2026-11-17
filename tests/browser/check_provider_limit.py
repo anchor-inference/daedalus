@@ -62,9 +62,7 @@ def main() -> int:
             context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
             page = context.new_page()
             page.route("**/api/**", host)
-            page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
-            # Providers sit on their own tab of the models section since the free-model catalog arrived.
-            page.get_by_role("tab", name="Providers" if lang == "en" else "Провайдеры").click()
+            page.goto(f"{BASE}/settings/providers?token=t&lang={lang}")
             provider = page.locator(".mrow", has_text="vendor").first
             provider.locator(".mmain").click()
             limits = provider.locator(".provider-limit")

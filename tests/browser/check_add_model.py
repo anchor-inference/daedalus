@@ -44,7 +44,7 @@ TYPED = "z-ai/glm-5.3-flash"  # $0.15/$0.50, 200k, text only
 
 
 def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]
-    """Settings -> Models -> Providers: the Go row says how it is paid for, and Zen is one click away."""
+    """Settings -> Providers: the Go row says how it is paid for, and Zen is one click away."""
     settings = copy.deepcopy(SETTINGS)
     settings["keyproxy_base"] = "http://keyproxy:3200"
     settings["providers"] = {"opencode": {"kind": "opencode", "name": "OpenCode Go", "base_url": "http://keyproxy:3200/opencode", "billing": "subscription", "timeout_seconds": 900}}
@@ -64,8 +64,7 @@ def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyp
         context = browser.new_context(viewport={"width": width, "height": 900})
         page = context.new_page()
         page.route("**/api/**", host)
-        page.goto(f"{BASE}/settings/models?token=t")
-        page.get_by_role("tab", name="Providers").click()
+        page.goto(f"{BASE}/settings/providers?token=t")
         row = page.locator(".mrow", has_text="OpenCode Go").first
         if GO_HINT not in row.inner_text():
             failures.append(f"{width}: the OpenCode Go row does not say it is a subscription")

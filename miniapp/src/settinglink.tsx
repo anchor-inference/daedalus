@@ -35,11 +35,9 @@ export function settingOfError(error: unknown): SettingRef | null {
   return error instanceof ApiError ? settingRef(error.data.setting) : null;
 }
 
-/** The address that opens the section and names the row. The models page keeps its endpoints on a
- *  tab of their own, and a provider's key is only on the page while that tab is open. */
+/** The address that opens the section and names the row. */
 export function settingPath(ref: SettingRef): string {
-  const tab = ref.page === "models" && ref.key.startsWith("providers.") ? "providers" : null;
-  return `${pathFor("settings", ref.page, { tab })}#${encodeURIComponent(ref.key).replace(/%2E/gi, ".")}`;
+  return `${pathFor("settings", ref.page)}#${encodeURIComponent(ref.key).replace(/%2E/gi, ".")}`;
 }
 
 /** The row the address names: its fragment, or null. A message anchor (`#m12`) is not a row. */

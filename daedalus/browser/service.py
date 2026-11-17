@@ -622,7 +622,7 @@ class Browsers:
         decided: their switch in the panel, or their yes to the agent's ask. One path for both, so the
         consent record and the event the app redraws on are the same whichever way they said it."""
         if env == USER and not self.user_offered():
-            raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
+            raise Unsupported("this installation does not offer your Chrome (Settings → Browser → Your Chrome)")
         choice = await self.choices.switch(session_id, env, consent=consent)
         if self.bus is not None:
             with contextlib.suppress(Exception):

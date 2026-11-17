@@ -850,7 +850,7 @@ class SettingsBody(BaseModel):
     """The levels per action category, which of them are reviewed and the review's model."""
     compaction: dict[str, Any] | None = None
     memory: dict[str, Any] | None = None
-    """Settings → Memory: the sensitive subjects Remember may keep, the classifier's model, the tidying."""
+    """Settings → Memory and Memory upkeep: the sensitive subjects Remember may keep, the classifier's model, the tidying."""
     orchestrator: dict[str, Any] | None = None
     """The project orchestrator's defaults: its model preset, its wake-up batching and its limits."""
     dispatcher: dict[str, Any] | None = None
@@ -858,7 +858,7 @@ class SettingsBody(BaseModel):
     terminals: dict[str, Any] | None = None
     """``running_cap`` from Settings; the terminals service reads the configuration on every admission."""
     browser: dict[str, Any] | None = None
-    """Settings → Environments: the cap, the idle close, recording, watch mode, the local network the
+    """Settings → Environments, Browser and Browser safety: the cap, the idle close, recording, watch mode, the local network the
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
     navigation: dict[str, Any] | None = None
@@ -1808,7 +1808,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
-    # Settings → Models → Accounts: several accounts per subscription, the default, the fallover.
+    # Settings → Subscription accounts: several accounts per subscription, the default, the fallover.
     api_subscription_accounts.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_recurring.register(api, app, auth)
@@ -2474,7 +2474,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         before anything is made."""
         found = app.extensions.get("browser")
         if found is None or not found.user_offered():  # type: ignore[attr-defined]
-            raise HTTPException(409, "this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
+            raise HTTPException(409, "this installation does not offer your Chrome (Settings → Browser → Your Chrome)")
         return found
 
     async def session_model_label(state: Any) -> str:
@@ -3379,7 +3379,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         until its words have.
         """
         if not recogniser_available(app.speech, app.config):
-            raise refusal(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)", SPEECH_RECOGNITION)
+            raise refusal(409, "speech-to-text is not set up (Settings → Voice input)", SPEECH_RECOGNITION)
         forget_old_recordings(kept)
         if recording:
             if not KEPT_NAME.fullmatch(recording) or not (kept / recording).is_file():
@@ -3758,7 +3758,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """One utterance as a recording, for a browser with no speech recognition of its own."""
         extension = voice()
         if not recogniser_available(app.speech, app.config):
-            raise refusal(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)", SPEECH_RECOGNITION)
+            raise refusal(409, "speech-to-text is not set up (Settings → Voice input)", SPEECH_RECOGNITION)
         suffix = Path(audio.filename or "").suffix or mimetypes.guess_extension((audio.content_type or "").split(";")[0]) or ".webm"
         target = settings.state_dir / "tmp" / f"utterance-{secrets.token_hex(4)}{suffix}"
         target.parent.mkdir(parents=True, exist_ok=True)

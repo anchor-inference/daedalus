@@ -33,7 +33,8 @@ from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
-SECTIONS = ["appearance", "notifications", "voice", "security", "models", "rules", "limits", "tools", "environments", "chat", "components", "dependencies", "heartbeat", "about"]
+# Every section the index lists, but the two only a desktop application or a native installation draws.
+SECTIONS = [s["id"] for s in json.loads((Path(__file__).resolve().parents[2] / "miniapp/src/screens/settings-index.json").read_text(encoding="utf-8"))["sections"] if s["id"] not in ("desktop", "address")]
 
 MEASURE = """() => {
   const vw = document.documentElement.clientWidth;
