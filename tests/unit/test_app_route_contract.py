@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -30,6 +30,7 @@ from typing import Any
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.api_panel import FORWARDED, OWN
+from daedalus.extensions.api_session_share import OWN_PATHS
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 
@@ -367,6 +368,14 @@ def test_the_scan_reads_the_app() -> None:
     assert any(c.method == "GET" and any(p.startswith("/api/projects/") and p.endswith("/watches") for p in c.paths) for c in calls)
 
 
+def _through_link_door(call: Call) -> Call:
+    """A live link's own page asks for a few paths the link's door answers under ``/api/share/`` instead
+    (``OWN_PATHS``): its page is checked against the routes those become, not the operator's."""
+    if not call.where.startswith("visit"):
+        return call
+    return replace(call, paths=tuple(OWN_PATHS.get(path, path) for path in call.paths))
+
+
 async def test_every_request_the_app_sends_is_a_route_the_host_serves(settings: Settings, db: Database) -> None:
     routes = await route_table(settings, db)
     # The comparison itself can tell a route from its absence and a method from the wrong one.
@@ -375,7 +384,7 @@ async def test_every_request_the_app_sends_is_a_route_the_host_serves(settings: 
     assert not served(routes, Call("probe", "POST", (f"/api/schedules/{HOLE}id{HOLE}/run",)))
     assert served(routes, Call("probe", None, ("/api/schedules",)))
     missing = sorted({f"{c.where}  {c.method or 'ANY'} {' | '.join(c.paths).replace(HOLE, '{}')}"
-                      for c in app_calls() if not served(routes, c)})
+                      for c in app_calls() if not served(routes, _through_link_door(c))})
     assert not missing, "the app calls routes the host does not serve:\n" + "\n".join(missing)
 
 
