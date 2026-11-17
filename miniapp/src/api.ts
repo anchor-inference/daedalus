@@ -4,6 +4,7 @@
 import type { ImportedOrigin, MessageImport } from "./imports/model";
 import type { DeskBridge, QuickBridge } from "./quick/bridge";
 import type { NavConfig } from "./navconfig";
+import { routed } from "./visit";
 
 declare global {
   interface Window {
@@ -239,7 +240,7 @@ export const api = {
   streamUrl: (sessionId: string) => panelPath(`/api/sessions/${sessionId}/stream`),
   downloadUrl: (sessionId: string, path: string) => {
     const token = storedToken();
-    return `/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+    return routed(`/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
   },
   authHeaders,
   fetch: authedFetch,
@@ -1414,6 +1415,8 @@ export type MessageView = {
   /** A message that came over an agent link (origin `guest:<link>`): who the link was made for and what
    *  the turn it started could do. The text is the guest's words, never the operator's. */
   guest?: { label: string; tools: string; kind?: "reply"; by?: "owner" } | null;
+  /** Written by a live link's visitor rather than the operator: the name they gave, empty when none. */
+  visitor?: { name: string } | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

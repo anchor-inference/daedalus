@@ -4037,6 +4037,33 @@ async def _session_bypass(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_bypass))
 
+# 168 — a live link to one session: whoever opens it drives that session in the app, as the operator
+# would (``daedalus.extensions.session_share``). The token is kept as it was handed out, because the
+# operator copies the same link again from the session's header; a revoked or expired row stays, so
+# the header can say when it stopped and who had used it. Visitors are counted by the random id their
+# browser made, with the name they gave, if any: nothing a visitor sends is an identity, and the count
+# is what the operator asked to see.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS session_shares (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    revoked_at TEXT,
+    last_seen_at TEXT
+);
+CREATE INDEX IF NOT EXISTS session_shares_by_session ON session_shares(session_id, created_at);
+CREATE TABLE IF NOT EXISTS session_share_visitors (
+    share_id TEXT NOT NULL REFERENCES session_shares(id) ON DELETE CASCADE,
+    visitor TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (share_id, visitor)
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

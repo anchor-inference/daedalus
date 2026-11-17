@@ -17,6 +17,7 @@ import { parseCsv } from "./csv";
 export { parseCsv } from "./csv";
 import { FileSkeleton } from "./feedback";
 import { createSharedFetch, type Joined } from "./sharedfetch";
+import { routed } from "./visit";
 
 /** Where the bytes come from: a file under a session API root, or a File object from the composer.
  * `lines` ("20-40", or a single number) is what an answer cited: the file opens as source with that range marked.
@@ -83,7 +84,8 @@ export function downloadHref(base: string, path: string): string {
   } catch {
     /* private mode */
   }
-  return `${base}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  // A live link's page names the file under its own prefix: a link carries no header, only its address.
+  return routed(`${base}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
 }
 
 /**

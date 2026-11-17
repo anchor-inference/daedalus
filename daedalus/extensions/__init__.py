@@ -49,6 +49,7 @@ EXTENSIONS = (
     "daedalus.extensions.loops",
     "daedalus.extensions.services",
     "daedalus.extensions.dialog_share",
+    "daedalus.extensions.session_share",
     "daedalus.extensions.balance",
     "daedalus.extensions.quota_sampler",
     "daedalus.extensions.companion",

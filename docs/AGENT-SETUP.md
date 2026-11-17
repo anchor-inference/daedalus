@@ -438,6 +438,22 @@ Restart the stack after changing `.env`
 (`docker compose … up -d`). With Telegram, register `https://<domain>/app` as the bot's menu button in
 @BotFather.
 
+### Live links to a conversation
+
+**Share → Live link** in a conversation's menu hands that conversation over: whoever opens the link gets
+the app's own screen for it (the chat, the composer with files, the panel, its terminals and browser) and
+drives the agent with your tools and permissions, with no review in between. Nothing else is reachable
+through it: not another conversation, the settings, the secrets, the models' configuration or a new chat.
+The link is a random token under `/v/<token>/` on the services door, never on the app's address, so it
+needs the door above and nothing more; on a native install it follows the public address you turn on in
+Settings. The dialog says whether the link can be opened from the internet, from your network only, or
+from this computer only. The header shows a live link while one is open, with how many visitors used it
+and when; revoking it ends every connection it has at once, and a link can be made to expire by itself.
+
+The visitor's terminal and browser view are WebSockets, so a proxy in front of the door has to pass the
+upgrade: `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` in the
+nginx block above (Caddy does it by itself).
+
 ## 5. Telegram (when wanted)
 
 Two shapes; both keep every feature:

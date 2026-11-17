@@ -148,7 +148,7 @@ from daedalus.host.setting_refs import (
     provider_spend_cap,
 )
 from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
-from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
+from daedalus.host.transcript_view import VISITOR_KEY, TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp import manager as mcp_manager
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
@@ -3942,6 +3942,7 @@ class SessionManager:
         secrets: Sequence[str] = (),
         autopilot: dict[str, Any] | None = None,
         guest: guest_turns.GuestTurn | None = None,
+        visitor: dict[str, str] | None = None,
         _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
@@ -3960,6 +3961,9 @@ class SessionManager:
         model may use and how, and the message carries the names for the app to draw.
         ``autopilot`` marks a message autopilot sent (its kind and decision), which the app labels and
         the continuation count reads (:mod:`daedalus.extensions.autopilot`).
+        ``visitor`` marks words a live link's visitor wrote (its link and the name they gave), which the app
+        labels so the operator can tell who wrote what (:mod:`daedalus.extensions.session_share`). It changes
+        nothing else: a visitor drives the session as the operator does.
         ``guest`` makes this a guest's turn (:mod:`daedalus.host.guest_turns`). It only ever starts a run
         of its own and raises ``GuestTurnBusy`` otherwise: placed in a running turn or a queue it would
         be read by a run with the operator's tools, and a queued item is merged with whatever else waits.
@@ -3974,6 +3978,8 @@ class SessionManager:
             words = {**words, "daedalus.reply_to": dict(reply_to)}
         if autopilot:
             words = {**words, "daedalus.autopilot": dict(autopilot)}
+        if visitor:
+            words = {**words, VISITOR_KEY: dict(visitor)}
         if guest is not None:
             words = {**words, guest_turns.METADATA_KEY: guest.as_metadata()}
         state = await self.get_state(session_id)
@@ -8738,7 +8744,7 @@ def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any
 # core places, or the one that opens the next turn, is written later from the queue item alone, so the item
 # has to carry it. It used to be dropped there: a message with a secret attached showed the host's note
 # about the secret as the operator's words and no chip.
-_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot", attached_files.METADATA_KEY)
+_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot", VISITOR_KEY, attached_files.METADATA_KEY)
 
 
 def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
@@ -8771,6 +8777,11 @@ def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     marks = [(item.get("display") or {}).get("daedalus.autopilot") for item in items]
     if items and all(marks):
         merged["daedalus.autopilot"] = marks[-1]
+    # A visitor's mark likewise only when every item is a visitor's: words joined with the operator's are
+    # not the visitor's alone, and the label would hide that the operator wrote some of them.
+    visits = [(item.get("display") or {}).get(VISITOR_KEY) for item in items]
+    if items and all(visits):
+        merged[VISITOR_KEY] = visits[-1]
     return merged
 
 

@@ -1,4 +1,4 @@
-"""The services door: a listener of its own that answers ``/s/`` (shared services) and ``/f/`` (canvas frames) and nothing else.
+"""The services door: a listener of its own that answers ``/s/`` (shared services), ``/f/`` (canvas frames) and ``/v/`` (live links to a session) and nothing else.
 
 A shared service runs pages an agent wrote. On the app's origin such a page holds everything the
 operator's browser holds there: its script reads the API with the session cookie, however carefully
@@ -50,10 +50,14 @@ LAN_MINUTES = 60
 
 
 class ServicesDoor:
-    """The whole application of the door's listener: ``/s/`` and ``/f/`` reach the API's routes, nothing else does.
+    """The whole application of the door's listener: ``/s/``, ``/f/`` and ``/v/`` reach the API's routes, nothing else does.
 
     A WebSocket under ``/s/`` goes the same way: a hot reload and a live app need it, and its route holds
-    it to the same rules as a page. Anywhere else one is closed before it opens.
+    it to the same rules as a page. So does one under ``/v/``, a live link's terminal or browser, which its
+    own door (``api_session_share``) checks. Anywhere else one is closed before it opens.
+
+    A live link is here rather than on the app's port for the reason services are: the app's origin holds
+    the operator's cookie, and a page a stranger opens has no business on it.
     """
 
     def __init__(self, api: ASGIApp) -> None:
@@ -61,10 +65,10 @@ class ServicesDoor:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
-        if scope["type"] == "websocket" and not path.startswith("/s/"):
+        if scope["type"] == "websocket" and not path.startswith(("/s/", "/v/")):
             await WebSocketClose(code=1008)(scope, receive, send)
             return
-        if path.startswith(("/s/", "/f/")):
+        if path.startswith(("/s/", "/f/", "/v/")):
             # /f/ is a canvas's live frame, which runs a page the agent wrote for the same reason.
             scope[SCOPE_KEY] = True
             await self.api(scope, receive, send)
