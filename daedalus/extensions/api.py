@@ -181,6 +181,7 @@ from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.filesystem import foreign_paths, machine_of
 from daedalus.host.host_exec import BRIDGE_DOWN
 from daedalus.host.installation_reach import secrets_hidden_from_commands
+from daedalus.host.job_log import read_job_log
 from daedalus.host.policy import BYPASS_KEEPS, SERVER_GRANT_DEFAULT_HOURS, SERVER_GRANT_HOURS, sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
@@ -2684,9 +2685,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "leader_title": leader.session.title if leader is not None else None,
             "subagents": subagents,
             # What the session still waits for once its turn is over: the app says "waiting for N jobs"
-            # instead of drawing a session whose render is still out there as finished.
-            "background_count": sum(1 for job in manager.jobs.get(session_id, {}).values() if job.running)
-            + sum(1 for child in subagents if child.get("status") in ("running", "waiting", "compacting")),
+            # instead of drawing a session whose render is still out there as finished. Its own jobs
+            # and its working helpers are two numbers: summed, the Jobs tab counted helpers it does not list.
+            "background_count": manager.running_jobs(session_id),
+            "subagents_running": sum(1 for child in subagents if child.get("status") in ("running", "waiting", "compacting")),
             "telegram_linked": bool(app.front is not None and await app.front.binding_for_session(session_id)),
             "share": await app.extensions["dialogs"].for_session(session_id) if "dialogs" in app.extensions else {"mode": "local", "slug": None, "key": None, "url": None, "public_base": ""},
             "verifications": dict(await app.db.fetchone("SELECT count(*) total, sum(passed) passed FROM verifications WHERE session_id = ?", (session_id,)) or {}),
@@ -2747,6 +2749,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such session")
         tasks = await manager.task_views(session_id)
         return {"tasks": tasks, "background_count": sum(task["state"] == "running" for task in tasks)}
+
+    @api.get("/api/sessions/{session_id}/tasks/{task_id}/log")
+    async def session_task_log(session_id: str, task_id: str, offset: int = -1, limit: int = 256 * 1024, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A job's log from byte ``offset`` on, or its tail when ``offset`` is negative, with how the job stands.
+
+        The Jobs tab follows a running job with this, asking each time for what came after the bytes it
+        holds (``next``); see :func:`daedalus.host.job_log.read_job_log`.
+        """
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        job = manager.jobs.get(session_id, {}).get(task_id)
+        if job is None:
+            raise HTTPException(404, "no such task")
+        try:
+            return await read_job_log(job, offset=offset, limit=limit)
+        except FileNotFoundError:
+            raise HTTPException(404, "the job's log is not there") from None
+        except OSError as exc:  # a pipe or a device under the log's name included: NotRegularFile is one
+            raise HTTPException(502, f"the job's log could not be read: {exc}") from None
 
     @api.post("/api/sessions/{session_id}/tasks/{task_id}/stop")
     async def stop_session_task(session_id: str, task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

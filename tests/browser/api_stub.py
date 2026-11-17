@@ -1169,6 +1169,31 @@ def session_tasks(session_id: str) -> dict:
     return {"tasks": tasks, "background_count": sum(task["state"] == "running" for task in tasks)}
 
 
+JOB_LOGS = {
+    "job-1": "".join(f"\x1b[2m[{12 + i // 60:02d}:{i % 60:02d}]\x1b[0m vite: rebuilt site/{name} in {40 + (i * 7) % 90} ms\n" for i, name in enumerate(["index.html", "menu.html", "style.css", "data/menu.json", "photos/cakes.json"] * 24))
+    + "watching for changes…\n",
+    "job-4": "".join(f"tests/unit/test_{name}.py ....................  [{(i + 1) * 20:3d}%]\n" for i, name in enumerate(["menu", "prices", "photos", "orders", "site"])) + "\n142 passed in 3.91s\n",
+    "job-5": "rsync site/ to the host\nsending incremental file list\nmenu.html\nstyle.css\n\x1b[31mmake: *** [deploy] Error 3\x1b[0m\n",
+}
+"""What a job of the bakery session printed, for ``GET /api/sessions/<id>/tasks/<job>/log``; the rest print one line."""
+
+
+def job_log(session_id: str, task_id: str, query: str) -> tuple[int, dict]:
+    """A piece of a job's log as the host hands it to the Jobs tab: from ``offset``, or its tail when negative."""
+    task = next((one for one in session_tasks(session_id)["tasks"] if one["id"] == task_id), None)
+    if task is None:
+        return 404, {"detail": "no such task"}
+    data = JOB_LOGS.get(task_id, f"$ {task['title']}\n").encode()
+    asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
+    offset, limit = int(asked.get("offset", "-1")), int(asked.get("limit", "262144"))
+    restart = offset < 0 or offset > len(data)
+    start = max(0, len(data) - limit) if restart else offset
+    piece = data[start:start + limit]
+    running = task["state"] == "running"
+    return 200, {"id": task_id, "state": task["state"], "outcome": task["outcome"], "exit_code": task["exit_code"], "running": running,
+                 "text": piece.decode("utf-8", "replace"), "start": start, "next": start + len(piece), "size": len(data), "restart": restart, "lines_only": False}
+
+
 def meeting_job(session_id: str, status: str) -> dict:
     """One meeting-notes job as the host reports it: under way, or done with its notes."""
     done = status == "done"
@@ -1968,6 +1993,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return status, "application/json", json.dumps(created)
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "tasks" and method.upper() == "GET":
         return 200, "application/json", json.dumps(session_tasks(parts[3]))
+    if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "log" and method.upper() == "GET":
+        status, piece = job_log(parts[3], parts[5], query)
+        return status, "application/json", json.dumps(piece)
     if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":
         return 200, "application/json", json.dumps({"stopped": True})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "browser-approvals" and method.upper() in ("GET", "PUT"):
@@ -2534,7 +2562,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load", "TRANSLATED_EXCHANGE", "session_translation", "translated_messages"]
+__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "job_log", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load", "TRANSLATED_EXCHANGE", "session_translation", "translated_messages"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

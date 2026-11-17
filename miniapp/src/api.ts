@@ -850,7 +850,10 @@ export type SessionSummary = {
   last_message_at: string;
   run_id: string | null;
   needs_attention?: boolean;
+  /** The session's own running jobs: what its Jobs tab lists. */
   background_count?: number;
+  /** Its helpers still at work, counted apart from its jobs. */
+  subagents_running?: number;
   unread_result?: boolean;
   archived?: boolean;
   /** The preset label or provider/model the session's next call goes to. */
@@ -967,6 +970,25 @@ export type TaskView = {
   child_session_id: string | null;
   result_ref: string | null;
   stop_supported: boolean;
+};
+
+/** ``GET /api/sessions/<id>/tasks/<task>/log``: a piece of a job's log and how the job stands. */
+export type JobLogPiece = {
+  id: string;
+  state: TaskView["state"];
+  outcome: TaskView["outcome"];
+  exit_code: number | null;
+  running: boolean;
+  text: string;
+  /** The byte the text starts at, and the one to ask from next. */
+  start: number;
+  next: number;
+  /** The log's size when it was read; -1 where only its last lines can be had. */
+  size: number;
+  /** Drop what is held: this is the log's tail, read afresh. */
+  restart: boolean;
+  /** The machine gives only its last lines: every read replaces the view. */
+  lines_only: boolean;
 };
 
 export type LoopView = {
@@ -1484,8 +1506,12 @@ export type SessionDetail = {
   id: string;
   title: string;
   status: string;
-  /** Running jobs and sub-agents: an idle session with some is not finished. */
+  /** The session's own running jobs: an idle session with some is not finished. Its helpers' jobs are
+   *  theirs and are not in it; the number once added the working helpers in, and the Jobs tab said
+   *  three over a list of one. */
   background_count?: number;
+  /** Its helpers still at work, which an idle session waits for as well. */
+  subagents_running?: number;
   /** The run is over and its answer is written; what the session is still saving behind it is not a run. */
   housekeeping?: boolean;
   /** Why the last run ended in an error, in the words the host was given — a provider's own refusal, typically.

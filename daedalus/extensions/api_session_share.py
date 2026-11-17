@@ -106,6 +106,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", _S + "/suggestion", SESSION),
         ("GET", _S + "/steer", SESSION),
         ("GET", _S + "/tasks", SESSION),
+        ("GET", _S + f"/tasks/{_PART}/log", SESSION),
         ("GET", _S + "/subagents", SESSION),
         ("GET", _S + "/questions", SESSION),
         ("GET", _S + "/verifications", SESSION),
