@@ -12,7 +12,7 @@ import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
 import { TogglesSelect } from "./toggles";
-import { AgentLangSelect, type AgentLangChoice } from "./agentlang";
+import { AgentLangSelect, agentLangLabel, type AgentLangChoice } from "./agentlang";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
@@ -178,6 +178,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
   // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
   const [secrets, setSecrets] = useState<AttachedSecret[]>([]);
   const [secretOpen, setSecretOpen] = useState(false);
@@ -731,6 +732,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onSecret={() => setSecretOpen(true)}
               onCoach={props.onCoach ? () => props.onCoach!(draft) : undefined}
               onBtw={props.onBtw ? () => props.onBtw!("") : undefined}
+              onLanguage={props.onAgentLang && props.translation ? () => setLangOpen(true) : undefined}
+              language={props.translation ? agentLangLabel(props.translation) : undefined}
               commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
               place={place.map((chip) => chip.name).join(" · ") || undefined} />
           )}
@@ -768,7 +771,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.onYagni
             ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
-          {props.onAgentLang && props.translation && <AgentLangSelect state={props.translation} defaultAgent={props.translationDefault} onChoose={props.onAgentLang} sheet={phone} />}
+          {/* The language chip is the desktop's: on a phone it did not fit beside the model and pushed
+              the row into itself (the model cut to "clau…", its effort lying on the microphone), and the
+              choice is a row of the + sheet there, the way the helpers are. */}
+          {props.onAgentLang && props.translation && <AgentLangSelect state={props.translation} defaultAgent={props.translationDefault} onChoose={props.onAgentLang} sheet={phone}
+            chip={!phone} open={langOpen} onOpenChange={setLangOpen} />}
           {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
@@ -848,9 +855,11 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
  * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
  * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
  */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, onBtw, place, extra }: {
+export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, onBtw, onLanguage, language, place, extra }: {
   onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
-  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; onBtw?: () => void; place?: string; extra?: ReactNode;
+  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; onBtw?: () => void;
+  /** The agent's language, with what the desktop's chip would say ("EN ⇄ RU"). */
+  onLanguage?: () => void; language?: string; place?: string; extra?: ReactNode;
 }) {
   const run = (fn: () => void) => () => { onClose(); fn(); };
   return (
@@ -866,6 +875,7 @@ export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onReco
       {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
       {onCoach && <SheetRow icon="wand" label={t("coach.open")} hint={t("coach.open.hint")} onClick={run(onCoach)} data={{ action: "coach" }} />}
       {onBtw && <SheetRow icon="ask" label={t("btw.open")} hint={t("btw.open.hint")} onClick={run(onBtw)} data={{ action: "btw" }} />}
+      {onLanguage && <SheetRow icon="globe" label={t("agentlang.for")} value={language} chevron onClick={run(onLanguage)} data={{ action: "language" }} />}
       {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
       {extra}
     </BottomSheet>
