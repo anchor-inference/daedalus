@@ -266,11 +266,15 @@ func hexSum(body []byte) string {
 // lines (pgrep -f) missed it, and the bridge then replaced the files of a running launcher.
 func TestTheInstallerSeesALauncherStartedByARelativePath(t *testing.T) {
 	requireInstallerTools(t)
-	sleep, err := exec.LookPath("sleep")
+	// The stand-in launcher is this test binary in its "sleep" mode. A copy of the system's sleep
+	// served before, until a runner image whose coreutils are one program choosing its tool by the
+	// name it is run under: copied as daedalus-desktop it exited at once, and the installer rightly
+	// went on with no launcher running.
+	self, err := os.Executable()
 	if err != nil {
-		t.Skip("no sleep")
+		t.Fatal(err)
 	}
-	program, err := os.ReadFile(sleep)
+	program, err := os.ReadFile(self)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,8 +293,9 @@ func TestTheInstallerSeesALauncherStartedByARelativePath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "daedalus-desktop"), program, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	running := exec.Command("./daedalus-desktop", "60")
+	running := exec.Command("./daedalus-desktop")
 	running.Dir = target
+	running.Env = append(os.Environ(), helperEnv+"=sleep")
 	if err := running.Start(); err != nil {
 		t.Fatal(err)
 	}

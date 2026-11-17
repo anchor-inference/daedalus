@@ -45,6 +45,10 @@ func TestMain(m *testing.M) {
 		platformTestHelper(os.Getenv(helperEnv))
 	}
 	switch os.Getenv(helperEnv) {
+	case "sleep":
+		// A program that stays running until it is killed (installer_sig_test.go).
+		time.Sleep(time.Minute)
+		os.Exit(0)
 	case "hold-lock":
 		// An upgrade (or a launcher) holding the installation lock until it is killed.
 		p, _ := NewPaths(os.Getenv("HELPER_DATA"))

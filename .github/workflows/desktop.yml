@@ -130,6 +130,9 @@ jobs:
           cache-dependency-path: ptyd/go.sum
       - name: Test with the emulator
         if: runner.os != 'Windows'
+        # Normally a few minutes. The emulator's zig build once hung for hours on both systems and held
+        # the release back until the six-hour job limit; a rerun is the cure, so fail early instead.
+        timeout-minutes: 20
         run: |
           command -v pkg-config >/dev/null || brew install pkgconf
           PKG_CONFIG_PATH="$(libghostty/build.sh)"
