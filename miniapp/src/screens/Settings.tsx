@@ -57,9 +57,6 @@ import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink
 import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
 import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
 
-/** The answer languages the page offers; any other the configuration names is shown as it is written,
- *  since the prompt takes the name as it stands ("Always answer the operator in …"). */
-const ANSWER_LANGUAGES = ["auto", "English", "Russian"];
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
 const TEMPERATURE_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
@@ -1083,7 +1080,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "desktop" | "devices" | "address" | "navigation" | "models" | "rules" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "desktop" | "devices" | "address" | "navigation" | "models" | "rules" | "translation" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1527,27 +1524,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {modelsTab === "providers" && <KeyproxyCard toast={toast} onChanged={rereadSettings} />}
           </>
         );
+      case "translation":
+        return <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />;
       case "rules":
         return (
           <>
             <PromptChange onApplied={(rules) => setS({ ...s, prompt: { ...s.prompt, rules } })} />
             <RulesEditor rules={s.prompt.rules} fallback={s.prompt.default_rules ?? ""} onSave={(rules) => save({ prompt: { rules } })} />
-            {/* Beside the rules because it is one: the agent's answers, not this page, which follows
-                the language picker. Until it had a row the setting existed only for SettingsChange. */}
-            <div className="card">
-              <Row title={t("settings.answerlang")} desc={t("settings.answerlang.sub")} stack data-setting="answer_language">
-                <Dropdown
-                  id="answer-language"
-                  label={t("settings.answerlang")}
-                  value={s.answer_language || "auto"}
-                  onChange={(answer_language) => save({ answer_language })}
-                  options={[
-                    ...ANSWER_LANGUAGES.map((id) => ({ id, label: t(`settings.answerlang.${id}`) })),
-                    ...(ANSWER_LANGUAGES.includes(s.answer_language || "auto") ? [] : [{ id: s.answer_language as string, label: s.answer_language as string }]),
-                  ]}
-                />
-              </Row>
-            </div>
             <ActionRules s={s} save={save} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.selfchange")}</div>
@@ -1630,7 +1613,6 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
             </div>
             <AutopilotSettings s={s} save={save} />
-            <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />
             <UserStyleCard toast={toast} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>

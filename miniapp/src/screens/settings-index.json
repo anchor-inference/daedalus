@@ -61,6 +61,12 @@
       "synonyms": ["rules", "instructions", "system prompt", "правила", "инструкции", "системный промпт"]
     },
     {
+      "id": "translation", "group": "work", "icon": "globe",
+      "title": { "en": "Translation", "ru": "Перевод" },
+      "about": { "en": "The language the agent answers in, and talking to it in another one: your language, the agent's, and the model that translates between them.", "ru": "Язык ответов агента и разговор с ним на другом языке: ваш язык, язык агента и модель, которая переводит между ними." },
+      "synonyms": ["translate", "translation", "translator", "language", "перевод", "переводчик", "перевести", "язык"]
+    },
+    {
       "id": "limits", "group": "work", "icon": "chart",
       "title": { "en": "Limits & budget", "ru": "Лимиты и бюджет" },
       "about": { "en": "Spend caps, the iteration limit, when the history is compacted and by which model, and balance alerts.", "ru": "Потолки трат, лимит итераций, когда и какой моделью сжимается история, предупреждения о балансе." },
@@ -513,10 +519,34 @@
       "synonyms": ["free models", "free tier", "OpenRouter free", "Groq", "Gemini", "бесплатные модели", "бесплатно", "без оплаты"]
     },
     {
-      "section": "rules", "anchor": "answer_language", "config": "answer_language",
+      "section": "translation", "anchor": "answer_language", "config": "answer_language",
       "title": { "en": "Answer language", "ru": "Язык ответов" },
       "about": { "en": "The language the agent writes its answers in; Automatic answers in the language of your message.", "ru": "Язык, на котором агент пишет ответы; «Автоматически» — на языке вашего сообщения." },
-      "synonyms": ["answer language", "reply language", "respond in English", "answer in Russian", "agent language", "язык ответов", "язык агента", "отвечай по-русски", "отвечай на английском", "на каком языке отвечать"]
+      "synonyms": ["answer language", "reply language", "respond in English", "answer in Russian", "language", "translate", "translation", "translator", "язык ответов", "отвечай по-русски", "отвечай на английском", "на каком языке отвечать", "язык", "перевод", "переводчик"]
+    },
+    {
+      "section": "translation", "anchor": "translation.operator_language", "config": "translation.operator_language",
+      "title": { "en": "Your language", "ru": "Ваш язык" },
+      "about": { "en": "The language you write in; when a session talks to the agent in another one, the agent's answers are translated into this.", "ru": "Язык, на котором вы пишете; когда сессия говорит с агентом на другом языке, ответы агента переводятся на этот." },
+      "synonyms": ["my language", "operator language", "language", "translate", "translation", "translator", "мой язык", "язык оператора", "язык", "перевод", "переводчик", "перевести"]
+    },
+    {
+      "section": "translation", "anchor": "translation.agent_language", "config": "translation.agent_language",
+      "title": { "en": "Agent language by default", "ru": "Язык агента по умолчанию" },
+      "about": { "en": "The language sessions talk to the agent in: your messages are translated into it and its answers back; Off sends your words as written.", "ru": "Язык, на котором сессии говорят с агентом: ваши сообщения переводятся на него, а ответы — обратно; «Выключено» отправляет ваши слова как есть." },
+      "synonyms": ["agent language", "work in English", "translate messages", "language", "translate", "translation", "translator", "язык агента", "работать на английском", "переводить сообщения", "язык", "перевод", "переводчик"]
+    },
+    {
+      "section": "translation", "anchor": "translation.preset", "config": "translation.preset",
+      "title": { "en": "Translator model", "ru": "Модель-переводчик" },
+      "about": { "en": "The model that translates both ways, twice a turn; a cheap fast one is enough, and Automatic picks one.", "ru": "Модель, которая переводит в обе стороны дважды за ход; хватит дешёвой быстрой, «Автоматически» выбирает её сама." },
+      "synonyms": ["translator", "translation model", "translator model", "translate", "translation", "language", "переводчик", "модель перевода", "модель-переводчик", "перевод", "язык"]
+    },
+    {
+      "section": "translation", "anchor": "translation.timeout_seconds", "config": "translation.timeout_seconds",
+      "title": { "en": "Translation time limit", "ru": "Лимит времени на перевод" },
+      "about": { "en": "How long one translation may take before the original is used instead, marked as untranslated.", "ru": "Сколько может длиться один перевод, прежде чем вместо него будет использован оригинал с пометкой «не переведено»." },
+      "synonyms": ["translation timeout", "time limit", "translate", "translation", "translator", "language", "таймаут перевода", "лимит времени", "перевод", "переводчик", "язык"]
     },
     {
       "section": "rules", "anchor": "prompt.rules", "config": "prompt.rules",

@@ -4,7 +4,7 @@ The composer's language chip names the pair it translates between and changes th
 at the host; the operator's message shows their own words with a switch to what the agent got, the code
 block intact on both sides; the agent's answer shows the translation with a switch to the original, a
 "translating" mark while the translator works and a plain mark when it failed; a question the agent asks
-is shown in the operator's language while the answer names the agent's own label; and Settings → Chat
+is shown in the operator's language while the answer names the agent's own label; and Settings → Translation
 has the translation card. Each state is photographed in English and in Russian, into ``SHOTS`` when set.
 
     APP_URL=http://127.0.0.1:8371/app python3 tests/browser/check_agent_language.py
@@ -51,9 +51,9 @@ def shot(page, name: str) -> None:  # type: ignore[no-untyped-def]
 
 WORDS = {
     "en": {"agent": "Show what the agent got (EN)", "mine": "Show my words", "original": "Show original", "translation": "Show translation", "done": "Translated EN → RU",
-           "pending": "Translating into RU…", "failed": "Translation failed — showing the original", "off": "Off", "card": "Translation"},
+           "pending": "Translating into RU…", "failed": "Translation failed — showing the original", "off": "Off", "card": "Talking in another language"},
     "ru": {"agent": "Показать, что получил агент (EN)", "mine": "Показать мои слова", "original": "Показать оригинал", "translation": "Показать перевод", "done": "Переведено EN → RU",
-           "pending": "Перевожу на RU…", "failed": "Перевести не удалось — показан оригинал", "off": "Выключено", "card": "Перевод"},
+           "pending": "Перевожу на RU…", "failed": "Перевести не удалось — показан оригинал", "off": "Выключено", "card": "Разговор на другом языке"},
 }
 
 
@@ -151,11 +151,11 @@ def walk(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     HOST.status = "idle"
     page.close()
 
-    # Settings → Chat: the card, the model left automatic with the host's choice named.
+    # Settings → Translation: the card, the model left automatic with the host's choice named.
     settings = browser.new_page(viewport={"width": 1280, "height": 900})
     settings.route("**/api/**", app_stub)
-    settings.goto(f"{BASE}/settings/chat?token=t&lang={lang}&scheme=dark")
-    card = settings.locator("[data-section='translation']")
+    settings.goto(f"{BASE}/settings/translation?token=t&lang={lang}&scheme=dark")
+    card = settings.locator("[data-card='agent-language']")
     expect(card.locator(".section-title")).to_have_text(words["card"])
     expect(card.locator("[data-setting='translation.preset']")).to_contain_text("DeepSeek Flash")
     expect(card.locator("[data-setting='translation.timeout_seconds'] input")).to_have_value("120")
