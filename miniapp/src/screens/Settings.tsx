@@ -46,6 +46,7 @@ import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark
 import { AsrSettingsCard } from "./AsrSettings";
 import { McpServers } from "./McpServers";
 import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
+import { TranslationSettings } from "./TranslationSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
@@ -1629,6 +1630,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
             </div>
             <AutopilotSettings s={s} save={save} />
+            <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />
             <UserStyleCard toast={toast} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>

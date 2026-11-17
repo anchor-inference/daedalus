@@ -7,7 +7,7 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, SubagentNotice, ToolImage, TurnAccount } from "./api";
+import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, MessageTranslation, SubagentNotice, ToolImage, TurnAccount } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
@@ -44,6 +44,8 @@ export type Turn = {
   answerSeq?: number;
   /** When the message carrying the answer was written: the time the answer was given. */
   answerAt?: number;
+  /** The answer crossed languages: translated for the operator, or on its way to being. */
+  answerTranslation?: MessageTranslation;
   /** The run went on past this turn: an operator's message steered it, and that message opened the
    *  next turn. Its last text was not the run's final answer, so it gets no time of its own. */
   steered?: boolean;
@@ -219,6 +221,7 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
         current.answer = "";
         current.answerSeq = undefined;
         current.answerAt = undefined;
+        current.answerTranslation = undefined;
       }
       current.activity.push({ kind: "summary", text: m.text, reason: "core" });
       mark(`x${m.seq ?? i}:${m.text.length}`);
@@ -235,7 +238,7 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       if (m.imported?.harness) current.imported = m.imported.harness;
       const note = systemNote(m);
       if (note) current.note = note;
-      mark(`${m.text.length}:${m.origin ?? ""}:${m.run_id ?? ""}:${m.imported?.harness ?? ""}`);
+      mark(`${m.text.length}:${m.origin ?? ""}:${m.run_id ?? ""}:${m.imported?.harness ?? ""}:${translationMark(m.translation)}`);
       return;
     }
     if (m.role === "system") return;
@@ -251,17 +254,20 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     // message's reference with nothing to draw.
     current.media = mergeMedia(current.media, m.media);
     if (m.imported?.harness) current.imported = m.imported.harness;
-    mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.account ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
+    // The translation's state too: an answer whose translation arrives keeps its text length only by
+    // chance, and one still "pending" with the same text as before must redraw once it is "done".
+    mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.account ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}:${translationMark(m.translation)}`);
     if (current.answer) {
       // Text that turned out not to be final becomes a note.
       current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
       current.answer = "";
       current.answerSeq = undefined;
       current.answerAt = undefined;
+      current.answerTranslation = undefined;
     }
     if (m.thinking) current.activity.push({ kind: "thinking", text: m.thinking });
     if (m.text && m.tool_calls.length) current.activity.push({ kind: "note", text: m.text, seq: m.seq ?? undefined, at: at || undefined });
-    else if (m.text) { current.answer = m.text; current.answerSeq = m.seq ?? undefined; current.answerAt = at || undefined; }
+    else if (m.text) { current.answer = m.text; current.answerSeq = m.seq ?? undefined; current.answerAt = at || undefined; current.answerTranslation = m.translation ?? undefined; }
     for (const c of m.tool_calls) {
       const r = results.get(c.id);
       const running = r === undefined;
@@ -343,6 +349,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
     t.answer = "";
     t.answerSeq = undefined;
     t.answerAt = undefined;
+    t.answerTranslation = undefined;
   }
   if (live.thinking && !thinkingKnown) t.activity.push({ kind: "thinking", text: live.thinking });
   for (const lt of fresh) {
@@ -355,7 +362,11 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   const annotated = new Map(live.tools.filter((lt) => lt.groups?.length).map((lt) => [lt.id, lt.groups]));
   if (annotated.size) t.activity = t.activity.map((a) => (a.kind === "tool" && !a.groups && annotated.has(a.id) ? { ...a, groups: annotated.get(a.id) } : a));
   for (const g of live.groups ?? []) t.activity.push({ kind: "group", group: g.group, tools: g.tools });
-  if (live.text) t.answer = stripHeadline(live.text);
+  if (live.text) {
+    // What streams is the original; a translation belongs to the written copy, which replaces this.
+    t.answer = stripHeadline(live.text);
+    t.answerTranslation = undefined;
+  }
   if (live.model) {
     t.model = live.model;
     t.fallback = live.fallback;
@@ -640,8 +651,11 @@ const receipts = (m: MessageView): string => [m.client_message_id ?? "", ...(m.c
 // had the words and no receipt id, every later read was "the same message", and the screen kept that
 // first copy for the rest of the run — so the bubble drawn while sending, which waits for a row
 // naming its id, stayed under it and the steer showed twice.
+/** A message's translation as far as drawing it goes: which state, and how long the other text is. */
+export const translationMark = (x: MessageTranslation | null | undefined): string => (x ? `${x.direction}${x.state}${x.alternate?.length ?? 0}` : "");
+
 const sameMessage = (a: MessageView, b: MessageView): boolean =>
-  a.run_id === b.run_id && a.internal === b.internal && a.text === b.text && a.thinking === b.thinking && a.tool_calls.length === b.tool_calls.length && a.tool_results.length === b.tool_results.length && !!a.summary === !!b.summary
+  translationMark(a.translation) === translationMark(b.translation) && a.translation?.alternate === b.translation?.alternate && a.run_id === b.run_id && a.internal === b.internal && a.text === b.text && a.thinking === b.thinking && a.tool_calls.length === b.tool_calls.length && a.tool_results.length === b.tool_results.length && !!a.summary === !!b.summary
   && a.origin === b.origin && a.delivery === b.delivery && receipts(a) === receipts(b) && (a.attachments?.length ?? 0) === (b.attachments?.length ?? 0) && (a.media?.length ?? 0) === (b.media?.length ?? 0);
 
 /**

@@ -640,7 +640,7 @@
   .composer[data-shape="idle"] .iconbtn.plus { order: 0; }
   .composer[data-shape="idle"] .composer-tools > .mic { order: 2; }
   .composer[data-shape="idle"] .composer-tools > .roundbtn { order: 3; }
-  .composer[data-shape="idle"] .composer-mode, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
+  .composer[data-shape="idle"] .composer-mode, .composer[data-shape="idle"] .agentlang-chip, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
   .composer[data-shape="open"] .composer-box { border-radius: var(--radius-xl); }
   .composer[data-shape="open"] .composer-box > .composer-field { padding: 8px 10px 4px; }
   /* The desktop gives the mic and Send one slot; the phone keeps a disabled Send in view beside the
@@ -658,9 +658,9 @@
   .composer[data-shape] .roundbtn.primary.stop { background: var(--primary); color: var(--primary-ink); }
   .composer[data-shape] .roundbtn.primary.queue, .composer[data-shape] .roundbtn.primary.reply { background: var(--accent); color: var(--accent-ink); }
   .composer[data-shape] .roundbtn.primary:disabled { opacity: .35; }
-  .composer[data-shape] .composer-mode, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 12px; gap: 4px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font-size: var(--fs-14); }
-  .composer[data-shape] .composer-mode::after, .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
-  .composer[data-shape] .composer-mode { flex: none; max-width: 40%; }
+  .composer[data-shape] .composer-mode, .composer[data-shape] .agentlang-chip, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 12px; gap: 4px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font-size: var(--fs-14); }
+  .composer[data-shape] .composer-mode::after, .composer[data-shape] .agentlang-chip::after, .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
+  .composer[data-shape] .composer-mode, .composer[data-shape] .agentlang-chip { flex: none; max-width: 40%; }
   .composer[data-shape] .composer-mode .mode-yagni, .composer[data-shape] .composer-mode .mode-autopilot { font-size: var(--fs-12); }
   .composer[data-shape] .model-select { flex: 0 1 auto; min-width: 0; }
   .composer[data-shape] .model-select > .ic:first-child { display: none; }

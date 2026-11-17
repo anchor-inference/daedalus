@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
@@ -37,6 +37,7 @@ import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer, withoutMedia
 import { SavedToMemory } from "../memory/savedchip";
 import { conversationMedia, galleryFor, toolImageSource, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
+import type { AgentLangChoice } from "../agentlang";
 import { Approval, QueuedMessage, ReturnedMessage, pendingApproval, queuedAfter, questionsKey, readQueued, readReturned, returnedDraft, returnedNoticeKey, settledIds, withQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { effortWord } from "../effortselect";
@@ -56,7 +57,7 @@ import { takeComputerSheet } from "../chatkind";
 import { RemoteHead, RemotePaused, remoteOf, remotePlace, useRemoteState } from "../remote";
 import { useMedia } from "../ui/index";
 import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
-import { DICT, plural, t } from "../i18n";
+import { DICT, lang, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
@@ -401,6 +402,16 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     try {
       await api.post(`/api/sessions/${id}/bypass`, { on });
       load();
+    } catch (e) {
+      toast(errorText(e));
+      load();
+    }
+  }
+
+  async function chooseAgentLang(choice: AgentLangChoice) {
+    try {
+      const translation = await api.post<SessionTranslation>(`/api/sessions/${id}/language`, { agent: choice.agent });
+      setDetail((previous) => (previous ? { ...previous, translation } : previous));
     } catch (e) {
       toast(errorText(e));
       load();
@@ -2060,6 +2071,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onAutopilot={bare || embedded || visit || main || orchestrating ? undefined : setAutopilot}
             bypass={!!detail?.bypass}
             onBypass={bare || embedded || visit ? undefined : setBypass}
+            translation={detail?.translation ?? { agent: "", operator: lang(), active: false, explicit: false }}
+            translationDefault={detail?.translation ? detail.translation.default ?? (detail.translation.explicit ? undefined : detail.translation.agent) : undefined}
+            onAgentLang={bare || visit ? undefined : chooseAgentLang}
             onCoach={bare || embedded || visit || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
             onBtw={bare || embedded || visit || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
@@ -2417,6 +2431,37 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
   );
 }
 
+/** Under the operator's words when the agent got them in another language: a switch to what it got, or
+ *  the mark that the translator failed and they went as written. */
+function OutgoingTranslation({ translation, agentSide, onFlip }: { translation: MessageTranslation; agentSide: boolean; onFlip: () => void }) {
+  if (translation.state === "failed") {
+    return <span className="msg-translation failed" data-translation="out-failed" title={translation.error || undefined}>{t("translation.out.failed")}</span>;
+  }
+  if (!translation.alternate) return null;
+  return (
+    <button type="button" className="msg-translation" data-translation="out" aria-pressed={agentSide} onClick={onFlip}>
+      {agentSide ? t("translation.out.mine") : t("translation.out.agent", { lang: translation.to.toUpperCase() })}
+    </button>
+  );
+}
+
+/** Under a translated answer: "translating…" while the translator works, the switch to the original
+ *  once it is done, and a plain mark when it failed and the original is what is shown. */
+function IncomingTranslation({ translation, original, onFlip }: { translation: MessageTranslation; original: boolean; onFlip: () => void }) {
+  if (translation.state === "pending") {
+    return <div className="answer-translation" role="status" data-translation="pending"><span className="live-dot" />{t("translation.in.pending", { lang: translation.to.toUpperCase() })}</div>;
+  }
+  if (translation.state === "failed") {
+    return <div className="answer-translation failed" data-translation="failed" title={translation.error || undefined}>{t("translation.in.failed")}</div>;
+  }
+  return (
+    <div className="answer-translation" data-translation="done">
+      <span className="sub">{t(original ? "translation.in.original" : "translation.in.done", { from: translation.from.toUpperCase(), to: translation.to.toUpperCase() })}</span>
+      <button type="button" className="linkbtn" aria-pressed={original} onClick={onFlip}>{t(original ? "translation.in.show.translation" : "translation.in.show.original")}</button>
+    </div>
+  );
+}
+
 /** The "N sources" button under an answer that cited or read the web; it opens the Sources tab on this turn. */
 function TurnSources({ turn }: { turn: Turn }) {
   const { openSources } = useContext(SessionContext);
@@ -2430,6 +2475,10 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const focusChat = useFocusChat();
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
   const split = useReplies() === "split";
+  // Which side of a translated exchange is on the screen: by default the operator's language, both for
+  // what they wrote and for the answer; each flips to the agent's side on its own.
+  const [agentWords, setAgentWords] = useState(false);
+  const [originalAnswer, setOriginalAnswer] = useState(false);
   if (turn.summary) return <SummaryBlock message={turn.summary} />;
   const elapsed = (live ? Date.now() : turn.endedAt) - turn.startedAt;
   const summary = activitySummary(turn, live, Date.now());
@@ -2453,7 +2502,12 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const fromGuest = !!turn.user && (!!turn.user.guest || !!turn.user.origin?.startsWith("guest:"));
   const fromPage = turn.user?.origin?.startsWith("page:") ? turn.user.origin.slice(5) : "";
   // The operator's words alone: the files are drawn above the bubble, so the list written for the model goes.
-  const words = turn.user ? withoutAttachedList(turn.user.text) : "";
+  const outgoing = turn.user?.translation?.direction === "out" ? turn.user.translation : null;
+  const words = turn.user ? withoutAttachedList(agentWords && outgoing?.alternate ? outgoing.alternate : turn.user.text) : "";
+  const incoming = !live && turn.answerTranslation?.direction === "in" ? turn.answerTranslation : null;
+  const showingOriginal = originalAnswer && incoming?.state === "done" && !!incoming.alternate;
+  const answer = showingOriginal ? incoming!.alternate! : turn.answer;
+  const answerKey = showingOriginal ? "o" : "";
   // A message that was only files has no bubble, unless something else is said in one.
   const bubble = !!turn.user && !!(words.trim() || inbound || fromPage || turn.user.visitor || turn.user.autopilot || turn.user.yagni || turn.user.reply_to || turn.user.secrets?.length);
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
@@ -2513,7 +2567,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
-            {words.trim() && <UserWords text={words} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />}
+            {words.trim() && <UserWords text={words} cacheKey={live ? undefined : `u${seq ?? turn.key}${agentWords ? "a" : ""}`} />}
+            {outgoing && <OutgoingTranslation translation={outgoing} agentSide={agentWords} onFlip={() => setAgentWords(!agentWords)} />}
             {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}
           </UserBubble>}
           {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}
@@ -2567,12 +2622,13 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {turn.account && (turn.answer || live) && <AccountChip account={turn.account} />}
       {turn.answer && (turn.media?.length ? (
         <div className={`answer answer-with-media ${live ? "streaming" : ""}`} data-quote={turn.answerSeq ?? ""}>
-          {splitMediaAnswer(turn.answer, turn.media).map((part, index) => part.kind === "text"
-            ? <Md key={`text-${index}`} text={part.text} cacheKey={live ? undefined : `a${turn.key}-${index}`} />
+          {splitMediaAnswer(answer, turn.media).map((part, index) => part.kind === "text"
+            ? <Md key={`text-${index}`} text={part.text} cacheKey={live ? undefined : `a${turn.key}${answerKey}-${index}`} />
             : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
         </div>
-      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={withoutMediaRefs(turn.answer)} cacheKey={live ? undefined : `a${turn.key}`} quote={turn.answerSeq ?? null} />)}
-      {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
+      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={withoutMediaRefs(answer)} cacheKey={live ? undefined : `a${turn.key}${answerKey}`} quote={turn.answerSeq ?? null} />)}
+      {turn.answer && incoming && <IncomingTranslation translation={incoming} original={showingOriginal} onFlip={() => setOriginalAnswer(!originalAnswer)} />}
+      {turn.answer && !live && <KeptFiles text={answer} onOpen={preview} />}
       {turn.answer && !live && <TurnSources turn={turn} />}
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
           opening the turn's work, and it can be answered while the agent is still writing. */}
@@ -2585,7 +2641,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
       <SavedToMemory activity={turn.activity} />
-      {turn.answer && !live && <MessageActions text={mediaCopyText(turn.answer, turn.media ?? [])} actions={answerActions(turn.answer, turn.answerSeq)} more={turnMenu} trail={answeredStamp} />}
+      {turn.answer && !live && <MessageActions text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq)} more={turnMenu} trail={answeredStamp} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}

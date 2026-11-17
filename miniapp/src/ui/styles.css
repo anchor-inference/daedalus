@@ -3465,13 +3465,17 @@ input.field[type="range"] {
 .composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); border-radius:var(--radius-lg); background:var(--surface-2); }
 /* The mode chip stays on every width, a running phone included: it is the one place that says the
    session plans, or holds to YAGNI, and the model chip is the one that gives way when the row is short. */
-.composer-mode { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-lg); background:var(--surface-2); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
-.composer-mode:hover, .composer-mode.on { color:var(--fg); }
+.composer-mode, .agentlang-chip { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-lg); background:var(--surface-2); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
+.composer-mode:hover, .agentlang-chip:hover, .composer-mode.on, .agentlang-chip.on { color:var(--fg); }
 .composer-mode .ic { flex:none; color:var(--fg-3); }
 .composer-mode.yagni, .composer-mode.autopilot { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
 .composer-mode .mode-yagni, .composer-mode .mode-autopilot { flex:none; color:var(--accent); font-size:var(--fs-11); font-weight:600; }
 /* The longer word is the one that gives way when both switches are on in a narrow composer. */
 .composer-mode .mode-autopilot { flex:0 1 auto; min-width:0; }
+/* The agent's language: the pair it translates between in the accent, the operator's code alone muted. */
+.agentlang-chip { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.agentlang-chip.translating, .composer-row .agentlang-chip.translating, .composer[data-shape] .composer-row .agentlang-chip.translating { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color:var(--accent); font-weight:600; }
+.agentlang-chip.off, .composer-row .agentlang-chip.off, .composer[data-shape] .composer-row .agentlang-chip.off { color:var(--fg-3); }
 .mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .mode-list { display:flex; flex-direction:column; }
 /* The one heading of the composer's menus: model and effort open under the same small title. */
@@ -3502,7 +3506,7 @@ input.field[type="range"] {
    the model name is what is cut, never the effort. These sit after the composer's own rules, which
    they would otherwise lose to at equal specificity. */
 @container (max-width: 560px) {
-  .composer-row .composer-mode { flex:none; max-width:45%; padding-inline:12px; gap:6px; font-size:var(--fs-12); }
+  .composer-row .composer-mode, .composer-row .agentlang-chip { flex:none; max-width:45%; padding-inline:12px; gap:6px; font-size:var(--fs-12); }
   .composer-row .composer-mode .ic { display:none; }
   .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
   .composer-row .model-select > .ic:first-child { display:none; }
@@ -3567,7 +3571,7 @@ input.field[type="range"] {
   .msg-actions .iconbtn.small, .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
   .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
   .msg-actions { opacity:1; }
-  .composer-row .model-select, .composer-row .composer-mode { min-height:var(--row-h-touch); }
+  .composer-row .model-select, .composer-row .composer-mode, .composer-row .agentlang-chip { min-height:var(--row-h-touch); }
   .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
   .composer-tools .ctx-pct { font-size:var(--fs-12); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }
@@ -5717,7 +5721,7 @@ button.coach-path:hover { color: var(--fg); }
 .coach-sheet .sheet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; margin: 0; padding: 0; }
 /* The coach's composer is for answering it: the mode chip and the folder chip of a working chat are noise
    in a window this small (the folder is the chat's, which the window sits over). */
-.coach-chat .composer-mode, .coach-chat .composer-place { display: none; }
+.coach-chat .composer-mode, .coach-chat .agentlang-chip, .coach-chat .composer-place { display: none; }
 /* The helpers' menu names the command each row also answers to, on the right where a shortcut stands. */
 .helpers-menu kbd { margin-left: auto; padding-left: 16px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
 /* The side question's empty window: one field, a line on what happens, and Ask. */
@@ -5898,3 +5902,15 @@ body.resizing .kind-tabs-pill { transition: none; }
 .runon-project-folder > .ic { flex: none; color: var(--fg-2); }
 .runon-project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .runon-project-settings { align-self: flex-start; }
+
+/* A translated exchange: one quiet line under the words and under the answer, never a box of its own,
+   since on most turns it is read past and only sometimes clicked. */
+.msg-translation { display:block; margin-top:var(--space-1); padding:0; background:none; border:0; color:var(--fg-3); font:inherit; font-size:var(--fs-12); text-align:left; cursor:pointer; }
+.msg-translation:hover { color:var(--fg); text-decoration:underline; }
+.msg-translation.failed { cursor:default; color:var(--warn); }
+.msg-translation.failed:hover { text-decoration:none; }
+.answer-translation { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2); margin-top:var(--space-1); color:var(--fg-3); font-size:var(--fs-12); }
+.answer-translation .live-dot { flex:none; }
+.answer-translation.failed { color:var(--warn); }
+.answer-translation .linkbtn { color:var(--accent); font-size:var(--fs-12); }
+.answer-translation .linkbtn:hover { text-decoration:underline; }

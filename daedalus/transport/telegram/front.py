@@ -537,6 +537,8 @@ class TelegramFront:
         """One merge buffer per (chat, thread, session): in the private chat two sessions share a
         chat, and their messages must not be merged into one submission."""
         self._question_state: dict[str, dict[str, Any]] = {}
+        self._held_answers: set[asyncio.Task[None]] = set()
+        """Answers waiting for their translation before they are sent; kept so a task is not collected mid-way."""
         self._answered_task: asyncio.Task[None] | None = None
         """Listens for questions answered on another front, whose keyboards here must go."""
         self._current_session: str | None = None
@@ -2375,18 +2377,22 @@ class TelegramFront:
         index = state["index"]
         q = state["questions"][index]
         options = q.get("options") or []
+        # The operator reads the question in their language when it was translated; a button still answers
+        # with the option's own label, which is what the agent matches on.
+        shown = q.get("translation") if isinstance(q.get("translation"), dict) else {}
+        shown_options = shown.get("options") if isinstance(shown.get("options"), list) and len(shown.get("options")) == len(options) else options
         rows = []
         selected = set(state["answers"][index]["selected"])
         for oi, option in enumerate(options):
             label = option.get("label", "")
             mark = "☑ " if label in selected else ""
-            rows.append([InlineKeyboardButton(text=f"{mark}{label}"[:60], callback_data=f"aq:{session_id}:{index}:{oi}")])
+            rows.append([InlineKeyboardButton(text=f"{mark}{shown_options[oi].get('label') or label}"[:60], callback_data=f"aq:{session_id}:{index}:{oi}")])
         if q.get("multiSelect"):
             rows.append([InlineKeyboardButton(text="✅ Done", callback_data=f"aq:{session_id}:{index}:done")])
         if q.get("allow_custom") or not options:
             rows.append([InlineKeyboardButton(text="✍️ Type an answer", callback_data=f"aq:{session_id}:{index}:custom")])
-        text = f"❓ {q.get('question')}"
-        details = [f"• {o.get('label')}: {o.get('description')}" for o in options if o.get("description")]
+        text = f"❓ {shown.get('question') or q.get('question')}"
+        details = [f"• {o.get('label')}: {o.get('description')}" for o in shown_options if o.get("description")]
         if details:
             text += "\n" + "\n".join(details)
         if len(state["questions"]) > 1:
@@ -2762,15 +2768,44 @@ class TelegramFront:
         # An interrupted run keeps its snapshot and resumes after the restart; its half-written
         # text is not an answer to deliver, so it never enters the ledger.
         final = split_headline(renderer.view.text_buffer.strip())[0] if not quiet and status != "interrupted" else ""
+        # An answer being translated is held back and sent once the translation is there, so the chat gets
+        # it once, in the operator's language. The ledger keeps the original meanwhile: a restart before
+        # the translation arrives redelivers that, which is better than nothing.
+        held = bool(final) and status == "completed" and self.manager.translations.waits_for(run_id)
         if final:
             await self.ledger.begin(run_id, session_id, final)
-        await renderer.finish(status, workspace=state.workspace if state else Path("/tmp"), quiet=quiet)
+        workspace = state.workspace if state else Path("/tmp")
+        await renderer.finish(status, workspace=workspace, quiet=quiet, held=held)
+        if held:
+            self._renderers.pop(session_id, None)
+            task = asyncio.create_task(self._deliver_translated(session_id, run_id, renderer, final, workspace), name=f"telegram-translated:{run_id}")
+            self._held_answers.add(task)
+            task.add_done_callback(self._held_answers.discard)
+            return
+        await self._delivered(session_id, run_id, renderer, final, quiet=quiet, status=status)
+        self._renderers.pop(session_id, None)
+
+    async def _deliver_translated(self, session_id: str, run_id: str, renderer: Any, original: str, workspace: Path) -> None:
+        """Send a held answer: its translation, or the original with a line saying it is not translated."""
+        try:
+            result = await self.manager.translations.result(run_id)
+            if result is not None and result[0] == "done":
+                text = result[1]
+            else:
+                text = f"{original}\n\n_(not translated: the translator did not answer; this is the original)_"
+            await renderer.deliver_final(text, workspace)
+        except Exception:  # noqa: BLE001 — the ledger still holds the original and redelivers it after a restart
+            logger.exception("could not deliver the translated answer of run %s", run_id)
+            renderer.view.delivery_failed = True
+        await self._delivered(session_id, run_id, renderer, original, quiet=False, status="completed")
+
+    async def _delivered(self, session_id: str, run_id: str, renderer: Any, final: str, *, quiet: bool, status: str) -> None:
+        """What follows an answer in the chat: the media it placed, the ledger's word, the saved-to-memory line."""
         if not quiet and status != "interrupted":
             renderer.view.delivery_failed = not await self._deliver_inline_media(session_id, run_id, renderer.outbox) or renderer.view.delivery_failed
         if final:
             await self.ledger.settle(run_id, delivered=not renderer.view.delivery_failed, error="delivery failed" if renderer.view.delivery_failed else "")
             await self._saved_note(run_id, renderer.outbox)
-        self._renderers.pop(session_id, None)
 
     async def _saved_note(self, run_id: str, outbox: Outbox) -> None:
         """One quiet line under an answer whose turn saved something to memory, as the app's chip says

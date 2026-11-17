@@ -67,10 +67,20 @@ class RunFinished(TypedDict):
     title: str
     summary: NotRequired[str]
     error: NotRequired[str]
+    translating: NotRequired[bool]
+    """The answer is being translated into the operator's language; ``answer.translated`` follows."""
     controlling: NotRequired[list[str]]
     """What the session controlled as the run ended (``chrome``, ``computer``). Taken before the end
     closes the run's tabs in the operator's Chrome, so the notification of this end still goes where
     the run was working, though the control is gone by the time it is posted."""
+
+
+class AnswerTranslated(RunFinished):
+    """A finished run's answer went through the translator (or could not): the finished-run payload again,
+    its ``summary`` now in the operator's language. ``run.finished`` of such a run said ``translating``
+    and left the summary out, so whoever announces answers waits for this one instead."""
+
+    translation: Literal["done", "failed", "none"]
 
 
 class SessionStatus(TypedDict):
@@ -773,6 +783,9 @@ class EventSpec:
 REGISTRY: dict[str, EventSpec] = {
     "run.started": EventSpec(RunStarted),
     "run.finished": EventSpec(RunFinished),
+    # In-process only: the fronts that announce answers (notifications, Telegram) wait for it. The app
+    # learns of the translation from the session's own stream, which reads the changed row.
+    "answer.translated": EventSpec(AnswerTranslated, persist=False, stream=False),
     "session.status": EventSpec(SessionStatus),
     "session.unread_result": EventSpec(SessionUnreadResult),
     "session.controlling": EventSpec(SessionControlling),

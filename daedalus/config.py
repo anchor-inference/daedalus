@@ -1565,6 +1565,24 @@ class AssistConfig(BaseModel):
     transcriber for a day."""
 
 
+class TranslationConfig(BaseModel):
+    """Talking to the agent in one language while it works in another: the operator writes and reads in
+    their own, and a separate, cheap model translates in both directions (:mod:`daedalus.host.translation`).
+
+    The agent's working language is chosen per session in the composer; ``agent_language`` is only what a
+    session that never chose follows. The transcript the model reads holds the agent's language alone, so a
+    translation never reaches the model and the prompt cache is not broken by it."""
+
+    operator_language: str = "ru"
+    """The language the operator writes and reads in, as a code (``ru``, ``en`` …): what answers are translated into."""
+    agent_language: str = ""
+    """What a session that never chose works in; empty means no translation."""
+    preset: str = ""
+    """The translator's model preset; empty = the helper preset the next-message guess uses, a middle one."""
+    timeout_seconds: int = Field(default=120, ge=5, le=900)
+    """How long one translation may take before the original is used instead. The turn never waits on it."""
+
+
 class AutopilotConfig(BaseModel):
     """What happens after an ordinary chat's run ends with autopilot switched on for it: one small
     judge call decides whether the work goes on by itself, is finished, or needs the operator.
@@ -2544,6 +2562,7 @@ class RuntimeConfig(BaseModel):
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
     assist: AssistConfig = Field(default_factory=AssistConfig)
     autopilot: AutopilotConfig = Field(default_factory=AutopilotConfig)
+    translation: TranslationConfig = Field(default_factory=TranslationConfig)
     goal_risk: GoalRiskConfig = Field(default_factory=GoalRiskConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)

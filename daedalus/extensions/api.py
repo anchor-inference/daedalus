@@ -171,7 +171,7 @@ from daedalus.extensions.services import (
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
-from daedalus.host import attached_files, capabilities, component_install, launcher_bridge, subagent_models
+from daedalus.host import attached_files, capabilities, component_install, launcher_bridge, subagent_models, translation
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secret_part, worktree_root
@@ -799,6 +799,11 @@ class YagniBody(BaseModel):
     on: bool
 
 
+class AgentLanguageBody(BaseModel):
+    agent: str | None
+    """The language the agent works in for this session: a code, ``""`` for none, ``null`` to follow the settings."""
+
+
 class BypassBody(BaseModel):
     on: bool
 
@@ -864,6 +869,8 @@ class SettingsBody(BaseModel):
     """Which sections the agent's SettingsChange applies without asking, and how long a change waits."""
     answer_language: str | None = None
     """The language every answer is written in; ``auto`` answers in the operator's own."""
+    translation: dict[str, Any] | None = None
+    """The operator's language, the translator's model and the language a session's agent works in by default."""
 
 
 class SettingsValidationBody(BaseModel):
@@ -2650,6 +2657,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             **manager.model_status(state),
             "kind": state.kind,
             "yagni": bool(state.metadata.get("yagni")),
+            # The language the agent works in here and the operator's own, for the composer's chip.
+            "translation": translation.session_view(state.metadata, app.config),
             "bypass": state.bypass,
             "autopilot": await app.extensions["autopilot"].status(session_id, state) if "autopilot" in app.extensions else None,
             "usd_cap": state.metadata.get("usd_cap"),
@@ -4586,6 +4595,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except KeyError:
             raise HTTPException(404, "no such session") from None
 
+    @api.post("/api/sessions/{session_id}/language")
+    async def set_agent_language(session_id: str, body: AgentLanguageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The language the agent works in for one session; the operator's messages and its answers are
+        translated while it differs from the operator's own."""
+        if body.agent and body.agent not in translation.LANGUAGES:
+            raise HTTPException(422, f"unknown language {body.agent!r}; one of {', '.join(translation.LANGUAGES)}")
+        try:
+            return await manager.set_agent_language(session_id, body.agent)
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+
     @api.post("/api/sessions/{session_id}/bypass")
     async def set_bypass(session_id: str, body: BypassBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's "Bypass all checks" for one session: one click, no confirmation, their choice."""
@@ -6507,6 +6527,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["orchestrator"]["strongest"] = app.config.strongest_preset() or ""
         # And what an empty main orchestrator preset means: a mid-tier one.
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
+        # What an empty translator preset means: the helpers' cheap one.
+        data["translation"]["suggested"] = translation.translator_preset(app.config)
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
         # What each preset costs and where that comes from, so its settings can say which source wins.

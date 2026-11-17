@@ -157,6 +157,13 @@ icons = { terminals = "bolt" }  # a built-in icon name in place of the item's ow
                              # page:<slug>; a place listed nowhere keeps its usual spot, and an id
                              # the app does not know (a removed page) is ignored where it is drawn.
 
+[translation]                # talk to the agent in your language while it works in another
+operator_language = "ru"     # what you write and read in; answers are translated into it
+agent_language = ""          # what a session that never chose works in; "" = no translation.
+                             # Each session picks its own from the composer's chip (EN ⇄ RU)
+preset = ""                  # the translator's model; empty = the cheap helper preset
+timeout_seconds = 120        # past this the original is shown, marked; a turn never waits on it
+
 [agent_settings]             # what the agent's SettingsChange may apply without asking
 auto_apply = ["navigation", "answer_language", "compaction"]
                              # every other section waits for your Apply on a card in the chat and in
