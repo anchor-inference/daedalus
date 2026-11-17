@@ -43,20 +43,58 @@ function reducedMotion(): boolean {
   }
 }
 
+function quotableOf(node: Node): Element | null {
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  return element?.closest(`[${QUOTABLE}]`) ?? null;
+}
+
+/** Whether the stretch from `start` to `end` holds anything but white space. */
+function holdsText(startNode: Node, startOffset: number, endNode: Node, endOffset: number): boolean {
+  const stretch = document.createRange();
+  stretch.setStart(startNode, startOffset);
+  stretch.setEnd(endNode, endOffset);
+  return stretch.toString().trim() !== "";
+}
+
+/**
+ * `range` cut to `source`, or null when what it reaches outside `source` is real text.
+ *
+ * A triple click selects a paragraph by running the selection to the first point of the next block:
+ * for the last paragraph of an answer that point is in the row of actions under it, or in the next
+ * message, so the range's common ancestor was the turn and the pill never came — while a drag over the
+ * same words raised it. What lies outside the answer in such a range is no text at all, only the line
+ * break between blocks; a selection that really takes in words of another message is still no reply.
+ */
+function within(range: Range, source: Element): Range | null {
+  const cut = range.cloneRange();
+  if (!source.contains(range.endContainer)) {
+    if (holdsText(source, source.childNodes.length, range.endContainer, range.endOffset)) return null;
+    cut.setEnd(source, source.childNodes.length);
+  }
+  if (!source.contains(range.startContainer)) {
+    if (holdsText(range.startContainer, range.startOffset, source, 0)) return null;
+    cut.setStart(source, 0);
+  }
+  return cut;
+}
+
 /** What the selection answers, if it lies in one answer of this conversation and nowhere else. */
 export function pickedFrom(selection: Selection | null, scroller: HTMLElement | null): Picked | null {
   if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !scroller) return null;
   const range = selection.getRangeAt(0);
-  const node = range.commonAncestorContainer;
-  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-  const source = element?.closest(`[${QUOTABLE}]`);
+  // The answer the selection starts in, or ends in when it starts in the gap above one.
+  const source = quotableOf(range.startContainer) ?? quotableOf(range.endContainer);
   // A conversation embedded in this one (the side question's window) has a list of its own; its
   // selections belong to its own pill.
   if (!source || !scroller.contains(source) || source.closest(".chat-scroll") !== scroller) return null;
+  const cut = within(range, source);
+  if (!cut) return null;
+  // The selection's own text keeps the line breaks between paragraphs, which a range's does not; what
+  // it carries from outside the answer is white space only (`within`), and the trim takes it.
   const quote = cleanQuote(selection.toString());
   if (!quote) return null;
   const seq = Number(source.getAttribute(QUOTABLE));
-  return { quote, seq: Number.isFinite(seq) && seq > 0 ? seq : null, range: range.cloneRange() };
+  return { quote, seq: Number.isFinite(seq) && seq > 0 ? seq : null, range: cut };
 }
 
 /** Whether two picks are the same passage: the same words of the same answer, between the same points. */

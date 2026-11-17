@@ -112,6 +112,10 @@ async def ask(app: Application, *, session_id: str, question: str, why: str = ""
     except StaffError as exc:
         raise Refused(str(exc)) from exc
     await _announce(manager, session_id, "opened", [made.id])
+    if manager.translations.pair_of(state) is not None:
+        # The operator reads the tab in their own language, as they read the chat; the agent is not kept
+        # waiting for it, and the card shows the agent's words until the translation is there.
+        manager._spawn_background(manager.translations.ask(made.id, asked=False), f"translate-ask:{made.id}")
     others = [a for a in open_now if a.id != made.id]
     tail = f" Also waiting: {'; '.join(_line(a) for a in others)}." if others else ""
     return (f"left for the operator as [{made.short_id}]. Keep working — the answer arrives later as a message of its own. "
@@ -232,15 +236,20 @@ async def record(app: Application, ask: Ask, shape: dict[str, Any], *, via: str,
     return await _manager(app).asks.resolve(ask.id, "operator", resolution)
 
 
-def delivery_text(answered: Sequence[tuple[Ask, Sequence[str]]]) -> str:
+def delivery_text(answered: Sequence[tuple[Ask, Sequence[str]]], said: dict[str, str] | None = None, *, shown: bool = False) -> str:
     """The message that carries a batch of answers into the asking session: each question quoted
-    beside its answer, so the agent needs no memory of what it asked to read them."""
+    beside its answer, so the agent needs no memory of what it asked to read them. ``said`` holds an
+    answer's words as the agent is to read them, when they are not the operator's own (a translation).
+    ``shown`` quotes each question as the operator's card showed it, translated when it was: that is the
+    operator's side of a translated delivery, which the chat draws while the agent reads the other."""
     blocks = []
     for ask_row, files in answered:
-        question = ask_row.text.split("\n\n", 1)[0].strip()
+        mark = ask_row.detail.get("translation") if shown else None
+        asked = str(mark.get("text") or "") if isinstance(mark, dict) and mark.get("state") == "done" else ""
+        question = (asked or ask_row.text).split("\n\n", 1)[0].strip()
         if len(question) > TITLE_MAX * 3:
             question = question[: TITLE_MAX * 3 - 1].rstrip() + "…"
-        lines = [f"[{ask_row.short_id}] {question}", f"Answer: {answer_words(ask_row)}"]
+        lines = [f"[{ask_row.short_id}] {question}", f"Answer: {(said or {}).get(ask_row.id) or answer_words(ask_row)}"]
         if files:
             lines.append("Attached with this answer: " + ", ".join(files))
         blocks.append("\n".join(lines))
@@ -256,8 +265,25 @@ async def deliver(app: Application, session_id: str, answered: Sequence[tuple[As
     reached the agent is asked for again rather than lost behind a closed row; the caller shows the
     error on each card."""
     manager = _manager(app)
+    said: dict[str, str] = {}
+    translated: dict[str, Any] | None = None
+    state = await manager.get_state(session_id)
+    languages = manager.translations.pair_of(state) if state is not None else None
+    if state is not None and languages is not None:
+        # The options chosen are the agent's own words already; what the operator typed is translated, as
+        # their messages are, so the agent reads one language. The row keeps the words as typed.
+        for ask_row, _files in answered:
+            r = ask_row.resolution
+            picked = ", ".join(str(s) for s in r.get("selected") or [])
+            typed = str(r.get("note") or "") if picked else str(r.get("text") or "")
+            if typed.strip():
+                words = await manager.translations.answer_words(state, typed)
+                said[ask_row.id] = f"{picked} — {words}" if picked else words
+        # The chat shows the operator's side, with "show what the agent got", as for a message of theirs.
+        operator, agent = languages
+        translated = {"direction": "out", "state": "done", "from": operator, "to": agent, "text": delivery_text(answered, shown=True)}
     try:
-        await manager.submit(session_id, delivery_text(answered), list(attachments), steer=True, as_answer=False, origin=ORIGIN)
+        await manager.submit(session_id, delivery_text(answered, said), list(attachments), steer=True, as_answer=False, origin=ORIGIN, translated=translated)
     except (RuntimeError, KeyError, OSError) as exc:
         logger.warning("could not hand the side answers to %s", session_id, exc_info=True)
         reopened = [a.id for a, _ in answered if await manager.asks.reopen(a.id)]

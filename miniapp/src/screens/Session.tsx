@@ -104,6 +104,7 @@ import { PromptCoach } from "../coach/PromptCoach";
 import { SideQuestion } from "../btw/SideQuestion";
 import { parseReplies, type SentReply } from "../quotereply";
 import { SelectionReply, SentReplies, revealPassage } from "../replyselect";
+import { Translatable, useAskedTranslation } from "../msgtranslate";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
@@ -1641,8 +1642,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         return true;
       },
       reveal: revealReply,
+      translateInto: detail?.translation?.operator,
     }),
-    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions, revealReply],
+    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions, revealReply, detail?.translation?.operator],
   );
   const shownSources = useMemo(() => {
     if (panel.state.tab !== "sources") return null;
@@ -2411,9 +2413,12 @@ function noteTitle(note: SystemNote): string {
 }
 
 /** A loop's wake-up, a schedule's prompt, a reminder: one folded line, never a bubble. */
-function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: string; run?: { folded: boolean; toggle: () => void } }) {
+function SystemNoteRow({ note, cacheKey, run, translation }: { note: SystemNote; cacheKey?: string; run?: { folded: boolean; toggle: () => void }; translation?: MessageTranslation | null }) {
   // The task a helper was given is what its conversation is about: open, where a wake-up is folded.
   const [open, setOpen] = useState(note.kind === "task");
+  // Answers to side questions in a translated chat: the operator's words, and what the agent got on request.
+  const [agentSide, setAgentSide] = useState(false);
+  const body = agentSide && translation?.alternate ? translation.alternate : note.body;
   const openSubagent = useContext(SubagentOpener);
   const subagentLink = openSubagent && (note.kind === "subagent" || note.kind === "subagents");
   // Said where the operator looks, not folded: a helper the cap holds back, and what lets it go on.
@@ -2432,7 +2437,8 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
       </button>}
       </div>
       {way && <p className="sysnote-way">{way}</p>}
-      {open && <Md className="sysnote-body" text={note.body} cacheKey={cacheKey} />}
+      {open && <Md className="sysnote-body" text={body} cacheKey={cacheKey && `${cacheKey}${agentSide ? "a" : ""}`} />}
+      {open && translation && <OutgoingTranslation translation={translation} agentSide={agentSide} onFlip={() => setAgentSide(!agentSide)} />}
     </div>
   );
 }
@@ -2451,23 +2457,6 @@ function OutgoingTranslation({ translation, agentSide, onFlip }: { translation: 
   );
 }
 
-/** Under a translated answer: "translating…" while the translator works, the switch to the original
- *  once it is done, and a plain mark when it failed and the original is what is shown. */
-function IncomingTranslation({ translation, original, onFlip }: { translation: MessageTranslation; original: boolean; onFlip: () => void }) {
-  if (translation.state === "pending") {
-    return <div className="answer-translation" role="status" data-translation="pending"><span className="live-dot" />{t("translation.in.pending", { lang: translation.to.toUpperCase() })}</div>;
-  }
-  if (translation.state === "failed") {
-    return <div className="answer-translation failed" data-translation="failed" title={translation.error || undefined}>{t("translation.in.failed")}</div>;
-  }
-  return (
-    <div className="answer-translation" data-translation="done">
-      <span className="sub">{t(original ? "translation.in.original" : "translation.in.done", { from: translation.from.toUpperCase(), to: translation.to.toUpperCase() })}</span>
-      <button type="button" className="linkbtn" aria-pressed={original} onClick={onFlip}>{t(original ? "translation.in.show.translation" : "translation.in.show.original")}</button>
-    </div>
-  );
-}
-
 /** The "N sources" button under an answer that cited or read the web; it opens the Sources tab on this turn. */
 function TurnSources({ turn }: { turn: Turn }) {
   const { openSources } = useContext(SessionContext);
@@ -2477,14 +2466,15 @@ function TurnSources({ turn }: { turn: Turn }) {
 }
 
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
-  const { id: sessionId, workspace, folders, preview, toast, link, compose } = useContext(SessionContext);
+  const { id: sessionId, workspace, folders, preview, toast, link, compose, translateInto } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
   const split = useReplies() === "split";
   // Which side of a translated exchange is on the screen: by default the operator's language, both for
   // what they wrote and for the answer; each flips to the agent's side on its own.
   const [agentWords, setAgentWords] = useState(false);
-  const [originalAnswer, setOriginalAnswer] = useState(false);
+  // The answer in the operator's language: the automatic translation, or one asked for under it.
+  const asked = useAskedTranslation({ sessionId, seq: turn.answerSeq, text: turn.answer, translation: turn.answerTranslation, live, into: translateInto });
   if (turn.summary) return <SummaryBlock message={turn.summary} />;
   const elapsed = (live ? Date.now() : turn.endedAt) - turn.startedAt;
   const summary = activitySummary(turn, live, Date.now());
@@ -2510,10 +2500,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // The operator's words alone: the files are drawn above the bubble, so the list written for the model goes.
   const outgoing = turn.user?.translation?.direction === "out" ? turn.user.translation : null;
   const words = turn.user ? withoutAttachedList(agentWords && outgoing?.alternate ? outgoing.alternate : turn.user.text) : "";
-  const incoming = !live && turn.answerTranslation?.direction === "in" ? turn.answerTranslation : null;
-  const showingOriginal = originalAnswer && incoming?.state === "done" && !!incoming.alternate;
-  const answer = showingOriginal ? incoming!.alternate! : turn.answer;
-  const answerKey = showingOriginal ? "o" : "";
+  const answer = asked.text;
+  const answerKey = asked.key;
   // A message that was only files has no bubble, unless something else is said in one.
   const bubble = !!turn.user && !!(words.trim() || inbound || fromPage || turn.user.visitor || turn.user.autopilot || turn.user.yagni || turn.user.reply_to || turn.user.secrets?.length);
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
@@ -2532,8 +2520,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const answered = answerTime(turn, closing, live);
   // The time and the speed go together: both belong to a turn that finished with an answer.
   const answeredStamp = answered ? <><MessageTime at={answered.at} took={answered.took} /><TurnSpeed runId={turn.runId} /></> : undefined;
-  const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
+  const answerActions = (text: string, answerSeq: number | undefined, translate?: MessageAction | null): MessageAction[] => [
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
+    ...(translate ? [translate] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
     ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
   ];
@@ -2560,7 +2549,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         ? <StepsCard steps={turn.user.operator_steps} seq={seq} onOpen={preview} />
         : <EventCard text={turn.note.body} seq={seq} />)}
       {turn.user && turn.note?.kind === "events" && !turn.user.operator_steps && !live && <KeptFiles text={turn.note.body} onOpen={preview} />}
-      {turn.user && turn.note && turn.note.kind !== "events" && <SystemNoteRow note={turn.note} cacheKey={live ? undefined : `n${seq ?? turn.key}`} run={turn.note.kind === "loop" && !live ? { folded, toggle: () => setFolded(!folded) } : undefined} />}
+      {turn.user && turn.note && turn.note.kind !== "events" && <SystemNoteRow note={turn.note} translation={turn.user.translation?.direction === "out" ? turn.user.translation : null} cacheKey={live ? undefined : `n${seq ?? turn.key}`} run={turn.note.kind === "loop" && !live ? { folded, toggle: () => setFolded(!folded) } : undefined} />}
       <div className="turn-content" hidden={folded && !live}>
       {turn.user && !turn.note && (
         <div className={`msg-wrap ${fromGuest ? "guest" : ""}`}>
@@ -2611,18 +2600,22 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         <WidgetFrames sessionId={sessionId} widgets={drawnWidgets(segment.items)} toast={toast} compose={compose} />
         </Fragment>
       ) : (
-        <Fragment key={`t${index}`}>
+        <Translatable key={`t${index}`} sessionId={sessionId} seq={segment.seq} text={segment.text} translation={segment.translation} live={live} into={translateInto}>
+          {(said) => <>
           {/* The model may write a file's line in a message it goes on from, not only in its last. */}
-          {turn.media?.length && splitMediaAnswer(segment.text, turn.media).some((part) => part.kind === "media") ? (
+          {turn.media?.length && splitMediaAnswer(said.text, turn.media).some((part) => part.kind === "media") ? (
             <div className="answer interim answer-with-media" data-quote={segment.seq ?? ""}>
-              {splitMediaAnswer(segment.text, turn.media).map((part, at) => part.kind === "text"
-                ? <Md key={`text-${at}`} text={part.text} cacheKey={live ? undefined : `r${turn.key}-${index}-${at}`} />
+              {splitMediaAnswer(said.text, turn.media).map((part, at) => part.kind === "text"
+                ? <Md key={`text-${at}`} text={part.text} cacheKey={live ? undefined : `r${turn.key}-${index}-${at}${said.key}`} />
                 : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
             </div>
-          ) : <Md className="answer interim" text={withoutMediaRefs(segment.text)} cacheKey={live ? undefined : `r${turn.key}-${index}`} quote={segment.seq ?? null} />}
+          ) : <Md className="answer interim" text={withoutMediaRefs(said.text)} cacheKey={live ? undefined : `r${turn.key}-${index}${said.key}`} quote={segment.seq ?? null} />}
+          {/* A note between steps has no row of actions: its "Translate" is a quiet line that shows on hover. */}
+          {said.line ?? (closing === segment ? null : said.offer)}
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
-          {closing === segment && <MessageActions text={mediaCopyText(segment.text, turn.media ?? [])} actions={answerActions(segment.text, segment.seq)} more={turnMenu} trail={answeredStamp} />}
-        </Fragment>
+          {closing === segment && <MessageActions text={mediaCopyText(said.text, turn.media ?? [])} actions={answerActions(said.text, segment.seq, said.action)} more={turnMenu} trail={answeredStamp} />}
+          </>}
+        </Translatable>
       ))}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
       {turn.account && (turn.answer || live) && <AccountChip account={turn.account} />}
@@ -2633,7 +2626,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
         </div>
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={withoutMediaRefs(answer)} cacheKey={live ? undefined : `a${turn.key}${answerKey}`} quote={turn.answerSeq ?? null} />)}
-      {turn.answer && incoming && <IncomingTranslation translation={incoming} original={showingOriginal} onFlip={() => setOriginalAnswer(!originalAnswer)} />}
+      {turn.answer && asked.line}
       {turn.answer && !live && <KeptFiles text={answer} onOpen={preview} />}
       {turn.answer && !live && <TurnSources turn={turn} />}
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
@@ -2647,7 +2640,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
       <SavedToMemory activity={turn.activity} />
-      {turn.answer && !live && <MessageActions text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq)} more={turnMenu} trail={answeredStamp} />}
+      {turn.answer && !live && <MessageActions text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq, asked.action)} more={turnMenu} trail={answeredStamp} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
@@ -3326,16 +3319,22 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
 
 function ActivityList({ items, compact, onRetry }: { items: Activity[]; compact: boolean; onRetry?: (seq: number) => void }) {
   const steps = !!useFocusChat()?.orchestrator;
+  const { id: sessionId, translateInto } = useContext(SessionContext);
   const out: ReactElement[] = [];
   let i = 0;
   while (i < items.length) {
     const it = items[i];
     if (it.kind === "note") {
       out.push(
-        <div key={i} className="note">
-          <Md className="md" text={it.text} />
-          {it.seq && onRetry && <MessageActions text={it.text} actions={[{ icon: "reload", label: t("turn.retry"), onSelect: () => onRetry(it.seq!) }]} />}
-        </div>,
+        <Translatable key={i} sessionId={sessionId} seq={it.seq} text={it.text} translation={it.translation} live={false} into={translateInto}>
+          {(said) => (
+            <div className="note">
+              <Md className="md" text={said.text} />
+              {said.line ?? said.offer}
+              {it.seq && onRetry && <MessageActions text={said.text} actions={[{ icon: "reload", label: t("turn.retry"), onSelect: () => onRetry(it.seq!) }]} />}
+            </div>
+          )}
+        </Translatable>,
       );
       i++;
       continue;
@@ -3636,7 +3635,9 @@ const NO_FOLDERS: SessionFolder[] = [];
  *  call that asked them reads as waiting and an older unanswered one does not. */
 /** `compose`: put text into the conversation's composer for the operator to send (a widget's ask);
  *  absent where the transcript has no composer of its own. */
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void; reveal?: (reply: SentReply) => void }>({
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void; reveal?: (reply: SentReply) => void;
+  /** The operator's language, which "Translate" under the agent's texts asks for; only the conversation's own view offers it. */
+  translateInto?: string }>({
   id: "",
   workspace: "",
   folders: NO_FOLDERS,

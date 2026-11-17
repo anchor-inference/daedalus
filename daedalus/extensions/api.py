@@ -4627,6 +4627,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except KeyError:
             raise HTTPException(404, "no such session") from None
 
+    @api.post("/api/sessions/{session_id}/messages/{seq}/translate")
+    async def translate_message(session_id: str, seq: int, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """One of the agent's texts in the operator's language, on request: the "Translate" under a note or
+        an answer the automatic translation left as it was. Answers with the row as the app draws it; a
+        translator that failed is a ``failed`` state on it, not an error, so the app shows the reason
+        beside the original it keeps."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        try:
+            message = await manager.translations.asked(state, seq)
+        except LookupError:
+            raise HTTPException(404, "no such message") from None
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        view = message_view(message)
+        view["seq"] = seq
+        return {"seq": seq, "text": view["text"], "translation": view["translation"]}
+
     @api.post("/api/sessions/{session_id}/bypass")
     async def set_bypass(session_id: str, body: BypassBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's "Bypass all checks" for one session: one click, no confirmation, their choice."""

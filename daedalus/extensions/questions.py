@@ -119,8 +119,10 @@ async def waiting(app: Application, project_id: str | None = None, *, session_id
     orchestrator's own confirmations."""
     manager = app.manager
     assert manager is not None
+    # The language a card's "Translate" asks for, on every card: the tab has no other way to know it.
+    into = {"translate_into": manager.config.translation.operator_language}
     if session_id is not None:
-        return [_side_view(a) for a in await side_questions.waiting(app, session_id)]
+        return [{**_side_view(a), **into} for a in await side_questions.waiting(app, session_id)]
     projects = {p.id: p for p in await manager.projects.list()}
     names = {pid: p.name for pid, p in projects.items()}
     if project_id is not None:
@@ -130,7 +132,7 @@ async def waiting(app: Application, project_id: str | None = None, *, session_id
         asks = [a for a in [await manager.asks.get(r["id"]) for r in rows] if a is not None]
         asks = [a for a in asks if a.origin == "dispatcher" or (a.project_id in projects and projects[a.project_id].settings.orchestrator.enabled)]
     members: dict[str, Any] = {}
-    return [await _view(app, a, names, members) for a in asks]
+    return [{**await _view(app, a, names, members), **into} for a in asks]
 
 
 def _shape(ask: Ask, item: dict[str, Any]) -> dict[str, Any]:

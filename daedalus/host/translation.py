@@ -13,8 +13,13 @@ between the two:
   transcript is the app's copy; the working history the model replays is a different table and keeps
   the original. Feeding the translation back would put two languages into one context and break the
   prompt cache at the first replay.
+* **On request.** Any other text of the agent's — a note written between steps, or an answer in a
+  session that translates nothing — is translated when the operator asks for it (:meth:`Translations.asked`),
+  onto its transcript row the same way, whatever the session's own mode.
 * **Questions.** An AskUser question is translated for display before it is announced; the answer the
-  operator picks is still the original option, which is what the agent matches on.
+  operator picks is still the original option, which is what the agent matches on. A side question left
+  in the Questions tab is translated the same way once it is open (:meth:`Translations.ask`), and any
+  question of the tab may be translated on request whatever its session's mode.
 
 What must survive a translation byte for byte — code, paths, identifiers, addresses, the host's own
 tags, quoted strings — is never shown to the translator at all: it is cut out and replaced by numbered
@@ -61,6 +66,10 @@ LANGUAGES: dict[str, str] = {
 METADATA_KEY = "daedalus.translation"
 """Message metadata: ``{direction, state, from, to, text?, error?}``. On an operator's message ``text`` is
 their own words; on an answer it is the translation. Never read by the wire."""
+
+ASK_KEY = "translation"
+"""A question's detail in the Questions tab: ``{state, from, to, title, text, options, error?, asked?}``, the
+words in the operator's language beside the agent's own, which stay the question and its options."""
 
 SESSION_KEY = "agent_language"
 """Session metadata: the language the agent works in, ``""`` for none. Absent = the settings' default."""
@@ -239,6 +248,10 @@ def view_of(metadata: dict[str, Any], role: MessageRole, body: str) -> tuple[str
     return body, view
 
 
+async def _same(text: str) -> str:
+    return text
+
+
 def _without_reply_quote(text: str, metadata: dict[str, Any]) -> str:
     if metadata.get("daedalus.reply_to") and text.startswith("[In reply to: «"):
         return text.split("\n", 1)[1] if "\n" in text else ""
@@ -289,6 +302,7 @@ class Translations:
     def __init__(self, manager: SessionManager) -> None:
         self.manager = manager
         self._results: dict[str, asyncio.Future[tuple[str, str] | None]] = {}
+        self._asking: set[tuple[str, int]] = set()
 
     def pair_of(self, state: SessionState) -> tuple[str, str] | None:
         """The languages a session's messages are translated between, or ``None``.
@@ -342,7 +356,9 @@ class Translations:
             return text
         manager = self.manager
         settings = manager.config.translation
-        instructions = PROMPT.format(source=LANGUAGES.get(source, source), target=LANGUAGES.get(target, target))
+        # An empty source is a text the operator asked about in a session that names no agent language: the
+        # translator is left to recognise it, which a model does better than a guess made here would.
+        instructions = PROMPT.format(source=LANGUAGES.get(source, source) if source else "the language it is written in", target=LANGUAGES.get(target, target))
         try:
             answer = await asyncio.wait_for(
                 manager.small_model(masked, translator_preset(manager.config), purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions),
@@ -376,13 +392,15 @@ class Translations:
             return Outgoing(text, {**mark, "state": "failed", "error": str(exc)})
         return Outgoing(translated, {**mark, "state": "done"})
 
-    async def incoming(self, state: SessionState, run_id: str, finished: dict[str, Any]) -> None:
+    async def incoming(self, state: SessionState, run_id: str, finished: dict[str, Any], *, announce: bool = True) -> None:
         """Translate the run's final answer onto its transcript row, then say so on the bus.
 
         The row goes ``pending`` first, so the app shows "translating" under the original it already
         has; then ``done`` with the translation, or ``failed`` with the reason. ``answer.translated``
         carries the finished-run payload with the summary in the operator's language: the notification
         and Telegram wait for it instead of announcing the answer in a language the operator does not read.
+        With ``announce`` false — a run woken by a job or a schedule, which no notification announces — the
+        row is translated and nothing is said on the bus, so the translation adds no notice either.
         The event names the run, not the text — events carry references — and a front that delivers the
         answer reads it off the row (:func:`delivered_text`).
         """
@@ -395,6 +413,8 @@ class Translations:
             logger.exception("translating the answer of run %s failed", run_id)
         finally:
             self._settle(run_id, delivered)
+        if not announce:
+            return
         try:
             await manager.bus.publish("answer.translated", outcome, **manager._event_ids(state))
         except Exception:  # noqa: BLE001 — the row holds the translation; a front that missed the event reads it
@@ -424,7 +444,131 @@ class Translations:
             return "done", translated
         return None
 
-    async def _mark(self, state: SessionState, key: str, message: Message, mark: dict[str, Any]) -> None:
+    async def asked(self, state: SessionState, seq: int) -> Message:
+        """Translate one of the agent's texts into the operator's language because the operator asked to.
+
+        Any text of the agent's in a conversation: a note between steps, which the automatic path leaves as
+        it is, or an answer in a session that translates nothing. It goes onto the transcript row exactly
+        as an automatic translation does — ``pending``, then ``done`` or ``failed`` — so the app draws it with
+        the same "Show original"; the working history is not touched. Returns the row as it now stands.
+
+        A text already translated, or being translated by an earlier click, is returned as it is: a second
+        click, or a second window, must not pay for the same words twice. A failed one may be asked again.
+        Raises :class:`LookupError` for a row the session does not hold and :class:`ValueError` for one that
+        is not the agent's text."""
+        manager = self.manager
+        session_id = state.session.id
+        key = (session_id, seq)
+        # Claimed before the first await: two clicks that both read the row before either marked it would
+        # both have paid the translator.
+        busy = key in self._asking
+        self._asking.add(key)
+        try:
+            rows = await manager.sessions.expand_transcript(session_id, seq, seq)
+            if not rows:
+                raise LookupError(f"no message {seq} in this session")
+            message = rows[0][1]
+            body = _answer_body(message)[0].strip() if message.role is MessageRole.assistant else ""
+            if not body:
+                raise ValueError("only a text the agent wrote can be translated")
+            mark = message.metadata.get(METADATA_KEY)
+            if busy or (isinstance(mark, dict) and mark.get("direction") == "in" and mark.get("state") == "done"):
+                # Being translated, the row says ``pending`` and the click that started it is the one that waits.
+                return message
+            operator = manager.config.translation.operator_language
+            if operator not in LANGUAGES:
+                raise ValueError(f"the operator's language {operator!r} is not one the translator knows")
+            # The session's agent language names the source when it has one; otherwise the translator is told
+            # to recognise it, and a text already in the operator's language comes back as it is.
+            source = agent_language(state.metadata, manager.config)
+            source = "" if source == operator else source
+            row_key = manager.sessions.transcript_key(message)
+            base: dict[str, Any] = {"direction": "in", "from": source, "to": operator, "at": datetime.now(UTC).isoformat(), "asked": True}
+            message = await self._mark(state, row_key, message, {**base, "state": "pending"})
+            try:
+                translated = await self.translate(body, source, operator, session_id=session_id)
+            except TranslationFailed as exc:
+                logger.warning("session %s: message %s stays untranslated: %s", session_id, seq, exc)
+                return await self._mark(state, row_key, message, {**base, "state": "failed", "error": str(exc)})
+            return await self._mark(state, row_key, message, {**base, "state": "done", "text": translated})
+        finally:
+            if not busy:
+                self._asking.discard(key)
+
+    async def ask(self, ask_id: str, *, asked: bool) -> dict[str, Any]:
+        """Translate a question of the Questions tab — its title, its text and each option — into the
+        operator's language, beside the agent's words in the request's detail (:data:`ASK_KEY`).
+
+        ``asked`` is the operator's "Translate", which works in any session and on any open question;
+        without it this is the automatic path for a side question of a translated session. The options
+        keep their own words: an answer names the option the agent wrote, whatever the card showed. A
+        question already translated, or being translated, is answered with what it has. Raises
+        :class:`LookupError` for a question that is not open any more."""
+        manager = self.manager
+        key = ("ask", ask_id)
+        busy = key in self._asking
+        self._asking.add(key)
+        try:
+            found = await manager.asks.get(ask_id)
+            if found is None or not found.open:
+                raise LookupError(f"no open question {ask_id}")
+            mark = found.detail.get(ASK_KEY)
+            if busy or (isinstance(mark, dict) and mark.get("state") == "done"):
+                return dict(mark) if isinstance(mark, dict) else {"state": "pending"}
+            operator = manager.config.translation.operator_language
+            if operator not in LANGUAGES:
+                raise LookupError(f"the operator's language {operator!r} is not one the translator knows")
+            state = await manager.get_state(found.session_id) if found.session_id else None
+            source = agent_language(state.metadata, manager.config) if state is not None else ""
+            source = "" if source == operator else source
+            base: dict[str, Any] = {"from": source, "to": operator, **({"asked": True} if asked else {})}
+            await self._mark_ask(found.id, {**base, "state": "pending"})
+            options = [str(o) for o in found.detail.get("options") or [] if isinstance(o, str)]
+            session_id = found.session_id or None
+            try:
+                # One call per part: a question's text runs over several lines, and numbering the parts in
+                # one text, as the run's question does, would be parsed back wrongly from a model that
+                # moved a line. A side question has at most a handful of short options.
+                title, text, *labels = await asyncio.gather(*(
+                    self.translate(part, source, operator, session_id=session_id or "") if part.strip() else _same(part)
+                    for part in (found.title, found.text, *options)
+                ))
+            except TranslationFailed as exc:
+                logger.warning("question %s stays untranslated: %s", found.id, exc)
+                return await self._mark_ask(found.id, {**base, "state": "failed", "error": str(exc)})
+            return await self._mark_ask(found.id, {**base, "state": "done", "title": title, "text": text, "options": labels})
+        finally:
+            if not busy:
+                self._asking.discard(key)
+
+    async def _mark_ask(self, ask_id: str, mark: dict[str, Any]) -> dict[str, Any]:
+        """Write the mark into the question's detail and have the session's Questions tab read it again."""
+        manager = self.manager
+        current = await manager.asks.get(ask_id)
+        if current is None or not current.open:
+            return mark
+        await manager.asks.revise(ask_id, title=current.title, text=current.text, detail={**current.detail, ASK_KEY: mark})
+        if current.session_id:
+            try:
+                await manager.bus.publish("ask.side", {"change": "translated", "ask_ids": [ask_id]}, session_id=current.session_id)
+            except Exception:  # noqa: BLE001 — the row holds it; a window that missed the event reads it on its next poll
+                logger.warning("could not announce the translation of question %s", ask_id, exc_info=True)
+        return mark
+
+    async def answer_words(self, state: SessionState, words: str) -> str:
+        """The operator's own words in an answer to a side question, as the agent is to read them: in its
+        language when the session is translated, as written otherwise or when the translator fails."""
+        languages = self.pair_of(state)
+        if languages is None or not words.strip():
+            return words
+        operator, agent = languages
+        try:
+            return await self.translate(words, operator, agent, session_id=state.session.id)
+        except TranslationFailed as exc:
+            logger.warning("session %s: an answer to a side question goes untranslated: %s", state.session.id, exc)
+            return words
+
+    async def _mark(self, state: SessionState, key: str, message: Message, mark: dict[str, Any]) -> Message:
         """Write the mark onto the transcript row alone and have the app read the end of the chat again.
 
         The message is copied: the row read back is the transcript's, but a copy keeps even a cached one
@@ -432,6 +576,7 @@ class Translations:
         updated = message.model_copy(update={"metadata": {**{k: v for k, v in message.metadata.items() if k != "daedalus.seq"}, METADATA_KEY: mark}})
         await self.manager.sessions.replace_transcript_message(state.session.id, key, updated)
         await self.manager.announce_transcript(state.session.id)
+        return updated
 
     async def question(self, state: SessionState, payload: dict[str, Any]) -> None:
         """Add each question's text and options in the operator's language, for display only.
@@ -474,6 +619,7 @@ class Translations:
 
 
 __all__ = [
+    "ASK_KEY",
     "LANGUAGES",
     "METADATA_KEY",
     "PURPOSE",
