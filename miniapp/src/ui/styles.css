@@ -3474,8 +3474,8 @@ input.field[type="range"] {
 .composer-mode .mode-autopilot { flex:0 1 auto; min-width:0; }
 /* The agent's language: the pair it translates between in the accent, the operator's code alone muted. */
 .agentlang-chip { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
-.agentlang-chip.translating, .composer-row .agentlang-chip.translating, .composer[data-shape] .composer-row .agentlang-chip.translating { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color:var(--accent); font-weight:600; }
-.agentlang-chip.off, .composer-row .agentlang-chip.off, .composer[data-shape] .composer-row .agentlang-chip.off { color:var(--fg-3); }
+.agentlang-chip.translating, .composer-row .agentlang-chip.translating { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color:var(--accent); font-weight:600; }
+.agentlang-chip.off, .composer-row .agentlang-chip.off { color:var(--fg-3); }
 .mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .mode-list { display:flex; flex-direction:column; }
 /* The one heading of the composer's menus: model and effort open under the same small title. */
@@ -3517,6 +3517,16 @@ input.field[type="range"] {
   .composer-row .model-select .model-to, .composer-row .model-select .model-from { max-width:100%; }
   .composer-row .model-select .model-from { font-size:var(--fs-11); }
   .composer-row .model-select.attn .model-effort { display:none; }
+  /* The effort stacks under the name, so the pill is as wide as the longer of the two rather than
+     both: side by side, "medium" took the width the name needed, and once the language chip joined
+     the row a phone read "clau…" with the effort lying on the microphone. */
+  .composer-row .model-select:not(.attn) { display:inline-grid; grid-template-columns:minmax(0, 1fr) auto; align-content:center; column-gap:4px; row-gap:0; line-height:1.15; }
+  .composer-row .model-select:not(.attn) > .model-label { grid-area:1 / 1; }
+  .composer-row .model-select:not(.attn) > .model-effort { grid-area:2 / 1; font-size:var(--fs-11); }
+  .composer-row .model-select:not(.attn) > .ic:last-child { grid-area:1 / 2 / 3 / 3; align-self:center; }
+  /* The language chip keeps the agent's code alone ("EN"), in the accent that says it translates;
+     the pair is in its title and its menu. A phone has no chip at all (the + sheet holds it). */
+  .composer-row .agentlang-chip .agentlang-to { display:none; }
 }
 @media (max-width: 1023px) {
   .composer-box .composer-field { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
