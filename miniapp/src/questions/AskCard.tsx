@@ -11,6 +11,7 @@ import type { Question } from "../api";
 import { Icon } from "../icons";
 import { t, plural } from "../i18n";
 import { errorText } from "../ui";
+import { useDropTarget } from "../filedrop";
 import {
   allAnswered,
   answerLine,
@@ -50,11 +51,15 @@ type Props = {
    *  no other until it reaches the agent or comes back. What was picked here stays for that case. */
   held?: { text: string; to: string } | null;
   toast: (text: string) => void;
+  /** Files dropped on the card. The host's answer to an AskUser carries files only as a reply written in
+   *  the composer, so they join the composer's attachments, and the reply sent from there answers with
+   *  them; the card is where the operator meant them to go, so it is the card that lights up. */
+  onFiles?: (files: File[]) => void;
 };
 
 const MISSING_KEY: Record<Missing, string> = { pick: "ask.need.pick", pickAny: "ask.need.pickAny", write: "ask.need.write", other: "ask.need.other" };
 
-export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast, translateTo, held }, ref) {
+export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ questions, phone, onSend, toast, translateTo, held, onFiles }, ref) {
   const n = questions.length;
   const [drafts, setDrafts] = useState<AskDraft[]>(() => blankDrafts(questions));
   const [step, setStep] = useState(0);
@@ -66,6 +71,9 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
   // the cursor out of a draft being typed in the composer.
   const moved = useRef(false);
   const uid = useId();
+  // The held card is another element under the same ref; it takes no files, which also re-registers the
+  // live one when it comes back.
+  useDropTarget(root, held ? null : onFiles ?? null);
 
   const complete = allAnswered(questions, drafts);
   const reviewing = hasReview(n) && step >= n;
@@ -183,6 +191,7 @@ export const AskCard = forwardRef<AskCardHandle, Props>(function AskCard({ quest
 
   return (
     <section ref={root} className={`ask ${phone ? "phone" : ""}`} role="group" aria-label={t("composer.question")} data-step={reviewing ? "review" : step} data-steps={n} onKeyDown={onKeyDown}>
+      <span className="drop-hint" aria-hidden="true"><Icon name="attach" size={18} />{t("ask.drop")}</span>
       <header className="ask-head">
         <Icon name="question" size={14} />
         <span className="ask-eyebrow">{t("composer.question")}</span>

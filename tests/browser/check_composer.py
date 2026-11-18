@@ -1010,7 +1010,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
               document.querySelector('.composer .composer-field').dispatchEvent(new ClipboardEvent('paste', {clipboardData:pasted, bubbles:true, cancelable:true}));
               const dropped = new DataTransfer();
               dropped.items.add(new File(['dropped'], 'drop.txt', {type:'text/plain'}));
-              document.querySelector('.chat').dispatchEvent(new DragEvent('drop', {dataTransfer:dropped, bubbles:true, cancelable:true}));
+              document.querySelector('.composer .composer-field').dispatchEvent(new DragEvent('drop', {dataTransfer:dropped, bubbles:true, cancelable:true}));
             }""")
             page.wait_for_selector(".attachment")
             if page.locator(".attachment").count() != 2:

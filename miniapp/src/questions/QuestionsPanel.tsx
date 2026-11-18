@@ -25,6 +25,7 @@ import { go } from "../shell";
 import { invalidate } from "../store";
 import { isMac } from "../terminal/keys";
 import { errorText } from "../ui";
+import { useDropTarget } from "../filedrop";
 import { markOf, useAskTranslation } from "./asktranslate";
 import { QUESTIONS_KEY, answerPath, dismissPath, useQuestions, type QuestionScope } from "./data";
 import {
@@ -444,7 +445,6 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
   const d = draft ?? EMPTY;
   const filesOk = takesFiles(q);
   const picker = useRef<HTMLInputElement>(null);
-  const [dropping, setDropping] = useState(false);
   const body = bodyOf(q);
   const long = folds(body);
   const [open, setOpen] = useState(false);
@@ -453,6 +453,10 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
   const blank = isBlank(draft) && files.length === 0;
   const gone = !!fate && fate.kind !== "refused";
   const field = useRef<HTMLTextAreaElement>(null);
+  const card = useRef<HTMLElement>(null);
+  // A file dropped on a card that takes files is that answer's; the composer, under the panel or beside
+  // it, would otherwise take it for the chat.
+  useDropTarget(card, filesOk && !gone ? onAttach : null);
   const permission = isPermission(q);
   const role = textRole(q, d);
   const state = fate ? fate.kind : ready ? "ready" : blank ? "idle" : "draft";
@@ -491,7 +495,8 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
 
   return (
     <article
-      className={`q-card k-${q.kind} s-${state} ${fresh ? "fresh" : ""} ${q.host ? "host" : ""} ${q.urgent ? "urgent" : ""} ${dropping ? "dropping" : ""}`}
+      ref={card}
+      className={`q-card k-${q.kind} s-${state} ${fresh ? "fresh" : ""} ${q.host ? "host" : ""} ${q.urgent ? "urgent" : ""}`}
       data-ask={q.short_id}
       data-state={state}
       aria-label={q.heading ?? q.title ?? q.short_id}
@@ -499,12 +504,8 @@ function QuestionCard({ q: asked, draft, fate, fresh, files, onChange, onClear, 
       // Dismiss, which is all that is left to do with it.
       inert={(fate && leaves(fate)) || undefined}
       style={fate && leaves(fate) ? ({ ["--q-leave" as string]: `${leaveMs(fate)}ms` }) : undefined}
-      // A file dropped on a card that takes files is that answer's; the chat around the panel would
-      // otherwise take it for the composer.
-      onDragOver={filesOk && !gone ? (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.stopPropagation(); setDropping(true); } } : undefined}
-      onDragLeave={filesOk ? () => setDropping(false) : undefined}
-      onDrop={filesOk && !gone ? (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); e.stopPropagation(); setDropping(false); onAttach(e.dataTransfer.files); } : undefined}
     >
+      {filesOk && !gone && <span className="drop-hint" aria-hidden="true"><Icon name="attach" size={18} />{t("questions.drop")}</span>}
       <header className="q-head">
         <span className={`q-kind k-${q.kind}`} aria-hidden><Icon name={KIND_ICON[q.kind] ?? "question"} size={14} /></span>
         <div className="q-headline">
