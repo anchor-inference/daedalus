@@ -55,6 +55,21 @@
   // Past this many elements the daemon does not ask Chromium for the page's listeners: the answer
   // alone costs more than the snapshot (browser-use draws the same line).
   const LISTENER_ELEMENTS = 10000;
+  // The most elements marked aria-hidden one read hit-tests to see whether the screen shows them
+  // after all: past it the mark is taken at its word, and the note on unread words still answers.
+  const ARIA_CHECKS = 200;
+  // How many characters of plain words, with no control or heading among them, an aria-hidden element
+  // needs before the screen's say overrules the mark: more than a label's visual twin, less than a
+  // paragraph.
+  const ARIA_WORDS = 80;
+  // The grid of hit tests that finds the words on screen: a point every 80 by 30 pixels or so of a
+  // laptop's window, closer than a line of text and a button are tall, at a few hundred hit tests.
+  const SCREEN_COLUMNS = 16;
+  const SCREEN_ROWS = 24;
+  // Below this many characters on screen an outline missing them is not worth a note (a splash, a
+  // canvas with a caption); and the note gives the words it lists at most this much room.
+  const SCREEN_TEXT_MIN = 80;
+  const SCREEN_TEXT_ROOM = 1500;
 
   function collapse(s) {
     return (s || "").replace(/\s+/g, " ").trim();
@@ -261,7 +276,9 @@
     if (node.nodeType === Node.TEXT_NODE) return node.data;
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     const el = node;
-    if (!visible(el)) return "";
+    // Inside a name the page's aria-hidden holds whatever the screen shows: it is an icon's glyph or
+    // the visual twin of a label, and the name is what a screen reader would say.
+    if (!visible(el) || (depth > 0 && ariaHidden(el))) return "";
     if (tag(el) === "img") return el.getAttribute("alt") || "";
     if (tag(el) === "input" && ["button", "submit", "reset"].includes(inputType(el))) return el.value;
     // Inside a name, a part's own label stands for it, as the accessibility tree has it: the icon
@@ -327,11 +344,53 @@
     return clip(el.getAttribute("title") || "", 120);
   }
 
+  // visible says el is drawn: not hidden by the markup or the style, and not withdrawn by an
+  // aria-hidden the screen contradicts (see shownDespiteAria).
   function visible(el) {
-    if (el.hidden || el.getAttribute("aria-hidden") === "true") return false;
-    if (el.checkVisibility) return el.checkVisibility({ visibilityProperty: true });
-    const s = style(el);
-    return s.display !== "none" && s.visibility !== "hidden";
+    if (el.checkVisibility ? !el.checkVisibility({ visibilityProperty: true }) :
+      (el.hidden || style(el).display === "none" || style(el).visibility === "hidden")) return false;
+    return el.getAttribute("aria-hidden") !== "true" || shownDespiteAria(el);
+  }
+
+  function ariaHidden(el) {
+    return el.getAttribute("aria-hidden") === "true";
+  }
+
+  // The answers of shownDespiteAria for one read: a hit test is the costly part, and an outline asks
+  // about the same element from several places. Each read starts with a fresh table.
+  let ariaShown = new WeakMap();
+  let ariaChecks = 0;
+
+  // shownDespiteAria says an element the page marks aria-hidden is in fact on screen, with words or
+  // controls in it, and takes clicks: a modal library hid the application's root while its notice
+  // was open and never took the mark back. A form service's page was read as its header, its footer
+  // and an empty alertdialog while its question and answers stood on screen, and the agent reloaded
+  // it for twenty minutes. The page's mark is a claim about assistive technology; the screen is what
+  // a person sees and clicks, so the screen wins. What the mark is usually right about stays hidden:
+  // an icon, or a line of words duplicated for the eye (no control or heading in it, and shorter than
+  // ARIA_WORDS), a clone of a carousel's slide off screen, and the page behind a modal that is open,
+  // whose backdrop takes the hit test. Whatever this leaves out the note on unread words still shows
+  // when it is most of the screen.
+  function shownDespiteAria(el) {
+    let v = ariaShown.get(el);
+    if (v !== undefined) return v;
+    v = false;
+    const words = collapse(el.textContent).length;
+    if (ariaChecks < ARIA_CHECKS && (words >= ARIA_WORDS || el.querySelector(CONTROLS + ",h1,h2,h3,h4,h5,h6"))) {
+      ariaChecks++;
+      const on = onScreen(el);
+      if (on) {
+        for (const [x, y] of samples(...on)) {
+          const t = topAt(x, y);
+          if (t && within(t, el)) {
+            v = true;
+            break;
+          }
+        }
+      }
+    }
+    ariaShown.set(el, v);
+    return v;
   }
 
   // native says the markup itself makes el something to act on.
@@ -377,7 +436,7 @@
     if (t === "body" || t === "html" || !el.firstElementChild) return false;
     let found = false;
     for (const c of el.children) {
-      if (visible(c) || !c.querySelector("a[href], button, [role=menuitem]")) continue;
+      if ((visible(c) && !ariaHidden(c)) || !c.querySelector("a[href], button, [role=menuitem]")) continue;
       const pos = style(c).position;
       if (pos === "absolute" || pos === "fixed") {
         found = true;
@@ -393,7 +452,7 @@
   // hiddenControl says a checkbox, radio or file input is drawn by something else: hidden, see-through
   // or shrunk to nothing, the way styled ones are, so its label is what takes the click.
   function hiddenControl(c) {
-    if (!visible(c)) return true;
+    if (!visible(c) || ariaHidden(c)) return true;
     if (c.checkVisibility && !c.checkVisibility({ opacityProperty: true })) return true;
     const b = c.getBoundingClientRect();
     return b.width < 2 || b.height < 2;
@@ -646,6 +705,18 @@
       if (SKIP.has(t)) return;
       if (!visible(el)) return;
       if (band && outside(el)) return;
+      if (ariaHidden(el)) {
+        // Read because the screen shows it (shownDespiteAria); said, so that an agent knows why a
+        // screen reader would not, and that the page may still be in the middle of something.
+        if (!emit(depth, "[aria-hidden by the page, but on screen and clickable:]", el)) return;
+        depth++;
+      }
+      if (el.hasAttribute("inert")) {
+        // Drawn, so read, but nothing in it takes a click or the focus, for a person either: said
+        // here, or an agent clicks its refs again and again for nothing.
+        if (!emit(depth, "[inert by the page: on screen, but it takes no click or focus until the page lifts it:]", el)) return;
+        depth++;
+      }
       // A control its label stands for is read on the label's line.
       if (t === "input" && proxiedBy(el)) return;
       const proxy = t === "label" ? proxyControl(el) : null;
@@ -938,8 +1009,77 @@
     return tail;
   }
 
+  // screenText is the words drawn in the viewport, as a grid of hit tests finds them: each element
+  // hit once, with its own text (its children are hit by points of their own), in reading order. It
+  // is what a person sees and could click, whatever the markup claims about it.
+  function screenText(columns, rows) {
+    const seen = new Set();
+    const out = [];
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < columns; i++) {
+        const t = topAt((i + 0.5) * innerWidth / columns, (j + 0.5) * innerHeight / rows);
+        if (!t || t.nodeType !== Node.ELEMENT_NODE || seen.has(t)) continue;
+        seen.add(t);
+        if (SKIP.has(tag(t)) || secret(t)) continue;
+        let all = "", longest = "";
+        for (const c of t.childNodes) {
+          if (c.nodeType !== Node.TEXT_NODE) continue;
+          const s = collapse(c.data);
+          all += " " + s;
+          if (s.length > longest.length) longest = s;
+        }
+        all = collapse(all);
+        if (all.length >= 2) out.push({ el: t, text: all, key: longest.slice(0, 30).trim() });
+      }
+    }
+    return out;
+  }
+
+  // unread is a note for an outline that misses most of the words on screen, with those words and
+  // refs to click them, or null. However the page came to hide its content from the outline (an
+  // aria-hidden left behind, a way of drawing this script does not know), the agent must never read
+  // a page blind: one that did reloaded a form for twenty minutes, told each time the page had not
+  // changed, while the form stood on screen.
+  function unread(lines, room) {
+    const hay = lines.map((l) => l.s).join("\n");
+    const tally = (words) => {
+      let total = 0, lost = 0;
+      const missing = [];
+      for (const w of words) {
+        total += w.text.length;
+        if (hay.includes(quote(w.key).slice(1, -1))) continue;
+        lost += w.text.length;
+        missing.push(w);
+      }
+      return { total, lost, missing };
+    };
+    // A coarse grid first: on a page the outline reads well, which is nearly every page, it settles
+    // the question at a quarter of the hit tests, and those cost tens of milliseconds on a long one.
+    const coarse = tally(screenText(SCREEN_COLUMNS / 2, SCREEN_ROWS / 2));
+    if (coarse.lost < coarse.total / 4) return null;
+    const { total, lost, missing } = tally(screenText(SCREEN_COLUMNS, SCREEN_ROWS));
+    if (total < SCREEN_TEXT_MIN || lost < total / 2) return null;
+    const out = ["- [the outline above misses most of the words on screen (" + lost + " of " + total +
+      " characters); what the screen shows, top to bottom:]"];
+    let refs = 0, left = Math.min(SCREEN_TEXT_ROOM, room) - out[0].length;
+    for (const w of missing) {
+      const c = controlOf(w.el) || w.el;
+      const line = "  - text " + quote(clip(w.text, 200)) + " [ref=" + ref(c) + "]";
+      if (line.length + 1 > left) {
+        out.push("  - …");
+        break;
+      }
+      left -= line.length + 1;
+      out.push(line);
+      refs++;
+    }
+    return { lines: out, refs };
+  }
+
   function snapshot(scope, maxChars, opts) {
     opts = opts || {};
+    ariaShown = new WeakMap();
+    ariaChecks = 0;
     let root = document.body || document.documentElement;
     if (scope) {
       root = lookup(scope) || frameByRef(scope);
@@ -970,13 +1110,19 @@
         tail.push("- [end of page]");
       }
     }
-    if (opts.header && !scope && o.refs === 0 && o.lines.length <= 2) {
+    let used = taken + o.used;
+    const missed = opts.header && !scope && !o.truncated ? unread(o.lines, maxChars - used - 120) : null;
+    if (missed) {
+      tail.push(...missed.lines);
+      o.refs += missed.refs;
+      for (const l of missed.lines) used += l.length + 1;
+    } else if (opts.header && !scope && o.refs === 0 && o.lines.length <= 2) {
       tail.push("- [the page looks empty" + (loading ? " and is still loading" : "") +
         "; wait for it to load, or look at a screenshot: it may draw on a canvas]");
     }
     return {
       url: location.href, title: document.title, header, lines: o.lines.map((l) => l.s), tail, refs: o.refs,
-      truncated: o.truncated, frames: o.frames, used: taken + o.used,
+      truncated: o.truncated, frames: o.frames, used,
       viewport: { w: innerWidth, h: innerHeight },
       scroll: { top: st.top, height: st.height, view: st.view, above: st.above, below: st.below },
       loading,
@@ -986,6 +1132,8 @@
   // readable is the page's main text, as a reader view would take it: the main landmark or the
   // article, else the body without its navigation, header and footer.
   function readable(scope, maxChars) {
+    ariaShown = new WeakMap();
+    ariaChecks = 0;
     let root;
     if (scope) {
       root = lookup(scope);
@@ -1075,6 +1223,8 @@
   // around it and the control it is in, or the few controls beside it (the Add to cart of the
   // product whose name matched).
   function find(query, isRegex, caseSensitive, max) {
+    ariaShown = new WeakMap();
+    ariaChecks = 0;
     let re;
     try {
       re = new RegExp(isRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi");

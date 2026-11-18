@@ -500,7 +500,12 @@ class LoopHints:
         trail.page = (url, fingerprint)
         still = self._still(trail, changed)
         if last is not None and last[0] == key and last[1] == fingerprint:
-            return "Note: the page is exactly as it was at your last read; nothing changed since. Act on it, BrowserWait for a change, or move on." + (f"\n{still}" if still else "")
+            # Only the read is known to be the same, not the screen: the note once said "nothing
+            # changed" of an outline that missed a whole form, and the agent took it for the page.
+            return (
+                "Note: this read is exactly as it was at your last read. If the screen should show something it does not, "
+                "BrowserLook to see it; otherwise act on it, BrowserWait for a change, or move on."
+            ) + (f"\n{still}" if still else "")
         return still
 
     def went(self, owner: str, url: str) -> str:

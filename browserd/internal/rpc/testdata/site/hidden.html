@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Hidden content</title>
+<style>
+body{margin:0;font:16px sans-serif}
+header,footer{padding:8px;background:#eee}
+.form{padding:20px}
+.answer{border:1px solid #0d4cd3;border-radius:8px;margin:8px 0;padding:14px;width:420px;cursor:pointer}
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+.box{background:#fff;padding:20px;width:420px}
+</style></head>
+<body>
+<!-- A form constructor's screen behind a notice, the way a portal's service page is built: the
+     portal's header and footer around an application root, and a notice the modal library opens in a
+     container of its own. Which way the screen hides or holds its form is chosen by ?mode=:
+       aria   the library marks the application root aria-hidden while the notice is open and leaves
+              it so when the notice closes, its alertdialog left behind empty (the default);
+       inert  the same with inert instead of aria-hidden;
+       shadow the form is drawn inside a custom element's open shadow root;
+       frame  the form is in a frame of the same site;
+       plain  no notice at all: only the cards, divs with a listener and a pointer cursor;
+       tiles  each answer marked aria-hidden on its own, its words too few for the outline to take
+              the screen's side against the mark: what only the note on unread words shows. -->
+<header><a href="/still?to=home">Госуслуги</a> <a href="/still?to=services">Услуги</a>
+  <button aria-label="Меню пользователя">☰</button></header>
+<div id="app"></div>
+<footer><a href="/still?to=help">Помощь</a> <a href="/still?to=about">О портале</a></footer>
+<div id="overlay"></div>
+<script>
+const mode = new URLSearchParams(location.search).get("mode") || "aria";
+const form = `<div class="form"><h2>Почему хотите сняться с воинского учёта?</h2>
+  <div class="answer"><span>Уезжаю жить в другую страну</span></div>
+  <div class="answer"><span>Уезжаю из России на срок более 6 месяцев</span></div></div>`;
+function wire(root) {
+  for (const a of root.querySelectorAll(".answer")) {
+    a.addEventListener("click", () => document.title = "chose " + a.textContent.trim());
+  }
+}
+const app = document.getElementById("app");
+if (mode === "shadow") {
+  customElements.define("epgu-form", class extends HTMLElement {
+    connectedCallback() {
+      const s = this.attachShadow({ mode: "open" });
+      s.innerHTML = `<style>.form{padding:20px}.answer{border:1px solid #0d4cd3;margin:8px 0;padding:14px;width:420px;cursor:pointer}</style>` + form;
+      wire(s);
+    }
+  });
+  app.innerHTML = "<epgu-form></epgu-form>";
+} else if (mode === "frame") {
+  const f = document.createElement("iframe");
+  f.title = "Форма";
+  f.style.cssText = "width:600px;height:300px;border:0";
+  f.srcdoc = `<style>body{font:16px sans-serif}.answer{border:1px solid #0d4cd3;margin:8px 0;padding:14px;width:420px;cursor:pointer}</style>` + form;
+  f.onload = () => wire(f.contentDocument);
+  app.appendChild(f);
+} else if (mode === "tiles") {
+  const tiles = ["Москва", "Санкт-Петербург", "Новосибирск", "Екатеринбург", "Казань", "Нижний Новгород",
+    "Челябинск", "Самара"];
+  app.innerHTML = `<div class="form"><p aria-hidden="true">Выберите город</p>` +
+    tiles.map((t) => `<div class="answer" aria-hidden="true">${t}</div>`).join("") + `</div>`;
+  wire(app);
+} else {
+  app.innerHTML = form;
+  wire(app);
+}
+if (mode === "aria" || mode === "inert") {
+  const overlay = document.getElementById("overlay");
+  overlay.innerHTML = `<div class="backdrop"><div role="alertdialog" aria-modal="true" class="box">
+    <div class="content"><h3>Технические работы</h3><p>Возможны перебои в работе услуги.</p>
+    <button id="ok">Понятно, перейти к услуге</button></div></div></div>`;
+  if (mode === "aria") app.setAttribute("aria-hidden", "true");
+  else app.inert = true;
+  document.getElementById("ok").addEventListener("click", () => {
+    // The library's fault this page reproduces: the notice's content and backdrop go, the
+    // alertdialog stays, and the root keeps the mark it was given.
+    const d = overlay.querySelector("[role=alertdialog]");
+    d.innerHTML = "";
+    d.className = "";
+    overlay.querySelector(".backdrop").replaceWith(d);
+  });
+}
+</script>
+</body></html>
