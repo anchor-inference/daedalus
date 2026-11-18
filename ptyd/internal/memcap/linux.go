@@ -31,6 +31,7 @@ type hooks struct {
 	probe     func(dir string) error
 	systemctl func(args ...string) error
 	machine   func() int64
+	dropins   func(unit string) string // where set-property --runtime keeps the unit's drop-ins
 }
 
 // Manager is the cap of one daemon. Its methods are safe from any goroutine.
@@ -52,7 +53,7 @@ type Manager struct {
 // Setup finds the daemon's own group and prepares it to carry the cap, then applies the cap saved in
 // stateFile by the last run, if any. It never fails: a Manager that cannot cap says why in Status.
 func Setup(stateFile string) *Manager {
-	h := hooks{pid: os.Getpid(), delegated: delegated, probe: probeClone, systemctl: systemctl, machine: machineBytes}
+	h := hooks{pid: os.Getpid(), delegated: delegated, probe: probeClone, systemctl: systemctl, machine: machineBytes, dropins: runtimeDropins}
 	root, err := containment.OwnRoot()
 	if err != nil {
 		return &Manager{h: h, stateFile: stateFile, reason: fmt.Sprintf("no cgroup v2 group of its own: %v", err)}
@@ -93,6 +94,11 @@ func setup(root, stateFile string, h hooks) *Manager {
 	}
 	if saved := loadRequest(stateFile); saved != nil {
 		_, _ = m.Apply(*saved)
+	} else if m.mode == "jobs" {
+		// No cap yet: the unit's fallback limit holds, and jobs is kept under it so a kill at that
+		// limit is a program's and the daemon keeps its room. A throttle point on the unit's group
+		// goes at once, cap or not: it would hold the daemon (see lift).
+		m.note = join(m.fitUnderRoot(), m.liftThrottle())
 	}
 	return m
 }
@@ -197,35 +203,53 @@ func (m *Manager) Apply(r Request) (Status, error) {
 		}
 		if m.mode == "jobs" {
 			m.note = join(m.note, m.lift(limits))
+			m.note = join(m.note, m.fitUnderRoot())
 		}
 		return m.status(), nil
 	}
-	err = m.h.systemctl("set-property", "--runtime", m.unit, "MemoryMax="+unitValue(limits.Max),
-		"MemoryHigh="+unitValue(limits.High), "MemorySwapMax="+unitValue(limits.Swap))
-	if err != nil {
+	// MemoryHigh is always infinity: this group holds the daemon (see lift).
+	props := []string{"MemoryMax=" + unitValue(limits.Max), "MemoryHigh=" + unitValue(limits.High), "MemorySwapMax=" + unitValue(limits.Swap)}
+	if err := m.h.systemctl(append([]string{"set-property", "--runtime", m.unit}, props...)...); err != nil {
 		return m.status(), fmt.Errorf("systemd did not take the cap: %w", err)
 	}
+	m.dropScale(props)
 	return m.status(), nil
 }
 
-// lift raises the unit's own limits, which systemd keeps on the group above jobs, when they are
-// lower than the cap: they are the fallback the unit file carries for the time before the host
-// first connects, and left in place they would quietly win over the operator's larger cap. systemd
-// owns that group's files, so it is asked rather than overwritten; --runtime lasts until a reboot,
-// after which the fallback holds again until the cap is sent anew.
+// DaemonHeadroom is how far the unit's group must stay above the cap on jobs: the cap is reached,
+// and its largest program killed, while the group the daemon shares with jobs still has room, so the
+// daemon is never the one reclaimed from at the unit's limit.
+const DaemonHeadroom = int64(512) << 20
+
+// lift raises the unit's own limits, which systemd keeps on the group above both the daemon and
+// jobs, when they would bind before the cap: they are the fallback the unit file carries for the time
+// before the host first connects, and left in place they would quietly win over the operator's cap
+// and act on the daemon too. A throttle point there is lifted whatever the cap: on 2026-11-18 the
+// unit's MemoryHigh=50% throttled the whole group at once, the daemon with the builds, so a file stat
+// took over ten seconds, the Files panel answered 503 and every host command hung.
+//
+// systemd owns that group's files, so it is asked rather than overwritten; --runtime lasts until a
+// reboot, after which the fallback holds again until the cap is sent anew. A limit once set as a
+// percentage lives in its own runtime drop-in (50-MemoryMaxScale.conf), which sorts after the absolute
+// one set-property writes now and would put the percentage back at systemd's next reload, so the
+// percentage drop-ins of what is lifted are removed.
 func (m *Manager) lift(want Limits) string {
 	var props []string
 	for _, l := range []struct {
 		file, prop string
-		want       int64
-	}{{"memory.max", "MemoryMax", want.Max}, {"memory.high", "MemoryHigh", want.Max}, {"memory.swap.max", "MemorySwapMax", want.Swap}} {
+		need       int64 // the least the unit's limit may be; 0 is none at all
+	}{
+		{"memory.max", "MemoryMax", headroom(want.Max)},
+		{"memory.high", "MemoryHigh", 0},
+		{"memory.swap.max", "MemorySwapMax", want.Swap},
+	} {
 		if l.prop == "MemorySwapMax" && want.Max != 0 {
 			// The swap allowance is this daemon's policy, not the operator's choice: a unit that
 			// allows less keeps it. Only "no limit" asks for the unit's to go.
 			continue
 		}
 		have := readLimit(filepath.Join(m.root, l.file))
-		if have >= 0 && have != none && (l.want == 0 || have < l.want) {
+		if have >= 0 && have != none && (l.need == 0 || have < l.need) {
 			props = append(props, l.prop+"=infinity")
 		}
 	}
@@ -238,7 +262,66 @@ func (m *Manager) lift(want Limits) string {
 	if err := m.h.systemctl(append([]string{"set-property", "--runtime", m.unit}, props...)...); err != nil {
 		return fmt.Sprintf("the unit's own lower limit stays in force: %v", err)
 	}
+	m.dropScale(props)
 	return ""
+}
+
+// dropScale removes the percentage drop-ins of the properties just set by set-property (see lift).
+func (m *Manager) dropScale(props []string) {
+	dir := m.h.dropins(m.unit)
+	if dir == "" {
+		return
+	}
+	for _, prop := range props {
+		name, _, _ := strings.Cut(prop, "=")
+		_ = os.Remove(filepath.Join(dir, "50-"+name+"Scale.conf"))
+	}
+}
+
+// liftThrottle asks systemd to drop a throttle point on the unit's group, which holds the daemon.
+func (m *Manager) liftThrottle() string {
+	have := readLimit(filepath.Join(m.root, "memory.high"))
+	if have < 0 || have == none {
+		return ""
+	}
+	if m.unit == "" {
+		return "the daemon's own group has a throttle point that only its owner can lift"
+	}
+	props := []string{"MemoryHigh=infinity"}
+	if err := m.h.systemctl(append([]string{"set-property", "--runtime", m.unit}, props...)...); err != nil {
+		return fmt.Sprintf("the unit's throttle point stays in force and slows the daemon too: %v", err)
+	}
+	m.dropScale(props)
+	return ""
+}
+
+func headroom(max int64) int64 {
+	if max == 0 {
+		return 0
+	}
+	return max + DaemonHeadroom
+}
+
+// fitUnderRoot keeps the cap on jobs below the unit group's own limit by DaemonHeadroom, when that
+// limit could not be lifted or the host has not sent a cap yet: the programs are then killed at jobs
+// before the group that holds the daemon is full.
+func (m *Manager) fitUnderRoot() string {
+	outer := readLimit(filepath.Join(m.root, "memory.max"))
+	if outer < 0 || outer == none {
+		return ""
+	}
+	room := (outer - DaemonHeadroom) &^ 4095
+	if room < MinBytes {
+		room = MinBytes
+	}
+	jobs := readLimit(filepath.Join(m.limited, "memory.max"))
+	if jobs >= 0 && jobs != none && jobs <= room {
+		return ""
+	}
+	if err := write(filepath.Join(m.limited, "memory.max"), strconv.FormatInt(room, 10)); err != nil {
+		return fmt.Sprintf("the cap could not be kept under the unit's own limit: %v", err)
+	}
+	return "the cap is kept under the unit's own limit, with room left for the daemon"
 }
 
 // Status reads back what is in force.
@@ -345,6 +428,14 @@ func systemctl(args ...string) error {
 		return err
 	}
 	return nil
+}
+
+func runtimeDropins(unit string) string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" || unit == "" {
+		return ""
+	}
+	return filepath.Join(dir, "systemd", "user.control", unit+".d")
 }
 
 func machineBytes() int64 {

@@ -20,6 +20,17 @@ from tests.support.fake_ptyd import FakePtyd
 from tests.unit.test_terminals_sidechannels import FreeOwners, eventually, frequent_housekeeping  # noqa: F401
 
 
+def test_the_unit_never_throttles_the_daemon() -> None:
+    """The unit's group holds the daemon: a MemoryHigh there throttled the daemon with the builds on
+    2026-11-18 (stat over ten seconds, the Files panel 503, every host command hung). Only the hard
+    limit and the small swap stay, the group is the daemon's to split, and one kill ends nothing else."""
+    unit = (Path(__file__).resolve().parents[2] / "deploy" / "ptyd" / "daedalus-ptyd.service").read_text()
+    settings = [line.strip() for line in unit.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert not [line for line in settings if line.startswith(("MemoryHigh=", "MemoryLow=", "CPUQuota="))]
+    for wanted in ("MemoryMax=60%", "MemorySwapMax=2G", "Delegate=yes", "OOMPolicy=continue"):
+        assert wanted in settings
+
+
 def test_the_setting_says_a_share_a_size_or_none() -> None:
     assert TerminalsConfig().host_memory_cap == "60%"
     assert memory_cap_request("60%") == {"percent": 60.0}

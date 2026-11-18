@@ -119,10 +119,13 @@ group and makes `jobs` (the cap: `memory.max`, `memory.swap.max` of 2 GB, `memor
 `jobs/commands`, where every program is created (`CLONE_INTO_CGROUP`); an attempt's containment is
 made inside `jobs` too. At the cap the kernel kills the largest program, never the daemon or the
 server, and `exec.run` answers with `oom_kills`, which the agent's tool result turns into a sentence.
-There is no `memory.high` below the cap: a throttle point held a program that kept allocating at the
-throttle for its whole timeout without killing it. The unit's own `MemoryMax=60%` is the fallback
-before the first connection; a larger cap asks systemd to lift it for the boot
-(`systemctl --user set-property --runtime`). Without delegation the daemon caps its own group,
+There is no `memory.high` anywhere, and never on a group that holds the daemon: the unit's first
+`MemoryHigh=50%` throttled the daemon together with eight agents' builds (file stats over ten
+seconds, every host command hung), and a throttle point never kills a program that keeps allocating.
+The unit's own `MemoryMax=60%` is the fallback before the first connection, with `jobs` kept 512 MB
+under it so the kill happens in `jobs` first; once a cap is set, systemd is asked to lift the unit's
+limits for the boot (`systemctl --user set-property --runtime`), and the `50-*Scale.conf` drop-ins a
+percentage left are removed so a reload does not bring it back. Without delegation the daemon caps its own group,
 itself included, and says so. The cap last applied is kept in the state directory and applied at the
 next start. The desktop launcher starts the daemon in a delegated `systemd-run --user --scope` for
 the same layout; on Windows the programs share a job object with a job-wide memory limit (an

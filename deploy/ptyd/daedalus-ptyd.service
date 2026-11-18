@@ -19,9 +19,11 @@ IgnoreSIGPIPE=no
 # 15 GB to 61 GB in ten minutes; nothing was killed, the kernel swapped instead, and every service on
 # the server stopped answering for an hour until a forced power-off. At MemoryMax the kernel kills the
 # largest process in this group alone. Little swap, so a runaway build is killed rather than thrashing
-# the disk for everyone. No MemoryHigh: a throttle point below the cap held a program that would not
-# stop allocating at the throttle for as long as it was given, never killing it, and a build the
-# agent ran would hang for its whole timeout.
+# the disk for everyone. Never a MemoryHigh here: this group holds the daemon itself. The first fix
+# had MemoryHigh=50%, and the same day eight agents' builds reached it and the kernel throttled the
+# whole group, the daemon with them: a file stat took over ten seconds, the Files panel answered 503,
+# every host command hung and the daemon refused new ones. A throttle point also never kills: a
+# program that kept allocating sat at it for its whole timeout.
 #
 # These two are the fallback for the time before the app first sends the operator's cap (Settings,
 # Limits). The daemon then moves itself into a "daemon" leaf of this group and holds its programs in
