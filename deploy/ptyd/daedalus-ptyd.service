@@ -14,6 +14,17 @@ ExecStart=%h/.local/lib/daedalus/ptyd serve --env host --run-dir "@RUN_DIR@" --s
 # that: a pipeline cut short by ``head`` then printed "Broken pipe" into the agent's output and broke the
 # base64 file reads. A shell in a terminal has it at the default, so the daemon's programs should too.
 IgnoreSIGPIPE=no
+# Everything the agent runs on the host runs in this unit's control group, outside any container's
+# limit. Eight subagents each building and testing a Rust workspace at once took the machine from
+# 15 GB to 61 GB in ten minutes; nothing was killed, the kernel swapped instead, and every service on
+# the server stopped answering for an hour until a forced power-off. Above MemoryHigh the group is
+# throttled and reclaimed; at MemoryMax the kernel kills the largest process in this group alone.
+# Little swap, so a runaway build is killed rather than thrashing the disk for everyone.
+MemoryHigh=50%
+MemoryMax=60%
+MemorySwapMax=2G
+# One process killed for memory must not stop the unit: the default would end every terminal with it.
+OOMPolicy=continue
 Restart=on-failure
 RestartSec=2
 # KillMode stays control-group: ptyd owns its PTYs, and when it stops they stop.
