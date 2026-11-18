@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus import load as load_math
+from daedalus.config import memory_cap_request
 from daedalus.harness.env import staff_inherited_env
 from daedalus.security import operator_secrets
 from daedalus.terminals import wire
@@ -178,6 +179,10 @@ class Link:
     event_seq: int = 0
     event_seq_saved: int = 0
     connected_once: asyncio.Event = field(default_factory=asyncio.Event)
+    memory_cap_sent: str = ""
+    """The ``terminals.host_memory_cap`` last sent to this daemon; "" until the first connection sends it."""
+    memory_cap_error: str = ""
+    """Why the daemon did not take it, as it said, for the Settings row; "" when it did."""
 
     @property
     def available(self) -> bool:
@@ -360,6 +365,7 @@ class Terminals(SideChannels):
         await self._reconcile(link)
         # A daemon starts with no roots, and one that restarted has forgotten them.
         await self._push_roots(link.env, link.client, force=True)
+        await self._push_memory_cap(link, force=True)
 
     async def _housekeeping(self) -> None:
         last_sync = last_prune = time.monotonic()
@@ -372,6 +378,7 @@ class Terminals(SideChannels):
                 for link in self.links.values():
                     if link.available and link.client is not None:
                         await self._push_roots(link.env, link.client)
+                        await self._push_memory_cap(link)
                 now = time.monotonic()
                 if now - last_sync >= SYNC_SECONDS:
                     last_sync = now
@@ -397,6 +404,58 @@ class Terminals(SideChannels):
             await self.db.kv_set("terminals.profile_costs", self.costs.dump())
             self._costs_dirty = False
             self._costs_saved_at = time.monotonic()
+
+    # -- the host commands' memory cap -----------------------------------------------------------
+
+    @staticmethod
+    def _speaks_memory_cap(link: Link) -> bool:
+        return link.env == "host" and int((link.info.get("capabilities") or {}).get("memory_cap") or 0) >= 1
+
+    async def _push_memory_cap(self, link: Link, *, force: bool = False) -> None:
+        """Send ``terminals.host_memory_cap`` to the host's daemon at every connection (a restarted one
+        has only what it saved, and the setting may have changed meanwhile) and within one
+        housekeeping tick of a change in Settings. Recorded as sent whatever the answer, so a daemon
+        that refuses is not asked every two seconds."""
+        if not self._speaks_memory_cap(link) or link.client is None:
+            return
+        value = self.config().host_memory_cap
+        if not force and link.memory_cap_sent == value:
+            return
+        link.memory_cap_sent = value
+        try:
+            answer = await link.client.call("memory.set_cap", memory_cap_request(value))
+        except (wire.RpcError, Unavailable) as exc:
+            link.memory_cap_error = exc.message if isinstance(exc, wire.RpcError) else exc.detail
+            logger.warning("terminal service %s did not take the memory cap %s: %s", link.env, value, link.memory_cap_error)
+            return
+        link.memory_cap_error = "" if answer.get("applied") else str(answer.get("error") or "")
+        status = answer.get("status") or {}
+        if link.memory_cap_error:
+            logger.warning("terminal service %s could not apply the memory cap %s: %s", link.env, value, link.memory_cap_error)
+        else:
+            logger.info("terminal service %s: host commands capped at %s (%s bytes in force, %s)", link.env, value, status.get("max_bytes"), status.get("mode"))
+
+    async def memory_cap(self, env: str) -> dict[str, Any]:
+        """The cap for Settings: the setting, and what the daemon has in force, the machine's memory
+        and what the host's programs use now, as the daemon reads them from the kernel."""
+        link = self.links.get(env)
+        if link is None:
+            raise InvalidRequest(unknown_env(env))
+        view: dict[str, Any] = {"env": env, "setting": self.config().host_memory_cap, "available": False, "reason": "", "error": "", "status": None}
+        if not link.available or link.client is None:
+            view["reason"] = "unreachable"
+            return view
+        if not self._speaks_memory_cap(link):
+            view["reason"] = "outdated"
+            return view
+        try:
+            view["status"] = await self._call(env, "memory.status", {}, what="reading the memory cap")
+        except EnvUnavailable:
+            view["reason"] = "unreachable"
+            return view
+        view["available"] = True
+        view["error"] = link.memory_cap_error
+        return view
 
     # -- environments ---------------------------------------------------------------------------
 

@@ -136,6 +136,27 @@ func TestTheMemoryScopeIsProbedBeforeItIsUsed(t *testing.T) {
 	}
 }
 
+// The terminal daemon's scope is delegated to it, so it can hold its programs under the memory cap
+// in a group beside its own, and is kept when one of them is killed for memory.
+func TestTheTerminalDaemonGetsADelegatedScope(t *testing.T) {
+	found := func(string) (string, error) { return "/usr/bin/systemd-run", nil }
+	works := func(context.Context, []string) error { return nil }
+	scope := ptydScope(context.Background(), found, works)
+	if runtime.GOOS != "linux" {
+		if scope != nil {
+			t.Fatalf("a scope off Linux: %v", scope)
+		}
+		return
+	}
+	if !slices.Contains(scope, "Delegate=yes") || !slices.Contains(scope, "OOMPolicy=continue") || slices.Contains(scope, "MemoryMax="+browserdMemoryMax) {
+		t.Fatalf("scope %v", scope)
+	}
+	argv := ptydArgv("/opt/ptyd", Paths{Local: "/tmp/local"}, scope)
+	if argv[0] != "/usr/bin/systemd-run" || argv[len(scope)] != "/opt/ptyd" {
+		t.Fatalf("argv %v", argv)
+	}
+}
+
 // The daemon works in the local state folder, never in the data folder: a daemon that outlived a
 // crashed launcher with its working directory in the data folder held every later switch and
 // restore of it off.

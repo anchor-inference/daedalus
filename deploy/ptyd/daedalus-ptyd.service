@@ -17,12 +17,21 @@ IgnoreSIGPIPE=no
 # Everything the agent runs on the host runs in this unit's control group, outside any container's
 # limit. Eight subagents each building and testing a Rust workspace at once took the machine from
 # 15 GB to 61 GB in ten minutes; nothing was killed, the kernel swapped instead, and every service on
-# the server stopped answering for an hour until a forced power-off. Above MemoryHigh the group is
-# throttled and reclaimed; at MemoryMax the kernel kills the largest process in this group alone.
-# Little swap, so a runaway build is killed rather than thrashing the disk for everyone.
-MemoryHigh=50%
+# the server stopped answering for an hour until a forced power-off. At MemoryMax the kernel kills the
+# largest process in this group alone. Little swap, so a runaway build is killed rather than thrashing
+# the disk for everyone. No MemoryHigh: a throttle point below the cap held a program that would not
+# stop allocating at the throttle for as long as it was given, never killing it, and a build the
+# agent ran would hang for its whole timeout.
+#
+# These two are the fallback for the time before the app first sends the operator's cap (Settings,
+# Limits). The daemon then moves itself into a "daemon" leaf of this group and holds its programs in
+# a "jobs" group with the cap, which needs the group delegated to it; when the cap is above these,
+# it asks systemd to lift them for this boot (systemctl --user set-property --runtime).
 MemoryMax=60%
 MemorySwapMax=2G
+# The group is the daemon's to divide: its own leaf stays outside the cap, so a kill at the cap
+# takes a program and never the daemon that holds the open terminals.
+Delegate=yes
 # One process killed for memory must not stop the unit: the default would end every terminal with it.
 OOMPolicy=continue
 Restart=on-failure

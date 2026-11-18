@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sync"
 
+	"github.com/ascorblack/daedalus/ptyd/internal/memcap"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 )
 
@@ -27,6 +28,9 @@ func newGroup(cmd *exec.Cmd, _ bool) *procGroup { return &procGroup{cmd: cmd} }
 const parentDeathPerThread = false
 
 func (g *procGroup) started() {
+	// The shared job first: a job a process is already in can only gain a child job, so the
+	// program's own job nests under the host commands' memory cap only in this order.
+	memcap.AssignPid(g.cmd.Process.Pid)
 	job, err := ptyproc.NewJob()
 	if err != nil {
 		return

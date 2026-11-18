@@ -4794,6 +4794,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Expose the current daemon capabilities without loading every terminal into a form."""
         return {"envs": [env.view() for env in terminal_service().environments()]}
 
+    @api.get("/api/terminals/envs/{env}/memory")
+    async def terminals_memory_cap(env: Literal["container", "host"], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The host commands' memory cap beside its setting: the machine's memory, what the programs
+        use now and the cap in force, as the environment's daemon reads them from the kernel."""
+        return await terminal_service().memory_cap(env)
+
     @api.post("/api/terminals/envs/{env}/update", status_code=202)
     async def terminals_daemon_update(env: str, body: TerminalDaemonUpdateBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Recreate the terminals service from the image, which updates its daemon and ends its

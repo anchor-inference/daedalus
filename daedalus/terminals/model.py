@@ -169,6 +169,11 @@ class ExecResult:
     duration_ms: int
     path: str = ""
     """What ``PATH`` resolved the program to, as the daemon found it."""
+    oom_kills: int = 0
+    """Programs the kernel killed under the host commands' memory cap while this one ran: this one's
+    or another command's, as the kernel picks the largest. 0 from a daemon without the cap."""
+    memory_cap_bytes: int = 0
+    """The cap in force when ``oom_kills`` was counted."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/ascorblack/daedalus/ptyd/internal/memcap"
 )
 
 // A Windows terminal is a pseudoconsole (ConPTY): a console host the system runs for the program,
@@ -148,6 +150,8 @@ func Start(spec Spec) (*Proc, error) {
 		console.Close()
 		return nil, err
 	}
+	// The shared job of the host commands' memory cap first, so the terminal's own job nests in it.
+	memcap.Assign(pi.Process)
 	if err := job.Assign(pi.Process); err != nil {
 		_ = windows.TerminateProcess(pi.Process, killedExitCode)
 		closeHandles(pi.Thread, pi.Process)

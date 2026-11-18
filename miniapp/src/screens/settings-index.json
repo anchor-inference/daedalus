@@ -135,7 +135,7 @@
     {
       "id": "limits", "group": "agent", "icon": "hand",
       "title": { "en": "Limits", "ru": "Лимиты" },
-      "about": { "en": "How far one run may go: its iterations, the subagents at once, and the size of a workspace.", "ru": "Насколько далеко заходит один запуск: итерации, субагенты одновременно и размер рабочей папки." },
+      "about": { "en": "How far one run may go: its iterations, the subagents at once, the size of a workspace, and the memory the agent's commands on this machine may use.", "ru": "Насколько далеко заходит один запуск: итерации, субагенты одновременно, размер рабочей папки и память, которую могут занять команды агента на этой машине." },
       "synonyms": ["limit", "iterations", "subagents", "disk", "лимит", "итерации", "субагенты", "диск"]
     },
     {
@@ -709,6 +709,12 @@
       "title": { "en": "Workspace size limit", "ru": "Лимит размера рабочей области" },
       "about": { "en": "How large a workspace may grow, in GB, before its agent is asked to clean up and you are told; again at twice that. 0 means no limit. A workspace can have a limit of its own in the session's Details.", "ru": "Насколько может вырасти рабочая область, в ГБ, прежде чем её агента попросят убрать лишнее, а вам придёт уведомление; и ещё раз вдвое больше. 0 — без лимита. У области может быть свой лимит в сведениях сессии." },
       "synonyms": ["disk limit", "workspace limit", "folder size", "disk quota", "soft limit", "workspace_soft_limit_gb", "disk usage limit", "лимит диска", "лимит папки", "размер рабочей области", "квота на диск", "место на диске"]
+    },
+    {
+      "section": "limits", "anchor": "terminals.host_memory_cap", "config": "terminals.host_memory_cap",
+      "title": { "en": "Memory for host commands", "ru": "Память для команд на хосте" },
+      "about": { "en": "How much memory everything the agent runs on this machine may use together: a share of the machine's memory, a size in GB, or no limit. At the cap the kernel kills the largest of those programs, not the server.", "ru": "Сколько памяти может занять всё, что агент запускает на этой машине, вместе: доля памяти машины, размер в ГБ или без лимита. На пределе ядро завершает самую большую из этих программ, а не сервер." },
+      "synonyms": ["memory limit", "memory cap", "RAM limit", "RAM cap", "out of memory", "OOM", "host commands", "host terminal memory", "cgroup", "MemoryMax", "host_memory_cap", "лимит памяти", "предел памяти", "ограничение памяти", "оперативная память", "нехватка памяти", "команды на хосте", "память хоста"]
     },
     {
       "section": "budget", "anchor": "limits.usd_total", "config": "limits.usd_total",

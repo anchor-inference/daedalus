@@ -105,6 +105,29 @@ use the daemon: `not_installed` (empty directory; its detail says when root owns
 (a lock or token without an endpoint, or an endpoint nothing answers at), `permission_denied` (root
 in the container is not root on the host: rootless Docker or userns-remap), `protocol_mismatch`.
 
+### The host commands' memory cap
+
+Everything the host daemon starts — terminals, `exec.run`, `exec.stream` — runs outside any
+container's limit, so it is held to one memory cap the operator sets in Settings → Limits
+(`terminals.host_memory_cap`: `"60%"` of the machine, a size such as `"24G"`, or `"none"`). The host
+sends it with `memory.set_cap` at every connection and within a housekeeping tick of a change, and
+Settings reads `memory.status` back through `GET /api/terminals/envs/host/memory`: the machine's
+memory, what the programs use, and the cap in force as the kernel has it.
+
+On Linux the unit is `Delegate=yes`. At start the daemon moves itself into a `daemon` leaf of its
+group and makes `jobs` (the cap: `memory.max`, `memory.swap.max` of 2 GB, `memory.oom.group` 0) with
+`jobs/commands`, where every program is created (`CLONE_INTO_CGROUP`); an attempt's containment is
+made inside `jobs` too. At the cap the kernel kills the largest program, never the daemon or the
+server, and `exec.run` answers with `oom_kills`, which the agent's tool result turns into a sentence.
+There is no `memory.high` below the cap: a throttle point held a program that kept allocating at the
+throttle for its whole timeout without killing it. The unit's own `MemoryMax=60%` is the fallback
+before the first connection; a larger cap asks systemd to lift it for the boot
+(`systemctl --user set-property --runtime`). Without delegation the daemon caps its own group,
+itself included, and says so. The cap last applied is kept in the state directory and applied at the
+next start. The desktop launcher starts the daemon in a delegated `systemd-run --user --scope` for
+the same layout; on Windows the programs share a job object with a job-wide memory limit (an
+allocation past it fails); macOS reports the cap as not supported.
+
 ## Run directory and handshake
 
 ```

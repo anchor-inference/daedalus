@@ -44,11 +44,18 @@ type group struct {
 // NewController locates this daemon's own cgroup. It never creates a child in another service's
 // cgroup or accepts a filesystem path from the host.
 func NewController(instance string) (*Controller, error) {
-	root, err := currentRoot()
+	root, err := OwnRoot()
 	if err != nil {
 		return nil, err
 	}
 	return &Controller{root: root, instance: instance, groups: map[string]*group{}}, nil
+}
+
+// NewControllerAt keeps attempts under root, a group the daemon created inside its own delegated
+// one: with the host commands' memory cap in force that is the capped group, so an attempt is held
+// to the operator's cap as well as to its own ceilings.
+func NewControllerAt(root, instance string) *Controller {
+	return &Controller{root: root, instance: instance, groups: map[string]*group{}}
 }
 
 // NewTestController uses a scratch cgroup-shaped directory to test validation and state parsing.
@@ -57,7 +64,8 @@ func NewTestController(root, instance string) *Controller {
 	return &Controller{root: root, instance: instance, groups: map[string]*group{}}
 }
 
-func currentRoot() (string, error) {
+// OwnRoot is the directory of this process's own cgroup v2 group.
+func OwnRoot() (string, error) {
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return "", fmt.Errorf("own cgroup: %w", err)

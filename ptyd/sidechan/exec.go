@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
+	"github.com/ascorblack/daedalus/ptyd/internal/memcap"
 	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 )
 
@@ -119,6 +120,27 @@ type ExecResult struct {
 	// and goes on as a Job: ExitCode is -1 and the output is what it had written by then.
 	HandedOver bool `json:"handed_over,omitempty"`
 	Pid        int  `json:"pid,omitempty"`
+	// OOMKills is how many programs the kernel killed under the host commands' memory cap while this
+	// one ran, and MemoryCapBytes the cap then in force. The kernel kills the largest program in the
+	// group, which may be this one's child or another command's, so it is a count over the run and
+	// not a verdict on this program; a bare "signal 9" left the agent rerunning the same build.
+	OOMKills       int64 `json:"oom_kills,omitempty"`
+	MemoryCapBytes int64 `json:"memory_cap_bytes,omitempty"`
+}
+
+// capKills fills in OOMKills when the cap's counter moved since before.
+func capKills(res *ExecResult, before int64) {
+	if before < 0 {
+		return
+	}
+	after := memcap.Kills()
+	if after <= before {
+		return
+	}
+	res.OOMKills = after - before
+	if m := memcap.Installed(); m != nil {
+		res.MemoryCapBytes = memcap.Bytes(m.Status().MaxBytes)
+	}
 }
 
 // HandOver is how RunOrHandOver keeps a program instead of waiting for it.
@@ -252,6 +274,7 @@ func (e *Exec) run(ctx context.Context, r ExecRequest, h *HandOver) (ExecResult,
 	// program itself has exited.
 	cmd.WaitDelay = killGrace
 	start := time.Now()
+	killsBefore := memcap.Kills()
 	started := make(chan error, 1)
 	waited := make(chan error, 1)
 	go func() {
@@ -325,6 +348,7 @@ func (e *Exec) run(ctx context.Context, r ExecRequest, h *HandOver) (ExecResult,
 	if werr != nil && cmd.ProcessState == nil {
 		return ExecResult{}, nil, fmt.Errorf("running %s: %w", filepath.Base(path), werr)
 	}
+	capKills(&res, killsBefore)
 	if fitReply(&res.Stdout, &res.Stderr, config.MaxReplyData) {
 		res.Truncated = true
 	}

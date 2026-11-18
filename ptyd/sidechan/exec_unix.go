@@ -23,6 +23,7 @@ func newGroup(cmd *exec.Cmd, tied bool) *procGroup {
 	if tied {
 		parentDeath(cmd.SysProcAttr)
 	}
+	placeUnderCap(cmd.SysProcAttr)
 	return &procGroup{cmd: cmd}
 }
 

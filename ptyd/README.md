@@ -42,6 +42,7 @@ The protocol, the run directory, the events and the guarantees about the output 
 | `internal/toolsmcp` | `tools-mcp --set <name>` (and `team-mcp`, the `team` set): Daedalus's tools as an MCP server on stdio — the team's (`Report`, `AskOrchestrator`) compiled in, any other set read from the launch's `tools/<name>.json` — posting each call to the hook listener |
 | `internal/wire` | the terminal frames an attachment carries; `testdata/frames.json` is shared byte for byte with the app |
 | `internal/logx` | the log and the journal of agent writes |
+| `internal/memcap` | the host commands' memory cap (`memory.set_cap`, `memory.status`): on Linux the daemon's delegated group split into a `daemon` leaf and a capped `jobs` group every program is created in; on Windows a shared job object with a job-wide memory limit |
 
 The packages under `proto/` are shared with `browserd`, the browser daemon beside this one, which
 imports this module for them; `internal/` would forbid it. They hold nothing about terminals:

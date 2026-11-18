@@ -170,6 +170,9 @@ class FakePtyd:
         self.replies: list[dict[str, Any]] = []
         self.dials: dict[int, str] = {}
         """Channel → target of an open stream; what the host writes on one is echoed back."""
+        self.memory_cap: dict[str, Any] | None = None
+        """The host commands' memory cap this daemon keeps (``memory.status``); None is a daemon
+        without the calls. ``memory.set_cap`` records each request in ``memory_cap["requested"]``."""
         self.exec_stream_version = 1
         """``capabilities.exec_stream``; 0 is a daemon from before ``exec.stream``, which the host must name as old."""
         self.stream_program: Any = None
@@ -415,11 +418,19 @@ class FakePtyd:
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "home": self.home, "shell": "/bin/bash",
                     "capabilities": {"sandbox": self.sandbox, "emulator": "fake@1", "stats": "ok",
                                      "inherited_env_selection": getattr(self, "inheritance_selection", True),
-                                     **({"exec_stream": self.exec_stream_version} if self.exec_stream_version else {})}, "hooks": {"listen": ""},
+                                     **({"exec_stream": self.exec_stream_version} if self.exec_stream_version else {}),
+                                     **({"memory_cap": 1} if self.memory_cap is not None else {})}, "hooks": {"listen": ""},
                     "side_channels": {"exec_allow": sorted(self.exec_allow), "fs_roots": self.roots, "state_dir": f"{self.run_dir}-state"},
                     "counts": {"running": running, "exited": len(self.terminals) - running}, "machine": self.machine}
         if method == "events.unsubscribe":
             return {}
+        if method in ("memory.status", "memory.set_cap") and self.memory_cap is not None:
+            if method == "memory.set_cap":
+                total = int(self.machine["mem_total_bytes"])
+                cap = None if params.get("unlimited") else int(params["bytes"]) if params.get("bytes") else int(total * params["percent"] / 100)
+                self.memory_cap.update(requested=dict(params), max_bytes=cap)
+                return {"applied": True, "status": dict(self.memory_cap)}
+            return dict(self.memory_cap)
         if method == "terminal.create":
             box = params.get("sandbox")
             if box is not None and self.sandbox != "ok":

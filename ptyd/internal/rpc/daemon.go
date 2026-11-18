@@ -14,6 +14,7 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/containment"
+	"github.com/ascorblack/daedalus/ptyd/internal/memcap"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
@@ -40,6 +41,7 @@ type Daemon struct {
 	Sandbox           *sandbox.Prober         // bubblewrap; nil where the daemon offers no sandbox
 	Containment       *containment.Controller // cgroup v2, when this daemon has delegated controllers
 	ContainmentReason string
+	MemoryCap         *memcap.Manager // the host commands' memory cap; nil where the daemon keeps none (the container)
 
 	sampler  *procstat.Sampler
 	statsMu  sync.Mutex
@@ -76,6 +78,8 @@ func (d *Daemon) Register(srv *server.Server) {
 	srv.Handle("attempt.preflight", d.preflightContainment)
 	srv.Handle("attempt.kill", d.killAttempt)
 	srv.Handle("attempt.release", d.releaseAttempt)
+	srv.Handle("memory.status", d.memoryStatus)
+	srv.Handle("memory.set_cap", d.memorySetCap)
 	d.registerSide(srv)
 }
 
@@ -161,6 +165,9 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 			// directories; a host sends them only to a daemon that says so, since an older one refuses
 			// a field it does not know and would start no sandboxed terminal at all.
 			"sandbox_hide": true,
+			// memory.status and memory.set_cap: 1 when this daemon holds the host's programs to a cap
+			// the host sets, 0 for an older daemon or the container's.
+			"memory_cap": d.memoryCapVersion(),
 		},
 		"hooks":         d.hooksInfo(),
 		"side_channels": d.sideInfo(),

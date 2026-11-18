@@ -89,6 +89,20 @@ interleaved stream, as a local Exec returns it; the daemon hands back stdout and
 order between them would be lost."""
 
 
+def memory_cap_note(kills: int, cap_bytes: int) -> str:
+    """What a command's output says when the kernel killed programs under the host commands' memory
+    cap while it ran. Without it the agent saw a bare ``signal: 9, SIGKILL`` from cargo, took it for a
+    flaky test and ran the same build again, into the same cap."""
+    cap = f" of {cap_bytes / (1 << 30):.1f} GB" if cap_bytes > 0 else ""
+    killed = "1 process" if kills == 1 else f"{kills} processes"
+    return (
+        f"\n[killed for the memory cap of host commands: while this ran the agent's commands on this machine together reached "
+        f"their cap{cap}, and the kernel killed {killed}, the largest. A SIGKILL, signal 9 or exit code 137 above is that, "
+        "not a bug in the program. Run fewer builds or tests at once or with fewer jobs (cargo -j 2, --test-threads 2), "
+        "or ask the operator to raise the cap (Settings → Limits).]"
+    )
+
+
 class HostExecBackend:
     """One shell command on the host, through the terminal daemon, as a session's ``exec_backend``.
 
@@ -128,6 +142,8 @@ class HostExecBackend:
         code = result.exit_code
         if code < 0 and result.signal:
             output += f"\n[ended by {result.signal}]"
+        if result.oom_kills > 0:
+            output += memory_cap_note(result.oom_kills, result.memory_cap_bytes)
         return ExecOutcome(exit_code=code, output=output, timed_out=bool(result.timed_out))
 
     def can_hand_over(self) -> bool:
