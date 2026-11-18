@@ -729,6 +729,13 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .composer-box { display:flex; flex-direction:column; gap:2px; background:var(--surface-1); border:1px solid var(--line-strong); border-radius:24px; padding:3px 5px; transition:border-radius var(--t-fast) var(--ease-out); }
 .composer-box.two { border-radius:var(--radius-lg); }
 .composer-box:focus-within { border-color:color-mix(in srgb, var(--fg) 30%, var(--line-strong)); }
+/* The element a dragged file would land on (filedrop.ts marks it): the composer's box, an agent's
+   question, a card of the Questions tab. Only that element changes, and without a blur: a blurred layer
+   over the whole conversation once repainted the transcript on every frame of a drag. */
+.drop-hint { display:none; }
+.composer[data-drop-over] .composer-box, .ask[data-drop-over], .q-card[data-drop-over] { position:relative; }
+.composer[data-drop-over] .composer-box > .drop-hint, .ask[data-drop-over] > .drop-hint, .q-card[data-drop-over] > .drop-hint { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; gap:8px; padding:0 12px; border:2px dashed color-mix(in srgb, var(--accent) 70%, transparent); border-radius:inherit; background:color-mix(in srgb, var(--accent) 9%, color-mix(in srgb, var(--surface-1) 90%, transparent)); color:var(--fg); font-size:var(--fs-13); font-weight:500; text-align:center; pointer-events:none; }
+.drop-hint .ic { flex:none; color:var(--accent); }
 .composer-row { display:flex; align-items:flex-end; gap:2px; min-width:0; }
 .composer-box .composer-field { flex:1; min-width:0; width:auto; resize:none; border:0; background:none; color:var(--fg); padding:9px 6px; min-height:38px; max-height:calc(8lh + 18px); line-height:1.4; font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); outline:none; overflow-y:auto; }
 .composer-box .composer-field[data-empty]::before { color:var(--fg-3); }
@@ -1724,7 +1731,6 @@ button.secret-chip:hover { background: var(--card-2); }
   /* No moving bar for a reader who asked for stillness; the value still hides on time. */
   .secret-timer { display: none; }
 }
-.dropzone { position: absolute; inset: 0; z-index: 25; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px); border: 2px dashed var(--info); border-radius: var(--radius-lg); margin: 8px; color: var(--fg); font-size: var(--fs-15); pointer-events: none; }
 .chat { position: relative; }
 
 /* ── to the latest message ─────────────────────────────────────────────────────────────── */
@@ -4980,7 +4986,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .q-card.s-sent { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 5%, var(--surface-1)); }
 .q-card.s-withdrawn, .q-card.s-elsewhere, .q-card.s-aside { border-style: dashed; background: transparent; }
 /* A file held over a card that takes files: the card is where it lands. */
-.q-card.dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 6%, var(--surface-1)); }
 .q-card.s-withdrawn .q-title { color: var(--fg-2); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg-3) 70%, transparent); }
 .q-card.s-conflict { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 .q-card.s-refused { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }

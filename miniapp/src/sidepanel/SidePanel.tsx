@@ -269,8 +269,7 @@ function NewConversation({ shell, current, listing, toast, onCreated, onCancel }
   };
   const defaultLabel = settings ? presetName(settings.model.preset) : "";
   return (
-    <div className="sp-new" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
+    <div className="sp-new">
       <div className="sp-new-intro">
         {!listing.consented && (
           <div className="sp-consent">
@@ -655,8 +654,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
 
   return (
     <>
-      <div className="sp-body" ref={scroller} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
-        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
+      <div className="sp-body" ref={scroller}>
         {detail ? (
           <TranscriptView key={detail.id} detail={detail} live={live} onPreview={preview} toast={toast} onRender={follow} awaiting={approval?.callId ?? ""} />
         ) : failed ? (

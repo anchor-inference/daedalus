@@ -5492,7 +5492,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.about.system": { en: "Follow the system", ru: "Как в системе" },
 
   // ── the conversation ───────────────────────────────────────────────────────────────────
-  "session.drop": { en: "Drop files to attach", ru: "Отпустите файлы, чтобы приложить" },
   "session.closepane": { en: "Close this pane", ru: "Закрыть панель" },
   "session.card": { en: "Session", ru: "Сессия" },
   "session.model.for": { en: "Model for this session", ru: "Модель этой сессии" },
@@ -6221,6 +6220,9 @@ export const DICT: Record<string, Record<Lang, string>> = {
 
   // ── the composer: one pill, one circle that means send, stop, queue or reply ──────────────
   "composer.plus": { en: "Add to the message", ru: "Добавить к сообщению" },
+  "composer.drop": { en: "Drop to attach to the message", ru: "Отпустите, чтобы приложить к сообщению" },
+  "ask.drop": { en: "Drop to attach to your answer: it goes with the reply sent from the field below", ru: "Отпустите, чтобы приложить к ответу: файл уйдёт с ответом из поля ниже" },
+  "questions.drop": { en: "Drop to attach to this answer", ru: "Отпустите, чтобы приложить к этому ответу" },
   "composer.photo": { en: "Take a photo", ru: "Сделать фото" },
   "composer.paste": { en: "Paste from the clipboard", ru: "Вставить из буфера обмена" },
   "composer.paste.none": { en: "the clipboard is empty, or the browser keeps it to itself", ru: "буфер обмена пуст или браузер его не отдаёт" },

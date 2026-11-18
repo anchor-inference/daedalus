@@ -47,6 +47,7 @@ import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 import { raiseFromError } from "./settinglink";
 import { AskCard, type AskCardHandle } from "./questions/AskCard";
+import { useDropTarget } from "./filedrop";
 import { CodeField, type CodeFieldHandle } from "./codefield";
 import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
@@ -198,6 +199,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const photoInput = useRef<HTMLInputElement>(null);
   const photosInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const helpButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
 
@@ -267,6 +269,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       setFiles((p) => [...p, ...named]);
     }
   }, [rememberTarget]);
+  // A file dragged over the composer is the message's: the composer, and nothing around it, is where
+  // a drop attaches to the chat. Not while the files of another conversation are still being restored.
+  useDropTarget(root, fileReadySession === sessionId ? addFiles : null);
 
   useImperativeHandle(
     ref,
@@ -557,7 +562,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const moved = draftChange(savedTarget, currentTarget);
 
   return (
-    <div className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
+    <div ref={root} className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
       onFocus={phone ? focus.onFocus : undefined}
       onBlur={phone ? focus.onBlur : undefined}>
       {props.above}
@@ -655,7 +660,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       {asking && !approval && props.onAnswer && (
-        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} held={props.answerTranslating ?? null} />
+        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} held={props.answerTranslating ?? null} onFiles={fileReadySession === sessionId ? addFiles : undefined} />
       )}
       {paletteItems.length + skillItems.length > 0 && (
         <div className="palette" role="listbox">
@@ -680,6 +685,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           36 px inside a 48 px pill, and the pill is the target the reader sees. */}
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>
         {voiceBar && <VoiceBar note={note} />}
+        <span className="drop-hint" aria-hidden="true"><Icon name="attach" size={18} />{t("composer.drop")}</span>
         {!phone && !voiceBar && place.length > 0 && (
           <div className="composer-place" aria-label={t("composer.place")}>
             {place.map((chip) => <span key={chip.kind} className="composer-place-chip" title={t(`composer.place.${chip.kind}`, { name: chip.name })}>

@@ -6,6 +6,7 @@ import { QuickChat } from "./quick/QuickChat";
 import { SidePanel } from "./sidepanel/SidePanel";
 import { VisitApp } from "./visitapp";
 import { installShareTransport, shareToken } from "./visit";
+import { installFileDrop } from "./filedrop";
 import "./ui/styles.css";
 import "./ui/desktop.css";
 import "./ui/phone.css";
@@ -21,6 +22,10 @@ if (!visiting && "serviceWorker" in navigator && window.location.protocol === "h
     navigator.serviceWorker.register("/app/sw.js", { scope: "/app/" }).catch(() => undefined);
   });
 }
+
+// A file let go of anywhere but a drop target does nothing, on every screen: the browser would otherwise
+// open it in place of the app.
+installFileDrop();
 
 const root = createRoot(document.getElementById("root")!);
 // The desktop's Quick Chat window loads /app/quick: the box alone, without the app around it. The

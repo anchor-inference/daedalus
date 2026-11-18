@@ -368,7 +368,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The job the Jobs tab shows in place of its list; another chat starts on the list.
   const [jobOpen, setJobOpen] = useState<string | null>(null);
   useEffect(() => setJobOpen(null), [id]);
-  const [dragging, setDragging] = useState(0);
   const [providerUsage, setProviderUsage] = useState<ProviderUsage | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [asr, setAsr] = useState<AsrStatus | null>(null);
@@ -1350,12 +1349,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (el.scrollTop < 400 && older === "more" && pageable) void loadOlder();
   }
 
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(0);
-    if (e.dataTransfer?.files?.length) composer.current?.addFiles(e.dataTransfer.files);
-  }
-
   // A slash command, run by the host. Its answer is a sheet, short or long; a failure is
   // thrown back so the composer can put the line back in the field.
   async function runCommand(line: string) {
@@ -1890,8 +1883,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   return (
     <FocusChatContext.Provider value={focusChat}>
     <ComposeTarget.Provider value={id}>
-    <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`} onDragEnter={(e) => { if (e.dataTransfer?.types.includes("Files")) setDragging((d) => d + 1); }} onDragLeave={() => setDragging((d) => Math.max(0, d - 1))} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-      {dragging > 0 && <div className="dropzone"><Icon name="attach" size={28} /> {t("session.drop")}</div>}
+    <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`}>
       {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
