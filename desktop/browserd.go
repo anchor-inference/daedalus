@@ -76,6 +76,11 @@ func browserdArgv(binary string, p Paths, scope []string) []string {
 // manager to ask (a session without one, a container). It is probed once, by starting `true` the same
 // way; a prefix that cannot start anything would leave the daemon restarting for ever.
 func systemScope(ctx context.Context, lookPath func(string) (string, error), probe func(ctx context.Context, argv []string) error) []string {
+	return scopeWith(ctx, lookPath, probe, "MemoryMax="+browserdMemoryMax, "MemorySwapMax=0")
+}
+
+// scopeWith is systemScope with the scope's properties given.
+func scopeWith(ctx context.Context, lookPath func(string) (string, error), probe func(ctx context.Context, argv []string) error, properties ...string) []string {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
@@ -83,7 +88,11 @@ func systemScope(ctx context.Context, lookPath func(string) (string, error), pro
 	if err != nil {
 		return nil
 	}
-	scope := []string{run, "--user", "--scope", "--quiet", "--collect", "-p", "MemoryMax=" + browserdMemoryMax, "-p", "MemorySwapMax=0", "--"}
+	scope := []string{run, "--user", "--scope", "--quiet", "--collect"}
+	for _, property := range properties {
+		scope = append(scope, "-p", property)
+	}
+	scope = append(scope, "--")
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if probe(ctx, append(append([]string(nil), scope...), "true")) != nil {

@@ -1033,9 +1033,13 @@ func (n *Native) newPtyd() child {
 		n.log("the terminal daemon's directory: %v", err)
 	}
 	base := environWithout("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON", "PYTHONPATH")
+	scope := ptydScope(context.Background(), exec.LookPath, runProbe)
+	if scope == nil && runtime.GOOS == "linux" {
+		n.log("no systemd user manager to give the terminal daemon a group of its own; host commands run without a memory cap")
+	}
 	return &Process{
 		Name:    "terminal daemon",
-		Argv:    ptydArgv(binary, n.paths),
+		Argv:    ptydArgv(binary, n.paths, scope),
 		Dir:     n.paths.Data,
 		Env:     ptydEnv(base, n.runtimeTools()),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "ptyd.log"),

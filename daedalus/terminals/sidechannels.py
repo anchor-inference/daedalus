@@ -270,6 +270,8 @@ class SideChannels:
             timed_out=bool(result.get("timed_out")),
             duration_ms=int(result.get("duration_ms") or 0),
             path=str(result.get("path") or ""),
+            oom_kills=int(result.get("oom_kills") or 0),
+            memory_cap_bytes=int(result.get("memory_cap_bytes") or 0),
         )
         if audit:
             await self.audit("", env, actor, "exec", {**detail, "exit_code": out.exit_code, "signal": out.signal, "timed_out": out.timed_out, "duration_ms": out.duration_ms})

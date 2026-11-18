@@ -797,6 +797,29 @@ export type TerminalLoad = {
   thresholds: { warn: number; bad: number };
 };
 
+/** `GET /api/terminals/envs/host/memory`: the host commands' memory cap beside its setting. `status`
+ *  is what the host's terminal daemon reads back from the kernel; a limit that is null is none.
+ *  `reason` is why there is no status: `unreachable` (the daemon is not connected) or `outdated` (it
+ *  has no cap to set). `status.reason` is the daemon's own words, in English, for a caveat. */
+export type HostMemoryCap = {
+  env: TerminalEnvName;
+  setting: string;
+  available: boolean;
+  reason: "" | "unreachable" | "outdated";
+  error: string;
+  status: {
+    supported: boolean;
+    mode: "" | "jobs" | "own" | "job_object";
+    reason?: string;
+    machine_bytes: number;
+    max_bytes: number | null;
+    high_bytes: number | null;
+    swap_max_bytes: number | null;
+    current_bytes: number;
+    oom_kills: number;
+  } | null;
+};
+
 /** One cell of the notification matrix: always, only for urgent notifications, or never. */
 export type NotifyCell = "on" | "urgent" | "off";
 export type NotifyChannel = "in_app" | "push" | "desktop" | "telegram";
@@ -2408,7 +2431,8 @@ export type Settings = {
   scheduler: { topic_mode: string; catch_up_missed: boolean; require_approval?: boolean };
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
   memory?: { classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
-  terminals?: { running_cap: number };
+  /** `host_memory_cap`: what every program run on the host may use together: "60%", "24G" or "none". */
+  terminals?: { running_cap: number; host_memory_cap?: string };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;
   /** The rail, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */

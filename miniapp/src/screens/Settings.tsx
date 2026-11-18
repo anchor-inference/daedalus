@@ -34,6 +34,7 @@ import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
 import { AppearancePanel } from "./Appearance";
 import { NavigationSettings } from "./NavigationSettings";
 import { MemorySettings } from "./MemorySettings";
+import { HostMemoryRow } from "./HostMemory";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
 import { Capabilities, componentsNeedAttention } from "../capabilities";
@@ -1612,6 +1613,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <NumRow id="limits-disk" setting="disk.workspace_soft_limit_gb" title={t("settings.limits.disk")} desc={t("settings.limits.disk.sub")} unit={t("disk.limit.unit")} step="1" value={s.disk?.workspace_soft_limit_gb ?? 20} min={0} onSave={(v) => save({ disk: { workspace_soft_limit_gb: v } })} {...shipped(s.disk?.workspace_soft_limit_gb ?? 20, 20, () => save({ disk: { workspace_soft_limit_gb: 20 } }), `20 ${t("disk.limit.unit")}`)} />
+            <HostMemoryRow s={s} save={save} />
           </div>
         );
       case "context":

@@ -61,10 +61,20 @@ func ptydListen(runDir string) string {
 	return "unix"
 }
 
-// ptydArgv is the daemon's command line.
-func ptydArgv(binary string, p Paths) []string {
+// ptydArgv is the daemon's command line, inside scope when it is not empty.
+func ptydArgv(binary string, p Paths, scope []string) []string {
 	run := ptydRunDir(p)
-	return []string{binary, "serve", "--env", "host", "--run-dir", run, "--state-dir", ptydStateDir(p), "--listen", ptydListen(run)}
+	argv := []string{binary, "serve", "--env", "host", "--run-dir", run, "--state-dir", ptydStateDir(p), "--listen", ptydListen(run)}
+	return append(append([]string(nil), scope...), argv...)
+}
+
+// ptydScope is the systemd scope the daemon runs in on Linux: a control group of its own, delegated
+// to it, where it holds every program it starts under the memory cap the operator sets in the app's
+// Settings, in a group beside its own so a kill at the cap never takes the daemon. Without one the
+// daemon would share the launcher's group, which it must not cap, and the setting reports that.
+// OOMPolicy=continue keeps the scope when one program in it is killed for memory.
+func ptydScope(ctx context.Context, lookPath func(string) (string, error), probe func(ctx context.Context, argv []string) error) []string {
+	return scopeWith(ctx, lookPath, probe, "Delegate=yes", "OOMPolicy=continue")
 }
 
 // ptydEnv is what the daemon, and so every host terminal, runs with: the operator's own

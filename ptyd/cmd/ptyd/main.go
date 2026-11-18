@@ -20,6 +20,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
+	"github.com/ascorblack/daedalus/ptyd/internal/memcap"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
@@ -152,7 +153,18 @@ func serve(args []string) error {
 		Config: cfg, Instance: hex.EncodeToString(instance), StartedAt: time.Now().UTC(), Registry: registry,
 		Events: evlog, Log: log, EmulatorName: production.Name, Environ: environ,
 	}
-	if owned, err := containment.NewController(daemon.Instance); err == nil {
+	// The host's programs under one memory cap, set up before the first of them starts. Only on the
+	// host: in the container the container's own limit is the cap, and its group is not the daemon's.
+	if cfg.Env == "host" {
+		daemon.MemoryCap = memcap.Setup(filepath.Join(cfg.StateDir, "memory-cap.json"))
+		memcap.Install(daemon.MemoryCap)
+		status := daemon.MemoryCap.Status()
+		log.Info("memory cap", "mode", status.Mode, "max_bytes", memcap.Bytes(status.MaxBytes), "reason", status.Reason)
+	}
+	if jobs := daemon.MemoryCap.JobsDir(); jobs != "" {
+		// The daemon's own group now only holds its two halves; an attempt is made inside the capped one.
+		daemon.Containment = containment.NewControllerAt(jobs, daemon.Instance)
+	} else if owned, err := containment.NewController(daemon.Instance); err == nil {
 		daemon.Containment = owned
 	} else {
 		daemon.ContainmentReason = err.Error()

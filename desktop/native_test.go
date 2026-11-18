@@ -326,7 +326,7 @@ func TestTheAgentIsToldWhereTheHostTerminalsAre(t *testing.T) {
 	if !within(env["TERMINALS_HOST_DIR"], env["DAEDALUS_LOCAL"]) {
 		t.Fatalf("the run directory %q is outside the sealed local state folder", env["TERMINALS_HOST_DIR"])
 	}
-	argv := ptydArgv("/opt/ptyd", paths)
+	argv := ptydArgv("/opt/ptyd", paths, nil)
 	want := []string{"/opt/ptyd", "serve", "--env", "host", "--run-dir", ptydRunDir(paths), "--state-dir", ptydStateDir(paths), "--listen"}
 	if strings.Join(argv[:len(want)], " ") != strings.Join(want, " ") {
 		t.Fatalf("argv %q", argv)

@@ -651,6 +651,10 @@ GATES: dict[str, object] = {
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
         {"env": "host", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
     ]},
+    # Settings → Limits: the host commands' memory cap as the host's daemon reads it back.
+    "/api/terminals/envs/host/memory": {"env": "host", "setting": "60%", "available": True, "reason": "", "error": "", "status": {
+        "supported": True, "mode": "jobs", "machine_bytes": 64 << 30, "max_bytes": int((64 << 30) * 0.6) & ~4095, "high_bytes": None,
+        "swap_max_bytes": 2 << 30, "current_bytes": 5 << 30, "oom_kills": 0}},
     "/api/admission/capacity": {"host_id": "local", "cap": 4, "active": 1, "reserved": 0, "available": 3},
     "/api/admission/queue": {"entries": []},
     # Settings → Tools opens on the tool groups.

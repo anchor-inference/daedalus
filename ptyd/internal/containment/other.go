@@ -13,6 +13,9 @@ func NewController(_ string) (*Controller, error) {
 	return &Controller{}, nil
 }
 
+// NewControllerAt exists for the build only: no other system has a capped group to contain attempts in.
+func NewControllerAt(_, _ string) *Controller { return &Controller{} }
+
 func (c *Controller) Probe() Status {
 	return Status{Kind: "unsupported", Reason: fmt.Sprintf("hard attempt ceilings are not verified on %s", runtime.GOOS)}
 }

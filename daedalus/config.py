@@ -2176,6 +2176,26 @@ class OpsConfig(BaseModel):
     far shorter than the report's own lifetime."""
 
 
+MEMORY_CAP_MIN_GB = 0.25
+"""The smallest cap in GB the daemon takes (its 256 MiB): below it a shell and a compiler cannot start."""
+
+
+def memory_cap_request(value: str) -> dict[str, Any]:
+    """``terminals.host_memory_cap`` as the daemon's ``memory.set_cap`` takes it: ``{"percent": 60}``,
+    ``{"bytes": n}`` or ``{"unlimited": true}``. A ``ValueError`` for a value out of range."""
+    if value == "none":
+        return {"unlimited": True}
+    if value.endswith("%"):
+        percent = float(value[:-1])
+        if not 1 <= percent <= 100:
+            raise ValueError("a share of the machine's memory is between 1% and 100%")
+        return {"percent": percent}
+    gigabytes = float(value[:-1])
+    if gigabytes < MEMORY_CAP_MIN_GB:
+        raise ValueError(f"the cap is at least {MEMORY_CAP_MIN_GB} GB")
+    return {"bytes": int(gigabytes * (1 << 30))}
+
+
 class TerminalsConfig(BaseModel):
     """Terminals: real shells and CLI programs run by a terminal daemon per environment."""
 
@@ -2205,6 +2225,18 @@ class TerminalsConfig(BaseModel):
     """Whether a session's agent may read the host terminals of its own session. Off by default: a
     host terminal is the operator's own machine, where a screen can hold what was never meant for a
     model — a password prompt's surroundings, another project's secrets."""
+    host_memory_cap: str = Field(default="60%", pattern=r"^(none|\d{1,3}(\.\d+)?%|\d{1,5}(\.\d+)?G)$")
+    """The memory every program run on the host through its terminal daemon may use together: a share
+    of the machine's memory ("60%"), a size in GB ("24G"), or "none". At the cap the kernel kills the
+    largest of those programs, not the server: eight agents building a Rust workspace at once once
+    filled a server's memory and froze every service on it for an hour. The daemon is sent it at
+    every connection and whenever it changes (see :func:`memory_cap_request`)."""
+
+    @field_validator("host_memory_cap")
+    @classmethod
+    def _memory_cap_in_range(cls, value: str) -> str:
+        memory_cap_request(value)
+        return value
 
 
 class PagesConfig(BaseModel):
