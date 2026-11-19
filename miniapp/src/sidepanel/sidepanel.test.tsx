@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, panelPath, setPanelCredential } from "../api";
 import { setLang, t } from "../i18n";
 import { connectShell, EXTENSION_ORIGIN, HELLO, PANEL_PROTO, READY, type Current, type Shell } from "./bridge";
-import { cardKey, cropRect, lineStops, pageFile, panelCarries, pickSession, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
+import { cardKey, cropRect, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
 import { SidePanel } from "./SidePanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -95,6 +95,14 @@ describe("what the panel decides", () => {
     expect(lineStops("running")).toBe(false);
     expect(lineStops("waiting")).toBe(false);
     expect(lineStops("compacting")).toBe(true);
+  });
+
+  it("reads the conversation again when the answer's translation lands", () => {
+    // The translation is written after the run settles and announced only as a transcript note.
+    expect(rereadsOn("transcript_note")).toBe(true);
+    expect(rereadsOn("message_translating")).toBe(true);
+    expect(rereadsOn("run_settled")).toBe(true);
+    expect(rereadsOn("text_delta")).toBe(false);
   });
 
   it("calls a stop unconfirmed only after three seconds of the run going on", () => {
