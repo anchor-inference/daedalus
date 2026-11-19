@@ -31,7 +31,7 @@ import { followSession } from "../sessionstream";
 import { errorText } from "../ui";
 import { ToastHost, toast } from "../ui/dialogs";
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
-import { cardKey, cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
+import { cardKey, cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
 import { ServerGrantButton } from "../servergrant";
 import "./sidepanel.css";
 
@@ -477,7 +477,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle" } : prev));
           onChanged();
         }
-        if (["message_start", "message_stop", "run_settled", "compaction_completed", "history_cut"].includes(event) && soon === null) {
+        if (rereadsOn(event) && soon === null) {
           soon = window.setTimeout(() => {
             soon = null;
             void load();

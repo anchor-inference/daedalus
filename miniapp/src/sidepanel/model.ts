@@ -39,6 +39,15 @@ export function stopUnconfirmed(askedAt: number | null, status: string, now: num
   return askedAt !== null && now - askedAt >= STOP_CONFIRM_MS && (status === "running" || status === "compacting");
 }
 
+/** Whether a stream event changes what the conversation shows, so the panel reads it again. The panel has
+ *  no app-wide event stream; this is all it hears. A row changed outside a run's own events counts: the
+ *  answer's translation is written after the run settles and announced as a transcript note, and the
+ *  panel, which did not listen for it, kept the agent's original words while the app showed them
+ *  translated. */
+export function rereadsOn(event: string): boolean {
+  return ["message_start", "message_stop", "run_settled", "compaction_completed", "history_cut", "transcript_note", "message_translating"].includes(event);
+}
+
 /** Whether the activity line carries a Stop of its own. The composer's round button is Stop while a run
  *  is on, and a second red Stop beside it made the panel's foot a block of two; the line keeps one only
  *  while the history is being compacted, when the composer's button is Send. */
