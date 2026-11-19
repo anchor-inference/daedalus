@@ -283,6 +283,27 @@ def message_shape(messages: list[dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
+CUT_REPLY_NOTE = (
+    "[Your reply above was cut off when the connection to the model dropped. "
+    "Continue from where it stopped, without repeating what is already written.]"
+)
+
+
+def close_cut_reply(wire: list[dict[str, Any]]) -> None:
+    """End a request whose last message is the model's own prose with a user turn asking it to go on.
+
+    The core keeps the part of a reply that streamed before a dropped connection and asks again with it in
+    the history, so the reader's screen and the model's context agree. That request then ends on an
+    assistant message, which is a prefill, and the newer Claude models refuse it outright ("This model does
+    not support assistant message prefill"): a subagent cut mid-sentence failed its retry, its wind-down and
+    its run. A user turn saying what happened is understood by every provider, keeps the partial in front of
+    the model, and leaves the cached prefix as it was. An assistant message with tool calls is left alone:
+    its results follow it, and one still missing them is the core's to settle, not a note's.
+    """
+    if wire and wire[-1].get("role") == "assistant" and not wire[-1].get("tool_calls"):
+        wire.append({"role": "user", "content": CUT_REPLY_NOTE})
+
+
 REASONING_REPLAY_UPSTREAMS = ("codex", "claude", "anthropic")
 """Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
 
@@ -930,6 +951,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             wire.extend(entries)
             wire_index.append(len(wire) - 1 if entries else -1)  # -1: this message put nothing on the wire
         wire, wire_index = place_carried_images(wire, wire_index)
+        close_cut_reply(wire)
         body: dict[str, Any] = {
             "model": model,
             "messages": wire,

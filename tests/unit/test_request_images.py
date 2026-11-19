@@ -111,6 +111,7 @@ def _tool_round() -> list[Message]:
             ToolResultBlock(tool_call_id="c1", content="clicked"),
             ToolResultBlock(tool_call_id="c2", content="captured", images=(shot,)),
         ]),
+        # Ending on the model's prose, the wire closes with the cut-reply note (close_cut_reply).
         Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="I see the dialog.")]),
     ]
 
@@ -135,7 +136,7 @@ async def test_a_tool_result_shows_its_picture_in_one_turn_after_the_whole_batch
     """A tool's pictures used to be dropped on the way to the model. They ride after the last result of
     the batch, in the core's carrier shape, which the key proxy folds back into the results for Claude."""
     sent = await _sent(images=True)
-    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "user", "assistant"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "user", "assistant", "user"]
     assert [m["content"] for m in sent[2:4]] == ["clicked", "captured"], "the results keep their own text"
     carrier = sent[4]["content"]
     assert carrier[0] == {"type": "text", "text": TOOL_IMAGES_CARRIER_HEADER}
@@ -147,7 +148,7 @@ async def test_a_tool_result_shows_its_picture_in_one_turn_after_the_whole_batch
 
 async def test_a_model_that_takes_no_images_is_told_in_the_result_and_given_no_extra_turn() -> None:
     sent = await _sent(images=False)
-    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "assistant"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "assistant", "user"]
     assert sent[3]["content"] == "captured\n[image not sent, this model does not take images: blob-shot]"
 
 
