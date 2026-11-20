@@ -349,7 +349,8 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
     "--bad": status.bad,
     "--info": status.info,
     "--code": base.light ? "#7c3f00" : "#f5b56e",
-    "--code-block": base.light ? "#3b2a12" : "#e8c48a",
+    // Code is ink a step under the text, on every theme: tinted amber, a block of it read as a warning.
+    "--code-block": mixHex(fg, base.bg, 0.14),
     "--term-bg": forceDark ? "#060606" : base.termBg,
     "--term-fg": forceDark ? "#f5f5f5" : fg,
   };
