@@ -1,29 +1,34 @@
 /* ── palette, offline strip ──────────────────────────────────────────────── */
-.offline-strip { position: sticky; top: 0; z-index: 13; text-align: center; padding: 6px 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+/* One quiet row: warn text on a 12% wash. The wash sits on --bg, not on nothing, because the strip is
+   sticky and the page scrolls under it. */
+.offline-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }
 .main.chat-open .offline-strip { flex: none; }
 
 /* The agent's own changes. Three states, one shape: waiting for a restart, applied, refused. */
-.change-strip { position: sticky; top: 0; z-index: 13; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 10px 14px; font-size: var(--fs-13); border-bottom: 1px solid var(--line); background: var(--surface); }
-.change-strip.pending { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border-bottom-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.change-strip.done { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, var(--bg)); border-bottom-color: color-mix(in srgb, var(--ok) 30%, transparent); }
-.change-strip.failed { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); border-bottom-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.change-strip { position: sticky; top: 0; z-index: 13; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 8px 14px; font-size: var(--fs-13); background: var(--surface-1); }
+.change-strip.pending { color: var(--info); background: color-mix(in srgb, var(--info) 12%, var(--bg)); }
+.change-strip.done { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--bg)); }
+.change-strip.failed { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }
 .change-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.change-text span { color: var(--text); opacity: .85; overflow-wrap: anywhere; }
+.change-text span { color: var(--fg); opacity: .85; overflow-wrap: anywhere; }
 .change-problem { color: var(--warn); }
 .change-actions { display: flex; gap: 8px; flex: none; }
 .main.chat-open .change-strip { flex: none; }
-.nudge-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; padding: 7px 12px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
-.nudge-strip a { color: var(--primary); font-weight: 600; }
+.nudge-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; min-height: 28px; padding: 4px 12px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
+.nudge-strip a { color: var(--fg); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 .main.chat-open .nudge-strip { flex: none; }
-.palette-sheet .field { margin-bottom: 8px; }
-.palette-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+/* The search is a 40px row closed by a hairline, part of the surface rather than a field lying on it. */
+.palette-sheet .field { height: var(--ctl-h-lg); margin: 0 0 4px; padding-inline: var(--space-3); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; }
+.palette-sheet .field:focus { box-shadow: none; }
+.palette-list { display: flex; flex-direction: column; gap: 1px; max-height: 50vh; overflow-y: auto; }
 /* The hint's column is at most 40 % of the row and no wider than its text. A max-width in percent on
    the hint itself resolved against its own auto column, a cycle the browser settled at a few
    characters: "Al…" for "All projects" with half the row empty. */
 .palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(40%); gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
-.palette-row .ic { color: var(--fg-2); }
-.palette-row.on { background: var(--surface-2); }
-.palette-row .sub { text-align: right; }
+.palette-row .ic { color: var(--fg-3); }
+.palette-row:hover { background: var(--surface-2); }
+.palette-row.on { background: var(--surface-3); }
+.palette-row .sub { text-align: right; font-size: var(--fs-12); color: var(--fg-3); }
 .palette-row .sub.tail { direction: rtl; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
@@ -52,7 +57,7 @@
    a second by one animation frame in Voice.tsx — and everything else here is the shape around them.
    The :root rule for prefers-reduced-motion takes every animation below away; the colours, the words
    and the scale still distinguish all six states, which is why none of them is drawn by motion alone. */
-.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-11); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
 .voice-beta { padding: 2px 8px; font-size: var(--fs-11); vertical-align: middle; }
 /* Wide by design: the conversation takes the room it needs and the agents stand beside it, not under
    it. The right column grows with the glass rather than pinning the page to a column in the middle. */
@@ -70,7 +75,7 @@
    a darker slab: the stage is the raised surface here and the halo is what raises it. */
 .voice-stage::before {
   content: ""; position: absolute; left: 50%; top: 14%; width: min(120%, 780px); aspect-ratio: 1; translate: -50% 0;
-  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 16%, transparent) 0%, transparent 62%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 9%, transparent) 0%, transparent 62%);
   opacity: calc(.35 + var(--orb-glow) * .5); transition: opacity .4s ease, background .6s ease; pointer-events: none;
 }
 .voice-stage.phase-idle { --orb-color: var(--fg-3); }
@@ -87,7 +92,7 @@
 .chip.quiet { color: var(--fg-3); }
 /* The state chip animates between states rather than swapping: three bars that stand still when idle,
    rise and fall with a listening page, travel while it thinks, and pulse together while it speaks. */
-.voice-chip { color: var(--orb-color, var(--fg-2)); border-color: color-mix(in srgb, var(--orb-color) 35%, transparent); background: color-mix(in srgb, var(--orb-color) 12%, var(--surface-2)); transition: color .3s ease, background .3s ease, border-color .3s ease; }
+.voice-chip { color: var(--orb-color, var(--fg-2)); border-color: transparent; background: color-mix(in srgb, var(--orb-color) 12%, transparent); transition: color .3s ease, background .3s ease, border-color .3s ease; }
 .voice-chip-mark { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; margin-right: 2px; }
 /* The bars are drawn at their tallest and scaled down: animating `height` on three elements at 60 fps
    is a layout pass per frame, and a transform is none. `transform-origin` keeps them standing on the
@@ -116,8 +121,8 @@
 .voice-mascot { position:relative; display:block; width:min(100%,440px); aspect-ratio:1; padding:0; border:0; background:transparent; cursor:pointer; transform:scale(var(--orb-scale,1)); transition:transform .12s ease; }
 .voice-mascot:disabled { cursor:default; }
 .voice-mascot .pet-canvas { width:100%; height:100%; pointer-events:none; }
-.voice-mascot-mic { position:absolute; left:50%; bottom:18px; translate:-50% 0; display:grid; place-items:center; width:40px; height:40px; border:1px solid var(--line-strong); border-radius:50%; background:var(--surface-2); color:var(--fg); box-shadow:var(--shadow-pop); }
-.voice-mascot.on .voice-mascot-mic { border-color:var(--accent); color:var(--accent); }
+.voice-mascot-mic { position:absolute; left:50%; bottom:18px; translate:-50% 0; display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:50%; background:var(--surface-2); color:var(--fg); box-shadow:var(--shadow-md); }
+.voice-mascot.on .voice-mascot-mic { color:var(--orb-color); }
 /* The orb is the page. On a wide screen it was capped at 232 px in a card most of a metre tall,
    which read as a small button lost in a lot of glass. */
 .voice-orb {
@@ -136,9 +141,8 @@
 }
 .orb-shell {
   position: absolute; inset: 0; border-radius: 50%;
-  background:
-    radial-gradient(circle at 36% 26%, color-mix(in srgb, var(--orb-color) 38%, var(--surface-3)) 0%, color-mix(in srgb, var(--orb-color) 10%, var(--surface-2)) 52%, var(--bg) 100%);
-  box-shadow: inset 0 1px 0 var(--line-strong), 0 18px 44px rgba(0, 0, 0, .45);
+  background: color-mix(in srgb, var(--orb-color) 14%, var(--surface-2));
+  box-shadow: var(--shadow-md);
   border: 1px solid color-mix(in srgb, var(--orb-color) 28%, var(--line-strong));
   animation: orb-breathe 5.5s ease-in-out infinite;
 }
@@ -205,7 +209,7 @@
 .voice-compose-btn .ic { display: block; margin: 0; }
 .voice-compose-btn.send { background: var(--primary); color: var(--primary-ink); }
 .voice-compose-btn.send:disabled { background: var(--surface-2); color: var(--fg-3); opacity: 1; }
-.voice-compose-btn.mic { background: var(--surface-2); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.voice-compose-btn.mic { background: var(--surface-2); color: var(--fg); }
 .voice-compose-btn.mic:hover { background: var(--surface-3); }
 .voice-compose-btn.hangup { background: var(--bad); color: #fff; }
 .voice-compose-btn.small { width: 32px; height: 32px; }
@@ -213,7 +217,7 @@
 .voice-why { width: min(100%, 720px); text-align: center; }
 
 .voice-agents { display: grid; gap: 8px; align-content: start; overflow-y: auto; animation: panel-slide .34s cubic-bezier(.2, .7, .3, 1) both; }
-.voice-agents-head { margin: 4px 2px 2px; font-size: 14px; font-weight: 600; }
+.voice-agents-head { margin: 4px 2px 2px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 .voice-agents-empty { padding: 8px 2px; }
 .voice-agent { width: 100%; text-align: left; border: 1px solid var(--line); cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .voice-agent:hover { background: var(--surface-2); border-color: var(--line-strong); }
@@ -259,7 +263,7 @@
 .voice-read.own .composer { display: none; }
 .voice-read-wait { padding: 20px; }
 .voice-crumbs { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
-.voice-crumbs b { min-width: 0; font-size: 14px; font-weight: 600; }
+.voice-crumbs b { min-width: 0; font-size: var(--fs-14); font-weight: 500; }
 .voice-to-transcript { margin-left: auto; }
 /* The captions and the field, under the concierge's own transcript: what is being said out loud now
    belongs with what was said before it, not on another screen. */
@@ -271,7 +275,7 @@
 
 /* The agent whose transcript is open: the panel is a set of destinations now, and one of them is
    where the reader already is. */
-.voice-agent.open { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); }
+.voice-agent.open { border-color: var(--line-strong); background: var(--surface-3); }
 
 @keyframes panel-slide { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 

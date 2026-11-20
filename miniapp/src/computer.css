@@ -1,38 +1,35 @@
 /* The Computer control (computer.tsx) and its scope picker (computerpicker.tsx), in the
-   conversation's sheet and, compact, in Quick Chat. Cards over a raised track; the chosen one is ringed in the accent rather than filled,
-   so its picture stays readable. Every motion here is a CSS transition or keyframe, and the app's
+   conversation's sheet and, compact, in Quick Chat. Cards over a raised track; the chosen one is ringed in ink rather than
+   filled, so its picture stays readable. Every motion here is a CSS transition or keyframe, and the app's
    reduced-motion rule (ui/styles.css) switches all of them off. */
 
 .cu-picker {
-  --cu-raised: var(--surface-3);
+  --cu-raised: var(--card);
   --cu-well: var(--surface-2);
-  --cu-glow: color-mix(in srgb, var(--accent) 22%, transparent);
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 12px);
   min-width: 0;
 }
-:root[data-scheme="light"] .cu-picker { --cu-raised: var(--surface-1); }
 
 /* Four tabs on one track, the lit one marked by a thumb that slides under the labels. */
 .cu-tabs {
   position: relative;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  padding: 2px;
+  border-radius: var(--radius-sm);
   background: var(--cu-well);
 }
 .cu-tabs-thumb {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc((100% - 6px) / 4);
-  border-radius: calc(var(--radius-md) - 3px);
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 4);
+  border-radius: var(--radius-xs);
   background: var(--cu-raised);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--line);
+  box-shadow: var(--drop-xs);
   transform: translateX(calc(var(--i, 0) * 100%));
   transition: transform 260ms var(--ease-out);
 }
@@ -54,7 +51,7 @@
   transition: color var(--t-fast) ease;
 }
 .cu-tabs button:hover { color: var(--fg); }
-.cu-tabs button.on { color: var(--fg); font-weight: 600; }
+.cu-tabs button.on { color: var(--fg); font-weight: 500; }
 .cu-tabs button svg { flex: none; }
 
 .cu-pane { display: flex; flex-direction: column; gap: var(--space-3, 12px); min-width: 0; animation: cu-fade 220ms var(--ease-out); }
@@ -76,16 +73,13 @@
 .cu-stage .cu-thumb.large img.cu-thumb-backdrop { object-fit: cover; filter: blur(22px) saturate(1.2); }
 .cu-stage .cu-thumb.large.ready img.cu-thumb-backdrop { opacity: 0.45; }
 .cu-stage-caption { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 8px 12px; font-size: var(--fs-12); color: var(--fg-3); border-top: 1px solid var(--line); }
-.cu-stage-caption b { color: var(--fg); font-size: var(--fs-13); font-weight: 600; min-width: 0; }
+.cu-stage-caption b { color: var(--fg); font-size: var(--fs-13); font-weight: 500; min-width: 0; }
 .cu-stage.empty { flex-direction: row; align-items: center; justify-content: center; gap: 10px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border-style: dashed; background: transparent; }
 .cu-stage-glyph { display: inline-grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--radius-sm); background: var(--cu-well); color: var(--fg-2); }
 .cu-stage.map {
   align-items: center;
   gap: 10px;
   padding: 16px 14px 12px;
-  background:
-    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
-    var(--cu-well);
 }
 .cu-stage.map .cu-stage-caption { border: 0; padding: 0; justify-content: center; font-size: var(--fs-12); color: var(--fg-2); }
 
@@ -97,11 +91,11 @@ button.cu-map-tile { cursor: pointer; }
   inset: 3px;
   aspect-ratio: auto;
   border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.22);
-  transition: box-shadow 200ms var(--ease-out), opacity 200ms ease, transform 200ms var(--ease-out);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  transition: box-shadow 200ms var(--ease-out), opacity 200ms ease;
 }
-button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
-.cu-map-tile.on .cu-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--cu-glow), 0 6px 18px rgba(0, 0, 0, 0.26); }
+button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
+.cu-map-tile.on .cu-thumb { box-shadow: 0 0 0 2px var(--fg); }
 .cu-map:has(button.cu-map-tile.on) button.cu-map-tile:not(.on) .cu-thumb { opacity: 0.6; }
 .cu-map-label {
   position: absolute;
@@ -112,14 +106,14 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
   gap: 6px;
   max-width: calc(100% - 18px);
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-xs);
   background: rgba(10, 10, 12, 0.62);
   color: #fff;
   font-size: var(--fs-12);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
-.cu-map-label b { font-weight: 600; min-width: 0; }
+.cu-map-label b { font-weight: 500; min-width: 0; }
 .cu-map-label .cu-badge { background: rgba(255, 255, 255, 0.18); color: #fff; }
 /* On a small tile the name matters more than the badge; the caption under the map still says it. */
 @container (max-width: 200px) { .cu-map-label .cu-badge { display: none; } }
@@ -135,18 +129,18 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: var(--cu-well);
+  background: var(--card);
+  box-shadow: var(--drop-xs);
   color: var(--fg);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color 160ms ease, box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out), background-color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease;
   animation: cu-rise 280ms var(--ease-out) both;
   animation-delay: calc(var(--n, 0) * 28ms);
 }
-.cu-card:hover:not(:disabled) { border-color: var(--line-strong); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
-.cu-card:active:not(:disabled) { transform: translateY(0) scale(0.99); }
-.cu-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 22px var(--cu-glow); }
+.cu-card:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-2); }
+.cu-card.on { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
 .cu-card.off { opacity: 0.55; cursor: not-allowed; }
 .cu-card.off .cu-card-sub { color: var(--warn); }
 .cu-card.ghost { pointer-events: none; }
@@ -184,15 +178,14 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  background: var(--primary);
+  color: var(--primary-ink);
   animation: cu-pop 220ms var(--ease-out);
 }
-.cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: var(--fs-11); font-weight: 600; }
+.cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
 
 .cu-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
-.cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); font-size: var(--fs-12); }
+.cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); }
 .cu-warn svg { flex: none; margin-top: 1px; }
 
 /* How long: presets as pills, and a field of its own for any other number of minutes. */
@@ -202,9 +195,9 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
 .cu-pill {
   height: var(--chip-h);
   padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
   color: var(--fg-2);
   font-size: var(--fs-13);
   font-variant-numeric: tabular-nums;
@@ -212,15 +205,15 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 .cu-pill:hover { background: var(--cu-well); color: var(--fg); }
-.cu-pill.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); font-weight: 600; }
+.cu-pill.on { border-color: var(--fg); color: var(--fg); font-weight: 500; }
 .cu-custom { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-12); animation: cu-rise 200ms var(--ease-out); }
 .cu-custom input {
   width: 68px;
   height: var(--chip-h);
   padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: var(--cu-well);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
   color: var(--fg);
   font-size: var(--fs-13);
   text-align: right;
@@ -231,9 +224,7 @@ button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
 
 .cu-actions { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .cu-summary { flex: 1; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
-.cu-cta { flex: none; height: var(--ctl-h-lg); gap: 8px; padding: 0 18px; border-radius: var(--radius-pill); font-weight: 600; transition: transform 160ms var(--ease-out), opacity 160ms ease, box-shadow 200ms ease; }
-.cu-cta:not(:disabled):hover { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22); }
-.cu-cta:not(:disabled):active { transform: scale(0.98); }
+.cu-cta { flex: none; height: var(--ctl-h-lg); gap: 8px; padding: 0 18px; border-radius: var(--radius-sm); font-weight: 500; }
 
 /* Compact: Quick Chat's window is short, so no large picture and the cards scroll sideways. */
 .cu-picker.compact { gap: 8px; }
