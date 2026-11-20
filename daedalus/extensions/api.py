@@ -2498,11 +2498,21 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         else:
             found = app.config.default_preset()
             preset = found[1] if found else None
+        # The account rides with the effort: both are drawn in the same picker, and both are this
+        # session's alone. ``account_upstream`` says whose accounts the picker lists, "" for a model
+        # that has no accounts; ``account`` is "" while the session follows the model's own, and
+        # ``account_default`` is the account that "the model's own" is today.
+        upstream = manager.account_upstream(overrides)
+        account = {
+            "account": manager.subscription_accounts.chosen(state.session.id, upstream) if upstream else "",
+            "account_upstream": upstream,
+            "account_default": manager.account_default(overrides, upstream) if upstream else "",
+        }
         if preset is None:
-            return {"thinking": True, "reasoning_effort": "medium"}
+            return {"thinking": True, "reasoning_effort": "medium", **account}
         thinking = preset.thinking if overrides.get("thinking_enabled") is None else bool(overrides["thinking_enabled"])
         effort = overrides.get("reasoning_effort") or preset.reasoning_effort
-        return {"thinking": thinking, "reasoning_effort": effort}
+        return {"thinking": thinking, "reasoning_effort": effort, **account}
 
     async def subagent_settings(state: Any) -> dict[str, Any]:
         """What a subagent runs on, for its card: the model, the provider (for its mark), the effort and the window.
@@ -5618,10 +5628,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/sessions/{session_id}/model")
     async def set_model(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """``{"clear": true}`` returns the session to the global default; otherwise any of
-        ``provider`` (a configured client id), ``model``, ``thinking``, ``reasoning_effort``."""
+        ``provider`` (a configured client id), ``model``, ``thinking``, ``reasoning_effort``, and
+        ``account``: the subscription account of the session's model, "" for the model's own."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
+        account = body.get("account")
+        if account is not None and not isinstance(account, str):
+            raise HTTPException(400, "account must be a string")
         if body.get("context_window"):
             # Per-session window (in memory): smaller than the model's for cheap runs or tests.
             state.context_window = max(8_000, int(body["context_window"]))
@@ -5641,6 +5655,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 preset=body.get("preset") or None,
                 thinking=body.get("thinking"),
                 reasoning_effort=body.get("reasoning_effort"),
+                account=account,
                 clear=bool(body.get("clear")),
             )
         except ValueError as exc:

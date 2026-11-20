@@ -4,7 +4,7 @@ import { ControlTrigger } from "./ui/control-trigger";
 // spans the collection from the root and stays scoped inside a provider. While another model stands in for the
 // configured one the button is amber and says so, and the list offers the way back first.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, ModelFallback, Preset, ProviderConf } from "./api";
 import { SegmentedControl } from "./ui/phone";
 import { REASONING_EFFORTS, effortIndex } from "./models";
@@ -13,10 +13,22 @@ import { Icon } from "./icons";
 import { shortModel, tokens } from "./format";
 import { DICT, num, t } from "./i18n";
 import { ProviderMark, providerName } from "./ui/provider-mark";
-import { EffortMenu, effortWord } from "./effortselect";
+import { EffortMenu, MenuBranch, effortWord } from "./effortselect";
+import { SubscriptionAccount, accountName, statusOf, useSubscriptionAccounts } from "./accounts";
 import { navigate, pathFor } from "./router";
 
 export type ModelChoice = { clear: true } | { preset: string } | { model: string };
+
+/** The subscription account of the session's model, as the host reports it with the effort. */
+export type AccountChoice = {
+  /** The key-proxy upstream the model goes through; "" for a model with no accounts, which shows no row. */
+  upstream: string;
+  /** The account the operator chose for this session; "" while it follows the model's own. */
+  chosen: string;
+  /** The account "the model's own" is today, named beside "default". */
+  fallback: string;
+  onChoose: (account: string) => void;
+};
 
 /** Where "Add model" leads: Settings → Models with its add sheet already open. A model
  *  typed by hand into the picker used to stand in for this, and it ran a session on a provider/model
@@ -37,6 +49,7 @@ export type ModelSelectProps = {
   effort?: string;
   thinking?: boolean;
   onChooseEffort?: (effort: string) => void;
+  account?: AccountChoice;
   /** A control elsewhere that opened the list, such as the panel strip's model chip: the popover hangs
    *  below it, aligned to its left edge. Null hangs it from this component's own pill. */
   anchor?: HTMLElement | null;
@@ -50,7 +63,7 @@ function isCurrent(id: string, p: Preset, model: string): boolean {
   return model === id || model === p.label || model === p.model || model === `${p.provider}/${p.model}`;
 }
 
-export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, thinking, onChooseEffort, anchor = null, pill = true }: ModelSelectProps) {
+export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, thinking, onChooseEffort, account, anchor = null, pill = true }: ModelSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -88,7 +101,8 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   ) : shortModel(model, 22);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
-  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
+  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined}
+    account={account?.upstream ? { ...account, onChoose: (value) => { account.onChoose(value); onOpenChange(false); } } : undefined} sheet={sheet} />;
   return (
     <>
       {pill && <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open && !anchor ? "on" : ""}`} onClick={() => onOpenChange(!(open && !anchor))} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open && !anchor}>
@@ -113,7 +127,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   );
 }
 
-function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; onClose: () => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
+function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thinking, onChooseEffort, account, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; onClose: () => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; account?: AccountChoice; sheet: boolean }) {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
   const [freeGroup, setFreeGroup] = useState(false);
@@ -149,7 +163,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
       listRef={list} cat={cat} model={model} fallback={fallback} configured={configured} onPick={onPick}
       query={query} setQuery={setQuery} provider={provider} setProvider={setProvider} freeGroup={freeGroup} setFreeGroup={setFreeGroup}
       browsing={browsing} matched={matched} providers={providers} entries={entries} back={back}
-      effort={effort} thinking={thinking} onChooseEffort={onChooseEffort}
+      effort={effort} thinking={thinking} onChooseEffort={onChooseEffort} account={account}
       showGlobal={showGlobal} addModel={addModel}
     />
   );
@@ -219,6 +233,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
       })}
       <div className="menu-sep" />
       {onChooseEffort && <EffortMenu effort={effort} thinking={thinking} onChoose={onChooseEffort} inline={sheet} />}
+      {account && <AccountMenu choice={account} inline={sheet} />}
       <button type="button" role="menuitem" className="model-row model-add" onClick={addModel}><Icon name="plus" size={16} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={14} /></button>
     </div>
   );
@@ -228,9 +243,66 @@ type PhoneListProps = {
   listRef: React.RefObject<HTMLDivElement | null>; cat: Catalogue; model: string; fallback: ModelFallback | null; configured: [string, Preset] | null; onPick: (c: ModelChoice) => void;
   query: string; setQuery: (q: string) => void; provider: string | null; setProvider: (p: string | null) => void; freeGroup: boolean; setFreeGroup: (on: boolean) => void;
   browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: () => void;
-  effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void;
+  effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; account?: AccountChoice;
   showGlobal: boolean; addModel: () => void;
 };
+
+/** The accounts of the session's subscription, names only: the quota reading asks every vendor and the picker cannot wait for it. */
+function useUpstreamAccounts(upstream: string): SubscriptionAccount[] {
+  const { data } = useSubscriptionAccounts(false);
+  return data?.upstreams.find((row) => row.upstream === upstream)?.accounts ?? [];
+}
+
+function chosenName(choice: AccountChoice, accounts: SubscriptionAccount[]): string {
+  const chosen = accounts.find((a) => a.id === choice.chosen);
+  if (chosen) return accountName(chosen);
+  const own = accounts.find((a) => a.id === choice.fallback) ?? accounts.find((a) => a.default);
+  return t("composer.account.default", { name: own ? accountName(own) : choice.fallback });
+}
+
+/**
+ * The accounts as radio rows drawn like the efforts': "default" first, which follows whatever Settings
+ * says for the model, then each account with what keeps it from answering, if anything does. A resting
+ * account can still be chosen: the call then moves on while it rests (with fallover on) and comes back.
+ */
+function AccountOptions({ choice, accounts, heading }: { choice: AccountChoice; accounts: SubscriptionAccount[]; heading: boolean }) {
+  const name = useId();
+  const rows = [{ id: "", text: chosenName({ ...choice, chosen: "" }, accounts), hint: t("composer.account.default.hint") },
+    ...accounts.map((a) => { const status = statusOf(a); return { id: a.id, text: accountName(a), hint: status.tone === "ok" ? a.plan : status.text }; })];
+  return <fieldset className="effort-options account-options">
+    {heading && <legend className="menu-heading sub">{t("composer.account.heading")}</legend>}
+    {rows.map((row) => {
+      const checked = row.id === choice.chosen;
+      return <label key={row.id || "default"} className={`model-row mode-row effort-option ${checked ? "on" : ""}`}>
+        <input type="radio" name={name} value={row.id} checked={checked} onChange={() => choice.onChoose(row.id)} onClick={() => { if (checked) choice.onChoose(row.id); }} />
+        <span className="grow model-text">
+          <span className="truncate">{row.text}</span>
+          {row.hint && <span className="sub clamp-2">{row.hint}</span>}
+        </span>
+        {checked && <Icon name="check" size={16} />}
+      </label>;
+    })}
+  </fieldset>;
+}
+
+/** The Account row beside Effort; nothing while the subscription has a single account, where there is nothing to choose. */
+function AccountMenu({ choice, inline }: { choice: AccountChoice; inline: boolean }) {
+  const accounts = useUpstreamAccounts(choice.upstream);
+  if (accounts.length < 2) return null;
+  return <MenuBranch title={t("composer.account")} value={chosenName(choice, accounts)} label={t("composer.account.heading")} inline={inline} onChoose={choice.onChoose} branch="account">
+    <AccountOptions choice={choice} accounts={accounts} heading />
+  </MenuBranch>;
+}
+
+/** The phone sheet's account section, under the effort's, with the same rows the desktop panel holds. */
+function PhoneAccounts({ choice }: { choice: AccountChoice }) {
+  const accounts = useUpstreamAccounts(choice.upstream);
+  if (accounts.length < 2) return null;
+  return <div className="ph-model-account" data-branch="account">
+    <div className="ph-model-sec">{t("composer.account")}</div>
+    <AccountOptions choice={choice} accounts={accounts} heading={false} />
+  </div>;
+}
 
 /** What a provider needs before it answers, in the words of its row: a key that is there or not. */
 function keyState(conf: ProviderConf | undefined): string {
@@ -298,6 +370,7 @@ function PhoneModelList(p: PhoneListProps) {
             onChange={(value) => p.onChooseEffort!(value)} />
         </>
       )}
+      {p.account && p.browsing && !p.freeGroup && <PhoneAccounts choice={p.account} />}
       {p.freeGroup && p.provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { p.setFreeGroup(false); p.setQuery(""); }}><Icon name="back" size={18} /><span className="grow">{t("composer.model.back")}</span></button>}
       {p.provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={p.back} aria-label={t("composer.model.back")}>
         <Icon name="back" size={18} />{mark(p.provider)}

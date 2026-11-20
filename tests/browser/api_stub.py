@@ -4269,6 +4269,9 @@ class FocusStub:
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",
+            # No subscription upstream: the model picker's account row stays out of the shots and of the
+            # checks that find the effort's row by its class.
+            "account": "", "account_upstream": "", "account_default": "",
             "messages": messages, "usd_cap": None, "brief": "", "spawned_by": None, "tools_off": [], "loop": None, "services": [], "subagents": [],
             "subagent_of": None, "subagent_name": None, "leader_title": None, "orchestrator_of": orchestrator_of, "staff": staff, "telegram_linked": False,
             "verifications": {}, "first_seq": messages[0]["seq"] if messages else 0, "has_older": False,

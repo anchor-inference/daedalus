@@ -1583,6 +1583,11 @@ export type SessionDetail = {
   /** Session override, else the preset: whether the next call thinks, and how hard. */
   thinking?: boolean;
   reasoning_effort?: string;
+  /** The subscription account this session chose ("" for the model's own), the upstream whose accounts
+   *  the picker lists ("" for a model with none), and the account "the model's own" is today. */
+  account?: string;
+  account_upstream?: string;
+  account_default?: string;
   /** The model name the session is set to answer with, and the one really answering; they differ during a fallback. */
   configured_model?: string;
   effective_model?: string;

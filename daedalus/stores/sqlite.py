@@ -1290,7 +1290,8 @@ class LiveControlStore:
     async def load(self, session_id: str) -> dict[str, Any]:
         row = await self._db.fetchone("SELECT * FROM live_control WHERE session_id = ?", (session_id,))
         if row is None:
-            return {"steer": [], "follow_up": [], "queue_revision": 0, "model_name": None, "provider": None, "preset": None, "thinking_enabled": None, "reasoning_effort": None}
+            return {"steer": [], "follow_up": [], "queue_revision": 0, "model_name": None, "provider": None, "preset": None, "thinking_enabled": None, "reasoning_effort": None,
+                    "account": None, "account_upstream": None}
         return {
             "steer": json.loads(row["steer_queue"] or "[]"),
             "follow_up": json.loads(row["follow_up_queue"] or "[]"),
@@ -1300,6 +1301,8 @@ class LiveControlStore:
             "preset": row["preset"],
             "thinking_enabled": None if row["thinking_enabled"] is None else bool(row["thinking_enabled"]),
             "reasoning_effort": row["reasoning_effort"],
+            "account": row["account"],
+            "account_upstream": row["account_upstream"],
         }
 
     async def load_models(self, session_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -1744,9 +1747,22 @@ class LiveControlStore:
             ),
         )
 
+    async def set_account(self, session_id: str, upstream: str, account: str) -> None:
+        """The subscription account the session's calls on ``upstream`` go out on first; "" returns it to the model's own.
+
+        Written apart from :meth:`set_model`, which leaves these columns alone: a choice of model keeps the
+        account, because the account is the subscription's and a move to a model of another one leaves it
+        waiting there (``SubscriptionAccounts.chosen`` reads it only for its own upstream)."""
+        await self._db.execute(
+            "INSERT INTO live_control(session_id, steer_queue, follow_up_queue, account, account_upstream, updated_at) VALUES (?, '[]', '[]', ?, ?, ?)"
+            " ON CONFLICT(session_id) DO UPDATE SET account = excluded.account, account_upstream = excluded.account_upstream, updated_at = excluded.updated_at",
+            (session_id, account or None, upstream if account else None, _now()),
+        )
+
     async def clear_overrides(self, session_id: str) -> None:
         await self._db.execute(
-            "UPDATE live_control SET model_name = NULL, provider = NULL, preset = NULL, thinking_enabled = NULL, reasoning_effort = NULL WHERE session_id = ?",
+            "UPDATE live_control SET model_name = NULL, provider = NULL, preset = NULL, thinking_enabled = NULL, reasoning_effort = NULL,"
+            " account = NULL, account_upstream = NULL WHERE session_id = ?",
             (session_id,),
         )
 

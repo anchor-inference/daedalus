@@ -4121,6 +4121,20 @@ CREATE TABLE IF NOT EXISTS translating_inputs (
 );
 """)
 
+# 171 — the subscription account the operator chose for one session from the composer's model chip.
+# ``account`` is the account's id and ``account_upstream`` the subscription it belongs to: an id means
+# something only within its upstream (every one has a ``default``), and a session moved onto a model of
+# another subscription and back again finds its choice where it left it. NULL is "the model's own".
+async def _session_account(conn: aiosqlite.Connection) -> None:
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(live_control)")).fetchall()}
+    for column in ("account", "account_upstream"):
+        if column not in present:
+            await conn.execute(f"ALTER TABLE live_control ADD COLUMN {column} TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_account))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
