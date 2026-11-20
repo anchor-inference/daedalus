@@ -182,7 +182,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
   return (
     <>
       <div className="card nav-cfg" data-setting="navigation.rail">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("nav.cfg.desktop")}</div>
+        <div className="section-title">{t("nav.cfg.desktop")}</div>
         <div className="sub">{t("nav.cfg.desktop.sub")}</div>
         {PLACES.map((p) => (
           <div key={p} className="nav-cfg-list" data-nav-list={p} onDragOver={(e) => allowDrop(e, "desktop")} onDrop={(e) => drop(e, "desktop", (id) => place(id, p))}>
@@ -193,7 +193,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
         ))}
       </div>
       <div className="card nav-cfg" data-setting="navigation.drawer">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("nav.cfg.phone")}</div>
+        <div className="section-title">{t("nav.cfg.phone")}</div>
         <div className="sub">{t("nav.cfg.phone.sub")}</div>
         <div className="nav-cfg-list" data-drawer-list="on" onDragOver={(e) => allowDrop(e, "phone")} onDrop={(e) => drop(e, "phone", (id) => setDrawer([...drawerOn.map((x) => x.id).filter((x) => x !== id), id]))}>
           <div className="nav-cfg-head">{t("nav.cfg.list.drawer")}</div>

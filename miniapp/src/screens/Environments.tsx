@@ -28,7 +28,7 @@ export function EnvironmentsTab({ s, save, toast }: { s: Settings; save: (patch:
   return (
     <>
       <div className="card env-load">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.env.load")}</div>
+        <div className="section-title">{t("settings.env.load")}</div>
         {load.data && (load.data.terminals || load.data.browsers) ? (
           <WorkloadsBar load={load.data} caps={caps} />
         ) : load.error ? (

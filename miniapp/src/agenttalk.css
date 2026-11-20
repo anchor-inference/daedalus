@@ -17,14 +17,16 @@
 .talk-card-head .subagent-chip { margin-left: auto; }
 .talk-counts { font-variant-numeric: tabular-nums; }
 .talk-key { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
-.talk-msg[data-author="owner"] .talk-msg-head > b { color: var(--accent); }
-.talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-1); }
+.talk-msg[data-author="owner"] .talk-msg-head > b { color: var(--fg); }
+.talk-topic { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); }
 .talk-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-13); line-height: 1.45; }
 
 .talk-messages { display: flex; flex-direction: column; gap: var(--space-2); }
-.talk-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
-.talk-msg[data-role="them"] { border-left: 3px solid var(--warn); }
-.talk-msg[data-role="us"] { background: var(--bg); }
+/* The two sides differ by surface and by the name in the head: theirs a card, ours recessed. A stripe
+   down theirs said the same thing a third time. */
+.talk-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
+.talk-msg[data-role="them"] .talk-msg-head > b { color: var(--warn); }
+.talk-msg[data-role="us"] { background: var(--inset); }
 .talk-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
 .talk-msg-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
 .talk-msg-word { color: var(--warn); }
@@ -51,4 +53,4 @@
 .talk-approval .talk-approve-why { font-size: var(--fs-12); }
 .talk-approval .talk-edit { width: 100%; min-height: 72px; font-size: var(--fs-13); line-height: 1.45; resize: vertical; }
 .talk-approval .dock-actions { flex-wrap: wrap; }
-.talk-card .talk-approval .dock-detail { background: var(--bg); }
+.talk-card .talk-approval .dock-detail { background: var(--inset); }

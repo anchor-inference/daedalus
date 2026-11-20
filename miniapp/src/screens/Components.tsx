@@ -297,8 +297,11 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
 
   const busy = view.busy || view.components.find((c) => c.state === "installing")?.id || "";
   return (
-    <div className="card" data-setting="components.catalogue">
-      <div className="section-title" style={{ marginTop: 0 }}>
+    <div className="catalogue settings-groups" data-setting="components.catalogue">
+      {/* The words and the way the installation runs are one card and the components lie on the page
+          under it, each a card of its own: drawn inside the first, they were cards in a card. */}
+      <div className="card">
+      <div className="section-title">
         {t("comp.title")}
       </div>
       <div className="sub">{t("comp.intro")}</div>
@@ -321,6 +324,7 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
       )}
 
       {problem && <div className="sub attn comp-line">{problem}</div>}
+      </div>
 
       <div className="comp-grid">
         <SearchComponent />

@@ -51,6 +51,11 @@ h3.account-upstream-title { margin: 0; font-size: var(--fs-14); font-weight: 600
 .account-add { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); background: var(--inset); }
 .account-add .field { flex: 1 1 160px; min-width: 0; min-height: var(--ctl-h-sm); padding-block: 4px; font-size: var(--fs-13); }
 @media (max-width: 1023px) {
+  /* The state takes a line of its own under the name: beside it, a long one ("resting: usage limit,
+     back in 2 hours") squeezed the address into a column three letters wide. */
+  .account-head { flex-wrap: wrap; }
+  .account-head > .pill { max-width: 100%; margin: 0 0 0 calc(var(--avatar) + var(--space-3)); text-align: left; }
+  .account-who { flex-basis: calc(100% - var(--avatar) - var(--space-3)); }
   .account-row .account-facts, .account-controls, .account-row .account-command { padding-left: 0; margin-left: 0; }
   .account-field { max-width: none; flex-basis: 100%; }
   .account-field .field, .account-add .field { font-size: var(--fs-16); min-height: var(--ctl-h); }

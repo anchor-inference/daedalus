@@ -4,15 +4,14 @@
 .deps-overview p { margin:6px 0 0; }
 /* Where dependencies go is a settings row like the rest (settingsrow.tsx), under a hairline. */
 .deps-mode { border-top:1px solid var(--line); }
-.deps-job { display:grid; gap:var(--space-3); border-color:color-mix(in srgb, var(--accent) 42%, var(--line)); }
-.deps-job.failed { border-color:color-mix(in srgb, var(--bad) 42%, var(--line)); }
+/* A job's state is its icon's colour and its words; the card keeps the edge every card has. */
+.deps-job { display:grid; gap:var(--space-3); }
 .deps-job-title { display:flex; align-items:flex-start; gap:var(--space-3); }
 .deps-job-title > span:last-child { display:grid; gap:3px; }
-.deps-job-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; flex:none; border-radius:50%; color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
-.deps-job.failed .deps-job-icon { color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, transparent); }
-.deps-job.offline { border-color:color-mix(in srgb, var(--warn) 42%, var(--line)); }
-.deps-job.offline .deps-job-icon { color:var(--warn); background:color-mix(in srgb, var(--warn) 10%, transparent); }
-.deps-label { display:block; margin-top:var(--space-2); font-size:var(--fs-13); font-weight:600; }
+.deps-job-icon { display:inline-flex; align-items:center; justify-content:center; width:var(--ctl-h); height:var(--ctl-h); flex:none; border-radius:var(--radius-sm); color:var(--accent); background:color-mix(in srgb, currentColor 12%, transparent); }
+.deps-job.failed .deps-job-icon { color:var(--bad); }
+.deps-job.offline .deps-job-icon { color:var(--warn); }
+.deps-label { display:block; margin-top:var(--space-2); margin-bottom:calc(-1 * var(--space-2)); color:var(--fg-3); font-size:var(--fs-12); font-weight:500; }
 .deps-request-card { display:grid; gap:var(--space-3); }
 .deps-request-card > p { margin:-6px 0 0; }
 .deps-request-card .field { margin:0; }
@@ -25,28 +24,28 @@
 .deps-environment-head b { font-size:var(--fs-14); font-weight:600; }
 .deps-environment-head > .chip { flex:none; color:var(--ok); }
 .deps-tool-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:var(--space-1); }
-.deps-tool-chips .chip { min-height:28px; padding:0 9px; background:var(--surface-2); }
-.deps-tool-chips .chip.missing { background:transparent; border-style:dashed; color:var(--fg-3); }
+.deps-tool-chips .chip { min-height:var(--chip-h-dense); padding:0 8px; background:var(--surface-2); }
+.deps-tool-chips .chip.missing { background:transparent; box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-3); }
 .deps-tools { margin:4px 0 var(--space-2); }
 .deps-tools .kv { gap:12px; align-items:baseline; }
 .deps-tools .kv > span { text-align:right; overflow-wrap:anywhere; }
 .dependencies details { margin:0; border-top:1px solid var(--line); }
-.dependencies summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--fg-2); }
+.dependencies summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--fg); font-size:var(--fs-14); font-weight:500; }
 /* A caret says the row opens: plain text between hairlines gave no sign there was more behind it. */
 .dependencies summary::after { content:""; flex:none; width:6px; height:6px; margin:0 4px 3px auto; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); transition:transform var(--t-fast); }
 .dependencies details[open] > summary::after { transform:translateY(3px) rotate(-135deg); }
 .dependencies pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--fs-12); }
 .deps-explanation { white-space:pre-wrap; overflow-wrap:anywhere; }
-.deps-patch { padding:12px; background:var(--bg); border-radius:var(--radius-sm); max-height:40vh; overflow:auto; }
+.deps-patch { padding:12px; background:var(--inset); box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); max-height:40vh; overflow:auto; }
 /* The whole label is the target and is a touch row tall; the box itself is drawn at 20 px because the
    browser's 13 px one looked like it wanted a fingertip's precision on the one gate before a restart. */
 .deps-consent { display:flex; align-items:start; gap:10px; min-height:44px; margin:16px 0; cursor:pointer; }
-.deps-consent input { flex-shrink:0; width:20px; height:20px; margin:1px 0 0; accent-color:var(--accent); }
+.deps-consent input { flex-shrink:0; width:20px; height:20px; margin:1px 0 0; accent-color:var(--fg); }
 .deps-progress { display:grid; gap:var(--space-2); min-width:0; }
 .deps-progress-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .deps-progress-heading > span { display:flex; align-items:center; gap:9px; min-width:0; }
 .deps-progress-heading time, .deps-events time { font-variant-numeric:tabular-nums; color:var(--fg-3); }
-.deps-progress-rail { height:3px; overflow:hidden; border-radius:99px; background:var(--surface-3); }
+.deps-progress-rail { height:4px; overflow:hidden; border-radius:2px; background:var(--surface-3); }
 .deps-progress-rail i { display:block; width:38%; height:100%; border-radius:inherit; background:var(--accent); animation:deps-travel 1.8s ease-in-out infinite; }
 @keyframes deps-travel { 0% { transform:translateX(-100%); } 100% { transform:translateX(365%); } }
 .deps-progress-meta { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; color:var(--fg-3); font-size:var(--fs-12); }
@@ -59,7 +58,7 @@
 .deps-events li { display:flex; align-items:baseline; gap:12px; margin:8px 0; }
 .deps-events time { flex-shrink:0; }
 .deps-events small { display:block; overflow-wrap:anywhere; margin-top:4px; }
-.deps-live-log { max-height:240px; overflow:auto; padding:12px; background:var(--bg); border-radius:var(--radius-sm); }
+.deps-live-log { max-height:240px; overflow:auto; padding:12px; background:var(--inset); box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); }
 @media (max-width:560px) {
   .deps-request-actions { align-items:stretch; flex-direction:column; }
   .deps-request-actions .btnrow, .deps-request-actions .btn { width:100%; }

@@ -201,7 +201,7 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
   }
   return (
     <div className="card">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("nset.quiet.title")}</div>
+      <div className="section-title">{t("nset.quiet.title")}</div>
       <div className="sub">{t("nset.quiet.sub")}</div>
       <Row title={t("nset.quiet.toggle")} data-setting="notifications.quiet_hours" desc={<>{ends ? `${t("nset.quiet.urgent")} ` : ""}{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</>}>
         <Switch checked={!!ends} onChange={(on) => change((p) => ({ ...p, quiet_hours: on ? joinQuietHours(draft.from, draft.to) || `${QUIET_DEFAULT.from}-${QUIET_DEFAULT.to}` : "" }))} label={t("nset.quiet.toggle")} />
@@ -230,7 +230,7 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
 function Answering({ prefs, change }: { prefs: NotificationPreferences; change: (edit: (p: NotificationPreferences) => NotificationPreferences) => void }) {
   return (
     <div className="card">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("nset.answer.title")}</div>
+      <div className="section-title">{t("nset.answer.title")}</div>
       <Row title={t("nset.quick")} desc={t("nset.quick.sub")} data-setting="notifications.quick_actions">
         <Switch checked={prefs.quick_actions} onChange={(quick_actions) => change((p) => ({ ...p, quick_actions }))} label={t("nset.quick")} />
       </Row>
@@ -247,7 +247,7 @@ function PopupsCard() {
   const on = usePopupsShown();
   return (
     <div className="card" data-popups-card>
-      <div className="section-title" style={{ marginTop: 0 }}>{t("nset.popups.title")}</div>
+      <div className="section-title">{t("nset.popups.title")}</div>
       <Row title={t("nset.popups")} desc={t("nset.popups.sub")} data-setting="notifications.popups">
         <Switch checked={on} onChange={setPopupsShown} label={t("nset.popups")} />
       </Row>
@@ -271,7 +271,7 @@ function MutedProjects({ prefs, change }: { prefs: NotificationPreferences; chan
   const list = (projects.data ?? []).filter((p) => !p.system);
   return (
     <div className="card" data-setting="notifications.muted_projects">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("nset.mute.title")}</div>
+      <div className="section-title">{t("nset.mute.title")}</div>
       <div className="sub">{t("nset.mute.sub")}</div>
       {projects.data && list.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("nset.mute.none")}</div>}
       <div className="mlist">
@@ -328,7 +328,7 @@ function Devices({ toast }: { toast: (text: string) => void }) {
   const list = devices.data?.subscriptions ?? [];
   return (
     <div className="card" data-setting="notifications.devices">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("nset.devices.title")}</div>
+      <div className="section-title">{t("nset.devices.title")}</div>
       <div className="sub">{t("nset.devices.sub")}</div>
       {devices.error && <div className="sub push-error">{devices.error}</div>}
       {devices.data && list.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("push.test.nodevice")}</div>}
@@ -384,7 +384,7 @@ function TestCard({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card" data-setting="notifications.test">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("push.test")}</div>
+      <div className="section-title">{t("push.test")}</div>
       <div className="sub">{t("push.test.sub")}</div>
       <div className="btnrow">
         <button className="btn small" disabled={testing} onClick={() => void test()}>{t("push.test.send")}</button>
@@ -407,7 +407,7 @@ export function NotificationSettings({ toast }: { toast: (text: string) => void 
       {view ? (
         <>
           <div className="card nmatrix-card" data-setting="notifications.matrix">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("nset.matrix.title")}</div>
+            <div className="section-title">{t("nset.matrix.title")}</div>
             <div className="sub">{t("nset.matrix.sub")}</div>
             <Matrix prefs={view.preferences} categories={view.categories} onCell={(category, channel, cell) => change((p) => withCell(p, category, channel, cell))} />
           </div>

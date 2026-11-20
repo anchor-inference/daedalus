@@ -570,7 +570,7 @@ export function SecretsCard({ toast: say, confirm, ago }: { toast: (text: string
   }
   return (
     <div className="card secrets-card" data-setting="security.secrets">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("secret.list.title")}</div>
+      <div className="section-title">{t("secret.list.title")}</div>
       <div className="sub">{t("secret.list.sub")}</div>
       <SecretsManager phone={false} onFetched={fetched} />
       {logins.length > 0 && (

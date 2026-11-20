@@ -223,7 +223,7 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
 
   return (
     <div className="card" data-setting="mcp.servers">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.mcp.title")}</div>
+      <div className="section-title">{t("settings.mcp.title")}</div>
       <div className="sub">{t("settings.mcp.sub")}</div>
       <div className="dt-mcp mcp-list">
         {servers !== null && servers.length === 0 && !draft && <div className="sub" style={{ marginTop: 6 }}>{t("settings.mcp.none")}</div>}

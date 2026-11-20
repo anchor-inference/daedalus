@@ -27,7 +27,7 @@ export function AutopilotSettings({ s, save }: SaveProps) {
   const verdicts = overview?.verdicts_today ?? {};
   return (
     <div className="card" data-section="autopilot">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.autopilot")}</div>
+      <div className="section-title">{t("settings.autopilot")}</div>
       <Row title={t("settings.autopilot.enabled")} desc={t("settings.autopilot.enabled.sub")} data-setting="autopilot.enabled">
         <Switch checked={pilot.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.autopilot.enabled")} />
       </Row>
@@ -75,7 +75,7 @@ export function UserStyleCard({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card" data-section="user-style">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.style")}</div>
+      <div className="section-title">{t("settings.style")}</div>
       <Row title={t("settings.style.profile")} desc={t("settings.style.profile.sub")} data-setting="user_style">
         <button type="button" className="btn" disabled={!style?.summary} onClick={() => void forget()}>{t("settings.style.forget")}</button>
       </Row>

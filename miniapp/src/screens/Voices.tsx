@@ -188,8 +188,11 @@ export function TtsVoices() {
   const chosen = view.models.find((m) => m.id === view.selected);
 
   return (
-    <div className="card" data-setting="companion.tts.local_voice">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("tts.title")}</div>
+    <div className="catalogue settings-groups" data-setting="companion.tts.local_voice">
+      {/* What is in use is one card, the voices lie on the page under it and the chosen one's
+          settings are a card after them: all in one card, the voices were cards in a card. */}
+      <div className="card">
+      <div className="section-title">{t("tts.title")}</div>
       <div className="sub">{t("tts.intro")}</div>
 
       <Row title={t("tts.inuse")}>
@@ -203,6 +206,7 @@ export function TtsVoices() {
         <span className="settings-value">{installedCount ? plural("tts.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("tts.ondisk.none")}</span>
       </Row>
       {view.state.error && <div className="sub attn" style={{ marginTop: 6 }}>{view.state.error}</div>}
+      </div>
 
       <div className="catalogue-filters">
         <input className="field" placeholder={t("tts.search")} aria-label={t("tts.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -292,7 +296,7 @@ export function TtsVoices() {
       </div>
 
       {chosen && (
-        <div className="catalogue-settings">
+        <div className="card catalogue-settings">
           {chosen.speakers.length > 1 && (
             <Row title={t("tts.speaker")} stack data-setting="companion.tts.local_speaker">
               <Dropdown label={t("tts.speaker")} value={view.state.speaker} onChange={(speaker) => void settings({ speaker })} options={[{ id: "", label: t("tts.speaker.first") }, ...chosen.speakers.map((who) => ({ id: who, label: who }))]} />

@@ -478,7 +478,7 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
         const apply = s.kind === "revision" ? (s.action === "retire" ? "retire" : "revision") : s.kind;
         return (
         <div key={s.id} className="card memory-suggestion" data-suggestion={s.id} data-kind={s.kind}>
-          <div className="section-title" style={{ marginTop: 0 }}>{t(`memory.suggest.${kind}`)}</div>
+          <div className="section-title">{t(`memory.suggest.${kind}`)}</div>
           {s.memory_ids.map((id) => {
             const r = data?.records[id];
             return r ? (

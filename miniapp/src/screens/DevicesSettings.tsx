@@ -62,7 +62,7 @@ function Waiting() {
   if (!waiting.length) return null;
   return (
     <div className="card" data-setting="devices.waiting">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("devices.waiting.title")}</div>
+      <div className="section-title">{t("devices.waiting.title")}</div>
       <div className="mlist">
         {waiting.map((r) => (
           <div key={r.id} className="mrow device-row" data-pair-request={r.user_code}>
@@ -103,7 +103,7 @@ function PairCard({ toast }: { toast: (text: string) => void }) {
   };
   return (
     <div className="card" data-setting="devices.pair">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("devices.pair.title")}</div>
+      <div className="section-title">{t("devices.pair.title")}</div>
       <ol className="devices-steps">
         <li>
           <span>{t("devices.install")}</span>
@@ -135,7 +135,7 @@ function DeviceList({ toast }: { toast: (text: string) => void }) {
   const devices = read.data?.devices ?? [];
   return (
     <div className="card" data-setting="devices.list">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("devices.list.title")}</div>
+      <div className="section-title">{t("devices.list.title")}</div>
       {read.error && <div className="sub push-error">{read.error}</div>}
       {read.data && devices.length === 0 && <div className="sub" data-devices-empty="">{t("devices.empty")}</div>}
       {!read.data && !read.error && <div className="sub">{t("common.loading")}</div>}

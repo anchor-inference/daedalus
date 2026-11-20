@@ -77,7 +77,7 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
   return (
     <>
       <div className="card action-rules" data-testid="action-rules" data-setting="action_rules">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("rules.actions.title")}</div>
+        <div className="section-title">{t("rules.actions.title")}</div>
         <div className="sub">{t("rules.actions.sub")}</div>
         <div className="ar-grid" role="table" aria-label={t("rules.actions.title")}>
           <div className="ar-row ar-head" role="row">
@@ -127,7 +127,7 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
         <div className="sub ar-legend">{t("rules.actions.legend")}</div>
       </div>
       <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("rules.review.title")}</div>
+        <div className="section-title">{t("rules.review.title")}</div>
         <div className="sub">{t("rules.review.sub")}</div>
         <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
           <ModelPicker id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
@@ -144,7 +144,7 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
 function ReviewLog({ entries }: { entries: ReviewEntry[] | null }) {
   return (
     <div className="card ar-log" data-testid="review-log">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("rules.log.title")}</div>
+      <div className="section-title">{t("rules.log.title")}</div>
       <div className="sub">{t("rules.log.sub")}</div>
       {entries === null ? (
         <div className="empty">{t("common.loading")}</div>

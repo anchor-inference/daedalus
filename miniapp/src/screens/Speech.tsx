@@ -192,8 +192,11 @@ export function SpeechModels() {
   const autoDetects = view.models.find((m) => m.id === view.selected)?.detects_language ?? true;
 
   return (
-    <div className="card" id="speech-models" data-setting="stt.models">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("stt.title")}</div>
+    <div className="catalogue settings-groups" id="speech-models" data-setting="stt.models">
+      {/* What is in use is one card, the models lie on the page under it and the chosen one's
+          settings are a card after them: all in one card, the models were cards in a card. */}
+      <div className="card">
+      <div className="section-title">{t("stt.title")}</div>
       <div className="sub">{t("stt.intro")}</div>
 
       <Row title={t("stt.inuse")} data-setting="stt.local_model">
@@ -206,6 +209,7 @@ export function SpeechModels() {
       {view.selected && !view.decoders?.opus && !view.decoders?.any && (
         <div className="sub attn" style={{ marginTop: 6 }}>{t("stt.nodecoder")}</div>
       )}
+      </div>
 
       {/* The catalogue's filters: the search takes the room, the language is a compact picker and
           "streaming only" a labelled switch, the same controls as every setting above them. */}
@@ -288,7 +292,7 @@ export function SpeechModels() {
       </div>
 
       {view.selected && (
-        <div className="catalogue-settings">
+        <div className="card catalogue-settings">
           <Row title={t("stt.language")} stack data-setting="stt.local_language">
             <Dropdown
               label={t("stt.language")}
