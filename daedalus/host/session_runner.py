@@ -5783,8 +5783,12 @@ class SessionManager:
                 await self.runs.create(run)
             state.run_id = run_id
             # Before the engine starts, so a request this run raises is never caught by the sweep. A
-            # continued turn (an answer, a resume after a restart) is the same run and keeps them.
-            if not state.grant_resume:
+            # continued turn (an answer, a resume after a restart) is the same run and keeps them. Only
+            # the operator's own next message moves past a request: a run woken by a subagent's report,
+            # a job or a schedule is not the operator answering. Every wake used to close it, so a card
+            # the agent had just raised vanished a second later when a subagent reported in, and the
+            # agent went on telling the operator to press Allow on a card that was no longer there.
+            if not state.grant_resume and message is not None and state.run_origin == "operator":
                 await self._retire_open_requests(state, via="run")
             await self._publish(state, "run.started", {"run_id": run_id, "origin": state.run_origin, "title": state.session.title})
         else:

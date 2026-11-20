@@ -33,7 +33,7 @@ async def _manager(settings: Settings, db: Database, provider: ScriptedProvider)
     return manager
 
 
-async def _run(manager: SessionManager, session_id: str, text: str) -> None:
+async def _run(manager: SessionManager, session_id: str, text: str, origin: str | None = None) -> None:
     done = asyncio.Event()
 
     async def finished(sid: str, run_id: str, status: str) -> None:
@@ -41,7 +41,7 @@ async def _run(manager: SessionManager, session_id: str, text: str) -> None:
             done.set()
 
     manager.on_finished(finished)
-    await manager.submit(session_id, text)
+    await (manager.submit(session_id, text) if origin is None else manager.submit(session_id, text, as_answer=False, origin=origin))
     await asyncio.wait_for(done.wait(), timeout=30)
     state = await manager.get_state(session_id)
     assert state is not None
@@ -146,6 +146,26 @@ async def test_a_later_run_closes_the_request_its_predecessor_left_unanswered(se
             provider.script[:0] = [REFUSED, {"text": "waiting again"}]
             await _run(manager, sid, "try once more")
             assert await _open(client, sid) == [key]
+    finally:
+        await manager.close()
+
+
+async def test_a_run_the_operator_did_not_start_leaves_the_request_open(settings: Settings, db: Database) -> None:
+    # A subagent reported in a second after the agent raised a card: the wake closed the card, and the
+    # agent kept telling the operator to press Allow on a card that was no longer anywhere.
+    provider = ScriptedProvider([])
+    manager = await _manager(settings, db, provider)
+    try:
+        sid, key = await _refused_in_a_run(manager, provider)
+        async with _client(settings, db, manager) as client:
+            provider.script[:0] = [{"text": "the review is in; still waiting for your Allow"}]
+            await _run(manager, sid, "[subagent 'reviewer' finished: completed.]", origin="subagent:reviewer")
+            assert await _open(client, sid) == [key]
+            assert await _resolutions(db, key) == []
+            # The operator's own next message is what moves past it.
+            provider.script[:0] = [{"text": "noted"}]
+            await _run(manager, sid, "never mind")
+            assert await _open(client, sid) == []
     finally:
         await manager.close()
 
