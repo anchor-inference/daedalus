@@ -5,13 +5,13 @@
 .sel { display: grid; gap: var(--space-2); min-width: 0; width: 100%; container-type: inline-size; }
 .sel.disabled { opacity: .6; }
 
-.sel-inherit { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); min-width: 0; }
-.sel-inherit.on { color: var(--accent); }
+.sel-inherit { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); min-width: 0; }
+.sel-inherit.on { color: var(--fg); }
 .sel-inherit-text { display: grid; flex: 1; min-width: 0; font-size: var(--fs-13); }
-.sel-inherit-text b { font-weight: 600; color: var(--fg); }
+.sel-inherit-text b { font-weight: 500; color: var(--fg); }
 .sel-inherit-text .sub { overflow-wrap: anywhere; }
 
-.sel-search { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); }
+.sel-search { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg-3); }
 /* One ring, on the box the reader sees as the field: the same ring the settings search draws. The
    field inside is borderless and must stay ringless, and `outline: none` on its class alone lost to
    the app-wide `:focus-visible` rule that is bundled after this file, so the field drew a second ring
@@ -26,45 +26,47 @@
 .sel-count { flex: 1; min-width: 0; }
 
 .sel-list { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-1); outline: none; }
-.sel-list:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.sel-list:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
 .sel-section + .sel-section { margin-top: var(--space-1); }
-.sel-group { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 0 var(--space-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.sel-group { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0 var(--space-2); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .sel-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sel-group-count { color: var(--fg-3); font-weight: 400; font-variant-numeric: tabular-nums; font-size: var(--fs-12); }
 
-.sel-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-2); border-radius: var(--radius-sm); cursor: pointer; user-select: none; min-width: 0; }
-.sel-row:hover { background: var(--surface-1); }
-.sel-row.active { background: var(--surface-2); }
-.sel-list:focus-visible .sel-row.active { box-shadow: inset 0 0 0 1px var(--accent); }
+.sel-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 4px var(--space-2); border-radius: var(--radius-sm); cursor: pointer; user-select: none; min-width: 0; }
+.sel-row:hover { background: var(--surface-2); }
+.sel-row.active { background: var(--surface-3); }
+.sel-list:focus-visible .sel-row.active { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sel-row.off { cursor: default; color: var(--fg-3); }
 .sel-row.off .sel-name { color: var(--fg-3); }
 .sel-row.default .sel-name { font-style: italic; }
 
-.sel-check { flex: none; width: var(--icon-sm); height: var(--icon-sm); border-radius: 4px; border: 1.5px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink); }
-.sel-row.on .sel-check { background: var(--accent); border-color: var(--accent); }
+/* A box that is on is ink, as a switch is: in the accent a column of chosen rows read as a column of
+   links. */
+.sel-check { flex: none; width: var(--icon-sm); height: var(--icon-sm); border-radius: 4px; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--bg); }
+.sel-row.on .sel-check { background: var(--fg); border-color: var(--fg); }
 .sel-row.sel-radio .sel-check { border-radius: var(--radius-pill); }
 .sel-row.sel-radio.on .sel-check { background: transparent; }
-.sel-dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--accent); }
+.sel-dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--fg); }
 
 .sel-text { display: grid; flex: 1; min-width: 0; line-height: var(--lh-ui); }
 .sel-name { font-size: var(--fs-13); color: var(--fg); overflow-wrap: anywhere; }
 .sel-detail { font-size: var(--fs-12); color: var(--fg-3); overflow-wrap: anywhere; }
 .sel-facts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); flex: none; max-width: 50%; }
-.sel-fact { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-2); border-radius: var(--radius-xs); padding: 1px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sel-fact { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.sel-row.active .sel-fact, .sel-row:hover .sel-fact { background: var(--surface-3); }
+.sel-row.active .sel-fact, .sel-row:hover .sel-fact { background: var(--surface-4); }
 
 .sel-empty { padding: var(--space-2); }
 
 .sel-chosen { display: grid; gap: var(--space-1); }
-.sel-chosen-head { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--fs-12); font-weight: 600; color: var(--fg-2); }
+.sel-chosen-head { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 .sel-chosen-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.sel-chip-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 2px 2px 2px var(--space-2); border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.sel-chip-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 2px 2px 2px var(--space-2); border-radius: var(--radius-sm); background: var(--surface-2); min-width: 0; }
 .sel-chip-row.missing .sel-detail { color: var(--warn); }
 .sel-order { flex: none; width: var(--icon-sm); text-align: center; font-size: var(--fs-12); color: var(--fg-3); font-variant-numeric: tabular-nums; }
 .sel-move:disabled { visibility: hidden; }
 
-.sel-current { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 2px 2px 2px var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--surface-1); min-width: 0; }
+.sel-current { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 2px 2px 2px var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
 .sel-current.missing .sel-detail { color: var(--warn); }
 
 /* In a narrow column (Details, a sheet) a row's facts take their own line under its name, where beside
