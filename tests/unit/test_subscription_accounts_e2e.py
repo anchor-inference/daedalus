@@ -253,3 +253,43 @@ async def test_a_model_can_name_its_own_account(stand: Any) -> None:
     state = await manager.create_session("named account")
     assert await _turn(manager, state.session.id, "go") == "completed"
     assert [token for token, _ in vendor.calls if token][0] == "token-work"
+
+
+async def test_a_session_runs_on_the_account_chosen_for_it_and_keeps_it_over_a_restart(stand: Any, settings: Settings) -> None:
+    http, manager, vendor = stand.http, stand.manager, stand.vendor
+    second = (await http.post("/api/subscription-accounts/grok", json={"label": "second"})).json()["id"]
+    _write_grok_login(stand.home / ".grok" / "daedalus-accounts" / second, "token-second")
+    state = await manager.create_session("chosen account")
+    session_id = state.session.id
+
+    page = (await http.get(f"/api/sessions/{session_id}")).json()
+    assert page["account"] == "" and page["account_upstream"] == "grok", "the picker is told whose accounts to list"
+    assert page["account_default"] == "default"
+    refused = await http.post(f"/api/sessions/{session_id}/model", json={"account": "gone"})
+    assert refused.status_code == 400 and "gone" in refused.text
+    chosen = await http.post(f"/api/sessions/{session_id}/model", json={"account": second})
+    assert chosen.status_code == 200, chosen.text
+    assert chosen.json()["account"] == second and chosen.json()["reasoning_effort"]
+
+    assert await _turn(manager, session_id, "go") == "completed"
+    assert [token for token, _ in vendor.calls if token][0] == "token-second"
+    other = await manager.create_session("another chat")
+    assert (await http.get(f"/api/sessions/{other.session.id}")).json()["account"] == "", "the choice is this session's alone"
+
+    # A restart reads the choice back, both for the page and for the next call's order.
+    again = SessionManager(settings, manager.config, db=stand.db)
+    await again.start()
+    try:
+        adapter = again.providers.get("grok")
+        assert again.providers.accounts is not None
+        assert again.providers.accounts.chain(adapter.endpoint, "grok-4", session_id)[0] == second
+        assert again.subscription_accounts.chosen(session_id, "grok") == second
+    finally:
+        await again.close()
+
+    # Returning the session to the default model returns it to the model's own account as well.
+    assert (await http.post(f"/api/sessions/{session_id}/model", json={"clear": True})).status_code == 200
+    assert (await http.get(f"/api/sessions/{session_id}")).json()["account"] == ""
+    assert (await stand.db.fetchone("SELECT account FROM live_control WHERE session_id = ?", (session_id,)))["account"] is None
+    assert (await http.post(f"/api/sessions/{session_id}/model", json={"account": second})).status_code == 200
+    assert (await http.post(f"/api/sessions/{session_id}/model", json={"account": ""})).json()["account"] == ""

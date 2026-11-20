@@ -61,6 +61,37 @@ async def test_the_choices_survive_a_restart_and_a_removed_default_falls_back(db
     assert again.choice("codex").default_account == "default"
 
 
+async def test_the_sessions_own_choice_goes_first_until_it_rests_or_is_removed(db: Database) -> None:
+    store = SubscriptionAccounts(db)
+    await store.load()
+    first = await store.add("claude", "first")
+    second = await store.add("claude", "second")
+    store.served("claude", first.id, "s1")
+    store.choose("s1", "claude", second.id)
+    # Ahead of the account that last served the session and of the model's own.
+    assert store.chain("claude", preferred="default", session_id="s1") == [second.id, first.id, "default"]
+    assert store.chain("claude", session_id="s2")[0] == "default", "another session keeps the ordinary order"
+    assert store.chosen("s1", "codex") == "" and store.chain("codex", session_id="s1") == ["default"], "a choice belongs to its own subscription"
+
+    # Spent, it is passed over while it rests, and the session comes back to it once it wakes.
+    later = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    await store.rest("claude", second.id, "quota", later)
+    assert store.chain("claude", session_id="s1")[0] == first.id
+    assert store.chain("claude", session_id="s1", at=datetime.now(UTC) + timedelta(hours=2))[0] == second.id
+    await store.wake("claude", second.id)
+
+    await store.set_choice("claude", fallover=False)
+    assert store.chain("claude", session_id="s1") == [second.id], "with fallover off the chosen account is all there is"
+    await store.set_choice("claude", fallover=True)
+
+    await store.remove("claude", second.id)
+    assert store.chosen("s1", "claude") == ""
+    assert store.chain("claude", session_id="s1") == [first.id, "default"], "a removed choice leaves the ordinary order"
+
+    store.choose("s1", "claude", "")
+    assert store.chosen("s1", "claude") == ""
+
+
 def test_the_sign_in_points_the_cli_at_the_accounts_own_home_on_every_system() -> None:
     assert account_home("/home/someone", "codex", "w1") == "/home/someone/.codex/daedalus-accounts/w1"
     assert account_home("/Users/someone", "claude", "default") == "/Users/someone/.claude"

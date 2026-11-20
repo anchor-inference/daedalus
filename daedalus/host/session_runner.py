@@ -85,6 +85,7 @@ from daedalus.config import (
     RuntimeConfig,
     Settings,
     compaction_ratio,
+    keyproxy_upstream,
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
@@ -163,6 +164,7 @@ from daedalus.memory import scope as memory_scope
 from daedalus.memory.entries import MemoryEntries
 from daedalus.memory.tools import build_memory_tools
 from daedalus.processes import end_tree
+from daedalus.providers.accounts import ACCOUNT_UPSTREAMS
 from daedalus.providers.chain import build_chain
 from daedalus.providers.free_catalog import approved_endpoint
 from daedalus.providers.free_catalog import catalog as free_catalog
@@ -1463,6 +1465,36 @@ class SessionManager:
             selected = default.model_copy(update={"free_only": False}) if default.free_only else default
             return self.providers.rungs_for_pair(self.config, overrides["provider"], overrides["model_name"]), selected
         return self.providers.rungs_for(self.config), default
+
+    def account_upstream(self, overrides: dict[str, Any]) -> str:
+        """The subscription upstream the session's own model reaches through the key proxy; "" when it has no accounts.
+
+        The model the session is set to, not the one a fallback has it on: the account is chosen for the
+        model the operator picked, and a stand-in on another provider keeps its own order."""
+        provider, _ = self._session_target(overrides)
+        conf = self.config.providers.get(provider)
+        upstream = keyproxy_upstream(conf.base_url) if conf is not None else ""
+        return upstream if upstream in ACCOUNT_UPSTREAMS else ""
+
+    def account_default(self, overrides: dict[str, Any], upstream: str) -> str:
+        """The account the session's calls open with when it has chosen none: the model's own, else the upstream's default.
+
+        The picker names it beside "default", so the operator sees which plan that word means today."""
+        provider, model = self._session_target(overrides)
+        own = next((p.account for p in self.config.presets.values() if p.provider == provider and p.model == model and p.account), "")
+        if own and self.subscription_accounts.account(upstream, own) is not None:
+            return own
+        return self.subscription_accounts.choice(upstream).default_account
+
+    def _session_target(self, overrides: dict[str, Any]) -> tuple[str, str]:
+        """(provider id, model) the session is set to, by the same precedence as :meth:`resolve_model`."""
+        if overrides.get("preset") and overrides["preset"] in self.config.presets:
+            preset = self.config.presets[overrides["preset"]]
+            return preset.provider, preset.model
+        if overrides.get("provider") and overrides.get("model_name"):
+            return str(overrides["provider"]), str(overrides["model_name"])
+        found = self.config.default_preset()
+        return (found[1].provider, found[1].model) if found else ("", "")
 
     # -- MCP per session --------------------------------------------------------------
 
@@ -5129,11 +5161,12 @@ class SessionManager:
         preset: str | None = None,
         thinking: bool | None = None,
         reasoning_effort: str | None = None,
+        account: str | None = None,
         clear: bool = False,
     ) -> None:
         state = await self.get_state(session_id)
         arguments = dict(model_name=model_name, provider=provider, preset=preset, thinking=thinking,
-                         reasoning_effort=reasoning_effort, clear=clear)
+                         reasoning_effort=reasoning_effort, account=account, clear=clear)
         if state is None:
             await self._set_model_locked(session_id, **arguments)
             return
@@ -5160,10 +5193,12 @@ class SessionManager:
         preset: str | None = None,
         thinking: bool | None = None,
         reasoning_effort: str | None = None,
+        account: str | None = None,
         clear: bool = False,
     ) -> None:
         if clear:
             await self.live.clear_overrides(session_id)
+            self.subscription_accounts.choose(session_id, "", "")
             return
         if preset is not None and preset not in self.config.presets:
             raise ValueError(f"no such model preset {preset!r}")
@@ -5171,6 +5206,19 @@ class SessionManager:
             raise ValueError(f"unknown or unusable provider {provider!r}")
         if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
             raise ValueError(f"reasoning_effort must be one of {', '.join(REASONING_EFFORTS)}")
+        upstream = ""
+        if account is not None:
+            # Checked against the model the session will be on once this call is done, so a model and an
+            # account sent together are judged as a pair, and before anything is written, so a refused
+            # account leaves the model choice untouched as well.
+            upcoming = await self.live.load(session_id)
+            if preset is not None or provider is not None or model_name is not None:
+                upcoming.update({"preset": preset, "provider": provider, "model_name": model_name})
+            upstream = self.account_upstream(upcoming)
+            if account and not upstream:
+                raise ValueError("this session's model has no subscription accounts to choose from")
+            if account and self.subscription_accounts.account(upstream, account) is None:
+                raise ValueError(f"no account {account!r} for {upstream}")
         state = self._states.get(session_id)
         if state is not None and state.running and state.run_id and (model_name or provider or preset):
             async with self.db.transaction() as conn:
@@ -5179,6 +5227,11 @@ class SessionManager:
         await self.live.set_model(
             session_id, model_name=model_name, provider=provider, preset=preset, thinking_enabled=thinking, reasoning_effort=reasoning_effort
         )
+        if account is not None:
+            # The router reads the choice on the very next call, so a running turn's next step already
+            # goes out on it; the account is the key proxy's header, not part of the engine's state.
+            await self.live.set_account(session_id, upstream, account)
+            self.subscription_accounts.choose(session_id, upstream, account)
         state = self._states.get(session_id)
         if state is not None and state.engine is not None and state.running:
             state.engine.apply_live_controls(

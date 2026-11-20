@@ -81,6 +81,8 @@ class SubscriptionAccounts:
         self._choices: dict[str, UpstreamChoice] = {}
         self._sticky: OrderedDict[tuple[str, str], str] = OrderedDict()
         """(session, upstream) → the account that last served that session's calls."""
+        self._chosen: dict[str, tuple[str, str]] = {}
+        """session → (upstream, account) the operator chose for it from the composer; durable in ``live_control``."""
 
     async def load(self) -> None:
         accounts: dict[tuple[str, str], Account] = {}
@@ -90,7 +92,9 @@ class SubscriptionAccounts:
             accounts[(account.upstream, account.id)] = account
         choices = {row["upstream"]: UpstreamChoice(row["default_account"], bool(row["fallover"]))
                    for row in await self.db.fetchall("SELECT upstream,default_account,fallover FROM subscription_upstreams")}
-        self._accounts, self._choices = accounts, choices
+        chosen = {row["session_id"]: (row["account_upstream"] or "", row["account"])
+                  for row in await self.db.fetchall("SELECT session_id, account, account_upstream FROM live_control WHERE account IS NOT NULL AND account != ''")}
+        self._accounts, self._choices, self._chosen = accounts, choices, chosen
 
     # -- reading --------------------------------------------------------------------
 
@@ -120,6 +124,23 @@ class SubscriptionAccounts:
         found = self.account(upstream, account_id)
         return found.label if found is not None else ""
 
+    def chosen(self, session_id: str | None, upstream: str) -> str:
+        """The account the operator chose for this session on ``upstream``, "" for none.
+
+        "" too when the choice belongs to another subscription, or names an account since removed: the
+        session then goes back to the ordinary order instead of naming an account the key proxy no longer has."""
+        found = self._chosen.get(session_id) if session_id else None
+        if found is None or found[0] != upstream or self.account(upstream, found[1]) is None:
+            return ""
+        return found[1]
+
+    def choose(self, session_id: str, upstream: str, account: str) -> None:
+        """Hold the session's choice for :meth:`chain`; the caller has written it to ``live_control``."""
+        if account:
+            self._chosen[session_id] = (upstream, account)
+        else:
+            self._chosen.pop(session_id, None)
+
     def several(self, upstream: str) -> bool:
         """Whether this upstream has more than its default account: only then is an account worth naming."""
         return any(u == upstream and a.id != DEFAULT_ACCOUNT for (u, _), a in self._accounts.items())
@@ -127,10 +148,15 @@ class SubscriptionAccounts:
     def chain(self, upstream: str, preferred: str = "", session_id: str | None = None, *, at: datetime | None = None) -> list[str]:
         """The accounts a call tries, in order: the first is the one it is sent with.
 
-        It opens with the account the session was last served by, then the model's own (``preferred``),
-        then the upstream's default; with fallover on, every other account follows in the operator's
-        order. An account at rest is left out while another is not; when every one rests, the first is
-        tried anyway so the call gets the provider's own refusal rather than none.
+        It opens with the account the operator chose for this session, if any, then the account the
+        session was last served by, then the model's own (``preferred``), then the upstream's default;
+        with fallover on, every other account follows in the operator's order. An account at rest is
+        left out while another is not; when every one rests, the first is tried anyway so the call gets
+        the provider's own refusal rather than none.
+
+        The session's choice is ahead of the last account because it is the operator saying which plan
+        pays for this conversation; the last account is only where a refusal happened to leave it. While
+        the chosen account rests, the call still moves on (with fallover on) and comes back once it wakes.
 
         The session's last account goes first for its prompt cache: a provider caches per account, so a
         session that moved to a second account after the first ran out would pay for its whole prompt
@@ -140,13 +166,16 @@ class SubscriptionAccounts:
         known = [a.id for a in self.accounts(upstream)]
         choice = self.choice(upstream)
         primary = preferred if preferred in known else choice.default_account
+        chosen = self.chosen(session_id, upstream)
         if not choice.fallover:
             # One account, whatever happens to it: the operator's refusal to move a turn to another plan.
-            return [primary]
+            return [chosen or primary]
         order = [primary]
         sticky = self._sticky.get((session_id, upstream)) if session_id else None
         if sticky in known and sticky != primary:
             order.insert(0, sticky)
+        if chosen in known:
+            order = [chosen, *(a for a in order if a != chosen)]
         order.extend(a for a in known if a not in order)
         awake = [a for a in order if not (self.account(upstream, a) or Account(upstream, a)).resting(at)]
         return awake or [order[0]]
