@@ -6,7 +6,7 @@
 .feed-agent-head { flex-wrap: wrap; align-items: center; row-gap: 2px; }
 .feed-agent-head .ic { flex: none; color: var(--info); }
 .feed-agent .feed-agent-who { color: var(--info); }
-.feed-agent-text { border-color: color-mix(in srgb, var(--info) 35%, var(--line)); }
+.feed-agent-text { border-color: var(--line); }
 .feed-agent.to .feed-agent-text { background: none; border-style: dashed; }
 .feed-agent-why { font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
 .feed-agent[data-state="refused"] .feed-agent-text, .feed-agent[data-state="failed"] .feed-agent-text { opacity: .75; }
@@ -14,10 +14,10 @@
 .agent-hop, .agent-wait { flex: none; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; }
 .agent-wait { color: var(--data-wait); }
 .pill.agent-state { flex: none; }
-.pill.agent-state.sent { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
-.pill.agent-state.answered { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.pill.agent-state.unanswered, .pill.agent-state.refused { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.pill.agent-state.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.pill.agent-state.sent { color: var(--info); }
+.pill.agent-state.answered { color: var(--ok); }
+.pill.agent-state.unanswered, .pill.agent-state.refused { color: var(--warn); }
+.pill.agent-state.failed { color: var(--bad); }
 
 /* The orchestrator's card: one dense row that opens in place. Folded, it is a line like its
  * neighbours; the whole message is a click away rather than three lines of every one. */

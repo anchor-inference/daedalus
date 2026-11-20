@@ -1,7 +1,7 @@
 /* The schedules list beside the open schedule: the Schedules screen and the dialog over a chat.
    A two-pane layout on a desktop, the panes taking turns on a phone. Every size is a token. */
 
-.schedbrowser { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); min-height: 0; background: var(--surface-1); }
+.schedbrowser { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); min-height: 0; background: var(--card); }
 .schedbrowser-list { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); }
 .schedbrowser-tools { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-2); }
 .schedbrowser-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-3); }
@@ -15,7 +15,7 @@
 .schedbrowser-none { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); height: 100%; color: var(--fg-3); font-size: var(--fs-13); }
 
 /* The list: a group's name over its rows. */
-.schedlist-title { display: flex; align-items: baseline; gap: 6px; padding: var(--space-3) var(--space-2) var(--space-1); font-size: var(--fs-12); font-weight: 600; color: var(--fg-2); }
+.schedlist-title { display: flex; align-items: baseline; gap: 6px; padding: var(--space-3) var(--space-2) var(--space-1); font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 .schedlist-title .n { font-weight: 400; color: var(--fg-3); }
 .schedlist-group.approval .schedlist-title { color: var(--warn); }
 .schedrow { border-radius: var(--radius-sm); }
@@ -54,7 +54,7 @@
 .scheddetail-head { display: flex; align-items: flex-start; gap: var(--space-3); }
 .scheddetail-back { flex: none; margin: -2px 0 0 -6px; }
 .scheddetail-title { flex: 1; min-width: 0; }
-.scheddetail h2 { margin: 0; font-size: var(--fs-18); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.scheddetail h2 { margin: 0; font-size: var(--fs-18); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; line-height: 1.3; overflow-wrap: anywhere; }
 .scheddetail-when { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); margin-top: var(--space-1); font-size: var(--fs-14); color: var(--fg); }
 .scheddetail-next { color: var(--fg-2); }
 .scheddetail-head .pill { flex: none; margin-top: 3px; }
@@ -67,8 +67,8 @@
 .scheddetail-facts .linkbtn:hover, .schedhistory .linkbtn:hover { color: var(--info); text-decoration-color: currentColor; }
 .scheddetail-last { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .scheddetail-error { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bad) 10%, transparent); color: var(--bad); font-size: var(--fs-13); overflow-wrap: anywhere; }
-.scheddetail h3 { margin: 0 0 var(--space-2); font-size: var(--fs-13); font-weight: 600; color: var(--fg-2); }
-.scheddetail-prompt { padding: var(--space-3) 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
+.scheddetail h3 { margin: 0 0 var(--space-2); font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.scheddetail-prompt { padding: var(--space-3) 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); }
 .scheddetail-prompt .answer { font-size: var(--fs-13); line-height: var(--lh-prose); max-width: none; }
 .scheddetail-prompt .answer h1, .scheddetail-prompt .answer h2, .scheddetail-prompt .answer h3, .scheddetail-prompt .answer h4 { margin: var(--space-2) 0 var(--space-1); font-size: var(--fs-14); }
 .scheddetail-prompt .answer > :first-child { margin-top: 0; }
@@ -104,7 +104,7 @@
 
 /* The dialog: wide and centred, as a settings window is, rather than a narrow sheet that would fold
    the list and the schedule into one column. */
-.schedules-dialog { display: flex; flex-direction: column; width: min(1040px, 94vw); height: min(700px, 90vh); overflow: hidden; outline: none; border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-pop); }
+.schedules-dialog { display: flex; flex-direction: column; width: min(1040px, 94vw); height: min(700px, 90vh); overflow: hidden; outline: none; border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-xl); }
 .schedules-dialog-head { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--head-h); padding: 0 var(--space-2) 0 var(--space-4); border-bottom: 1px solid var(--line); color: var(--fg-2); }
 .schedules-dialog-head h2 { flex: 1; margin: 0; font-size: var(--fs-14); font-weight: 600; color: var(--fg); }
 .schedules-dialog .schedbrowser { flex: 1; }
