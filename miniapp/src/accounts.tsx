@@ -84,7 +84,7 @@ function windowsText(windows: AccountWindow[]): string {
   return windows.map((w) => t("accounts.window", { name: w.name, n: Math.round(w.used_percent) })).join(" · ");
 }
 
-function statusOf(account: SubscriptionAccount): { tone: string; text: string } {
+export function statusOf(account: SubscriptionAccount): { tone: string; text: string } {
   if (!account.configured) return { tone: "failed", text: t("accounts.status.off") };
   if (account.resting) {
     const reason = t(`accounts.reason.${account.rest_reason}`);

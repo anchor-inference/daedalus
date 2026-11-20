@@ -1,5 +1,5 @@
 // Named choices keep a discrete setting understandable without dragging an unlabeled track.
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
@@ -44,10 +44,20 @@ export function EffortOptions({ effort, thinking, onChoose }: EffortOptionsProps
 
 /** Effort belongs to the model picker; its child panel stays in the same owned menu layer. */
 export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptionsProps & { inline: boolean }) {
+  return <MenuBranch title={t("composer.effort.short")} value={effortWord(effort, thinking)} label={t("composer.effort")} inline={inline} onChoose={onChoose}>
+    <EffortOptions effort={effort} thinking={thinking} onChoose={onChoose} />
+  </MenuBranch>;
+}
+
+/**
+ * A row of the model picker that opens its choices in a child panel beside the menu (or under the row
+ * where there is no room), with the effort's look and keys. The account row is drawn by the same code,
+ * so the two branches of one menu cannot drift apart; ``children`` is a fieldset of radio rows.
+ */
+export function MenuBranch({ title, value, label, inline, onChoose, branch, children }: { title: string; value: string; label: string; inline: boolean; onChoose: (value: string) => void; branch?: string; children: ReactNode }) {
   const owner = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const current = REASONING_EFFORTS[effortIndex(effort)];
   const close = () => { setOpen(false); trigger.current?.focus({ preventScroll:true }); };
   useEffect(() => {
     if (!open) return;
@@ -55,17 +65,17 @@ export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptions
     document.addEventListener("pointerdown", outside, true);
     return () => document.removeEventListener("pointerdown", outside, true);
   }, [open]);
-  return <div ref={owner} className="effort-branch">
+  return <div ref={owner} className="effort-branch" data-branch={branch}>
     <button ref={trigger} type="button" role="menuitem" className={`model-row effort-entry ${open ? "on" : ""}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(!open)} onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); setOpen(true); } }}>
-      <span className="grow">{t("composer.effort.short")}</span>
-      <span className="sub">{effortWord(effort, thinking)}</span><Icon name="chevron" size={14} />
+      <span className="grow">{title}</span>
+      <span className="sub">{value}</span><Icon name="chevron" size={14} />
     </button>
-    {open && <EffortPanel anchor={trigger.current} inline={inline} onClose={close} effort={effort} thinking={thinking} onChoose={onChoose} />}
+    {open && <BranchPanel anchor={trigger.current} inline={inline} onClose={close} label={label} onChoose={onChoose}>{children}</BranchPanel>}
   </div>;
 }
 
-function EffortPanel({ anchor, inline, onClose, ...props }: EffortOptionsProps & { anchor: HTMLElement | null; inline: boolean; onClose: () => void }) {
+function BranchPanel({ anchor, inline, onClose, label, onChoose, children }: { anchor: HTMLElement | null; inline: boolean; onClose: () => void; label: string; onChoose: (value: string) => void; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   useLayer(onClose);
@@ -99,20 +109,20 @@ function EffortPanel({ anchor, inline, onClose, ...props }: EffortOptionsProps &
     return () => { observer.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
   }, [anchor, inline]);
   useEffect(() => { panel.current?.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll:true }); }, []);
-  return <div ref={panel} role="dialog" aria-label={t("composer.effort")} className={`effort-menu effort-submenu ${position ? "floating" : "inline"}`}
+  return <div ref={panel} role="dialog" aria-label={label} className={`effort-menu effort-submenu ${position ? "floating" : "inline"}`}
     data-side={position && anchor && position.left < anchor.getBoundingClientRect().left ? "left" : "right"}
     style={position ? { position:"fixed", ...position } : undefined}
     onKeyDown={(e) => {
       if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); onClose(); return; }
       if (!(e.target instanceof HTMLInputElement)) return;
       if (["ArrowUp", "ArrowDown", "ArrowRight", "Home", "End", "Enter"].includes(e.key)) e.stopPropagation();
-      if (e.key === "Enter") { e.preventDefault(); props.onChoose(e.target.value); }
+      if (e.key === "Enter") { e.preventDefault(); onChoose(e.target.value); }
       if (e.key === "Home" || e.key === "End") {
         e.preventDefault();
         const inputs = panel.current?.querySelectorAll<HTMLInputElement>("input[type='radio']");
         (e.key === "Home" ? inputs?.[0] : inputs?.[inputs.length - 1])?.click();
       }
     }}>
-    <EffortOptions {...props} />
+    {children}
   </div>;
 }

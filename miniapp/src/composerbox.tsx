@@ -10,7 +10,7 @@ import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
-import { ModelChoice, ModelSelect } from "./modelselect";
+import { AccountChoice, ModelChoice, ModelSelect } from "./modelselect";
 import { TogglesSelect } from "./toggles";
 import { AgentLangSelect, agentLangLabel, type AgentLangChoice } from "./agentlang";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
@@ -95,6 +95,8 @@ export type ComposerProps = {
   thinking?: boolean;
   reasoningEffort?: string;
   onChooseEffort?: (effort: string) => void;
+  /** The session's subscription account, chosen in the same picker as the effort. */
+  account?: AccountChoice;
   /** The operator's likely next message, shown in the empty field and taken with Tab; empty for none. */
   suggestion?: string;
   /** The suggestion went into the field: the screen stops offering it. */
@@ -791,7 +793,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {/* A running phone composer has no room for the pill, but the list still opens from the panel's
                 strip: without the component mounted that chip did nothing at all while a turn ran. */}
             <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={(o) => { if (o) setModelAnchor(null); setModelOpen(o); }} onChoose={props.onChooseModel} sheet={phone}
-              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} anchor={modelAnchor} pill={!phone || status !== "running"} />
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} account={props.account} anchor={modelAnchor} pill={!phone || status !== "running"} />
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />

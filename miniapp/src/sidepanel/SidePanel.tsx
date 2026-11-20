@@ -631,6 +631,15 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     }
   }
 
+  async function chooseAccount(account: string) {
+    try {
+      await api.post(`/api/sessions/${id}/model`, { account });
+      void load();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function giveTab() {
     try {
       await shell.request("tab.grant", { group: session.group, session: id, title: session.title });
@@ -703,6 +712,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           thinking={detail.thinking}
           reasoningEffort={detail.reasoning_effort}
           onChooseEffort={chooseEffort}
+          account={detail.account_upstream ? { upstream: detail.account_upstream, chosen: detail.account ?? "", fallback: detail.account_default ?? "", onChoose: chooseAccount } : undefined}
           queued={queued}
           onWithdraw={(message) => void takeBack(message, false)}
           onEdit={(message) => void takeBack(message, true)}

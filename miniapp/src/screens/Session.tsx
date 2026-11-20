@@ -1514,6 +1514,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
+  async function chooseAccount(account: string) {
+    try {
+      await api.post(`/api/sessions/${id}/model`, { account });
+      load();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function remove() {
     const ends = endsTerminals(sessionTerminals.running.length);
     // Deleting the orchestrator's chat switches the orchestrator off and moves the project to the
@@ -2106,6 +2115,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             thinking={detail?.thinking}
             reasoningEffort={detail?.reasoning_effort}
             onChooseEffort={chooseEffort}
+            account={detail?.account_upstream ? { upstream: detail.account_upstream, chosen: detail.account ?? "", fallback: detail.account_default ?? "", onChoose: chooseAccount } : undefined}
             suggestion={suggestion}
             onSuggestionUsed={() => setSuggestion("")}
             yagni={!!detail?.yagni}
