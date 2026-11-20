@@ -17,7 +17,7 @@ body:has(.quick) #root { min-height: 0; }
   font-size: var(--fs-14);
   line-height: var(--lh-ui);
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
 }
 
 .quick-top {
@@ -36,12 +36,13 @@ body:has(.quick) #root { min-height: 0; }
   max-width: 60%;
   height: var(--ctl-h-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
+  border: 0;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--fg);
   font: inherit;
   font-size: var(--fs-12);
+  font-weight: 500;
   cursor: pointer;
 }
 .quick-target:hover { background: var(--surface-3); }
@@ -55,11 +56,12 @@ body:has(.quick) #root { min-height: 0; }
   align-items: flex-end;
   gap: var(--space-2);
   padding: var(--space-2);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: var(--card);
+  box-shadow: var(--drop-sm);
 }
-.quick-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong)); }
+.quick-box:focus-within { border-color: var(--line-strong); box-shadow: var(--shadow-focus); }
 .quick-box .voicebar { flex: 1; }
 
 /* The main composer's field (codefield.tsx, drawn by .composer-field in styles.css), sized for the box:
@@ -94,12 +96,12 @@ body:has(.quick) #root { min-height: 0; }
   max-width: 100%;
   height: var(--chip-h-dense);
   padding: 0 var(--space-1) 0 var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
   color: var(--fg-2);
   font-size: var(--fs-12);
 }
-.quick-chip.skill { color: var(--accent); }
+.quick-chip.skill { color: var(--fg); }
 .quick-chip.image { height: auto; padding: 2px var(--space-1) 2px 2px; border-radius: var(--radius-sm); }
 .quick-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
 .quick-chip button {
@@ -112,7 +114,7 @@ body:has(.quick) #root { min-height: 0; }
   color: inherit;
   cursor: pointer;
 }
-.quick-chip button:hover { background: var(--surface-4); }
+.quick-chip button:hover { background: var(--surface-3); }
 .quick-thumb img { display: block; width: 58px; height: 36px; object-fit: cover; border-radius: var(--radius-xs); }
 
 .quick-preview { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); cursor: zoom-out; }
@@ -124,9 +126,10 @@ body:has(.quick) #root { min-height: 0; }
   max-height: 220px;
   overflow-y: auto;
   padding: var(--space-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
 }
 .quick-option {
   display: flex;
@@ -135,7 +138,7 @@ body:has(.quick) #root { min-height: 0; }
   min-height: var(--row-h-dense);
   padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -167,7 +170,7 @@ body:has(.quick) #root { min-height: 0; }
   font-size: var(--fs-12);
   cursor: pointer;
 }
-.quick-window:hover { border-color: var(--accent); }
+.quick-window:hover { border-color: var(--line-strong); background: var(--surface-3); }
 .quick-window img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--bg); border-radius: var(--radius-xs); }
 .quick-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -194,8 +197,8 @@ body:has(.quick) #root { min-height: 0; }
   gap: var(--space-1);
   height: var(--ctl-h-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-2);
   font: inherit;
@@ -204,7 +207,7 @@ body:has(.quick) #root { min-height: 0; }
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 .quick-mode:hover { background: var(--surface-2); color: var(--fg); }
-.quick-mode.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); }
+.quick-mode.on { border-color: transparent; background: var(--surface-3); color: var(--fg); }
 .quick-target:disabled { cursor: default; opacity: 1; }
 
 .quick-computer {
