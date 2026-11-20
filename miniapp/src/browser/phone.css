@@ -2,12 +2,12 @@
    (the page first and as wide as the sheet, the request above it, the actions under it and the one
    decision in a footer), the list of a chat's browsers, a replayed step, and driving full screen.
    Everything is inside the phone media query, as ui/phone.css is, so a desktop never reads a rule of
-   this file; sizes are the phone's six steps (12 / 13 / 15 / 16 / 17 / 22) and every control reaches
+   this file; sizes are the phone's six steps (12 / 13 / 14 / 15 / 16 / 17) and every control reaches
    44 px to the finger, through an invisible ::after when it is drawn smaller. */
 
 @media (max-width: 1023px) {
   /* ── the top bar's chip ─────────────────────────────────────────────────────────────────── */
-  .ph-bchip.browser-headbtn { position: relative; flex: none; height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 8px; margin: 0 4px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .ph-bchip.browser-headbtn { position: relative; flex: none; height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 8px; margin: 0 4px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .ph-bchip.browser-headbtn::after { content: ""; position: absolute; inset: -6px 0; }
   .ph-bchip.bare { padding: 0 8px; }
   .ph-bchip.needs { background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); }
@@ -25,7 +25,7 @@
   .ph-bneeds-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .ph-bneeds-t { font-size: var(--fs-15); line-height: 1.3; }
   .ph-bneeds-m { margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); overflow-wrap: anywhere; }
-  .ph-bneeds-open { position: relative; flex: none; height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--warn); color: #1a1405; font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .ph-bneeds-open { position: relative; flex: none; height: 36px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .ph-bneeds-open::after { content: ""; position: absolute; inset: -4px 0; }
 
   /* ── the sheet ──────────────────────────────────────────────────────────────────────────── */
@@ -74,8 +74,8 @@
   .bp.phone .bp-log-empty { padding: 4px var(--gutter); font-size: var(--fs-14); color: var(--fg-2); }
   /* The decision in the thumb's reach: one full-width button in a footer that never scrolls away. */
   .bp-foot { flex: none; padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); }
-  .bp-foot .bp-control { width: 100%; height: var(--tap); display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 600; cursor: pointer; }
-  .bp-foot .bp-control.needs { background: var(--warn); color: #1a1405; }
+  .bp-foot .bp-control { width: 100%; height: var(--tap); display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; cursor: pointer; }
+  .bp-foot .bp-control.needs { background: var(--primary); color: var(--primary-ink); }
   .bp-foot .bp-control:disabled { opacity: .45; cursor: default; }
   .bp-foot .bp-control.pulse { animation: none; }
 
@@ -90,7 +90,7 @@
   .bp-replay.phone .bp-replay-stage { flex: none; width: 100%; border-radius: 10px; background: var(--term-bg); }
   .bp-replay.phone .bp-replay-words { margin: 0; font-size: var(--fs-14); line-height: 1.4; color: var(--fg); overflow-wrap: anywhere; }
   .bp-replay-nav { display: flex; justify-content: space-between; gap: var(--space-2); }
-  .bp-replay-nav button { position: relative; height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .bp-replay-nav button { position: relative; height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .bp-replay-nav button::after { content: ""; position: absolute; inset: -4px 0; }
   .bp-replay-nav button:disabled { opacity: .35; cursor: default; }
 
@@ -111,7 +111,7 @@
   .bp-list-rm { margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); }
   .bp-list-state.needs { color: var(--warn); }
   .bp-list-state.acting, .bp-list-state.you { color: var(--info); }
-  .bp-list-take { position: relative; flex: none; height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--warn); color: #1a1405; font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .bp-list-take { position: relative; flex: none; height: 36px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .bp-list-take::after { content: ""; position: absolute; inset: -4px 0; }
 
   /* ── driving ───────────────────────────────────────────────────────────────────────────── */
@@ -119,7 +119,7 @@
   .bp-drive-head { height: 48px; gap: 10px; padding: 0 0 0 var(--gutter); background: var(--bg); border-bottom: 0; }
   .bp-drive-head .bp-favicon { border-radius: 5px; }
   .bp-drive-domain { font-size: var(--fs-16); font-weight: 600; }
-  .bp-drive-you { height: 32px; gap: 6px; padding: 0 12px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--warn) 16%, var(--bg)); color: var(--warn); font-size: var(--fs-14); font-weight: 600; }
+  .bp-drive-you { height: 32px; gap: 6px; padding: 0 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-14); font-weight: 500; }
   .bp-drive-you i { width: 8px; height: 8px; background: var(--warn); }
   .bp-drive-you.lost { background: color-mix(in srgb, var(--bad) 16%, var(--bg)); color: var(--bad); }
   .bp-drive-more { width: var(--tap); height: var(--tap); flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fg); cursor: pointer; }
@@ -127,8 +127,8 @@
   .bp-drive-viewer .bv-canvas { box-shadow: none; }
   .bp-drive .bv.driving .bv-canvas { box-shadow: none; }
   .bp-drive-hint { font-size: var(--fs-13); }
-  .bp-drive-lost { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .4); }
-  .bp-drive-lost-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 20px; border-radius: var(--radius-md); background: rgba(20, 20, 20, .88); color: #fff; text-align: center; }
+  .bp-drive-lost { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
+  .bp-drive-lost-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 20px; border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-xl); color: var(--fg); text-align: center; }
   .bp-drive-lost-card .ic { color: var(--bad); }
   .bp-drive-lost b { font-size: var(--fs-15); font-weight: 600; }
   .bp-drive-lost span { max-width: 300px; font-size: var(--fs-14); line-height: 1.4; }
@@ -138,7 +138,7 @@
   .bp-drive-kbd { color: var(--fg); }
   .bp-drive-arrows { display: flex; gap: 6px; margin-left: auto; }
   .bp-drive-arrows .term-key { flex: none; width: var(--tap); }
-  .btn.primary.bp-drive-give, .bp-drive-give { flex: none; height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; border: 0; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-15); font-weight: 600; cursor: pointer; }
+  .btn.primary.bp-drive-give, .bp-drive-give { flex: none; height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-15); font-weight: 500; cursor: pointer; }
   .bp-drive-give .ic { margin: 0; }
   .bp-drive .bp-compose { align-items: center; gap: 4px; padding: 4px 8px calc(8px + env(safe-area-inset-bottom)); background: var(--bg); }
   .bp-drive .term-compose-field { min-height: 48px; padding: 12px 16px; border-radius: 24px; background: var(--surface-1); font-size: var(--fs-16); line-height: 22px; }
@@ -154,5 +154,5 @@
   .ph-givesheet-why { margin: 8px 0 0; font-size: var(--fs-13); color: var(--fg-2); }
   .ph-givesheet .ph-sheet-foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: nowrap; }
   .ph-givesheet-keep { min-width: var(--tap); height: var(--tap); padding: 0 12px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 600; cursor: pointer; }
-  .ph-givesheet-go { height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 20px; border: 0; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-15); font-weight: 600; cursor: pointer; }
+  .ph-givesheet-go { height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 20px; border: 0; border-radius: 12px; background: var(--primary); color: var(--primary-ink); font: inherit; font-size: var(--fs-15); font-weight: 500; cursor: pointer; }
 }
