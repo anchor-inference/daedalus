@@ -17,7 +17,7 @@
 .ask-steps::-webkit-scrollbar { display: none; }
 .ask-step { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--chip-h-dense); max-width: 168px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .ask-step:hover { background: var(--surface-2); }
-.ask-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-step:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ask-step-n { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .ask-step-label { overflow: hidden; text-overflow: ellipsis; }
 .ask-step[data-state="done"] .ask-step-n { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
@@ -30,7 +30,7 @@
 /* The padding is the room a focused option's ring needs inside the scrolling box. */
 .ask-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; min-height: 0; overflow-y: auto; margin: -3px -4px; padding: 3px 4px; }
 .ask-q { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
-.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask-text { margin: 0; color: var(--fg); font-size: var(--fs-14); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-kind { color: var(--fg-3); font-size: var(--fs-12); }
 
@@ -40,7 +40,7 @@
 .ask-opt { position: relative; display: flex; align-items: flex-start; gap: 10px; min-height: var(--row-h); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .ask-opt:hover { background: var(--surface-2); }
 .ask-opt input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.ask-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ask-opt.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .ask-mark { flex: none; position: relative; width: 16px; height: 16px; margin-top: 1px; border: 1.5px solid var(--fg-3); border-radius: 50%; transition: border-color var(--t-fast), background var(--t-fast); }
 .ask-options[role="group"] .ask-mark { border-radius: 4px; }

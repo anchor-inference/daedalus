@@ -22,7 +22,7 @@
 .deps-environment-head { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-3); }
 .deps-environment-head > span:first-child { display:grid; gap:3px; }
 /* The card's heading in the same size and weight as every other card heading in Settings. */
-.deps-environment-head b { font-size:var(--fs-14); font-weight:650; }
+.deps-environment-head b { font-size:var(--fs-14); font-weight:600; }
 .deps-environment-head > .chip { flex:none; color:var(--ok); }
 .deps-tool-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:var(--space-1); }
 .deps-tool-chips .chip { min-height:28px; padding:0 9px; background:var(--surface-2); }

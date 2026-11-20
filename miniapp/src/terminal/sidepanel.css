@@ -29,7 +29,7 @@ body.tside-resizing, body.tside-resizing * { cursor: col-resize !important; user
 .tside-sub { padding: 0 var(--space-3) var(--space-1); color: var(--fg-3); font-size: var(--fs-11); }
 .tside-note { padding: var(--space-3); color: var(--fg-3); font-size: var(--fs-12); }
 .tside-detail { display: block; margin-top: var(--space-1); font-family: var(--mono); font-size: var(--fs-11); overflow-wrap: anywhere; }
-.tside-label { display: flex; align-items: center; gap: 6px; padding: var(--space-3) var(--space-3) var(--space-1); font-size: var(--fs-11); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); }
+.tside-label { display: flex; align-items: center; gap: 6px; padding: var(--space-3) var(--space-3) var(--space-1); font-size: var(--fs-11); color: var(--fg-3); }
 .tside-label .num { margin-left: auto; letter-spacing: 0; }
 .tside-list { margin: 0; padding: 0 var(--space-1); list-style: none; }
 .tside-tag { flex: none; padding: 0 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); font-size: var(--fs-11); line-height: 18px; }
@@ -107,7 +107,7 @@ body.tside-resizing, body.tside-resizing * { cursor: col-resize !important; user
 
 .tside-save { display: flex; gap: 6px; padding: 0 var(--space-3) var(--space-2); }
 .tside-input { flex: 1; min-width: 0; height: var(--ctl-h-sm); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-12); outline: none; }
-.tside-input:focus { border-color: var(--accent); }
+.tside-input:focus { border-color: var(--fg-3); }
 .tside-layout { padding: 4px 8px 6px; border-radius: var(--radius-sm); }
 .tside-layout:hover { background: var(--surface-2); }
 .tside-layout-head { display: flex; align-items: center; gap: 6px; min-height: var(--ctl-h-sm); min-width: 0; }

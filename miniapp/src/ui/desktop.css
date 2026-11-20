@@ -13,7 +13,7 @@
   .desktop-context { flex:1; min-width:0; position:relative; overflow:hidden; }
   .desktop-context .sidebar { position:absolute; inset:0; width:100%; border:0; border-right:1px solid var(--line); }
   .desktop-column.folded .desktop-context { display:none; }
-  .desktop-column .rail-item:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .desktop-column .rail-item:focus-visible { outline: 2px solid var(--ring); outline-offset:1px; }
   .bulkbar { left:calc(var(--rail-w) + var(--sidebar-w)); }
 }
 /* Value buttons keep an explicit boundary in both themes; a caret never flows as text. */
@@ -22,7 +22,7 @@
 .control-trigger > .truncate { min-width:0; }
 .control-trigger:hover { background:var(--surface-3); color:var(--fg); }
 .control-trigger[aria-expanded="true"] { border-color:var(--fg-3); color:var(--fg); }
-.control-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.control-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset:2px; }
 .menu.pop { border-radius:var(--radius-md); padding:var(--space-2); }
 .model-row { border-radius:var(--radius-sm); gap:var(--space-2); }
 .model-search { margin:var(--space-1) var(--space-1) var(--space-2); width:calc(100% - var(--space-2)); }
@@ -53,7 +53,7 @@
 .context-menu { z-index:var(--z-toast); max-height:calc(100dvh - 16px); overflow:auto; max-width:calc(100vw - 16px); }
 
 .context-menu { width:max-content; right:auto; bottom:auto; }
-.menu button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.menu button:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 
 /* Cursor menus stay at their measured point throughout opening. */
 .context-menu { animation:none; }
@@ -69,7 +69,7 @@
 .provider-count { min-width:20px; text-align:right; font-variant-numeric:tabular-nums; }
 .provider-back { margin-bottom:var(--space-1); }
 .provider-back .provider-mark { width:var(--ctl-h-sm); height:var(--ctl-h-sm); }
-.provider-back:focus-visible, .model-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.provider-back:focus-visible, .model-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .model-menu { animation:none; }
 .model-effort { flex:none; color:var(--fg-3); font-size:var(--fs-13); white-space:nowrap; }
 .effort-entry > .ic:last-child { transform:rotate(-90deg); }
@@ -133,7 +133,7 @@
 
 .effort-branch:has(.floating[data-side="left"]) .effort-entry > .ic:last-child { transform:rotate(90deg); }
 .effort-branch:has(.inline) .effort-entry > .ic:last-child { transform:none; }
-.effort-submenu .effort-option:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:-2px; }
+.effort-submenu .effort-option:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset:-2px; }
 
 /* The composer's primary is the phone's white circle on a desktop too: one round button that is
    Send or Stop, so the two read as one control changing its word. */
@@ -174,7 +174,7 @@
   .start-where-chip:hover { background:var(--surface-2); color:var(--fg); }
   .start-where-chip.on { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--fg); }
   .start-where-chip.more { padding-left:10px; }
-  .start-where-chip:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .start-where-chip:focus-visible { outline: 2px solid var(--ring); outline-offset:2px; }
   .start-where-tile { display:grid; place-items:center; flex:none; width:20px; height:20px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); }
 
   .start-live { margin-top:var(--space-7); }
@@ -185,7 +185,7 @@
   .start-live-more:hover { color:var(--fg); }
   .start-live-row { display:flex; align-items:center; gap:var(--space-3); padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer; }
   .start-live-row:hover { background:var(--surface-1); }
-  .start-live-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  .start-live-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
   .start-live-plate { position:relative; display:grid; place-items:center; flex:none; width:28px; height:28px; border-radius:50%; background:var(--surface-2); color:var(--fg-2); }
   .start-live-plate > .dot { position:absolute; right:-1px; bottom:-1px; box-shadow:0 0 0 2px var(--bg); }
   .start-live-main { display:flex; flex-direction:column; flex:1; min-width:0; gap:1px; }
@@ -227,7 +227,7 @@
 .projects-row + .projects-row { box-shadow:0 -1px 0 var(--line); }
 .projects-row:not(.head):hover, .projects-row:not(.head):focus-within { background:var(--surface-1); box-shadow:none; }
 .projects-row:not(.head):hover + .projects-row, .projects-row:not(.head):focus-within + .projects-row { box-shadow:none; }
-.projects-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.projects-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .projects-row.head { padding-block:var(--space-2); color:var(--fg-3); font-size:var(--fs-11); cursor:default; box-shadow:0 1px 0 var(--line); }
 .projects-name { display:flex; align-items:center; gap:var(--space-3); min-width:0; }
 .projects-tile { position:relative; display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border-radius:var(--radius-sm); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-2); }

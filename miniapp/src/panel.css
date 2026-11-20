@@ -10,12 +10,12 @@
 .panel-strip-model.static { cursor: default; }
 .panel-strip-model .ic { flex: none; color: var(--fg-2); }
 .panel-strip-model:hover:not(.static) { background: var(--surface-2); }
-.panel-strip-model:focus-visible, .panel-strip-context:focus-visible, .panel-strip-cost:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.panel-strip-model:focus-visible, .panel-strip-context:focus-visible, .panel-strip-cost:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .panel-strip-effort { flex: none; }
 .panel-strip-figures { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; row-gap: 5px; padding-right: 4px; }
 .panel-strip-context, .panel-strip-cost { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .panel-strip-context:disabled, .panel-strip-cost:disabled { cursor: default; }
-.panel-strip-context b, .panel-strip-cost b { color: var(--fg); font-size: var(--fs-13); font-weight: 700; }
+.panel-strip-context b, .panel-strip-cost b { color: var(--fg); font-size: var(--fs-13); font-weight: 600; }
 .panel-strip-context b.attn { color: var(--warn); }
 .panel-strip-context b.bad { color: var(--bad); }
 .panel-strip-context:hover:not(:disabled) span, .panel-strip-cost:hover:not(:disabled) span { color: var(--fg); }
@@ -49,7 +49,7 @@
 .file-tab:hover:not(.on) { background: var(--surface-2); }
 .file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 10px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .file-tab-name .ic { flex: none; color: var(--fg-3); }
-.file-tab-name:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+.file-tab-name:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-sm); }
 .file-tab-close { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); cursor: pointer; }
 .file-tab-close:hover { background: var(--surface-3); color: var(--fg); }
 
@@ -62,11 +62,11 @@
 /* The inspector: one line a section, grouped under quiet headings, all of them on one screen. */
 .details.inspector { gap: 0; padding: 0 0 8px; }
 .dt-props { display: flex; flex-direction: column; }
-.dt-grp { margin: 0; padding: 12px 8px 4px; font-size: var(--fs-11); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
+.dt-grp { margin: 0; padding: 12px 8px 4px; font-size: var(--fs-11); font-weight: 500; color: var(--fg-3); }
 .dt-props:first-child .dt-grp { padding-top: 4px; }
 .dt-prop { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-dense); padding: 0 6px 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
 .dt-prop:hover { background: var(--surface-1); }
-.dt-prop:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface-1); }
+.dt-prop:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; background: var(--surface-1); }
 .dt-prop > .ic:first-child { flex: none; color: var(--fg-3); }
 .dt-prop > .ic:last-child { flex: none; color: var(--fg-3); }
 .dt-prop-k { flex: none; }

@@ -16,10 +16,10 @@ describe("themes", () => {
 
   it("resolves follow-system to the dark and light pair, and a chosen theme when follow is off", () => {
     const prefs = { ...DEFAULT_PREFS, colors: {} };
-    expect(resolvedTheme(prefs, dark).id).toBe("claude");
-    expect(resolvedTheme(prefs, light).id).toBe("serebro");
+    expect(resolvedTheme(prefs, dark).id).toBe("ink");
+    expect(resolvedTheme(prefs, light).id).toBe("paper");
     expect(resolvedTheme({ ...prefs, follow: false, theme: "baltika" }, dark).id).toBe("baltika");
-    expect(themeById("nope").id).toBe("claude");
+    expect(themeById("nope").id).toBe("ink");
     expect(isThemeId("malibu")).toBe(true);
   });
 
@@ -29,8 +29,8 @@ describe("themes", () => {
     expect(tokens["--bg"]).toBe("#112233");
     expect(tokens["--ansi-0"]).toMatch(/^#[0-9a-f]{6}$/i);
     const forced = appearanceTokens({ ...prefs, colors: {}, code: "dark" }, light);
-    expect(forced["--term-bg"]).toBe("#09090b");
-    expect(forced["--term-fg"]).toBe("#ededef");
+    expect(forced["--term-bg"]).toBe("#060606");
+    expect(forced["--term-fg"]).toBe("#f5f5f5");
     expect(Object.keys(forced).filter((name) => name.startsWith("--ansi-"))).toHaveLength(16);
   });
 
@@ -56,9 +56,21 @@ describe("themes", () => {
     vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
     localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "cheek", follow: false, colors: { bg: "red" } }));
     const prefs = readPrefs();
-    expect(prefs.theme).toBe("claude");
+    expect(prefs.theme).toBe("ink");
     expect(prefs.follow).toBe(false);
     expect(prefs.colors.bg).toBeUndefined();
+  });
+
+  it("moves the old default pair onto the new one once, and leaves a theme chosen by name alone", () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "claude", dark: "claude", light: "serebro", scale: "lg" }));
+    expect(readPrefs()).toMatchObject({ theme: "ink", dark: "ink", light: "paper", scale: "lg" });
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "malibu", dark: "grafit", light: "zakat" }));
+    expect(readPrefs()).toMatchObject({ theme: "malibu", dark: "grafit", light: "zakat" });
+    // Chosen again after the move, the old default is a choice like any other.
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ look: 2, theme: "claude", dark: "claude", light: "serebro" }));
+    expect(readPrefs()).toMatchObject({ theme: "claude", dark: "claude", light: "serebro" });
   });
 
   it("sets answer text to any whole size from 12 to 22 px, independent of the interface step", () => {

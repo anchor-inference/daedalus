@@ -65,7 +65,7 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-head .iconbtn:active { background: var(--surface-3); }
 .sp-head .iconbtn.on { background: transparent; color: var(--accent); }
 .sp-head .iconbtn.on .ic { fill: currentColor; }
-.sp-head .iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sp-head .iconbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .sp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
 .sp-dot.running { background: var(--accent); }
@@ -144,7 +144,7 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-card-detail { font-size: var(--fs-12); overflow-wrap: anywhere; color: var(--fg-2); }
 .sp-card-foot { font-size: var(--fs-11); }
 .sp-card kbd { font-size: var(--fs-11); opacity: 0.7; }
-.sp-card .btn.acked { outline: 2px solid var(--accent); }
+.sp-card .btn.acked { outline: 2px solid var(--ring); }
 
 .sp-shot { display: grid; gap: var(--space-2); }
 .sp-shot-frame { position: relative; cursor: crosshair; user-select: none; touch-action: none; }

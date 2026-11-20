@@ -4025,6 +4025,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.sec.text": { en: "Text & layout", ru: "Текст и компоновка" },
   "settings.sec.text.hint": { en: "typefaces, text size, spacing, column width, messages", ru: "шрифты, размер текста, интервалы, ширина колонки, сообщения" },
   "settings.about.appearance": { en: "Theme, type and size are under Appearance.", ru: "Тема, шрифт и размер — в разделе «Внешний вид»." },
+  "theme.paper": { en: "Paper", ru: "Бумага" },
+  "theme.ink": { en: "Ink", ru: "Тушь" },
   "theme.serebro": { en: "Milky silver", ru: "Молочное серебро" },
   "theme.zakat": { en: "Dusty sunset", ru: "Пыльный закат" },
   "theme.malibu": { en: "Malibu", ru: "Малибу" },

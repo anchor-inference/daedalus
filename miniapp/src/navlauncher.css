@@ -26,7 +26,7 @@
 .launch-field::-webkit-search-cancel-button { display: none; }
 
 .launch-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px 8px; }
-.launch-label { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: var(--fs-11); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
+.launch-label { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: var(--fs-11); font-weight: 500; color: var(--fg-3); }
 .launch-label-hint { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
 
 .launch-cell { position: relative; min-width: 0; }
@@ -52,7 +52,7 @@
 .launch-row .launch-count, .launch-row .launch-dot { margin-left: auto; }
 .launch-row .launch-count + .launch-dot { margin-left: 6px; }
 /* The same count is the same colour it is on the rail's icon a few pixels away. */
-.launch-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--bad); color: #fff; font-size: var(--fs-11); font-weight: 700; line-height: 16px; text-align: center; }
+.launch-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--bad); color: #fff; font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
 .launch-count.attn { background: var(--warn); color: var(--bg); }
 .launch-count.ok { background: var(--ok); color: var(--bg); }
 
@@ -63,7 +63,7 @@
 .launch-cell:not(.tile) .launch-pin { top: 50%; right: 4px; translate: 0 -50%; }
 .launch-cell:hover .launch-pin, .launch-cell:focus-within .launch-pin, .launch-cell.pinned.tile .launch-pin { opacity: 1; }
 .launch-pin:hover { color: var(--fg); }
-.launch-pin:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
+.launch-pin:focus-visible { opacity: 1; outline: 2px solid var(--ring); outline-offset: -2px; }
 .launch-pin[aria-pressed="true"] { color: var(--accent); }
 
 .launch-results { display: flex; flex-direction: column; gap: 1px; }

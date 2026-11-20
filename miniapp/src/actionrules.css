@@ -11,7 +11,7 @@
 .ar-levels { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:var(--space-1); min-width:0; }
 .ar-cell { display:flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 6px; border:1px solid transparent; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; font:inherit; min-width:0; }
 .ar-cell:hover { background:var(--surface-2); }
-.ar-cell:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.ar-cell:focus-visible { outline: 2px solid var(--ring); outline-offset:1px; }
 .ar-cell.on { border-color:color-mix(in srgb, var(--accent) 50%, var(--line)); background:color-mix(in srgb, var(--accent) 10%, transparent); color:var(--fg); }
 .ar-dot { flex:none; width:14px; height:14px; border-radius:50%; border:1.5px solid var(--fg-3); }
 .ar-cell.on .ar-dot { border-color:var(--accent); background:radial-gradient(circle, var(--accent) 0 3.5px, transparent 4px); }

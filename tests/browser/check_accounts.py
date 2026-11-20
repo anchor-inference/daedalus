@@ -74,7 +74,8 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.goto(f"{BASE}/settings/accounts?token=t&lang={lang}")
     card = page.locator('[data-setting="accounts"]')
     card.scroll_into_view_if_needed()
-    expect(card.locator(".section-title").first).to_have_text(words["title"])
+    # The section's name is the page's heading; the section itself does not repeat it.
+    expect(page.locator(".settings-title").first).to_have_text(words["title"])
 
     claude = card.locator('[data-account-upstream="claude"]')
     rows = claude.locator(".account-row")

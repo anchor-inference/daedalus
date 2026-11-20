@@ -42,7 +42,7 @@
 /* The choice of who answers comes first and decides which fields follow, so it is set apart from them. */
 .guest-levels { margin-top: var(--space-2); }
 /* A heading over the limits: the rows below it are all of one kind, and the eye looks for them there. */
-.guest-section { margin-top: var(--space-4); padding-bottom: 2px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.guest-section { margin-top: var(--space-4); padding-bottom: 2px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
 /* "No limit" sits beside the number it replaces, and the number goes while it is chosen: the choice is
    visible as a word, never a 0 the operator would have to know means none. */
 .guest-nolimit { flex: none; min-width: 96px; justify-content: center; }

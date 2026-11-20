@@ -6,7 +6,7 @@
 // scheme blocks and stay hex. Nothing here is stored on the host: a font address is fetched by
 // this browser alone.
 
-export const THEME_IDS = ["serebro", "zakat", "malibu", "baltika", "claude", "sazha", "grafit", "slanets", "pepel", "oranzhereya", "med", "glub", "laim"] as const;
+export const THEME_IDS = ["paper", "ink", "serebro", "zakat", "malibu", "baltika", "claude", "sazha", "grafit", "slanets", "pepel", "oranzhereya", "med", "glub", "laim"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 export const THEME_GROUPS = ["light", "gray", "color"] as const;
 export type ThemeGroup = (typeof THEME_GROUPS)[number];
@@ -30,20 +30,30 @@ export type Theme = {
   sendInk: string;
   wash: string;
   termBg: string;
+  /** A card lying on the page, where the theme draws it apart from what floats; the surface otherwise. */
+  card?: string;
+  /** The fill's hover and pressed steps, where the theme names them; mixed from the fill otherwise. */
+  surface3?: string;
+  surface4?: string;
 };
 
-const DARK_STATUS = { ok: "#5fd68a", warn: "#e8b44c", bad: "#f0625d", info: "#7db4ff" };
-const LIGHT_STATUS = { ok: "#1e9e56", warn: "#b7791f", bad: "#d93b36", info: "#2f6fe0" };
+/** The status colours are one vocabulary on every theme (the chatcn theme's): a theme recolors the frame, never a state. */
+const DARK_STATUS = { ok: "#5bcc80", warn: "#f3af49", bad: "#f86a6b", info: "#5ba5f6" };
+const LIGHT_STATUS = { ok: "#218041", warn: "#a75e0f", bad: "#d02c2a", info: "#1f6dd8" };
 
 /** The sixteen ANSI colours of the dark scheme, in order. A theme recolors the frame and keeps these. */
-const DARK_ANSI = ["#1c1c1f", "#f0625d", "#5fd68a", "#e8b44c", "#7db4ff", "#c792ea", "#2dd4bf", "#c8c9ce", "#5c5d66", "#ff8a85", "#8be9a8", "#f5cf7a", "#a6ccff", "#ddb3f5", "#7ee8d9", "#ededef"];
-const LIGHT_ANSI = ["#141416", "#d93b36", "#1e9e56", "#b7791f", "#2f6fe0", "#9b4dca", "#0e9f8e", "#8e9098", "#5b5d66", "#e0524d", "#25b865", "#c98a26", "#4a84f0", "#b066dd", "#13b3a0", "#b4b5bb"];
+const DARK_ANSI = ["#1c1c1c", "#f86a6b", "#5bcc80", "#f3af49", "#5ba5f6", "#bf93f1", "#5cc9c2", "#a4a4a4", "#636363", "#ff8f8e", "#86e3a4", "#f8c877", "#8cc0fa", "#d4b5f6", "#8adcd6", "#f5f5f5"];
+const LIGHT_ANSI = ["#0a0a0a", "#d02c2a", "#218041", "#a75e0f", "#1f6dd8", "#7f47c7", "#007f80", "#868686", "#525252", "#e0524d", "#25b865", "#c98a26", "#4a84f0", "#b066dd", "#13b3a0", "#bebebe"];
 
 function theme(partial: Theme): Theme {
   return partial;
 }
 
 export const THEMES: Theme[] = [
+  // The two the app opens in: the chatcn theme's neutral ramp, light and dark, in the hex its OKLCH
+  // steps compute to (ui/tokens.css names the role each one plays).
+  theme({ id: "paper", group: "light", light: true, bg: "#ffffff", side: "#fafafa", surface: "#ffffff", surface2: "#f5f5f5", surface3: "#eeeeee", surface4: "#e8e8e8", fg: "#0a0a0a", fg2: "#525252", fg3: "#6a6a6a", accent: "#1f6dd8", send: "#0a0a0a", sendInk: "#ffffff", wash: "#ffffff", termBg: "#fafafa" }),
+  theme({ id: "ink", group: "gray", light: false, bg: "#0a0a0a", side: "#111111", surface: "#171717", card: "#101010", surface2: "#1c1c1c", surface3: "#232323", surface4: "#2a2a2a", fg: "#f5f5f5", fg2: "#a4a4a4", fg3: "#868686", accent: "#5ba5f6", send: "#f5f5f5", sendInk: "#0a0a0a", wash: "#0a0a0a", termBg: "#060606" }),
   theme({ id: "serebro", group: "light", light: true, bg: "#E7EEF2", side: "#D9E3EA", surface: "#F7F4EF", surface2: "#EFE8DF", fg: "#1C242B", fg2: "#3E4C57", fg3: "#5C6B76", accent: "#1F5E73", send: "#1F5E73", sendInk: "#F4FBFD", wash: "linear-gradient(165deg,#E6EEF2 0%,#E8E4DC 58%,#D8CFC4 100%)", termBg: "#F7F4EF" }),
   theme({ id: "zakat", group: "light", light: true, bg: "#F7F1E8", side: "#EFE4D6", surface: "#FFFCF8", surface2: "#F4E7DA", fg: "#2A221C", fg2: "#5C4A3E", fg3: "#6F5C4E", accent: "#9A4E22", send: "#9A4E22", sendInk: "#FFF8F3", wash: "linear-gradient(145deg,#F8E7D6 0%,#F6F1EA 46%,#E3EEF5 100%)", termBg: "#FFFCF8" }),
   theme({ id: "malibu", group: "light", light: true, bg: "#F3F7F2", side: "#E3F0F2", surface: "#FFFEFB", surface2: "#E5F4E4", fg: "#14323A", fg2: "#3E5960", fg3: "#4E6A70", accent: "#0C6E84", send: "#0C6E84", sendInk: "#F3FBFC", wash: "linear-gradient(160deg,#D7F3FA 0%,#F3F7F2 48%,#E7F0D4 100%)", termBg: "#FFFEFB" }),
@@ -62,7 +72,7 @@ export const THEMES: Theme[] = [
 const BY_ID = new Map(THEMES.map((item) => [item.id, item]));
 
 export function themeById(id: string | null | undefined): Theme {
-  return BY_ID.get(id as ThemeId) ?? BY_ID.get("claude")!;
+  return BY_ID.get(id as ThemeId) ?? BY_ID.get("ink")!;
 }
 
 /** Faces the search offers. `google` is the Google Fonts family spec; a local face is already bundled. */
@@ -123,9 +133,9 @@ export type Prefs = {
 
 export const DEFAULT_PREFS: Prefs = {
   follow: true,
-  theme: "claude",
-  dark: "claude",
-  light: "serebro",
+  theme: "ink",
+  dark: "ink",
+  light: "paper",
   colors: {},
   wash: true,
   fontUi: "",
@@ -147,6 +157,11 @@ export const DEFAULT_PREFS: Prefs = {
 };
 
 const KEY = "daedalus.appearance";
+/** Stamped into what is saved. Preferences saved before the neutral pair became the app's look carry
+ *  no stamp, and what they hold of the old default pair is moved onto the new one once, keeping every
+ *  other choice: a browser that had ever touched a setting had the old pair written into it, and
+ *  would otherwise never see the look the app now opens in. A theme chosen by name stays chosen. */
+const LOOK = 2;
 const SCHEME = "daedalus.scheme";
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -235,6 +250,11 @@ function readJson(): Partial<Prefs> | null {
 export function readPrefs(): Prefs {
   const stored = readJson();
   if (!stored) return { ...DEFAULT_PREFS, colors: {} };
+  if ((stored as { look?: number }).look !== LOOK) {
+    if (stored.theme === "claude") stored.theme = DEFAULT_PREFS.theme;
+    if (stored.dark === "claude") stored.dark = DEFAULT_PREFS.dark;
+    if (stored.light === "serebro") stored.light = DEFAULT_PREFS.light;
+  }
   const colors: Prefs["colors"] = {};
   for (const key of ["bg", "surface", "fg", "fg2", "accent", "send"] as const) {
     const value = stored.colors?.[key];
@@ -303,15 +323,17 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
   const sendInk = HEX.test(send) ? inkFor(send) : base.sendInk;
   const forceDark = prefs.code === "dark" && base.light;
   const ansi = ansiFor({ ...base, accent, fg, fg2, surface }, forceDark);
-  const line = base.light ? "rgba(28,36,43,.12)" : "rgba(255,255,255,.10)";
+  const line = base.light ? "rgba(28,36,43,.10)" : "rgba(255,255,255,.09)";
   const lineStrong = prefs.contrast === "high" ? (base.light ? "rgba(28,36,43,.28)" : "rgba(255,255,255,.28)") : base.light ? "rgba(28,36,43,.18)" : "rgba(255,255,255,.16)";
   const out: Record<string, string> = {
     "--bg": bg,
     "--wash": prefs.wash ? base.wash : bg,
     "--surface-1": surface,
     "--surface-2": base.surface2,
-    "--surface-3": mixHex(base.surface2, fg, base.light ? 0.06 : 0.08),
-    "--surface-4": mixHex(base.surface2, fg, base.light ? 0.12 : 0.14),
+    "--card": prefs.colors.surface ? surface : base.card ?? surface,
+    "--inset": mixHex(base.bg, base.light ? "#000000" : "#ffffff", base.light ? 0.03 : 0.015),
+    "--surface-3": base.surface3 ?? mixHex(base.surface2, fg, base.light ? 0.06 : 0.08),
+    "--surface-4": base.surface4 ?? mixHex(base.surface2, fg, base.light ? 0.12 : 0.14),
     "--line": line,
     "--line-strong": lineStrong,
     "--fg": fg,
@@ -321,15 +343,15 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
     "--accent-ink": inkFor(accent),
     "--primary": send,
     "--primary-ink": sendInk,
+    "--primary-hover": HEX.test(send) ? mixHex(send, sendInk, 0.28) : send,
     "--ok": status.ok,
     "--warn": status.warn,
     "--bad": status.bad,
     "--info": status.info,
     "--code": base.light ? "#7c3f00" : "#f5b56e",
     "--code-block": base.light ? "#3b2a12" : "#e8c48a",
-    "--shadow-pop": base.light ? `0 12px 32px rgba(0,0,0,.14), 0 0 0 1px ${line}` : `0 12px 32px rgba(0,0,0,.5), 0 0 0 1px ${lineStrong}`,
-    "--term-bg": forceDark ? "#09090b" : base.termBg,
-    "--term-fg": forceDark ? "#ededef" : fg,
+    "--term-bg": forceDark ? "#060606" : base.termBg,
+    "--term-fg": forceDark ? "#f5f5f5" : fg,
   };
   ansi.forEach((color, i) => {
     out[`--ansi-${i}`] = color;
@@ -436,7 +458,7 @@ export function applyAppearance(prefs: Prefs = readPrefs(), env: AppearanceEnv =
 
 export function writePrefs(prefs: Prefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(prefs));
+    localStorage.setItem(KEY, JSON.stringify({ ...prefs, look: LOOK }));
   } catch {
     /* private mode: the choice lasts for the visit */
   }

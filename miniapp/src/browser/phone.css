@@ -11,7 +11,7 @@
   .ph-bchip.browser-headbtn::after { content: ""; position: absolute; inset: -6px 0; }
   .ph-bchip.bare { padding: 0 8px; }
   .ph-bchip.needs { background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); }
-  .ph-bchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ph-bchip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   .ph-bchip-ico { position: relative; display: inline-flex; }
   .ph-bchip-ico .bp-favicon { border-radius: 5px; }
   .ph-bchip-t { white-space: nowrap; }

@@ -22,7 +22,7 @@
 .schedrow:hover { background: var(--surface-2); }
 .schedrow.on { background: var(--surface-3); }
 .schedrow-open { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.schedrow-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.schedrow-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .schedrow-icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); }
 .schedrow.on .schedrow-icon { background: var(--surface-4); }
 .schedrow.active .schedrow-icon { color: var(--accent); }
