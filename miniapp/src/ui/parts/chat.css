@@ -1,5 +1,10 @@
-/* ── chat: flat Grok-style timeline, fixed composer ─────────────────────────────────── */
+/* ── chat: a flat timeline over a fixed composer ─────────────────────────────────────── */
 .chat { display:flex; flex-direction:column; height:100%; min-height:0; overflow:hidden; background:var(--bg); }
+/* On a desktop the conversation lies on the page, like every other screen's content, and the frame's
+   colour is the sidebar's and the rail's. Painted with the frame it was a grey slab between them, and
+   the composer's card sat darker than the page it is meant to lie on. Only the chat that fills the
+   main column: a pane of the dual view, the coach's window and a panel's chat keep their own ground. */
+@media (min-width: 1024px) { .main > .chat { background:var(--wash, var(--bg)); } }
 /* The title stays passive: all session actions belong to the right-hand menu.
    A 2 px line along the bottom edge is the run's progress; nothing else in the row moves. */
 .chat-head { flex:none; position:relative; display:flex; align-items:center; gap:8px; padding:0 8px; border-bottom:1px solid var(--line); height:var(--head-h); min-height:var(--head-h); }
@@ -10,7 +15,7 @@
 .leader-link:hover { color:var(--fg); }
 .head-status { display:inline-flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0; max-width:44%; height:var(--ctl-h); padding:0 6px; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg-2); font:inherit; font-size:var(--fs-13); white-space:nowrap; cursor:default; }
 .head-status.livebar { cursor:pointer; }
-.head-status.livebar:hover { background:var(--surface-2); }
+.head-status.livebar:hover { background:var(--surface-2); color:var(--fg); }
 .head-status b { color:var(--fg); font-weight:600; }
 .head-status.running b { color:var(--accent); }
 .head-status.waiting b { color:var(--warn); }
@@ -31,9 +36,9 @@
 .head-progress.waiting i { width:100%; background:var(--warn); }
 @keyframes head-shimmer { from { transform:translateX(-100%); } to { transform:translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .head-progress.busy i { width:100%; } }
-.title-edit { width:100%; font:inherit; font-weight:600; font-size:var(--fs-14); background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:var(--radius-sm); padding:2px 8px; }
+.title-edit { width:100%; font:inherit; font-weight:600; font-size:var(--fs-14); letter-spacing:-0.01em; background:var(--card); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--radius-xs); padding:2px 8px; outline:none; }
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
-.head-actions { display:flex; gap:6px; flex:none; }
+.head-actions { display:flex; gap:2px; flex:none; }
 .menu { position:absolute; right:10px; top:48px; z-index:var(--z-menu); background:var(--surface-1); border:0; border-radius:var(--radius-md); padding:4px; min-width:190px; max-width:min(280px,calc(100vw - 16px)); box-shadow:var(--shadow-md); display:flex; flex-direction:column; }
 .menu button { background:none; border:0; color:var(--fg); text-align:left; padding:6px 10px; min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
 .menu button:active { background:var(--surface-4); }
@@ -45,8 +50,8 @@
 
 .chat-body { flex:1; min-height:0; display:flex; position:relative; }
 .chat-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
-.chat-scroll { flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:6px 14px 16px; }
-.timeline { display:flex; flex-direction:column; gap:14px; }
+.chat-scroll { flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:8px 14px 16px; }
+.timeline { display:flex; flex-direction:column; gap:16px; }
 .turn { display:flex; flex-direction:column; gap:6px; }
 .turn-slot { display:flex; flex-direction:column; min-width:0; }
 .older-note { text-align:center; min-height:18px; }
@@ -54,13 +59,13 @@
    around it, then back to how every turn looks. An outline, not a border, so nothing moves. */
 .anchored { border-radius:var(--radius-md); animation:anchored 2.6s ease-out both; }
 @keyframes anchored {
-  0%, 45% { outline: 2px solid var(--ring); outline-offset:4px; background:color-mix(in srgb, var(--accent) 9%, transparent); }
+  0%, 45% { outline: 2px solid var(--ring); outline-offset:4px; background:color-mix(in srgb, var(--fg) 5%, transparent); }
   100% { outline:2px solid transparent; outline-offset:4px; background:transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
   .anchored { animation:none; outline: 2px solid var(--ring); outline-offset:4px; }
 }
-.anchor-note { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-13); min-width:0; }
+.anchor-note { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border:0; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-13); min-width:0; }
 .anchor-note .grow { min-width:0; overflow-wrap:anywhere; }
 /* The chat's own search: a field and the hits under it, as wide as a phone allows. */
 .menu.pop.chat-search-pop { width:min(380px, calc(100vw - 16px)); max-width:min(380px, calc(100vw - 16px)); padding:6px; overflow:auto; }
@@ -69,49 +74,73 @@
 .chat-search-note { padding:6px 8px; font-size:var(--fs-13); }
 .chat-search-hits { display:flex; flex-direction:column; gap:2px; }
 .menu.pop .chat-hit { display:flex; flex-direction:column; align-items:stretch; text-align:left; gap:2px; min-width:0; padding:6px 8px; }
-.chat-hit-meta { display:flex; gap:8px; font-size:var(--fs-12); color:var(--fg-2); min-width:0; }
-.chat-hit-meta b { font-weight:600; color:var(--fg); }
+.chat-hit-meta { display:flex; gap:8px; font-size:var(--fs-12); color:var(--fg-3); min-width:0; }
+.chat-hit-meta b { font-weight:500; color:var(--fg-2); }
 .chat-hit-snippet { font-size:var(--fs-13); line-height:1.35; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .chat-hit-snippet mark { background:color-mix(in srgb, var(--accent) 28%, transparent); color:inherit; border-radius:3px; padding:0 1px; }
-.msg.user { align-self:flex-end; max-width:86%; min-width:0; background:var(--surface-2); color:var(--fg); padding:10px 14px; border-radius:var(--radius-lg); border-bottom-right-radius:var(--radius-xs); margin-bottom:6px; font-family: var(--font-prose, var(--font)); font-size:var(--fs-14); line-height:1.5; word-break:break-word; }
+/* One fill and four equal corners: the bubble is told from the answer by its side and its surface,
+   and a corner cut toward the sender drew a speech balloon in a column that has only one speaker on
+   that side. */
+.msg.user { align-self:flex-end; max-width:80%; min-width:0; background:var(--surface-2); color:var(--fg); padding:10px 16px; border-radius:var(--radius-lg); margin-bottom:6px; font-family: var(--font-prose, var(--font)); font-size:var(--fs-14); line-height:1.5; word-break:break-word; }
 :root[data-user="plain"] .msg.user { background: transparent; padding-left: 0; padding-right: 0; }
 .msg.user p { margin:0; }
 .msg.user p + p { margin-top:6px; }
 .msg-origin { display:block; font-size:var(--fs-11); color:var(--fg-3); margin-bottom:2px; }
-.msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
-.msg-origin.msg-autopilot { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
+.msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--fg-2); }
+.msg-origin.msg-autopilot { display:flex; align-items:center; gap:var(--space-1); color:var(--fg-2); }
 .msg-origin.msg-visitor { color:var(--warn); }
 /* The auto mode's level on the message: a word, quiet like the other origins, that opens the correction. */
 
-.thinking-head { align-self:flex-start; display:flex; align-items:center; gap:8px; max-width:100%; min-width:0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-2); font-size:var(--fs-14); min-height:28px; padding:2px 0; cursor:pointer; text-align:left; }
+.thinking-head { align-self:flex-start; display:flex; align-items:center; gap:8px; max-width:100%; min-width:0; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg-2); font-size:var(--fs-14); min-height:28px; padding:2px 8px; margin-left:-8px; cursor:pointer; text-align:left; transition:background var(--t-fast), color var(--t-fast); }
+.thinking-head:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+/* A phone's line holds the label, the count and the waiting tag with no pixel to spare: the wash's
+   right padding was what pushed the chevron onto a line of its own there. */
+@media (max-width: 1023px) { .thinking-head { padding-right:0; } }
 .thinking-head .worked, .thinking-head .steps { white-space:nowrap; flex:none; }
 .thinking-head .dots { flex:none; }
-.thinking-head .families { color:var(--fg-3); min-width:0; flex:0 1 auto; }
+/* What the run is doing now, beside the label that shimmers: in the secondary ink, because in the
+   accent it read as a link to press. */
+.thinking-head .activity-current { color:var(--fg-2); }
+.thinking-head .families { color:var(--fg-3); font-size:var(--fs-13); min-width:0; flex:0 1 auto; }
 .thinking-head:hover .worked, .thinking-head:hover .families { color:var(--fg); }
-.chev { display:inline-flex; align-items:center; color:var(--fg-3); transition:transform .14s var(--ease-out); flex:none; }
+.chev { display:inline-flex; align-items:center; color:var(--fg-3); transition:transform var(--t-slow) var(--ease-out), opacity var(--t-fast); flex:none; }
 .thinking-head .chev, .summary-head .chev { margin-left:2px; }
-/* A block of steps holding a request that waits on the operator: open, and marked in the warning
-   colour, so the refusal under it is not mistaken for the end of the turn. */
+/* A block of steps holding a request that waits on the operator: open, and tagged in the warning
+   colour, so the refusal under it is not mistaken for the end of the turn. A tag, not an outlined
+   pill: the tone sets the ink and a wash of it, like every other state in the app. */
 .thinking-head.awaiting .worked { color:var(--fg); }
-.awaiting-badge { flex:none; padding:0 var(--space-2); border-radius:var(--radius-pill); border:1px solid color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 12%, transparent); color:var(--warn); font-size:var(--fs-12); line-height:20px; white-space:nowrap; }
+.awaiting-badge { flex:none; padding:0 6px; border-radius:var(--radius-xs); border:0; background:color-mix(in srgb, currentColor 12%, transparent); color:var(--warn); font-size:var(--fs-12); font-weight:500; line-height:20px; white-space:nowrap; }
 .chev.down { transform:rotate(90deg); }
-.thinking-head .steps { color:var(--muted); font-size:var(--fs-13); }
-.activity { display:flex; flex-direction:column; padding-left:2px; border-left:2px solid var(--line); margin-left:8px; padding-left:12px; }
+.thinking-head .steps { color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
+/* The steps hang from a hairline under the head's dots. Each row is padded for its own hover wash,
+   so the rule sits a row's padding left of the icons and the wash never touches it. */
+.activity { display:flex; flex-direction:column; margin-left:8px; padding-left:5px; border-left:1px solid var(--line); }
 .dots { display:inline-grid; grid-template-columns:repeat(3, 4px); gap:3px; width:18px; }
-.dots i { width:4px; height:4px; border-radius:50%; background:var(--muted); opacity:.55; }
+.dots i { width:4px; height:4px; border-radius:50%; background:var(--fg-3); opacity:.7; }
 .dots.on i { animation:dotpulse 1.2s ease-in-out infinite; }
 .dots.on i:nth-child(2) { animation-delay:.2s; }
 .dots.on i:nth-child(3) { animation-delay:.4s; }
 @keyframes dotpulse { 0%,100% { opacity:.3; } 50% { opacity:1; } }
 
-.act { display:grid; grid-template-columns:16px auto minmax(0, 1fr) auto; align-items:center; column-gap:8px; padding:2px 0; min-height:28px; color:var(--fg-2); font-size:var(--fs-14); line-height:1.35; min-width:0; cursor:pointer; border-radius:var(--radius-xs); }
+/* A step is one line of an inline list, not a card: its icon, the verb, the thing it was done to in
+   the code face, and how long it took at the far end. It lights on hover like any row, and the
+   chevron that says it opens is drawn only then: thirty resting chevrons down the right edge were
+   the loudest column of a run nobody was reading. */
+.act { display:grid; grid-template-columns:16px auto minmax(0, 1fr) auto; align-items:center; column-gap:8px; padding:2px 8px; min-height: 28px; color:var(--fg-2); font-size:var(--fs-14); line-height:1.35; min-width:0; cursor:pointer; border-radius:var(--radius-sm); transition:background var(--t-fast); }
+.act > .ic { color:var(--fg-3); }
+.act .act-end .chev { opacity:0; }
+.act:hover .act-end .chev, .act:focus-visible .act-end .chev, .act[aria-expanded="true"] .act-end .chev, .act .act-end .chev.down { opacity:1; }
+/* Nothing hovers on a touch screen: a row that opens must say so before it is pressed, and a wash
+   that stays under the last row touched is a selection nobody made. */
+@media (hover: none) { .act .act-end .chev { opacity:1; } }
+@media (hover: hover) { .act:hover, .thinking-head:hover { background:var(--surface-2); } }
 .act:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .act .ic { width:16px; height:16px; }
 .act .verb { white-space:nowrap; }
-.act .act-end { grid-column:4; display:inline-flex; align-items:center; gap:8px; margin-left:auto; flex:none; color:var(--fg-3); }
-.act .failed { color:var(--bad); font-size:var(--fs-12); }
-.act .dur { font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
-.act .receipt-link { background:none; border:0; padding:0; color:var(--info); font:inherit; font-size:var(--fs-12); cursor:pointer; }
+.act .act-end { grid-column:4; display:inline-flex; align-items:center; gap:8px; margin-left:auto; flex:none; color:var(--fg-3); font-size:var(--fs-12); }
+.act .failed { color:var(--bad); font-size:var(--fs-12); font-weight:500; }
+.act .dur { font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
+.act .receipt-link { background:none; border:0; padding:0; color:var(--accent); font:inherit; font-size:var(--fs-12); cursor:pointer; }
 .act .receipt-link:hover { text-decoration:underline; }
 .act .exec-job { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42vw; }
 .act .exec-job .exec-job-short { display:none; }
@@ -119,49 +148,64 @@
    background, and the rest (moved there, which job) is in its title and in Jobs. */
 @media (max-width: 600px) { .act .exec-job .exec-job-long { display:none; } .act .exec-job .exec-job-short { display:inline; } }
 .act .detail.link { background:none; border:0; padding:0; text-align:left; cursor:pointer; color:var(--fg); }
-.act .detail.link:hover { color:var(--accent); text-decoration:underline; }
+.act .detail.link:hover { text-decoration:underline; text-decoration-color:var(--line-strong); text-underline-offset:3px; }
 .act.head { grid-template-columns:16px minmax(0, 1fr) auto; }
 .act.head .act-end { grid-column:3; }
 /* One clamped line rather than a clipped one: the line breaks between words, so the ellipsis lands
    after a whole word or path ("… && ls -la…") instead of inside one ("images/her…"). A single token
    longer than the line still breaks where it must. */
-.act .detail { color:var(--fg); overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; min-width:0; font-family:var(--mono); font-size:var(--fs-mono); }
-.act.prose .detail { font-family:var(--font); font-size:1em; color:var(--fg-2); }
-.act.running .verb { color:var(--fg); }
-.act.running .ic { animation:pulse 1.2s ease-in-out infinite; }
-.act.error .detail { color:var(--bad); }
+.act .detail { color:var(--fg); overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; min-width:0; font-family:var(--mono); font-size:var(--fs-13); }
+/* Reasoning and a folded summary read as an aside: the same row, its words in the UI face and a step
+   quieter than a tool's object. */
+.act.prose .detail { font-family:var(--font); font-size:var(--fs-13); color:var(--fg-3); }
+/* What runs now is said by a sweep of light across its words, not by a colour or a pulsing icon: a
+   run of twenty steps had one moving thing, and it is the line being worked on. Still, and in the
+   plain ink, for a reader who asked for no motion. */
+.act.running .verb, .thinking-head:has(.dots.on) .worked { color:transparent; background-image:linear-gradient(90deg, var(--fg-3) 0%, var(--fg-3) 40%, var(--fg) 50%, var(--fg-3) 60%, var(--fg-3) 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; animation:step-shimmer 1.6s linear infinite; }
+@keyframes step-shimmer { from { background-position:100% 0; } to { background-position:0% 0; } }
+@media (prefers-reduced-motion: reduce) { .act.running .verb, .thinking-head:has(.dots.on) .worked { animation:none; background-image:none; color:var(--fg); } }
+:root[data-motion="reduce"] .act.running .verb, :root[data-motion="reduce"] .thinking-head:has(.dots.on) .worked { animation:none; background-image:none; color:var(--fg); }
+/* A failed step keeps its object readable: the icon and the word "failed" carry the colour, and a
+   red command line read as the error text itself. */
+.act.error > .ic { color:var(--bad); }
 .act.head { cursor:default; }
-.act-wrap.nested { padding-left:28px; }
-.act-wrap.nested .act { padding:2px 0; min-height:26px; }
-.note { display:grid; grid-template-columns:16px minmax(0, 1fr); column-gap:8px; color:var(--fg-2); font-size:var(--fs-14); line-height:1.4; padding:4px 0; }
+.act-wrap.nested { padding-left:24px; }
+.act-wrap.nested .act { padding:2px 8px; min-height:26px; }
+.note { display:grid; grid-template-columns:16px minmax(0, 1fr); column-gap:8px; color:var(--fg-2); font-size:var(--fs-14); line-height:1.45; padding:4px 8px; }
 .note::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--fg-3); margin:8px auto 0; }
 .note .md { min-width:0; flex:1; }
 .note p { margin:0 0 6px; }
 .note p:last-child { margin-bottom:0; }
 .note ul, .note ol { margin:4px 0; padding-left:20px; }
-.thought { white-space:pre-wrap; color:var(--muted); font-size:var(--fs-13); line-height:1.45; padding:4px 0 8px 28px; font-style:italic; max-height:360px; overflow:auto; }
-.working { color:var(--muted); font-size:var(--fs-13); padding-left:28px; }
+/* What a step opens into hangs from a hairline dropped from its icon, indented to the verb: the
+   body belongs to the row above it without a card around every one. */
+.thought { white-space:pre-wrap; color:var(--fg-2); font-size:var(--fs-13); line-height:1.5; margin:2px 0 8px 15px; padding:2px 8px 2px 16px; border-left:1px solid var(--line); max-height:360px; overflow:auto; text-wrap:pretty; }
+.working { color:var(--fg-3); font-size:var(--fs-13); padding:4px 8px 4px 32px; }
 
-.toolcard { margin:4px 0 8px 28px; display:flex; flex-direction:column; gap:6px; }
-.toolcard .result { margin:0; padding:8px 10px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); font-family:var(--mono); font-size:var(--fs-mono); white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; color:var(--muted); }
-.toolcard .result.error { color:var(--bad); }
+.toolcard { margin:2px 0 8px 15px; padding:4px 0 4px 16px; border-left:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+/* Output is a recessed well, not another card: the call above it is the card-less row, and a
+   bordered box per result stacked frames down the run. */
+.toolcard .result { margin:0; padding:10px 12px; background:var(--inset); border:0; box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); font-family:var(--mono); font-size:var(--fs-12); line-height:1.5; white-space:pre-wrap; word-break:break-word; max-height:288px; overflow:auto; color:var(--fg-2); }
+/* A failed call's output is read like any other: the row above it carries the failure's colour, and
+   a well of red type was the loudest thing in a run that had already recovered. */
+.toolcard .result.error { color:var(--fg-2); }
 .toolcard .result.full { max-height:70vh; }
 .toolcard > .btn.small { align-self:flex-start; }
-.toolcard .result-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:var(--fs-13); }
-.toolcard .result-note { color:var(--muted); font-size:var(--fs-13); }
+.toolcard .result-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--fg-3); font-size:var(--fs-12); }
+.toolcard .result-note { color:var(--fg-3); font-size:var(--fs-12); }
 .toolcard .result-note.error { color:var(--bad); }
 /* the auto-review's block under its call: what the reviewer said, and the one override there is */
-.toolcard .result-blocked { display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:8px 10px; border:1px solid color-mix(in srgb, var(--bad) 40%, var(--line)); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bad) 6%, var(--card)); }
+.toolcard .result-blocked { display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--card); box-shadow:var(--drop-xs); }
 .toolcard .result-blocked-head { display:flex; align-items:center; gap:6px; font-size:var(--fs-13); font-weight:600; color:var(--bad); }
 .toolcard .result-blocked-reason { font-size:var(--fs-13); color:var(--fg-2); overflow-wrap:anywhere; }
-.diff pre { margin:0; padding:8px 10px; font-family:var(--mono); font-size:var(--fs-mono); white-space:pre-wrap; word-break:break-word; }
-.diff .del { background:rgba(248,113,113,.14); border-radius:var(--radius-md) var(--radius-md) 0 0; color:#fca5a5; }
-.diff .add { background:rgba(74,222,128,.12); border-radius:0 0 var(--radius-md) var(--radius-md); color:#86efac; }
+.diff pre { margin:0; padding:8px 12px; font-family:var(--mono); font-size:var(--fs-12); line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+.diff .del { background:color-mix(in srgb, var(--bad) 12%, transparent); border-radius:var(--radius-sm) var(--radius-sm) 0 0; color:color-mix(in srgb, var(--bad) 55%, var(--fg)); }
+.diff .add { background:color-mix(in srgb, var(--ok) 12%, transparent); border-radius:0 0 var(--radius-sm) var(--radius-sm); color:color-mix(in srgb, var(--ok) 55%, var(--fg)); }
 /* What was removed and what replaced it are told apart by a sign as well as a tint: red and green
    at this depth are one colour to a reader who does not see the difference between them. The sign
    is drawn, not written, so copying the text copies the code alone. */
-.diff pre.del, .diff pre.add { position:relative; padding-left:26px; }
-.diff pre.del::before, .diff pre.add::before { position:absolute; left:10px; top:8px; font-weight:600; }
+.diff pre.del, .diff pre.add { position:relative; padding-left:28px; }
+.diff pre.del::before, .diff pre.add::before { position:absolute; left:12px; top:8px; font-weight:600; }
 .diff pre.del::before { content:"−"; }
 .diff pre.add::before { content:"+"; }
 
@@ -175,80 +219,92 @@
 .fallback-note .chev { margin-left: 2px; }
 .fallback-note .sub { margin: 4px 0 0 2px; line-height: 1.45; }
 .answer { font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); line-height:var(--lh-prose); word-break:break-word; padding-top:4px; }
-.answer.streaming::after { content:""; display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--accent); animation:pulse 1s infinite; }
-.answer p, .summary-body p, .sheet-body p { margin:0 0 10px; }
+.answer.streaming::after { content:""; display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--fg); animation:pulse 1s infinite; }
+.answer p, .summary-body p, .sheet-body p { margin:0 0 12px; }
 /* Every heading stands at least two steps above the prose it heads. The smallest one was the
    prose's own size, and an answer's title read the same as the bold line under it. */
-.answer h2, .summary-body h2 { font-size:var(--fs-22); margin:18px 0 8px; }
-.answer h3, .summary-body h3 { font-size:var(--fs-20); margin:16px 0 6px; }
-.answer h4, .summary-body h4 { font-size:var(--fs-18); margin:14px 0 4px; }
-.answer ul, .answer ol, .summary-body ul, .summary-body ol { margin:0 0 10px; padding-left:22px; }
-.answer li, .summary-body li { margin:3px 0; }
+.answer :is(h2, h3, h4), .summary-body :is(h2, h3, h4) { font-weight:600; letter-spacing:-0.015em; line-height:1.3; text-wrap:balance; }
+.answer h2, .summary-body h2 { font-size:var(--fs-22); margin:24px 0 10px; }
+.answer h3, .summary-body h3 { font-size:var(--fs-20); margin:22px 0 8px; }
+.answer h4, .summary-body h4 { font-size:var(--fs-18); margin:20px 0 6px; }
+.answer > :first-child, .summary-body > :first-child { margin-top:0; }
+.answer strong, .summary-body strong { font-weight:600; }
+/* A link is the one coloured word in an answer (the base rule gives it the accent); the line under
+   it comes with the pointer. Written without weight of its own, so a card's title or a citation,
+   which are links drawn another way, keep their own ink and underline. */
+:where(.answer, .summary-body, .note) a:hover { text-decoration:underline; text-underline-offset:0.22em; }
+.answer ul, .answer ol, .summary-body ul, .summary-body ol { margin:0 0 12px; padding-left:24px; }
+.answer li, .summary-body li { margin:4px 0; }
+.answer li::marker, .summary-body li::marker { color:var(--fg-3); font-variant-numeric:tabular-nums; }
 .answer li.task { list-style:none; margin-left:-20px; }
-.check { display:inline-flex; width:16px; height:16px; border:1px solid var(--muted); border-radius:4px; margin-right:8px; font-size:var(--fs-11); align-items:center; justify-content:center; vertical-align:-2px; }
-.check.on { background:var(--fg); color:var(--bg); border-color:var(--fg); }
-.answer blockquote, .summary-body blockquote { margin:0 0 10px; padding:2px 12px; border-left:3px solid var(--line); color:var(--muted); }
-.answer hr { border:0; border-top:1px solid var(--line); margin:14px 0; }
-.answer code, .note code, .summary-body code, .msg.user code { font-family:var(--mono); font-size:0.9em; background:color-mix(in srgb, var(--fg) 6%, transparent); padding:1px 4px; border-radius:4px; color:inherit; }
-.answer details, .summary-body details { border:1px solid var(--line); border-radius:var(--radius-md); padding:8px 12px; margin:0 0 10px; }
-.answer summary, .summary-body summary { cursor:pointer; color:var(--muted); }
+.check { display:inline-flex; width:16px; height:16px; border:0; box-shadow:inset 0 0 0 1px var(--line-strong); border-radius:4px; margin-right:8px; font-size:var(--fs-11); align-items:center; justify-content:center; vertical-align:-2px; }
+.check.on { background:var(--fg); color:var(--bg); box-shadow:none; }
+.answer blockquote, .summary-body blockquote { margin:0 0 12px; padding:2px 0 2px 16px; border-left:2px solid var(--line-strong); color:var(--fg-2); }
+.answer hr { border:0; border-top:1px solid var(--line); margin:20px 0; }
+.answer code, .note code, .summary-body code, .msg.user code { font-family:var(--mono); font-size:0.9em; background:color-mix(in srgb, var(--fg) 7%, transparent); padding:0.1em 0.3em; border-radius:4px; color:inherit; -webkit-box-decoration-break:clone; box-decoration-break:clone; }
+.answer details, .summary-body details { border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 12px; margin:0 0 12px; }
+.answer summary, .summary-body summary { cursor:pointer; color:var(--fg-2); }
 /* The frame is as wide as the table, up to the column: a two-column table in a frame the width of the
    answer drew its header and its rows short of the frame's right edge, with a blank strip beside them. */
-.tablewrap { overflow:auto; max-height:70vh; width:fit-content; max-width:100%; margin:0 0 10px; border:1px solid var(--line); border-radius:var(--radius-sm); }
+.tablewrap { overflow:auto; max-height:70vh; width:fit-content; max-width:100%; margin:0 0 12px; border:1px solid var(--line); border-radius:var(--radius-sm); }
 .tablewrap table, .answer .tablewrap table, .summary-body .tablewrap table { border:0; border-radius:0; min-width:100%; }
-.answer thead th, .summary-body thead th { position:sticky; top:0; background:var(--surface-1); z-index:1; color:var(--fg-2); font-weight:500; }
+.answer thead th, .summary-body thead th { position:sticky; top:0; background:var(--inset); z-index:1; color:var(--fg-3); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 .answer table, .summary-body table { width:auto; min-width:60%; border:0; border-collapse:separate; border-spacing:0; font-size:var(--fs-13); }
-.answer th, .answer td, .summary-body th, .summary-body td { padding:6px 10px; border-bottom:1px solid var(--line); }
+.answer th, .answer td, .summary-body th, .summary-body td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
 /* A cell breaks between words, and inside a word only when the word alone is wider than the table
    can give: the answer's break-anywhere let a narrow column split "framework" into "framewo" / "rk". */
 .answer th, .answer td, .summary-body th, .summary-body td { word-break:normal; overflow-wrap:break-word; }
 .answer tr:last-child td { border-bottom:0; }
 
-.codecard { margin:6px 0 10px; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; background:var(--card); }
-.codehead { display:flex; align-items:center; justify-content:space-between; padding:6px 12px; border-bottom:1px solid var(--line); font-size:var(--fs-13); color:var(--fg); }
-.codehead .copy, .cf-card > .copy { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-3); cursor:pointer; padding:0; }
-:is(.codehead, .cf-card) .copy:hover { color:var(--fg); background:var(--surface-2); }
+/* A block of code is a well with a hairline edge and a head on the same surface: the language in
+   the code face at the left, a ghost copy button at the right, and no rule between the head and the
+   code, which is what made the old block read as a card with a title bar. */
+.codecard { margin:8px 0 12px; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; background:var(--inset); }
+.codehead { display:flex; align-items:center; justify-content:space-between; gap:8px; height:36px; padding:0 6px 0 14px; font-family:var(--mono); font-size:var(--fs-12); color:var(--fg-2); }
+.codehead .copy, .cf-card > .copy { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-3); cursor:pointer; padding:0; flex:none; transition:background var(--t-fast), color var(--t-fast); }
+:is(.codehead, .cf-card) .copy:hover { color:var(--fg); background:var(--surface-3); }
 :is(.codehead, .cf-card) .copy .glyph-done, :is(.codehead, .cf-card) .copy[data-state="done"] .glyph-copy { display:none; }
 :is(.codehead, .cf-card) .copy[data-state="done"] .glyph-done { display:inline-flex; color:var(--ok); }
 :is(.codehead, .cf-card) .copy span { display:inline-flex; }
-.codecard pre { margin:0; padding:10px 12px; overflow-x:auto; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; word-break:normal; overflow-wrap:normal; color:var(--code-block); }
+.codecard pre { margin:0; padding:2px 14px 14px; overflow-x:auto; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.55; white-space:pre; word-break:normal; overflow-wrap:normal; color:var(--code-block); }
 /* The block is the frame; its text is not an inline code span again. The answer's inline-code tint
    reached into it and drew a rounded chip behind every line of a fenced block; the operator's bubble,
    whose rule weighs more, did it still, and drew its code smaller than the answer's. */
 .codecard pre code, .msg.user .codecard pre code { background:none; padding:0; border-radius:0; font-size:inherit; }
 .toolcard .codecard { margin:0; }
 /* Inside the card the halves meet its frame: their own rounded corners drew a card in a card. */
-.diffcard .diff .del, .diffcard .diff .add { border-radius:0; padding:8px 10px 8px 26px; }
+.diffcard .diff .del, .diffcard .diff .add { border-radius:0; padding:8px 12px 8px 28px; }
 
-.summary { border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); padding:4px 12px; }
-.summary-head { display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; color:var(--muted); font-size:var(--fs-14); padding:6px 0; cursor:pointer; text-align:left; }
+.summary { border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); padding:2px 14px; }
+.summary-head { display:flex; align-items:center; gap:8px; width:100%; min-height:36px; background:none; border:0; color:var(--fg-2); font-size:var(--fs-14); font-weight:500; padding:0; cursor:pointer; text-align:left; }
 .summary-head .chev { margin-left:auto; }
-.summary-body { padding:4px 0 10px; font-size:var(--fs-14); line-height:1.5; }
+.summary-body { padding:4px 0 12px; font-size:var(--fs-14); line-height:1.5; }
 
-/* ── a system note: the loop's wake-up, a schedule's prompt — one folded line, never a bubble ── */
+/* ── a system note: the loop's wake-up, a schedule's prompt — one quiet folded line, never a bubble.
+   Its glyph is neutral: a green mark on every wake-up coloured a column of lines that report nothing
+   the reader must act on; only a notice, which does ask for the eye, keeps its warning ink. ── */
 .sysnote { display:flex; flex-direction:column; gap:4px; align-self:stretch; }
-.sysnote-head { display:inline-flex; align-items:center; gap:8px; align-self:flex-start; max-width:100%; min-height:28px; padding:2px 8px 2px 0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-2); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
+.sysnote-head { display:inline-flex; align-items:center; gap:6px; align-self:flex-start; max-width:100%; min-height:24px; padding:2px 8px 2px 0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-3); font:inherit; font-size:var(--fs-12); text-align:left; cursor:pointer; transition:color var(--t-fast); }
 .sysnote-head .ic { color:var(--fg-3); flex:none; }
 .sysnote-head:hover { color:var(--fg); }
-.sysnote.loop .sysnote-head .ic { color:var(--ok); }
 .sysnote.notice .sysnote-head, .sysnote.notice .sysnote-head .ic { color:var(--warn); }
-.sysnote-way { margin:0; padding-left:22px; font-size:var(--fs-12); color:var(--fg-2); }
-.sysnote-body { padding:8px 12px; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
+.sysnote-way { margin:0; padding-left:22px; font-size:var(--fs-12); color:var(--fg-3); }
+.sysnote-body { padding:10px 12px; background:var(--inset); border:0; box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
 .sysnote-body p { margin:0 0 8px; }
 .sysnote-body p:last-child { margin-bottom:0; }
 
 /* ── the files a turn produced: cards under the answer ── */
-.artifacts { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
-.artifact { position:relative; display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; min-height:48px; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; }
+.artifacts { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+.artifact { position:relative; display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; min-height:48px; background:var(--card); border:1px solid var(--line); box-shadow:var(--drop-xs); border-radius:var(--radius-md); overflow:hidden; transition:background var(--t-fast); }
 .artifact:hover { background:var(--surface-2); }
 .artifact-main { display:flex; align-items:center; gap:10px; min-width:0; min-height:46px; padding:6px 10px; background:none; border:0; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
-.artifact-glyph { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg-2); flex:none; }
+.artifact-glyph { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg-2); flex:none; }
 .artifact:hover .artifact-glyph { background:var(--surface-3); }
 .artifact-text { display:flex; flex-direction:column; min-width:0; gap:1px; }
 .artifact-name { font-size:var(--fs-14); font-weight:500; }
 /* Clamped to a line between words, like a step's detail: a narrow phone cut "sent to you" to
    "sent t…". */
-.artifact-meta { font-size:var(--fs-12); color:var(--fg-2); }
+.artifact-meta { font-size:var(--fs-12); color:var(--fg-3); }
 .artifact-meta.truncate { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; }
 .artifact-actions { display:inline-flex; align-items:center; gap:2px; padding:0 6px; }
 .artifact-actions .iconbtn.small { background:transparent; color:var(--fg-2); }
@@ -262,46 +318,45 @@
 /* The files a turn produced: the sent ones as the cards above, three before "+N more", and the
    changed ones as one quiet line that opens into one-line rows of relative paths. A card per written
    file buried the answer under two dozen of them. */
-.turn-files { display:flex; flex-direction:column; gap:6px; margin-top:4px; min-width:0; }
+.turn-files { display:flex; flex-direction:column; gap:8px; margin-top:4px; min-width:0; }
 .turn-files .artifacts { margin-top:0; }
 .artifacts-more { align-self:flex-start; height:var(--ctl-h-sm); padding:0 10px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
 .artifacts-more:hover { background:var(--surface-2); color:var(--fg); }
 .changed-files { min-width:0; }
 .changed-files-head { display:inline-flex; align-items:center; gap:6px; max-width:100%; height:var(--ctl-h-sm); padding:0 8px; margin-left:-8px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
 .changed-files-head:hover { background:var(--surface-2); color:var(--fg); }
-.changed-file-list { list-style:none; margin:2px 0 0; padding:4px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); max-height:min(360px, 50vh); overflow:auto; }
-.changed-file { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; min-height:26px; border-radius:var(--radius-xs); }
+.changed-file-list { list-style:none; margin:4px 0 0; padding:4px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); max-height:min(360px, 50vh); overflow:auto; }
+.changed-file { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; min-height:28px; border-radius:var(--radius-xs); }
 .changed-file:hover, .changed-file:focus-within { background:var(--surface-2); }
-.changed-file-main { display:flex; align-items:center; gap:8px; min-width:0; height:26px; padding:0 6px; border:0; background:none; color:var(--fg); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
+.changed-file-main { display:flex; align-items:center; gap:8px; min-width:0; height:28px; padding:0 8px; border:0; background:none; color:var(--fg); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
 .changed-file-glyph { display:inline-flex; color:var(--fg-3); flex:none; }
 .changed-file-path { min-width:0; font-family:var(--mono); font-size:var(--fs-12); }
 .changed-file-dir { color:var(--fg-3); }
 .changed-file-how { flex:none; font-size:var(--fs-11); color:var(--fg-3); }
 .changed-file-actions { display:inline-flex; align-items:center; gap:2px; padding-right:2px; opacity:0; transition:opacity .12s; }
 .changed-file:hover .changed-file-actions, .changed-file:focus-within .changed-file-actions { opacity:1; }
-.changed-file-actions .iconbtn.small { width:22px; height:22px; background:transparent; color:var(--fg-2); }
+.changed-file-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }
 .changed-file-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
 /* The agent's settings change under its answer: a card of its own, because one waiting for Apply is a
    question to the operator and must not hide among the folded steps. A line is the path above the
-   values rather than beside them, so a long path and a long value both fit a phone without a scroll. */
-.setchange { display:flex; flex-direction:column; gap:8px; margin-top:8px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); min-width:0; }
-.setchange.pending { border-color:color-mix(in srgb, var(--warn) 45%, var(--line)); }
+   values rather than beside them, so a long path and a long value both fit a phone without a scroll.
+   Its state is the pill in its head; the card's edge stays the hairline every card has. */
+.setchange { display:flex; flex-direction:column; gap:10px; margin-top:8px; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); min-width:0; }
 .setchange-head { display:flex; align-items:center; gap:8px; min-width:0; color:var(--fg-2); }
 .setchange-title { flex:1; min-width:0; font-size:var(--fs-14); font-weight:600; color:var(--fg); }
 .setchange-reason { font-size:var(--fs-13); color:var(--fg-2); overflow-wrap:anywhere; }
 .setchange-lines { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
-.setchange-line { display:flex; flex-direction:column; gap:2px; min-width:0; padding:6px 8px; border-radius:var(--radius-sm); background:var(--surface-2); }
+.setchange-line { display:flex; flex-direction:column; gap:2px; min-width:0; padding:8px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); }
 .setchange-path { font-family:var(--mono); font-size:var(--fs-12); color:var(--fg-2); overflow-wrap:anywhere; }
 .setchange-values { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; min-width:0; font-size:var(--fs-13); }
 .setchange-old { color:var(--fg-3); text-decoration:line-through; overflow-wrap:anywhere; min-width:0; }
 .setchange-new { color:var(--fg); font-weight:500; overflow-wrap:anywhere; min-width:0; }
 .setchange-arrow { color:var(--fg-3); }
 .setchange-foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
-.setchange-when { font-size:var(--fs-12); color:var(--fg-2); min-width:0; overflow-wrap:anywhere; }
+.setchange-when { font-size:var(--fs-12); color:var(--fg-3); min-width:0; overflow-wrap:anywhere; }
 .setchange-actions { display:inline-flex; gap:6px; margin-left:auto; }
 .setchange-note { font-size:var(--fs-12); color:var(--fg-2); }
 .setchange-note.error { color:var(--bad); }
-.schedcard.set { border-color:color-mix(in srgb, var(--ok) 35%, var(--line)); }
 .schedcard-facts { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; min-width:0; font-size:var(--fs-13); color:var(--fg); }
 .schedcard-when { overflow-wrap:anywhere; min-width:0; }
 .schedcard-kind { color:var(--fg-2); font-size:var(--fs-12); }
@@ -318,11 +373,11 @@
 
 
 .chip .ic { width:14px; height:14px; }
-.roundbtn { width:var(--ctl-h-lg); height:var(--ctl-h-lg); border-radius:50%; border:1px solid var(--line); background:var(--card-2); color:var(--fg); display:flex; align-items:center; justify-content:center; cursor:pointer; flex:none; padding:0; }
-.question { border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.roundbtn { width:var(--ctl-h-lg); height:var(--ctl-h-lg); border-radius:50%; border:1px solid var(--line); background:var(--card); box-shadow:var(--drop-xs); color:var(--fg); display:flex; align-items:center; justify-content:center; cursor:pointer; flex:none; padding:0; transition:background var(--t-fast), color var(--t-fast), scale var(--t-fast); }
+.question { border-color: var(--line-strong); }
 .option { display: block; width: 100%; text-align: left; margin-top: 6px; }
-.option.selected { border-color: var(--accent); }
-pre.diff { font-family: var(--mono); font-size: var(--fs-mono); white-space: pre; overflow-x: auto; background: var(--bg-2); padding: 10px; border-radius: var(--radius-sm); }
+.option.selected { border-color: var(--fg-3); background: var(--surface-2); }
+pre.diff { font-family: var(--mono); font-size: var(--fs-mono); white-space: pre; overflow-x: auto; background: var(--inset); box-shadow: var(--shadow-ring); padding: 10px 12px; border-radius: var(--radius-sm); }
 pre.diff .add { color: var(--ok); }
 pre.diff .del { color: var(--bad); }
 pre.diff .hunk { color: var(--info); }
@@ -362,7 +417,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .stat b { font-size: var(--fs-18); font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-.summary-inline { margin:4px 0 8px 28px; padding:8px 12px; border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-14); line-height:1.5; color:var(--muted); max-height:360px; overflow:auto; }
+.summary-inline { margin:2px 0 8px 15px; padding:2px 8px 2px 16px; border:0; border-left:1px solid var(--line); border-radius:0; font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
 .sheet-backdrop { position:fixed; inset:0; background:var(--scrim); z-index:var(--z-overlay); display:flex; align-items:flex-end; }
 .sheet { width:100%; max-height:88%; background:var(--surface-1); outline:none; border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:8px 16px calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; box-shadow:var(--shadow-xl); }
 .sheet .grip { width:36px; height:4px; border-radius:2px; background:var(--line-strong); margin:4px auto 10px; }
@@ -384,7 +439,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .card.row .avatar { flex:none; }
 
 .preset { border-top:1px solid var(--line); padding-top:8px; margin-top:8px; }
-.preset.default { border-left:3px solid var(--ok); padding-left:8px; margin-left:-11px; }
+.preset.default { border-left:0; padding-left:0; margin-left:0; }
 .radio { width:16px; height:16px; border-radius:50%; border:0; box-shadow:inset 0 0 0 1.5px var(--line-strong); background:none; flex:none; cursor:pointer; padding:0; }
 .radio.on { box-shadow:inset 0 0 0 5px var(--fg); }
 
@@ -426,29 +481,32 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .filters { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px; }
 
 .models-menu-wrap { position:relative; display:inline-block; }
-.models-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:min(320px, 80vw); background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--radius-md); padding:8px; box-shadow:0 14px 34px rgba(0,0,0,.5); }
+.models-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:min(320px, 80vw); background:var(--surface-1); border:0; border-radius:var(--radius-md); padding:4px; box-shadow:var(--shadow-md); }
 .models-menu .field { margin-bottom:6px; }
 .models-menu-list { max-height:260px; overflow-y:auto; display:flex; flex-direction:column; }
 .models-menu-item { text-align:left; background:none; border:0; color:var(--fg); padding:6px 10px; min-height:var(--row-h-dense); border-radius:var(--radius-sm); font-size:var(--fs-13); cursor:pointer; font-family:var(--mono); }
-.models-menu-item:hover, .models-menu-item.on { background:var(--card-2); }
+.models-menu-item:hover, .models-menu-item.on { background:var(--surface-3); }
 
 .tab-badge { position:absolute; top:-6px; right:-14px; min-width:16px; height:16px; padding:0 4px; border-radius:999px; background:var(--bad); color:#fff; font-size:10px; line-height:16px; text-align:center; font-weight:600; }
-.card.unread { border-color: color-mix(in srgb, var(--info) 45%, var(--line)); }
+.card.unread { border-color: var(--line-strong); }
 /* The message and its actions stack: a row of buttons beside the bubble is pushed off a phone screen. */
 .msg-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:0; }
 .msg-wrap .msg.user { margin-bottom:0; }
+/* Four fifths of the column on a desktop: wider, a long message ran the whole stripe and stopped
+   reading as the operator's side of it. A phone keeps the wider share its narrow column needs. */
+@media (min-width: 1024px) { .msg-wrap .msg.user { max-width:80%; } }
 /* The files the message carried, above its bubble and aligned with it: the pictures as one row of
    square thumbnails, each other file as a card. Widths and a square ratio, not heights, so a card is
    as tall as its two lines and the thumbnails stay square at every width. */
-.msg-attachments { display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:min(86%, var(--chat-w)); min-width:0; margin-bottom:4px; }
+.msg-attachments { display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:min(80%, var(--chat-w)); min-width:0; margin-bottom:4px; }
 .msg-thumbs { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
-.msg-thumb { display:inline-flex; align-items:center; justify-content:center; width:112px; aspect-ratio:1; padding:0; border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; background:var(--surface-2); color:var(--fg-3); cursor:zoom-in; }
+.msg-thumb { display:inline-flex; align-items:center; justify-content:center; width:112px; aspect-ratio:1; padding:0; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; background:var(--surface-2); color:var(--fg-3); cursor:zoom-in; }
 .msg-thumb img { display:block; width:100%; height:100%; object-fit:cover; }
 .msg-thumb:hover img { filter:brightness(.92); }
 .msg-thumb:focus-visible, .msg-file:focus-visible { outline: 2px solid var(--ring); outline-offset:2px; }
-.msg-file { display:flex; align-items:center; gap:10px; width:280px; max-width:100%; padding:8px 14px 8px 8px; border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--surface-1); color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
-.msg-file:hover { background:var(--surface-2); }
-.msg-file-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; aspect-ratio:1; border-radius:var(--radius-md); background:var(--file-kind, var(--file-other)); color:var(--file-glyph); flex:none; }
+.msg-file { display:flex; align-items:center; gap:10px; width:280px; max-width:100%; padding:8px 14px 8px 8px; border:0; border-radius:var(--radius-md); background:var(--surface-2); color:var(--fg); font:inherit; text-align:left; cursor:pointer; transition:background var(--t-fast); }
+.msg-file:hover { background:var(--surface-3); }
+.msg-file-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; aspect-ratio:1; border-radius:var(--radius-sm); background:var(--file-kind, var(--file-other)); color:var(--file-glyph); flex:none; }
 .msg-file[data-kind="pdf"] { --file-kind:var(--file-pdf); }
 .msg-file[data-kind="document"] { --file-kind:var(--file-document); }
 .msg-file[data-kind="sheet"] { --file-kind:var(--file-sheet); }
@@ -459,11 +517,11 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .msg-file[data-kind="code"] { --file-kind:var(--file-code); }
 .msg-file[data-kind="text"] { --file-kind:var(--file-text); }
 .msg-file-text { display:flex; flex-direction:column; gap:1px; min-width:0; }
-.msg-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-14); font-weight:600; }
-.msg-file-kind { font-size:var(--fs-12); color:var(--fg-2); }
+.msg-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-14); font-weight:500; }
+.msg-file-kind { font-size:var(--fs-12); color:var(--fg-3); }
 /* Under the message: copy, and what the turn allows. Always there on touch, on hover on a desk. */
-.msg-actions { display:flex; align-items:center; gap:2px; min-height:24px; opacity:.55; }
-.msg-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }
+.msg-actions { display:flex; align-items:center; gap:2px; min-height:24px; opacity:.7; }
+.msg-actions .iconbtn.small { width:24px; height:24px; border-radius:var(--radius-xs); background:transparent; color:var(--fg-3); }
 .msg-actions .iconbtn.small:hover { background:var(--surface-2); color:var(--fg); }
 .msg-wrap .msg-actions { justify-content:flex-end; padding-right:4px; }
 /* When the message was sent or the answer given. It lives in the row that is already there, so a turn
@@ -476,7 +534,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
    opens says what it removes. */
 .msg-actions .iconbtn.small.danger:hover, .msg-actions .iconbtn.small.danger:focus-visible { color:var(--bad); }
 @media (hover: hover) {
-  .msg-actions { opacity:0; transition:opacity .15s; }
+  .msg-actions { opacity:0; transition:opacity var(--t-fast); }
   .turn:hover .msg-actions, .msg-actions:focus-within, .msg-actions:hover { opacity:1; }
 }
 /* A landscape tablet is wider than the phone layout and still pressed with a finger: the icons under
