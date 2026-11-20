@@ -1,0 +1,402 @@
+/* ── a project's team ─────────────────────────────────────────────────────────────────────
+   One row per member: who (avatar, name, persona), what they answer for, what runs them and where,
+   and, on the right, what they are doing and the executor's badge. On a phone the right-hand column
+   stays and the two meta lines wrap under the name rather than squeezing it. */
+.staff-avatar { --c: var(--staff-blue); width: calc(var(--avatar) + var(--space-2)); height: calc(var(--avatar) + var(--space-2)); border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-12); font-weight: 600; letter-spacing: 0.02em; color: var(--c); background: color-mix(in srgb, var(--c) 18%, transparent); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+.staff-avatar.small { width: var(--avatar); height: var(--avatar); font-size: var(--fs-11); }
+.harness-badge { display: inline-flex; align-items: center; justify-content: center; min-width: var(--avatar); padding: 1px 6px; border-radius: var(--radius-xs); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-11); font-weight: 600; flex: none; }
+.harness-badge.daedalus { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.staff-list { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+.staff-list.archived { opacity: 0.7; }
+/* Who edits what in the shared folders: one compact line per agent; a file two agents hold is marked. */
+.team-editing { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2); font-size: var(--fs-12); }
+.team-editing-row { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; padding: 4px 12px; }
+.team-editing-who { flex: none; max-width: 40%; font-weight: 600; }
+.team-editing-files { flex: 1; min-width: 0; color: var(--fg-2); font-family: var(--mono); }
+.team-editing-files .overlap { color: var(--warn); font-weight: 600; }
+.team-editing-age { flex: none; color: var(--fg-3); }
+.staff-row { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; min-height: var(--row-h); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font: inherit; text-align: left; }
+button.staff-row { cursor: pointer; }
+button.staff-row:hover { background: var(--surface-2); }
+.staff-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.staff-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.staff-name { font-weight: 600; font-size: var(--fs-14); min-width: 0; }
+.staff-agent { font-weight: 400; color: var(--fg-2); }
+.staff-role { color: var(--fg); font-size: var(--fs-13); }
+.staff-meta { display: flex; flex-wrap: wrap; column-gap: var(--space-4); row-gap: 2px; color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
+.staff-meta > span { min-width: 0; max-width: 100%; }
+.staff-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+.staff-status-inline { display: none; }
+.staff-sheet-who { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 4px; }
+.executor-choice { border: 0; padding: 0; margin: 0; min-width: 0; }
+.executor-choice legend { padding: 0; margin: 10px 0 4px; color: var(--muted); font-size: var(--fs-12); }
+.executor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.executor { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: var(--row-h); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; min-width: 0; }
+.executor.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--card)); }
+.executor:disabled { cursor: not-allowed; opacity: 0.55; }
+.executor-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.executor-why { color: var(--fg-2); font-size: var(--fs-11); }
+.staff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-3); }
+.branch-preview { font-family: var(--mono); font-size: var(--fs-12); word-break: break-all; }
+.colour-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 4px; }
+.colour-swatch { --c: var(--staff-blue); width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; padding: 0; }
+.colour-swatch.on { border-color: var(--fg); box-shadow: inset 0 0 0 2px var(--surface-1); }
+.staff-sheet textarea.field { resize: vertical; font: inherit; }
+@media (min-width: 720px) {
+  .executor-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (max-width: 479px) {
+  .staff-grid { grid-template-columns: minmax(0, 1fr); }
+  .staff-row { padding: 10px; gap: var(--space-2); }
+  .staff-side .status { display: none; }
+  .staff-status-inline { display: block; margin-top: 2px; }
+}
+
+/* The terminal: the session dock under the conversation, its tabs and panes, the full-screen view
+   and the phone's list. A terminal takes every column it is given, so the dock spans the whole
+   conversation column rather than the reading stripe; the container is teal (the accent) and the
+   host amber (warn), in the pill and on a host tab's edge. */
+.term-dock { flex: none; display: flex; flex-direction: column; height: var(--dock-h); min-height: 0; position: relative; border-top: 1px solid var(--line-strong); background: var(--term-bg); }
+.term-dock.closed { display: none; }
+.term-grip { position: absolute; top: -4px; left: 0; right: 0; height: 8px; cursor: row-resize; z-index: 3; touch-action: none; }
+.term-grip:hover, .term-grip:active { background: linear-gradient(transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.term-bar { flex: none; display: flex; align-items: stretch; height: var(--row-h-dense); background: var(--surface-1); border-bottom: 1px solid var(--line); min-width: 0; }
+.term-tabs { flex: 1; min-width: 0; display: flex; align-items: center; overflow-x: auto; scrollbar-width: none; }
+.term-tabs::-webkit-scrollbar { display: none; }
+.term-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 100%; max-width: 220px; padding: 0 4px 0 10px; border-right: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-family: var(--mono); cursor: pointer; user-select: none; }
+.term-tab:hover { color: var(--fg); background: var(--surface-2); }
+.term-tab.on { color: var(--fg); background: var(--term-bg); box-shadow: inset 0 2px 0 var(--accent); }
+.term-tab.on.host { box-shadow: inset 0 2px 0 var(--warn); }
+.term-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.term-tab-title { min-width: 0; }
+.term-tab-code { color: var(--fg-3); font-size: var(--fs-11); }
+/* A sandboxed terminal: a shield before its title, in the tab, the full view and the phone's list. */
+.term-shield { flex: none; display: inline-flex; color: var(--accent); }
+.term-tab-x { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); cursor: pointer; padding: 0; opacity: 0; }
+.term-tab:hover .term-tab-x, .term-tab.on .term-tab-x, .term-tab-x:focus-visible { opacity: 1; }
+.term-tab-x:hover { background: var(--surface-3); color: var(--fg); }
+.term-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.term-dot.unseen { background: var(--accent); box-shadow: none; }
+.term-dot.bell { background: var(--warn); box-shadow: none; }
+.term-dot.exited { background: var(--fg-3); box-shadow: none; }
+.term-dot.cmd-ok { background: var(--ok); box-shadow: none; }
+.term-dot.cmd-failed { background: var(--bad); box-shadow: none; }
+.term-dot.cmd-running { box-shadow: inset 0 0 0 2px var(--accent); }
+.term-tabs > .iconbtn { margin-left: 2px; }
+.term-tools { flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; }
+/* A touch tablet is wide enough for the desktop's dock but is worked with a thumb: the dock's tools
+   take the touch size there. At the desktop's 32px they sat 30px apart, glyph against glyph. */
+@media (pointer: coarse) {
+  .term-bar { height: var(--row-h-touch); }
+  .term-bar .iconbtn.small { width: var(--row-h-touch); height: var(--row-h-touch); }
+}
+.term-env { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; margin-right: 4px; border-radius: var(--radius-pill); border: 1px solid; font-size: var(--fs-11); font-weight: 500; white-space: nowrap; }
+.term-env.container { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.term-env.host { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+/* The small one, for a row of a list and a header's corner: the same pill, one size down. */
+.term-env.tiny { height: 18px; padding: 0 6px; margin-right: 0; flex: none; letter-spacing: .04em; }
+.term-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.term-panes.split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.term-slot { min-width: 0; min-height: 0; display: flex; }
+.term-slot.hidden { display: none; }
+.term-slot.left { order: 0; }
+.term-slot.right { order: 1; border-left: 1px solid var(--line-strong); }
+.term-empty, .term-away { padding: 12px 14px; font-size: var(--fs-13); }
+.term-view { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--term-bg); }
+.term-view.hidden { display: none; }
+.term-screen { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 4px 0 0 8px; }
+.term-host { width: 100%; height: 100%; }
+.term-host .xterm { height: 100%; }
+/* A command's mark: xterm.js draws the decoration over the prompt's first cell, and the dot hangs to
+   the left of it, in the screen's padding, so no character of the prompt is covered. The cell itself
+   stays transparent to the pointer: a click there still selects. */
+.term-host .xterm-decoration.term-mark { pointer-events: none; }
+.term-host .xterm-decoration.term-mark::before { content: ""; position: absolute; left: -7px; top: calc(50% - 2.5px); width: 5px; height: 5px; border-radius: 50%; background: var(--fg-3); }
+.term-host .xterm-decoration.term-mark[data-result="ok"]::before { background: var(--ok); }
+.term-host .xterm-decoration.term-mark[data-result="failed"]::before { background: var(--bad); }
+.term-host .xterm-decoration.term-mark[data-result="running"]::before { background: var(--accent); }
+.term-host .xterm-decoration.term-mark.current::before { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 45%, transparent); }
+.term-menu-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
+.term-menu button { min-width: 240px; }
+.term-menu-key { margin-left: 16px; font-size: var(--fs-11); font-family: var(--mono); }
+/* xterm.js paints the space below its last row black whatever the theme; in the light scheme that
+   is a black bar under every terminal. */
+.term-host .xterm:not(.allow-transparency) .xterm-viewport { background-color: var(--term-bg); }
+.term-strips { position: absolute; left: 10px; right: 18px; bottom: 8px; z-index: 4; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: none; }
+.term-strip { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 3px 10px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); pointer-events: auto; }
+.term-strip.bad { color: var(--bad); }
+.term-strip.other { color: var(--warn); }
+.term-strip.agent { color: var(--info); }
+.term-strip-action { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.term-strip-action:hover { text-decoration: underline; }
+.term-search { position: absolute; top: 6px; right: 14px; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop); max-width: calc(100% - 28px); }
+.term-search-field { width: 180px; min-width: 60px; flex: 1 1 auto; height: var(--ctl-h-sm); border: 0; background: transparent; color: var(--fg); font-size: var(--fs-13); outline: none; }
+.term-search-count { color: var(--fg-3); font-size: var(--fs-11); min-width: 40px; text-align: right; white-space: nowrap; }
+.term-flag { min-width: 26px; height: 24px; padding: 0 4px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-12); cursor: pointer; }
+.term-flag:hover { background: var(--surface-3); }
+.term-flag.on { background: var(--surface-4); color: var(--fg); }
+.term-exit { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); background: var(--surface-1); font-size: var(--fs-12); color: var(--fg-2); }
+.term-exit-text { flex: 1; min-width: 0; }
+.term-exit .btn .ic { margin-right: 4px; }
+.term-full { position: fixed; inset: 0; z-index: 28; display: flex; flex-direction: column; background: var(--term-bg); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.term-full-head { flex: none; display: flex; align-items: center; gap: 8px; height: var(--head-h); padding: 0 10px; background: var(--surface-1); border-bottom: 1px solid var(--line); min-width: 0; }
+.term-full-title { min-width: 0; font-family: var(--mono); font-size: var(--fs-13); }
+.term-button { position: relative; }
+.term-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg); font-size: var(--fs-11); line-height: 14px; text-align: center; pointer-events: none; }
+.term-count.unseen { background: var(--accent); color: var(--accent-ink); }
+.iconbtn.on .term-count { background: var(--accent); color: var(--accent-ink); }
+.erow-terms { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--fg-2); font-size: var(--fs-11); }
+.menu button.warn { color: var(--warn); }
+.menu button.warn .ic { color: var(--warn); }
+.term-sheet-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h); padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.term-sheet-row:active { background: var(--surface-2); }
+.term-sheet-title { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-13); }
+.term-sheet-empty { padding: 8px; }
+.term-sheet-actions { display: flex; padding-top: 8px; }
+.term-sheet-actions .btn .ic { margin-right: 6px; }
+.term-paste p { margin: 0 0 8px; }
+.term-paste-preview { max-height: 160px; overflow: auto; margin: 0; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); white-space: pre-wrap; word-break: break-all; }
+.term-paste-remember { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--fs-13); color: var(--fg); }
+.term-link-uri { word-break: break-all; font-size: var(--fs-12); }
+@media (max-width: 1023px) {
+  .term-full-head .iconbtn.small { width: var(--ctl-h); height: var(--ctl-h); }
+  .term-screen { padding-left: 4px; }
+}
+
+/* A project's board. On a phone and in a narrow panel it is one list under chips; from 1024 px the
+   columns stand side by side and each scrolls with the page, so a long queue never hides the review. */
+.pboard-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.pboard-unknown-stops { min-width: 0; margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); font-size: var(--fs-12); }
+.pboard-unknown-stops > summary { cursor: pointer; color: var(--warn); font-weight: 600; }
+.pboard-unknown-stops > p { margin: 8px 0; }
+.pboard-unknown-row { min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.pboard-unknown-row:first-of-type { margin-top: 8px; }
+.pboard-unknown-row > details { margin: 6px 0; }
+.pboard-unknown-row > details summary { cursor: pointer; color: var(--fg-2); }
+.pboard-unknown-row dl { margin: 8px 0; }
+.pboard-unknown-row dl > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 6px; padding: 2px 0; }
+.pboard-unknown-row dt { color: var(--fg-3); }
+.pboard-unknown-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.pboard-unknown-stops > .linkbtn { margin-right: 12px; }
+.pboard-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.pboard-section .section-title, .pboard-list > .section-title { margin: 10px 2px 2px; }
+.pboard-none { color: var(--fg-3); font-size: var(--fs-12); padding: 6px 4px; }
+.pboard-fold { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-12); color: var(--fg-2); align-items: center; }
+.pboard-fold .ic { transform: rotate(-90deg); transition: transform .15s ease; }
+.pboard-fold[aria-expanded="true"] .ic { transform: none; }
+.pboard-chips .chip.need:not([aria-pressed="true"]) { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.pcard { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); cursor: pointer; }
+.pcard:hover { background: var(--surface-2); }
+.pcard:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pcard.p1 { box-shadow: inset 3px 0 0 var(--bad); }
+.pcard.p2 { box-shadow: inset 3px 0 0 var(--warn); }
+.pcard.done, .pcard.dropped { opacity: 0.75; }
+.pcard.need { cursor: default; border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--surface-1)); }
+.pcard.need:hover { background: color-mix(in srgb, var(--warn) 7%, var(--surface-1)); }
+.pcard-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+/* The issue number is a link inside a clickable card; it keeps the chip's look and does not shrink away. */
+.pcard-issue { flex: none; text-decoration: none; color: inherit; font-variant-numeric: tabular-nums; }
+.pcard-issue:hover { text-decoration: underline; }
+.issue-import-repo { display: flex; gap: var(--space-2); align-items: center; }
+.issue-import-repo input.field { flex: 1; min-width: 0; }
+.issue-import-repo .btn { flex: none; }
+.issue-import-head { display: flex; align-items: center; gap: var(--space-2); margin-top: 12px; }
+.issue-row { align-items: flex-start; margin: 8px 0 0; }
+.issue-row input { margin-top: 2px; flex: none; }
+.issue-row.is-off { cursor: default; }
+.issue-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.issue-row-title { overflow-wrap: anywhere; }
+.issue-row-number { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pboard-import { display: block; margin: 0 0 8px; }
+.pcard-title { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; overflow-wrap: anywhere; }
+.pcard-line { font-size: var(--fs-12); min-width: 0; }
+.pcard-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--fg-2); font-size: var(--fs-12); }
+.pcard-meta > .truncate, .pcard-meta > .pcard-status { min-width: 0; }
+.pcard-status .dot { flex: none; }
+.pcard-who { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.pcard-short { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); flex: none; }
+.pcard-branch { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-2); min-width: 0; display: block; }
+.pcard .btn.small { flex: none; }
+.btn.warn { color: var(--warn); background: transparent; border-color: color-mix(in srgb, var(--warn) 50%, transparent); font-weight: 600; }
+.btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
+.host-capacity { margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
+.host-capacity.waiting { border-color: var(--warn); color: var(--fg); }
+.host-capacity-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.host-capacity-line > span { min-width: 0; overflow-wrap: anywhere; }
+.host-capacity-details { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+.host-capacity-details ol { margin: 6px 0 0; padding-left: 22px; }
+.host-capacity-details li { padding: 2px 0; }
+.task-workflow, .task-context { border-top: 1px solid var(--line); padding: 12px 0; }
+/* The section-title carries a two-pixel inline margin on board sections; alongside a full-width
+   button it widened the sheet's scroll area on a phone. Keep the whole heading tappable. */
+.task-workflow > .section-title, .task-context > .section-title { width: 100%; margin-inline: 0; text-align: left; }
+.task-workflow-body { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-body p { margin: 0; }
+.task-workflow-create, .task-workflow-run { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-step { display: grid; grid-template-columns: auto minmax(100px, 1fr) minmax(120px, 2fr); gap: 6px; align-items: center; margin: 8px 0; }
+.task-workflow-step > .field { min-width: 0; }
+.task-workflow-step > button, .task-workflow-step > select:nth-of-type(3) { grid-column: 2 / -1; justify-self: start; }
+.task-workflow .pboard-item { min-width: 0; }
+@media (max-width: 440px) { .task-workflow-step { grid-template-columns: auto minmax(0, 1fr); } .task-workflow-step > select, .task-workflow-step > button { grid-column: 2; } }
+.pboard-moves { margin: 0 0 6px; flex-wrap: wrap; }
+.pboard-brief { border: 0; padding: 0; margin: 0; min-width: 0; }
+.pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-2); font-size: var(--fs-12); }
+.pboard-moves .sub { align-self: center; }
+.pboard-sheet textarea.field { resize: vertical; font: inherit; }
+.pboard-deps { margin-bottom: 4px; min-width: 0; }
+.pboard-notes { max-height: 180px; overflow: auto; }
+.pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.pcard-review .chip { flex: none; }
+.pcard-accept .ic { width: 11px; height: 11px; }
+/* The acceptance and the requirements of a card in its sheet: read-only blocks drawn like the review's.
+   Each item is its label in a narrow column and everything about it beside, so the text of a check
+   lines up under itself on a phone instead of wrapping back under "C1". */
+.pboard-contract { margin-top: 12px; }
+.pboard-contract-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.pboard-contract-head .pboard-contract-title { margin: 0; }
+.pboard-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--fs-13); }
+.pboard-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: baseline; min-width: 0; }
+.pboard-item > * { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.pboard-item-line { display: flex; align-items: baseline; gap: 6px; }
+.pboard-item-text { flex: 1; min-width: 0; }
+.pboard-item-line .chip { flex: none; }
+.pboard-item .sub { font-size: var(--fs-12); }
+.pboard-item.superseded .pboard-item-text, .pboard-item.withdrawn .pboard-item-text { text-decoration: line-through; color: var(--fg-3); }
+.pboard-item.superseded, .pboard-item.withdrawn { opacity: 0.75; }
+.pboard-req-file { display: flex; align-items: center; gap: 4px; }
+.pboard-req-file .ic { flex: none; }
+.pboard-deliveries { display: flex; flex-wrap: wrap; gap: 4px; }
+.pboard-deliveries .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The review of a staff branch in the task sheet: a bordered block over the move buttons, every row
+   free to shrink so a long branch name or path never widens the sheet on a phone. */
+.review-panel, .pboard-contract { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.review-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); }
+.review-head .pcard-branch { flex: 0 1 auto; }
+.review-stat { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-13); }
+.review-commits, .review-files, .review-receipts, .review-blockers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); min-width: 0; }
+.review-commits li, .review-files li, .review-receipts li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.review-commits li > .truncate, .review-files li > .truncate, .review-receipts li > .truncate { flex: 1; min-width: 0; }
+.review-files li > .num { flex: none; }
+.review-receipts li.ok { color: var(--ok); }
+.review-receipts li.bad, .review-blockers li.bad { color: var(--bad); }
+.review-blockers li.attn { color: var(--warn); }
+.review-blockers li::before { content: "· "; }
+.review-actions { flex-wrap: wrap; margin: 2px 0 0; }
+.review-why { font-size: var(--fs-12); }
+.review-reject { display: flex; flex-direction: column; gap: 4px; }
+.review-reject textarea.field { resize: vertical; font: inherit; }
+.review-diff .diff-view { font-size: var(--fs-mono); }
+.review-diff-scope { max-width: 420px; margin-bottom: 8px; }
+.review-base { font-size: var(--fs-12); overflow-wrap: anywhere; }
+.review-why.bad { color: var(--bad); }
+.review-why.attn { color: var(--warn); }
+.review-ci-setup { min-width: 0; font-size: var(--fs-12); }
+.review-ci-setup summary { color: var(--link); cursor: pointer; }
+.review-ci-fields { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+.review-ci-fields p { margin: 0; }
+.review-ci-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.review-ci-fields .field { width: 100%; min-width: 0; box-sizing: border-box; }
+.review-ci-fields textarea.field { resize: vertical; font: inherit; }
+.review-ci-fields .btn { align-self: flex-start; }
+@media (min-width: 1024px) {
+  .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(170px, 0.8fr); gap: 12px; align-items: start; }
+  .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 4px 6px 8px; border-radius: var(--radius-md); }
+  .pboard-col.needs { background: color-mix(in srgb, var(--warn) 5%, transparent); }
+  .pboard-col .section-title { margin: 6px 4px 4px; }
+}
+
+/* Push on this device: the Settings card and the phone's nudge above the notification list. */
+.push-steps { margin: 8px 0 0; padding-left: 20px; color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); display: grid; gap: 4px; }
+.push-error { color: var(--bad); }
+.push-test-result { margin: 8px 0 0; padding-left: 18px; color: var(--fg-2); font-size: var(--fs-13); display: grid; gap: 2px; }
+.push-nudge { display: block; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); text-decoration: none; box-shadow: inset 0 0 0 1px var(--line); }
+.push-nudge:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+/* The Terminals screen: cards with the last rows of each screen, grouped by project; the load bar in
+   the header; the full-screen view with its grid of up to four. */
+.pagehead .term-filters { margin: 6px 0 2px; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+.pagehead .term-filters::-webkit-scrollbar { display: none; }
+.term-new-button .ic { margin-right: 4px; }
+.term-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
+.term-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
+.term-card.host { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); box-shadow: inset 3px 0 0 var(--warn); }
+.term-card.finished { opacity: .66; }
+.term-card-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.term-card-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.term-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 10px 12px 0; }
+.term-card-title { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-13); font-weight: 600; }
+.term-card-head .term-env { margin-right: 0; }
+.term-card-owner { padding: 0 12px 6px; font-size: var(--fs-12); }
+.term-card-preview { margin: 0; height: calc(6 * 1.45em + 16px); padding: 8px 12px; overflow: hidden; background: var(--term-bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-11); line-height: 1.45; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+/* A line wider than the card ends in an ellipsis: clipped bare, "cd ../daedalus" read as "cd ../daeda",
+   a whole command that was never typed. */
+.term-card-line { white-space: pre; overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
+.term-card-foot { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px 8px 4px 12px; min-width: 0; }
+.term-card-status { flex: 1; min-width: 0; font-size: var(--fs-12); }
+.term-card-status[data-level="warn"] { color: var(--warn); }
+.term-card-status[data-level="bad"] { color: var(--bad); }
+.term-card-foot .btn.small { flex: none; }
+.term-group + .term-group { margin-top: var(--space-2); }
+
+.term-new-path { display: flex; gap: var(--space-2); align-items: center; }
+.term-new-path .field { flex: 1; min-width: 0; font-family: var(--mono); }
+.term-new-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2); }
+.term-new-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* Where a new terminal runs (terminal/picker.tsx): a popover from the "+" on a desktop, a sheet on a
+   phone. The host is amber, as every host terminal is; the place chosen last carries a quiet tag. */
+.menu.pop.term-pick-pop { width: min(360px, calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); padding: 4px; }
+.term-pick { display: flex; flex-direction: column; }
+.term-pick-title { padding: 6px 10px 4px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.menu .term-pick-row, .term-pick-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-touch); padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.term-pick-row:hover:not(:disabled), .term-pick-row:focus-visible { background: var(--surface-3); outline: none; }
+.term-pick-row:disabled { opacity: .5; cursor: default; }
+.term-pick-row > .ic { flex: none; color: var(--accent); }
+.term-pick-row.host > .ic { color: var(--warn); }
+.term-pick-row.sandbox > .ic { color: var(--fg-2); }
+.term-pick-text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.term-pick-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); }
+.term-pick-sub { font-size: var(--fs-12); color: var(--fg-2); }
+.term-pick-sub.mono { font-family: var(--mono); }
+.term-pick-sub.why { white-space: normal; }
+.term-pick-tag { flex: none; padding: 0 6px; border-radius: 999px; font-size: var(--fs-11); line-height: 18px; }
+.term-pick-tag.ok { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.term-pick-tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.term-pick-last { margin-left: auto; flex: none; color: var(--fg-3); font-size: var(--fs-11); }
+.term-pick-key { flex: none; min-width: 18px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-11); text-align: center; }
+.term-pick-row .menu-check { margin-left: auto; flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
+.term-pick-row .menu-check.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.term-pick-folder { display: grid; gap: var(--space-2); padding: 8px; }
+.term-pick-folder .term-new-actions { margin-top: var(--space-1); }
+.term-pick-folder .segmented .ic { margin-right: 4px; }
+.term-pick-sheet .term-pick { padding: 0 var(--space-2) var(--space-3); }
+.term-pick-sheet .term-pick-folder { padding: 0 var(--space-3) var(--space-3); }
+
+/* Clean-up on the Overview: a terminal's End beside Open, the selection, the group's End all, and the
+   question that lists what each one stops. */
+.term-card { position: relative; }
+.term-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.term-card.stale:not(.selected) { border-style: dashed; }
+.term-card-status[data-level="stale"] { color: var(--warn); }
+.term-card-check { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; padding: 4px; border-radius: var(--radius-xs); }
+.term-card.selecting .term-card-head { padding-left: 36px; }
+.term-card-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+/* Red words, no red frame: a row of framed red buttons read as an alarm over every card. */
+.term-card-foot .term-card-end { border-color: transparent; }
+.term-card-end .ic { margin-right: 4px; }
+.term-group-title { display: flex; align-items: center; gap: var(--space-2); }
+.term-group-end { margin-left: auto; }
+.term-group-end .ic, .tp-overview .pagehead .btn.small .ic { margin-right: 4px; }
+.pagehead .btn.small .num { margin-left: 4px; color: var(--fg-2); }
+.pagehead .btn[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-strong); }
+.term-select-bar { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0 2px; }
+.term-bulk-list { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; max-height: 40vh; overflow: auto; }
+.term-bulk-list li { overflow-wrap: anywhere; }
+.term-bulk-title { font-family: var(--mono); font-size: var(--fs-13); }
+/* What stops in it, under its title: the command line or the member's session. */
+.term-bulk-note { display: block; color: var(--warn); font-size: var(--fs-12); background: none; padding: 0; }
+.term-phone-end { color: var(--bad); }
+
+.pagehead .loadbar { margin: 6px 0 2px; }

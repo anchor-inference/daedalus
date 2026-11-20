@@ -1,0 +1,407 @@
+/* ── a command-line staff member's view: terminal or Feed, receipts, requests, the composer ──── */
+.staff-cli .staff-mode { flex: none; }
+.staff-head-facts { color: inherit; opacity: .85; }
+.staff-head-runs { min-width: 0; }
+.staff-term { flex: 1; min-height: 0; display: flex; border-bottom: 1px solid var(--line); }
+.feed-turns { display: grid; gap: var(--space-4); width: min(100%, var(--chat-w)); margin: 0 auto; padding-bottom: var(--space-4); }
+.feed-turn { display: grid; gap: 6px; min-width: 0; }
+.feed-turn-head { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--fs-12); color: var(--fg-2); }
+.feed-turn-who { font-weight: 600; color: var(--fg); }
+.feed-turn.orchestrator .feed-turn-who { color: var(--accent); }
+.feed-turn-at, .feed-turn-spend { color: var(--fg-3); }
+.feed-prompt { padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); font-size: var(--fs-14); line-height: var(--lh-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.feed-turn.orchestrator .feed-prompt { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.feed-answer { padding-top: 0; }
+.feed-tools { font-size: var(--fs-13); color: var(--fg-2); }
+.feed-tools-head { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
+.feed-tools-failed { color: var(--bad); }
+.feed-tools-chevron { flex: none; display: inline-flex; color: var(--fg-3); transition: transform var(--t-fast); }
+.feed-tools.open .feed-tools-chevron { transform: rotate(90deg); }
+.feed-tool-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.feed-tool { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
+.feed-tool-name { flex: none; font-size: var(--fs-12); color: var(--fg); }
+.feed-tool.failed .feed-tool-name { color: var(--bad); }
+.feed-tool-summary { min-width: 0; }
+.staff-foot { flex: none; display: grid; gap: 6px; width: min(100%, var(--chat-w)); margin: 0 auto; padding: 6px 16px 12px; }
+.staff-message-retry { flex: none; }
+/* The messages live beside the terminal, not under it: a marker in the header while one is on its way
+   or failed, the list in the Session tab, and in the Feed the ones the transcript cannot show yet. */
+.staff-attention { flex: none; display: inline-flex; align-items: center; gap: 4px; height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.staff-attention:hover { background: var(--surface-2); }
+.staff-attention.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.staff-attention-n { font-variant-numeric: tabular-nums; }
+.staff-message-list { display: grid; }
+.staff-message-list .staff-message { flex-wrap: wrap; row-gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.staff-message-list .staff-message:last-child { border-bottom: 0; }
+.staff-message-list .staff-message-from { flex: 1; min-width: 0; }
+.staff-message-list .staff-message-text { order: 3; flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; color: var(--fg); }
+.feed-outbox { display: grid; gap: 4px; padding-top: var(--space-2); border-top: 1px dashed var(--line); }
+.staff-keyboard { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); font-size: var(--fs-12); }
+.staff-requests { display: grid; gap: 6px; }
+.staff-request { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.staff-request-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--warn); font-size: var(--fs-13); }
+.staff-request-text { flex: 1; min-width: 0; color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); }
+.staff-request-id { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
+.staff-request-routed { color: var(--fg-2); font-size: var(--fs-12); }
+.staff-compose { display: flex; align-items: flex-end; gap: var(--space-2); min-width: 0; }
+.staff-compose-field { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 30vh; padding: 6px 10px; resize: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: var(--lh-ui); field-sizing: content; }
+.staff-compose .staff-when { flex: none; }
+.staff-when button[disabled] { opacity: .45; cursor: not-allowed; }
+.staff-health { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
+.staff-health-parts { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.staff-health .ic { flex: none; margin-top: 1px; color: var(--ok); }
+.staff-health.warn .ic { color: var(--warn); }
+.staff-health-part.warn { color: var(--warn); }
+.staff-health.compact { margin-top: 2px; }
+/* The step a member's attempt is stuck at or was stopped at: amber while its clock still runs, red
+   once it ran out, so a member stopped at a deadline reads as stopped, not as quietly "exited". */
+.staff-cond { display: flex; align-items: flex-start; gap: 10px; margin-top: 2px; font-size: var(--fs-12); color: var(--warn); min-width: 0; }
+.staff-cond.bad { color: var(--bad); }
+.staff-cond .ic { flex: none; margin-top: 1px; }
+.staff-cond-text { min-width: 0; overflow-wrap: anywhere; }
+.staff-cond-text b { font-weight: 600; }
+.staff-cond-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-13); }
+.staff-cond-item { display: grid; grid-template-columns: 8px minmax(96px, auto) 1fr; align-items: baseline; gap: 8px; }
+.staff-cond-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); align-self: center; }
+.staff-cond-item.ok .staff-cond-mark { background: var(--ok); }
+.staff-cond-item.wait .staff-cond-mark { background: var(--warn); }
+.staff-cond-item.bad .staff-cond-mark { background: var(--bad); }
+.staff-cond-item.bad .staff-cond-why { color: var(--bad); }
+.staff-cond-item.wait .staff-cond-why { color: var(--warn); }
+.staff-cond-why { color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
+.staff-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface-1); }
+.staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+/* Five tabs in Russian are wider than the narrowest column (280 px): the row scrolls sideways, as
+   the session panel's tab list does, rather than wrapping under itself or clipping the last tab. */
+.staff-panel > .panel-tabs { padding-right: 4px; }
+/* The panel body is a grid, whose items grow to their longest unbroken line: a Details row would
+   push the whole column past the aside. The rows wrap instead, the key taking a fixed share. */
+.staff-panel-body > .details { min-width: 0; }
+.staff-details .dt-row { flex-wrap: wrap; align-items: baseline; padding-block: 2px; }
+.staff-details .dt-key { flex: 0 0 38%; min-width: 0; }
+.staff-details .dt-row > .grow { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.staff-panel-body { display: grid; align-content: start; gap: var(--space-3); font-size: var(--fs-13); }
+.staff-aside-section { display: grid; gap: 4px; }
+/* The Session tab's headings are the Details tab's (.dt-label): one heading style in one column. The
+   Session tab once had small capitals and the Details tab sentence case, side by side on one panel. */
+.staff-aside-label { color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.staff-session > .staff-aside-section + .staff-aside-section { padding-top: 10px; border-top: 1px solid var(--line); }
+.staff-aside-line { min-width: 0; overflow-wrap: anywhere; }
+.staff-aside-line.mono { font-size: var(--fs-12); }
+.staff-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.staff-event { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
+.staff-event-at { flex: none; color: var(--fg-3); font-size: var(--fs-11); }
+.staff-event-text { min-width: 0; }
+.staff-event-report { align-items: flex-start; }
+.staff-event-report-body { flex: 1; min-width: 0; }
+.staff-event-report-body .result-original { margin-top: var(--space-2); }
+.staff-changes-head { display: flex; align-items: center; gap: var(--space-2); justify-content: space-between; }
+.staff-files { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: 2px; }
+.staff-file { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: var(--row-h-dense); }
+.staff-file-path { flex: 1; min-width: 0; font-size: var(--fs-12); }
+.staff-file-added { color: var(--ok); font-size: var(--fs-12); }
+.staff-file-removed { color: var(--bad); font-size: var(--fs-12); }
+.staff-notes { display: grid; gap: 6px; }
+.staff-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--lh-ui); }
+.staff-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.staff-rule { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: var(--row-h-dense); }
+.staff-rule .ic { flex: none; color: var(--ok); }
+.staff-rule-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.staff-rule .btn { flex: none; }
+@media (min-width: 1024px) {
+  /* The column's own width until the operator drags its edge (--staff-aside-w, kept per browser);
+     a dragged width still leaves the terminal 480 px when the window is made narrower later. */
+  .chat-body.with-staff-aside { display: grid; grid-template-columns: minmax(0, 1fr) max(260px, min(var(--staff-aside-w, clamp(280px, 26%, 360px)), calc(100% - 480px))); }
+  .staff-aside { position: relative; }
+  .staff-aside > .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
+  .staff-aside > .pane-handle:focus-visible { outline: none; }
+  .staff-aside > .pane-handle:focus-visible::after { background: var(--accent); width: 2px; }
+  /* Laid over the whole body rather than widened: out of the grid's flow, the column it leaves
+     keeps its width, so the terminal underneath keeps its size and its PTY hears no resize. */
+  .chat-body.with-staff-aside > .staff-aside.expanded { position: absolute; inset: 0; z-index: 6; border-left: 0; }
+  .staff-request .ask-answers-row .btn { flex: none; min-height: var(--ctl-h); }
+  .staff-request .ask-answers-own .field, .staff-request .ask-answers-own .btn { min-height: var(--ctl-h); }
+}
+@media (max-width: 1023px) {
+  .staff-cli .chat-head .segmented.inline button { padding: 4px 10px; }
+  .staff-compose { flex-wrap: wrap; }
+  .staff-compose .staff-when { order: 2; }
+  .staff-compose .staff-compose-send { order: 3; margin-left: auto; }
+  .staff-compose-field { flex-basis: 100%; }
+}
+@media (hover: none) {
+  .staff-compose-field { font-size: 16px; }
+}
+.staff-session { display: grid; gap: var(--space-4); }
+
+/* ── the Harnesses screen: a table on a desktop, a card per CLI on a phone ───────────────── */
+.harness-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.harness-actions .btn { gap: 6px; }
+.harness-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.harness-table th { text-align: left; font-weight: 500; font-size: var(--fs-12); color: var(--fg-3); padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface-1); white-space: nowrap; }
+.harness-table td { padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; height: var(--row-h); }
+.harness-name { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; }
+.harness-name .ic-chevron { color: var(--fg-3); transition: rotate 150ms; }
+.harness-row.open .harness-name .ic-chevron, .harness-card-more[aria-expanded="true"] .ic-chevron { rotate: 90deg; }
+.harness-version { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.harness-mark { font-size: var(--fs-11); padding: 1px 6px; border-radius: var(--radius-pill); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); white-space: nowrap; }
+.harness-mark.verified { color: var(--fg-2); border-color: var(--line); }
+.harness-mark.unsupported { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.harness-newer { color: var(--accent); }
+.harness-signin.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.harness-signin.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.harness-models { color: var(--fg-2); }
+.harness-action { text-align: right; white-space: nowrap; }
+.harness-table th.harness-action { text-align: right; }
+.harness-screen .btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.harness-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }
+.harness-busy .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: harness-spin 900ms linear infinite; }
+@keyframes harness-spin { to { rotate: 360deg; } }
+.harness-row-details td, .harness-row-refused td { background: var(--surface-1); height: auto; padding: 10px 12px 12px 44px; }
+.harness-details { display: grid; gap: 6px; }
+.harness-details-label { color: var(--fg-3); font-size: var(--fs-11); margin-top: 4px; }
+.harness-agents { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 12px; }
+.harness-agent { display: grid; gap: 2px; min-width: 0; }
+.harness-offer { display: grid; gap: 6px; }
+.harness-offer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.harness-check-line.failed { color: var(--bad); }
+.harness-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.harness-step { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--row-h-dense); font-size: var(--fs-12); }
+.harness-step.ok .ic { color: var(--ok); }
+.harness-step.failed { color: var(--bad); }
+.harness-step.skipped { color: var(--fg-3); }
+.harness-guard, .staff-guard { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 7%, transparent); color: var(--warn); font-size: var(--fs-12); line-height: var(--lh-ui); }
+.staff-guard { margin: 8px 0; }
+.harness-refused { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bad) 8%, transparent); color: var(--bad); font-size: var(--fs-12); }
+.harness-node { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-3); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); font-size: var(--fs-13); }
+.harness-node-name { font-weight: 600; }
+.harness-foot { display: flex; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-3); font-size: var(--fs-12); }
+.harness-foot .ic { flex: none; margin-top: 1px; }
+.harness-cards { display: grid; gap: var(--space-3); }
+.harness-card { display: grid; gap: var(--space-2); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
+.harness-card-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); }
+.harness-card-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-13); }
+.harness-card-facts dt { color: var(--fg-3); }
+.harness-card-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.harness-card-more { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: var(--row-h); padding: 0; background: none; border: 0; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.harness-card .harness-card-head .btn.small { min-height: var(--ctl-h); }
+.harness-name b { white-space: nowrap; }
+.harness-row.open .harness-name .ic-chevron, .harness-card-more[aria-expanded="true"] .ic-chevron { rotate: 180deg; }
+.harness-step { min-height: 24px; }
+.harness-actions .harness-update-all { margin-left: auto; }
+
+/* The main orchestrator: its pinned entry, and the questions and dispatches above its conversation. */
+.main-entry { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; border: 1px solid transparent; }
+.main-entry:hover { background: var(--surface-2); }
+.main-entry.current { background: var(--surface-2); border-color: var(--line); }
+.main-entry-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); flex: none; }
+.main-entry.working .main-entry-icon { box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 45%, transparent); }
+.main-entry-text { display: grid; min-width: 0; flex: 1; }
+.main-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.main-entry-name { font-size: var(--fs-14); font-weight: 600; }
+.main-entry-sub { font-size: var(--fs-12); color: var(--fg-2); }
+.main-pill { flex: none; font-size: var(--fs-11); padding: 1px 8px; border-radius: var(--radius-pill); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); white-space: nowrap; }
+/* The main chat's open questions and the work under way, after the latest turn in the timeline. */
+.main-flow { display: grid; gap: 10px; margin: 8px 0 4px; min-width: 0; }
+.main-setup { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); font-size: var(--fs-13); }
+.main-dispatches { display: grid; gap: 6px; }
+.dispatch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.dispatch-card.tone-info { border-left-color: var(--info); }
+.dispatch-card.tone-ok { border-left-color: var(--ok); }
+.dispatch-card.tone-warn { border-left-color: var(--warn); }
+.dispatch-card.tone-bad { border-left-color: var(--bad); }
+.dispatch-card.tone-faint { border-left-color: var(--line); opacity: 0.8; }
+.dispatch-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-12); }
+.dispatch-project { font-weight: 600; color: var(--fg); text-decoration: none; min-width: 0; }
+.dispatch-seq { color: var(--fg-2); }
+.dispatch-state { padding: 0 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); }
+.dispatch-state.tone-info { color: var(--info); }
+.dispatch-state.tone-ok { color: var(--ok); }
+.dispatch-state.tone-warn { color: var(--warn); }
+.dispatch-state.tone-bad { color: var(--bad); }
+.dispatch-age { margin-left: auto; flex: none; }
+.dispatch-body { display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; min-width: 0; }
+.dispatch-title { font-size: var(--fs-13); overflow-wrap: anywhere; }
+.dispatch-last { font-size: var(--fs-12); color: var(--fg-2); }
+.dispatch-detail { display: grid; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); font-size: var(--fs-12); }
+.dispatch-asked { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
+.dispatch-message { display: grid; gap: 1px; }
+.dispatch-message-head { color: var(--fg-2); }
+.dispatch-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Cancel sits beside the description, not on a row of its own: on its own row it roughly doubled
+   every card's height with empty space, and on a phone pushed the questions line and the composer
+   down the screen. */
+.dispatch-head, .dispatch-detail { grid-column: 1 / -1; }
+.dispatch-body { grid-column: 1; }
+.dispatch-actions { grid-column: 2; grid-row: 2; align-self: end; display: flex; justify-content: flex-end; }
+/* ── the two modes (orchestration.tsx, mode.ts) ─────────────────────────────────────────────
+   The rail's two mode items switch between them (the first two tabs on a phone). The count on
+   Orchestration is the one trace of that mode in Agents, so it is drawn quietly — a neutral pill, not
+   the red of an unread badge. */
+.mode-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
+.tab-badge.mode-count { background: var(--surface-3); color: var(--fg-2); }
+.orch-body { padding: 0 8px 12px; gap: 1px; }
+.orch-main { flex: none; }
+.orch-section { padding: 10px 9px 4px; font-size: var(--fs-11); }
+.orch-empty { padding: 4px 9px; font-size: var(--fs-12); }
+.orch-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; }
+.orch-row:hover { background: var(--surface-2); }
+.orch-row-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); flex: none; }
+.orch-row-text { display: grid; min-width: 0; flex: 1; }
+.orch-row-name { font-size: var(--fs-14); font-weight: 600; }
+.orch-row-meta { font-size: var(--fs-12); color: var(--fg-2); }
+.orch-list { display: flex; flex-direction: column; gap: 2px; }
+/* On a phone the tab bar holds both modes, five tabs to a row; a long word ends in an ellipsis rather
+   than pushing the bar wider than the screen. */
+.tabbar.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.tabbar.five > a, .tabbar.five > button { min-width: 0; }
+.tabbar .tab-label { max-width: 100%; padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* ── the Questions tab (questions/QuestionsPanel.tsx) ───────────────────────────────────────
+   A list to work through, not a feed: each card is a decision with its name, its text, its options
+   as chips and one field. What the operator has touched carries a bar at the card's left edge — amber
+   while it is a draft, the accent once it is ready — so the list shows at a glance what Send will
+   carry. The send bar stays at the foot of the tab however long the list is. */
+.panel-body.tab-questions { padding: 0; display: flex; flex-direction: column; }
+.questions-panel { flex: 1; min-height: 100%; display: flex; flex-direction: column; }
+/* Every grid on the way down to a chip has one column that may shrink below its content: an
+   implicit column is sized to its widest child, and a chip that would not wrap once made a card, and
+   the sheet with it, wider than a phone and scroll sideways. */
+.questions-list { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-4); }
+.questions-section, .questions-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0; }
+.questions-section-head, .questions-group-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 2px; color: var(--fg-3); font-size: var(--fs-11); font-weight: 500; }
+.questions-section.requests .questions-section-head { color: var(--warn); }
+.questions-group-head { text-transform: none; letter-spacing: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.questions-group-head a { color: var(--fg); text-decoration: none; }
+.questions-group-head a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.questions-count { min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 18px; text-align: center; letter-spacing: 0; }
+.questions-count:empty { display: none; }
+
+.q-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0; padding: var(--space-3) var(--space-3) 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); transition: border-color var(--t-base) var(--ease-out), background var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out); }
+.q-card::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: transparent; transition: background var(--t-base) var(--ease-out); }
+.q-card:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+.q-card.s-draft::before { background: var(--warn); }
+.q-card.s-ready::before { background: var(--accent); }
+.q-card.s-ready { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.q-card.host { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.q-card.fresh { animation: q-arrive 1.2s var(--ease-out); }
+@keyframes q-arrive {
+  0% { opacity: 0; transform: translateY(-6px); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+  25% { opacity: 1; transform: none; }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+/* A card that has left the list stays long enough to read why, then fades. */
+.q-card.s-sent, .q-card.s-withdrawn, .q-card.s-elsewhere, .q-card.s-aside { animation: q-leave var(--q-leave, 1.6s) var(--ease-in) forwards; }
+@keyframes q-leave { 0%, 72% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(0.98); } }
+.q-card.s-sent { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 5%, var(--surface-1)); }
+.q-card.s-withdrawn, .q-card.s-elsewhere, .q-card.s-aside { border-style: dashed; background: transparent; }
+/* A file held over a card that takes files: the card is where it lands. */
+.q-card.s-withdrawn .q-title { color: var(--fg-2); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg-3) 70%, transparent); }
+.q-card.s-conflict { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.q-card.s-refused { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+
+.q-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.q-kind { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.q-kind.k-permission { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.q-kind.k-folder, .q-kind.k-project { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
+.q-headline { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.q-title { margin: 0; font-size: var(--fs-14); font-weight: 600; line-height: var(--lh-ui); color: var(--fg); overflow-wrap: anywhere; }
+.q-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
+.q-short { flex: none; margin-top: 2px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.q-aside { width: var(--ctl-h-sm); height: var(--ctl-h-sm); margin: -2px -4px 0 -4px; border-radius: 50%; background: transparent; color: var(--fg-3); }
+.q-aside:hover { color: var(--fg); }
+.q-flag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: var(--radius-pill); font-size: var(--fs-11); font-weight: 600; line-height: 16px; }
+.q-flag.urgent { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.q-flag.updated { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); font-weight: 500; }
+.q-flag.host { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+
+.q-text { min-width: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
+.q-text > :first-child { margin-top: 0; }
+.q-text > :last-child { margin-bottom: 0; }
+.q-text p, .q-text ul, .q-text ol { margin: 0 0 6px; }
+.q-text ul, .q-text ol { padding-left: 18px; }
+.q-text code { font-family: var(--mono); font-size: var(--fs-12); padding: 1px 4px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--code); }
+.q-text pre { margin: 0 0 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); overflow-x: auto; font-size: var(--fs-12); }
+.q-text h1, .q-text h2, .q-text h3, .q-text h4 { margin: 4px 0; font-size: var(--fs-13); }
+.q-text.folded { max-height: 9em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.q-more { justify-self: start; display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+.q-more .ic { transition: transform var(--t-fast); }
+.q-more[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.q-suggestion { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
+.q-suggestion .ic { flex: none; margin-top: 2px; color: var(--accent); }
+
+.q-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.q-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: var(--ctl-h-sm); padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: calc(var(--ctl-h-sm) / 2); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; line-height: 1.35; text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
+/* An option is read whole, over as many lines as it takes: the operator chooses by it, and an
+   ellipsis hid the half that told two options apart. A link with no spaces breaks anywhere. */
+.q-chip-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.q-chip:hover { background: var(--surface-2); }
+.q-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.q-chip.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); }
+.q-chip.tone-ok.on { border-color: color-mix(in srgb, var(--ok) 70%, transparent); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.q-chip.tone-bad.on { border-color: color-mix(in srgb, var(--bad) 70%, transparent); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.q-check { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1.5px solid var(--fg-3); border-radius: 4px; color: var(--accent-ink); transition: background var(--t-fast), border-color var(--t-fast); }
+.q-chip.on .q-check { border-color: var(--accent); background: var(--accent); }
+
+.q-field { display: block; min-height: var(--ctl-h); margin: 0; padding: 6px 10px; resize: none; overflow-y: auto; font: inherit; font-size: var(--fs-13); line-height: 1.45; color: var(--fg); background: var(--bg); transition: border-color var(--t-fast); }
+.q-field:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.q-field.role-note { border-style: dashed; }
+/* The files of an answer: the paperclip first, then each file as the composer shows it. */
+.q-files { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.q-attach { width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: 50%; color: var(--fg-2); }
+.q-files-hint { min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
+.q-files .attachment-open { max-width: min(220px, 100%); }
+.q-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: var(--fs-12); }
+.q-foot:empty { display: none; }
+.q-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.q-state i { width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; }
+.q-state.draft { color: var(--warn); }
+.q-state.ready { color: var(--accent); }
+.q-why { font-weight: 400; color: var(--fg-3); }
+.q-clear { margin-left: auto; padding: 2px 0; border: 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.q-clear:hover { color: var(--fg); }
+.q-fate { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.q-fate.ok { color: var(--ok); }
+.q-fate.warn { color: var(--warn); }
+.q-fate.bad { color: var(--bad); }
+.q-fate.faint { color: var(--fg-2); }
+.q-reason { font-weight: 400; color: var(--fg-2); }
+.q-reason::before { content: "— "; }
+
+.questions-send { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-3) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: 0 -8px 16px -12px rgba(0, 0, 0, 0.35); }
+.questions-send-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--fg-2); }
+.questions-send.ready .questions-send-info { color: var(--fg); }
+.questions-translating { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--fg-2); }
+/* The answer a card sent, while the translator has it on the way to the session. */
+.q-answer { padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-13); white-space: pre-wrap; overflow-wrap: anywhere; }
+.q-fate[data-fate="translating"] { font-weight: 400; gap: var(--space-2); }
+.questions-keys { display: inline-flex; gap: 2px; }
+.questions-keys kbd { font: var(--fs-11) var(--mono); padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--fg-3); }
+.questions-send-btn { flex: none; gap: 6px; }
+.questions-empty { display: grid; justify-items: center; gap: 6px; padding: var(--space-8) var(--space-4); text-align: center; font-size: var(--fs-13); color: var(--fg-2); }
+.questions-empty b { font-size: var(--fs-14); color: var(--fg); }
+.questions-empty span:last-child { max-width: 280px; }
+.questions-empty-mark { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); margin-bottom: 4px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+/* The badge on the tab: what waits for the operator, in the colour of a request. */
+.panel-tab .count.attn { background: var(--warn); color: var(--primary-ink); }
+
+/* The chat's one line for the whole list: how many wait, and the way to them. */
+/* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the
+   end — told apart by its colour: the two stacked on a phone used to read as unrelated components,
+   one dashed with a button, the other solid with a bare link. */
+.questions-line { display: flex; align-items: center; gap: 10px; width: 100%; margin: 10px 0 4px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 6%, transparent); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.questions-line:hover { background: color-mix(in srgb, var(--warn) 11%, transparent); border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
+.questions-line-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: 50%; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.questions-line-text { flex: 1; min-width: 0; font-weight: 500; }
+.questions-line-open { flex: none; gap: 4px; }
+.questions-headbtn { position: relative; }
+.questions-headbtn .count { position: absolute; top: 2px; right: 2px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--warn); color: var(--primary-ink); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
+@media (max-width: 1023px) {
+  .q-chip { min-height: var(--ctl-h); padding: 6px 14px; border-radius: calc(var(--ctl-h) / 2); }
+  .questions-keys { display: none; }
+  .questions-send-btn { min-height: var(--row-h-touch); }
+}
+@media (hover: none) {
+  .q-field { font-size: 16px; }
+  .q-chip:hover { background: transparent; }
+  .q-chip.on:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+}

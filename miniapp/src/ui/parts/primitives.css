@@ -1,0 +1,143 @@
+/* ── primitives ─────────────────────────────────────────────────────────────────────────── */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--drop-xs);
+  padding: 12px 14px; margin-bottom: 10px; }
+.card.pressable { cursor: pointer; transition: transform var(--t-fast) var(--ease-out), background var(--t-fast); }
+.card.pressable:active { transform: scale(0.99); background: var(--surface-2); }
+.row { display: flex; align-items: center; gap: 12px; }
+.grow { flex: 1; min-width: 0; }
+.title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { color: var(--fg-2); font-size: var(--fs-13); }
+.sub.faint { color: var(--fg-3); }
+.sub.attn { color: var(--warn); }
+
+/* one status vocabulary: idle is not a colour, so waiting and running stand out */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); flex: none; display: inline-block; }
+.dot.running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.dot.waiting { background: var(--warn); }
+.dot.compacting { background: var(--info); animation: pulse 1.4s ease-in-out infinite; }
+.dot.done, .dot.merged, .dot.ok { background: var(--ok); }
+.dot.failed, .dot.dead, .dot.error { background: var(--bad); }
+.dot.paused { background: var(--fg-2); }
+.dot.scheduled, .dot.info, .dot.notice { background: var(--info); }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-2); white-space: nowrap; }
+.status.running { color: var(--accent); }
+.status.waiting { color: var(--warn); font-weight: 600; }
+.status.failed { color: var(--bad); font-weight: 600; }
+.status.done { color: var(--ok); }
+.status .dot { background: currentColor; }
+.status.running .dot { background: var(--accent); }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--radius-xs); border: 0; font-size: var(--fs-11); font-weight: 500; white-space: nowrap;
+  background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); }
+.pill.running { color: var(--accent); }
+.pill.waiting, .pill.pending { color: var(--warn); }
+.pill.failed { color: var(--bad); }
+.pill.done, .pill.merged, .pill.approved { color: var(--ok); }
+.pill.idle, .pill.closed { color: var(--fg-2); }
+.pill.warn { color: var(--warn); }
+/* A refusal is a decision, not an absence: in grey beside an amber pending and a green approved it read
+   as a disabled row. Softer than a failure's red, so a rejected change does not look like a broken one. */
+.pill.rejected { color: color-mix(in srgb, var(--bad) 75%, var(--fg-2)); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--ctl-h);
+  border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); border-radius: var(--radius-sm);
+  padding: 5px 12px; cursor: pointer; font-weight: 500; white-space: nowrap; user-select: none;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), scale var(--t-fast); }
+.btn:hover { background: var(--surface-2); }
+/* A press is felt: the control gives a little under the pointer and comes back. */
+.btn:active:not(:disabled) { scale: var(--press-scale); transition-duration: 100ms; }
+.btn.primary { background: var(--primary); color: var(--primary-ink); border-color: transparent; box-shadow: none; }
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--fg-2); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--fg); }
+.btn.danger { color: var(--bad); background: var(--card); border-color: color-mix(in srgb, var(--bad) 30%, var(--line)); }
+.btn.danger:hover { background: color-mix(in srgb, var(--bad) 10%, var(--card)); }
+/* The ink is the primary button's: white on the dark theme's coral read at 3.2:1, below what a label
+   needs, and it was the label of an action that cannot be undone. */
+.btn.danger.solid { background: var(--bad); color: var(--primary-ink); border-color: transparent; box-shadow: none; }
+.btn.small { padding: 4px 10px; font-size: var(--fs-13); min-height: var(--ctl-h-sm); border-radius: var(--radius-xs); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn .ic { flex: none; }
+.title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.title-row .title { min-width: 0; flex: 0 1 auto; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.empty { color: var(--fg-2); text-align: center; padding: 48px 16px; display: grid; gap: 6px; justify-items: center; }
+/* The line under an empty state's heading is a sentence, and often the server's own words, which
+   start in lower case ("the board did not answer") beside hand-written lines that do not. */
+.empty > div::first-letter { text-transform: uppercase; }
+.empty b { color: var(--fg); font-weight: 500; font-size: var(--fs-15); }
+/* A page's error state draws its "Try again" as a primary button: it is the one thing to do there,
+   and in the quiet outline it read as a footnote under the message. */
+.empty .btn { margin-top: 8px; }
+/* A page that holds nothing but its empty or error state shows it in the middle of the page, a
+   little above centre, not pinned under the header with the rest of the window blank below it: a
+   desktop read as a header whose body had failed to load. */
+.screen:has(> .empty:only-child) { display: flex; flex-direction: column; justify-content: center; }
+.screen > .empty:only-child { margin-bottom: 12vh; }
+.section-title { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
+.section-title .n, .group-n { color: var(--fg-3); font-weight: 400; }
+.skeleton { border-radius: var(--radius-xs); background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.sk-row { display: grid; grid-template-columns: var(--avatar) 1fr; gap: 10px; padding: 8px 4px; }
+.sk-row .skeleton.avatar { width: var(--avatar); height: var(--avatar); border-radius: var(--radius-xs); }
+.sk-row .skeleton.line { height: 10px; margin: 4px 0; }
+.iconbtn { width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--fg-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; transition: background var(--t-fast), color var(--t-fast), scale var(--t-fast); }
+.iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.iconbtn:active { background: var(--surface-3); scale: var(--press-scale-icon); }
+.iconbtn.on { background: var(--surface-3); color: var(--fg); }
+.iconbtn.small { width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-xs); }
+.iconbtn.danger { color: var(--bad); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--radius-xs); border: 0; background: color-mix(in srgb, currentColor 12%, transparent); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); white-space: nowrap; }
+.chip .ic { width: 14px; height: 14px; }
+.chip.mono { font-family: var(--mono); font-size: var(--fs-12); }
+.chip.accent { color: var(--accent); }
+.chip.attn { color: var(--warn); }
+.chip.ok { color: var(--ok); }
+.chip.bad { color: var(--bad); }
+.chip.select { cursor: pointer; min-height: var(--ctl-h-sm); padding: 4px 10px; color: var(--fg-2); background: transparent; box-shadow: inset 0 0 0 1px var(--line); transition: background var(--t-fast), color var(--t-fast); }
+.chip.select:hover { background: var(--surface-2); color: var(--fg); }
+.chip.select[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+/* overflow-x alone makes the row a scroll container on both axes, and in a flex column (the bell's
+   popover) it may then shrink below its chips and scroll them vertically. It never shrinks, and only
+   scrolls sideways. */
+.chips { display: flex; flex-shrink: 0; gap: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 2px; margin: 4px 0 8px; }
+.chips::-webkit-scrollbar { display: none; }
+.chips .chip { flex: none; }
+/* A set of choices that must all be seen at once wraps instead of scrolling out of the window. */
+.chips.wrap { flex-wrap: wrap; overflow: visible; }
+.bar { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.bar i { display: block; height: 100%; width: calc(var(--v, 0) * 1%); background: var(--fg); border-radius: 2px; transition: width .3s; }
+.bar.attn i { background: var(--warn); }
+.bar.bad i { background: var(--bad); }
+.bar.ok i { background: var(--ok); }
+.kpi { background: var(--card); border: 1px solid var(--line); box-shadow: var(--drop-xs); border-radius: var(--radius-md); padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+.kpi .label { color: var(--fg-2); font-size: var(--fs-13); }
+.kpi .value { font-size: 26px; font-weight: 600; letter-spacing: -0.022em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.kpi .value small { font-size: .55em; color: var(--fg-2); margin-left: 2px; font-weight: 500; }
+.kpi .sub { font-size: var(--fs-12); }
+.kpi .bar { margin-top: 6px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.dialog { background: var(--surface-1); border-radius: var(--radius-lg); padding: 20px 20px 16px; width: min(440px, calc(100vw - 32px)); box-shadow: var(--shadow-xl); }
+.dialog h3 { margin: 0 0 6px; font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.dialog-body { color: var(--fg-2); font-size: var(--fs-14); line-height: 1.45; text-wrap: pretty; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.sheet-backdrop.confirm { align-items: center; justify-content: center; z-index:var(--z-confirm); }
+.menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
+.menu button { background:none; border:0; color:var(--fg); text-align:left; padding:6px 8px; min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
+.menu button .ic { color: var(--fg-2); }
+.menu button:hover, .menu button:focus-visible { background: var(--surface-3); outline: none; }
+
+/* avatar: simple shape + expressive eyes; the motion carries the status */
+.avatar { width: var(--avatar); height: var(--avatar); flex: none; }
+.avatar .body { fill: var(--card-2); stroke: var(--line); }
+.avatar .eye { fill: var(--fg); transform-origin: center; }
+.avatar.idle .eye { animation: blink 4s infinite; }
+.avatar.running .body { animation: pulse 1.2s ease-in-out infinite; }
+.avatar.running .eye { animation: look 1.6s ease-in-out infinite; }
+.avatar.waiting .eye { animation: bounce 0.9s ease-in-out infinite; }
+.avatar.waiting .body { stroke: var(--warn); }
+.avatar.failed .body { stroke: var(--bad); }
+.avatar.failed .eye { transform: scaleY(0.25); }
+.avatar.done .body { stroke: var(--ok); }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@keyframes look { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
+@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
