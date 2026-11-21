@@ -242,7 +242,7 @@ function Tunnelled({ view }: { view: Tunnel }) {
 
       {shown && (
         <div className="card address-card" data-address-shown="">
-          <div className="section-title" style={{ marginTop: 0 }}>{t("address.current")}</div>
+          <div className="section-title">{t("address.current")}</div>
           <div className="share-field">
             <input className="field mono" readOnly value={view.address} title={view.address} onFocus={(e) => e.target.select()} aria-label={t("address.current")} />
             <button type="button" className="btn small" onClick={() => void copyAddress()}><Icon name={copied ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
@@ -252,7 +252,7 @@ function Tunnelled({ view }: { view: Tunnel }) {
       )}
 
       <div className="card address-card" data-address-exposed="">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("address.exposed")}</div>
+        <div className="section-title">{t("address.exposed")}</div>
         <Row title={t("address.exposed.links")}><span className="settings-value" data-exposed="links">{view.exposed.links}</span></Row>
         <Row title={t("address.exposed.services")}><span className="settings-value" data-exposed="services">{view.exposed.services}</span></Row>
         <div className="sub">{t("address.exposed.notapp")}</div>

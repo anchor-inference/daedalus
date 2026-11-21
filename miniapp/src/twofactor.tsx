@@ -138,7 +138,7 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
 
   return (
     <div className="card totp-card" data-setting="two_factor" data-totp={status ? (status.enabled ? "on" : "off") : "loading"}>
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.totp.title")}</div>
+      <div className="section-title">{t("settings.totp.title")}</div>
       {desktop ? (
         <div className="sub">{status?.enabled ? t("settings.totp.on", { t: shortDateTime(status.enabled_at) }) : t("settings.totp.off")} · {t("settings.totp.desktop")}</div>
       ) : (

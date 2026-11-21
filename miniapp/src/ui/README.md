@@ -1,6 +1,6 @@
 # Interface package
 
-Screens import controls from this directory. `tokens.css` owns colour, type, spacing, density and motion; `styles.css` owns shared surfaces, control states and the native screen geometry; `desktop.css` owns the desktop column and the value triggers; `phone.tsx` and `phone.css` own the phone's pieces (top bar, drawer, sheets, list rows, chips, states, grouped cards), whose rules all sit inside the phone media query. `components.tsx` owns stateful choices, status and skeletons; `dialogs.tsx` owns temporary layers and their keyboard behavior. Theme preferences override these tokens for the entire application, including terminal colours.
+Screens import controls from this directory. `tokens.css` owns colour, type, spacing, density and motion; `styles.css` lists the parts in `parts/`, which own shared surfaces, control states and the native screen geometry; `desktop.css` owns the desktop column and the value triggers; `phone.tsx` and `phone.css` own the phone's pieces (top bar, drawer, sheets, list rows, chips, states, grouped cards), whose rules all sit inside the phone media query. `components.tsx` owns stateful choices, status and skeletons; `dialogs.tsx` owns temporary layers and their keyboard behavior. Theme preferences override these tokens for the entire application, including terminal colours.
 
 Use existing behavior rather than rendering a second control that performs the same action. A page provides its data and callbacks. It does not implement its own choice menu, notification layer or settings row.
 

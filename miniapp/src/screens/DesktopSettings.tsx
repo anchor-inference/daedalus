@@ -76,7 +76,7 @@ export function DesktopPanel() {
   const quit = desk.quit;
   return (
     <div className="card settings-desktop">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.sec.desktop")}</div>
+      <div className="section-title">{t("settings.sec.desktop")}</div>
       {shortcut({ name: "quickChat", setting: "desktop.quickChat" }, t("settings.desktop.quick.title"), t("settings.desktop.quick.desc"))}
       {shortcut({ name: "appshot", setting: "desktop.appshot" }, t("settings.desktop.appshot.title"), t("settings.desktop.appshot.desc"))}
       {/* A shell older than the area appshot and the voice shortcut reports neither: no row for a

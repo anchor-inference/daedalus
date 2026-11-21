@@ -96,7 +96,7 @@ export function BrowserSettingsTab({ s, save, toast, onDraft, part }: { s: Setti
   if (listing.data && !envs.length) {
     return (
       <div className="card bs-none">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("bs.none.title")}</div>
+        <div className="section-title">{t("bs.none.title")}</div>
         <div className="sub">{t("bs.none.body")}</div>
         <code className="bs-code">COMPOSE_PROFILES=browser</code>
       </div>
@@ -131,7 +131,7 @@ export function BrowserSettingsTab({ s, save, toast, onDraft, part }: { s: Setti
 function Environments({ envs }: { envs: BrowserEnv[] }) {
   return (
     <div className="card bs-envs">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.env.title")}</div>
+      <div className="section-title">{t("bs.env.title")}</div>
       {envs.map((e) => (
         <div key={e.env} className="bs-env" data-env={e.env} data-available={e.available}>
           <div className="bs-env-head">
@@ -173,7 +173,7 @@ function Running({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card bs-running">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.running.title")}</div>
+      <div className="section-title">{t("bs.running.title")}</div>
       {list.length === 0 ? (
         <div className="sub">{t("bs.running.none")}</div>
       ) : (
@@ -206,7 +206,7 @@ function Limits({ b, set, onDraft }: { b: BrowserSettings; set: (patch: Partial<
   const load = useQuery<WorkloadsLoad>("/api/workloads/load", { pollMs: 10000 });
   return (
     <div className="card bs-limits">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.limits.title")}</div>
+      <div className="section-title">{t("bs.limits.title")}</div>
       <div className="sub">{t("bs.limits.sub")}</div>
       <Row title={t("bs.limits.cap")} htmlFor="browser-cap" data-setting="browser.running_cap" desc={load.data?.browsers ? plural("bs.limits.running", load.data.browsers.running) : undefined}>
         <span className="settings-num">
@@ -268,7 +268,7 @@ function Profiles({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card bs-profiles" data-setting="browser.profiles">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.profiles.title")}</div>
+      <div className="section-title">{t("bs.profiles.title")}</div>
       <div className="sub">{t("bs.profiles.sub")}</div>
       {list.length === 0 ? (
         <div className="sub">{t("bs.profiles.none")}</div>
@@ -315,7 +315,7 @@ function Recording({ b, set, toast }: { b: BrowserSettings; set: (patch: Partial
   }
   return (
     <div className="card bs-recording">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.rec.title")}</div>
+      <div className="section-title">{t("bs.rec.title")}</div>
       <div className="sub">{t("bs.rec.sub")}</div>
       <Row title={t("bs.rec.default")} desc={t("bs.rec.default.sub")} data-setting="browser.record_frames">
         <Switch checked={b.record_frames} onChange={(record_frames) => set({ record_frames })} label={t("bs.rec.default")} />
@@ -349,7 +349,7 @@ function Watch({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSet
   useEffect(() => setText(b.watch_domains.join("\n")), [b.watch_domains]);
   return (
     <div className="card bs-watch">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.watch.title")}</div>
+      <div className="section-title">{t("bs.watch.title")}</div>
       <div className="sub">{t("bs.watch.sub")}</div>
       <Row title={t("bs.watch.mode")} data-setting="browser.watch_mode">
         <Switch checked={b.watch_mode} onChange={(watch_mode) => set({ watch_mode })} label={t("bs.watch.mode")} />
@@ -369,7 +369,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
   useEffect(() => setText(b.lan_allow.join("\n")), [b.lan_allow]);
   return (
     <div className="card bs-network">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.local.title")}</div>
+      <div className="section-title">{t("bs.local.title")}</div>
       <div className="sub">{t("bs.local.sub")}</div>
       <Row title={t("bs.local.title")} stack data-setting="browser.local_sites">
         <Dropdown id="browser-local-sites" label={t("bs.local.title")} value={b.local_sites} onChange={(local_sites) => set({ local_sites })} options={[
@@ -398,7 +398,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
 function Monitor({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; catalogue: ModelCatalogue }) {
   return (
     <div className="card bs-monitor">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.monitor.title")}</div>
+      <div className="section-title">{t("bs.monitor.title")}</div>
       <div className="sub">{t("bs.monitor.sub")}</div>
       <Row title={t("bs.monitor.mode")} data-setting="browser.injection_monitor">
         <Switch checked={b.injection_monitor} onChange={(injection_monitor) => set({ injection_monitor })} label={t("bs.monitor.mode")} />
@@ -413,7 +413,7 @@ function Monitor({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Parti
 function Reading({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; catalogue: ModelCatalogue }) {
   return (
     <div className="card bs-reading">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.agent.title")}</div>
+      <div className="section-title">{t("bs.agent.title")}</div>
       <div className="sub">{t("bs.agent.sub")}</div>
       <Row title={t("bs.agent.extract")} stack data-setting="browser.extract_preset">
         <ModelPicker id="browser-extract-model" label={t("bs.agent.extract")} catalogue={catalogue} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
@@ -432,7 +432,7 @@ function Graphics({ b, set, envs }: { b: BrowserSettings; set: (patch: Partial<B
   const reporting = envs.filter((e) => e.available && e.webgl);
   return (
     <div className="card bs-webgl">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.webgl.title")}</div>
+      <div className="section-title">{t("bs.webgl.title")}</div>
       <div className="sub">{t("bs.webgl.sub")}</div>
       <Row title={t("bs.webgl.allow")} stack data-setting="browser.webgl_allow">
         <Dropdown
@@ -484,7 +484,7 @@ function SiteNotes({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card bs-notes" data-setting="browser.notes">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.notes.title")}</div>
+      <div className="section-title">{t("bs.notes.title")}</div>
       <div className="sub">{t("bs.notes.sub")}</div>
       {list.length === 0 ? (
         <div className="sub">{t("bs.notes.none")}</div>

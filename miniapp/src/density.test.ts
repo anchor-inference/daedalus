@@ -25,7 +25,9 @@
 
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import legacy from "./ui/styles.css?raw";
+// The shared stylesheet is a list of imports now; its rules are in ui/parts, read here in name order
+// (the guard reads rules one at a time, so the order they are joined in does not matter to it).
+const legacy = Object.values(import.meta.glob("./ui/parts/*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>).join("\n");
 import tokens from "./ui/tokens.css?raw";
 import desktop from "./ui/desktop.css?raw";
 import phone from "./ui/phone.css?raw";

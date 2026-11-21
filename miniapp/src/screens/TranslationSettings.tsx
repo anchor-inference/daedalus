@@ -71,7 +71,7 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
   const suggested = s.translation?.suggested ?? "";
   return (
     <div className="card" data-card="agent-language">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.translation")}</div>
+      <div className="section-title">{t("settings.translation")}</div>
       <Row title={t("settings.translation.operator")} desc={t("settings.translation.operator.sub")} stack data-setting="translation.operator_language">
         <Dropdown id="translation-operator" label={t("settings.translation.operator")} value={current.operator_language} onChange={(operator_language) => put({ operator_language })}
           options={ordered.map((code) => ({ id: code, label: code === ui ? t("settings.translation.applang", { lang: languageName(code) }) : languageName(code) }))} />

@@ -58,7 +58,7 @@ export function YourChrome({ user, setUser, toast }: { user: BrowserUserSettings
   if (!status || state === "none") return null;
   return (
     <div className="card bs-chrome" data-setting="browser.user" data-state={state}>
-      <div className="section-title" style={{ marginTop: 0 }}>{t("uc.title")}</div>
+      <div className="section-title">{t("uc.title")}</div>
       <div className="sub">{t("uc.sub")}</div>
       {status.native ? <Connector status={status} toast={toast} /> : null}
       <Connection status={status} state={state} toast={toast} />

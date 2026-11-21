@@ -11,15 +11,16 @@
 /* ── the list of sections and the search, at every width ────────────────────────────────── */
 .settings-index { display: flex; flex-direction: column; gap: 1px; }
 .settings-group-block { display: flex; flex-direction: column; gap: 1px; }
-.settings-group { margin: 14px 8px 4px; color: var(--fg-3); font-size: var(--fs-11); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.settings-link { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 8px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; }
-.settings-link .ic { color: var(--fg-2); }
-.settings-link:hover { background: var(--surface-2); }
-.settings-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.settings-link.active { background: var(--surface-3); }
+.settings-group { margin: 14px 8px 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.settings-link { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 8px; border-radius: var(--radius-sm); color: var(--fg-2); text-decoration: none; transition: background var(--t-fast), color var(--t-fast); }
+.settings-link .ic { color: var(--fg-3); }
+.settings-link:hover { background: var(--surface-2); color: var(--fg); }
+.settings-link:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.settings-link.active { background: var(--surface-3); color: var(--fg); }
 .settings-link.active .ic { color: var(--fg); }
 .settings-link-text { display: flex; flex-direction: column; min-width: 0; }
 .settings-link-text b { overflow: hidden; font-weight: 400; font-size: var(--fs-14); text-overflow: ellipsis; white-space: nowrap; }
+.settings-link.active .settings-link-text b { font-weight: 500; }
 .settings-link-text .sub { display: none; }
 /* The icon set's chevron points down; a row that leads somewhere points the way it goes. */
 .settings-link .chev { display: none; color: var(--fg-3); transform: rotate(-90deg); }
@@ -29,14 +30,14 @@
    it reads as part of it. */
 .settings-field-hit { display: block; margin: 0 0 1px 34px; padding: 5px 8px; border-radius: var(--radius-xs); color: var(--fg-2); font-size: var(--fs-13); text-decoration: none; overflow-wrap: anywhere; }
 .settings-field-hit:hover { background: var(--surface-2); color: var(--fg); }
-.settings-field-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-field-hit:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .settings-count { margin-top: 4px; }
 .settings-empty { padding: 12px 8px; }
 
 .settings-search-box { position: relative; display: flex; align-items: center; }
 .settings-search-box > .ic { position: absolute; left: 10px; color: var(--fg-3); pointer-events: none; }
 .settings-search-box .settings-search { width: 100%; min-height: var(--ctl-h); margin: 0; padding: 0 34px 0 32px; border-radius: var(--radius-sm); background: var(--bg); }
-.settings-search-key { position: absolute; right: 8px; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--fg-3); font: var(--fs-11)/16px var(--font); text-align: center; pointer-events: none; }
+.settings-search-key { position: absolute; right: 8px; min-width: 18px; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--fg-3); font: var(--fs-11)/16px var(--font); text-align: center; pointer-events: none; }
 .settings-search-clear { position: absolute; right: 4px; }
 
 /* What a search found, as the sections' own controls: everything else in a section's body is hidden
@@ -54,29 +55,29 @@
 .settings-hit-link b { font-weight: 500; }
 .settings-hit-link:hover { background: var(--surface-2); }
 
-h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 650; letter-spacing: -.01em; line-height: 1.25; overflow-wrap: anywhere; }
-.settings-about { margin: 4px 0 0; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter-spacing: -.018em; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
+.settings-about { margin: 4px 0 0; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; text-wrap: pretty; }
 
 /* ── the dialog (a desktop) ──────────────────────────────────────────────────────────────── */
 @media (min-width: 1024px) {
-  .settings-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 2); display: grid; place-items: center; background: var(--scrim, rgba(0, 0, 0, .45)); animation: settings-fade var(--t-fast, 120ms) var(--ease-out); }
+  .settings-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 2); display: grid; place-items: center; background: var(--scrim); animation: settings-fade var(--t-fast) var(--ease-out); }
   /* Claude's proportions: nine tenths of the window up to 1100 × 760, so the screen it was opened
      from stays visible round it and closing it is plainly going back there. */
-  .settings-dialog { width: min(90vw, 1100px); height: min(100vh - 64px, 760px); overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--bg); box-shadow: var(--shadow-pop); outline: none; animation: settings-rise 180ms var(--ease-out); }
+  .settings-dialog { width: min(90vw, 1100px); height: min(100vh - 64px, 760px); overflow: hidden; border: 0; border-radius: var(--radius-lg); background: var(--wash, var(--bg)); box-shadow: var(--shadow-xl); outline: none; animation: settings-rise var(--t-slow) var(--ease-out); }
   .settings-stage { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; }
-  .settings-nav { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 16px 10px 0; border-right: 1px solid var(--line); background: var(--surface-1); }
-  h2.settings-dialog-title { margin: 2px 8px 4px; font-size: var(--fs-17); font-weight: 650; }
+  .settings-nav { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 16px 10px 0; border-right: 1px solid var(--line); background: var(--bg); }
+  h2.settings-dialog-title { margin: 2px 8px 4px; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.005em; }
   .settings-nav .settings-index { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -10px; padding: 0 10px 8px; }
   .settings-foot { display: flex; justify-content: space-between; gap: 8px; margin: 0 -10px; padding: 10px 14px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
   .settings-foot > span:first-child { overflow: hidden; text-overflow: ellipsis; }
   .settings-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .settings-head { display: flex; align-items: flex-start; gap: 16px; padding: 20px 20px 14px 28px; border-bottom: 1px solid var(--line); }
+  .settings-head { display: flex; align-items: flex-start; gap: 16px; padding: 24px 20px 12px 28px; }
   .settings-head-text { flex: 1; min-width: 0; }
   .settings-close { flex: none; margin: -4px -4px 0 0; }
   .settings-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   /* The content takes the pane's whole width: the dialog is already the reading width, and a narrower
      column inside it put rows' words and controls a long way apart for nothing. */
-  .settings-dialog .settings-col { padding: 20px 28px 32px; }
+  .settings-dialog .settings-col { padding: 12px 28px 32px; }
   .settings-dialog .settings-col > .card:first-child, .settings-dialog .settings-col > .section-title:first-child { margin-top: 0; }
 
   /* 1024–1180 px: the list is a column of icons with the names in tooltips, so the section keeps its
@@ -100,7 +101,7 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 650; letter
   .settings-stage.icons:not(.opened) .settings-link > .settings-mark { top: 5px; right: 7px; }
 }
 @keyframes settings-fade { from { opacity: 0; } }
-@keyframes settings-rise { from { opacity: 0; transform: translateY(6px) scale(.99); } }
+@keyframes settings-rise { from { opacity: 0; transform: scale(.96); } }
 @media (prefers-reduced-motion: reduce) { .settings-backdrop, .settings-dialog { animation: none; } }
 
 /* ── the stack (a phone) ─────────────────────────────────────────────────────────────────── */
@@ -110,20 +111,21 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 650; letter
   .settings-phone h1.settings-title { margin-top: 4px; font-size: var(--fs-22); }
   .settings-phone .settings-about { margin-bottom: var(--space-2); }
   .settings-phone .settings-search-box { margin: 4px 0 var(--space-2); }
-  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-pill); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
+  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-md); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
   .settings-phone .settings-search-box > .ic { left: 14px; }
-  /* Grouped cards, as the phone's own settings draw them: a grey label over each group, rows 2 px
-     apart, the first and last of a group rounded. */
+  /* One card per group, as every grouped list on a phone is: a small label over it, the links its
+     rows with a hairline between them, the first and the last carrying the card's corners. A matched
+     field under a link is a card of its own, so the link above it closes its group. */
   .settings-phone .settings-index { gap: 0; }
-  .settings-phone .settings-group-block { gap: 2px; }
-  .settings-phone .settings-group { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--fg-2); }
-  .settings-phone .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border-radius: var(--radius-xs); background: var(--surface-1); }
-  .settings-phone .settings-link .ic { color: var(--fg); }
+  .settings-phone .settings-group-block { gap: 0; }
+  .settings-phone .settings-group { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--fg-3); }
+  .settings-phone .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; background: var(--card); color: var(--fg); }
+  .settings-phone .settings-link:not(.settings-link + .settings-link) { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .settings-phone .settings-link:not(:has(+ .settings-link)) { border-bottom-width: 1px; border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); box-shadow: var(--drop-xs); }
+  .settings-phone .settings-link:active { background: var(--surface-2); }
+  .settings-phone .settings-link .ic { color: var(--fg-2); }
+  .settings-phone .settings-link .ic:last-child { color: var(--fg-3); }
   .settings-phone .settings-link-text b { font-size: var(--fs-15); white-space: normal; }
   .settings-phone .settings-link .chev { display: inline-flex; }
-  .settings-phone .settings-group + .settings-link { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
-  .settings-phone .settings-group-block > .settings-link:last-child,
-  .settings-phone .settings-group-block > .settings-link:has(+ .settings-field-hit) { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
-  .settings-phone .settings-field-hit { margin: 2px 0 6px 0; padding: 10px var(--space-4); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font-size: var(--fs-15); }
-  .settings-phone .settings-link + .settings-field-hit { margin-top: 6px; }
+  .settings-phone .settings-field-hit { margin: 6px 0; padding: 10px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-15); }
 }

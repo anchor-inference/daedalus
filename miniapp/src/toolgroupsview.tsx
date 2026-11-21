@@ -51,7 +51,7 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
   }
   return (
     <div className="card tgroups" data-setting="tools.groups">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("tgroup.title")}</div>
+      <div className="section-title">{t("tgroup.title")}</div>
       <div className="sub">{t("tgroup.sub")}</div>
       {data === null && <div className="sub">{t("common.loading")}</div>}
       {data?.groups.map((g) => {

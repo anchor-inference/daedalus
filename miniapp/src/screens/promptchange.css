@@ -1,8 +1,8 @@
 .prompt-change { display:grid; gap:var(--space-3); }
 .prompt-change-head { display:flex; align-items:flex-start; gap:var(--space-3); }
 .prompt-change-head > span:last-child { display:grid; gap:3px; }
-.prompt-change-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; flex:none; border-radius:var(--radius-md); color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
-.prompt-change > label { font-size:var(--fs-13); font-weight:600; }
+.prompt-change-icon { display:inline-flex; align-items:center; justify-content:center; width:var(--ctl-h); height:var(--ctl-h); flex:none; border-radius:var(--radius-sm); color:var(--fg-2); background:var(--surface-2); }
+.prompt-change > label { color:var(--fg-3); font-size:var(--fs-12); font-weight:500; margin-bottom:calc(-1 * var(--space-2)); }
 .prompt-change .field { margin:0; }
 .prompt-change-actions { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); }
 .prompt-change-actions select { width:min(320px, 50%); }
@@ -11,7 +11,7 @@
 .prompt-change-status .live-dot { flex:none; }
 .prompt-review { display:grid; gap:var(--space-3); }
 .prompt-review > p { margin:0; }
-.prompt-review-diff { max-height:55vh; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--bg); }
+.prompt-review-diff { max-height:55vh; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--inset); }
 .prompt-review-diff .diff-file { position:sticky; top:0; z-index:1; }
 /* The rules are prose, and the line being approved has to be read whole: kept on one line as code
    is, a phone showed "…then list e" at the box's edge with no sign the rest was to the right. */

@@ -16,19 +16,19 @@
 .imp-hstrip { display: flex; gap: 6px; flex: none; overflow-x: auto; scrollbar-width: none; }
 .imp-htile { display: flex; align-items: center; gap: 8px; height: var(--ctl-h-lg); padding: 0 12px 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--field, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; cursor: pointer; }
 .imp-htile:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--line-strong); }
-.imp-htile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.imp-htile:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .imp-htile b { font-weight: 500; }
 .imp-htile .imp-n { font-size: var(--fs-12); color: var(--fg-3); }
-.imp-htile.on { box-shadow: inset 0 0 0 1.5px var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+.imp-htile.on { box-shadow: inset 0 0 0 1px var(--fg); background: var(--card); }
 .imp-htile.off { opacity: .45; }
 .imp-htile:disabled { cursor: default; }
 
 .imp-fb { flex: 1; min-height: 0; }
 .imp-main { grid-template-columns: 210px minmax(0, 1fr) 330px; flex: 1; min-height: 0; }
 .imp-main.down { grid-template-columns: 210px minmax(0, 1fr); }
-.imp-hostlbl { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-12); font-weight: 600; flex: none; }
+.imp-hostlbl { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); font-weight: 500; flex: none; }
 .imp-search { width: 300px; height: var(--ctl-h-sm); display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-3); flex: none; }
-.imp-search.filled { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--bg); color: var(--fg); }
+.imp-search.filled { box-shadow: inset 0 0 0 1px var(--line-strong); background: var(--card); color: var(--fg); }
 .imp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-12); }
 .imp-search kbd { font-size: var(--fs-11); }
 .imp-clear { display: inline-flex; background: none; border: 0; padding: 2px; color: var(--fg-3); cursor: pointer; }
@@ -39,7 +39,7 @@
 .imp-lsec .grow { flex: 1; }
 .imp-sort { color: var(--fg-2); }
 .imp-deep { height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); cursor: pointer; }
-.imp-deep.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.imp-deep.on { background: var(--surface-4); color: var(--fg); }
 .imp-frow .imp-cnt { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-3); height: 18px; padding: 0 6px; border-radius: 5px; display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .imp-frow .imp-cnt.zero { background: transparent; color: var(--fg-3); }
 .imp-group + .imp-group { margin-top: 4px; }
@@ -51,7 +51,7 @@
 .imp-srow { display: flex; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--fg); font: inherit; text-align: left; align-items: flex-start; cursor: pointer; flex: none; min-width: 0; }
 .imp-srow + .imp-srow { margin-top: 1px; }
 .imp-srow:hover { background: var(--surface-3); }
-.imp-srow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.imp-srow:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .imp-sic { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--fg-2); margin-top: 1px; position: relative; }
 .imp-live { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 2px var(--surface-2); }
 .imp-smain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -65,8 +65,8 @@
 .imp-st2 .big { color: var(--warn); font-weight: 500; }
 .imp-gone { color: var(--warn); }
 .imp-stm { font-size: var(--fs-11); color: var(--fg-3); flex: none; margin-top: 2px; }
-.imp-srow.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
-.imp-srow.sel .imp-sic { background: var(--accent); color: var(--accent-ink, var(--bg)); }
+.imp-srow.sel { background: var(--surface-3); }
+.imp-srow.sel .imp-sic { background: var(--fg); color: var(--bg); }
 .imp-srow.done .imp-st1 { color: var(--fg-3); }
 .imp-srow.missing { opacity: .6; }
 .imp-srow mark, .imp-pv mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
@@ -75,7 +75,7 @@
 .imp-skel.short { width: 60%; }
 
 /* The preview: what the session is, how it comes over and where it lands. */
-.imp-pv { border-left: 1px solid var(--line); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-width: 0; background: color-mix(in srgb, var(--surface-1) 55%, var(--surface-2)); }
+.imp-pv { border-left: 1px solid var(--line); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-width: 0; background: var(--inset); }
 .imp-pv.empty { align-items: center; justify-content: center; text-align: center; color: var(--fg-3); font-size: var(--fs-13); gap: 8px; }
 .imp-pv h3 { margin: 0; font-size: var(--fs-14); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .imp-pmeta { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: var(--fs-11); color: var(--fg-3); margin-top: 4px; }
@@ -90,10 +90,10 @@
 .imp-plbl { font-size: var(--fs-11); font-weight: 500; color: var(--fg-3); margin-bottom: 5px; }
 .imp-mode { display: flex; flex-direction: column; gap: 4px; }
 .imp-mopt { display: flex; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; font: inherit; font-size: var(--fs-12); color: var(--fg); text-align: left; box-shadow: inset 0 0 0 1px var(--line); background: var(--surface-1); cursor: pointer; }
-.imp-mopt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.imp-mopt:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .imp-radio { width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
-.imp-mopt.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.imp-mopt.on .imp-radio { box-shadow: inset 0 0 0 4px var(--accent); }
+.imp-mopt.on { box-shadow: inset 0 0 0 1px var(--fg); }
+.imp-mopt.on .imp-radio { box-shadow: inset 0 0 0 4px var(--fg); }
 .imp-mopt b, .imp-check b { font-weight: 500; display: block; }
 .imp-d { display: block; color: var(--fg-3); font-size: var(--fs-11); margin-top: 1px; line-height: 1.35; }
 .imp-model-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -106,7 +106,7 @@
 .imp-dest.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 60%, transparent); }
 .imp-dest.bad .imp-dest-tile { color: var(--bad); }
 .imp-check { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; font-size: var(--fs-12); cursor: pointer; }
-.imp-check input { margin: 2px 0 0; accent-color: var(--accent); }
+.imp-check input { margin: 2px 0 0; accent-color: var(--primary); }
 .imp-warnbox, .imp-infobox, .imp-errbox { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; font-size: var(--fs-12); line-height: 1.4; }
 .imp-warnbox { background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .imp-warnbox > svg { color: var(--warn); flex: none; margin-top: 1px; }
@@ -137,7 +137,7 @@
 .imp-go kbd { margin-left: 6px; }
 
 /* The imported chat: the banner, the line where Daedalus takes over, a foreign step's own name. */
-.imp-banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 4px 0 18px; border-radius: var(--radius-md); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-13); color: var(--fg-2); }
+.imp-banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 4px 0 18px; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-13); color: var(--fg-2); }
 .imp-banner b { color: var(--fg); font-weight: 500; }
 .imp-banner-text { flex: 1; min-width: 0; line-height: 1.5; }
 .imp-banner-text .mono { font-size: var(--fs-12); }
@@ -146,7 +146,7 @@
 .imp-handoff::before, .imp-handoff::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .act-orig { font-size: var(--fs-11); color: var(--fg-3); font-family: var(--mono); padding: 0 5px; border-radius: 4px; background: var(--surface-3); flex: none; white-space: nowrap; }
 .sb-plate { position: relative; }
-.imp-hmini { position: absolute; right: -5px; top: -5px; width: 14px; height: 14px; border-radius: 4px; font-size: var(--fs-11); line-height: 14px; font-weight: 700; color: #fff; display: grid; place-items: center; background: var(--c); box-shadow: 0 0 0 1.5px var(--bg); }
+.imp-hmini { position: absolute; right: -5px; top: -5px; width: 14px; height: 14px; border-radius: 4px; font-size: var(--fs-11); line-height: 14px; font-weight: 600; color: #fff; display: grid; place-items: center; background: var(--c); box-shadow: 0 0 0 1.5px var(--bg); }
 
 @media (min-width: 1024px) {
   .sheet.imp-sheet { width: min(1180px, 96vw); height: min(780px, calc(100% - 48px)); max-height: calc(100% - 48px); }
@@ -179,8 +179,8 @@
   .imp-ph-search { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 12px; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-3); }
   .imp-ph-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-16); }
   .imp-ph-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: none; }
-  .imp-ph-chips button { height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; }
-  .imp-ph-chips button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .imp-ph-chips button { height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; }
+  .imp-ph-chips button.on { background: var(--fg); color: var(--bg); }
   .imp-ph-chips b { font-weight: 500; color: var(--fg-3); }
   .imp-ph-sessions .imp-srow { min-height: var(--list-row-h); padding: 8px 12px; border-radius: 0; align-items: center; }
   .imp-ph-sessions .imp-srow + .imp-srow { border-top: 1px solid var(--line); margin-top: 0; }
@@ -195,7 +195,7 @@
   .imp-phone .imp-mopt { min-height: var(--tap); align-items: center; }
   .imp-phone .imp-check input { width: 20px; height: 20px; }
   .imp-ph-foot { display: flex; gap: 10px; }
-  .imp-ph-foot .btn { flex: 1; min-height: var(--tap); justify-content: center; border-radius: var(--radius-pill); }
+  .imp-ph-foot .btn { flex: 1; min-height: var(--tap); justify-content: center; border-radius: 12px; }
   .imp-ph-foot .btn.primary { flex: 1.6; }
   .imp-phone .fb-empty { padding: var(--space-4) var(--space-2); }
   .imp-banner { align-items: flex-start; flex-wrap: wrap; font-size: var(--fs-13); }
@@ -215,7 +215,7 @@
   .si-more:hover { color: var(--fg); }
   .si-row { display: flex; align-items: center; gap: var(--space-3); padding: 6px 10px; border-radius: var(--radius-sm); cursor: pointer; }
   .si-row:hover { background: var(--surface-1); }
-  .si-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .si-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .si-row .btn { flex: none; }
   .si-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
   .si-title { color: var(--fg); font-size: var(--fs-14); }

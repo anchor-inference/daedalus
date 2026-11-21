@@ -5,9 +5,12 @@
 .address-status.ok { color: var(--ok); }
 .address-status.attn { color: var(--warn); }
 .address-status.bad { color: var(--bad); }
-.address-providers { margin: var(--space-2) 0; }
+/* The ways to open the address are rows of the card under a hairline. A row reaches a little past
+   the text on either side, so its fill has the room a list row's has. */
+.address-providers { margin: var(--space-3) 0 0; padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.address-providers .access-option { margin: 0 calc(-1 * var(--space-2)); }
 .address-detail > summary { cursor: pointer; color: var(--fg-2); font-size: var(--fs-12); }
-.address-detail code { display: block; margin-top: 4px; color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.address-detail code { display: block; margin-top: 4px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; }
 
 .service-phone { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .service-phone-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

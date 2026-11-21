@@ -7,23 +7,24 @@
 .guest-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .guest-list { display: flex; flex-direction: column; gap: var(--space-2); }
 
-.guest-link { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
-.guest-link[data-state="revoked"], .guest-link[data-state="expired"] { background: transparent; }
+.guest-link { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
+.guest-link[data-state="revoked"], .guest-link[data-state="expired"] { background: transparent; box-shadow: none; }
 .guest-link[data-state="revoked"] .guest-name, .guest-link[data-state="expired"] .guest-name { color: var(--fg-2); }
 .guest-link-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
-.guest-name { min-width: 0; font-weight: 600; }
+.guest-name { min-width: 0; font-size: var(--fs-14); font-weight: 500; }
 .guest-link-meta { overflow-wrap: anywhere; }
 .guest-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
-/* What the guest first wrote, in a frame that says it is theirs. It scrolls rather than grows, so a
-   long message cannot push the buttons that answer it out of the sheet. */
-.guest-quote { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warn); border-radius: var(--radius-xs); background: var(--surface-2); }
+/* What the guest first wrote, in a recessed well that says it is quoted. It scrolls rather than grows,
+   so a long message cannot push the buttons that answer it out of the sheet. */
+.guest-quote { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); }
 .guest-quote-text, .guest-msg-text, .guest-card-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-14); line-height: 1.45; }
 .guest-quote-text { max-height: 8lh; overflow-y: auto; }
 
 .guest-reader { display: flex; flex-direction: column; gap: var(--space-2); }
-.guest-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
-.guest-msg[data-role="guest"] { border-left: 3px solid var(--warn); }
+/* Whose words a message is, its head says in words; a stripe down the guest's said it a second time. */
+.guest-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
+.guest-msg[data-role="guest"] .guest-msg-head > b { color: var(--warn); }
 .guest-msg[data-role="agent"] { background: var(--surface-2); }
 .guest-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
 .guest-msg-head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
@@ -42,7 +43,7 @@
 /* The choice of who answers comes first and decides which fields follow, so it is set apart from them. */
 .guest-levels { margin-top: var(--space-2); }
 /* A heading over the limits: the rows below it are all of one kind, and the eye looks for them there. */
-.guest-section { margin-top: var(--space-4); padding-bottom: 2px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.guest-section { margin-top: var(--space-4); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 /* "No limit" sits beside the number it replaces, and the number goes while it is chosen: the choice is
    visible as a word, never a 0 the operator would have to know means none. */
 .guest-nolimit { flex: none; min-width: 96px; justify-content: center; }
@@ -68,6 +69,6 @@
 /* A guest's message in the chat: a framed card on the answer's side with the guest's mark on it, so it
    is never read as something the operator typed. */
 .msg-wrap.guest { align-items: stretch; }
-.guest-card { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
+.guest-card { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
 .guest-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); color: var(--fg-2); }
-.guest-card-head b { color: var(--warn); font-weight: 600; }
+.guest-card-head b { color: var(--warn); font-weight: 500; }

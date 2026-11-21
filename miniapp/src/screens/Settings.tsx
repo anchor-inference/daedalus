@@ -81,7 +81,7 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
   }, [rules, fallback]);
   return (
     <div className="card" data-setting="prompt.rules">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.rules.title")}</div>
+      <div className="section-title">{t("settings.rules.title")}</div>
       <div className="sub">{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</div>
       {/* The eleventh line shows through the field's bottom padding sliced in half; the fade over
           it (while more waits below) makes that read as "scroll for more" rather than broken text. */}
@@ -541,7 +541,7 @@ function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: 
   }
   if (!open)
     return (
-      <button className="btn small" style={{ marginTop: 10 }} onClick={() => setOpen(true)}>
+      <button className="btn small" onClick={() => setOpen(true)}>
         ＋ {t("settings.provider.add")}
       </button>
     );
@@ -675,8 +675,11 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
   };
   const fallbackIds = search.fallback ?? [];
   return (
-    <div className="card search-card">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.search.title")}</div>
+    <div className="search-card settings-groups">
+      {/* One card a group: the choice of backend, each engine in use, the keys, the check. As one card
+          the engines' fields ran on from the rows above them with only a heading between. */}
+      <div className="card">
+      <div className="section-title">{t("settings.search.title")}</div>
       <div className="sub">{t("settings.search.sub")}</div>
       <Row title={t("settings.search.backend")} stack data-setting="tools.web.search.backend">
         <Dropdown
@@ -704,8 +707,9 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
       </Row>
       <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
       <NumRow setting="tools.web.search.timeout_seconds" title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
+      </div>
       {search.backend === "searxng" || fallbackIds.includes("searxng") ? (
-        <>
+        <div className="card">
           <div className="section-title">SearXNG</div>
           <TextBlock setting="tools.web.search.searxng.url" label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
           <TextBlock setting="tools.web.search.searxng.engines" label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
@@ -713,47 +717,48 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
           <Row title={t("settings.search.safe")} data-setting="tools.web.search.searxng.safesearch">
             <Segmented label={t("settings.search.safe")} value={String(Math.min(2, Math.max(0, search.searxng.safesearch)))} onChange={(v) => saveSearch({ searxng: { safesearch: Number(v) } })} options={["0", "1", "2"].map((id) => ({ id, label: t(`settings.search.safe.${id}`) }))} />
           </Row>
-        </>
+        </div>
       ) : null}
       {search.backend === "duckduckgo" || fallbackIds.includes("duckduckgo") ? (
-        <>
+        <div className="card">
           <div className="section-title">DuckDuckGo</div>
           <TextBlock setting="tools.web.search.duckduckgo.url" label={t("settings.search.html")} value={search.duckduckgo.url} onSave={(v) => saveSearch({ duckduckgo: { url: v } })} />
           <TextBlock setting="tools.web.search.duckduckgo.region" label={t("settings.search.region")} value={search.duckduckgo.region} placeholder="wt-wt, ru-ru, us-en" onSave={(v) => saveSearch({ duckduckgo: { region: v } })} />
-        </>
+        </div>
       ) : null}
       {search.backend === "serper" || fallbackIds.includes("serper") ? (
-        <>
+        <div className="card">
           <div className="section-title">Serper (Google)</div>
           <div className="grid2 settings-block">
             <TextBlock setting="tools.web.search.serper.gl" label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
             <TextBlock setting="tools.web.search.serper.hl" label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
           </div>
-        </>
+        </div>
       ) : null}
       {search.backend === "keenable" || fallbackIds.includes("keenable") ? (
-        <>
+        <div className="card">
           <div className="section-title">Keenable</div>
           <NumRow setting="tools.web.search.keenable.snippet_max_length" title={t("settings.search.snippet")} unit={t("settings.unit.chars")} value={search.keenable.snippet_max_length} min={180} step={60} onSave={(v) => saveSearch({ keenable: { snippet_max_length: v } })} />
-        </>
+        </div>
       ) : null}
       {search.backend === "tavily" || fallbackIds.includes("tavily") ? (
-        <>
+        <div className="card">
           <div className="section-title">Tavily</div>
           <Row title={t("settings.search.depth")} data-setting="tools.web.search.tavily.depth">
             <Dropdown label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </>
+        </div>
       ) : null}
       {search.backend === "exa" || fallbackIds.includes("exa") ? (
-        <>
+        <div className="card">
           <div className="section-title">Exa</div>
           <Row title={t("settings.search.type")} data-setting="tools.web.search.exa.type">
             <Dropdown label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </>
+        </div>
       ) : null}
-      <SearchKeys toast={toast} onChanged={reload} />
+      <div className="card"><SearchKeys toast={toast} onChanged={reload} /></div>
+      <div className="card">
       <div className="btnrow search-check">
         <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
         <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
@@ -774,6 +779,7 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -788,7 +794,7 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
 
       <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.web.title")}</div>
+        <div className="section-title">{t("settings.web.title")}</div>
         <NumRow setting="tools.web.fetch_timeout_seconds" title={t("settings.web.timeout")} unit={t("settings.unit.seconds")} value={web.fetch_timeout_seconds} min={1} onSave={(v) => save({ tools: { web: { fetch_timeout_seconds: v } } })} />
         <NumRow setting="tools.web.fetch_max_chars" title={t("settings.web.maxchars")} unit={t("settings.unit.chars")} value={web.fetch_max_chars} min={1000} step={1000} onSave={(v) => save({ tools: { web: { fetch_max_chars: v } } })} />
         <TextBlock setting="tools.web.proxy" label={t("settings.web.proxy")} value={web.proxy} placeholder="socks5://127.0.0.1:1080" hint={t("settings.web.proxy.hint")} onSave={(v) => save({ tools: { web: { proxy: v } } })} />
@@ -796,7 +802,7 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
       </div>
 
       <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.exec.title")}</div>
+        <div className="section-title">{t("settings.exec.title")}</div>
         <NumRow setting="limits.tool_timeout_seconds" title={t("settings.exec.timeout")} desc={t("settings.exec.timeout.hint")} unit={t("settings.unit.seconds")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} />
         <NumRow setting="tools.exec.background_after_seconds" title={t("settings.exec.background")} desc={t("settings.exec.background.hint")} unit={t("settings.unit.seconds")} value={s.tools.exec.background_after_seconds} min={1} step={30} onSave={(v) => save({ tools: { exec: { background_after_seconds: v } } })} />
         <NumRow setting="tools.exec.max_output_chars" title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
@@ -866,7 +872,7 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
       {integrations && integrations.length > 0 && <IntegrationsCard rows={integrations} />}
       <div className="card">
         {checks.map((c, i) => (
-          <div key={i} className="row" style={{ alignItems: "flex-start", padding: "6px 0", borderTop: i ? "1px solid var(--line)" : undefined }}>
+          <div key={i} className="row health-row">
             <span className={`health-mark ${mark(c)[1]}`}><Icon name={mark(c)[0]} size={16} /></span>
             <div className="grow" style={{ minWidth: 0 }}>
               <div>
@@ -887,12 +893,12 @@ function IntegrationsCard({ rows }: { rows: IntegrationRow[] }) {
   const mark: Record<IntegrationRow["severity"], [IconName, string]> = { ok: ["check", "ok"], info: ["dot", "info"], warn: ["alert", "warn"], fail: ["close", "bad"] };
   return (
     <div className="card integrations">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("health.int.title")}</div>
-      {rows.map((row, i) => {
+      <div className="section-title">{t("health.int.title")}</div>
+      {rows.map((row) => {
         const words = describeIntegration(row);
         const [icon, tone] = mark[row.severity] ?? mark.info;
         return (
-          <div key={`${row.kind}:${row.name}`} className="row integration" data-kind={row.kind} data-state={row.state} data-severity={row.severity} style={{ alignItems: "flex-start", padding: "6px 0", borderTop: i ? "1px solid var(--line)" : undefined }}>
+          <div key={`${row.kind}:${row.name}`} className="row integration health-row" data-kind={row.kind} data-state={row.state} data-severity={row.severity}>
             <span className={`health-mark ${tone}`}><Icon name={icon} size={16} /></span>
             <div className="grow" style={{ minWidth: 0 }}>
               <div>
@@ -960,7 +966,7 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
   return (
     <>
       <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.heartbeat.title")}</div>
+        <div className="section-title">{t("settings.heartbeat.title")}</div>
         <div className="sub">{t("settings.heartbeat.sub")}</div>
         {/* The switch and Run now share the row, and the state is the row's description: apart,
             an "on" chip, a Run now and a status line made three rows that read as three actions. */}
@@ -990,7 +996,7 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         </Row>
       </div>
       <div className="card" data-setting="heartbeat.text">
-        <div className="section-title" style={{ marginTop: 0 }}>
+        <div className="section-title">
           HEARTBEAT.md
         </div>
         <textarea
@@ -1386,12 +1392,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     switch (sec) {
       case "models":
         return (
+          <>
           <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.models.title")}</div>
+            <div className="section-title">{t("settings.models.title")}</div>
             <div className="sub">{t("settings.models.sub")}</div>
-            <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
-              <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
-            </Row>
             <div className="mlist" data-setting="model.preset">
               {Object.entries(s.presets ?? {}).map(([id, p]) => (
                 <PresetRow
@@ -1422,12 +1426,20 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <div className="sub">{t("settings.models.empty.sub")}</div>
               </div>
             )}
-            <div className="btnrow" data-setting="models.add">
+            <div className="card-foot" data-setting="models.add">
               <button className="btn primary" onClick={() => setAdding(true)}>
                 <Icon name="plus" size={14} /> {t("settings.models.add")}
               </button>
-              <span className="sub faint" style={{ alignSelf: "center" }}>{t("settings.models.add.hint")}</span>
+              <span className="sub faint">{t("settings.models.add.hint")}</span>
             </div>
+          </div>
+          {/* What happens when a model fails is a group of its own: the switch that allows a stand-in
+              and the stand-ins in their order. Above the list of models and under its button, the two
+              read as part of the list, and the page was one card from top to bottom. */}
+          <div className="card">
+            <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
+              <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
+            </Row>
             {/* The whole chain in one place, in its order. It was a switch inside each model's
                 expanded row and a line of ids joined by arrows: nobody could see the set at once
                 or change the order without switching models off and on again. */}
@@ -1446,6 +1458,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
             )}
           </div>
+          </>
         );
       case "tasks":
         return (
@@ -1462,7 +1475,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             </div>
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card">
-                <div className="section-title" style={{ marginTop: 0 }}>{t("settings.orchestrator.title")}</div>
+                <div className="section-title">{t("settings.orchestrator.title")}</div>
                 <div className="sub">{t("settings.orchestrator.sub")}</div>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack data-setting="orchestrator.preset">
                   <ModelPicker
@@ -1478,7 +1491,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             )}
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card" data-card="main-orchestrator">
-                <div className="section-title" style={{ marginTop: 0 }}>{t("settings.main.title")}</div>
+                <div className="section-title">{t("settings.main.title")}</div>
                 <div className="sub">{t("settings.main.sub")}</div>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack data-setting="dispatcher.preset">
                   <ModelPicker
@@ -1495,7 +1508,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {/* Here rather than under Tools: it is a choice of model, and this is where the operator
                 comes to choose one. */}
             <div className="card vision-card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
+              <div className="section-title">{t("settings.vision.title")}</div>
               <div className="sub">{t("settings.vision.sub")}</div>
               <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
                 {/* Only the models that see images are offered; the one in use stays listed even if
@@ -1514,7 +1527,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {/* The same setting as under Approvals, here too: the operator came to the models looking
                 for which model reviews a push, and it was only on a page about permissions. */}
             <div className="card" data-card="action-review">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.review.title")}</div>
+              <div className="section-title">{t("settings.review.title")}</div>
               <div className="sub">
                 {t("settings.review.sub")}{" "}
                 <a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a>
@@ -1532,7 +1545,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             </div>
             {/* Beside the auxiliary models it governs: the summary model (Context) and the vision model above. */}
             <div className="card" data-card="auxiliary-fallback">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.auxiliary.title")}</div>
+              <div className="section-title">{t("settings.auxiliary.title")}</div>
               <Row title={t("settings.auxiliary.fallback")} desc={t("settings.auxiliary.fallback.sub")} data-setting="model.fallback_to_session">
                 <Switch checked={s.model.fallback_to_session ?? true} onChange={(fallback_to_session) => save({ model: { fallback_to_session } as any })} label={t("settings.auxiliary.fallback")} />
               </Row>
@@ -1542,15 +1555,18 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "providers":
         return (
           <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.providers.title")}</div>
+            <div className="section-title">{t("settings.providers.title")}</div>
             <div className="sub">{t("settings.providers.sub")}</div>
             <div className="mlist" data-setting="providers.list">
               {providerIds.map((id) => (
                 <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
               ))}
             </div>
-            <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
-            <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
+            {/* Every way to add an endpoint, in the card's foot under the ones there are. */}
+            <div className="card-foot provider-add">
+              <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
+              <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
+            </div>
           </div>
         );
       case "accounts":
@@ -1574,7 +1590,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {/* The two rules about the agent's own code first: the action grid's review log grows as it
                 loads, and a link to a row below it landed on a row the log had just pushed away. */}
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.selfchange")}</div>
+              <div className="section-title">{t("settings.selfchange")}</div>
               <div className="sub">{t("settings.selfchange.sub")}</div>
               {/* Two separate rules, each a segmented pick like every other choice in Settings. They
                   were three loose buttons once, the third a toggle that looked like a third mode. */}
@@ -1592,13 +1608,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.budget.caps")}</div>
+              <div className="section-title">{t("settings.budget.caps")}</div>
               <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
               <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
               <TotalCaps s={s} save={save} />
             </div>
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.balance.title")}</div>
+              <div className="section-title">{t("settings.balance.title")}</div>
               <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack data-setting="balance.thresholds_usd">
                 <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
               </Row>
@@ -1609,7 +1625,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "limits":
         return (
           <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.limits.title")}</div>
+            <div className="section-title">{t("settings.limits.title")}</div>
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <NumRow id="limits-disk" setting="disk.workspace_soft_limit_gb" title={t("settings.limits.disk")} desc={t("settings.limits.disk.sub")} unit={t("disk.limit.unit")} step="1" value={s.disk?.workspace_soft_limit_gb ?? 20} min={0} onSave={(v) => save({ disk: { workspace_soft_limit_gb: v } })} {...shipped(s.disk?.workspace_soft_limit_gb ?? 20, 20, () => save({ disk: { workspace_soft_limit_gb: 20 } }), `20 ${t("disk.limit.unit")}`)} />
@@ -1619,7 +1635,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "context":
         return (
           <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.compaction")}</div>
+            <div className="section-title">{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>
             <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} {...shipped(s.compaction?.auto_ratio ?? 0.8, 0.8, () => save({ compaction: { ...s.compaction, auto_ratio: 0.8 } }))} />
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
@@ -1667,7 +1683,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.app")}</div>
+              <div className="section-title">{t("settings.chat.app")}</div>
               <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict" {...shipped(s.assist?.predict ?? true, true, () => save({ assist: { ...s.assist, predict: true } }), t("common.on"))}>
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
@@ -1681,7 +1697,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
         return (
           <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>
+            <div className="section-title">{t("settings.chat.telegram")}</div>
             <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
               <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
             </Row>
@@ -1710,7 +1726,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.scheduler")}</div>
+              <div className="section-title">{t("settings.chat.scheduler")}</div>
               <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack data-setting="scheduler.topic_mode">
                 <Segmented label={t("settings.chat.scheduled")} value={s.scheduler.topic_mode} onChange={(topic_mode) => save({ scheduler: { ...s.scheduler, topic_mode } })} options={["per_task", "per_run"].map((m) => ({ id: m, label: t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun") }))} />
               </Row>
@@ -1739,7 +1755,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           <>
             <DesktopAppCard toast={toast} />
             <div className="card">
-              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.runtime")}</div>
+              <div className="section-title">{t("settings.about.runtime")}</div>
               {status ? (
                 <>
                   <Row title={t("settings.about.providers")}>{value(status.providers?.length ? status.providers.join(", ") : "—")}</Row>
@@ -1760,7 +1776,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             </div>
             {!telegram()?.initData && (
               <div className="card">
-                <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.browser")}</div>
+                <div className="section-title">{t("settings.about.browser")}</div>
                 <Row title={t("settings.sec.appearance")} desc={t("settings.about.appearance")}>
                   <a className="btn small" href={pathFor("settings", "appearance")} onClick={(e) => go(e, pathFor("settings", "appearance"))}>{t("settings.about.open")}</a>
                 </Row>

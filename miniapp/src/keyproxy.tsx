@@ -300,19 +300,21 @@ export function ClientVersions({ toast }: { toast: (text: string) => void }) {
   };
   const replace = (result: ClientResult) => setData((d) => d && { ...d, clients: (d.clients ?? []).map((c) => (c.name === result.client.name ? result.client : c)) });
   return (
-    <div className="keyproxy-clients" data-setting="keyproxy.clients">
+    <div className="keyproxy-clients settings-groups" data-setting="keyproxy.clients">
       <div className="section-title">{t("keyproxy.clients.title")}</div>
       <div className="sub">{t("keyproxy.clients.sub")}</div>
-      {!data.reachable
-        ? <div className="sub">{t(data.state === "outdated" ? "keyproxy.clients.outdated" : "keyproxy.unreachable")}</div>
-        : (
-          <>
-            <div className="mlist">{(data.clients ?? []).map((client) => <ClientRow key={client.name} client={client} writable={!!data.writable} onDone={replace} toast={toast} />)}</div>
-            <div className="btnrow">
-              <button className="btn small" data-action="check" disabled={checking} onClick={() => void check()}>{t(checking ? "keyproxy.clients.checking" : "keyproxy.clients.check")}</button>
-            </div>
-          </>
-        )}
+      <div className="card">
+        {!data.reachable
+          ? <div className="sub">{t(data.state === "outdated" ? "keyproxy.clients.outdated" : "keyproxy.unreachable")}</div>
+          : (
+            <>
+              <div className="mlist">{(data.clients ?? []).map((client) => <ClientRow key={client.name} client={client} writable={!!data.writable} onDone={replace} toast={toast} />)}</div>
+              <div className="card-foot">
+                <button className="btn small" data-action="check" disabled={checking} onClick={() => void check()}>{t(checking ? "keyproxy.clients.checking" : "keyproxy.clients.check")}</button>
+              </div>
+            </>
+          )}
+      </div>
     </div>
   );
 }
@@ -329,24 +331,27 @@ export function KeyproxyCard({ toast, onChanged }: { toast: (text: string) => vo
   const writable = !!data?.writable;
   const group = (g: KeyproxyUpstream["group"]) => rows.filter((row) => row.group === g);
   return (
-    <div className="card keyproxy-card" data-setting="keyproxy.upstreams">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("keyproxy.title")}</div>
+    <div className="keyproxy-card settings-groups" data-setting="keyproxy.upstreams">
       <div className="sub">{t("keyproxy.sub")}</div>
-      {!data?.reachable ? <Unavailable data={data} /> : (
+      {!data?.reachable ? <div className="card"><Unavailable data={data} /></div> : (
         <>
-          {!writable && <div className="sub" style={{ color: "var(--warn)" }}>{t("keyproxy.readonly")}</div>}
-          {data.keys_hidden === false && <div className="sub" data-keys-readable="" style={{ color: "var(--warn)" }}>{t("keyproxy.keys.readable")}</div>}
+          {!writable && <div className="sub attn">{t("keyproxy.readonly")}</div>}
+          {data.keys_hidden === false && <div className="sub attn" data-keys-readable="">{t("keyproxy.keys.readable")}</div>}
           <div className="section-title">{t("keyproxy.group.model")}</div>
-          <div className="mlist">{group("model").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div>
+          <div className="card"><div className="mlist">{group("model").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div></div>
           <div className="section-title">{t("keyproxy.group.search")}</div>
-          <div className="mlist">{group("search").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div>
+          <div className="card"><div className="mlist">{group("search").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div></div>
           <div className="section-title">{t("keyproxy.group.extra")}</div>
-          {group("extra").length ? <div className="mlist">{group("extra").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div> : <div className="sub">{t("keyproxy.extra.none")}</div>}
-          <AddUpstream write={write} writable={writable} taken={rows.map((row) => row.upstream)} />
+          <div className="card">
+            {group("extra").length ? <div className="mlist">{group("extra").map((row) => <UpstreamRow key={row.upstream} row={row} write={write} writable={writable} />)}</div> : <div className="sub">{t("keyproxy.extra.none")}</div>}
+            <AddUpstream write={write} writable={writable} taken={rows.map((row) => row.upstream)} />
+          </div>
           {!!data.cli_logins?.length && (
-            <Row title={t("keyproxy.logins")} desc={t("keyproxy.logins.sub")}>
-              <span className="sub">{data.cli_logins.map((login) => `${login.upstream}: ${t(login.configured ? "keyproxy.login.on" : "keyproxy.login.off")}`).join(" · ")}</span>
-            </Row>
+            <div className="card">
+              <Row title={t("keyproxy.logins")} desc={t("keyproxy.logins.sub")} stack>
+                <span className="settings-value">{data.cli_logins.map((login) => `${login.upstream}: ${t(login.configured ? "keyproxy.login.on" : "keyproxy.login.off")}`).join(" · ")}</span>
+              </Row>
+            </div>
           )}
           <ClientVersions toast={toast} />
         </>

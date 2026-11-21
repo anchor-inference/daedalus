@@ -14,6 +14,7 @@ import { navigate, pathFor } from "./router";
 import { Row } from "./settingsrow";
 import { confirmAsync, errorText } from "./ui";
 import { Dropdown, Switch } from "./ui/index";
+import { ProviderMark } from "./ui/provider-mark";
 import "./accounts.css";
 
 export type AccountWindow = { name: string; used_percent: number; resets_at?: number | string | null };
@@ -80,8 +81,16 @@ export function useSubscriptionAccounts(usage = true) {
   return { data, load };
 }
 
-function windowsText(windows: AccountWindow[]): string {
-  return windows.map((w) => t("accounts.window", { name: w.name, n: Math.round(w.used_percent) })).join(" · ");
+/** One usage window as a meter: its name and share in words, and the share again as a bar that turns
+ *  amber near the limit and red at it, so a spent account is seen before it is read. */
+function UsageWindow({ window }: { window: AccountWindow }) {
+  const used = Math.max(0, Math.min(100, Math.round(window.used_percent)));
+  return (
+    <span className="account-window" data-tone={used >= 100 ? "bad" : used >= 80 ? "warn" : undefined}>
+      <span>{t("accounts.window", { name: window.name, n: used })}</span>
+      <span className="account-meter" aria-hidden="true"><i style={{ width: `${used}%` }} /></span>
+    </span>
+  );
 }
 
 export function statusOf(account: SubscriptionAccount): { tone: string; text: string } {
@@ -94,9 +103,11 @@ export function statusOf(account: SubscriptionAccount): { tone: string; text: st
   return { tone: "ok", text: t("accounts.status.on") };
 }
 
-function AccountRow({ upstream, account, first, last, busy, onRename, onMove, onSignIn, onKey, onRemove }: {
+function AccountRow({ upstream, account, order, first, last, busy, onRename, onMove, onSignIn, onKey, onRemove }: {
   upstream: SubscriptionUpstream;
   account: SubscriptionAccount;
+  /** Its place in the order calls fall over in, from 1. */
+  order: number;
   first: boolean;
   last: boolean;
   busy: boolean;
@@ -113,26 +124,26 @@ function AccountRow({ upstream, account, first, last, busy, onRename, onMove, on
   const who = [account.email, account.plan].filter(Boolean).join(" · ");
   const keyed = upstream.sign_in === "key";
   return (
-    <div className="mrow account-row" data-account={account.id} data-upstream={upstream.upstream}>
-      <div className="mline noradio">
-        <div className="mmain">
-          <span className="mtitle">
-            <Icon name="user" size={14} /> {accountName(account)}
+    <div className="account-row" data-account={account.id} data-upstream={upstream.upstream} data-default={account.default ? "" : undefined}>
+      <div className="account-head">
+        <span className="account-order num" aria-hidden="true">{order}</span>
+        <div className="account-who">
+          <span className="account-name">
+            <span className="truncate">{accountName(account)}</span>
+            {account.default && <span className="chip accent">{t("accounts.default")}</span>}
           </span>
           <span className="mmeta">{who || t(account.configured ? "accounts.who.unknown" : "accounts.who.none")}</span>
         </div>
-        <div className="mtags">
-          {account.default && <span className="chip accent">{t("accounts.default")}</span>}
-          <span className={`pill ${status.tone}`} data-account-status={status.tone}>{status.text}</span>
-        </div>
+        <span className={`pill ${status.tone}`} data-account-status={status.tone}>{status.text}</span>
       </div>
-      <div className="account-facts sub">
-        {account.usage?.windows.length ? <span data-account-usage="">{windowsText(account.usage.windows)}</span> : null}
+      <div className="account-facts">
+        {account.usage?.windows.length ? <span className="account-windows" data-account-usage="">{account.usage.windows.map((w) => <UsageWindow key={w.name} window={w} />)}</span> : null}
         {account.usage?.error ? <span>{t("accounts.usage.error")}</span> : null}
         <span>{t("accounts.calls", { n: account.calls_24h })}{account.last_call_at ? ` · ${t("accounts.lastcall", { when: relTimeLong(account.last_call_at) })}` : ""}</span>
       </div>
-      <div className="account-edit">
-        <label className="mfield">
+      {!keyed && !account.configured && account.sign_in_command && <div className="mono account-command">{account.sign_in_command}</div>}
+      <div className="account-controls">
+        <label className="account-field">
           <span>{t("accounts.label")}</span>
           <input
             className="field"
@@ -144,27 +155,27 @@ function AccountRow({ upstream, account, first, last, busy, onRename, onMove, on
           />
         </label>
         {keyed && account.id !== DEFAULT_ACCOUNT && (
-          <label className="mfield">
+          <label className="account-field">
             <span>{t("accounts.key.replace")}</span>
-            <span className="row" style={{ gap: 8 }}>
+            <span className="account-key">
               <input className="field" type="password" autoComplete="off" value={key} placeholder={t("accounts.key.placeholder")} onChange={(e) => setKey(e.target.value)} />
               <button className="btn small" disabled={busy || !key.trim()} onClick={() => { onKey(key.trim()); setKey(""); }}>{t("common.save")}</button>
             </span>
           </label>
         )}
+        <div className="account-actions">
+          {!keyed && <button className={`btn small ${account.configured ? "" : "primary"}`.trim()} data-action="signin" disabled={busy} onClick={onSignIn}>{t(account.configured ? "accounts.signin.again" : "accounts.signin")}</button>}
+          <span className="account-move">
+            <button className="iconbtn small" disabled={busy || first} title={t("accounts.up")} aria-label={t("accounts.up")} onClick={() => onMove(-1)}><Icon name="up" size={14} /></button>
+            <button className="iconbtn small" disabled={busy || last} title={t("accounts.down")} aria-label={t("accounts.down")} onClick={() => onMove(1)}><Icon name="down" size={14} /></button>
+          </span>
+          {account.id !== DEFAULT_ACCOUNT && (
+            <button className="btn small ghost danger" data-action="remove" disabled={busy} onClick={onRemove}>
+              <Icon name="trash" size={14} /> {t("accounts.remove")}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="btnrow">
-        {!keyed && <button className="btn small primary" data-action="signin" disabled={busy} onClick={onSignIn}>{t(account.configured ? "accounts.signin.again" : "accounts.signin")}</button>}
-        <button className="iconbtn small" disabled={busy || first} title={t("accounts.up")} aria-label={t("accounts.up")} onClick={() => onMove(-1)}><Icon name="up" size={14} /></button>
-        <button className="iconbtn small" disabled={busy || last} title={t("accounts.down")} aria-label={t("accounts.down")} onClick={() => onMove(1)}><Icon name="down" size={14} /></button>
-        <span className="grow" />
-        {account.id !== DEFAULT_ACCOUNT && (
-          <button className="btn small danger" data-action="remove" disabled={busy} onClick={onRemove}>
-            <Icon name="trash" size={14} /> {t("accounts.remove")}
-          </button>
-        )}
-      </div>
-      {!keyed && !account.configured && account.sign_in_command && <div className="sub mono account-command">{account.sign_in_command}</div>}
     </div>
   );
 }
@@ -212,11 +223,16 @@ function UpstreamBlock({ row, terminal, toast, reload }: { row: SubscriptionUpst
   });
   const several = row.accounts.length > 1;
   return (
-    <div className="account-upstream" data-account-upstream={row.upstream}>
-      <div className="section-title">{upstreamTitle(row.upstream)}</div>
-      <div className="sub">{t("accounts.providers", { list: row.providers.join(", ") })}</div>
+    <section className="card account-upstream" data-account-upstream={row.upstream}>
+      <header className="account-upstream-head">
+        <ProviderMark id={row.upstream} />
+        <div className="account-upstream-text">
+          <h3 className="account-upstream-title">{upstreamTitle(row.upstream)}</h3>
+          <div className="sub">{t("accounts.providers", { list: row.providers.join(", ") })}</div>
+        </div>
+      </header>
       {several && (
-        <>
+        <div className="account-rules">
           <Row title={t("accounts.default.title")} desc={t("accounts.default.sub")} stack>
             <Dropdown
               id={`accounts-default-${row.upstream}`}
@@ -230,14 +246,15 @@ function UpstreamBlock({ row, terminal, toast, reload }: { row: SubscriptionUpst
           <Row title={t("accounts.fallover")} desc={t("accounts.fallover.sub")} data-setting={`accounts.${row.upstream}.fallover`}>
             <Switch checked={row.fallover} disabled={busy} onChange={(fallover) => act(() => api.put(base, { fallover }))} label={t("accounts.fallover")} />
           </Row>
-        </>
+        </div>
       )}
-      <div className="mlist">
+      <div className="account-list">
         {row.accounts.map((account, index) => (
           <AccountRow
             key={account.id}
             upstream={row}
             account={account}
+            order={index + 1}
             first={index === 0}
             last={index === row.accounts.length - 1}
             busy={busy}
@@ -249,35 +266,36 @@ function UpstreamBlock({ row, terminal, toast, reload }: { row: SubscriptionUpst
           />
         ))}
       </div>
-      <div className="account-add row" style={{ gap: 8 }}>
+      <div className="account-add">
         <input className="field" value={label} maxLength={60} placeholder={t("accounts.add.placeholder")} aria-label={t("accounts.label")} onChange={(e) => setLabel(e.target.value)} />
         {row.sign_in === "key" && <input className="field" type="password" autoComplete="off" value={key} placeholder={t("accounts.key.placeholder")} aria-label={t("accounts.key")} onChange={(e) => setKey(e.target.value)} />}
         <button className="btn small" data-action="add" disabled={busy || (row.sign_in === "key" && !key.trim())} onClick={() => void add()}>
           <Icon name="plus" size={14} /> {t("accounts.add")}
         </button>
       </div>
-    </div>
+    </section>
   );
 }
 
-/** Settings → Subscription accounts: every subscription's accounts. The card is the whole section, so
- *  with no subscription behind any model it says so rather than leaving the page blank. */
+/** Settings → Subscription accounts: every subscription's accounts. A subscription is a card of its
+ *  own (its two rules, its accounts in order, the line that adds one), so where one ends and the next
+ *  begins is drawn rather than inferred; as one long card the rows of two subscriptions ran together.
+ *  The section's name is the page's heading, so it is not said again here.
+ *  With no subscription behind any model the section says so rather than leaving the page blank. */
 export function SubscriptionAccountsCard({ toast }: { toast: (text: string) => void }) {
   const { data, load } = useSubscriptionAccounts();
   if (!data || !data.upstreams.length) return (
-    <div className="card accounts-card" data-setting="accounts">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("accounts.title")}</div>
-      <div className="sub">{t(data ? "accounts.none" : "common.loading")}</div>
+    <div className="accounts" data-setting="accounts">
+      <div className="sub accounts-lead">{t(data ? "accounts.none" : "common.loading")}</div>
     </div>
   );
   return (
-    <div className="card accounts-card" data-setting="accounts">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("accounts.title")}</div>
-      <div className="sub">{t("accounts.sub")}</div>
-      {!data.proxy.reachable && <div className="sub" style={{ color: "var(--warn)" }}>{t(data.proxy.state === "outdated" ? "accounts.proxy.outdated" : "accounts.proxy.unreachable")}</div>}
-      {!data.terminal && <div className="sub">{t("accounts.noterminal")}</div>}
+    <div className="accounts" data-setting="accounts">
+      <div className="sub accounts-lead">{t("accounts.sub")}</div>
+      {!data.proxy.reachable && <div className="accounts-note" data-tone="warn"><Icon name="alert" size={14} /> {t(data.proxy.state === "outdated" ? "accounts.proxy.outdated" : "accounts.proxy.unreachable")}</div>}
+      {!data.terminal && <div className="accounts-note"><Icon name="terminal" size={14} /> {t("accounts.noterminal")}</div>}
       {data.upstreams.map((row) => <UpstreamBlock key={row.upstream} row={row} terminal={data.terminal} toast={toast} reload={load} />)}
-      <div className="sub faint">{t("accounts.cache")}</div>
+      <div className="sub faint accounts-foot">{t("accounts.cache")}</div>
     </div>
   );
 }

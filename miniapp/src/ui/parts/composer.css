@@ -1,0 +1,206 @@
+/* ── the composer: one card, the field over a row of quiet controls ─────────────────────── */
+/* Transparent on purpose. The page behind a conversation is the theme's wash and the column beside
+   it is --bg; painting the composer with --bg drew a full-width slab of the column colour around
+   the field whenever those two differed. The scroll area ends above the composer, so nothing
+   passes behind it that an opaque bar would have to hide. */
+.composer { flex:none; display:flex; flex-direction:column; gap:6px; padding:6px 10px calc(10px + env(safe-area-inset-bottom)); background:transparent; }
+/* A card on the page, with a card's hairline and soft drop. Focus darkens the edge and nothing else:
+   a ring or a glow around the one field that is always in focus was a frame drawn twice. */
+.composer-box { display:flex; flex-direction:column; gap:2px; background:var(--card); border:1px solid var(--line); box-shadow:var(--drop-sm); border-radius:var(--radius-lg); padding:3px 5px; transition:border-color var(--t-fast); }
+.composer-box.two { border-radius:var(--radius-lg); }
+.composer-box:focus-within { border-color:var(--line-strong); }
+/* The element a dragged file would land on (filedrop.ts marks it): the composer's box, an agent's
+   question, a card of the Questions tab. Only that element changes, and without a blur: a blurred layer
+   over the whole conversation once repainted the transcript on every frame of a drag. */
+.drop-hint { display:none; }
+.composer[data-drop-over] .composer-box, .ask[data-drop-over], .q-card[data-drop-over] { position:relative; }
+.composer[data-drop-over] .composer-box > .drop-hint, .ask[data-drop-over] > .drop-hint, .q-card[data-drop-over] > .drop-hint { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; gap:8px; padding:0 12px; border:1px dashed var(--fg-3); border-radius:inherit; background:color-mix(in srgb, var(--surface-2) 94%, transparent); color:var(--fg); font-size:var(--fs-13); font-weight:500; text-align:center; pointer-events:none; }
+.drop-hint .ic { flex:none; color:var(--fg-2); }
+.composer-row { display:flex; align-items:flex-end; gap:2px; min-width:0; }
+.composer-box .composer-field { flex:1; min-width:0; width:auto; resize:none; border:0; background:none; color:var(--fg); padding:9px 6px; min-height:38px; max-height:calc(8lh + 18px); line-height:1.4; font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); outline:none; overflow-y:auto; }
+.composer-box .composer-field[data-empty]::before { color:var(--fg-3); }
+/* The composer's field is an editable element that draws a fenced block as the answer's code card
+   (codefield.tsx). Its lines wrap as a textarea's did; the code inside a card does not, and scrolls
+   sideways in the card, so a long line never widens the composer on a phone. The placeholder lies over
+   the empty first line, inside the field's own padding, on one line cut with an ellipsis. */
+.composer-field { position:relative; display:block; white-space:pre-wrap; overflow-wrap:anywhere; cursor:text; }
+.composer-box .composer-field:has(.cf-card) { max-height:min(60vh, calc(16lh + 18px)); }
+.composer-field[data-empty]::before { content:attr(data-placeholder); position:absolute; inset:0 0 auto 0; padding:inherit; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.composer-field[contenteditable="false"] { opacity:.6; cursor:default; }
+.composer-field .cf-card { position:relative; margin:6px 0; white-space:normal; cursor:text; }
+.composer-field .cf-card > .copy { position:absolute; top:4px; right:6px; z-index:1; }
+.composer-field .cf-card .codehead { display:block; height:auto; min-height:36px; padding:9px 44px 9px 14px; white-space:pre; overflow:hidden; text-overflow:ellipsis; }
+.composer-field .cf-tick { color:var(--fg-3); }
+.composer-field .cf-code { overflow-x:auto; padding:2px 14px 10px; font-family:var(--mono); font-size:var(--fs-mono); line-height:1.55; color:var(--code-block); }
+.composer-field .cf-code > .cf-line { white-space:pre; width:max-content; min-width:100%; }
+.composer-field .cf-close { padding:2px 14px 6px; border-top:1px solid var(--line); font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; color:var(--fg-3); }
+.composer-tools { display:flex; align-items:center; gap:2px; flex:none; }
+.composer-row > .iconbtn.plus { margin-bottom:3px; }
+.composer-tools .roundbtn { margin-left:4px; }
+.iconbtn.flat { background:transparent; color:var(--fg-2); }
+.iconbtn.flat:hover { background:var(--surface-2); color:var(--fg); }
+.iconbtn.flat.on { background:var(--surface-3); color:var(--fg); }
+.iconbtn.flat:disabled { opacity:.4; cursor:default; }
+/* Send is the view's one ink control, and Stop, Queue and Reply are the same control with another
+   glyph: a red Stop and a blue Queue made one button three, and the red one sat under every running
+   turn as an alarm. With nothing to send it is a grey plate, not a faded ink one, so it reads as
+   absent rather than as disabled by a fault. */
+.roundbtn.primary { border-color:transparent; box-shadow:none; background:var(--primary); color:var(--primary-ink); transition:background var(--t-fast), color var(--t-fast), scale var(--t-fast); }
+.roundbtn.primary:hover:not(:disabled) { background:var(--primary-hover); }
+.roundbtn.primary:active:not(:disabled) { scale:var(--press-scale-icon); }
+.roundbtn.primary:disabled { opacity:1; background:var(--surface-4); color:var(--fg-3); cursor:default; }
+.roundbtn.primary.stop, .roundbtn.primary.queue, .roundbtn.primary.reply { background:var(--primary); color:var(--primary-ink); }
+/* The context ring is a meter, so it is neutral until the window is nearly full. */
+.ctx-ring { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-width:28px; height:28px; border:0; border-radius:var(--radius-xs); background:transparent; color:var(--fg-3); cursor:pointer; padding:0 6px; flex:none; transition:background var(--t-fast), color var(--t-fast); }
+.ctx-pct { font-size:var(--fs-12); font-variant-numeric:tabular-nums; line-height:1; }
+.ctx-ring:hover { background:var(--surface-2); color:var(--fg); }
+.ctx-ring.attn { color:var(--warn); }
+.ctx-ring.bad { color:var(--bad); }
+.model-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); max-width:220px; padding:0 8px; background:transparent; border:0; border-radius:var(--radius-sm); color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; flex:0 1 auto; min-width:0; transition:background var(--t-fast), color var(--t-fast); }
+.model-select:hover, .model-select.on, .model-select[aria-expanded="true"] { background:var(--surface-2); color:var(--fg); }
+.model-select .model-effort { font-weight:400; color:var(--fg-3); }
+.model-select .ic { flex:none; color:var(--fg-3); }
+.model-select .model-label { min-width:0; }
+.model-select.attn { color:var(--warn); }
+/* Where a new chat runs, beside the model in the start composer: the environment's own pill, on a
+   control's height, opening the two choices with the reason the host is greyed out when it is. */
+.runon-select { display:inline-flex; align-items:center; height:var(--ctl-h-sm); padding:0 4px; background:transparent; border:0; border-radius:var(--radius-sm); cursor:pointer; flex:none; }
+.runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--surface-2); }
+.runon-menu { width:min(320px, 92vw); max-width:min(320px, 92vw); }
+.menu .runon-option { align-items:flex-start; padding:8px 10px; }
+.runon-option-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.runon-option-main .sub { font-size:var(--fs-12); white-space:normal; }
+.menu .runon-option:disabled { cursor:default; opacity:.7; }
+.menu .runon-option:disabled:hover { background:none; }
+.menu .runon-option.on > .ic { color:var(--fg); margin-top:2px; }
+/* A session that runs on the host, on its row and in its details: the host pill, never squeezed. */
+.host-mark { display:inline-flex; flex:none; }
+/* The fallback's two names: the stand-in, then an arrow and the configured model. */
+.model-select .model-label.model-fallback { display:inline-flex; align-items:baseline; gap:4px; }
+.model-select .model-to, .model-select .model-from { min-width:0; }
+.model-select .model-from { opacity:.85; }
+.model-select .model-dot { width:6px; height:6px; border-radius:50%; background:var(--warn); flex:none; }
+.composer-box .attachments { margin:4px 6px 2px; width:auto; }
+
+/* A voice note being recorded is the whole pill: cancel, the waveform with the time, stop, send. The
+   bar is as tall as the field and its row were, so the conversation above does not jump when it opens. */
+/* The field and its row stay mounted under the bar, so the draft and its measured height survive it. */
+.composer-box.voicing > .composer-field[hidden], .composer-box.voicing > .composer-row[hidden] { display:none; }
+.voicebar { display:flex; align-items:center; gap:6px; min-height:calc(38px + var(--ctl-h-lg) + 2px); padding:0 2px; }
+.voicebar-wave { flex:1; min-width:0; height:32px; color:var(--fg-2); }
+.voicebar-time { flex:none; min-width:3.5ch; text-align:right; font-variant-numeric:tabular-nums; font-size:var(--fs-13); color:var(--fg-2); }
+.voicebar-busy { flex:1; min-width:0; display:flex; align-items:center; gap:8px; color:var(--fg-2); font-size:var(--fs-13); }
+.voicebar-spinner { width:14px; height:14px; border-radius:50%; border:2px solid var(--line-strong); border-top-color:var(--fg-2); animation:voicebar-spin .8s linear infinite; flex:none; }
+@keyframes voicebar-spin { to { transform:rotate(360deg); } }
+.voicebar .roundbtn.voicebar-stop { background:var(--surface-2); border-color:transparent; box-shadow:none; color:var(--fg); }
+.voicebar .roundbtn:disabled { opacity:.35; cursor:default; }
+/* A thumb gets the touch size on every control in the bar: these are the only way out of a recording.
+   The microphone too, on a touch tablet, where the desktop's row would otherwise keep it at 40. */
+@media (pointer: coarse), (max-width: 1023px) {
+  .voicebar .iconbtn, .voicebar .roundbtn, .composer-tools > .iconbtn.mic { width:var(--row-h-touch); height:var(--row-h-touch); }
+}
+/* A recording that was not transcribed: why, and retry, attach, discard. Above the pill so the field
+   stays free to type in meanwhile. */
+.voicenote-failed { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:8px 8px 8px 12px; background:var(--card); border:1px solid var(--line); box-shadow:var(--drop-xs); border-radius:var(--radius-md); font-size:var(--fs-13); }
+.voicenote-failed > .ic { color:var(--bad); flex:none; }
+.voicenote-failed-text { flex:1 1 220px; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.voicenote-failed-reason { overflow-wrap:anywhere; }
+.voicenote-failed-actions { display:flex; align-items:center; gap:6px; flex:none; margin-left:auto; }
+@media (pointer: coarse), (max-width: 1023px) {
+  .voicenote-failed-actions .btn, .voicenote-failed-actions .iconbtn { min-height:var(--row-h-touch); min-width:var(--row-h-touch); }
+}
+
+/* The messages the host is holding for a running agent: one quiet list above the field, a row each,
+   rather than a stack of bordered cards that outweighed the field they wait beside. A row grows a
+   column for each control it carries (Steer only on a follow-up, Edit and the × only when allowed). */
+.steers { display:flex; flex-direction:column; gap:2px; }
+.steer { display:grid; grid-template-columns:auto minmax(0, 1fr); grid-auto-flow:column; grid-auto-columns:auto; align-items:center; gap:8px; min-height:var(--ctl-h); padding:2px 4px 2px 10px; background:transparent; border:0; border-radius:var(--radius-sm); font-size:var(--fs-12); color:var(--fg-3); transition:background var(--t-fast); }
+.steer:hover, .steer:focus-within { background:var(--surface-2); }
+.steer > .ic { color:var(--fg-3); flex:none; }
+.steer-text { color:var(--fg-2); font-size:var(--fs-13); }
+/* the files a queued message carries, ahead of its words: a pasted screenshot has no words at all */
+.steer-files { display:inline-flex; align-items:center; gap:3px; margin-right:6px; max-width:100%; color:var(--fg-3); overflow-wrap:anywhere; }
+.steer-files .ic { color:var(--fg-3); flex:none; }
+.steer-hint { white-space:nowrap; }
+.steer-x, .steer-edit { background:transparent; color:var(--fg-3); }
+.steer-now { white-space:nowrap; }
+/* Narrow, the hint goes under the message instead of away: it is the only thing on the card that
+   says the message is waiting and not yet read. */
+@media (max-width: 719px) {
+  .steer { row-gap:2px; }
+  .steer > .ic { grid-row:1; grid-column:1; }
+  .steer-text { grid-row:1; grid-column:2; }
+  .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-11); }
+  .steer-now, .steer-edit, .steer-x { grid-row:1 / span 2; }
+}
+/* A narrow pill — a phone, or a pane of the dual view — has room for the field, the model and the
+   circle: the ring lives in Details there, and the model name is cut short. */
+.composer-box { container-type: inline-size; }
+@container (max-width: 560px) {
+  /* Narrow, the context stays as its number alone rather than going away: a phone otherwise had no
+     sight of how full the window is. The number without the arc does not read as a spinner. */
+  .ctx-ring svg { display:none; }
+  .composer-box .composer-field { padding:9px 4px; max-height:calc(8lh + 18px); }
+  .composer-tools { gap:0; }
+}
+
+/* The dock: the agent's question, or a tool call the policy refused, waiting on the operator. A small
+   card with a card's edge; that it waits is said by its glyph in the warning ink, and what it asks to
+   run sits in a well in the code face. One ink button allows; every other answer is a ghost beside
+   it, so the eye lands on the one that lets the run go on. */
+.dock { display:flex; flex-direction:column; gap:10px; padding:12px 14px; background:var(--card); border:1px solid var(--line); box-shadow:var(--drop-sm); border-radius:var(--radius-md); }
+.dock-title { display:flex; align-items:center; gap:8px; font-size:var(--fs-14); font-weight:500; color:var(--fg); min-width:0; }
+.dock-title .ic { color:var(--warn); flex:none; }
+.dock-title kbd { font:inherit; font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; }
+.dock-detail { font-size:var(--fs-12); line-height:1.5; color:var(--fg-2); padding:8px 10px; background:var(--inset); box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); }
+.dock-actions { display:flex; gap:6px; }
+.dock-actions .btn:not(.primary) { background:transparent; border-color:transparent; box-shadow:none; color:var(--fg-2); }
+.dock-actions .btn:not(.primary):hover { background:var(--surface-2); color:var(--fg); }
+/* a blocked call overrides a check, not a question: the shield in the failure's ink says so */
+.dock.approval[data-kind="blocked"] .dock-title .ic { color:var(--bad); }
+.dock.approval [data-blocked-reason] { font-size:var(--fs-13); overflow-wrap:anywhere; }
+/* a question settled elsewhere waits on nobody: no warning edge, and the answer reads as words, not code */
+.dock.answered { box-shadow:var(--drop-xs); }
+.dock.answered .dock-title .ic { color:var(--fg-3); }
+.dock.answered .dock-detail { font-size:var(--fs-14); white-space:pre-wrap; overflow-wrap:anywhere; background:none; box-shadow:none; padding:0; }
+
+/* the + and the model list open upward from the pill */
+/* Popovers open upward from the composer. `.menu` itself is `right:10px` for the header overflow;
+   without `right:auto` a left-anchored popover is stretched to the window's right edge. */
+.menu.pop { top:auto; right:auto; z-index:var(--z-popover); overflow-y:auto; min-width:200px; width:max-content; max-width:min(340px, 92vw); }
+.menu.pop button { display:flex; align-items:center; gap:8px; min-height:var(--row-h); font-size:var(--fs-14); }
+.plus-menu { min-width: 200px; }
+.model-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
+.model-list { display:flex; flex-direction:column; }
+.model-row { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--row-h); padding:4px 8px; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
+.model-row:hover, .model-row:focus-visible { background:var(--surface-3); outline:none; }
+.model-row.restore { color:var(--warn); }
+.model-row .sub { font-size:var(--fs-12); color:var(--fg-3); }
+.model-text { display:flex; flex-direction:column; min-width:0; }
+.model-kind { width:18px; text-align:center; flex:none; font-size:var(--fs-12); color:var(--fg-3); }
+.model-kind.fast { color:var(--fg-2); }
+.model-kind.thinking { color:var(--fg-2); }
+.model-row-note { padding:4px 8px; }
+.model-row-note.attn { color:var(--warn); }
+
+/* The slash palette floats over the conversation like any menu: one surface, rows that light, and
+   no rule between them. */
+.palette { background:var(--surface-1); border:0; border-radius:var(--radius-md); padding:4px; overflow:hidden; box-shadow:var(--shadow-md); }
+.palette-item { display:flex; align-items:center; gap:10px; width:100%; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg); padding:4px 8px; min-height:var(--row-h-dense); font-size:var(--fs-13); cursor:pointer; text-align:left; }
+.palette-item:hover { background:var(--surface-3); }
+.palette-item:active { background:var(--surface-4); }
+.mono { font-family:var(--mono); }
+
+/* subagents */
+.card.row.subrow { margin-left: 22px; padding-top: 8px; padding-bottom: 8px; position: relative; }
+.subarrow { position: absolute; left: -18px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: var(--fs-14); }
+.badge.sub { margin-left: 8px; color: var(--fg-2); vertical-align: 2px; }
+.leader-link { cursor: pointer; color: var(--fg-3); }
+.leader-link b { font-weight: 600; }
+
+/* files */
+.files .crumbs { display:flex; align-items:center; flex-wrap:wrap; gap:2px; margin-bottom:8px; font-size:var(--fs-13); }
+.files .crumb { background:none; border:0; color:var(--fg-2); padding:6px 2px; font:inherit; cursor:pointer; }
+.files .filerow { width:100%; text-align:left; font:inherit; color:var(--fg); min-height:var(--row-h); }
+.files .filetext { margin:0; padding:10px 12px; background:var(--inset); border:0; box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre-wrap; word-break:break-word; color:var(--fg); }
+.files .preview { display:block; max-width:100%; border-radius:var(--radius-md); border:1px solid var(--line); }

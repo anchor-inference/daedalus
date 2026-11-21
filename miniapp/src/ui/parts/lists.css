@@ -1,0 +1,380 @@
+/* ── the session panel: usage of its provider, its cron ────────────────────────────────── */
+.sched-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.sched-row:first-of-type { border-top: 0; }
+.sched-name { font-size: var(--fs-13); font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sched-when { font-size: var(--fs-11); color: var(--fg-3); }
+
+/* ── phones: tighter header, every control reachable with a thumb ──────────────────────── */
+@media (max-width: 1023px) {
+  .chat-head { padding: 0 6px; gap: 4px; }
+  .head-model { display: none; }
+  .head-status { max-width: 36%; padding: 0 4px; }
+  .composer-row .chip { max-width: 40vw; }
+  .composer-row .chip span, .composer-row .chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet { max-height: 92%; }
+  .sheet .grip { margin-bottom: 6px; }
+  .filters { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; }
+  .filters .btn { white-space: nowrap; flex: none; }
+  table { font-size: var(--fs-12); }
+  .jump-down { right: 12px; bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .msg.user { max-width: 92%; }
+  .thought { padding-left: 12px; }
+  .toolcard, .tool-attachment, .summary-inline { margin-left: 12px; }
+  /* Between the header, the composer and the tab bar a phone's chat is about two thirds of the
+     screen; a whole result at 70vh filled all of it, and its end sat under the composer. */
+  .toolcard .result.full { max-height: 50vh; }
+  .act-wrap.nested { padding-left: 14px; }
+}
+@media (max-width: 400px) {
+  .tabbar { padding-left: 2px; padding-right: 2px; }
+  .grid2, .grid4 { grid-template-columns: 1fr; }
+}
+/* tablets: the phone layout with more room — the conversation and a pane fit side by side */
+@media (min-width: 720px) and (max-width: 1023px) {
+  .chat-scroll { padding-left: 20px; padding-right: 20px; }
+  .composer { padding-left: 20px; padding-right: 20px; }
+  .screen { padding-left: 20px; padding-right: 20px; }
+  .msg.user { max-width: 80%; }
+}
+/* A text field under a thumb is 16 px whatever the scale says: iOS zooms the page into anything smaller. */
+@media (hover: none) {
+  .composer-box .composer-field, .palette-sheet .field, input.field, textarea.field, select.field { font-size: 16px; }
+}
+/* the wheel and the keyboard, not the thumb: hover states only where hovering exists */
+@media (hover: none) {
+  .card.pressable:hover, .aside-row.link:hover, .attachment-open:hover { background: inherit; }
+}
+
+@media (min-width: 1024px) { .toast { left: auto; right: 24px; top: auto; bottom: 24px; transform: none; } }
+
+/* ── the microphone ────────────────────────────────────────────────────────────────────── */
+.roundbtn:disabled { opacity: .4; cursor: default; }
+
+/* ── memory ────────────────────────────────────────────────────────────────────────────── */
+.memory-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.memory-toolbar select.field { flex: 1 1 200px; width: auto; }
+.memory-toolbar input.field { flex: 2 1 160px; width: auto; }
+.memory-bulk { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 8px; min-height: 36px; }
+.memory-row { display: flex; gap: 10px; align-items: flex-start; }
+.memory-row.selected { border-color: var(--line-strong); background: var(--surface-2); }
+.memory-check { width: 18px; height: 18px; margin: 4px 0 0; accent-color: var(--primary); flex: none; }
+.memory-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; font-size: var(--fs-12); color: var(--fg-3); }
+.memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+.memory-actions { display: flex; gap: 4px; flex: none; }
+.badge.kind-decision { color: var(--warn); }
+.badge.kind-preference { color: var(--info); }
+.badge.kind-reflection { color: var(--ok); }
+@media (max-width: 480px) {
+  .memory-actions { flex-direction: column; }
+}
+
+/* ── settings: models and clients as rows that expand ───────────────────────────────────
+   Rows of one list, parted by hairlines. The default model is named by its tag: the stripe down the
+   row's side said it a second time, in a colour kept for what is live. An open row is a tinted block
+   with 12 px corners, so its fields read as belonging to it rather than to the list. */
+.mlist { margin-top: 8px; border-top: 1px solid var(--line); }
+.mlist:empty { display: none; }
+.mrow { border-bottom: 1px solid var(--line); padding: 4px 0; }
+/* At a card's top or bottom the card's own edge is the rule: a second line there underlined nothing. */
+.card > .mlist:first-child { border-top: 0; }
+.card > .mlist:last-child > .mrow:last-child, .card > .mlist:has(+ .card-foot) > .mrow:last-child { border-bottom: 0; }
+.mrow.open { background: color-mix(in srgb, var(--surface-2) 55%, transparent); border-bottom-color: transparent; border-radius: var(--radius-md); margin: 4px -12px; padding: 4px 12px 12px; }
+/* The hairline of the row above an open block would underline nothing. */
+.mrow:has(+ .mrow.open) { border-bottom-color: transparent; }
+.mline { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "radio main actions" "tags tags tags"; align-items: center; gap: 4px 10px; min-height: var(--row-h-touch); }
+.mline.noradio { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main actions" "tags tags"; }
+.mline .radio { grid-area: radio; }
+.mmain { grid-area: main; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; background: none; border: 0; padding: 6px 0; border-radius: var(--radius-xs); color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.mmain:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.mtitle { font-weight: 500; font-size: var(--fs-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.mtitle.mono, .sub.mono { font-family: var(--mono); font-size: var(--fs-13); }
+.mmeta { color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* A sentence about how the endpoint is paid for, not an address: read in the body face, and allowed to wrap. */
+.mmeta.opencode-hint { font-family: inherit; white-space: normal; color: var(--fg-2); }
+.opencode-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+/* A button here names a whole plan ("OpenCode Zen — pay per token, …"): on a phone it wraps inside
+   the card rather than running past the screen's edge on one line. */
+.opencode-add .btn { max-width: 100%; height: auto; white-space: normal; text-align: left; }
+.mtags { grid-area: tags; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 6px; }
+/* "default" is a tag like its neighbours, a step stronger: blue is kept for what is live. */
+.mtags .chip.accent { color: var(--fg); }
+.mactions { grid-area: actions; display: flex; align-items: center; gap: 6px; }
+.mactions .chev { display: inline-block; font-size: var(--fs-18); line-height: 1; color: var(--fg-3); transition: transform var(--t-fast) var(--ease-out); }
+.mactions .chev.down { transform: rotate(90deg); }
+.mactions .iconbtn.on .chev { color: var(--fg); }
+.mpanel { padding: 8px 0 0; }
+.mpanel.add { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); padding: 12px; }
+.mfields { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.mfield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mfield.end { justify-content: flex-end; }
+.mfield > span { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.mfield > span .faint { color: var(--fg-3); font-weight: 400; }
+/* Settings → MCP servers: a server's buttons wrap under its name on a narrow screen rather than
+   pushing the card wider than the page; the sign-in switch reads as one line, box then words. */
+/* The servers are rows of their card, one under a hairline from the next: as filled tiles they were
+   cards inside the card, and two of them ran together where the tiles touched. */
+.mcp-list { gap: 0; margin-top: 10px; border-top: 1px solid var(--line); }
+.mcp-list > * + * { border-top: 1px solid var(--line); }
+.mcp-list:empty { display: none; }
+.mcp-list .dt-server-head { flex-wrap: wrap; }
+.mcp-list .dt-hint[data-tone="bad"] { color: var(--bad); }
+.mcp-form { margin-top: 12px; }
+.mcp-form .mcp-check { flex-direction: row; align-items: center; gap: 8px; }
+.mcp-form .mcp-check > span { color: var(--fg); font-size: var(--fs-14); }
+.mcp-form .mcp-actions { flex-direction: row; gap: 8px; }
+.mfield .field { margin: 0; width: 100%; }
+.segmented.inline { display: inline-flex; margin: 0; }
+/* "Allow all from <server>": the button and its span read as one control, in the card's own button
+   style; the row it sits in wraps rather than pushing the approval wider than the column. */
+.dock-actions:has(.srv-grant), .sp-card-actions:has(.srv-grant) { flex-wrap: wrap; }
+.srv-grant { display: inline-flex; align-items: stretch; min-width: 0; max-width: 100%; }
+.srv-grant > .btn, .srv-grant > .ph-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
+.srv-grant-span { flex: none; font: inherit; font-size: var(--fs-12); color: var(--fg); background: var(--card); border: 1px solid var(--line); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 0 6px; }
+.srv-grant-span[data-forever] { color: var(--warn); }
+.srv-grant.phone { width: 100%; }
+.srv-grant.phone > .ph-btn { flex: 1; }
+.dt-server-grant { display: flex; }
+/* The session's standing grants: what, how long it has left, and the way to take it back. */
+.dt-grants { display: flex; flex-direction: column; gap: 6px; }
+.dt-grant { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 6px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-grant-left { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
+.dt-grant-left[data-tone="warn"] { color: var(--warn); }
+/* One-step add: paste, try, read what came of it, add. */
+.mcp-quick { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 10px; min-width: 0; }
+.mcp-quick-row { display: flex; gap: var(--space-2); min-width: 0; }
+.mcp-quick-row .field { margin: 0; min-width: 0; flex: 1; width: auto; }
+.mcp-quick-row .btn { flex: none; }
+.mcp-trial .mcp-trial-name { margin: 0; flex: 1; min-width: 0; }
+.mcp-trial .dt-hint[data-tone="bad"] { color: var(--bad); }
+.mcp-trial .dt-hint[data-tone="warn"] { color: var(--warn); }
+.mcp-trial .mfield { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.mcp-trial .mcp-actions, .mcp-quick .mcp-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mcp-stderr summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-3); }
+.mcp-stderr pre { margin: 4px 0 0; max-height: 180px; overflow: auto; padding: 6px 8px; font-size: var(--fs-mono); background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-policy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mcp-policy .segmented { flex-wrap: wrap; }
+.mcp-tools summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-3); }
+.mcp-tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px 0; }
+.mcp-tool-row .field { margin: 0; width: auto; flex: none; }
+.segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
+.priority-pick button.bad { color: var(--bad); }
+.priority-pick button.attn { color: var(--warn); }
+.priority-pick button.bad.on { background: color-mix(in srgb, var(--bad) 12%, var(--card)); }
+.priority-pick button.attn.on { background: color-mix(in srgb, var(--warn) 12%, var(--card)); }
+.btnrow .sub.mid { margin-left: auto; align-self: center; }
+.btnrow-labelled { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (min-width: 720px) {
+  .mline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "radio main tags actions"; }
+  .mline.noradio { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "main tags actions"; }
+  .mtags { padding: 0; justify-content: flex-end; }
+  .mfields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mfield.wide { grid-column: 1 / -1; }
+}
+@media (min-width: 1200px) {
+  .mfields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mfield.wide { grid-column: span 2; }
+}
+
+/* ── entity rows: the roster, and every other list of things with a title and a state ───────
+   A row is a card on the page: the card's surface, a hairline border and the smallest drop. What it
+   waits for is said by the amber word in its meta line, not by an amber outline. */
+.erow-group { margin-bottom: 6px; }
+
+/* The list is as wide as its column. */
+.agents-screen { width: 100%; }
+.folder-live { display: inline-flex; flex: none; }
+.chip.tiny { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; flex: none; }
+.erow.fork { margin-left: 22px;  }
+.erow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); padding: 8px 12px; margin-bottom: 6px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--drop-xs); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.erow:hover { background: var(--surface-2); }
+.erow:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.erow:active { background: var(--surface-3); }
+.erow .avatar { width: var(--avatar); height: var(--avatar); margin-top: 0; }
+.erow-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.erow-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.erow-title { flex: 1; min-width: 0; font-weight: 500; font-size: var(--fs-14); line-height: 1.35; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+.erow-time { color: var(--fg-3); font-size: var(--fs-11); flex: none; font-variant-numeric: tabular-nums; }
+/* A result the operator has not seen: a dot beside the time and a heavier name, in the list and in the sidebar. */
+.unread-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--accent); align-self: center; }
+.erow.unread .erow-title, .sidebar .erow.unread .erow-title { font-weight: 600; }
+.erow-meta { display: flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-13); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.erow-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A change's own sheet has the room to say who, where and when in full: truncated to a line, a
+   phone showed "daed…", "bot/websear…" and "28 Se…" and nothing could bring them back. */
+.proposal-sheet .erow-meta { flex-wrap: wrap; row-gap: 4px; white-space: normal; }
+.proposal-sheet .erow-meta > span { overflow: visible; overflow-wrap: anywhere; }
+.erow-meta .sep { color: var(--fg-3); flex: none; }
+.erow-meta .word { font-weight: 500; flex: none; }
+.erow-meta.running .word { color: var(--accent); }
+.erow-meta.waiting .word, .erow-meta.waiting { color: var(--warn); }
+.erow-meta.failed .word { color: var(--bad); }
+.disclosure { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 12px; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--line); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; text-align: left; }
+.disclosure .chev { color: var(--fg-3); display: inline-block; transition: transform var(--t-fast) var(--ease-out); font-size: var(--fs-18); line-height: 1; }
+.disclosure .chev.down { transform: rotate(90deg); }
+.disclosure-body { padding-bottom: 6px; }
+.sheet-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 0 4px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--surface-1); }
+.field.search { margin: 2px 0 6px; }
+.pagehead .field { background: var(--card); }
+
+/* ── key/value rows ────────────────────────────────────────────────────────────────────── */
+.kv { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:4px 0; font-size:var(--fs-13); }
+.kv > span:first-child { color:var(--fg-3); flex:none; }
+.kv b { font-weight:500; text-align:right; min-width:0; overflow-wrap:anywhere; }
+.kv-part { display: inline-block; }
+.kv .linkbtn { text-align:right; min-width:0; max-width:60%; font-size:var(--fs-13); }
+
+/* ── inbox, changes, board rows: a task's priority is its tag's to say, so the card carries no
+   coloured stripe down its side ─────────────────────────────────────────────────────────── */
+.erow.inbox, .erow.action { grid-template-columns: 32px minmax(0, 1fr); }
+.erow.inbox .erow-title { font-weight: 500; }
+.erow.inbox.unread .erow-title { font-weight: 600; }
+.erow.action { cursor: default; }
+.erow.action:hover { background: var(--card); }
+/* The square that says what kind of thing a row is: a wash of its tone under the glyph, which reads
+   on a card, a popover and a toast alike. */
+.kind { width: 32px; height: 32px; border-radius: var(--radius-sm); background: color-mix(in srgb, currentColor 10%, transparent); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-2); flex: none; }
+.kind.error { color: var(--bad); }
+.kind.warning { color: var(--warn); }
+.kind.info { color: var(--info); }
+.kind.ok { color: var(--ok); }
+.kind.quiet { color: var(--fg-3); }
+
+/* ── notifications: the rows, the bell's popover, the toasts ───────────────────────────────
+   On the Inbox screen the rows of a group are one card, parted by hairlines: each row carries the
+   card's surface and side edges, and the first and last of a run close it with 12 px corners. In
+   the popover and a toast a row is a flat line; the parts are the same. An unread row is a heavier
+   title and a 6 px dot after its time; one that needs an answer says so with its buttons, not with
+   an amber outline. Every size here is a token: the density guard reads this block like any other. */
+.notice-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); cursor: pointer; color: var(--fg); }
+.notice-row.card { margin: 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; box-shadow: none; transition: background var(--t-fast); }
+.notice-row.card:not(.notice-row.card + .notice-row.card) { border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md); }
+.notice-row.card:not(:has(+ .notice-row.card)) { margin-bottom: 6px; border-bottom-width: 1px; border-bottom-left-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); box-shadow: var(--drop-xs); }
+.notice-row.card:hover { background: var(--surface-2); }
+.notice-row.flat { padding: 8px; border-radius: var(--radius-sm); transition: background var(--t-fast); }
+.notice-row.flat:hover, .notice-row.flat:focus-visible { background: var(--surface-3); outline: none; }
+.notice-row.card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.notice-row.flat .kind { width: var(--ctl-h-sm); height: var(--ctl-h-sm); }
+.notice-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notice-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.notice-title { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; line-height: var(--lh-ui); overflow-wrap: anywhere; }
+.notice-row.unread .notice-title { font-weight: 600; }
+.notice-row.quiet .notice-title { color: var(--fg-2); font-weight: 400; }
+.notice-count { flex: none; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; font-variant-numeric: tabular-nums; }
+.notice-time { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.notice-row.unread .notice-time::after { content: ""; display: inline-block; width: var(--dot); height: var(--dot); margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
+.notice-meta { color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notice-body { color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); overflow-wrap: anywhere; }
+.notice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.notice-outcome { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.notice-outcome.allow, .notice-outcome.answered { color: var(--ok); }
+.notice-outcome.deny { color: var(--bad); }
+.needs-you { margin-bottom: 4px; }
+.needs-you .notice-body { font-family: var(--mono); font-size: var(--fs-mono); color: var(--fg-2); }
+.linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
+.linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
+.linkbtn.board-task-open { display: inline-flex; align-items: center; gap: 3px; font-size: inherit; }
+/* The bell's popover is a floating surface: the raised colour, a ring and drop in a border's place,
+   12 px corners, and rows that hover a step lighter than the surface. */
+.bell { position: relative; }
+.bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 15px; text-align: center; pointer-events: none; }
+.bell-badge.urgent { background: var(--bad); color: var(--bg); }
+.bell-pop { position: fixed; z-index: 38; width: min(400px, calc(100vw - 16px)); display: flex; flex-direction: column; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-md); overflow: hidden; outline: none; }
+.bell-head { display: flex; align-items: center; gap: 10px; padding: 10px 8px 4px 12px; font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.01em; }
+.bell-chips { padding: 0 12px; margin: 4px 0 4px; }
+.bell-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 4px; }
+.bell-body .section-title { margin: 10px 8px 2px; }
+.bell-empty { padding: 16px 8px; color: var(--fg-3); font-size: var(--fs-13); text-align: center; }
+.notice-toasts .iconbtn.quiet, .bell-pop .iconbtn.quiet { background: transparent; color: var(--fg-2); }
+.notice-toasts .iconbtn.quiet:hover, .bell-pop .iconbtn.quiet:hover { background: var(--surface-3); color: var(--fg); }
+.bell-foot { display: flex; justify-content: center; border-top: 1px solid var(--line); padding: 4px; }
+.notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.notice-toasts > * { pointer-events: auto; }
+.notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }
+/* A toast is a floating surface a step above a menu: the raised colour with the large ring and drop,
+   12 px corners, and its first answer the one filled button (ui/phone.css evens them on a phone). */
+/* On a phone the banner and its foot are one strip over the top of the page, on the page's own colour:
+   as two floating cards the 8 px between them let the page show through, the half of a heading cut
+   across the foot's upper edge. */
+.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px; background: var(--bg); border-bottom: 1px solid var(--line); pointer-events: auto; }
+.notice-toasts.banner .notice-foot { padding: 3px 4px; box-shadow: none; }
+.notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); cursor: pointer; touch-action: pan-x; animation: notice-in var(--t-base) var(--ease-out); }
+.notice-toast-head { display: flex; align-items: flex-start; gap: 10px; }
+.notice-toast-head .kind { width: var(--avatar); height: var(--avatar); }
+.notice-toast-head .notice-title { font-size: var(--fs-14); font-weight: 500; padding-top: 2px; }
+.notice-toast > .notice-body { padding-left: calc(var(--avatar) + 10px); }
+.notice-toast > .notice-actions { padding-left: calc(var(--avatar) + 10px); }
+.notice-toast .notice-actions { margin-top: 6px; }
+.notice-foot { display: flex; align-items: center; gap: 4px; padding: 2px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.notice-foot .grow { flex: 1; }
+.notice-foot .btn.small { padding: 2px 8px; font-size: var(--fs-12); color: var(--fg-3); }
+.notice-more { padding: 2px 8px; border: 0; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); font-weight: 500; cursor: pointer; }
+.notice-more:hover { color: var(--fg); }
+@keyframes notice-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* A toast about a setting says by its square whether the work was done another way (amber) or not at
+   all (red): a wash of the tone under its glyph. It was a tinted border and a stripe down the edge. */
+.notice-toast.tone-warning { --toast-tone: var(--warn); }
+.notice-toast.tone-error { --toast-tone: var(--bad); }
+.notice-toast:is(.tone-warning, .tone-error) .kind { color: var(--toast-tone); background: color-mix(in srgb, var(--toast-tone) 12%, transparent); }
+/* The row a link brought the operator to: two soft pulses of ink, then nothing. */
+.setting-flash { animation: setting-flash 1.2s var(--ease-out) 2; border-radius: var(--radius-md); }
+@keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
+.inbox-body { margin-top: 6px; cursor: default; }
+.inbox-entry + .inbox-entry { margin-top: 8px; }
+.inbox-entry-title { font-weight: 500; font-size: var(--fs-13); margin-bottom: 4px; }
+.inbox-text { margin: 0; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-mono); white-space: pre-wrap; word-break: break-word; line-height: 1.45; max-height: 50vh; overflow: auto; color: var(--fg-2); }
+.erow.proposal { grid-template-columns: minmax(0, 1fr); }
+.erow.proposal .pill { flex: none; }
+.proposal-summary { margin-top: 4px; line-height: 1.45; }
+.proposal-text { white-space: pre-wrap; line-height: 1.5; font-size: var(--fs-14); }
+.proposal-sheet .segmented { margin: 4px 0 10px; }
+.proposal-sheet pre.diff { max-height: 60vh; overflow: auto; font-size: var(--fs-mono); }
+pre.diff .file { color: var(--fg); font-weight: 600; }
+.sheet-foot.column { flex-direction: column; align-items: stretch; }
+.task-check { display: flex; align-items: center; gap: 8px; }
+.task-check .bar { flex: 1; max-width: 160px; }
+.check-row { margin: 0; min-height: var(--row-h); align-items: flex-start; }
+.check-row input { margin-top: 3px; }
+.check-row .done { color: var(--fg-3); text-decoration: line-through; }
+
+/* ── services: a card per service, its name over a line of state, the command in the code face ── */
+.service-row.erow { display: block; padding: 12px; cursor: default; }
+.service-row.erow:hover { background: var(--card); }
+.service-row.erow .service-line { gap: 10px; }
+.service-row.erow .service-name { font-size: var(--fs-14); font-weight: 500; }
+.service-name .chip.port { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; }
+.service-name .chip { padding: 1px 8px; font-size: var(--fs-11); }
+.service-meta { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-3); }
+.service-line .btn.open { flex: none; min-height: var(--ctl-h-sm); }
+.service-group .section-title .linkbtn { color: var(--fg-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-13); font-weight: 500; }
+.service-group .section-title .linkbtn:hover { color: var(--fg); }
+/* A choice of one is a list's rows, the chosen one filled: as bordered tiles each option was a card
+   inside the sheet or the card that asks. */
+.access-options { display: flex; flex-direction: column; gap: 2px; }
+.access-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; transition: background var(--t-fast); }
+.access-option:hover { background: var(--surface-2); }
+.access-option.on { background: var(--surface-3); }
+.access-option input { margin-top: 3px; accent-color: var(--primary); }
+.access-option b { display: block; font-weight: 500; }
+.access-option .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); }
+/* A live link: whoever holds it drives the agent, so the warning comes first and is not quiet. */
+.live-links { display: grid; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.live-title { margin: 0; font-size: var(--fs-14); font-weight: 600; }
+.live-warning, .live-reach { display: flex; align-items: flex-start; gap: var(--space-2); padding: 8px 10px; border-radius: var(--radius-sm); font-size: var(--fs-12); }
+.live-warning { color: var(--fg); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.live-warning .ic, .live-reach .ic { flex: none; margin-top: 1px; }
+.live-warning .ic { color: var(--bad); }
+.live-reach.ok .ic { color: var(--ok); }
+.live-reach.warn .ic { color: var(--warn); }
+.live-reach.ok { color: var(--fg); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.live-reach.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.live-link { display: grid; gap: 4px; }
+.live-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--fs-12); color: var(--fg-3); }
+.live-visitors { margin: 0; padding-left: 18px; font-size: var(--fs-12); color: var(--fg-2); }
+.live-create { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.live-create select.field { width: auto; }
+.live-ended { display: grid; gap: 2px; font-size: var(--fs-12); color: var(--fg-3); }
+.live-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.preview-line { margin-top: 10px; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); color: var(--fg-2); }
+.kind.muted { color: var(--fg-3); }

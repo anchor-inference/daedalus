@@ -1,12 +1,12 @@
 /* The agent's question above the composer, and its record in the transcript once answered.
 
    A calm card on the page's own surface: the question used to sit in a warning-orange frame, which
-   shouted at the operator for something that is a normal part of the work. Colour is kept for two
-   things only — the chosen option (the accent) and the one button that moves on (the primary). */
+   shouted at the operator for something that is a normal part of the work. The chosen option is drawn
+   in ink and the one button that moves on is the primary; nothing here takes a colour. */
 
 /* Twenty options with descriptions is what the schema allows: the card stops at most of the window
    and its question scrolls between the chips and the button, which both stay in sight. */
-.ask { display: flex; flex-direction: column; gap: var(--space-3); max-height: 72vh; padding: 12px 16px 12px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); min-width: 0; }
+.ask { display: flex; flex-direction: column; gap: var(--space-3); max-height: 72vh; padding: 14px 16px 12px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--drop-sm); border-radius: var(--radius-md); min-width: 0; }
 .ask-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
 .ask-head .ic { flex: none; }
 .ask-eyebrow { font-weight: 500; color: var(--fg-2); }
@@ -15,12 +15,12 @@
 /* A batch's chips: where the operator is, what is answered, and a way to any question. */
 .ask-steps { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: -2px -2px 0; padding: 2px; }
 .ask-steps::-webkit-scrollbar { display: none; }
-.ask-step { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--chip-h-dense); max-width: 168px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.ask-step { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--chip-h-dense); max-width: 168px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .ask-step:hover { background: var(--surface-2); }
-.ask-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-step:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ask-step-n { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .ask-step-label { overflow: hidden; text-overflow: ellipsis; }
-.ask-step[data-state="done"] .ask-step-n { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.ask-step[data-state="done"] .ask-step-n { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .ask-step[data-state="current"] { border-color: var(--line-strong); background: var(--surface-3); color: var(--fg); }
 .ask-step[data-state="current"] .ask-step-n { background: var(--fg); color: var(--bg); }
 .ask-step.review { padding: 0 10px; }
@@ -30,7 +30,7 @@
 /* The padding is the room a focused option's ring needs inside the scrolling box. */
 .ask-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; min-height: 0; overflow-y: auto; margin: -3px -4px; padding: 3px 4px; }
 .ask-q { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
-.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask-text { margin: 0; color: var(--fg); font-size: var(--fs-14); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-kind { color: var(--fg-3); font-size: var(--fs-12); }
 
@@ -40,17 +40,17 @@
 .ask-opt { position: relative; display: flex; align-items: flex-start; gap: 10px; min-height: var(--row-h); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .ask-opt:hover { background: var(--surface-2); }
 .ask-opt input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.ask-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
-.ask-opt.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.ask-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ask-opt.on { border-color: var(--fg); background: var(--surface-2); }
 .ask-mark { flex: none; position: relative; width: 16px; height: 16px; margin-top: 1px; border: 1.5px solid var(--fg-3); border-radius: 50%; transition: border-color var(--t-fast), background var(--t-fast); }
 .ask-options[role="group"] .ask-mark { border-radius: 4px; }
-.ask-opt.on .ask-mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-1); }
+.ask-opt.on .ask-mark { border-color: var(--fg); background: var(--fg); box-shadow: inset 0 0 0 3px var(--card); }
 .ask-options[role="group"] .ask-opt.on .ask-mark { box-shadow: none; }
-.ask-options[role="group"] .ask-opt.on .ask-mark::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid var(--accent-ink); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.ask-options[role="group"] .ask-opt.on .ask-mark::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .ask-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ask-opt-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--fg); font-size: var(--fs-14); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
 .ask-opt-desc { color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; overflow-wrap: anywhere; }
-.ask-rec { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
+.ask-rec { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
 .ask-key { flex: none; min-width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-11); }
 .ask-opt.other .ask-opt-label { color: var(--fg-2); font-weight: 400; }
 .ask-opt.other.on .ask-opt-label { color: var(--fg); }
@@ -62,13 +62,13 @@
 .ask-options[data-layout="pair"] .ask-key { position: absolute; right: 8px; top: 50%; margin: 0; transform: translateY(-50%); }
 
 /* Words: the whole answer of a free-text question, or what "Other…" opens onto. */
-.ask-field { display: block; width: 100%; min-height: var(--ctl-h-lg); resize: none; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: 1.45; }
-.ask-field:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.ask-field { display: block; width: 100%; min-height: var(--ctl-h-lg); resize: none; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: 1.45; }
+.ask-field:focus { outline: none; border-color: var(--fg-3); }
 .ask-other-field { padding-left: 2px; }
 
 /* An option with a preview: the list and the chosen option's preview side by side. */
 .ask-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); align-items: start; }
-.ask-preview { margin: 0; padding: 10px 12px; min-height: 100%; max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.4; white-space: pre; }
+.ask-preview { margin: 0; padding: 10px 12px; min-height: 100%; max-height: 280px; overflow: auto; border: 0; border-radius: var(--radius-sm); background: var(--inset); color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.4; white-space: pre; }
 
 /* The review: one row per question, its answer, and the way back to it. */
 .ask-review { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
@@ -107,7 +107,7 @@
 .ask-record-head-a { flex: 0 0 auto; max-width: 55%; color: var(--fg); }
 .ask-record-head-a.none, .ask-record-status { font-style: italic; }
 .ask-record-status { flex: 0 1 auto; min-width: 0; }
-.ask-record[data-state="waiting"] .ask-record-status { color: var(--accent); font-style: normal; }
+.ask-record[data-state="waiting"] .ask-record-status { color: var(--fg-2); font-style: normal; }
 /* Opened: the questions whole, each with its answer under it, wrapping rather than cut. */
 /* The reply's files sit under its line, at the body's indent; the strip leans left here, where a
    message's leans right with its bubble. */
@@ -127,7 +127,7 @@
 @media (max-width: 1023px) {
   /* The phone: full width, a thumb's targets, and the button that moves on kept in reach at the
      bottom of the card while a long question or a preview scrolls under it. */
-  .ask.phone { gap: 10px; padding: 12px 14px 0; border-radius: var(--radius-xl); max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
+  .ask.phone { gap: 10px; padding: 12px 14px 0; border-radius: var(--radius-lg); max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
   .ask.phone .ask-body { flex: none; overflow: visible; }
   .ask.phone .ask-head { font-size: var(--fs-13); }
   .ask.phone .ask-text { font-size: var(--fs-15); }
@@ -138,7 +138,7 @@
   .ask.phone .ask-step[data-state="current"], .ask.phone .ask-step.review { padding: 0 10px 0 4px; }
   .ask.phone .ask-step.review { padding: 0 10px; }
   .ask.phone .ask-step.review .ask-step-label { display: inline; }
-  .ask.phone .ask-opt { min-height: var(--tap); padding: 10px 12px; border-radius: var(--radius-md); }
+  .ask.phone .ask-opt { min-height: var(--tap); padding: 10px 12px; border-radius: var(--radius-sm); }
   .ask.phone .ask-mark { width: 20px; height: 20px; margin-top: 0; }
   .ask.phone .ask-options[role="group"] .ask-opt.on .ask-mark::after { left: 6px; top: 2px; width: 5px; height: 10px; }
   .ask.phone .ask-opt-label { font-size: var(--fs-15); }
@@ -152,9 +152,9 @@
   .ask.phone .ask-review-q { grid-column: 1; grid-row: 1; }
   .ask.phone .ask-review-a { grid-column: 1; grid-row: 2; font-size: var(--fs-14); }
   .ask.phone .ask-review-edit { grid-column: 2; grid-row: 1 / 3; min-height: var(--tap); padding: 0 8px; font-size: var(--fs-14); }
-  .ask.phone .ask-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -14px; padding: 10px 14px 12px; background: var(--surface-1); }
+  .ask.phone .ask-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -14px; padding: 10px 14px 12px; background: var(--card); }
   .ask.phone .ask-hint { text-align: left; white-space: normal; font-size: var(--fs-13); line-height: 1.3; }
-  .ask.phone .ask-foot .btn { min-height: var(--tap); border-radius: var(--radius-pill); font-size: var(--fs-15); }
+  .ask.phone .ask-foot .btn { min-height: var(--tap); border-radius: var(--radius-sm); font-size: var(--fs-15); }
   .ask.phone .ask-go { padding: 0 20px; }
   .ask.phone .ask-back { min-width: var(--tap); justify-content: center; padding: 0; }
   .ask-record-body { font-size: var(--fs-14); }

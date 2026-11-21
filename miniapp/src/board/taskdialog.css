@@ -13,7 +13,7 @@
 .ptask-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .ptask-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .ptask-title-row { display: flex; align-items: flex-start; gap: var(--space-1); min-width: 0; }
-h3.ptask-title { margin: 0; font-size: var(--fs-20); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
+h3.ptask-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
 .ptask-title-input.field { font-size: var(--fs-20); font-weight: 600; }
 
 /* The pen beside a heading: quiet until its block is pointed at or it has the focus, never hidden,
@@ -27,20 +27,20 @@ h3.ptask-title { margin: 0; font-size: var(--fs-20); font-weight: 600; line-heig
 .ptask-state-line > span { min-width: 0; overflow-wrap: anywhere; }
 .ptask-state-line .status { display: inline-flex; align-items: center; gap: 6px; }
 .ptask-waits { color: var(--fg); }
-/* What waits on the operator is the one loud thing in the dialog. */
-.ptask-needs { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); font-size: var(--fs-13); color: var(--fg); min-width: 0; }
+/* What waits on the operator is the one loud thing in the dialog: a quiet card with a warning mark. */
+.ptask-needs { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); font-size: var(--fs-13); color: var(--fg); min-width: 0; }
 .ptask-needs > .ic { color: var(--warn); flex: none; }
 .ptask-needs > .grow { min-width: 0; overflow-wrap: anywhere; }
 .ptask-needs .btn { flex: none; }
 
 .ptask-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-7); align-items: start; padding-top: var(--space-4); }
 .ptask-main { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
-.ptask-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface-2); min-width: 0; }
+.ptask-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-md); background: var(--card); border: 1px solid var(--line); min-width: 0; }
 .ptask-result:empty { display: none; }
 
 .ptask-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ptask-block-head { display: flex; align-items: center; gap: var(--space-1); min-height: var(--ctl-h-sm); }
-.ptask-label { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--fg-2); letter-spacing: 0; text-transform: none; }
+.ptask-label { margin: 0; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); letter-spacing: 0; text-transform: none; }
 /* Text in full and at a reading width: the brief was cut at two lines, and a line across 1000 px is
    lost on its way back to the left edge. */
 .ptask-brief-text { font-size: var(--fs-14); line-height: var(--lh-prose); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); max-width: 80ch; }
@@ -52,7 +52,7 @@ h3.ptask-title { margin: 0; font-size: var(--fs-20); font-weight: 600; line-heig
 /* The requirements and the acceptance keep their own components; in the view they lose the box and
    the tracked capitals, so they read as part of the page rather than a form panel dropped into it. */
 .ptask-main .pboard-contract { border: 0; padding: 0; margin: 0; gap: var(--space-2); }
-.ptask-main .pboard-contract-title { font-size: var(--fs-13); font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--fg-2); }
+.ptask-main .pboard-contract-title { font-size: var(--fs-12); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--fg-3); }
 .ptask-main .pboard-items { font-size: var(--fs-14); gap: var(--space-3); }
 .ptask-notes-text { max-height: none; }
 
@@ -105,7 +105,7 @@ select.field.ptask-select { width: 100%; }
 /* A phone: the same parts in the same order, one column, on the review page's Task tab. */
 .ptask-phone { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .ptask-phone .ptask-state { padding: 0; }
-.ptask-phone .ptask-props, .ptask-phone .ptask-action { padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--surface-1); border-top: 0; }
+.ptask-phone .ptask-props, .ptask-phone .ptask-action { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--card); border: 1px solid var(--line); }
 @media (max-width: 1023px) {
   .ph-taskpage .ptask-foot { position: sticky; bottom: 0; margin-top: 0; z-index: 2; background: var(--bg); }
   .ph-taskpage .ptask-prop label.field, .ph-taskpage .ptask-resume label.field { margin: 0; }
