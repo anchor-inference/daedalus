@@ -20,3 +20,11 @@ export function effortOf(value: string): Effort {
 export function effortBody(effort: Effort): { thinking: boolean; reasoning_effort?: string } {
   return effort.thinking ? { thinking: true, reasoning_effort: effort.effort } : { thinking: false };
 }
+
+/** The subscription a preset's calls go through and the account "the model's own" is there; null for a
+ *  model whose client has no accounts, or one typed by hand, which names no preset to read them from. */
+export function startUpstream(preset: Preset | undefined, upstreams: readonly { upstream: string; providers: string[]; default_account: string }[]): { upstream: string; fallback: string } | null {
+  if (!preset) return null;
+  const found = upstreams.find((row) => row.providers.includes(preset.provider));
+  return found ? { upstream: found.upstream, fallback: preset.account || found.default_account } : null;
+}

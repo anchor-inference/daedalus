@@ -10,8 +10,9 @@ import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react
 import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
 import { AttachmentCard, PlusSheet, useComposerFocus } from "../composerbox";
 import { layerOpen, Popover, Sheet } from "../ui/dialogs";
-import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
-import { ModelChoice, ModelSelect } from "../modelselect";
+import { effortBody, effortOf, presetEffort, startUpstream, type Effort } from "../starteffort";
+import { AccountChoice, ModelChoice, ModelSelect } from "../modelselect";
+import { useSubscriptionAccounts } from "../accounts";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
 import { landWords } from "../voicenote";
 import { ChatsScreen } from "./Chats";
@@ -337,12 +338,22 @@ function useStartModel() {
   // A model picked outside the presets keeps the thinking the session starts with, the default's.
   const presetId = chosen && "preset" in chosen ? chosen.preset : defaultId;
   const shownEffort = effort ?? presetEffort(presets[presetId] as Preset | undefined);
+  // The account too is picked before the chat exists, from the subscription the chosen model's client
+  // goes through. Without it a chat could only be moved to another plan after its first turn had
+  // already run, and been paid for, on the default one.
+  const [account, setAccount] = useState("");
+  const { data: accounts } = useSubscriptionAccounts(false);
+  const preset = chosen && !("preset" in chosen) ? undefined : presets[presetId] as Preset | undefined;
+  const upstream = startUpstream(preset, accounts?.upstreams ?? []);
+  const accountChoice: AccountChoice | undefined = upstream ? { ...upstream, chosen: account, onChoose: setAccount } : undefined;
   function choose(choice: ModelChoice) {
     if ("clear" in choice) setChosen(null);
     else if ("preset" in choice) setChosen({ preset: choice.preset });
     else setChosen({ model: choice.model });
+    // An account names a plan of one subscription; another model may go through another one.
+    setAccount("");
   }
-  return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen };
+  return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen, account: accountChoice, setAccount };
 }
 
 /** What Agent mode adds to a new chat, beyond the model and the project the composer already asks. */
@@ -358,6 +369,8 @@ const NO_AGENT: AgentDraft = { name: "", ownDirectory: false, folder: "", loop: 
 
 function StartComposer({ phone, project, toast, model, run, kind, onKind, offers, agent, onAgent }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn; kind: ChatKind; onKind: (kind: ChatKind) => void; offers: KindOffers; agent: boolean; onAgent: (on: boolean) => void }) {
   const { chosen, effort, setEffort, shownEffort, choose } = model;
+  const account = model.account;
+  const setAccount = model.setAccount;
   const modelLabel = model.label;
   const modelOpen = model.open;
   const setModelOpen = model.setOpen;
@@ -434,8 +447,9 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       // The model and the effort in one change, before the message: the first turn is the one
       // that has to think the way the operator asked.
       const model = chosen && !("preset" in chosen) ? { model: chosen.model } : null;
-      if (model || effort) {
-        await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}) });
+      const chosenAccount = account?.chosen ? { account: account.chosen } : null;
+      if (model || effort || chosenAccount) {
+        await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}), ...chosenAccount });
       }
       // The consent the operator just gave, recorded on the chat as its own switch records it.
       if (kind === "chrome") await api.put(`${USER_STATUS}/sessions/${encodeURIComponent(created.id)}`, { env: "user", consent: true });
@@ -454,6 +468,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       setDraft("");
       setFiles([]);
       setEffort(null);
+      setAccount("");
       setSecret(false);
       setExtra(NO_AGENT);
     } catch (e) {
@@ -648,7 +663,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
             {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} />{t("newagent.loop")}<Icon name="close" size={12} /></button>}
             <div className="composer-tools">
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
-                effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
+                effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
               {asr?.configured && <MicButton note={note} />}
               {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
                   not offered here: it is a beta with a chat of its own, and a new chat offers dictation. */}
@@ -697,7 +712,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           {offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
-              effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
+              effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
             {asr?.configured && <MicButton note={note} />}
             <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || offline || idle || blocked} aria-label={sendLabel} title={sendLabel}><Icon name="up" /></button>
           </div>
