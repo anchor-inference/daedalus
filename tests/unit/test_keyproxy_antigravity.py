@@ -186,6 +186,7 @@ async def test_proxy_antigravity_models_and_completion(tmp_path: Path, monkeypat
         assert resp_usage.status == 200
         usage_data = await resp_usage.json()
         assert usage_data["antigravity"]["logged_in"] is True
+        assert usage_data["antigravity"]["windows"][0]["name"] == "Gemini (5h)"
         assert usage_data["antigravity"]["windows"][0]["used_percent"] == 10.0
     finally:
         await app["client"].aclose()

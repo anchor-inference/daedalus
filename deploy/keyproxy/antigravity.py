@@ -201,20 +201,27 @@ def antigravity_usage_view(data: dict[str, Any], tier: str = "") -> dict[str, An
     buckets: dict[str, tuple[float, str | None]] = {}
     if isinstance(models_map, dict):
         for model_id, info in models_map.items():
-            if not isinstance(info, dict) or model_id.startswith("tab_"):
+            if not isinstance(info, dict) or model_id.startswith("tab_") or model_id.endswith("-disabled"):
                 continue
             qi = info.get("quotaInfo")
             if not isinstance(qi, dict) or "remainingFraction" not in qi:
                 continue
-            family = "Gemini" if model_id.startswith("gemini") else "Claude / GPT"
+            if model_id.startswith("gemini-4-argon") or model_id == "gemini-pro-orchestrator-g1-pro":
+                family = "Gemini 4 Argon (weekly)"
+            elif model_id.startswith("gemini"):
+                family = "Gemini (5h)"
+            else:
+                family = "Claude / GPT (5h)"
             frac = float(qi.get("remainingFraction") or 0.0)
             reset = qi.get("resetTime")
             prev = buckets.get(family)
             if prev is None or frac < prev[0]:
                 buckets[family] = (frac, str(reset) if reset else None)
+    order = ("Gemini (5h)", "Gemini 4 Argon (weekly)", "Claude / GPT (5h)")
     windows = [
-        {"name": family, "used_percent": round(max(0.0, min(100.0, (1.0 - frac) * 100.0)), 1), "resets_at": reset}
-        for family, (frac, reset) in buckets.items()
+        {"name": family, "used_percent": round(max(0.0, min(100.0, (1.0 - buckets[family][0]) * 100.0)), 1), "resets_at": buckets[family][1]}
+        for family in order
+        if family in buckets
     ]
     limit_reached = any(w["used_percent"] >= 100.0 for w in windows)
     return {"provider": "antigravity", "plan": tier or "Antigravity", "limit_reached": limit_reached, "windows": windows}
