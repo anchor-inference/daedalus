@@ -652,12 +652,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // Usage of the provider the session talks to: a subscription's windows, or the day's metered spend.
   const provider = detail?.provider ?? "";
+  const activeAccount = detail?.account || detail?.account_default || "";
   useEffect(() => {
     if (!provider) return;
     let gone = false;
+    const qs = new URLSearchParams();
+    if (activeAccount) qs.set("account", activeAccount);
+    if (id) qs.set("session_id", id);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const pull = () =>
       api
-        .get<ProviderUsage>(`/api/usage/provider/${encodeURIComponent(provider)}`)
+        .get<ProviderUsage>(`/api/usage/provider/${encodeURIComponent(provider)}${suffix}`)
         .then((u) => !gone && setProviderUsage(u))
         .catch(() => undefined);
     pull();
@@ -666,7 +671,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       gone = true;
       clearInterval(t);
     };
-  }, [provider, detail?.usage.c]);
+  }, [id, provider, activeAccount, detail?.usage.c]);
 
   // The card's run and delete are the schedule commands the Schedules dialog sends, revision and
   // command identity included. The card used to call `/api/schedules/{id}/run` and `DELETE

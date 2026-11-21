@@ -6220,7 +6220,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return {"hours": max(1, min(hours, MAX_WINDOW_HOURS)), "models": [row.view() for row in rows]}
 
     @api.get("/api/usage/provider/{provider_id}")
-    async def usage_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def usage_provider(provider_id: str, account: str = "", session_id: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One provider's day so far, its subscription windows when it is a login, its balance when it is metered."""
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         row = await app.db.fetchone(
@@ -6231,7 +6231,21 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         monitor = app.extensions.get("balance")
         balances = await monitor.current() if monitor is not None else {}  # type: ignore[attr-defined]
         subscriptions = await subscription_usage()
-        return {"provider": provider_id, "today": dict(row) if row else {}, "subscription": subscriptions.get(provider_id), "balance": balances.get(provider_id)}
+        conf = app.config.providers.get(provider_id)
+        upstream = (keyproxy_upstream(conf.base_url) if conf is not None else "") or provider_id
+        sub = subscriptions.get(upstream) or subscriptions.get(provider_id)
+        target_account = account.strip()
+        acct_store = getattr(manager, "subscription_accounts", None)
+        if not target_account and acct_store is not None:
+            if session_id:
+                target_account = acct_store.chosen(session_id, upstream)
+            if not target_account:
+                target_account = acct_store.choice(upstream).default_account
+        if target_account and target_account != "default" and isinstance(sub, dict):
+            acct_sub = (sub.get("accounts") or {}).get(target_account)
+            if isinstance(acct_sub, dict):
+                sub = acct_sub
+        return {"provider": provider_id, "today": dict(row) if row else {}, "subscription": sub, "balance": balances.get(provider_id)}
 
     async def subscription_usage() -> dict[str, Any]:
         """Quota windows of the Codex, Grok and Claude subscriptions, read from the key proxy that holds
