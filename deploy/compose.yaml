@@ -584,6 +584,7 @@ services:
       KEYPROXY_CODEX_AUTH: /home/keyproxy/.codex/auth.json
       KEYPROXY_GROK_AUTH: /home/keyproxy/.grok/auth.json
       KEYPROXY_CLAUDE_AUTH: /home/keyproxy/.claude/.credentials.json
+      KEYPROXY_ANTIGRAVITY_AUTH: /home/keyproxy/.gemini/antigravity-cli/antigravity-oauth-token
       # The same file as env_file, so a key saved in Settings is written where the next start reads it.
       KEYPROXY_KEYS_FILE: /run/keyproxy/keyproxy.env
       # A listener of its own for the guest door: a chat completion on these upstreams and nothing else,
@@ -594,10 +595,11 @@ services:
       - daedalus-state:/srv/state:ro
       - ${DAEDALUS_SECRETS_FILE:-../../daedalus-secrets/keyproxy.env}:/run/keyproxy/keyproxy.env
       - guest-model:/run/keyproxy-guest
-      # Subscriptions: the CLIs' logins, served as /codex/v1, /grok/v1 and /claude/v1.
+      # Subscriptions: the CLIs' logins, served as /codex/v1, /grok/v1, /claude/v1 and /antigravity/v1.
       - ${DAEDALUS_HARNESS_HOME:-~}/.codex:/home/keyproxy/.codex
       - ${DAEDALUS_HARNESS_HOME:-~}/.grok:/home/keyproxy/.grok
       - ${DAEDALUS_HARNESS_HOME:-~}/.claude:/home/keyproxy/.claude
+      - ${DAEDALUS_HARNESS_HOME:-~}/.gemini/antigravity-cli:/home/keyproxy/.gemini/antigravity-cli
     # A model server the operator runs on this machine (Ollama, LM Studio) listens on the host's
     # loopback, which from in here is the container itself. The setup wizard writes such an endpoint
     # as host.docker.internal; this makes that name resolve to the Docker host.

@@ -37,7 +37,7 @@ type Subscription = { provider: string; logged_in: boolean; plan?: string; limit
 type UsageData = { daily: Daily[]; recent: Recent[]; sessions: BySession[]; subscriptions?: Record<string, Subscription>; forecasts?: QuotaForecast[] };
 type Balance = { balances: Record<string, number | null>; thresholds: number[] };
 
-const SUB_LABEL: Record<string, string> = { codex: "Codex · ChatGPT", claude: "Claude", opencode: "OpenCode Go", grok: "SuperGrok" };
+const SUB_LABEL: Record<string, string> = { codex: "Codex · ChatGPT", claude: "Claude", antigravity: "Google (Antigravity)", opencode: "OpenCode Go", grok: "SuperGrok" };
 // The call kinds of a run, then the helpers around the operator's messages, which the host books
 // under their own names so their cost can be read apart.
 export const PURPOSES = ["stream", "structured", "text", "compaction", "next_message", "meeting_notes", "memory", "memory_edit", "memory_classify"];

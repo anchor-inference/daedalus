@@ -304,7 +304,7 @@ def close_cut_reply(wire: list[dict[str, Any]]) -> None:
         wire.append({"role": "user", "content": CUT_REPLY_NOTE})
 
 
-REASONING_REPLAY_UPSTREAMS = ("codex", "claude", "anthropic")
+REASONING_REPLAY_UPSTREAMS = ("codex", "claude", "anthropic", "antigravity")
 """Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
 
 The Codex route turns the Responses API's encrypted reasoning into these entries and back, so a

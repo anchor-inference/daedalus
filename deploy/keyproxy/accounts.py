@@ -35,7 +35,7 @@ ACCOUNTS_DIR = "daedalus-accounts"
 ACCOUNT_ID = re.compile(r"[a-z0-9]{1,32}")
 """Lower-case letters and digits: the id becomes a folder name and an environment variable's suffix, and
 nothing else in it could reach outside the folder or be read as a second variable."""
-LOGIN_UPSTREAMS = ("codex", "grok", "claude")
+LOGIN_UPSTREAMS = ("codex", "grok", "claude", "antigravity")
 KEYED_PLANS = ("opencode", "zai_coding", "minimax_plan", "kimi_coding")
 """The prepaid plans that sign with a key; an account of one is a second key for the same plan."""
 
@@ -163,6 +163,9 @@ def identity(upstream: str, credentials: Path) -> dict[str, str]:
         entry = next(iter(data.values()))
         if isinstance(entry, dict):
             email = str(entry.get("email") or _claims(str(entry.get("key") or "")).get("email") or "")
+    elif upstream == "antigravity" and isinstance(data, dict):
+        email = str(data.get("id_token_email") or "")
+        plan = str(data.get("auth_method") or "")
     return {"email": email[:200], "plan": plan[:80]}
 
 

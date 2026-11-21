@@ -46,6 +46,15 @@ import sqlite3
 import sys
 import time
 import uuid
+from antigravity import (
+    ANTIGRAVITY_BASE,
+    AntigravityAuth,
+    antigravity_models_view,
+    antigravity_sse_to_chunks,
+    antigravity_usage_view,
+    chat_to_antigravity,
+    fetch_antigravity_models,
+)
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -158,7 +167,8 @@ GROK_AUTH = GrokAuth(Path(os.environ.get("KEYPROXY_GROK_AUTH", os.path.expanduse
 # Looked up through settings() at call time, so a key saved from the app shows its allowance at once.
 OPENCODE_AUTH = OpencodeAuth(lookup=lambda var: settings().get(var, ""))
 CLAUDE_AUTH = ClaudeAuth(Path(os.environ.get("KEYPROXY_CLAUDE_AUTH", os.path.expanduser("~/.claude/.credentials.json"))))
-"""The operator's subscriptions: served as ``/codex/v1``, ``/grok/v1`` and ``/claude/v1`` with the CLIs' own logins."""
+ANTIGRAVITY_AUTH = AntigravityAuth(Path(os.environ.get("KEYPROXY_ANTIGRAVITY_AUTH", os.path.expanduser("~/.gemini/antigravity-cli/antigravity-oauth-token"))))
+"""The operator's subscriptions: served as ``/codex/v1``, ``/grok/v1``, ``/claude/v1`` and ``/antigravity/v1`` with the CLIs' own logins."""
 _usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 """Per ``<upstream>@<account>``: one account's windows say nothing about another's."""
 USAGE_CACHE_SECONDS = 60.0
@@ -175,7 +185,7 @@ def login_auth(upstream: str, account: str = "") -> Any:
 
     Derived from the module's default login at call time, never captured, so whatever points that
     default somewhere else (a test, the native launcher's paths) points the accounts there as well."""
-    default = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH}[upstream]
+    default = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH, "antigravity": ANTIGRAVITY_AUTH}[upstream]
     if not account:
         return default
     path = accounts.login_path(default.path, account)
@@ -288,7 +298,7 @@ def upstreams() -> dict[str, tuple[str, str]]:
     return out
 
 
-CLI_LOGINS = ("codex", "grok", "claude")
+CLI_LOGINS = ("codex", "grok", "claude", "antigravity")
 """Upstreams whose credential is a CLI's own login on this machine, not a key in the environment."""
 API_KEY, CLI_LOGIN, ENDPOINT = "api_key", "cli_login", "endpoint"
 """What an upstream's credential is: a key the proxy holds, a CLI login it reads, or an address that needs neither."""
@@ -333,7 +343,7 @@ def key_status() -> dict[str, dict[str, Any]]:
             # An extra upstream is an address the operator wrote down; with no key beside it, it is
             # an endpoint that needs none rather than one whose key went missing.
             out[name] = {"configured": True, "kind": API_KEY if key else ENDPOINT}
-    for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH)):
+    for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH), ("antigravity", ANTIGRAVITY_AUTH)):
         out[name] = {"configured": credential_readable(auth), "kind": CLI_LOGIN}
     return out
 
@@ -513,7 +523,7 @@ def settings_view() -> dict[str, Any]:
             "address": entry(f"KEYPROXY_UPSTREAM_{name.upper()}"),
             "header": entry(f"KEYPROXY_AUTH_{name.upper()}"),
         })
-    logins = [{"upstream": name, "configured": credential_readable(auth)} for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH))]
+    logins = [{"upstream": name, "configured": credential_readable(auth)} for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH), ("antigravity", ANTIGRAVITY_AUTH))]
     return {"writable": bool(KEYS_FILE), "upstreams": upstream_rows, "cli_logins": logins}
 
 
@@ -567,7 +577,7 @@ clients.configure(read=settings, write=_write_client_setting, writable=lambda: b
 
 def logged_in(name: str) -> bool | None:
     """Whether the subscription a client profile signs for has a readable login; None for a client without one."""
-    auth = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH}.get(clients.SPECS[name].upstream)
+    auth = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH, "antigravity": ANTIGRAVITY_AUTH}.get(clients.SPECS[name].upstream)
     return credential_readable(auth) if auth is not None else None
 
 
@@ -778,7 +788,7 @@ def target_url(base: str, rest: str, query: str) -> str:
 
 
 def subscriptions_status() -> dict[str, Any]:
-    return {"codex": {"logged_in": CODEX_AUTH.available()}, "grok": {"logged_in": GROK_AUTH.available()}, "claude": {"logged_in": CLAUDE_AUTH.available()}}
+    return {"codex": {"logged_in": CODEX_AUTH.available()}, "grok": {"logged_in": GROK_AUTH.available()}, "claude": {"logged_in": CLAUDE_AUTH.available()}, "antigravity": {"logged_in": ANTIGRAVITY_AUTH.available()}}
 
 
 async def _sse_lines(response: httpx.Response, timing: UpstreamTiming | None = None) -> Any:
@@ -888,6 +898,80 @@ def refusal_headers(headers: httpx.Headers) -> dict[str, str]:
     on its own short backoff and spent the attempts before the window reopened."""
     wait = headers.get("retry-after")
     return {"Retry-After": wait} if wait else {}
+
+
+async def handle_antigravity(request: web.Request, rest: str) -> web.StreamResponse:
+    """Google Antigravity (agy) login, presented as OpenAI chat completions and models."""
+    client: httpx.AsyncClient = request.app["client"]
+    tail = rest.strip("/").removeprefix("v1/")
+    try:
+        account = request_account(request)
+    except AccountRefused as exc:
+        return account_refusal(exc)
+    auth = login_auth("antigravity", account)
+    try:
+        headers = await auth.headers(client)
+    except SubscriptionError as exc:
+        return web.json_response({"error": {"message": str(exc), "type": "subscription_error"}}, status=502)
+    if tail == "models":
+        data = None
+        try:
+            data = await fetch_antigravity_models(client, headers)
+        except (SubscriptionError, httpx.HTTPError, ValueError):
+            pass
+        return web.json_response(antigravity_models_view(data))
+    if tail != "chat/completions":
+        return web.json_response({"error": {"message": f"antigravity serves chat/completions and models, not {tail!r}", "type": "invalid_request_error"}}, status=404)
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": {"message": "body must be JSON", "type": "invalid_request_error"}}, status=400)
+    model = str(body.get("model") or "gemini-3-flash")
+    stream = bool(body.get("stream", False))
+    project, _ = await auth.project_and_tier(client, headers)
+    payload = chat_to_antigravity(body, project=project)
+    url = f"{ANTIGRAVITY_BASE}/v1internal:streamGenerateContent?alt=sse"
+    upstream = client.build_request("POST", url, json=payload, headers=headers)
+    timing = UpstreamTiming("antigravity", "POST", "v1internal:streamGenerateContent", model)
+    try:
+        response = await client.send(upstream, stream=True)
+    except httpx.HTTPError as exc:
+        timing.report(f"unreachable:{type(exc).__name__}")
+        return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+    timing.answered(response.status_code)
+    if response.status_code >= 400:
+        raw_bytes = await response.aread()
+        timing.received(len(raw_bytes))
+        timing.report("refused")
+        raw = raw_bytes.decode("utf-8", "replace")
+        await response.aclose()
+        await clients.verify("antigravity", response.status_code, raw)
+        try:
+            payload_err = json.loads(raw)
+        except ValueError:
+            payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
+        return web.json_response(payload_err, status=response.status_code, headers=refusal_headers(response.headers))
+    await clients.verify("antigravity", response.status_code)
+    chunks = antigravity_sse_to_chunks(_sse_lines(response, timing), model=model, completion_id=f"chatcmpl-{uuid.uuid4().hex[:24]}")
+    served = served_headers("antigravity", model, account)
+    try:
+        if not stream:
+            return web.json_response(await collect_completion(chunks, model=model), headers=served)
+        out = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", **served})
+        await out.prepare(request)
+        async for chunk in chunks:
+            await out.write(chunk.encode("utf-8"))
+        await out.write_eof()
+        return out
+    except (ConnectionResetError, asyncio.CancelledError):
+        timing.report("caller_gone")
+        return web.Response(status=499)
+    except httpx.HTTPError as exc:
+        timing.report(f"upstream_dropped:{type(exc).__name__}")
+        raise
+    finally:
+        timing.report()
+        await response.aclose()
 
 
 async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
@@ -1259,7 +1343,18 @@ def extra_accounts(upstream: str) -> list[str]:
     return []
 
 
-USAGE_FETCHERS = (("codex", _codex_usage), ("grok", _grok_usage), ("claude", _claude_usage), ("opencode", _opencode_usage))
+async def _antigravity_usage(client: httpx.AsyncClient, headers: dict[str, str], account: str = "") -> dict[str, Any]:
+    cached = _usage_cache.get(f"antigravity@{account}")
+    if cached and time.monotonic() - cached[0] < USAGE_CACHE_SECONDS:
+        return cached[1]
+    auth = login_auth("antigravity", account)
+    _, tier = await auth.project_and_tier(client, headers)
+    view = antigravity_usage_view(await fetch_antigravity_models(client, headers), tier=tier)
+    _usage_cache[f"antigravity@{account}"] = (time.monotonic(), view)
+    return view
+
+
+USAGE_FETCHERS = (("codex", _codex_usage), ("grok", _grok_usage), ("claude", _claude_usage), ("antigravity", _antigravity_usage), ("opencode", _opencode_usage))
 
 
 async def _usage_of(client: httpx.AsyncClient, name: str, fetch: Any, account: str) -> dict[str, Any]:
@@ -1366,6 +1461,8 @@ async def handle(request: web.Request) -> web.StreamResponse:
         return await handle_codex(request, rest)
     if name == "claude":
         return await handle_claude(request, rest)
+    if name == "antigravity":
+        return await handle_antigravity(request, rest)
     table = upstreams()
     client: httpx.AsyncClient = request.app["client"]
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}

@@ -64,7 +64,7 @@ const KIND_NAMES: Record<string, string> = {
   llamacpp: "llama.cpp",
 };
 /** Endpoints named after the tool whose login they borrow: the kind says nothing, the id does. */
-const ID_NAMES: Record<string, string> = { codex: "Codex", grok: "Grok", claude: "Claude", openai: "OpenAI" };
+const ID_NAMES: Record<string, string> = { codex: "Codex", grok: "Grok", claude: "Claude", antigravity: "Google (Antigravity)", openai: "OpenAI" };
 
 function providerName(id: string, kind: string, name = "", billing?: Billing): string {
   return name || ID_NAMES[id] || opencodePlanOf(kind, billing)?.name || KIND_NAMES[kind] || id;

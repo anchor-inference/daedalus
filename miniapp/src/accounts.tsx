@@ -56,6 +56,7 @@ const UPSTREAM_TITLES: Record<string, string> = {
   claude: "Claude",
   codex: "Codex (ChatGPT)",
   grok: "Grok",
+  antigravity: "Google (Antigravity)",
   opencode: "OpenCode Go",
   zai_coding: "Z.AI Coding Plan",
   minimax_plan: "MiniMax Token Plan",

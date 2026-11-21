@@ -162,7 +162,7 @@ def keyproxy_upstream(url: str) -> str:
     return tail.split("/", 1)[0] if tail else ""
 
 
-LOGIN_UPSTREAMS = ("codex", "grok", "claude")
+LOGIN_UPSTREAMS = ("codex", "grok", "claude", "antigravity")
 """The key proxy's routes behind a CLI login. Plans in fact, though the provider's billing may read ``metered``."""
 
 
@@ -2560,6 +2560,7 @@ class RuntimeConfig(BaseModel):
             "grok": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/grok/v1", timeout_seconds=900.0, pricing={"grok": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "codex": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/codex/v1", timeout_seconds=900.0, pricing={"gpt": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "claude": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/claude/v1", timeout_seconds=900.0, pricing={"claude": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
+            "antigravity": ProviderConfig(kind="openai_compat", name="Google (Antigravity)", base_url=keyproxy_base() + "/antigravity/v1", timeout_seconds=900.0, billing="subscription"),
             "opencode": ProviderConfig(kind="opencode", name="OpenCode Go", base_url=keyproxy_base() + "/opencode", timeout_seconds=900.0, billing="subscription"),
             "opencode_zen": ProviderConfig(kind="opencode", name="OpenCode Zen", base_url=keyproxy_base() + "/opencode_zen", timeout_seconds=900.0),
             "openai": ProviderConfig(kind="openai_compat", name="OpenAI API", base_url=keyproxy_base() + "/openai"),
@@ -2881,10 +2882,30 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window", "context-window-source", "coding-plan-subscriptions")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window", "context-window-source", "coding-plan-subscriptions", "antigravity-subscription")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
+
+
+def _seed_antigravity_subscription(raw: dict[str, Any]) -> bool:
+    """Add the Google Antigravity subscription endpoint once to an existing config."""
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "antigravity-subscription" in seeded:
+        return False
+    seeded.append("antigravity-subscription")
+    providers = raw.setdefault("providers", {})
+    if isinstance(providers, dict) and "antigravity" not in providers:
+        providers["antigravity"] = {
+            "kind": "openai_compat",
+            "name": "Google (Antigravity)",
+            "base_url": keyproxy_base() + "/antigravity/v1",
+            "timeout_seconds": 900.0,
+            "billing": "subscription",
+        }
+    return True
 
 
 def _seed_claude_subscription(raw: dict[str, Any]) -> bool:
@@ -3365,6 +3386,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_inbox_retention(raw) or changed
     changed = _migrate_keyproxy_base(raw) or changed
     changed = _seed_claude_subscription(raw) or changed
+    changed = _seed_antigravity_subscription(raw) or changed
     changed = _seed_openai_anthropic_keys(raw) or changed
     changed = _seed_provider_endpoints(raw) or changed
     changed = _seed_opencode_go_subscription(raw) or changed

@@ -534,7 +534,7 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
 // The section is titled by the provider alone and the plan is the badge beside it. The title used
 // to carry a plan too ("Claude · Max") for some providers and not for others ("opencode"), and the
 // Claude one then said its plan twice.
-const PROVIDER_LABEL: Record<string, string> = { codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode Go", openrouter: "OpenRouter", deepseek: "DeepSeek" };
+const PROVIDER_LABEL: Record<string, string> = { codex: "Codex", claude: "Claude", grok: "Grok", antigravity: "Google (Antigravity)", opencode: "OpenCode Go", openrouter: "OpenRouter", deepseek: "DeepSeek" };
 
 function providerLabel(id: string): string {
   return PROVIDER_LABEL[id] ?? (id ? id[0].toUpperCase() + id.slice(1) : id);

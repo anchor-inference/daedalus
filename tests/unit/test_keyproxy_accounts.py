@@ -64,6 +64,7 @@ def homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(proxy, "CODEX_AUTH", subs.CodexAuth(home / ".codex" / "auth.json"))
     monkeypatch.setattr(proxy, "GROK_AUTH", subs.GrokAuth(home / ".grok" / "auth.json"))
     monkeypatch.setattr(proxy, "CLAUDE_AUTH", claude_mod.ClaudeAuth(home / ".claude" / ".credentials.json"))
+    monkeypatch.setattr(proxy, "ANTIGRAVITY_AUTH", proxy.AntigravityAuth(home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"))
     monkeypatch.setattr(proxy, "_account_auths", {})
     monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
     keys = tmp_path / "keyproxy.env"

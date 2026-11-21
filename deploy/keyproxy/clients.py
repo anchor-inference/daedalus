@@ -92,6 +92,10 @@ async def grok_latest(client: httpx.AsyncClient) -> str:
     raise RuntimeError("no Grok release version: " + "; ".join(failures))
 
 
+async def antigravity_latest(_client: httpx.AsyncClient) -> str:
+    return "1.5.14"
+
+
 def installed_grok_version() -> str:
     """The grok CLI mounted beside its login (``<grok home>/bin/grok`` → ``grok-<version>-…``), or "".
 
@@ -188,6 +192,15 @@ SPECS: dict[str, ClientSpec] = {
             follows=("User-Agent", "x-grok-client-version"),
             installed=installed_grok_version,
             upstream="grok",
+        ),
+        ClientSpec(
+            name="antigravity",
+            label="Antigravity CLI",
+            defaults={"version": "1.5.14"},
+            pin_variable="KEYPROXY_ANTIGRAVITY_CLI_VERSION",
+            latest=antigravity_latest,
+            follows=("User-Agent",),
+            upstream="antigravity",
         ),
     )
 }

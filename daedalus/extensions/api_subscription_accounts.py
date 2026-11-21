@@ -38,6 +38,7 @@ LOGINS = {
     "claude": (".claude", "CLAUDE_CONFIG_DIR"),
     "codex": (".codex", "CODEX_HOME"),
     "grok": (".grok", "GROK_HOME"),
+    "antigravity": (".gemini/antigravity-cli", ""),
 }
 SIGN_IN_ENV = "host"
 """Where the sign-in terminal opens: the operator's machine, whose home the key proxy reads the logins from
@@ -81,8 +82,21 @@ def account_home(home: str, upstream: str, account: str) -> str:
     return separator.join(parts)
 
 
+def _sign_in_argv(upstream: str, account: str, home: str) -> list[str]:
+    if upstream == "antigravity":
+        if account == DEFAULT_ACCOUNT:
+            return ["agy"]
+        return ["agy", "--app-data-dir", account_home(home, upstream, account)]
+    return list(tooling(upstream).sign_in)
+
+
 def sign_in_command(upstream: str, account: str, home: str) -> str:
     """The sign-in as one line the operator can run in a terminal of their own, when none can be opened here."""
+    if upstream == "antigravity":
+        if account == DEFAULT_ACCOUNT:
+            return "agy"
+        path = account_home(home or "~", upstream, account)
+        return f'agy --app-data-dir "{path}"'
     argv = " ".join(tooling(upstream).sign_in)
     if account == DEFAULT_ACCOUNT:
         return argv
@@ -242,10 +256,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             except ProxyUnavailable as exc:
                 raise refused(exc) from exc
         _, variable = LOGINS[upstream]
-        env_vars = {variable: account_home(home, upstream, account_id)} if account_id != DEFAULT_ACCOUNT else {}
+        env_vars = {variable: account_home(home, upstream, account_id)} if (account_id != DEFAULT_ACCOUNT and variable) else {}
         label = accounts.label(upstream, account_id) or account_id
         view = await terminals.create(  # type: ignore[attr-defined]
-            TerminalSpec(env=SIGN_IN_ENV, owner=Owner("free"), argv=list(tooling(upstream).sign_in), env_vars=env_vars,
+            TerminalSpec(env=SIGN_IN_ENV, owner=Owner("free"), argv=_sign_in_argv(upstream, account_id, home), env_vars=env_vars,
                          title=f"Sign in: {upstream} · {label}", cols=120, rows=32, profile="shell", created_by="operator"),
             confirm_over_cap=True,
         )
