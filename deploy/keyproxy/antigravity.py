@@ -50,7 +50,7 @@ ANTIGRAVITY_FALLBACK_MODELS = (
 def antigravity_user_agent() -> str:
     """The Antigravity CLI User-Agent expected by daily-cloudcode-pa."""
     version = clients.version("antigravity")
-    return f"antigravity-cli/{version} (linux; amd64)"
+    return f"antigravity/cli/{version} (aidev_client; os_type=linux; arch=amd64; cl=1026970498; auth_method=consumer)"
 
 
 class AntigravityAuth:
@@ -174,7 +174,7 @@ def antigravity_models_view(data: dict[str, Any] | None) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     if isinstance(models_map, dict) and models_map:
         for model_id, info in sorted(models_map.items()):
-            if not isinstance(info, dict) or model_id.startswith("tab_"):
+            if not isinstance(info, dict) or model_id.startswith("tab_") or model_id.endswith("-disabled"):
                 continue
             entry: dict[str, Any] = {
                 "id": model_id,
