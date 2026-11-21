@@ -54,9 +54,9 @@
 .launch-row .launch-count, .launch-row .launch-dot { margin-left: auto; }
 .launch-row .launch-count + .launch-dot { margin-left: 6px; }
 /* The same count is the same colour it is on the rail's icon a few pixels away. */
-.launch-count { flex: none; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--surface-1); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
-.launch-count.attn { background: var(--warn); color: var(--surface-1); }
-.launch-count.ok { background: var(--ok); color: var(--surface-1); }
+.launch-count { flex: none; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.launch-count.attn { background: var(--warn); color: var(--bg); }
+.launch-count.ok { background: var(--ok); color: var(--bg); }
 
 /* The pin shows on the hovered or focused item and stays on a pinned tile, so what is held in place
    says so; a right click or the menu key offers the same toggle. */

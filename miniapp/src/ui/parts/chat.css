@@ -100,7 +100,6 @@
 .thinking-head .dots { flex:none; }
 /* What the run is doing now, beside the label that shimmers: in the secondary ink, because in the
    accent it read as a link to press. */
-.thinking-head .activity-current { color:var(--fg-2); }
 .thinking-head .families { color:var(--fg-3); font-size:var(--fs-13); min-width:0; flex:0 1 auto; }
 .thinking-head:hover .worked, .thinking-head:hover .families { color:var(--fg); }
 .chev { display:inline-flex; align-items:center; color:var(--fg-3); transition:transform var(--t-slow) var(--ease-out), opacity var(--t-fast); flex:none; }
@@ -333,7 +332,7 @@
 .changed-file-path { min-width:0; font-family:var(--mono); font-size:var(--fs-12); }
 .changed-file-dir { color:var(--fg-3); }
 .changed-file-how { flex:none; font-size:var(--fs-11); color:var(--fg-3); }
-.changed-file-actions { display:inline-flex; align-items:center; gap:2px; padding-right:2px; opacity:0; transition:opacity .12s; }
+.changed-file-actions { display:inline-flex; align-items:center; gap:2px; padding-right:2px; opacity:0; transition:opacity var(--t-fast); }
 .changed-file:hover .changed-file-actions, .changed-file:focus-within .changed-file-actions { opacity:1; }
 .changed-file-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }
 .changed-file-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
@@ -428,7 +427,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
    hire sheet or a task's actions ending at the fold with nothing to say the rest was a swipe away. */
 .sheet-body[data-more="below"]:not(:has(.sheet-foot)) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .sheet-more-anchor { position: relative; height: 0; flex: none; }
-.sheet-more { position: absolute; left: 50%; bottom: var(--space-2); transform: translateX(-50%); display: none; align-items: center; justify-content: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-pill); border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--fg); box-shadow: var(--shadow-pop); cursor: pointer; }
+.sheet-more { position: absolute; left: 50%; bottom: var(--space-2); transform: translateX(-50%); display: none; align-items: center; justify-content: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-pill); border: 0; background: var(--surface-1); color: var(--fg-2); box-shadow: var(--shadow-md); cursor: pointer; }
 .sheet-body[data-more="below"] + .sheet-more-anchor .sheet-more { display: inline-flex; }
 /* A sheet with a sticky footer says it with the shade over the footer instead: the arrow, standing
    above the footer, sat on the last field's words. */
@@ -444,7 +443,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .radio.on { box-shadow:inset 0 0 0 5px var(--fg); }
 
 .segmented { display:flex; gap:2px; background:var(--surface-2); border:0; border-radius:var(--radius-sm); padding:2px; margin-bottom:12px; }
-.segmented button { flex:1; border:0; background:none; color:var(--fg-2); padding:5px 8px; border-radius:var(--radius-xs); font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
+/* A segment is a small control: by its padding alone it came to 27.5 px, under the 28 a finger is promised. */
+.segmented button { flex:1; min-height:var(--ctl-h-sm); border:0; background:none; color:var(--fg-2); padding:4px 8px; border-radius:var(--radius-xs); font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
 .segmented button.on { background:var(--card); color:var(--fg); box-shadow:var(--shadow-xs); }
 .segmented button:not(.on):hover { color:var(--fg); }
 /* The button is the touch target at a small control's height; the track inside is what shows. */
@@ -470,9 +470,9 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .usage-row .cost { text-align:right; font-variant-numeric:tabular-nums; }
 .usage-row .cost .ms { color:var(--muted); font-size:var(--fs-12); }
 .badge { font-size:var(--fs-11); font-weight:500; padding:1px 6px; border-radius:var(--radius-xs); border:0; background:color-mix(in srgb, currentColor 12%, transparent); color:var(--muted); flex:none; }
-.badge.stream { color:var(--info); border-color:color-mix(in srgb, var(--info) 40%, transparent); }
-.badge.structured { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); }
-.badge.text { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 40%, transparent); }
+.badge.stream { color:var(--info); }
+.badge.structured { color:var(--warn); }
+.badge.text { color:var(--ok); }
 /* The unfolded call and its payload read as one pair: the row is lit, and the payload is a code
    panel with its own edge. On the card's own colour it was a bare "{}" in body text. */
 .usage-row.open { background:var(--surface-2); border-radius:var(--radius-sm); }
@@ -487,14 +487,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .models-menu-item { text-align:left; background:none; border:0; color:var(--fg); padding:6px 10px; min-height:var(--row-h-dense); border-radius:var(--radius-sm); font-size:var(--fs-13); cursor:pointer; font-family:var(--mono); }
 .models-menu-item:hover, .models-menu-item.on { background:var(--surface-3); }
 
-.tab-badge { position:absolute; top:-6px; right:-14px; min-width:16px; height:16px; padding:0 4px; border-radius:999px; background:var(--bad); color:#fff; font-size:10px; line-height:16px; text-align:center; font-weight:600; }
 .card.unread { border-color: var(--line-strong); }
 /* The message and its actions stack: a row of buttons beside the bubble is pushed off a phone screen. */
 .msg-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:0; }
 .msg-wrap .msg.user { margin-bottom:0; }
-/* Four fifths of the column on a desktop: wider, a long message ran the whole stripe and stopped
-   reading as the operator's side of it. A phone keeps the wider share its narrow column needs. */
-@media (min-width: 1024px) { .msg-wrap .msg.user { max-width:80%; } }
 /* The files the message carried, above its bubble and aligned with it: the pictures as one row of
    square thumbnails, each other file as a card. Widths and a square ratio, not heights, so a card is
    as tall as its two lines and the thumbnails stay square at every width. */

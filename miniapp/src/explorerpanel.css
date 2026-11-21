@@ -46,7 +46,7 @@ button.explorer-where:hover { background:var(--surface-2); }
 .tree-row.dim { color:var(--fg-3); }
 .tree-row.dim > .ic { opacity:.6; }
 .tree-chevron { display:inline-flex; justify-content:center; width:14px; flex:none; color:var(--fg-3); }
-.tree-chevron .ic { transform:rotate(-90deg); transition:transform 120ms var(--ease-out); }
+.tree-chevron .ic { transform:rotate(-90deg); transition:transform var(--t-fast) var(--ease-out); }
 .tree-chevron.open .ic { transform:none; }
 .written-badge { width:6px; height:6px; flex:none; border-radius:50%; background:var(--accent); }
 .file-size { flex:none; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; visibility:hidden; }

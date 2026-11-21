@@ -26,7 +26,7 @@
   .ph-ib:active { background: var(--surface-2); }
   .ph-ib:disabled { opacity: .4; }
   .ph-ib:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-  .ph-badge { position: absolute; top: 5px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--bad); color: var(--primary-ink); font-size: var(--fs-12); font-weight: 600; line-height: 16px; text-align: center; }
+  .ph-badge { position: absolute; top: 5px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-12); font-weight: 600; line-height: 16px; text-align: center; }
   .ph-pip { position: absolute; top: 9px; right: 9px; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--bg); }
 
   /* The page header every screen already draws becomes the same bar: no rule, no blur band, the
@@ -68,7 +68,7 @@
   .ph-nrow-l { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-nrow .ph-cnt { font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); font-variant-numeric: tabular-nums; }
   .ph-nrow .ph-badge, .ph-drow .ph-badge { position: static; }
-  .ph-badge.warn { background: var(--warn); color: var(--primary-ink); }
+  .ph-badge.warn { background: var(--warn); color: var(--bg); }
   .ph-badge.quiet { background: var(--surface-3); color: var(--fg-2); }
   .ph-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
   .ph-dsec { display: flex; align-items: center; padding: var(--space-3) var(--gutter) 0; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
@@ -590,17 +590,14 @@
   .main .settings-col .card .settings-num input.field { min-width: 0; }
   .main .settings-col .card .settings-unit { min-width: 0; }
   .main .settings-col .card > :is(input, select, textarea).field { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
-  /* Settings' own first page: its links are the rows of one card per group, as every grouped list
-     here is. The selectors carry .main so they outrank the page's own phone rules in settings.css. */
-  .main .settings-phone .settings-group-block { gap: 0; }
-  .main .settings-phone .settings-group { font-weight: 500; color: var(--fg-3); }
-  .main .settings-phone .settings-link { border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; background: var(--card); color: var(--fg); }
-  .main .settings-phone .settings-link:not(.settings-link + .settings-link) { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
-  .main .settings-phone .settings-link:not(:has(+ .settings-link)) { border-bottom-width: 1px; border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); box-shadow: var(--drop-xs); }
-  .main .settings-phone .settings-link:active { background: var(--surface-2); }
-  .main .settings-phone .settings-link .ic { color: var(--fg-2); }
-  .main .settings-phone .settings-link .ic:last-child { color: var(--fg-3); }
-  .main .settings-phone .settings-search-box .settings-search { border-radius: 12px; }
+  /* A group that is not itself a card (a catalogue, the key proxy's lists) reads as the cards do: the
+     same grey label and line of words over it, and its tiles with the grouped card's corners. */
+  .main .settings-col .settings-groups > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .main .settings-col .settings-groups > .section-title:first-child { margin-top: var(--space-2); }
+  .main .settings-col .settings-groups > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
+  .main .settings-col .catalogue > .catalogue-filters { margin: 0 0 var(--space-2); }
+  .main .settings-col .catalogue > :is(.stt-list, .comp-grid) { gap: var(--space-2); margin: 0 0 var(--space-2); }
+  .main .settings-col :is(.stt-card, .comp-card) { border-radius: var(--radius-xl); }
 
   /* ── Usage: the period as a segmented track, the tightest quota first and wide, the rest as the
      settings' cards ──────────────────────────────────────────────────────────────────────────── */
@@ -787,7 +784,7 @@
   .tab-badge, .bell-badge, .beta-tag { font-size: var(--fs-12); }
 
   /* What waits in a project is amber, the colour of a request, on the bar as everywhere else. */
-  .tabbar.project-tabs .tab-badge { background: var(--warn); color: var(--primary-ink); }
+  .tabbar.project-tabs .tab-badge { background: var(--warn); color: var(--bg); }
 
   /* ── orchestration: one card and one sheet for what waits, the list of projects ──────────── */
   .ph-btn.grow { flex: 1; min-width: 0; }
@@ -1152,7 +1149,7 @@
   .thinking-head .steps { font-size: var(--fs-14); color: var(--fg-2); }
   .thinking-head .families { font-size: var(--fs-13); color: var(--fg-3); padding-left: 0; }
   .thinking-head .chev { margin-left: auto; }
-  .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); border: 0; background: var(--surface-1); box-shadow: var(--shadow-md); }
+  .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); }
   .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; }
 
   /* The tray over the field: the queue, a permission request and the agent's question share one
@@ -1210,15 +1207,17 @@
   /* Details in the sheet: the desktop's cards as the phone's grouped cards, a 44 px header with the
      title in the body's size, controls 36–44 px. The sheet is the lighter surface here, so the tiles
      inside a card are the sheet's colour, set into it. */
-  .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
+  /* The sheet is the floating surface, so what the desktop's cards hold as tiles are tiles here too, a
+     step up from it: on the sheet's own colour a tile, a field and a button had no edge at all. */
+  .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: transparent; --dt-tile: var(--surface-2); }
   .panel-sheet .details .dt-section, .panel-sheet .details .dt-section:first-child { margin: 0; border: 0; border-radius: var(--radius-md); }
   .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
   .panel-sheet .details .dt-content { padding: 0 var(--space-4) var(--space-4); font-size: var(--fs-15); }
   .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub, .panel-sheet .dt-content .dt-hint, .panel-sheet .dt-note { font-size: var(--fs-13); }
   .panel-sheet .dt-stat-value, .panel-sheet .dt-today b { font-size: var(--fs-15); }
   .panel-sheet .dt-row, .panel-sheet .dt-control { min-height: 40px; }
-  .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 10px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-16); }
-  .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-16); }
+  .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
   .panel-sheet .dt-legend { grid-template-columns: minmax(0, 1fr); }
   /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */

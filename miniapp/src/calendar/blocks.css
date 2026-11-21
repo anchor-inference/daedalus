@@ -44,7 +44,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-view-when { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .cal-view-when > span:first-child::first-letter { text-transform: uppercase; }
 .cal-view-edit { flex: none; }
-.cal-status { position: relative; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; border-radius: var(--radius-pill); }
+.cal-status { position: relative; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; border-radius: var(--radius-xs); }
 /* The pill is 24 px to sit in the time line; its target reaches a thumb's 44. */
 .cal-status::after { content: ""; position: absolute; inset: -10px -2px; }
 .cal-status-face { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
@@ -118,7 +118,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-card.on .cal-card-lines { color: var(--fg-3); }
 
 /* A table's totals stay at the bottom of the sheet while the table is in view. */
-.cal-totals { position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: -6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: var(--fs-13); font-variant-numeric: tabular-nums; box-shadow: 0 -6px 12px -10px rgba(0, 0, 0, .35); }
+.cal-totals { position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: -6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
 .cal-totals-label { font-weight: 600; color: var(--fg-2); margin-right: auto; }
 .cal-total { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--fg); }
 .cal-total small { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }

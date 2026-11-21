@@ -323,7 +323,7 @@
 .nrow-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h); padding: 6px 0; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
 .nrow-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .nrow-text b { font-weight: 600; font-size: var(--fs-14); }
-.nrow-head .chev { color: var(--fg-3); transition: transform .15s; }
+.nrow-head .chev { color: var(--fg-3); transition: transform var(--t-fast); }
 .nrow.open .nrow-head .chev { transform: rotate(90deg); }
 .nrow-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; min-height: var(--row-h); padding: 2px 0 2px 12px; font-size: var(--fs-13); color: var(--fg-2); }
 .nrow-line .segmented.inline button { min-height: var(--ctl-h-sm); padding: 0 10px; }

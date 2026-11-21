@@ -57,19 +57,8 @@
 .ctx-ring.attn { color:var(--warn); }
 .ctx-ring.bad { color:var(--bad); }
 .model-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); max-width:220px; padding:0 8px; background:transparent; border:0; border-radius:var(--radius-sm); color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; flex:0 1 auto; min-width:0; transition:background var(--t-fast), color var(--t-fast); }
-.model-select:hover, .model-select.on { background:var(--surface-2); color:var(--fg); }
+.model-select:hover, .model-select.on, .model-select[aria-expanded="true"] { background:var(--surface-2); color:var(--fg); }
 .model-select .model-effort { font-weight:400; color:var(--fg-3); }
-/* The toolbar's controls are ghosts: a word, and a wash when the pointer is on it. As bordered and
-   filled pills beside the field's own edge they were four boxes in a box. These name the composer's
-   card to outweigh the per-control rules written after this sheet; a state (an armed mode, a
-   translation under way, a fallback model) is said by the ink of its word, never by a fill. */
-.composer-box .composer-row .model-select { color:var(--fg-2); background:transparent; border-radius:var(--radius-sm); }
-.composer-box .composer-row .model-select:hover, .composer-box .composer-row .model-select[aria-expanded="true"] { background:var(--surface-2); color:var(--fg); }
-.composer-box .composer-row .model-select.attn { color:var(--warn); }
-.composer-box .composer-row .composer-mode, .composer-box .composer-row .agentlang-chip { border-color:transparent; background:transparent; border-radius:var(--radius-sm); color:var(--fg-2); font-weight:500; transition:background var(--t-fast), color var(--t-fast); }
-.composer-box .composer-row button.composer-mode:hover, .composer-box .composer-row .composer-mode[aria-expanded="true"], .composer-box .composer-row .agentlang-chip:hover, .composer-box .composer-row .agentlang-chip[aria-expanded="true"] { background:var(--surface-2); color:var(--fg); }
-.composer-box .composer-row .agentlang-chip.translating { color:var(--accent); }
-.composer-box .composer-row .agentlang-chip.off { color:var(--fg-3); }
 .model-select .ic { flex:none; color:var(--fg-3); }
 .model-select .model-label { min-width:0; }
 .model-select.attn { color:var(--warn); }
@@ -185,7 +174,6 @@
 .model-list { display:flex; flex-direction:column; }
 .model-row { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--row-h); padding:4px 8px; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
 .model-row:hover, .model-row:focus-visible { background:var(--surface-3); outline:none; }
-.model-row.on > .ic { color:var(--fg); }
 .model-row.restore { color:var(--warn); }
 .model-row .sub { font-size:var(--fs-12); color:var(--fg-3); }
 .model-text { display:flex; flex-direction:column; min-width:0; }

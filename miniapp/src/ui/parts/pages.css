@@ -14,7 +14,8 @@
    three of them still reads as its text first. */
 .memory-topics { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; }
 .topic-tag { background: none; border: 0; padding: 0; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; }
-.topic-tag:hover, .topic-tag.on { color: var(--accent); }
+.topic-tag:hover, .topic-tag.on { color: var(--fg); }
+.topic-tag.on { text-decoration: underline; text-underline-offset: 3px; }
 .memory-view { margin: 0 0 6px; }
 .memory-filter { margin: 0 0 6px; }
 .memory-group + .memory-group { margin-top: 14px; }
@@ -93,7 +94,7 @@
 .memory-block-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0 2px 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .memory-block-head .btn { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .memory-summary { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font-size: var(--fs-14); line-height: 1.45; text-align: left; cursor: text; }
-.memory-summary svg { flex: none; margin-top: 3px; color: var(--fg-3); opacity: 0; transition: opacity 120ms; }
+.memory-summary svg { flex: none; margin-top: 3px; color: var(--fg-3); opacity: 0; transition: opacity var(--t-fast); }
 .memory-summary:hover svg, .memory-summary:focus-visible svg { opacity: 1; }
 .memory-bullets { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
 .memory-bullets:empty { display: none; }
@@ -103,7 +104,7 @@
 .memory-bullet-text::before { content: "•"; margin-right: 8px; color: var(--fg-3); }
 .memory-bullet.archived .memory-bullet-text { color: var(--fg-2); }
 .memory-bullet-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--ctl-h-sm); font-size: var(--fs-12); color: var(--fg-3); }
-.memory-bullet-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
+.memory-bullet-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--t-fast); }
 .memory-bullet:hover .memory-bullet-actions, .memory-bullet:focus-within .memory-bullet-actions { opacity: 1; }
 @media (hover: none) { .memory-bullet-actions { opacity: 1; } }
 .memory-source { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; padding: 0 8px; min-height: var(--chip-h-dense); border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); text-decoration: none; }
@@ -249,19 +250,8 @@ a.memory-source:hover { color: var(--fg); }
 .settings-groups > .sub { max-width: 75ch; margin: 0 2px 16px; }
 .settings-groups > .sub.attn { margin-top: -8px; }
 .settings-col > .settings-groups { margin-bottom: 16px; }
-/* A list of things in a card (models, upstreams, clients) is the card's rows: no rule above the first
-   or under the last, which the card's own edge already is, and no stripe on the default one, which
-   its tag says. */
-.settings-col .card > .mlist:last-child > .mrow:last-child, .settings-col .card > .mlist:has(+ .card-foot) > .mrow:last-child { border-bottom: 0; }
-/* A link drawn as a button is a button: the link's blue made it the one coloured control on a page. */
-.settings-col a.btn:not(.primary) { color: var(--fg); text-decoration: none; }
-.settings-col .mrow.default { box-shadow: none; padding-left: 0; }
-.settings-col .mrow.open.default { padding-left: 8px; }
-.settings-col .mtitle { font-weight: 500; }
-.settings-col .mmeta { color: var(--fg-3); }
 /* The foot of a card that adds one more: recessed, under a hairline, across the card's whole width. */
 .settings-col .card > .card-foot > .sub { flex: 1 1 200px; min-width: 0; }
-.settings-col .card > .mlist:empty { display: none; }
 /* What follows is the desktop card's own arithmetic: a row or a list at the card's edge gives back the
    padding it doubles, and the foot runs to the card's edges. A phone draws a group as its own list
    (ui/phone.css) with no padding to give back, so none of it applies there. */
@@ -269,7 +259,7 @@ a.memory-source:hover { color: var(--fg); }
 @media (min-width: 1024px) {
   .settings-col .card > .settings-row:first-child { margin-top: -8px; }
   .settings-col .card > .settings-row:last-child { margin-bottom: -8px; }
-  .settings-col .card > .mlist:first-child { margin-top: -8px; border-top: 0; }
+  .settings-col .card > .mlist:first-child { margin-top: -8px; }
   .settings-col .card > .mlist:last-child { margin-bottom: -8px; }
   .settings-col .card > .card-foot { margin: 12px -16px -12px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--inset); }
   .settings-col .card > .mlist + .card-foot, .settings-col .card > .settings-row + .card-foot { margin-top: 0; }
@@ -280,12 +270,6 @@ a.memory-source:hover { color: var(--fg); }
   .settings-col .card > :not(.settings-row, .settings-block, .section-title, .sub) + .settings-row { border-top: 1px solid var(--line); }
   .settings-col .card > .section-title + :is(textarea, input).field { margin-top: 8px; }
 }
-/* The MCP servers are the card's rows, one under a hairline from the next: as filled tiles they were
-   cards inside the card, and two of them ran together where the tiles touched. */
-.settings-col .mcp-list { gap: 0; margin-top: 10px; border-top: 1px solid var(--line); }
-.settings-col .mcp-list > .dt-server { padding: 12px 0; border-radius: 0; background: none; }
-.settings-col .mcp-list > * + * { border-top: 1px solid var(--line); }
-.settings-col .mcp-list:empty { display: none; }
 .settings-col .card > .btnrow:first-child { margin-top: 0; }
 .settings-col .card > .mcp-quick { margin-top: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 /* The providers' foot: the plans one click away, then the form for any other endpoint, which takes the

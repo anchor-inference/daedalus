@@ -79,8 +79,11 @@ a { color: var(--accent); text-decoration: none; }
 }
 .tabbar > .active { color: var(--fg); }
 .tabbar > .active .glyph { background: var(--surface-3); }
-.tabbar .glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 28px; border-radius: 14px; line-height: 1; transition: background .15s; }
-.tab-badge { position: absolute; top: -3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: var(--bg); font-size: 10px; line-height: 16px; text-align: center; font-weight: 600; }
+.tabbar .glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 28px; border-radius: 14px; line-height: 1; transition: background var(--t-fast); }
+/* A count over an icon is one thing wherever it sits (the tab bar, the rail, the bell, the drawer, the
+   launcher): a small round plate in the alert colour with the frame's colour for its figure, which
+   every theme keeps readable against it; a count that asks for nothing is the grey .quiet plate. */
+.tab-badge { position: absolute; top: -6px; right: -14px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-11); line-height: 16px; text-align: center; font-weight: 600; }
 .tab-badge.dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 1px; right: 8px; background: var(--warn); }
 .more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 0 8px; }
 .more-item { position: relative; display: grid; justify-items: center; gap: 8px; padding: 14px 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-13); font-weight: 500; text-align: center; }

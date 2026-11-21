@@ -794,7 +794,7 @@ export function VoiceSettings() {
         : t("voice.card.in.none");
   return (
     <div className="card voice-card" data-setting="companion.enabled">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("voice.card.title")}</div>
+      <div className="section-title">{t("voice.card.title")}</div>
       <div className="sub">{t("voice.card.intro")}</div>
       <Row title={t("voice.card.enabled")}>
         <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>

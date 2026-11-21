@@ -129,7 +129,7 @@ export function DesktopAppCard({ toast }: { toast: (text: string) => void }) {
   }
   return (
     <div className="card" data-desktop-app data-setting="desktop.updates">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("update.card")}</div>
+      <div className="section-title">{t("update.card")}</div>
       <Row title={t("update.version")}>{value(state?.connected ? state.version || "—" : t("update.notconnected"))}</Row>
       {state?.connected && (
         <Row title={t("update.updates")} desc={<span data-update-status>{status}</span>}>

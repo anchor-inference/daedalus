@@ -21,7 +21,7 @@
 .notes-subtab.on { color: var(--fg); }
 .notes-subtab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .notes-subtab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.notes-subtab-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); line-height: 16px; font-variant-numeric: tabular-nums; }
+.notes-subtab-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 4px; text-align: center; background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); line-height: 16px; font-variant-numeric: tabular-nums; }
 .notes-subtab.on .notes-subtab-count { background: var(--surface-3); color: var(--fg); }
 
 .notes-bar { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -32,7 +32,7 @@
 .notes-search-clear { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); cursor: pointer; padding: 0; }
 .notes-shelf-toggle { position: relative; background: var(--surface-2); color: var(--fg-2); }
 .notes-shelf-toggle.on { background: var(--fg); color: var(--bg); }
-.notes-shelf-count { position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); font-size: var(--fs-11); line-height: 15px; font-weight: 600; }
+.notes-shelf-count { position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); line-height: 15px; font-weight: 600; text-align: center; }
 .notes-new { flex: none; gap: 4px; }
 
 .notes-scope { display: flex; flex-direction: column; gap: 6px; animation: notes-scope-in var(--t-slow) var(--ease-out); }

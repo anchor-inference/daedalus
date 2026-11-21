@@ -179,7 +179,7 @@
   .imp-ph-search { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 12px; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-3); }
   .imp-ph-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-16); }
   .imp-ph-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: none; }
-  .imp-ph-chips button { height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; }
+  .imp-ph-chips button { height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; }
   .imp-ph-chips button.on { background: var(--fg); color: var(--bg); }
   .imp-ph-chips b { font-weight: 500; color: var(--fg-3); }
   .imp-ph-sessions .imp-srow { min-height: var(--list-row-h); padding: 8px 12px; border-radius: 0; align-items: center; }
@@ -195,7 +195,7 @@
   .imp-phone .imp-mopt { min-height: var(--tap); align-items: center; }
   .imp-phone .imp-check input { width: 20px; height: 20px; }
   .imp-ph-foot { display: flex; gap: 10px; }
-  .imp-ph-foot .btn { flex: 1; min-height: var(--tap); justify-content: center; border-radius: var(--radius-pill); }
+  .imp-ph-foot .btn { flex: 1; min-height: var(--tap); justify-content: center; border-radius: 12px; }
   .imp-ph-foot .btn.primary { flex: 1.6; }
   .imp-phone .fb-empty { padding: var(--space-4) var(--space-2); }
   .imp-banner { align-items: flex-start; flex-wrap: wrap; font-size: var(--fs-13); }

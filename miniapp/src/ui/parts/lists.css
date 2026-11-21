@@ -73,7 +73,11 @@
    row's side said it a second time, in a colour kept for what is live. An open row is a tinted block
    with 12 px corners, so its fields read as belonging to it rather than to the list. */
 .mlist { margin-top: 8px; border-top: 1px solid var(--line); }
+.mlist:empty { display: none; }
 .mrow { border-bottom: 1px solid var(--line); padding: 4px 0; }
+/* At a card's top or bottom the card's own edge is the rule: a second line there underlined nothing. */
+.card > .mlist:first-child { border-top: 0; }
+.card > .mlist:last-child > .mrow:last-child, .card > .mlist:has(+ .card-foot) > .mrow:last-child { border-bottom: 0; }
 .mrow.open { background: color-mix(in srgb, var(--surface-2) 55%, transparent); border-bottom-color: transparent; border-radius: var(--radius-md); margin: 4px -12px; padding: 4px 12px 12px; }
 /* The hairline of the row above an open block would underline nothing. */
 .mrow:has(+ .mrow.open) { border-bottom-color: transparent; }
@@ -107,6 +111,11 @@
 .mfield > span .faint { color: var(--fg-3); font-weight: 400; }
 /* Settings → MCP servers: a server's buttons wrap under its name on a narrow screen rather than
    pushing the card wider than the page; the sign-in switch reads as one line, box then words. */
+/* The servers are rows of their card, one under a hairline from the next: as filled tiles they were
+   cards inside the card, and two of them ran together where the tiles touched. */
+.mcp-list { gap: 0; margin-top: 10px; border-top: 1px solid var(--line); }
+.mcp-list > * + * { border-top: 1px solid var(--line); }
+.mcp-list:empty { display: none; }
 .mcp-list .dt-server-head { flex-wrap: wrap; }
 .mcp-list .dt-hint[data-tone="bad"] { color: var(--bad); }
 .mcp-form { margin-top: 12px; }
@@ -267,8 +276,8 @@
 /* The bell's popover is a floating surface: the raised colour, a ring and drop in a border's place,
    12 px corners, and rows that hover a step lighter than the surface. */
 .bell { position: relative; }
-.bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; pointer-events: none; }
-.bell-badge.urgent { background: var(--bad); color: var(--primary-ink); }
+.bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 15px; text-align: center; pointer-events: none; }
+.bell-badge.urgent { background: var(--bad); color: var(--bg); }
 .bell-pop { position: fixed; z-index: 38; width: min(400px, calc(100vw - 16px)); display: flex; flex-direction: column; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-md); overflow: hidden; outline: none; }
 .bell-head { display: flex; align-items: center; gap: 10px; padding: 10px 8px 4px 12px; font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.01em; }
 .bell-chips { padding: 0 12px; margin: 4px 0 4px; }
@@ -306,10 +315,10 @@
 .notice-toast.tone-warning { --toast-tone: var(--warn); }
 .notice-toast.tone-error { --toast-tone: var(--bad); }
 .notice-toast:is(.tone-warning, .tone-error) .kind { color: var(--toast-tone); background: color-mix(in srgb, var(--toast-tone) 12%, transparent); }
-/* The row a link brought the operator to: two soft pulses of the accent, then nothing. */
+/* The row a link brought the operator to: two soft pulses of ink, then nothing. */
 .setting-flash { animation: setting-flash 1.2s var(--ease-out) 2; border-radius: var(--radius-md); }
-@keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); } }
+@keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
 .inbox-body { margin-top: 6px; cursor: default; }
 .inbox-entry + .inbox-entry { margin-top: 8px; }
@@ -323,28 +332,11 @@
 .proposal-sheet pre.diff { max-height: 60vh; overflow: auto; font-size: var(--fs-mono); }
 pre.diff .file { color: var(--fg); font-weight: 600; }
 .sheet-foot.column { flex-direction: column; align-items: stretch; }
-.erow.task { grid-template-columns: minmax(0, 1fr); }
-.erow.task.dragging { opacity: .4; }
-.erow.task .erow-title { font-size: var(--fs-14); }
 .task-check { display: flex; align-items: center; gap: 8px; }
 .task-check .bar { flex: 1; max-width: 160px; }
 .check-row { margin: 0; min-height: var(--row-h); align-items: flex-start; }
 .check-row input { margin-top: 3px; }
 .check-row .done { color: var(--fg-3); text-decoration: line-through; }
-.kanban { display: flex; flex-direction: column; gap: 4px; }
-.kanban-col.is-empty { display: none; }
-.kanban-empty { display: none; }
-@media (min-width: 1024px) {
-  /* The columns are set by kanbanColumns (Board.tsx): narrow when empty, and sideways scrolling when
-     the rest do not fit. */
-  .kanban { display: grid; gap: 12px; align-items: start; overflow-x: auto; }
-  .kanban-col { min-height: 240px; padding: 4px 8px 8px; border-radius: var(--radius-md); border: 1px solid transparent; }
-  .kanban-col.is-empty { display: block; }
-  .kanban-col.over { border-color: var(--line-strong); background: var(--surface-2); }
-  .kanban-col .section-title { margin: 6px 4px 8px; }
-  .kanban-empty { display: block; text-align: center; color: var(--fg-3); padding: 24px 0; }
-  .erow.task { cursor: grab; }
-}
 
 /* ── services: a card per service, its name over a line of state, the command in the code face ── */
 .service-row.erow { display: block; padding: 12px; cursor: default; }
@@ -357,9 +349,12 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .service-line .btn.open { flex: none; min-height: var(--ctl-h-sm); }
 .service-group .section-title .linkbtn { color: var(--fg-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-13); font-weight: 500; }
 .service-group .section-title .linkbtn:hover { color: var(--fg); }
-.access-options { display: flex; flex-direction: column; gap: 6px; }
-.access-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.access-option.on { border-color: var(--line-strong); background: var(--surface-2); }
+/* A choice of one is a list's rows, the chosen one filled: as bordered tiles each option was a card
+   inside the sheet or the card that asks. */
+.access-options { display: flex; flex-direction: column; gap: 2px; }
+.access-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; transition: background var(--t-fast); }
+.access-option:hover { background: var(--surface-2); }
+.access-option.on { background: var(--surface-3); }
 .access-option input { margin-top: 3px; accent-color: var(--primary); }
 .access-option b { display: block; font-weight: 500; }
 .access-option .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); }

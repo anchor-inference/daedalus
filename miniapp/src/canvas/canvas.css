@@ -166,7 +166,7 @@
 .cv-edges { position: absolute; overflow: visible; pointer-events: none; }
 
 .cv-node { position: absolute; box-sizing: border-box; cursor: default; --cv-ink: var(--line-strong); }
-.cv-text, .cv-link, .cv-file { border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--cv-card); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.cv-text, .cv-link, .cv-file { border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--cv-card); color: var(--fg); box-shadow: var(--drop-xs); }
 .cv-node.tinted.cv-text, .cv-node.tinted.cv-link, .cv-node.tinted.cv-file { border-color: var(--cv-ink); background: color-mix(in srgb, var(--cv-ink) 12%, var(--cv-card)); }
 .cv-node.shape-ellipse { border-radius: 999px; }
 .cv-node.shape-ellipse .cv-card-body { padding-inline: 22px; }

@@ -111,20 +111,21 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .settings-phone h1.settings-title { margin-top: 4px; font-size: var(--fs-22); }
   .settings-phone .settings-about { margin-bottom: var(--space-2); }
   .settings-phone .settings-search-box { margin: 4px 0 var(--space-2); }
-  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-pill); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
+  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-md); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
   .settings-phone .settings-search-box > .ic { left: 14px; }
-  /* Grouped cards, as the phone's own settings draw them: a grey label over each group, rows 2 px
-     apart, the first and last of a group rounded. */
+  /* One card per group, as every grouped list on a phone is: a small label over it, the links its
+     rows with a hairline between them, the first and the last carrying the card's corners. A matched
+     field under a link is a card of its own, so the link above it closes its group. */
   .settings-phone .settings-index { gap: 0; }
-  .settings-phone .settings-group-block { gap: 2px; }
-  .settings-phone .settings-group { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--fg-2); }
-  .settings-phone .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border-radius: var(--radius-xs); background: var(--surface-1); }
-  .settings-phone .settings-link .ic { color: var(--fg); }
+  .settings-phone .settings-group-block { gap: 0; }
+  .settings-phone .settings-group { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--fg-3); }
+  .settings-phone .settings-link { min-height: var(--set-row-h); gap: var(--space-3); padding: 8px var(--space-4); border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; background: var(--card); color: var(--fg); }
+  .settings-phone .settings-link:not(.settings-link + .settings-link) { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .settings-phone .settings-link:not(:has(+ .settings-link)) { border-bottom-width: 1px; border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); box-shadow: var(--drop-xs); }
+  .settings-phone .settings-link:active { background: var(--surface-2); }
+  .settings-phone .settings-link .ic { color: var(--fg-2); }
+  .settings-phone .settings-link .ic:last-child { color: var(--fg-3); }
   .settings-phone .settings-link-text b { font-size: var(--fs-15); white-space: normal; }
   .settings-phone .settings-link .chev { display: inline-flex; }
-  .settings-phone .settings-group + .settings-link { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
-  .settings-phone .settings-group-block > .settings-link:last-child,
-  .settings-phone .settings-group-block > .settings-link:has(+ .settings-field-hit) { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
-  .settings-phone .settings-field-hit { margin: 2px 0 6px 0; padding: 10px var(--space-4); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font-size: var(--fs-15); }
-  .settings-phone .settings-link + .settings-field-hit { margin-top: 6px; }
+  .settings-phone .settings-field-hit { margin: 6px 0; padding: 10px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-15); }
 }

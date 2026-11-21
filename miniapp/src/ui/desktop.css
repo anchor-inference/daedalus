@@ -85,7 +85,7 @@
 /* The mic and Send keep the same reserved slot; draft state cannot resize the field. */
 .composer-row { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
 .composer-row > .iconbtn.plus, .composer-tools .mic, .composer-tools .roundbtn.primary { width:var(--composer-toolbar-h); height:var(--composer-toolbar-h); }
-.composer-row .composer-mode, .composer-row .agentlang-chip { height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); border:0; border-radius:var(--radius-xs); padding-inline:var(--space-2); font-size:var(--fs-12); }
+.composer-row .composer-mode, .composer-row .agentlang-chip { height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); padding-inline:var(--space-2); font-size:var(--fs-12); }
 @media (pointer:coarse) {
   :root { --composer-toolbar-h:var(--row-h-touch); }
   .composer-row .composer-mode, .composer-row .agentlang-chip { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
@@ -95,14 +95,13 @@
 .composer-box { position:relative; padding:var(--space-3); gap:var(--space-2); border-radius:var(--radius-lg); }
 .composer-box .composer-field { padding:var(--space-1); min-height:40px; max-height:calc(8lh + var(--space-1) * 2); }
 .composer-row { gap:var(--space-2); }
-.composer-row > .iconbtn.plus { border:0; border-radius:var(--radius-sm); background:transparent; }
 .composer-tools { min-width:0; flex:1 1 auto; justify-content:flex-end; gap:0; }
 .composer-row .control-trigger { height:var(--ctl-h); min-height:var(--ctl-h); border:0; background:transparent; box-shadow:none; gap:var(--space-1); padding-inline:var(--space-1); border-radius:var(--radius-sm); }
-.composer-row .control-trigger:hover, .composer-row .control-trigger[aria-expanded="true"] { background:var(--surface-3); }
-.composer-row .model-select { flex:0 1 auto; max-width:240px; color:var(--fg); }
+.composer-row .control-trigger:hover, .composer-row .control-trigger[aria-expanded="true"] { background:var(--surface-2); color:var(--fg); }
+.composer-row .model-select { flex:0 1 auto; max-width:240px; }
 .composer-row .model-select > .ic { display:none; }
 .composer-row .model-select > .ic:last-child { display:block; }
-.composer-row .composer-mode, .composer-row .agentlang-chip { background:var(--surface-2); padding-inline:var(--space-2); flex:0 1 auto; }
+.composer-row .composer-mode, .composer-row .agentlang-chip { flex:0 1 auto; }
 .composer-row .composer-mode > .ic { display:none; }
 .composer-row span.composer-mode { cursor:default; }
 .composer-tools .roundbtn.primary { border-radius:var(--radius-sm); margin-left:var(--space-2); }

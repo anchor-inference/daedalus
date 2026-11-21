@@ -208,7 +208,7 @@
 .stt-bar-fill { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
 .stt-bar-fill.accent { background: var(--fg); }
 .stt-progress { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.stt-progress .stt-bar-fill { background: var(--accent); }
+.stt-progress .stt-bar-fill { background: var(--fg); }
 .stt-progress .sub { flex: none; min-width: 64px; text-align: right; }
 /* The chosen model's weights on their way into memory: a line that says the wait is happening now
    rather than under the first thing the operator says. */
@@ -423,24 +423,25 @@ input.field[type="range"] {
 .composer-box { gap:var(--space-2); padding:var(--space-2); border-radius:var(--radius-lg); transition:none; }
 .composer-box .composer-field { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); max-height:calc(8lh + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
 .composer-row { align-items:center; flex-wrap:nowrap; gap:var(--space-1); }
-/* The plus wears the same filled ground as the mode and model chips beside it: bare on the card, its
-   tap area was the one control in the row nothing marked. */
-.composer-row > .iconbtn.plus { margin:0; border-radius:50%; background:var(--surface-2); }
-.composer-row > .iconbtn.plus:hover, .composer-row > .iconbtn.plus.on { background:var(--surface-3); }
-.composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); border-radius:var(--radius-lg); background:var(--surface-2); }
+/* The toolbar's controls are ghosts: a word, and a wash when the pointer is on it. As bordered and
+   filled pills beside the field's own edge they were four boxes in a box. A state (an armed mode, a
+   translation under way, a fallback model) is said by the ink of its word, never by a fill. */
+.composer-row > .iconbtn.plus { margin:0; }
+.composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); }
 /* The mode chip stays on every width, a running phone included: it is the one place that says the
    session plans, or holds to YAGNI, and the model chip is the one that gives way when the row is short. */
-.composer-mode, .agentlang-chip { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-lg); background:var(--surface-2); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
+.composer-mode, .agentlang-chip { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
 .composer-mode:hover, .agentlang-chip:hover, .composer-mode.on, .agentlang-chip.on { color:var(--fg); }
+/* Only the ones that open something take the wash: a mode shown as a plain word is not a button. */
+button.composer-mode:hover, .composer-mode[aria-expanded="true"], .agentlang-chip:hover, .agentlang-chip[aria-expanded="true"] { background:var(--surface-2); }
 .composer-mode .ic { flex:none; color:var(--fg-3); }
-/* A mode that is on is said in ink on a step darker fill; the accent is kept for what is running. */
-.composer-mode.yagni, .composer-mode.autopilot { background:var(--surface-3); }
+/* A mode that is on is said in ink; the accent is kept for what is running. */
 .composer-mode .mode-yagni, .composer-mode .mode-autopilot { flex:none; color:var(--fg); font-size:var(--fs-11); font-weight:600; }
 /* The longer word is the one that gives way when both switches are on in a narrow composer. */
 .composer-mode .mode-autopilot { flex:0 1 auto; min-width:0; }
 /* The agent's language: the pair it translates between in the accent, the operator's code alone muted. */
 .agentlang-chip { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
-.agentlang-chip.translating, .composer-row .agentlang-chip.translating { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color:var(--accent); font-weight:600; }
+.agentlang-chip.translating, .composer-row .agentlang-chip.translating { color:var(--accent); }
 .agentlang-chip.off, .composer-row .agentlang-chip.off { color:var(--fg-3); }
 .mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .mode-list { display:flex; flex-direction:column; }
@@ -458,7 +459,6 @@ input.field[type="range"] {
 /* Bypass is drawn in the danger colour wherever it shows: the switch, the chip that wears it, the header's mark. */
 .mode-switch.danger.on { background:var(--bad); }
 .mode-switch.danger.on i { background:var(--card); }
-.composer-mode.bypass { background:color-mix(in srgb, var(--bad) 14%, var(--surface-2)); }
 .composer-mode .mode-bypass { flex:0 1 auto; min-width:0; color:var(--bad); font-size:var(--fs-11); font-weight:600; }
 .bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
 .composer-tools { margin-left:auto; gap:var(--space-1); }
@@ -505,9 +505,7 @@ input.field[type="range"] {
 
 /* Keep the newest-message shortcut above a card of any height. */
 .composer-jump-anchor { position:relative; flex:none; height:0; }
-/* A ring of the page's own colour around it: on a phone the text runs to the button's edge, and
-   without the gap it sat on the last lines of a log instead of over them. */
-.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); background:var(--surface-2); box-shadow:0 0 0 4px var(--bg), 0 6px 18px rgba(0,0,0,.45); }
+.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
 .search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
@@ -531,7 +529,7 @@ input.field[type="range"] {
 .run-disclosure { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-touch); padding:0; border:0; background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-12); cursor:pointer; }
 /* It shrinks only when the row runs out of room. A cap of half the head's width was half of a head
    that shrinks to fit its content, so a short line was cut to "Writing the ans…" beside empty space. */
-.activity-current { color:var(--accent); min-width:0; flex:0 1 auto; }
+.activity-current { color:var(--fg-2); min-width:0; flex:0 1 auto; }
 
 /* The scroll viewport ends at the header; neither streaming content nor a translated child
    may paint over navigation. Touch controls keep their area while secondary containers flatten. */
@@ -610,14 +608,16 @@ input.field[type="range"] {
 .subagents-total { color:var(--fg); font-size:var(--fs-13); font-weight:600; }
 .subagents-group { display:flex; flex-direction:column; gap:var(--space-2); padding:4px 0 12px; }
 .subagents-group .dt-label { margin:4px 0 0; }
-/* A helper's card is the inspector card of the Details tab. Its state is the tag in its head: a rail
-   down its left edge in the state's colour said the same thing again, in a stripe on every card. */
-.subagent-card { position:relative; display:flex; flex-direction:column; gap:6px; min-width:0; padding:8px 10px 6px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); overflow:hidden; }
-.subagent-card-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:var(--ctl-h-sm); margin:-2px -4px 0; padding:0 4px; border:0; border-radius:var(--radius-xs); background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+/* A helper's card is one card: a 40 px head across its width that opens the helper (its name, its
+   state as a tag, how long ago), the brief and what came of it under that, and the actions in a
+   recessed foot. Its state is the tag in its head: a rail down its left edge in the state's colour
+   said the same thing again, in a stripe on every card. */
+.subagent-card { position:relative; display:flex; flex-direction:column; gap:var(--space-2); min-width:0; padding:0 var(--space-3) 10px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); overflow:hidden; }
+.subagent-card-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:var(--ctl-h-lg); margin:0 calc(-1 * var(--space-3)) -4px; padding:0 var(--space-3); border:0; border-radius:0; background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; transition:background var(--t-fast); }
 .subagent-card-head:hover { background:var(--surface-2); }
 .subagent-card-head:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .subagent-card-head > .ic { flex:none; color:var(--fg-3); }
-.subagent-name { min-width:0; font-size:var(--fs-14); font-weight:600; }
+.subagent-name { min-width:0; font-size:var(--fs-14); font-weight:500; }
 .subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:2px 7px 2px 6px; border:0; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--tone) 12%, transparent); color:var(--tone); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
 .subagent-chip .sub-dot { display:none; }
 .subagent-chip[data-phase="working"] { --tone:var(--info); }
@@ -630,9 +630,10 @@ input.field[type="range"] {
 .subagent-when { flex:none; color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
 .subagent-note { font-size:var(--fs-12); color:var(--fg-2); }
 .subagent-note.attn { color:var(--warn); }
-/* What a working helper does this second: the one line on the card that moves. */
-.subagent-now { display:flex; align-items:center; gap:8px; min-width:0; padding:5px 8px; border-radius:var(--radius-sm); background:color-mix(in srgb, var(--info) 9%, transparent); color:var(--fg); font-size:var(--fs-12); }
-.subagent-now code { min-width:0; font-family:var(--mono); font-size:var(--fs-12); color:var(--info); }
+/* What a working helper does this second: the one line on the card that moves. A recessed line with
+   a live dot; tinted blue, it was a second coloured band under the card's blue tag. */
+.subagent-now { display:flex; align-items:center; gap:8px; min-width:0; padding:6px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); color:var(--fg); font-size:var(--fs-12); }
+.subagent-now code { min-width:0; font-family:var(--mono); font-size:var(--fs-12); color:var(--fg-2); }
 .subagent-now-pulse { flex:none; width:6px; height:6px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
 .subagent-now-steps { flex:none; margin-left:auto; color:var(--fg-3); font-variant-numeric:tabular-nums; }
 .subagent-brief { display:block; width:100%; margin:0; padding:0; border:0; background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); line-height:1.4; text-align:left; white-space:pre-wrap; overflow-wrap:anywhere; cursor:pointer; }
@@ -640,7 +641,7 @@ input.field[type="range"] {
 .subagent-brief:hover { color:var(--fg); }
 .subagent-brief:focus-visible { outline: 2px solid var(--ring); outline-offset:2px; border-radius:var(--radius-xs); }
 /* What the helper brought back, in a recessed well; how it ended is the card's tag. */
-.subagent-report { display:flex; flex-direction:column; gap:4px; padding:6px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); }
+.subagent-report { display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); }
 .subagent-report p { margin:0; color:var(--fg); font-size:var(--fs-13); line-height:1.4; overflow-wrap:anywhere; }
 .subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-11); }
 .subagent-delivery.ok .ic { color:var(--ok); }
@@ -658,8 +659,8 @@ input.field[type="range"] {
 .subagent-bar i { display:block; height:100%; border-radius:2px; background:var(--fg); }
 .subagent-bar.attn i { background:var(--warn); }
 .subagent-bar.bad i { background:var(--bad); }
-.subagent-actions { display:flex; flex-wrap:wrap; gap:2px; margin:0 -6px; padding-top:2px; border-top:1px solid var(--line); }
-.subagent-actions .btn { gap:5px; padding:2px 6px; color:var(--fg-2); font-size:var(--fs-12); }
+.subagent-actions { display:flex; flex-wrap:wrap; gap:2px; margin:2px calc(-1 * var(--space-3)) -10px; padding:4px 6px; border-top:1px solid var(--line); background:var(--inset); }
+.subagent-actions .btn { gap:5px; padding:2px 8px; color:var(--fg-2); font-size:var(--fs-12); }
 .subagent-actions .subagent-stop { margin-left:auto; color:var(--bad); }
 /* No helpers: a mark, what the tab will hold, and nothing to press — a helper is started from the chat. */
 .subagents-empty { display:flex; flex-direction:column; align-items:center; gap:6px; max-width:300px; margin:40px auto 0; padding:0 16px; text-align:center; color:var(--fg-2); }

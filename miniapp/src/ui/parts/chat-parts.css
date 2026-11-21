@@ -1,6 +1,6 @@
 /* ── pane resizing (wide screens): a thin strip between panes, wider to grab than to see ──── */
 .pane-handle { flex: none; width: 7px; margin: 0 -3px; cursor: col-resize; position: relative; z-index: 3; touch-action: none; }
-.pane-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background .15s; }
+.pane-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background var(--t-fast); }
 .pane-handle:hover::after, body.resizing .pane-handle::after { background: var(--line-strong); }
 body.resizing { cursor: col-resize; user-select: none; }
 /* Nothing a drag moves is animated while it moves: the width follows the pointer, not a curve. */
@@ -60,7 +60,7 @@ body.resizing iframe { pointer-events: none; }
 .reply-card-chip { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 1px 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
 /* The ✕ shows on hover or focus, as Claude's does: a row of tiles each with a standing ✕ reads as a
    row of things to remove. On touch there is no hover, and it stays. */
-.reply-card .reply-card-x { opacity: 0; transition: opacity .12s; }
+.reply-card .reply-card-x { opacity: 0; transition: opacity var(--t-fast); }
 .reply-card:hover .reply-card-x, .reply-card:focus-within .reply-card-x { opacity: 1; }
 @media (pointer: coarse) { .reply-card .reply-card-x { opacity: 1; } }
 .reply-dialog { display: flex; flex-direction: column; gap: 12px; }
@@ -117,7 +117,7 @@ button.secret-chip:hover { background: var(--surface-3); }
 .secrets-group { display: flex; flex-direction: column; gap: 4px; }
 .secrets-group > .secret-heading { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-12); }
 .secrets-others-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
-.secrets-others-toggle .ic { transform: rotate(-90deg); transition: transform .14s ease; }
+.secrets-others-toggle .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
 .secrets-others-toggle[aria-expanded="true"] .ic { transform: none; }
 .secrets-list { display: flex; flex-direction: column; gap: 6px; }
 .secrets-none { padding: var(--space-2) 0; }
@@ -153,13 +153,11 @@ button.secret-chip:hover { background: var(--surface-3); }
 /* ── to the latest message ─────────────────────────────────────────────────────────────── */
 .chat-main { position: relative; }
 /* A round button that floats over the conversation: the floating surface with its ring and drop,
-   no border of its own, and quiet ink until it is pointed at. The second rule names the chat to
-   outweigh the anchor's own sizes written after this sheet; a phone's rule, later still, keeps its
+   no border of its own, and quiet ink until it is pointed at. A phone's rule, later, keeps its
    thumb-sized circle. */
 .jump-down { position: absolute; right: 18px; bottom: calc(96px + env(safe-area-inset-bottom)); width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; border: 0; background: var(--surface-1); color: var(--fg-2); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow-md); z-index: 4; animation: rise .15s ease-out; transition: color var(--t-fast), scale var(--t-fast); }
 .jump-down:hover { color: var(--fg); }
 .jump-down:active { scale: var(--press-scale-icon); }
-@media (min-width: 1024px) { .chat-main .composer-jump-anchor .jump-down { background: var(--surface-1); box-shadow: var(--shadow-md); } }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes sidebar-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 
@@ -336,7 +334,7 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .inline-media-play { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
 .inline-media-play .ic { width:var(--row-h-touch); height:var(--row-h-touch); padding:12px; border-radius:50%; background:rgba(8,9,10,.72); color:#fff; }
 .inline-media-image figcaption { position:absolute; inset:auto 0 0; padding:26px 12px 9px; color:#fff; font-size:var(--fs-12); line-height:1.35; background:linear-gradient(transparent,rgba(0,0,0,.72)); pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.inline-media-actions { position:absolute; right:10px; bottom:10px; display:flex; gap:6px; opacity:0; transform:translateY(3px); transition:opacity .14s,transform .14s; }
+.inline-media-actions { position:absolute; right:10px; bottom:10px; display:flex; gap:6px; opacity:0; transform:translateY(3px); transition:opacity var(--t-fast),transform var(--t-fast); }
 .inline-media-image:hover .inline-media-actions,.inline-media-image:focus-within .inline-media-actions { opacity:1; transform:none; }
 .inline-media-image:has(figcaption) .inline-media-actions { bottom:34px; }
 .inline-media-actions button,.inline-media-actions a,.inline-media-nav { width:var(--ctl-h-lg); height:var(--ctl-h-lg); display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.18); border-radius:50%; background:rgba(8,9,10,.72); backdrop-filter:blur(10px); color:#fff; cursor:pointer; }

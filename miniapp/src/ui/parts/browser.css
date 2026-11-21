@@ -234,8 +234,8 @@
 .bp-pip:hover { box-shadow: var(--shadow-xl); }
 .bp-pip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .bp-pip.dragging { cursor: grabbing; box-shadow: var(--shadow-xl); }
-.bp-pip.needs { box-shadow: 0 0 0 1px var(--warn), 0 16px 32px -8px rgba(0, 0, 0, .6); }
-.bp-pip.you { box-shadow: 0 0 0 1px var(--info), 0 16px 32px -8px rgba(0, 0, 0, .6); }
+.bp-pip.needs { box-shadow: var(--shadow-lg), 0 0 0 1px var(--warn); }
+.bp-pip.you { box-shadow: var(--shadow-lg), 0 0 0 1px var(--info); }
 @keyframes bp-pip-in { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
 .bp-pip-frame { position: relative; aspect-ratio: 16 / 10; background: var(--term-bg); }
 .bp-pip-frame > .bv { position: absolute; inset: 0; }
@@ -639,7 +639,7 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 /* The guessed next message is the empty field's placeholder, set apart from the usual hint so it
    reads as an offer rather than as an instruction; the key that takes it sits in the field's corner. */
 .composer-box .composer-field.ghost[data-empty]::before { color:var(--fg-3); font-style:italic; opacity:1; }
-.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius-xs); background:var(--surface-1); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
+.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:0; border-radius:var(--radius-xs); background:var(--surface-1); box-shadow:var(--shadow-xs); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
 .composer-ghost-accept:hover { color:var(--fg); background:var(--surface-3); }
 .composer-ghost-accept kbd { font:inherit; }
 
@@ -777,9 +777,9 @@ body.resizing .kind-tabs-pill { transition: none; }
 .composer-mode.kind-select { gap: 5px; cursor: pointer; }
 .composer-row .composer-mode.kind-select > .ic, .composer-mode.kind-select > .ic { display: inline-block; flex: none; color: var(--fg-3); }
 .composer-mode.kind-select > .ic:last-child { opacity: .7; }
-.composer-mode.kind-select.kind-computer { color: var(--fg); background: color-mix(in srgb, var(--kind-computer) 12%, var(--surface-2)); }
+.composer-mode.kind-select.kind-computer { color: var(--fg); background: color-mix(in srgb, var(--kind-computer) 12%, transparent); }
 .composer-mode.kind-select.kind-computer > .ic:first-child { color: var(--kind-computer); }
-.composer-mode.kind-select.kind-chrome { color: var(--fg); background: color-mix(in srgb, var(--kind-chrome) 12%, var(--surface-2)); }
+.composer-mode.kind-select.kind-chrome { color: var(--fg); background: color-mix(in srgb, var(--kind-chrome) 12%, transparent); }
 .composer-mode.kind-select.kind-chrome > .ic:first-child { color: var(--kind-chrome); }
 .kind-row-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
 .kind-row-icon.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 15%, var(--surface-2)); }
@@ -793,7 +793,7 @@ body.resizing .kind-tabs-pill { transition: none; }
 .ph-kinds .kind-tab { min-width: var(--row-h-touch); height: var(--row-h-touch); font-size: var(--fs-14); }
 .ph-hero-picks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 100%; }
 .ph-hero-picks .ph-where { min-width: 0; max-width: 100%; }
-.ph-hero .kind-select.ph-btn { max-width: none; height: 32px; padding: 0 14px; background: var(--surface-2); border-radius: var(--radius-pill); font-size: var(--fs-14); font-weight: 600; }
+.ph-hero .kind-select.ph-btn { max-width: none; height: 32px; padding: 0 14px; background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-14); font-weight: 500; }
 .ph-hero .kind-select.ph-btn.kind-computer { background: color-mix(in srgb, var(--kind-computer) 18%, var(--surface-2)); }
 .ph-hero .kind-select.ph-btn.kind-chrome { background: color-mix(in srgb, var(--kind-chrome) 18%, var(--surface-2)); }
 .ph-hero .kind-select .ic { color: var(--fg-2); }
@@ -893,13 +893,13 @@ body.resizing .kind-tabs-pill { transition: none; }
    the corner of the note's last line, there while the pointer is on the note or on the chip. The delay
    before it fades lets the pointer cross the gap from the text to the chip. */
 .answer-translation.offer { position:relative; display:block; height:0; margin:0; z-index:1; }
-.answer-translation.offer .linkbtn { position:absolute; right:0; bottom:var(--space-1); display:inline-flex; align-items:center; gap:var(--space-1); padding:2px var(--space-2); border:1px solid var(--line); border-radius:var(--radius-pill); background:var(--surface-1); color:var(--fg-2); opacity:0; pointer-events:none; transition:opacity .12s ease .3s; }
+.answer-translation.offer .linkbtn { position:absolute; right:0; bottom:var(--space-1); display:inline-flex; align-items:center; gap:var(--space-1); padding:2px var(--space-2); border:0; border-radius:var(--radius-xs); background:var(--surface-1); box-shadow:var(--shadow-xs); color:var(--fg-2); opacity:0; pointer-events:none; transition:opacity .12s ease .3s; }
 .answer.interim:hover + .answer-translation.offer .linkbtn, .note:hover > .answer-translation.offer .linkbtn,
 .answer-translation.offer .linkbtn:hover, .answer-translation.offer .linkbtn:focus-visible { opacity:1; pointer-events:auto; transition-delay:0s; }
 .answer-translation.offer .linkbtn:hover { color:var(--accent); text-decoration:none; }
 /* "Translate" on a question card sits in the line under its title, quiet until pointed at. */
 .q-translate { display:inline-flex; align-items:center; gap:var(--space-1); color:var(--fg-3); font-size:inherit; }
-.q-translate:hover { color:var(--accent); }
+.q-translate:hover { color:var(--fg); }
 /* A touch screen has no hover: the chip is a quiet line under the note instead. */
 @media (hover: none) {
   .answer-translation.offer { height:auto; margin-top:var(--space-1); }

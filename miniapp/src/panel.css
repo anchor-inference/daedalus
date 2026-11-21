@@ -117,6 +117,9 @@
   .panel-sheet .dt-grp { padding: 14px 8px 4px; }
   .panel-sheet .dt-prop-v .truncate { max-width: 120px; }
   .panel-sheet .dt-drillhead { margin: 0 0 8px; padding: 0; top: 0; }
+  /* A sheet's own heading rule gives every h3 the sheet title's size and a gap under it, which lifted
+     this one off the crumb's line: here it is the last crumb, on that line. */
+  .panel-sheet .dt-drillhead h3 { margin: 0; font-size: var(--fs-15); font-weight: 500; }
   .panel-sheet .file-tab-name { font-size: var(--fs-13); }
 }
 /* A phone narrower than 400 px: the quota windows keep their figures and drop their bars, which pushed

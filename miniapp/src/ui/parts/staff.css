@@ -115,7 +115,7 @@
   .staff-aside { position: relative; }
   .staff-aside > .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
   .staff-aside > .pane-handle:focus-visible { outline: none; }
-  .staff-aside > .pane-handle:focus-visible::after { background: var(--accent); width: 2px; }
+  .staff-aside > .pane-handle:focus-visible::after { background: var(--ring); width: 2px; }
   /* Laid over the whole body rather than widened: out of the grid's flow, the column it leaves
      keeps its width, so the terminal underneath keeps its size and its PTY hears no resize. */
   .chat-body.with-staff-aside > .staff-aside.expanded { position: absolute; inset: 0; z-index: 6; border-left: 0; }
@@ -143,7 +143,7 @@
 .harness-table tbody tr:last-child td { border-bottom: 0; }
 .harness-table tbody tr.harness-row:hover td { background: var(--surface-2); }
 .harness-name { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; }
-.harness-name .ic-chevron { color: var(--fg-3); transition: rotate 150ms; }
+.harness-name .ic-chevron { color: var(--fg-3); transition: rotate var(--t-fast); }
 .harness-row.open .harness-name .ic-chevron, .harness-card-more[aria-expanded="true"] .ic-chevron { rotate: 90deg; }
 .harness-version { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .harness-mark { font-size: var(--fs-11); font-weight: 500; padding: 1px 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--warn); white-space: nowrap; }

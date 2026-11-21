@@ -196,7 +196,10 @@
 .dt-provider-today { padding-top: var(--space-1); }
 
 .dt-mcp { display: flex; flex-direction: column; gap: var(--space-2); }
-.dt-server { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
+/* A server is a row wherever it is listed; in the details panel, whose sections are built of tiles,
+   it is one of them. */
+.dt-server { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 0; }
+.details .dt-server { padding: 10px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
 .dt-server-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .dt-server-name { font-weight: 500; overflow-wrap: anywhere; }
 .dt-state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-2); }
@@ -409,7 +412,7 @@
   .sb-subs { padding: 0; border: 0; font: inherit; cursor: pointer; }
   .sb-subs:hover, .sb-subs.open, .sb-row:hover .sb-subs:hover, .sb-row.current .sb-subs.open { background: var(--surface-4); color: var(--fg); }
   .sb-subs:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-  .sb-subs-chev { display: none; transform: rotate(-90deg); transition: transform .12s ease; }
+  .sb-subs-chev { display: none; transform: rotate(-90deg); transition: transform var(--t-fast); }
   .sb-subs.open .sb-subs-chev { transform: none; }
   .sb-subs:hover .sb-subs-icon, .sb-subs.open .sb-subs-icon, .sb-subs:focus-visible .sb-subs-icon { display: none; }
   .sb-subs:hover .sb-subs-chev, .sb-subs.open .sb-subs-chev, .sb-subs:focus-visible .sb-subs-chev { display: grid; }
@@ -511,7 +514,6 @@
      field they are answered in all take the same stripe, so nothing is offset against anything
      else and the conversation uses the room the window gives it. */
   .answer, .msg-wrap, .thinking-head, .activity, .artifacts { max-width: 100%; }
-  .msg.user { max-width: min(86%, var(--chat-w)); }
   /* A sheet on a wide screen is a dialog, not a full-width drawer. */
   .sheet-backdrop { align-items: center; justify-content: center; }
   .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-top: 14px; padding-bottom: 16px; }
@@ -536,7 +538,7 @@
 /* tool picker */
 .toolpicker { margin: 8px 0; }
 .toolpicker-head { background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); padding: 6px 12px; font: inherit; font-size: var(--fs-14); cursor: pointer; width: 100%; text-align: left; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); }
-.toolpicker-head .chev { color: var(--muted); display: inline-block; transition: transform .15s; }
+.toolpicker-head .chev { color: var(--muted); display: inline-block; transition: transform var(--t-fast); }
 .toolpicker-head .chev.down { transform: rotate(90deg); }
 .toolpicker-body { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); padding: 8px 12px 4px; max-height: 46vh; overflow-y: auto; }
 .toolgroup { margin-bottom: 8px; }

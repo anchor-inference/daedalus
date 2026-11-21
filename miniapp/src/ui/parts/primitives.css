@@ -41,6 +41,9 @@
   border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); border-radius: var(--radius-sm);
   padding: 5px 12px; cursor: pointer; font-weight: 500; white-space: nowrap; user-select: none;
   transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), scale var(--t-fast); }
+/* A link drawn as a button is a button: the link's blue made it the one coloured control on a page.
+   Written before the variants, which outweigh it and keep their own ink. */
+a.btn { color: var(--fg); text-decoration: none; }
 .btn:hover { background: var(--surface-2); }
 /* A press is felt: the control gives a little under the pointer and comes back. */
 .btn:active:not(:disabled) { scale: var(--press-scale); transition-duration: 100ms; }
@@ -74,6 +77,8 @@
 .screen > .empty:only-child { margin-bottom: 12vh; }
 .section-title { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
 .section-title .n, .group-n { color: var(--fg-3); font-weight: 400; }
+/* A title that opens a card sits at the card's padding: the gap above it is for a title between groups. */
+.card > .section-title:first-child { margin-top: 0; }
 .skeleton { border-radius: var(--radius-xs); background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .sk-row { display: grid; grid-template-columns: var(--avatar) 1fr; gap: 10px; padding: 8px 4px; }

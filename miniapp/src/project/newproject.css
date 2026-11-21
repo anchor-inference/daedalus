@@ -31,20 +31,20 @@
 .np-newpath .grow { flex: 1; }
 .np-slug { border-bottom: 1px dashed var(--fg-3); }
 .np-newpath-edit { display: flex; align-items: center; min-width: 0; flex: 1; }
-.np-slug-input { flex: 1; min-width: 80px; height: var(--ctl-h-sm); border: 0; outline: 0; background: transparent; color: var(--fg); font-size: var(--fs-mono); border-bottom: 1px solid var(--accent); }
+.np-slug-input { flex: 1; min-width: 80px; height: var(--ctl-h-sm); border: 0; outline: 0; background: transparent; color: var(--fg); font-size: var(--fs-mono); border-bottom: 1px solid var(--fg-3); }
 .np-where { white-space: nowrap; font-size: var(--fs-12); }
 .np-newpath .linkbtn, .np-back-new { font-size: var(--fs-12); color: var(--accent); white-space: nowrap; }
 .np-back-new { align-self: flex-start; }
 
 .np-extras-h { display: flex; align-items: center; gap: var(--space-2); background: none; border: 0; padding: 0; color: var(--fg-2); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; text-align: left; }
 .np-extras-h .sub { font-weight: 400; font-size: var(--fs-12); }
-.np-extras-h .chev { display: inline-block; transition: transform .15s; color: var(--fg-3); }
+.np-extras-h .chev { display: inline-block; transition: transform var(--t-fast); color: var(--fg-3); }
 .np-extras-h .chev.down { transform: rotate(90deg); }
 .np-extras-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; padding: var(--space-2) 0 0 22px; }
 .np-toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .np-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.np-switch { width: 30px; height: 18px; flex: none; border-radius: 9px; background: var(--surface-3); position: relative; margin-top: 1px; transition: background .15s; }
-.np-switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); transition: left .15s; }
+.np-switch { width: 30px; height: 18px; flex: none; border-radius: 9px; background: var(--surface-3); position: relative; margin-top: 1px; transition: background var(--t-fast); }
+.np-switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); transition: left var(--t-fast); }
 .np-toggle input:checked + .np-switch { background: var(--primary); }
 .np-toggle input:checked + .np-switch::after { left: 14px; background: var(--primary-ink); }
 .np-toggle input:focus-visible + .np-switch { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -103,14 +103,14 @@
 .fb-time { font-size: var(--fs-11); color: var(--fg-3); width: 56px; text-align: right; flex: none; }
 .fb-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: var(--fs-11); font-weight: 500; background: var(--surface-3); color: var(--fg-2); flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-badge.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
-.fb-badge.acc { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.fb-badge.acc { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
 .fb-group { height: 30px; flex: none; display: flex; align-items: center; gap: var(--space-2); margin-top: 4px; padding: 0 8px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; }
 .fb-group b { font-weight: 500; color: var(--fg-2); }
 .fb-group span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.fb-group .chev { display: inline-block; transition: transform .15s; }
+.fb-group .chev { display: inline-block; transition: transform var(--t-fast); }
 .fb-group .chev.down { transform: rotate(90deg); }
 .fb-making { cursor: default; }
-.fb-mk-input { flex: 1; min-width: 0; height: var(--ctl-h-sm); border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); border-bottom: 1px solid var(--accent); }
+.fb-mk-input { flex: 1; min-width: 0; height: var(--ctl-h-sm); border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); border-bottom: 1px solid var(--fg-3); }
 .fb-none { padding: var(--space-3) var(--space-2); }
 .fb-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--space-2); padding: var(--space-4) var(--space-6); flex: 1; }
 .fb-empty > svg { color: var(--fg-3); }
@@ -130,9 +130,9 @@
 .fb-host { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; flex: none; }
 .fb-warn { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 8px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-12); }
 .fb-warn > svg { color: var(--warn); flex: none; }
-/* A folder other projects use already: a question, not a fault, so it wears the accent rather than the
+/* A folder other projects use already: a question, not a fault, so it wears the colour of a note rather than the
    warning colour, and its two answers wrap under the sentence on a narrow screen. */
-.fb-warn.fb-shared { flex-wrap: wrap; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fb-warn.fb-shared { flex-wrap: wrap; background: color-mix(in srgb, var(--info) 10%, transparent); }
 .fb-warn.fb-shared > svg { color: var(--accent); }
 .fb-warn.fb-shared > .grow { flex: 1 1 240px; min-width: 0; }
 .fb-warn .grow { flex: 1; min-width: 0; }
@@ -148,7 +148,7 @@
   .sheet.np-sheet.ph-sheet .sheet-body { padding-bottom: 0; }
   .sheet.np-sheet .np-foot { flex-wrap: wrap; }
   .sheet.np-sheet .np-hint { flex-basis: 100%; }
-  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--tap); border-radius: var(--radius-pill); }
+  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--tap); border-radius: 12px; }
   .np-choice, .np-two, .np-extras-body { grid-template-columns: 1fr; }
   .np-extras-body { padding-left: 0; }
   .np-card { padding: var(--space-3); }
@@ -161,7 +161,7 @@
   .sheet .fb-main { height: 52vh; }
   .fb-places { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); gap: var(--space-1); scrollbar-width: none; }
   .fb-places-h { display: none; }
-  .fb-place { flex: none; height: var(--chip-h); border-radius: var(--radius-pill); background: var(--surface-3); padding: 0 var(--space-3); font-size: var(--fs-13); }
+  .fb-place { flex: none; height: var(--chip-h); border-radius: var(--radius-sm); background: var(--surface-3); padding: 0 var(--space-3); font-size: var(--fs-13); }
   .fb-row { height: var(--row-h-touch); font-size: var(--fs-14); }
   .fb-time { width: auto; }
   .fb-foot, .fb-warn { flex-wrap: wrap; }

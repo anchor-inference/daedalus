@@ -90,7 +90,7 @@
 .cal-task-tabs { display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-sm); background: var(--surface-2); margin-bottom: 6px; }
 .cal-task-tab { position: relative; flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 2px 4px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; white-space: nowrap; }
 .cal-task-tab.on { background: var(--card); color: var(--fg); font-weight: 500; box-shadow: var(--drop-xs); }
-.cal-count { position: absolute; top: -6px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: #fff; font-size: 10px; line-height: 16px; font-weight: 600; }
+.cal-count { position: absolute; top: -6px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-11); line-height: 16px; font-weight: 600; }
 .cal-task-add { display: flex; align-items: center; gap: 8px; min-height: var(--row-h-dense); padding: 0 6px; border-radius: var(--radius-sm); color: var(--fg-3); }
 .cal-task-add:focus-within { background: var(--surface-2); color: var(--fg); }
 .cal-task-add input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: var(--fs-13); color: var(--fg); padding: 6px 0; }
