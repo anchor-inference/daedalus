@@ -104,7 +104,7 @@ def test_chat_to_antigravity_translates_messages_tools_and_signatures() -> None:
     assert req["systemInstruction"] == {"parts": [{"text": "Be concise."}]}
     assert req["generationConfig"]["thinkingConfig"] == {"includeThoughts": True, "thinkingBudget": 8192}
     assert req["toolConfig"] == {"functionCallingConfig": {"mode": "AUTO"}}
-    decl_params = req["tools"][0]["functionDeclarations"][0]["parameters"]
+    decl_params = req["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"]
     assert "$schema" not in decl_params
     assert "additionalProperties" not in decl_params
     model_parts = req["contents"][1]["parts"]

@@ -233,17 +233,21 @@ def antigravity_usage_view(data: dict[str, Any], tier: str = "") -> dict[str, An
 _STRIP_SCHEMA_KEYS = frozenset({"$schema", "additionalProperties", "strict", "$id", "$defs", "definitions"})
 
 
-def _clean_schema(schema: Any) -> Any:
-    """Strip JSON Schema keywords rejected by Gemini's FunctionDeclaration validator."""
+def _clean_schema(schema: Any, *, root: bool = False) -> Any:
+    """Strip JSON Schema keywords rejected by Cloud Code / Vertex validators and ensure root object type."""
     if isinstance(schema, list):
         return [_clean_schema(item) for item in schema]
     if not isinstance(schema, dict):
-        return schema
+        return {"type": "object", "properties": {}} if root else schema
     out: dict[str, Any] = {}
     for k, v in schema.items():
         if k in _STRIP_SCHEMA_KEYS:
             continue
         out[k] = _clean_schema(v)
+    if root:
+        out.setdefault("type", "object")
+        if out.get("type") == "object":
+            out.setdefault("properties", {})
     return out
 
 
@@ -361,27 +365,37 @@ def chat_to_antigravity(body: dict[str, Any], *, project: str) -> dict[str, Any]
         if not isinstance(tool, dict) or tool.get("type") != "function":
             continue
         fn = tool.get("function") or {}
-        decl: dict[str, Any] = {"name": str(fn.get("name") or "")}
+        decl: dict[str, Any] = {
+            "name": str(fn.get("name") or ""),
+            "parametersJsonSchema": _clean_schema(fn.get("parameters"), root=True),
+        }
         if fn.get("description"):
             decl["description"] = str(fn["description"])
-        if fn.get("parameters"):
-            decl["parameters"] = _clean_schema(fn["parameters"])
         decls.append(decl)
     if decls:
         req["tools"] = [{"functionDeclarations": decls}]
 
     tool_choice = body.get("tool_choice")
+    unforceable_claude = model.startswith(("claude-opus-5-5", "claude-sonnet-5-5"))
     if tool_choice is not None and decls:
         if tool_choice == "auto":
             req["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
-        elif tool_choice == "required":
-            req["toolConfig"] = {"functionCallingConfig": {"mode": "ANY"}}
         elif tool_choice == "none":
             req["toolConfig"] = {"functionCallingConfig": {"mode": "NONE"}}
+        elif tool_choice == "required":
+            if unforceable_claude:
+                req["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
+                req["contents"][-1]["parts"].append({"text": "[Call one of the provided tools next; do not answer in plain text.]"})
+            else:
+                req["toolConfig"] = {"functionCallingConfig": {"mode": "ANY"}}
         elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
             fname = str((tool_choice.get("function") or {}).get("name") or "")
             if fname:
-                req["toolConfig"] = {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": [fname]}}
+                if unforceable_claude:
+                    req["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
+                    req["contents"][-1]["parts"].append({"text": f"[Call the `{fname}` tool next; do not answer in plain text.]"})
+                else:
+                    req["toolConfig"] = {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": [fname]}}
 
     gen_cfg: dict[str, Any] = {}
     if body.get("temperature") is not None:
