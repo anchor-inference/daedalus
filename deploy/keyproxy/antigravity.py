@@ -334,6 +334,9 @@ def chat_to_antigravity(body: dict[str, Any], *, project: str) -> dict[str, Any]
                 sig = sigs.get(tc_id)
                 if sig:
                     part["thoughtSignature"] = sig
+                elif not model.startswith("claude-"):
+                    # History carried over from another model (e.g. Claude/Codex) lacks Gemini thought signatures.
+                    part["thoughtSignature"] = "skip_thought_signature_validator"
                 parts.append(part)
             if parts:
                 contents.append({"role": "model", "parts": parts})

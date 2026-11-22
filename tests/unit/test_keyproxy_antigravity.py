@@ -114,6 +114,20 @@ def test_chat_to_antigravity_translates_messages_tools_and_signatures() -> None:
     assert tool_parts[0]["functionResponse"] == {"name": "get_weather", "response": {"result": "Sunny, 20C"}}
 
 
+def test_chat_to_antigravity_adds_skip_thought_signature_for_cross_model_history() -> None:
+    body: dict[str, Any] = {
+        "model": "gemini-4-argon-medium",
+        "messages": [
+            {"role": "user", "content": "Run echo"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call_from_claude", "type": "function", "function": {"name": "Exec", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_from_claude", "content": "ok"},
+        ],
+    }
+    payload = kp_ag.chat_to_antigravity(body, project="aicode-consumers")
+    model_parts = payload["request"]["contents"][1]["parts"]
+    assert model_parts[0]["thoughtSignature"] == "skip_thought_signature_validator"
+
+
 @pytest.mark.asyncio
 async def test_sse_translation_emits_thinking_tool_call_signature_and_usage() -> None:
     events = [
