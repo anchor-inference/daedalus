@@ -108,10 +108,10 @@ def test_chat_to_antigravity_translates_messages_tools_and_signatures() -> None:
     assert "$schema" not in decl_params
     assert "additionalProperties" not in decl_params
     model_parts = req["contents"][1]["parts"]
-    assert model_parts[0]["functionCall"] == {"name": "get_weather", "args": {"city": "Paris"}}
+    assert model_parts[0]["functionCall"] == {"name": "get_weather", "args": {"city": "Paris"}, "id": "call_1"}
     assert model_parts[0]["thoughtSignature"] == "sig-abc"
     tool_parts = req["contents"][2]["parts"]
-    assert tool_parts[0]["functionResponse"] == {"name": "get_weather", "response": {"result": "Sunny, 20C"}}
+    assert tool_parts[0]["functionResponse"] == {"name": "get_weather", "response": {"result": "Sunny, 20C"}, "id": "call_1"}
 
 
 def test_chat_to_antigravity_adds_skip_thought_signature_for_cross_model_history() -> None:

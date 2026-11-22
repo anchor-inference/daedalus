@@ -324,17 +324,19 @@ def chat_to_antigravity(body: dict[str, Any], *, project: str) -> dict[str, Any]
             for tc in msg.get("tool_calls") or []:
                 if not isinstance(tc, dict):
                     continue
-                tc_id = str(tc.get("id") or "")
+                tc_id = str(tc.get("id") or "") or f"call_{uuid.uuid4().hex[:24]}"
                 fn = tc.get("function") or {}
                 fn_name = str(fn.get("name") or "")
-                if tc_id and fn_name:
+                if fn_name:
                     call_names[tc_id] = fn_name
                 raw_args = fn.get("arguments") or "{}"
                 try:
                     args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
                 except (ValueError, TypeError):
                     args = {}
-                part: dict[str, Any] = {"functionCall": {"name": fn_name, "args": args}}
+                # The id pairs a call with its result. Claude behind this endpoint refuses a tool_use
+                # without one ("tool_use.id: Field required"), and Gemini accepts it, so it is always sent.
+                part: dict[str, Any] = {"functionCall": {"name": fn_name, "args": args, "id": tc_id}}
                 sig = sigs.get(tc_id)
                 if sig:
                     part["thoughtSignature"] = sig
@@ -349,7 +351,7 @@ def chat_to_antigravity(body: dict[str, Any], *, project: str) -> dict[str, Any]
             tc_id = str(msg.get("tool_call_id") or "")
             fn_name = str(msg.get("name") or call_names.get(tc_id) or "tool")
             text = _text_of(msg.get("content"))
-            fr_part: dict[str, Any] = {"functionResponse": {"name": fn_name, "response": {"result": text}}}
+            fr_part: dict[str, Any] = {"functionResponse": {"name": fn_name, "response": {"result": text}, "id": tc_id}}
             if contents and contents[-1]["role"] == "user":
                 contents[-1]["parts"].append(fr_part)
             else:
