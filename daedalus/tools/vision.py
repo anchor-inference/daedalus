@@ -123,7 +123,9 @@ async def describe_kept(manager: Any, data: bytes, mime: str, name: str, *, sess
         raise VisionUnavailable(f"{name} is a {mime or 'binary'} file; it cannot be shown here, but it can be handed on with files=[…]")
     if len(data) > MAX_IMAGE_BYTES:
         raise VisionUnavailable(f"{name} is {len(data)} bytes, past what the vision model takes; it can still be handed on with files=[…]")
-    vision = manager.vision_model() if manager is not None and hasattr(manager, "vision_model") else None
+    # The session's own vision model where there is a session: a kept file read from a chat is looked at
+    # by the model that chat chose, as an ImageView from it would be.
+    vision = manager.vision_model(session_id) if manager is not None and hasattr(manager, "vision_model") else None
     try:
         text, model = await look(vision, manager, data, mime, KEPT_IMAGE_TASK, detail="full", session_id=session_id)
     except VisionUnavailable as exc:

@@ -2665,6 +2665,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "model": await session_model_label(state),
             "provider": await session_provider(state),
             **(await session_thinking(state)),
+            # The vision model this session looks with, its own or the global one's, for its Details.
+            **manager.vision_view(session_id),
             # What is really answering, when that is not what the session was set to. The header
             # reads this on every poll, so a fallback that ends while the screen is open goes away
             # on its own instead of waiting for the session to be reopened.
@@ -5670,6 +5672,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # The chip on the main chat chooses the main orchestrator's model in Settings.
             await dispatcher.model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
         return {"ok": True, "model": await session_model_label(state), **(await session_thinking(state))}
+
+    @api.post("/api/sessions/{session_id}/vision")
+    async def set_session_vision(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """``{"preset": id}`` makes an image-capable preset the vision model of this session alone;
+        ``""`` returns it to the global one. Its own endpoint rather than a field of ``/model``: that
+        one's ``clear`` and preset choice reach the orchestrators' models, and a vision model is none of
+        their business. Answers with what Details draws."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        preset = body.get("preset")
+        if not isinstance(preset, str):
+            raise HTTPException(400, "preset must be a string")
+        try:
+            await manager.set_vision(session_id, preset)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True, **manager.vision_view(session_id)}
 
     # -- MCP per session --------------------------------------------------------------
 

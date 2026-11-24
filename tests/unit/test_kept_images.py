@@ -23,7 +23,7 @@ class Manager:
     def __init__(self, model: Any) -> None:
         self.model = model
 
-    def vision_model(self) -> Any:
+    def vision_model(self, session_id: str | None = None) -> Any:
         return self.model
 
 

@@ -741,7 +741,7 @@ async def project_files(orch: Orchestrators, project: Project) -> str:
     return "\n".join([f"{project.name}'s files, newest first (read one with Peek(op='read', path='att:…'); hand one over with Assign or Tell files=[…]):", *lines])
 
 
-async def read_kept(orch: Orchestrators, scope: str, handle_text: str, *, offset: int, limit: int) -> str:
+async def read_kept(orch: Orchestrators, scope: str, handle_text: str, *, offset: int, limit: int, session_id: str | None = None) -> str:
     """A kept file's lines, for a scope that may use its handle."""
     try:
         stored = await orch.manager.files.in_scope(handle_text, scope)
@@ -749,7 +749,7 @@ async def read_kept(orch: Orchestrators, scope: str, handle_text: str, *, offset
         raise Refused(str(exc)) from exc
     data = await orch.manager.files.read(stored)
     try:
-        body = await kept_body(orch.manager, data, stored, offset=offset, limit=limit)
+        body = await kept_body(orch.manager, data, stored, offset=offset, limit=limit, session_id=session_id)
     except (PeekRefused, VisionUnavailable) as exc:
         raise Refused(str(exc)) from exc
     return f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}"
@@ -779,7 +779,7 @@ async def peek(orch: Orchestrators, project: Project, session_id: str, *, op: st
     if parse_handle(path) is not None and (path.strip().startswith("att:") or not folder):
         if op not in ("read", "ls"):
             raise Refused(f"{path} is a kept file: read it with op='read'")
-        return await read_kept(orch, project.id, path, offset=offset, limit=limit)
+        return await read_kept(orch, project.id, path, offset=offset, limit=limit, session_id=session_id)
     own = _own_workspace(orch, session_id, path) if not folder and op in ("read", "ls", "find", "search") else None
     access = own if own is not None else orch.folder_access(project, _folder(project, folder), session_id)
     target = _folder(project, folder)

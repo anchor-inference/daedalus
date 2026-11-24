@@ -784,7 +784,7 @@ async def op_files(d: Dispatcher, session_id: str, *, op: str = "list", file: st
     except FileRefused as exc:
         raise ValueError(f"{exc}; Files() lists them") from exc
     try:
-        body = await kept_body(d.manager, await d.manager.files.read(stored), stored, offset=offset, limit=limit)
+        body = await kept_body(d.manager, await d.manager.files.read(stored), stored, offset=offset, limit=limit, session_id=session_id)
     except (PeekRefused, VisionUnavailable) as exc:
         raise ValueError(str(exc)) from exc
     return f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}"

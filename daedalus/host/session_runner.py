@@ -81,6 +81,7 @@ from daedalus.config import (
     STAFF_ONLY_TOOLS,
     SUBAGENT_BLOCKED_TOOLS,
     SUBAGENT_ONLY_TOOLS,
+    ModelPresetConfig,
     NoModelConfigured,
     RuntimeConfig,
     Settings,
@@ -943,6 +944,9 @@ class SessionManager:
         """The main orchestrator's tools and the few shared ones it may call, and nothing else."""
         self.subscription_accounts = SubscriptionAccounts(db)
         """The operator's accounts per subscription, read once at start and written through after."""
+        self.vision_choices: dict[str, str] = {}
+        """Each session's own vision preset, by session id, read once at start and written through after
+        (``live_control.vision_preset``). Held here because an image tool asks for its route synchronously."""
         self.providers = ProviderRegistry(
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
@@ -1073,6 +1077,7 @@ class SessionManager:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
         await self.subscription_accounts.load()
+        self.vision_choices = await self.live.vision_choices()
         await self.memory_entries.file_unfiled()
         await self.secrets.load()
         operator_secrets.install(self.secrets)
@@ -1431,13 +1436,63 @@ class SessionManager:
                 state.services.max_tool_output_chars = config.tools.exec.max_output_chars
         self._apply_tool_visibility_all()
 
-    def vision_model(self) -> tuple[Any, str, FileBlobStore, str] | None:
+    def vision_model(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str] | None:
         """The vision model as a tool that looks at an image needs it, or ``None`` without one: for a
-        caller with no session of its own (a command-line member's browser)."""
-        return self._vision()
+        caller outside the engine's tools (a kept file read, a command-line member's browser, which
+        has no session and so gets the global one)."""
+        return self._vision(session_id)
 
-    def _vision(self) -> tuple[Any, str, FileBlobStore, str] | None:
+    def vision_preset_for(self, session_id: str | None) -> tuple[str, ModelPresetConfig] | None:
+        """The preset a session looks with: its own choice, else ``[vision] preset``.
+
+        A choice whose preset was removed, or no longer takes images, falls back to the global one
+        instead of leaving the session blind: the row stays in the table and comes back to life if
+        the preset does, which is the operator's intent, and nothing has to sweep the sessions when
+        a model is deleted. A subagent with no choice of its own looks with its leader's: it reads the
+        pictures of the conversation the operator chose that model for."""
+        seen: set[str] = set()
+        while session_id and session_id not in seen:
+            seen.add(session_id)
+            chosen = self.vision_choices.get(session_id, "")
+            preset = self.config.presets.get(chosen) if chosen else None
+            if preset is not None and preset.images:
+                return chosen, preset
+            state = self._states.get(session_id)
+            session_id = str(state.metadata.get("subagent_of") or "") if state is not None else ""
+        return self.config.vision_preset()
+
+    def vision_view(self, session_id: str) -> dict[str, str]:
+        """What the session's Details draws for its vision model: its own choice ("" while it follows
+        the global one, and also when the one it chose is gone, since that is what it looks with), and
+        the global preset with its label, which the picker names beside "default"."""
+        chosen = self.vision_choices.get(session_id, "")
+        preset = self.config.presets.get(chosen) if chosen else None
+        own = chosen if preset is not None and preset.images else ""
         found = self.config.vision_preset()
+        return {
+            "vision_preset": own,
+            "vision_label": preset.display(own) if own and preset is not None else "",
+            "vision_default": found[0] if found else "",
+            "vision_default_label": found[1].display(found[0]) if found else "",
+        }
+
+    async def set_vision(self, session_id: str, preset: str) -> None:
+        """Choose the session's vision model; "" follows the global one again. A ``ValueError`` says why
+        a preset cannot be chosen, before anything is written."""
+        if preset:
+            found = self.config.presets.get(preset)
+            if found is None:
+                raise ValueError(f"no such model preset {preset!r}")
+            if not found.images:
+                raise ValueError(f"the model preset {preset!r} is not marked as taking images")
+        await self.live.set_vision(session_id, preset)
+        if preset:
+            self.vision_choices[session_id] = preset
+        else:
+            self.vision_choices.pop(session_id, None)
+
+    def _vision(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str] | None:
+        found = self.vision_preset_for(session_id)
         if found is None:
             return None
         preset_id, preset = found
@@ -2323,6 +2378,7 @@ class SessionManager:
             state.provider_hold = None
             await self.providers.close_retired()
         self._states.pop(session_id, None)
+        self.vision_choices.pop(session_id, None)
         locator.unregister(session_id)
         for job in self.jobs.pop(session_id, {}).values():
             if isinstance(job, RemoteJob):
@@ -3669,7 +3725,7 @@ class SessionManager:
             # the session's own directory alone when it has one.
             walls=self.walls_of(state),
             read_only_everywhere=(self.settings.skills_dir,),
-            extra={"skill_store": self.skills_for(state), "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
+            extra={"skill_store": self.skills_for(state), "manager": self, "vision": _LiveVision(self, state.session.id), "jobs": self.jobs.setdefault(state.session.id, {})},
         )
         host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)
         remote_home = self.remote.home_of(state) if self.remote is not None else None
@@ -9336,19 +9392,23 @@ def operator_language(history: Sequence[Message]) -> str:
 
 
 class _LiveVision:
-    """Resolves the ImageView provider/model at call time, so settings edits apply immediately."""
+    """Resolves the ImageView provider/model at call time, so settings edits apply immediately.
 
-    def __init__(self, manager: SessionManager) -> None:
+    Bound to its session, whose own vision model wins over the global one; every image tool of the
+    session (ImageView, BrowserLook, a page's look) reads its route through this one object."""
+
+    def __init__(self, manager: SessionManager, session_id: str | None = None) -> None:
         self._manager = manager
+        self._session_id = session_id
 
     def __iter__(self):  # type: ignore[no-untyped-def]
-        resolved = self._manager._vision()
+        resolved = self._manager._vision(self._session_id)
         if resolved is None:
             raise ValueError("no vision model is configured")
         return iter(resolved)
 
     def __bool__(self) -> bool:
-        return self._manager._vision() is not None
+        return self._manager._vision(self._session_id) is not None
 
 
 def _forget_persisted(state: SessionState) -> None:

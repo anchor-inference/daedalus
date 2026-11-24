@@ -1291,7 +1291,7 @@ class LiveControlStore:
         row = await self._db.fetchone("SELECT * FROM live_control WHERE session_id = ?", (session_id,))
         if row is None:
             return {"steer": [], "follow_up": [], "queue_revision": 0, "model_name": None, "provider": None, "preset": None, "thinking_enabled": None, "reasoning_effort": None,
-                    "account": None, "account_upstream": None}
+                    "account": None, "account_upstream": None, "vision_preset": None}
         return {
             "steer": json.loads(row["steer_queue"] or "[]"),
             "follow_up": json.loads(row["follow_up_queue"] or "[]"),
@@ -1303,6 +1303,7 @@ class LiveControlStore:
             "reasoning_effort": row["reasoning_effort"],
             "account": row["account"],
             "account_upstream": row["account_upstream"],
+            "vision_preset": row["vision_preset"],
         }
 
     async def load_models(self, session_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -1758,6 +1759,23 @@ class LiveControlStore:
             " ON CONFLICT(session_id) DO UPDATE SET account = excluded.account, account_upstream = excluded.account_upstream, updated_at = excluded.updated_at",
             (session_id, account or None, upstream if account else None, _now()),
         )
+
+    async def set_vision(self, session_id: str, preset: str) -> None:
+        """The vision model this session looks with; "" returns it to ``[vision] preset``.
+
+        Apart from :meth:`set_model`, and left alone by :meth:`clear_overrides`: the session's model
+        returning to the default is no reason for the model that reads its pictures to change."""
+        await self._db.execute(
+            "INSERT INTO live_control(session_id, steer_queue, follow_up_queue, vision_preset, updated_at) VALUES (?, '[]', '[]', ?, ?)"
+            " ON CONFLICT(session_id) DO UPDATE SET vision_preset = excluded.vision_preset, updated_at = excluded.updated_at",
+            (session_id, preset or None, _now()),
+        )
+
+    async def vision_choices(self) -> dict[str, str]:
+        """Every session's own vision model, for the manager to hold: it is read on a tool call, where the
+        lookup has to be synchronous."""
+        rows = await self._db.fetchall("SELECT session_id, vision_preset FROM live_control WHERE vision_preset IS NOT NULL AND vision_preset != ''")
+        return {row["session_id"]: row["vision_preset"] for row in rows}
 
     async def clear_overrides(self, session_id: str) -> None:
         await self._db.execute(
