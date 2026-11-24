@@ -192,7 +192,7 @@ describe("the secrets manager", () => {
     expect(written).toEqual([SHOWN]);
     expect(document.body.innerHTML).not.toContain(SHOWN);
     // Said at the button pressed, not in a line that leaves.
-    expect(row("wifi")!.querySelector(".secret-copy svg path")?.getAttribute("d")).toBe("M5 12l5 5 9-11");
+    expect(row("wifi")!.querySelector(".secret-copy .ic-check")).not.toBeNull();
   });
 
   it("edits in place, sending only what changed and never fetching the value", async () => {
