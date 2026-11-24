@@ -1,7 +1,7 @@
 // One icon set for the whole app: 24-unit stroked paths, drawn with the current text colour.
 
 export type IconName =
-  | "back" | "more" | "plus" | "up" | "stop" | "model" | "terminal" | "file" | "pen" | "search" | "globe" | "attach" | "image"
+  | "back" | "more" | "plus" | "minus" | "up" | "stop" | "model" | "terminal" | "file" | "pen" | "search" | "globe" | "attach" | "image"
   | "question" | "skill" | "spawn" | "bulb" | "wrench" | "clock" | "calendar" | "plug" | "dot" | "compact"
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
@@ -56,6 +56,7 @@ const PATHS: Record<IconName, string> = {
   back: "M15 18l-6-6 6-6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   plus: "M12 5v14M5 12h14",
+  minus: "M5 12h14",
   up: "M12 19V5M5 12l7-7 7 7",
   stop: "M7 7h10v10H7z",
   model: "M4 12l8-8 8 8-8 8-8-8z",

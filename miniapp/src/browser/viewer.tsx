@@ -12,14 +12,25 @@
 //
 // On a phone a tap is a click, one finger dragged is a scroll, a long press is a right click, and two
 // fingers zoom this picture (never the page, whose layout the agent reads).
+//
+// While the operator drives, the picture zooms: the buttons in its corner, Ctrl (⌘) with plus, minus
+// and zero, Ctrl with the wheel (a trackpad's pinch) about the pointer, two fingers on a phone; the
+// middle button drags it. Enlarging the live frame alone shows nothing new — it has the page's window's
+// pixels at most, and a sign-in code drawn one pixel a module stays a grey blur however large — so a
+// zoomed view asks for its frames whole at JPEG 92, and once the zoom settles lays a sharp frame over
+// them: the zoomed part drawn again by the browser at the screen's own pixels (`/still`). Nothing
+// changes on the page itself for any of this, so handing the page back, which resets the zoom, leaves
+// the agent the page exactly as it was.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { InputDeduper } from "../terminal/dedupe";
-import { attachBox, clampZoom, dragToWheel, fit, NO_ZOOM, viewOf, viewToPage, zoomed, type PictureQuality, type Rect, type Zoom } from "./geometry";
+import { api } from "../api";
+import { attachBox, boxToView, clampZoom, dragToWheel, fit, NO_ZOOM, panBy, stillScale, viewOf, viewToPage, visibleClip, zoomAbout, zoomed, ZOOM_MAX, ZOOM_STEP, type PictureQuality, type Rect, type Zoom } from "./geometry";
 import { copyFromPage, pasteText } from "./clipboard";
-import { clipboardChord, ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseButton, viewerChord, type ViewerChord } from "./keys";
+import { clipboardChord, ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseButton, viewerChord, zoomChord, type ViewerChord, type ZoomChord } from "./keys";
+import type { Box } from "./protocol";
 import type { LiveSnapshot, LiveView } from "./live";
 import { CursorOverlay } from "./overlay";
 
@@ -29,6 +40,13 @@ const TAP_SLOP_PX = 8;
 const LONG_PRESS_MS = 520;
 /** A resize settles before the daemon is asked for another size. */
 const RESIZE_SETTLE_MS = 180;
+/** The zoom, a pan or the operator's own input settles this long before a sharp frame is taken. */
+const STILL_SETTLE_MS = 400;
+/** A page that keeps changing under a sharp frame (a code that renews itself) gets a new one this often. */
+const STILL_REFRESH_MS = 2500;
+
+/** A sharp frame over the live picture: the part of the page it shows, and which tab. */
+type Still = { url: string; clip: Box; tab: string; ts: number };
 
 export type ViewerProps = {
   live: LiveView | null;
@@ -61,7 +79,9 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
   const field = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState<Zoom>(NO_ZOOM);
+  const [still, setStill] = useState<Still | null>(null);
   const meta = snap.meta;
+  const zoomable = interactive && !compact;
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -78,34 +98,131 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
     return () => live?.attach(null);
   }, [live]);
 
-  // A live picture follows the box it is drawn in; the thumbnail's size is the daemon's.
+  // A live picture follows the box it is drawn in; the thumbnail's size is the daemon's. Zoomed, it
+  // asks for more pixels: in half steps, so a pinch does not send a VIEW for every frame it moves.
+  const zoomLevel = Math.min(ZOOM_MAX, Math.round(zoom.scale * 2) / 2);
   const asked = useRef("");
   useEffect(() => {
     if (!live || tier !== "live" || size.w <= 0 || snap.state.kind !== "live") return;
     const timer = window.setTimeout(() => {
-      const want = viewOf(attachBox(size.w, size.h, window.devicePixelRatio || 1, saving, quality));
+      const want = viewOf(attachBox(size.w, size.h, window.devicePixelRatio || 1, saving, quality, zoomLevel));
       const key = `${want.max_w}x${want.max_h} q${want.quality} f${want.fps} ${want.adaptive}`;
       if (key === asked.current) return;
       asked.current = key;
       live.view(want);
     }, RESIZE_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [live, tier, size.w, size.h, saving, quality, snap.state.kind]);
+  }, [live, tier, size.w, size.h, saving, quality, snap.state.kind, zoomLevel]);
 
   const base = useMemo<Rect>(() => (meta ? fit(size.w, size.h, meta.w, meta.h) : { x: 0, y: 0, w: 0, h: 0 }), [meta, size.w, size.h]);
   const rect = useMemo(() => zoomed(base, size.w, size.h, zoom), [base, size.w, size.h, zoom]);
   const rectRef = useRef(rect);
   rectRef.current = rect;
+  const geometry = useRef({ base, w: size.w, h: size.h });
+  geometry.current = { base, w: size.w, h: size.h };
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
-  // Losing control leaves the zoom and the keyboard behind.
+  // ── the zoom ────────────────────────────────────────────────────────────────────────────────
+  const zoomBy = useCallback((factor: number, at?: { x: number; y: number }) => {
+    const g = geometry.current;
+    setZoom((z) => zoomAbout(z, g.base, g.w, g.h, at?.x ?? g.w / 2, at?.y ?? g.h / 2, factor));
+  }, []);
+  const onZoomChord = useCallback((chord: ZoomChord) => {
+    if (chord === "reset") setZoom(NO_ZOOM);
+    else zoomBy(chord === "in" ? ZOOM_STEP : 1 / ZOOM_STEP);
+  }, [zoomBy]);
+
+  // The sharp frame. Each request is numbered, so an answer that comes after the picture moved again
+  // is thrown away rather than laid over the wrong part of the page.
+  const stillSeq = useRef(0);
+  const stillBusy = useRef(false);
+  // Asked for while one was on its way: taken when that one is back, or the settled picture would
+  // wait for the next change to get its sharp frame.
+  const stillAgain = useRef(false);
+  const stillTimer = useRef(0);
+  const dropStill = useCallback(() => {
+    stillSeq.current++;
+    window.clearTimeout(stillTimer.current);
+    setStill((old) => {
+      if (old) URL.revokeObjectURL(old.url);
+      return null;
+    });
+  }, []);
+  const takeStill = useCallback(async () => {
+    const m = live?.latest ?? meta;
+    const g = geometry.current;
+    if (!live || !m) return;
+    if (stillBusy.current) {
+      stillAgain.current = true;
+      return;
+    }
+    const clip = visibleClip(m, rectRef.current, g.w, g.h);
+    if (!clip) return;
+    const seq = ++stillSeq.current;
+    stillBusy.current = true;
+    try {
+      const url = await api.browserStill(live.options.group, { tab_id: m.tab, ...clip, scale: stillScale(m, rectRef.current, window.devicePixelRatio || 1) });
+      if (seq !== stillSeq.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      setStill((old) => {
+        if (old) URL.revokeObjectURL(old.url);
+        return { url, clip, tab: m.tab, ts: m.ts };
+      });
+    } catch {
+      // The live picture stays; the operator can ask again from the zoom's corner.
+    } finally {
+      stillBusy.current = false;
+    }
+    if (stillAgain.current) {
+      stillAgain.current = false;
+      void takeStillRef.current();
+    }
+  }, [live, meta]);
+  const takeStillRef = useRef(takeStill);
+  takeStillRef.current = takeStill;
+  const settleStill = useCallback(() => {
+    dropStill();
+    if (zoomRef.current.scale > 1) stillTimer.current = window.setTimeout(() => void takeStill(), STILL_SETTLE_MS);
+  }, [dropStill, takeStill]);
+
+  // Every change of what the box shows puts the sharp frame out of place: it goes, and a new one is
+  // taken once the picture stands still.
+  useEffect(() => {
+    if (!zoomable) return;
+    settleStill();
+  }, [zoomable, zoom, size.w, size.h, meta?.tab, settleStill]);
+  // A page that changes under the sharp frame — a code that renews itself — gets a fresh one.
+  useEffect(() => {
+    if (!zoomable || zoom.scale <= 1 || !still) return;
+    const timer = window.setInterval(() => {
+      const newest = live?.latest;
+      if (newest && newest.ts !== still.ts) void takeStill();
+    }, STILL_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [zoomable, zoom.scale, still, live, takeStill]);
+  useEffect(() => () => {
+    window.clearTimeout(stillTimer.current);
+  }, []);
+
+  // Losing control leaves the zoom, the sharp frame and the keyboard behind.
   useEffect(() => {
     if (!interactive) {
       setZoom(NO_ZOOM);
+      dropStill();
       field.current?.blur();
     }
-  }, [interactive]);
+  }, [interactive, dropStill]);
 
-  const send = useCallback((message: Parameters<LiveView["input"]>[0]) => (interactive && live ? live.input(message) : false), [interactive, live]);
+  const send = useCallback((message: Parameters<LiveView["input"]>[0]) => {
+    if (!interactive || !live) return false;
+    // What the operator does on the page may change it under the sharp frame; a pointer passing over
+    // it does not, or the frame would never stay.
+    if (still && !(message.t === "mouse" && message.type === "move")) settleStill();
+    return live.input(message);
+  }, [interactive, live, still, settleStill]);
 
   /** A client point as the page's, from the newest frame (a scroll moves nothing we map by). */
   const pagePoint = useCallback((clientX: number, clientY: number) => {
@@ -144,6 +261,15 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
     const el = box.current;
     if (!el || !interactive || touch) return;
     const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // A trackpad's pinch arrives as a wheel with Ctrl held. Sent on, either would zoom the remote
+        // page itself, which changes its layout under the agent; it zooms the picture instead.
+        e.preventDefault();
+        const r = el.getBoundingClientRect();
+        const step = e.deltaMode === 1 ? 0.05 : e.deltaMode === 2 ? 1 : 0.0025;
+        zoomBy(Math.exp(-e.deltaY * step), { x: e.clientX - r.left, y: e.clientY - r.top });
+        return;
+      }
       const p = pagePoint(e.clientX, e.clientY);
       if (!p) return;
       e.preventDefault();
@@ -156,7 +282,9 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [interactive, touch, pagePoint, flushWheel]);
+  }, [interactive, touch, pagePoint, flushWheel, zoomBy]);
+
+  const panning = useRef<{ x: number; y: number; zoom0: Zoom } | null>(null);
 
   // ── fingers ─────────────────────────────────────────────────────────────────────────────────
   const fingers = useRef(new Map<number, { x: number; y: number; x0: number; y0: number; t0: number }>());
@@ -194,6 +322,13 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
       }
       return;
     }
+    // The middle button drags a zoomed picture rather than clicking the page.
+    if (e.button === 1 && zoomable && zoomRef.current.scale > 1) {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      panning.current = { x: e.clientX, y: e.clientY, zoom0: zoomRef.current };
+      return;
+    }
     // A mouse: the keyboard follows the click, as it would into a page.
     field.current?.focus({ preventScroll: true });
     const p = pagePoint(e.clientX, e.clientY);
@@ -206,6 +341,14 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!interactive) return;
+    if (panning.current) {
+      // From where the drag began, not from the last move: a move the browser merged or dropped
+      // would otherwise leave the picture behind the pointer for the rest of the drag.
+      const g = geometry.current;
+      const start = panning.current;
+      setZoom(panBy(start.zoom0, g.base, g.w, g.h, e.clientX - start.x, e.clientY - start.y));
+      return;
+    }
     if (e.pointerType === "touch" || touch) {
       const f = fingers.current.get(e.pointerId);
       if (!f) return;
@@ -246,6 +389,10 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!interactive) return;
+    if (panning.current) {
+      panning.current = null;
+      return;
+    }
     if (e.pointerType === "touch" || touch) {
       const f = fingers.current.get(e.pointerId);
       fingers.current.delete(e.pointerId);
@@ -264,6 +411,7 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
   };
 
   const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    panning.current = null;
     fingers.current.delete(e.pointerId);
     window.clearTimeout(gesture.current.timer);
     if (fingers.current.size === 0) gesture.current.kind = "tap";
@@ -285,6 +433,12 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!interactive || e.nativeEvent.isComposing || composing.current) return;
+    const zooming = zoomable ? zoomChord(e, mac) : null;
+    if (zooming) {
+      e.preventDefault();
+      onZoomChord(zooming);
+      return;
+    }
     const chord = viewerChord(e, mac);
     if (chord) {
       e.preventDefault();
@@ -321,6 +475,11 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
 
   const onKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!interactive || composing.current || !isKeyPress(e) || clipboardChord(e, mac) === "paste") return;
+    // The zoom's chord went nowhere on its way down, so its release does not go either.
+    if (zoomable && zoomChord(e, mac)) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     send(keyInput(e, "up"));
   };
@@ -355,6 +514,7 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
       data-owner={snap.control?.owner ?? ""}
       data-holder={snap.control?.holder ?? ""}
       data-zoom={zoom.scale.toFixed(2)}
+      data-still={still ? "shown" : ""}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -368,7 +528,20 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
         data-rect={`${rect.x.toFixed(1)},${rect.y.toFixed(1)},${rect.w.toFixed(1)},${rect.h.toFixed(1)}`}
       />
+      {still && meta && still.tab === meta.tab && <StillFrame still={still} meta={meta} rect={rect} />}
       <CursorOverlay action={snap.action} meta={meta} rect={rect} parked={parked} compact={compact} agent={agent} />
+      {zoomable && snap.painted && (
+        <ZoomBar
+          scale={zoom.scale}
+          sharp={!!still}
+          mac={mac}
+          onChord={onZoomChord}
+          onSharp={() => {
+            dropStill();
+            void takeStill();
+          }}
+        />
+      )}
       {placeholder && (
         <div className="bv-placeholder">
           <Icon name="globe" size={22} />
@@ -403,4 +576,35 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
 /** Put the keyboard on the page: the hidden field inside a viewer that is driving. */
 export function focusViewer(root: HTMLElement | null): void {
   root?.querySelector<HTMLTextAreaElement>(".bv-ime")?.focus({ preventScroll: true });
+}
+
+/** The sharp frame laid exactly over the part of the live picture it was taken of. */
+function StillFrame({ still, meta, rect }: { still: Still; meta: NonNullable<LiveSnapshot["meta"]>; rect: Rect }) {
+  const at = boxToView(meta, rect, still.clip);
+  return <img className="bv-still" src={still.url} alt="" draggable={false} style={{ left: at.x, top: at.y, width: at.w, height: at.h }} data-clip={`${still.clip.x},${still.clip.y},${still.clip.w},${still.clip.h}`} />;
+}
+
+/**
+ * The zoom's corner: out, the scale (which puts it back), in, and a sharp frame taken now. Its pointer
+ * events stop here, or a press on a button would also be a click on the page beneath it.
+ */
+function ZoomBar({ scale, sharp, mac, onChord, onSharp }: { scale: number; sharp: boolean; mac: boolean; onChord: (chord: ZoomChord) => void; onSharp: () => void }) {
+  const mod = mac ? "⌘" : "Ctrl";
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <div className="bv-zoom" role="toolbar" aria-label={t("browser.zoom")} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onWheel={stop} onContextMenu={stop}>
+      <button type="button" className="iconbtn small" aria-label={t("browser.zoom.out", { mod })} title={t("browser.zoom.out", { mod })} disabled={scale <= 1} onClick={() => onChord("out")}>
+        <Icon name="minus" size={16} />
+      </button>
+      <button type="button" className="bv-zoom-level" aria-label={t("browser.zoom.reset", { mod })} title={t("browser.zoom.reset", { mod })} onClick={() => onChord("reset")}>
+        {Math.round(scale * 100)}%
+      </button>
+      <button type="button" className="iconbtn small" aria-label={t("browser.zoom.in", { mod })} title={t("browser.zoom.in", { mod })} disabled={scale >= ZOOM_MAX} onClick={() => onChord("in")}>
+        <Icon name="plus" size={16} />
+      </button>
+      <button type="button" className={`iconbtn small bv-zoom-sharp ${sharp ? "on" : ""}`} aria-pressed={sharp} aria-label={t("browser.zoom.sharp")} title={t("browser.zoom.sharp")} onClick={onSharp}>
+        <Icon name="camera" size={16} />
+      </button>
+    </div>
+  );
 }

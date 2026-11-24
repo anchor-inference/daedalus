@@ -94,6 +94,14 @@
 .bv-overlay.compact .bv-box { border-width: 1.5px; border-radius: 3px; box-shadow: none; }
 .bv-overlay.compact .bv-ripple { width: 14px; height: 14px; margin: -7px 0 0 -7px; border-width: 1.5px; }
 .bv-overlay.compact .bv-cursor svg { margin: -2px 0 0 -2px; }
+/* The sharp frame: the browser's own drawing of the zoomed part, laid over the live picture it sharpens. */
+.bv-still { position: absolute; z-index: 1; display: block; pointer-events: none; }
+.bv-zoom { position: absolute; right: 10px; bottom: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--surface-2) 92%, transparent); box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
+.bv-zoom .iconbtn { border-radius: var(--radius-pill); }
+.bv-zoom .iconbtn:disabled { opacity: .4; }
+.bv-zoom-level { min-width: 46px; padding: 0 6px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-12); font-variant-numeric: tabular-nums; cursor: pointer; }
+.bv-zoom-level:hover { color: var(--accent); }
+.bv-zoom .bv-zoom-sharp.on { color: var(--accent); }
 .bv-ime { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; font-size: var(--fs-14); }
 @media (hover: none) { .bv-ime { font-size: 16px; } }
 .bp-veil { position: absolute; inset: 0; z-index: 4; display: flex; align-items: flex-end; justify-content: center; padding-bottom: var(--space-4); opacity: 0; transition: opacity var(--t-base); cursor: default; }

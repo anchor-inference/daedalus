@@ -302,6 +302,15 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, res.status === 404 ? "no such keyframe" : `could not load the keyframe (${res.status})`);
     return URL.createObjectURL(await res.blob());
   },
+  /**
+   * A sharp frame of the part of the page the take-over view is zoomed into, as a blob URL: the browser
+   * draws that part again at `scale` picture pixels per CSS pixel. The caller revokes it.
+   */
+  browserStill: async (group: string, body: { tab_id: string; x: number; y: number; w: number; h: number; scale: number }): Promise<string> => {
+    const res = await fetch(`/api/browsers/${encodeURIComponent(group)}/still`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new ApiError(res.status, `could not take a sharp frame (${res.status})`);
+    return URL.createObjectURL(await res.blob());
+  },
   /** A new terminal. At the machine's cap the host answers 409 `over_cap`; `confirm` is the operator's "open it anyway". */
   createTerminal: (body: TerminalCreate) => call<TerminalView>("POST", "/api/terminals", body),
   terminal: (id: string) => call<TerminalView>("GET", `/api/terminals/${encodeURIComponent(id)}`),

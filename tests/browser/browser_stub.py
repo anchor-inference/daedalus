@@ -50,11 +50,18 @@ class Scene:
     sizes: dict[tuple[int, int], bytes] = field(default_factory=dict)
     """The same page rendered at other viewport sizes (``render_scenes(sizes=...)``), for a picture of
     a page the app asked to take another shape: a phone driving it at its own width."""
+    sharp: bytes = b""
+    """The viewport drawn at ``SHARP_SCALE`` device pixels per CSS pixel as PNG (``render_scenes(sharp=...)``):
+    what a sharp frame of the take-over view is cut from, as the daemon has Chromium draw the part again."""
 
 
-def render_scenes(browser: Any, quality: int = 72, sizes: tuple[tuple[int, int], ...] = ()) -> dict[str, Scene]:
+SHARP_SCALE = 4
+
+
+def render_scenes(browser: Any, quality: int = 72, sizes: tuple[tuple[int, int], ...] = (), sharp: tuple[str, ...] = ()) -> dict[str, Scene]:
     """Every page of ``browser_pages.SCENES`` as a 1280×800 JPEG, a 320×200 one, and its elements' boxes;
-    with ``sizes``, also as a JPEG at each of those viewport sizes."""
+    with ``sizes``, also as a JPEG at each of those viewport sizes; with ``sharp``, those scenes also
+    as a PNG at four times their pixels."""
     context = browser.new_context(viewport={"width": VIEWPORT[0], "height": VIEWPORT[1]}, device_scale_factor=1)
     page = context.new_page()
     out: dict[str, Scene] = {}
@@ -78,6 +85,16 @@ def render_scenes(browser: Any, quality: int = 72, sizes: tuple[tuple[int, int],
                 out[name].sizes[(w, h)] = page.screenshot(type="jpeg", quality=quality)
     finally:
         context.close()
+    if sharp:
+        dense = browser.new_context(viewport={"width": VIEWPORT[0], "height": VIEWPORT[1]}, device_scale_factor=SHARP_SCALE)
+        try:
+            page = dense.new_page()
+            for name in sharp:
+                page.set_content(SCENES[name][3])
+                page.wait_for_timeout(50)
+                out[name].sharp = page.screenshot(type="png")
+        finally:
+            dense.close()
     return out
 
 
@@ -197,6 +214,8 @@ class BrowserStub:
         self.counter = 0
         self.action_counter = 0
         self.available = True
+        self.stills_on = True
+        """Whether ``/still`` draws a sharp frame (``still``)."""
         self.user: dict[str, Any] | None = None
         """A conversation's choice of browser where the operator's Chrome is offered (``user`` in a
         session's listing); ``None`` on an installation that does not offer it."""
@@ -746,6 +765,13 @@ class BrowserStub:
         with self.lock:
             self.requests.append((request.method, path, body))
             segments = path.strip("/").split("/")
+            if len(segments) == 4 and segments[3] == "still" and request.method == "POST":
+                status, picture = self.still(segments[2], body or {})
+                if picture is None:
+                    route.fulfill(status=status, content_type="application/json", body=json.dumps({"detail": "no sharp frame"}))
+                else:
+                    route.fulfill(status=200, content_type="image/png", body=picture, headers={"Cache-Control": "no-store"})
+                return
             if len(segments) == 5 and segments[3] == "frames" and request.method == "GET":
                 # A keyframe is a picture, not JSON: the scene it was taken of.
                 g = self.groups.get(segments[2])
@@ -757,6 +783,29 @@ class BrowserStub:
                 return
             status, answer = self.answer(request.method, path, parse_qs(parts.query), body)
         route.fulfill(status=status, content_type="application/json", body=json.dumps(answer))
+
+    def still(self, group_id: str, body: dict[str, Any]) -> tuple[int, bytes | None]:
+        """``POST /api/browsers/{group}/still``: the part asked for, cut from the scene's dense PNG and
+        brought to ``scale`` picture pixels per CSS pixel, as the daemon has Chromium draw it. While
+        ``stills_on`` is false it answers 503, which leaves a check the enlarged live frame to look at."""
+        g = self.groups.get(group_id)
+        if g is None:
+            return 404, None
+        if not self.stills_on:
+            return 503, None
+        scene = self.scenes[self.active(g).scene]
+        if not scene.sharp:
+            return 501, None
+        from PIL import Image  # noqa: PLC0415 — only the zoom's check renders sharp scenes
+
+        x, y, w, h, scale = (float(body[k]) for k in ("x", "y", "w", "h", "scale"))
+        dense = Image.open(io.BytesIO(scene.sharp))
+        part = dense.crop((round(x * SHARP_SCALE), round(y * SHARP_SCALE), round((x + w) * SHARP_SCALE), round((y + h) * SHARP_SCALE)))
+        if scale != SHARP_SCALE:
+            part = part.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+        out = io.BytesIO()
+        part.save(out, format="PNG")
+        return 200, out.getvalue()
 
     def install(self, page: Any) -> None:
         page.route("**/api/browsers**", self.route)

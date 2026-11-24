@@ -14,10 +14,18 @@ import type { Box, FrameMeta, Point } from "./protocol";
 /** Where the image is drawn, in client pixels relative to the viewer. */
 export type Rect = { x: number; y: number; w: number; h: number };
 
-/** The operator's pinch on a phone: a scale about the viewer's centre, then a pan. 1/0/0 is none. */
+/** The operator's zoom while driving: a scale about the viewer's centre, then a pan. 1/0/0 is none. */
 export type Zoom = { scale: number; panX: number; panY: number };
 export const NO_ZOOM: Zoom = { scale: 1, panX: 0, panY: 0 };
-export const ZOOM_MAX = 3;
+/**
+ * Eight times: a sign-in code drawn one CSS pixel a module in a page fitted to a narrow pane needs
+ * about that to reach the four screen pixels a module a phone's camera reads; three stopped short.
+ */
+export const ZOOM_MAX = 8;
+/** One press of a zoom button or key. */
+export const ZOOM_STEP = 1.25;
+/** The most picture pixels per CSS pixel a sharp frame is drawn at (the daemon's own cap). */
+export const STILL_SCALE_MAX = 4;
 
 /**
  * The image contained in the box, its proportions kept (`object-fit: contain`), and centred both ways.
@@ -46,15 +54,65 @@ export function zoomed(rect: Rect, boxW: number, boxH: number, zoom: Zoom): Rect
   };
 }
 
-/** A pinch never zooms out past the fitted picture, and a pan never loses the picture off an edge. */
+/**
+ * A zoom never goes out past the fitted picture, and a pan never takes the picture off the box's
+ * centre, nor leaves a gap at an edge once the picture is more than twice the box. Holding every side
+ * to the box's edges instead pinned a side about as long as the box to the centre: a wide page
+ * letterboxed in a tall pane then slid away from the pointer at that step of a zoom about it, and the
+ * code the operator was zooming onto left the box.
+ */
 export function clampZoom(zoom: Zoom, rect: Rect, boxW: number, boxH: number): Zoom {
   const scale = Math.min(ZOOM_MAX, Math.max(1, zoom.scale));
   if (scale === 1) return NO_ZOOM;
   const w = rect.w * scale;
   const h = rect.h * scale;
-  const limitX = Math.max(0, (w - boxW) / 2);
-  const limitY = Math.max(0, (h - boxH) / 2);
+  const limitX = Math.max(Math.abs(w - boxW), Math.min(w, boxW)) / 2;
+  const limitY = Math.max(Math.abs(h - boxH), Math.min(h, boxH)) / 2;
   return { scale, panX: Math.min(limitX, Math.max(-limitX, zoom.panX)), panY: Math.min(limitY, Math.max(-limitY, zoom.panY)) };
+}
+
+/** The zoom times `factor` about a point of the box (client pixels from its corner), which stays put. */
+export function zoomAbout(zoom: Zoom, rect: Rect, boxW: number, boxH: number, px: number, py: number, factor: number): Zoom {
+  const scale = Math.min(ZOOM_MAX, Math.max(1, zoom.scale * factor));
+  const k = scale / zoom.scale;
+  const dx = px - boxW / 2;
+  const dy = py - boxH / 2;
+  return clampZoom({ scale, panX: dx - (dx - zoom.panX) * k, panY: dy - (dy - zoom.panY) * k }, rect, boxW, boxH);
+}
+
+/** The zoom moved by a drag of the picture, in client pixels. */
+export function panBy(zoom: Zoom, rect: Rect, boxW: number, boxH: number, dx: number, dy: number): Zoom {
+  return clampZoom({ ...zoom, panX: zoom.panX + dx, panY: zoom.panY + dy }, rect, boxW, boxH);
+}
+
+/**
+ * The part of the page's viewport the box shows, in its CSS pixels, widened to whole pixels: what a
+ * sharp frame is taken of. Null when none of the picture is in the box.
+ */
+export function visibleClip(meta: FrameMeta, rect: Rect, boxW: number, boxH: number): Box | null {
+  const x0 = Math.max(rect.x, 0);
+  const y0 = Math.max(rect.y, 0);
+  const x1 = Math.min(rect.x + rect.w, boxW);
+  const y1 = Math.min(rect.y + rect.h, boxH);
+  if (x1 <= x0 || y1 <= y0) return null;
+  const a = viewToPage(meta, rect, x0, y0);
+  const b = viewToPage(meta, rect, x1, y1);
+  if (!a || !b) return null;
+  const x = Math.floor(a.x);
+  const y = Math.floor(a.y);
+  const w = Math.min(meta.vw, Math.ceil(b.x)) - x;
+  const h = Math.min(meta.vh, Math.ceil(b.y)) - y;
+  return w >= 1 && h >= 1 ? { x, y, w, h } : null;
+}
+
+/**
+ * The picture pixels per CSS pixel a sharp frame needs to fill the screen pixel for pixel where the
+ * box shows it: the zoomed picture's client pixels per CSS pixel times the screen's density, in
+ * quarter steps, at least 1 and at most the daemon's cap.
+ */
+export function stillScale(meta: FrameMeta, rect: Rect, dpr: number): number {
+  const perCss = (rect.w / Math.max(1, meta.w)) * density(meta) * Math.max(1, dpr || 1);
+  return Math.min(STILL_SCALE_MAX, Math.max(1, Math.ceil(perCss * 4) / 4));
 }
 
 /** Image pixels per CSS pixel of the page, counting the page's own zoom. */
@@ -131,19 +189,32 @@ export function viewOf(b: AttachBox): Required<AttachBox> {
   return { max_w: b.max_w, max_h: b.max_h, dpr: b.dpr, quality: b.quality ?? 60, fps: b.fps ?? 60, adaptive: b.adaptive ?? true };
 }
 
+/** The JPEG quality of the live picture while it is zoomed in. */
+export const ZOOMED_QUALITY = 92;
+
 /**
  * The box a live view asks the daemon for: the element's size in device pixels within the preset's
  * cap, and smaller and coarser under data saving when the choice is left to the device (auto).
  * Rounded, since the daemon wants integers.
  */
-export function attachBox(cssW: number, cssH: number, dpr: number, saving: boolean, preset: PictureQuality = "auto"): AttachBox {
+export function attachBox(cssW: number, cssH: number, dpr: number, saving: boolean, preset: PictureQuality = "auto", zoom = 1): AttachBox {
   const p = saving && preset === "auto" ? { w: 640, h: 400, quality: 45 } : PRESETS[preset] ?? PRESETS.auto;
   const ratio = Math.max(1, Math.min(dpr || 1, 3));
-  const w = Math.max(64, Math.min(p.w, Math.round(cssW * ratio)));
-  const h = Math.max(64, Math.min(p.h, Math.round(cssH * ratio)));
+  // Zoomed in, the operator is reading something small: the frame takes as many pixels as the
+  // enlarged picture covers (the daemon never sends more than the page's window has), at JPEG 92 and
+  // never degraded, whatever the preset. A blurred frame enlarged eight times is still blurred.
+  const zoomed = zoom > 1;
+  const capW = zoomed ? PRESETS.sharp.w : p.w;
+  const capH = zoomed ? PRESETS.sharp.h : p.h;
+  const w = Math.max(64, Math.min(capW, Math.round(cssW * ratio * Math.max(1, zoom))));
+  const h = Math.max(64, Math.min(capH, Math.round(cssH * ratio * Math.max(1, zoom))));
   const out: AttachBox = { max_w: w, max_h: h, dpr: ratio };
   if ("quality" in p && p.quality) out.quality = p.quality;
   if ("fps" in p && p.fps) out.fps = p.fps;
   if ("adaptive" in p && p.adaptive === false) out.adaptive = false;
+  if (zoomed) {
+    out.quality = Math.max(out.quality ?? 60, ZOOMED_QUALITY);
+    out.adaptive = false;
+  }
   return out;
 }

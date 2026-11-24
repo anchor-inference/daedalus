@@ -123,10 +123,32 @@ h2 {{ font-size: 24px; margin-top: 30px; }}
 <p>A starter kept at a steady warmth is more sour; one kept cool is milder and slower. Neither is wrong.</p></div>
 </body></html>"""
 
+QR_CODE = (
+    # The code of an invented sign-in link, 45 modules square with its quiet zone (segno, level M),
+    # kept as drawn so the checks need no QR library.
+    '<svg viewBox="0 0 45 45" class="segno"><path class="qrline" stroke="#000" d="M4 4.5h7m3 0h1m1 0h1m4 0h2m1 0h1m1 0h2m1 0h2m3 0h7m-37 1h1m5 0h1m3 0h4m1 0h3m1 0h1m1 0h1m3 0h3m2 0h1m5 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m3 0h5m5 0h1m1 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h6m1 0h1m1 0h3m2 0h6m2 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m4 0h3m1 0h1m2 0h1m3 0h1m1 0h3m1 0h1m-37 1h1m5 0h1m1 0h2m1 0h1m3 0h1m2 0h1m1 0h1m1 0h1m2 0h4m1 0h1m5 0h1m-37 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-29 1h2m1 0h4m1 0h1m2 0h5m2 0h3m-29 1h1m1 0h5m3 0h1m3 0h1m3 0h3m1 0h1m2 0h1m1 0h1m2 0h5m-34 1h2m5 0h4m3 0h3m5 0h2m3 0h1m2 0h1m3 0h1m-36 1h1m1 0h7m2 0h2m1 0h1m5 0h1m1 0h1m3 0h6m2 0h3m-37 1h1m2 0h1m1 0h1m1 0h2m2 0h1m2 0h1m1 0h1m4 0h1m5 0h4m5 0h1m-37 1h1m2 0h1m2 0h2m4 0h1m3 0h3m5 0h4m1 0h2m1 0h5m-36 1h1m1 0h1m1 0h1m3 0h3m5 0h1m1 0h5m4 0h2m1 0h1m3 0h1m-36 1h5m1 0h1m4 0h1m1 0h5m2 0h3m2 0h3m2 0h4m2 0h1m-37 1h2m1 0h2m3 0h1m3 0h1m1 0h1m2 0h2m2 0h3m3 0h6m3 0h1m-36 1h1m1 0h1m2 0h2m1 0h2m1 0h2m1 0h2m2 0h1m2 0h5m1 0h1m1 0h1m1 0h1m1 0h3m-37 1h1m1 0h1m1 0h1m5 0h4m1 0h1m1 0h2m1 0h1m2 0h1m5 0h1m1 0h1m3 0h1m-36 1h5m1 0h3m1 0h2m2 0h3m1 0h2m2 0h1m3 0h3m3 0h1m2 0h2m-37 1h3m2 0h1m1 0h4m2 0h3m2 0h7m1 0h3m1 0h2m1 0h1m2 0h1m-37 1h3m1 0h1m1 0h2m4 0h4m1 0h1m1 0h1m2 0h1m1 0h4m1 0h2m1 0h1m1 0h1m-35 1h6m2 0h1m3 0h1m3 0h1m1 0h6m2 0h1m1 0h1m4 0h1m-34 1h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m3 0h1m1 0h2m2 0h4m1 0h2m-37 1h5m4 0h1m4 0h1m4 0h1m1 0h1m5 0h1m1 0h4m2 0h2m-37 1h1m2 0h1m2 0h2m1 0h3m1 0h3m2 0h1m1 0h2m1 0h5m1 0h4m1 0h1m1 0h1m-37 1h3m1 0h2m2 0h1m4 0h1m1 0h2m4 0h1m1 0h1m4 0h1m4 0h1m-34 1h1m3 0h3m1 0h2m1 0h2m4 0h1m2 0h1m4 0h1m1 0h1m2 0h1m1 0h2m1 0h2m-37 1h1m1 0h1m7 0h1m1 0h1m3 0h1m1 0h1m2 0h2m1 0h1m1 0h1m2 0h2m2 0h1m-34 1h1m3 0h3m1 0h1m2 0h1m1 0h1m2 0h3m1 0h1m1 0h11m1 0h3m-29 1h1m1 0h3m1 0h1m2 0h1m1 0h3m1 0h1m2 0h1m1 0h1m3 0h2m1 0h1m-36 1h7m2 0h1m4 0h4m2 0h2m4 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m-37 1h1m5 0h1m1 0h2m2 0h4m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m3 0h2m1 0h2m-37 1h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h4m4 0h1m1 0h10m1 0h1m-35 1h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h2m2 0h1m1 0h2m1 0h1m2 0h1m2 0h2m1 0h1m3 0h1m-37 1h1m1 0h3m1 0h1m1 0h3m1 0h2m1 0h5m1 0h2m1 0h1m1 0h1m1 0h1m4 0h1m1 0h2m-37 1h1m5 0h1m3 0h3m2 0h1m3 0h5m4 0h1m1 0h1m1 0h1m3 0h1m-37 1h7m1 0h2m1 0h2m2 0h1m1 0h1m1 0h2m1 0h1m1 0h2m1 0h1m1 0h1m2 0h5"/></svg>'
+)
+
+QR = f"""<!doctype html><html><head><style>{BASE_CSS}
+.qr-page {{ display: grid; grid-template-columns: 1fr 1fr; gap: 56px; padding: 56px 48px; }}
+h1 {{ font-size: 30px; margin: 0 0 12px; letter-spacing: -.02em; }}
+p {{ font-size: 15px; line-height: 1.6; color: #5b5145; max-width: 460px; }}
+#qr {{ width: 45px; height: 45px; background: #fff; }}
+#qr svg {{ display: block; width: 100%; height: 100%; }}
+</style></head><body>
+<div class="top"><div class="brand"><i></i>Example ID</div></div>
+<div class="qr-page"><div><h1>Sign in with your phone</h1>
+<p>Open the Example app on your phone, choose Scan, and point the camera at the code. The code renews every minute.</p></div>
+<div><div id="qr">{QR_CODE}</div><p>Or sign in with a password instead.</p></div></div>
+</body></html>"""
+
 # name → (address, title, favicon, HTML, {element name: CSS selector})
 SCENES: dict[str, tuple[str, str, str, str, dict[str, str]]] = {
     "shop": ("https://shop.example.com/rye-flour-5kg", "Whole rye flour, 5 kg — Northwind Mill", SHOP_ICON, SHOP, {"add": "#add", "search": "#search", "size": "#size", "cart": "#cart"}),
     "cart": ("https://shop.example.com/cart", "Your cart — Northwind Mill", SHOP_ICON, CART, {"checkout": "#checkout"}),
     "signin": ("https://accounts.example.com/signin", "Sign in — Example ID", KEY_ICON, SIGNIN, {"email": "#email", "password": "#password", "signin": "#signin"}),
     "article": ("https://shop.example.com/recipes/rye-sourdough", "A rye sourdough in three days", DOCS_ICON, ARTICLE, {"day1": "#day1"}),
+    # A sign-in code drawn one CSS pixel a module, as small as some sites draw theirs: the take-over
+    # view's zoom and sharp frame are checked against it (check_browser_zoom.py).
+    "qr": ("https://accounts.example.com/qr", "Sign in with your phone — Example ID", KEY_ICON, QR, {"qr": "#qr"}),
 }
