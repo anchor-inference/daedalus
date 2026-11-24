@@ -6449,6 +6449,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "tool.Verify.failed": { en: "Verification failed", ru: "Проверка не прошла" },
   "tool.SubAgent.on": { en: "Starting subagent", ru: "Запускает субагента" },
   "tool.SubAgent.off": { en: "Started subagent", ru: "Запустил субагента" },
+  "tool.QuickAgent.on": { en: "Quick agent working", ru: "Работает быстрый агент" },
+  "tool.QuickAgent.off": { en: "Quick agent", ru: "Быстрый агент" },
   "tool.SubAgentList": { en: "Listed subagents", ru: "Перечислил субагентов" },
   "tool.SpawnAgent.on": { en: "Creating agent", ru: "Создаёт агента" },
   "tool.SpawnAgent.off": { en: "Created agent", ru: "Создал агента" },
@@ -10110,6 +10112,13 @@ Object.assign(DICT, {
   "subm.parent": { en: "Set by the session that started this one.", ru: "Задано сессией, которая запустила эту." },
   "subm.nothing": { en: "No model is allowed: helpers will be refused.", ru: "Ни одна модель не разрешена: помощники будут отклонены." },
   "subm.settings.sub": { en: "The default for every session; a session’s own choice in its Details wins. Also holds for agents it spawns or hires.", ru: "По умолчанию для всех сессий; выбор в деталях сессии важнее. Действует и для агентов, которых она создаёт или нанимает." },
+  "qagent.title": { en: "Quick agent models", ru: "Модели быстрого агента" },
+  "qagent.settings.sub": { en: "Fast models the agent hands mechanical work to (a browser job, a sweep of files, a lookup) and gets the result back inside its own step. The first is the default; with none chosen the agent has no quick agent. It never asks for approval. A session’s own choice in its Details wins.", ru: "Быстрые модели, которым агент поручает механическую работу (дело в браузере, перебор файлов, поиск) и получает результат прямо в своём шаге. Первая — по умолчанию; если не выбрано ни одной, быстрого агента нет. Он никогда не спрашивает разрешений. Выбор в деталях сессии важнее." },
+  "qagent.session.sub": { en: "Which fast models this chat’s agent may hand mechanical work to. The first is the default.", ru: "Каким быстрым моделям агент этого чата может поручать механическую работу. Первая — по умолчанию." },
+  "qagent.chosen": { en: "Quick agent models, in order", ru: "Модели быстрого агента по порядку" },
+  "qagent.none": { en: "None chosen: the agent has no quick agent.", ru: "Ничего не выбрано: быстрого агента у агента нет." },
+  "qagent.off": { en: "off", ru: "выключен" },
+  "qagent.starting": { en: "Starting the quick agent…", ru: "Запускается быстрый агент…" },
 });
 
 // The export of one conversation over an agent link (linkexport.tsx).

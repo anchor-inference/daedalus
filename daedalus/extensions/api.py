@@ -171,7 +171,15 @@ from daedalus.extensions.services import (
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
-from daedalus.host import attached_files, capabilities, component_install, launcher_bridge, subagent_models, translation
+from daedalus.host import (
+    attached_files,
+    capabilities,
+    component_install,
+    launcher_bridge,
+    quick_agent,
+    subagent_models,
+    translation,
+)
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secret_part, worktree_root
@@ -655,6 +663,12 @@ class MoveSessionBody(BaseModel):
 
 class ToolsOffBody(BaseModel):
     tools_off: list[str] = Field(default_factory=list)
+
+
+class QuickModelsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    presets: list[str] | None = Field(default=None, max_length=200)
+    """``None`` returns the session to the default from Settings; an empty list turns QuickAgent off here."""
 
 
 class SubagentModelsBody(BaseModel):
@@ -2757,6 +2771,43 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except KeyError:
             raise HTTPException(404, "no such session") from None
         return await _subagent_models_view(session_id)
+
+    async def _quick_models_view(session_id: str) -> dict[str, Any]:
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        presets, inherited = quick_agent.chosen(state.metadata, app.config.subagents.quick_models)
+        available = set(manager.providers.available())
+        return {
+            "presets": presets, "inherited": inherited, "allowed": manager.quick_models(state.metadata),
+            "default": list(app.config.subagents.quick_models),
+            "options": [{"id": pid, "label": preset.display(pid)} for pid, preset in app.config.presets.items() if preset.provider in available and preset.model],
+        }
+
+    @api.get("/api/sessions/{session_id}/quick-models")
+    async def session_quick_models(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Which presets this session's quick agents may run on, the first being their default."""
+        return await _quick_models_view(session_id)
+
+    @api.put("/api/sessions/{session_id}/quick-models")
+    async def set_session_quick_models(session_id: str, body: QuickModelsBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        unknown = [p for p in body.presets or () if p not in app.config.presets]
+        if unknown:
+            raise HTTPException(422, f"no such model preset: {', '.join(unknown)}")
+        try:
+            await manager.set_quick_models(session_id, body.presets)
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+        return await _quick_models_view(session_id)
+
+    @api.get("/api/sessions/{session_id}/quick-agents")
+    async def session_quick_agents(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The session's quick agents with the tool call each answers, for the transcript to draw its steps under."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        if "subagents" not in app.extensions:
+            return {"quick_agents": []}
+        return {"quick_agents": await app.extensions["subagents"].quick_children(session_id)}
 
     @api.get("/api/sessions/{session_id}/tasks")
     async def session_tasks(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

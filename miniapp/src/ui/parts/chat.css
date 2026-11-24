@@ -181,6 +181,11 @@
 .working { color:var(--fg-3); font-size:var(--fs-13); padding:4px 8px 4px 32px; }
 
 .toolcard { margin:2px 0 8px 15px; padding:4px 0 4px 16px; border-left:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+/* A quick agent's own conversation under its call: hung off the call by the same rule a tool card is, so it
+   reads as that step's inside rather than as more of the leader's chat. */
+.quick-agent { margin:2px 0 8px 15px; padding:0 0 0 16px; border-left:1px solid var(--line); }
+.quick-agent.pending { padding:4px 0 4px 16px; }
+.quick-agent .subagent-chat.inline { padding-top:0; }
 /* Output is a recessed well, not another card: the call above it is the card-less row, and a
    bordered box per result stacked frames down the run. */
 .toolcard .result { margin:0; padding:10px 12px; background:var(--inset); border:0; box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); font-family:var(--mono); font-size:var(--fs-12); line-height:1.5; white-space:pre-wrap; word-break:break-word; max-height:288px; overflow:auto; color:var(--fg-2); }

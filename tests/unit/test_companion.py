@@ -109,9 +109,10 @@ async def test_the_concierge_gets_its_four_tools_and_nothing_else(app: Any) -> N
         assert name not in blocked
     # And the delegation tools are the concierge's alone, as the reporting tools are staff's and the
     # control tools the orchestrator's, the report to a leader a subagent's and the saved prompt a coach's: a working session reaches none of them.
+    # QuickAgent is off too, with no quick model chosen in this installation's settings.
     worker = await manager.create_session("work")
     assert manager.blocked_tools_for(worker) == (set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS)
-                                                 | set(PROMPT_COACH_ONLY_TOOLS) | set(AGENT_MESH_TOOLS))
+                                                 | set(PROMPT_COACH_ONLY_TOOLS) | set(AGENT_MESH_TOOLS) | {"QuickAgent"})
 
 
 # -- delegation ----------------------------------------------------------------------------

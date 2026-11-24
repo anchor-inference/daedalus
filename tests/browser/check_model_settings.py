@@ -120,6 +120,14 @@ def details(browser, lang: str, width: int, scheme: str, failures: list[str]) ->
         route.fallback()
 
     page.route("**/api/sessions/*/subagent-models", chosen)
+    quick_sent: list[object] = []
+
+    def quick_chosen(route):  # type: ignore[no-untyped-def]
+        if route.request.method == "PUT":
+            quick_sent.append(route.request.post_data_json)
+        route.fallback()
+
+    page.route("**/api/sessions/*/quick-models", quick_chosen)
     page.goto(f"{BASE}/agents/{S1}?panel=details&token=t&scheme={scheme}&lang={lang}")
     scope = ".panel-sheet" if mobile else ".panel"
     # Details is an inspector: the helper models have a line of their own, opened in place of the list.
@@ -156,9 +164,23 @@ def details(browser, lang: str, width: int, scheme: str, failures: list[str]) ->
     page.wait_for_timeout(300)
     if sent[-1] != {"mode": None, "presets": []}:
         failures.append(f"{where}: Use the default sent {sent[-1]}")
+    # Under them, the quick agent's models: an ordered list whose first is the default, the session's own or Settings'.
+    quick = page.locator(f"{scope} .dt-quick-models")
+    quick.wait_for()
+    if quick.locator(".sel-chosen-list > li").count() != 1 or "DeepSeek" not in quick.locator(".sel-chosen-list").inner_text():
+        failures.append(f"{where}: the quick agent models start with {quick.locator('.sel-chosen-list').inner_text()!r}")
+    quick.locator(".sel-list [data-id='claude-opus-5']").click()
+    page.wait_for_timeout(300)
+    if not quick_sent or quick_sent[-1] != {"presets": ["deepseek-flash", "claude-opus-5"]}:
+        failures.append(f"{where}: adding a quick model sent {quick_sent[-1:]}")
+    quick.locator(".sel-inherit button").click()
+    page.wait_for_timeout(300)
+    if quick_sent[-1] != {"presets": None}:
+        failures.append(f"{where}: Use the default for the quick models sent {quick_sent[-1]}")
     if SHOTS:
         box.scroll_into_view_if_needed()
         box.screenshot(path=f"{SHOTS}/subagent-models-{lang}-{width}-{scheme}.png")
+        quick.screenshot(path=f"{SHOTS}/quick-models-{lang}-{width}-{scheme}.png")
     if page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth"):
         failures.append(f"{where}: the details scroll sideways")
     context.close()

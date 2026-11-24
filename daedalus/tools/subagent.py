@@ -10,6 +10,7 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.config import REASONING_EFFORTS
+from daedalus.host import call_scope
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import clip, error, idle_words, ok, services_for
 
@@ -87,6 +88,38 @@ def _report(context: ToolContext, result: dict, *, started: bool) -> ToolResult:
     effort = f" with {result['effort']} effort" if result.get("effort") else ""
     what = f"subagent {result['name']!r} started on {result.get('model', 'its model')}{effort}" if started else f"subagent {result['name']!r} took the message and started a run"
     return ok(context, f"{what} (session {result['session_id']}); its report arrives as a message when it finishes", session_id=result["session_id"], run_id=result.get("run_id"))
+
+
+@tool_group("agents")
+@search_hint(
+    "quick agent fast cheap model inline helper delegate browser form clicks sweep files lookup extract mechanical sonnet haiku "
+    "быстрый агент быстрая модель дешёвая поручить браузер форма заполнить перебрать файлы выписать данные механическая работа"
+)
+@tool(
+    name="QuickAgent",
+    description=(
+        "Hand a bounded, mechanical job to a fast model and get its final reply back as this call's result: "
+        "browser work (forms, clicking through a site, reading pages), sweeping many files, web lookups, extracting "
+        "data, routine edits, checking a page or an output. It works in your workspace and your browser (the same "
+        "tabs, the same Chrome), never asks for approval, and starts no agents. It sees only `task` and the usual "
+        "environment; it can read this chat's history when the task says what to look for. Write `task` as a "
+        "complete instruction: the exact values, what it must not touch, and what to report. `model` picks one of "
+        "the QuickAgent models in your environment (default: the first); `effort` is off, low, medium, high or xhigh."
+    ),
+)
+async def quick_agent(context: ToolContext, task: str, model: str | None = None, effort: str | None = None, timeout_minutes: int | None = None) -> ToolResult:
+    hook = _hook(context)
+    if hook is None:
+        return error(context, "quick agents are not available")
+    scope = call_scope.current()
+    try:
+        result = await hook("quick", leader_id=context.session_id, task=task, model=model, effort=effort, timeout_minutes=timeout_minutes, call_id=scope.tool_call_id if scope is not None else "")
+    except (ValueError, RuntimeError) as exc:
+        return error(context, str(exc))
+    limit = services_for(context).max_tool_output_chars
+    # The first line names the session, which the app follows to draw the helper's steps under the call.
+    body = f"{result['header']}\n\n" + clip(result["answer"], limit)
+    return (ok if result.get("completed") else error)(context, body, session_id=result["session_id"])
 
 
 @tool_group("agents")
@@ -206,6 +239,6 @@ async def report_to_leader(context: ToolContext, text: str) -> ToolResult:
     return ok(context, f"delivered to your leader ({how}); carry on with the task — your final reply is still the report")
 
 
-TOOLS = [sub_agent, sub_agent_list, sub_agent_send, sub_agent_delete, report_to_leader]
+TOOLS = [sub_agent, quick_agent, sub_agent_list, sub_agent_send, sub_agent_delete, report_to_leader]
 
 __all__ = ["TOOLS"]

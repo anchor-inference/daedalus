@@ -110,7 +110,7 @@ import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { PanelStrip } from "../panelstrip";
-import type { ProjectEnvironments } from "../api";
+import type { ProjectEnvironments, QuickAgentRow } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
 // The Notes tab's editor and renderer are a chunk of their own, fetched the first time the tab opens.
@@ -3003,7 +3003,11 @@ const SUBAGENT_TAIL = 160;
  * helper's own event stream so its run is drawn as it happens, every block of steps open. Nothing in it
  * acts on the helper — no composer, no fork or revert — because the leader is the one who talks to it.
  */
-export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPreview: (src: PreviewSource) => void; toast: (text: string) => void }) {
+export function SubagentTranscript({ id, onPreview, toast, inline = false, fallback }: { id: string; onPreview: (src: PreviewSource) => void; toast: (text: string) => void;
+  /** Drawn inside the leader's chat under a quick agent's call: the chat scrolls, not this, and no note about older messages. */
+  inline?: boolean;
+  /** What stands in when the conversation cannot be read (a pruned helper); the plain note otherwise. */
+  fallback?: ReactNode }) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const liveRef = useRef<LiveStore | null>(null);
@@ -3060,10 +3064,11 @@ export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPre
   const scroller = () => box.current?.closest<HTMLElement>(".subagent-main, .panel-body, .sheet-body") ?? null;
   const landed = useRef(false);
   const follow = useCallback(() => {
+    if (inline) return;
     const el = scroller();
     if (!el) return;
     if (!landed.current || el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
-  }, []);
+  }, [inline]);
   useLayoutEffect(() => {
     if (!detail) return;
     follow();
@@ -3079,10 +3084,10 @@ export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPre
     link: sessionPath(id),
     asking: questionsKey(detail?.pending?.questions ?? null),
   }), [id, detail?.workspace, detail?.folders, onPreview, toast, detail?.pending?.questions]);
-  if (!detail) return failed ? <div className="empty">{t("subagents.unreadable")}</div> : <TurnSkeleton />;
+  if (!detail) return failed ? <>{fallback ?? <div className="empty">{t("subagents.unreadable")}</div>}</> : <TurnSkeleton />;
   return (
-    <div ref={box} className="timeline subagent-chat" data-subagent={id}>
-      {detail.messages.length >= SUBAGENT_TAIL && <div className="sub older-note">{t("subagents.older")}</div>}
+    <div ref={box} className={`timeline subagent-chat ${inline ? "inline" : ""}`} data-subagent={id}>
+      {!inline && detail.messages.length >= SUBAGENT_TAIL && <div className="sub older-note">{t("subagents.older")}</div>}
       <SessionContext.Provider value={ctx}>
         <StepsOpen.Provider value={true}>
           {settled.map((turn) => <Safe key={turn.key}><TurnView turn={turn} live={false} /></Safe>)}
@@ -3330,6 +3335,8 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("SubAgent", r), family: "SubAgent", detail: str("name") || str("task").split("\n")[0].slice(0, 60), icon: "spawn" };
     case "SubAgentList":
       return { verb: t("tool.SubAgentList"), family: "SubAgentList", detail: "", icon: "spawn" };
+    case "QuickAgent":
+      return { verb: verb("QuickAgent", r), family: "QuickAgent", detail: str("task").split("\n")[0].slice(0, 80), icon: "bolt" };
     case "SubAgentSend":
     case "SubAgentDelete":
       return { verb: verb(item.name, r), family: item.name, detail: str("name"), icon: "spawn" };
@@ -3581,6 +3588,58 @@ function subagentOfStep(item: ToolItem): { id?: string; name?: string } | null {
   return id || name ? { id, name } : null;
 }
 
+/** The model a QuickAgent call ran on: what its answer names, else what the call asked for. */
+export function quickModelOf(item: Pick<ToolItem, "args" | "result">): string {
+  const named = /^\[quick agent on (\S+) \(session /.exec(item.result ?? "")?.[1];
+  return named ?? (typeof item.args.model === "string" ? item.args.model : "");
+}
+
+/** The helper session a QuickAgent call started: named in its answer once it has one. */
+export function quickSessionOf(result: string | undefined): string | null {
+  return /^\[quick agent on \S+ \(session ([\w-]+)\)/.exec(result ?? "")?.[1] ?? null;
+}
+
+/** How often a running QuickAgent call looks for the session it started, until it finds it. */
+const QUICK_FIND_MS = 1500;
+
+/** The session behind a QuickAgent call: from its answer, or while it runs from the leader's list of
+ *  quick agents, matched by the call's id. A list it may not read (a shared link) ends the looking. */
+function useQuickSession(leaderId: string, item: ToolItem): string | null {
+  const named = quickSessionOf(item.result);
+  const [found, setFound] = useState<string | null>(null);
+  useEffect(() => {
+    if (named || !leaderId || !item.running) return;
+    let gone = false;
+    let timer: number | undefined;
+    const look = () => {
+      api.get<{ quick_agents?: QuickAgentRow[] }>(`/api/sessions/${encodeURIComponent(leaderId)}/quick-agents`)
+        .then((r) => {
+          if (gone) return;
+          const row = (r?.quick_agents ?? []).find((q) => q.call === item.id);
+          if (row) setFound(row.session_id);
+          else timer = window.setTimeout(look, QUICK_FIND_MS);
+        })
+        .catch(() => undefined);
+    };
+    look();
+    return () => { gone = true; if (timer) window.clearTimeout(timer); };
+  }, [named, leaderId, item.id, item.running]);
+  return named ?? found;
+}
+
+/** A quick agent's work under the call that ran it: its own conversation, steps open, following it live.
+ *  Before its session is known, and for a call whose helper is gone, the call and its answer as any step. */
+function QuickAgentSteps({ item }: { item: ToolItem }) {
+  const { id: leaderId, preview, toast } = useContext(SessionContext);
+  const child = useQuickSession(leaderId, item);
+  if (!child) return item.running ? <div className="quick-agent pending sub faint">{t("qagent.starting")}</div> : <ToolCard item={item} />;
+  return (
+    <div className="quick-agent" data-quick-agent={child}>
+      <SubagentTranscript id={child} onPreview={preview} toast={toast} inline fallback={<ToolCard item={item} />} />
+    </div>
+  );
+}
+
 /** An AskUser call's record among the turn's steps. The call the session still waits on is a step
  *  that says so; the card that answers it is above the composer. */
 function AskUserRecord({ item }: { item: ToolItem }) {
@@ -3599,7 +3658,10 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
   const step = useFocusChat()?.orchestrator ? stepDescription(item) : null;
   const d = step ?? describe(item, workspace);
   const job = execJob(item);
-  const expanded = open || (item.running && item.name === "Exec");
+  const quick = item.name === "QuickAgent";
+  // A quick agent's steps are drawn under its call while it works and fold away once it has answered,
+  // like the command a running Exec shows; opened again they are there to read.
+  const expanded = open || (item.running && (item.name === "Exec" || quick));
   // The file a step names is the evidence: it opens where the answer's citations open.
   const path = FILE_TOOLS.includes(item.name) ? toolSource(item, sessionId, workspace, folders) : null;
   const openFile = (e: React.MouseEvent) => {
@@ -3633,13 +3695,14 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           {openSubagent && subagentRef && (
             <button type="button" className="receipt-link subagent-link" onClick={(e) => { e.stopPropagation(); openSubagent(subagentRef); }}>{t("subagents.open.one")}</button>
           )}
+          {quick && quickModelOf(item) && <span className="act-orig quick-model">{quickModelOf(item)}</span>}
           {item.ms !== undefined && item.ms >= 500 && <span className="dur num">{duration(item.ms)}</span>}
           <Chevron open={expanded} />
         </span>
       </div>
       {item.name === "ImageView" && !item.running && <ToolAttachment item={item} />}
       {!!item.images?.length && !item.running && <ToolImages item={item} />}
-      {expanded && <ToolCard item={item} />}
+      {expanded && (quick ? <QuickAgentSteps item={item} /> : <ToolCard item={item} />)}
     </div>
   );
 }

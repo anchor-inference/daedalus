@@ -17,7 +17,7 @@ import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
 import { ModelPrice } from "../modelprice";
-import { SubagentModelsPicker } from "../subagentmodels";
+import { QuickModelsPicker, SubagentModelsPicker } from "../subagentmodels";
 import { ModelPicker, modelItems } from "../modelitems";
 import { FreeModels } from "./FreeModels";
 import { OpenRouterProviders } from "./OpenRouterProviders";
@@ -1470,6 +1470,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   value={s.subagents?.models ?? { mode: "all", presets: [] }}
                   {...modelItems(s)}
                   onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
+                />
+              </Row>
+              <Row title={t("qagent.title")} desc={t("qagent.settings.sub")} stack data-setting="subagents.quick_models">
+                <QuickModelsPicker
+                  value={s.subagents?.quick_models ?? []}
+                  {...modelItems(s)}
+                  onChange={(quick_models) => save({ subagents: { ...s.subagents!, quick_models } })}
                 />
               </Row>
             </div>

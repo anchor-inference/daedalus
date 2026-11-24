@@ -2371,6 +2371,20 @@ export type SubagentModelsView = SubagentModelsChoice & {
   options: { id: string; label: string }[];
 };
 
+/** A session's quick-agent models (`/api/sessions/{id}/quick-models`), the first being the default. */
+export type QuickModelsView = {
+  presets: string[];
+  /** The session has no list of its own and follows the default from Settings. */
+  inherited: boolean;
+  /** What can run now, in order: the chosen ones whose provider is there. Empty: QuickAgent is off here. */
+  allowed: string[];
+  default: string[];
+  options: { id: string; label: string }[];
+};
+
+/** One of a session's quick agents and the tool call it answers (`/api/sessions/{id}/quick-agents`). */
+export type QuickAgentRow = { session_id: string; call: string; created_at: string; running: boolean };
+
 export type ContextWindowSource = "manual" | "provider" | "catalog" | "table" | "error" | "default";
 
 /** What each source knows about one preset's window; null where it knows nothing. */
@@ -2434,7 +2448,7 @@ export type Settings = {
   };
   self_change: { approval: string; auto_rebuild: boolean };
   limits: { max_iterations: number; tool_timeout_seconds: number; usd_per_day?: number; usd_per_run: number; usd_total: number; usd_total_per_provider: Record<string, number>; total_since: string };
-  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice };
+  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice; quick_models?: string[]; quick_wait_minutes?: number };
   /** The disk guard: `workspace_soft_limit_gb` is the size past which a workspace is flagged, 0 for none. */
   disk?: { workspace_soft_limit_gb: number };
   usd_per_day?: number;

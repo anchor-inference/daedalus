@@ -977,6 +977,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # A session's helper models: the shared host's answer, the choice it was given, for reads and writes.
     if rel.startswith("/api/sessions/") and rel.endswith("/subagent-models") and fulfil_shared(route):
         return None
+    # Its quick agent's models, and the quick agents a running call looks for its helper among.
+    if rel.startswith("/api/sessions/") and rel.endswith(("/quick-models", "/quick-agents")) and fulfil_shared(route):
+        return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
