@@ -184,7 +184,7 @@ def phone(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     section.wait_for(timeout=15000)
     project = section.get_attribute("data-project")
     section.locator(".ph-sec-act .ph-ib").first.click()
-    page.locator(".ph-actions .ph-mrow").first.click()
+    page.locator(".menu-sheet .menu-row").first.click()
     check(in_agent_mode(page, project), f"{where}: the project sheet's first row opens Agent mode in it")
     check(page.locator(".start-composer .start-agent-name").is_visible(), f"{where}: the name heads the composer")
     check(page.locator(".ph-kind").get_attribute("data-kind") == "agent", f"{where}: the mode says {words['agent']}")

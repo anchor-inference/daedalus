@@ -26,7 +26,7 @@ import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { describeIntegration, type IntegrationRow } from "../integrationHealth";
-import { Dropdown, Segmented, SelectionList, Switch } from "../ui/index";
+import { Select, Segmented, SelectionList, Switch } from "../ui/index";
 import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
@@ -336,7 +336,7 @@ function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, pr
             {routed && <PresetRoutes p={p} onPatch={onPatch} />}
             {accounts && accounts.accounts.length > 1 && (
               <Row title={t("settings.preset.account")} desc={t("settings.preset.account.sub")} stack data-setting={`presets.${id}.account`}>
-                <Dropdown
+                <Select
                   id={`preset-account-${id}`}
                   label={t("settings.preset.account")}
                   value={accounts.accounts.some((a) => a.id === p.account) ? (p.account as string) : ""}
@@ -682,7 +682,7 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
       <div className="section-title">{t("settings.search.title")}</div>
       <div className="sub">{t("settings.search.sub")}</div>
       <Row title={t("settings.search.backend")} stack data-setting="tools.web.search.backend">
-        <Dropdown
+        <Select
           id="search-backend"
           label={t("settings.search.backend")}
           value={search.backend}
@@ -745,7 +745,7 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
         <div className="card">
           <div className="section-title">Tavily</div>
           <Row title={t("settings.search.depth")} data-setting="tools.web.search.tavily.depth">
-            <Dropdown label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
+            <Select label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
           </Row>
         </div>
       ) : null}
@@ -753,7 +753,7 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
         <div className="card">
           <div className="section-title">Exa</div>
           <Row title={t("settings.search.type")} data-setting="tools.web.search.exa.type">
-            <Dropdown label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
+            <Select label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
           </Row>
         </div>
       ) : null}
@@ -1811,7 +1811,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     }
   };
   const addSheet = adding && (
-    <Sheet title={t("settings.models.add")} size="wide" onClose={stopAdding}>
+    <Sheet title={t("settings.models.add")} size="xl" onClose={stopAdding}>
       <AddModel
         toast={toast}
         onCancel={stopAdding}

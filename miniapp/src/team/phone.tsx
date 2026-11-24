@@ -13,7 +13,8 @@ import { navigate, pathFor, projectSessionPath, projectStaffPath } from "../rout
 import { invalidate, useOffline } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import type { MenuItem } from "../ui/dialogs";
-import { EmptyState, ListRow, SectionHeader } from "../ui/phone";
+import { EmptyState, SectionHeader } from "../ui/phone";
+import { Row } from "../ui/primitives";
 import { firstWait, splitTeam, staffTone, waitKey, type StaffTone } from "../project/focus";
 import { spendLine, staffUsage, type ProjectUsage } from "../project/usage";
 import { EditingNow } from "./editing";
@@ -132,7 +133,7 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
     ];
     const wait = firstWait(member);
     return (
-      <ListRow
+      <Row
         key={member.id}
         className="ph-srow-member"
         data={{ staff: member.id }}

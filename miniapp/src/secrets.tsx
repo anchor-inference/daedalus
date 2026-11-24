@@ -8,8 +8,7 @@ import { t } from "./i18n";
 import { Icon } from "./icons";
 import { errorText } from "./ui";
 import { Sheet, toast } from "./ui/dialogs";
-import { Dropdown, Segmented, timeAgo, useCopied } from "./ui/components";
-import { BottomSheet, SegmentedControl } from "./ui/phone";
+import { Select, Segmented, timeAgo, useCopied } from "./ui/components";
 
 export type SecretScope = "session" | "project";
 
@@ -151,7 +150,7 @@ function AddForm({ sessionId, phone, project, projects, onKept, onCancel, attach
         <>
           <div className="secret-heading">{t("secret.scope")}</div>
           {phone
-            ? <SegmentedControl value={scope} options={scopes} onChange={setScope} label={t("secret.scope")} />
+            ? <Segmented value={scope} options={scopes} onChange={setScope} label={t("secret.scope")} className="ph-seg" />
             : <Segmented value={scope} options={scopes} onChange={setScope} label={t("secret.scope")} />}
           {scope === "project" && <div className="sub secret-hint">{t("secret.scope.project.hint", { project: project || "" })}</div>}
         </>
@@ -161,7 +160,7 @@ function AddForm({ sessionId, phone, project, projects, onKept, onCancel, attach
           ? (
             <>
               <div className="secret-heading">{t("secret.scope.pick")}</div>
-              <Dropdown value={projectId} options={projects.map((p) => ({ id: p.id, label: p.name }))} onChange={setProjectId} label={t("secret.scope.pick")} id="secret-project" />
+              <Select value={projectId} options={projects.map((p) => ({ id: p.id, label: p.name }))} onChange={setProjectId} label={t("secret.scope.pick")} id="secret-project" />
               <div className="sub secret-hint">{t("secret.scope.settings.hint")}</div>
             </>
           )
@@ -537,8 +536,8 @@ export function SecretSheet({ sessionId, phone, attached, onClose, onAttach, onC
     <SecretsManager sessionId={sessionId} phone={phone} attached={attached} onChanged={onChanged}
       onAttach={(secret) => { onAttach(secret); onClose(); }} />
   );
-  if (phone) return <BottomSheet title={t("secret.title")} onClose={onClose} className="secret-sheet" full>{body}</BottomSheet>;
-  return <Sheet title={t("secret.title")} onClose={onClose} size="narrow" className="secret-sheet">{body}</Sheet>;
+  if (phone) return <Sheet title={t("secret.title")} onClose={onClose} className="ph-sheet secret-sheet" size="full">{body}</Sheet>;
+  return <Sheet title={t("secret.title")} onClose={onClose} size="sm" className="secret-sheet">{body}</Sheet>;
 }
 
 /** A secret on a draft or a sent message: the lock and the name, never the value. */

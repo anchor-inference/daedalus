@@ -69,7 +69,7 @@ export function FilterSheet({ filters, calendars, types, groups, tags, dense, on
     </button>
   );
   return (
-    <Sheet title={t("cal.filters")} onClose={onClose} size="narrow" className="cal-filters">
+    <Sheet title={t("cal.filters")} onClose={onClose} size="sm" className="cal-filters">
       <div className="cal-filter-body">
         <label className="cal-switch-row cal-filter-done">
           <input type="checkbox" checked={filters.hideDone} onChange={(e) => onChange({ ...filters, hideDone: e.target.checked })} />

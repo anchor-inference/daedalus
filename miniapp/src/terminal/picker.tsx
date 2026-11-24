@@ -12,7 +12,7 @@ import type { Project, TerminalEnv, TerminalEnvName } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { Popover } from "../ui/dialogs";
-import { BottomSheet } from "../ui/phone";
+import { Sheet } from "../ui/primitives";
 import { loadSandboxChoice, sandboxOffer, sandboxToggle, saveSandboxChoice } from "./dockstate";
 
 export type PlaceChoice = "container" | "host" | "folder";
@@ -77,7 +77,7 @@ type PickerProps = {
   anchor: HTMLElement | null;
   /** Which edge of the anchor the popover lines up with: the dock's "+" sits at the left, the page's
    *  button at the right. */
-  align?: "left" | "right";
+  align?: "start" | "end";
   phone: boolean;
   /** The place marked when nothing was chosen on this device yet: the project's default environment. */
   suggested?: PlaceChoice;
@@ -85,7 +85,7 @@ type PickerProps = {
   onClose: () => void;
 };
 
-export function TerminalPicker({ envs, folders, projects = [], lens = null, anchor, align = "right", phone, suggested, onPick, onClose }: PickerProps) {
+export function TerminalPicker({ envs, folders, projects = [], lens = null, anchor, align = "end", phone, suggested, onPick, onClose }: PickerProps) {
   const [boxed, setBoxed] = useState(loadSandboxChoice);
   const [last] = useState(() => loadLastPlace() ?? suggested ?? null);
   const [step, setStep] = useState<"places" | "folder">("places");
@@ -189,7 +189,7 @@ export function TerminalPicker({ envs, folders, projects = [], lens = null, anch
     <FolderStep envs={envs} boxed={sandboxed} folders={folders} projects={projects} lens={lens} busy={busy} onBack={() => setStep("places")} onOpen={(env, cwd, projectId) => void go({ choice: "folder", env, cwd, projectId })} />
   );
 
-  if (phone) return <BottomSheet title={t("term.pick.title")} onClose={onClose} className="term-pick-sheet">{body}</BottomSheet>;
+  if (phone) return <Sheet title={t("term.pick.title")} onClose={onClose} className="ph-sheet term-pick-sheet">{body}</Sheet>;
   return (
     <Popover anchor={anchor} onClose={onClose} className="term-pick-pop" align={align} label={t("term.pick.title")}>
       {body}

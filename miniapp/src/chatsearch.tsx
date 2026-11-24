@@ -43,7 +43,7 @@ export function ChatSearch({ sessionId, onPick }: { sessionId: string; onPick: (
         <Icon name="search" />
       </button>
       {open && (
-        <Popover anchor={button.current} align="right" className="chat-search-pop" label={t("chatsearch.open")} onClose={() => setOpen(false)}>
+        <Popover anchor={button.current} align="end" className="chat-search-pop" label={t("chatsearch.open")} onClose={() => setOpen(false)}>
           <ChatSearchBody
             sessionId={sessionId}
             onPick={(seq) => {

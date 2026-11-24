@@ -20,7 +20,8 @@ import { ArtifactCard } from "../artifact";
 import { filesKey, keptBase, type KeptFile } from "../keptfiles";
 import { downloadHref } from "../preview";
 import { Icon } from "../icons";
-import { BottomSheet, EmptyState, SegmentedControl } from "../ui/phone";
+import { EmptyState } from "../ui/phone";
+import { Segmented, Sheet } from "../ui/primitives";
 import { DecisionSlot } from "./slot";
 
 export type ResultReceipt = {
@@ -499,28 +500,28 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       returnBlocked={returnBlocked} blocking={blockingComments.length} onAccept={() => void accept()} onMerge={() => void merge()} onReturn={() => setReturning(true)}
       onShow={() => setNotesOpen(true)} />, slot)}
     {slot && returning && (
-      <BottomSheet title={t("pres.return.title")} onClose={() => setReturning(false)} className="ph-return"
+      <Sheet title={t("pres.return.title")} onClose={() => setReturning(false)} className="ph-sheet ph-return"
         footer={<><button type="button" className="ph-btn" onClick={() => setReturning(false)}>{t("common.cancel")}</button>
           <button type="button" className="ph-btn primary" disabled={busy || returnBlocked || !returnNote.trim()} onClick={() => void returnResult()}>{t("result.sendBack")}</button></>}>
         <div className="ph-form">
           <label htmlFor={`return-${task.id}`}>{t("result.returnReason")}</label>
           <textarea id={`return-${task.id}`} className="field" rows={4} autoFocus value={returnNote} onChange={(event) => setReturnNote(event.target.value)} />
         </div>
-      </BottomSheet>
+      </Sheet>
     )}
     {slot && noteAt && (
-      <BottomSheet onClose={() => setNoteAt(null)} className="ph-note-sheet" label={t("pres.note.title")}
+      <Sheet onClose={() => setNoteAt(null)} className="ph-sheet ph-note-sheet" ariaLabel={t("pres.note.title")}
         title={<span className="ph-sheet-title two"><span>{t("pres.note.title")}</span><span className="ph-sheet-sub truncate">{t("pres.note.where", { path: noteAt.path, line: noteAt.line })}</span></span>}
         footer={<><button type="button" className="ph-btn" onClick={() => setNoteAt(null)}>{t("common.cancel")}</button>
           <button type="button" className="ph-btn primary" disabled={busy || offline || !commentText.trim() || !contract.data} onClick={async () => { if (await addComment()) setNoteAt(null); }}>{t("pres.note.save")}</button></>}>
         <div className="ph-form">
           <div className="ph-gl">{t("pres.note.importance")}</div>
-          <SegmentedControl label={t("pres.note.importance")} value={commentPriority} onChange={setCommentPriority}
-            options={(["blocking", "important", "suggestion"] as const).map((id) => ({ id, label: t(`pres.priority.${id}`) }))} />
+          <Segmented label={t("pres.note.importance")} value={commentPriority} onChange={setCommentPriority}
+            options={(["blocking", "important", "suggestion"] as const).map((id) => ({ id, label: t(`pres.priority.${id}`) }))} className="ph-seg" />
           <label htmlFor={`note-${task.id}`}>{t("pres.note.label")}</label>
           <textarea id={`note-${task.id}`} className="field" rows={3} autoFocus value={commentText} onChange={(event) => setCommentText(event.target.value)} />
         </div>
-      </BottomSheet>
+      </Sheet>
     )}
     <div className={`result-action${slot ? " slotted" : ""}`}>
       {task.branch && task.merge_state !== "merged" && review.data?.merge_receipt?.state !== "merged" && <>

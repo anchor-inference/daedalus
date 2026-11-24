@@ -239,7 +239,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     tiles = page.locator(".ph-plus-sheet .ph-tile").count()
     if tiles != 3:
         problems.append(f"phone: the + sheet has {tiles} tiles; Secret is a row, not a tile")
-    row = page.locator(".ph-plus-sheet .ph-mrow", has=page.locator("svg")).filter(has_text="Secret" if LANG == "en" else "Секрет")
+    row = page.locator(".ph-plus-sheet .menu-row", has=page.locator("svg")).filter(has_text="Secret" if LANG == "en" else "Секрет")
     if row.count() != 1:
         problems.append("phone: the + sheet has no Secret row")
         context.close()

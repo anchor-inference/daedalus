@@ -11,8 +11,6 @@
   .head-status { max-width: 36%; padding: 0 4px; }
   .composer-row .chip { max-width: 40vw; }
   .composer-row .chip span, .composer-row .chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sheet { max-height: 92%; }
-  .sheet .grip { margin-bottom: 6px; }
   .filters { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; }
   .filters .btn { white-space: nowrap; flex: none; }
   table { font-size: var(--fs-12); }
@@ -45,7 +43,6 @@
   .card.pressable:hover, .aside-row.link:hover, .attachment-open:hover { background: inherit; }
 }
 
-@media (min-width: 1024px) { .toast { left: auto; right: 24px; top: auto; bottom: 24px; transform: none; } }
 
 /* ── the microphone ────────────────────────────────────────────────────────────────────── */
 .roundbtn:disabled { opacity: .4; cursor: default; }
@@ -212,7 +209,6 @@
 .disclosure .chev { color: var(--fg-3); display: inline-block; transition: transform var(--t-fast) var(--ease-out); font-size: var(--fs-18); line-height: 1; }
 .disclosure .chev.down { transform: rotate(90deg); }
 .disclosure-body { padding-bottom: 6px; }
-.sheet-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 0 4px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--surface-1); }
 .field.search { margin: 2px 0 6px; }
 .pagehead .field { background: var(--card); }
 
@@ -331,7 +327,6 @@
 .proposal-sheet .segmented { margin: 4px 0 10px; }
 .proposal-sheet pre.diff { max-height: 60vh; overflow: auto; font-size: var(--fs-mono); }
 pre.diff .file { color: var(--fg); font-weight: 600; }
-.sheet-foot.column { flex-direction: column; align-items: stretch; }
 .task-check { display: flex; align-items: center; gap: 8px; }
 .task-check .bar { flex: 1; max-width: 160px; }
 .check-row { margin: 0; min-height: var(--row-h); align-items: flex-start; }

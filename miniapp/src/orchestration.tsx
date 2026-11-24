@@ -15,7 +15,8 @@ import { Icon } from "./icons";
 import { MainEntry } from "./main/MainEntry";
 import { MAIN_PATH } from "./main/model";
 import { colourOf, initials } from "./drawer";
-import { EmptyState, ListRow, NewChatPill, SectionHeader, TopBar } from "./ui/phone";
+import { EmptyState, NewChatPill, SectionHeader, TopBar } from "./ui/phone";
+import { Row } from "./ui/primitives";
 import { useMain } from "./main/data";
 import { orchestratedProjects, waitingInOrchestration } from "./mode";
 import { ORCHESTRATION, navigate, projectHome } from "./router";
@@ -135,7 +136,7 @@ export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
     <div className="ph-page ph-orch">
       <TopBar center title={t("mode.orchestration")} pip={waiting > 0} />
       <div className="ph-page-body list">
-        <ListRow
+        <Row
           className="ph-orch-main"
           data={{ "main-entry": "" }}
           lead={<span className="ph-avatar accent" aria-hidden><Icon name="conductor" size={22} /></span>}
@@ -173,7 +174,7 @@ function PhoneProjectRow({ project, sessions }: { project: ProjectFolder; sessio
     : project.last_message_at ? relTime(project.last_message_at) : t("orch.row.idle");
   const meta = [plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
   return (
-    <ListRow
+    <Row
       data={{ project: project.id }}
       lead={<span className="ph-avatar" style={{ ["--c" as string]: colourOf(project.id) }} aria-hidden>{initials(project.name)}</span>}
       title={project.name}

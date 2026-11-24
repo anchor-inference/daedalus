@@ -61,7 +61,7 @@ export function RecordButton({ group, toast }: { group: string; toast: (text: st
         <span className="bp-rec-label">{t("browser.steps.record")}</span>
       </button>
       {anchor && (
-        <Popover anchor={anchor} onClose={() => setAnchor(null)} align="right" className="bp-rec-start" label={t("browser.steps.start.head")}>
+        <Popover anchor={anchor} onClose={() => setAnchor(null)} align="end" className="bp-rec-start" label={t("browser.steps.start.head")}>
           <div className="bp-rec-start-head">{t("browser.steps.start.head")}</div>
           <p>{t("browser.steps.start.body")}</p>
           <p className="bp-rec-start-secret"><Icon name="lock" size={13} /> <span>{t("browser.steps.start.secret")}</span></p>

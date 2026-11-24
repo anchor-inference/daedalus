@@ -12,7 +12,8 @@ import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, projectSessionPath } from "../router";
 import { useQuery } from "../store";
-import { ActionSheet, IconButton, SegmentedControl, TopBar } from "../ui/phone";
+import { TopBar } from "../ui/phone";
+import { IconButton, Menu, Segmented } from "../ui/primitives";
 import { useProject } from "../project/data";
 import { relTime } from "../format";
 import { DiffView } from "../previewparts";
@@ -50,8 +51,8 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
       <DecisionSlot.Provider value={slot}>
         <div className="ph-taskpage-top">
           <TopBar back={onClose} title={task.title} sub={sub}
-            actions={<IconButton icon="vdots" label={t("board.actions")} onClick={() => setMenu(true)} popup="menu" expanded={menu} />} />
-          {tabs.length > 1 && <div className="ph-taskpage-tabs"><SegmentedControl label={t("pres.tabs")} value={tab} onChange={setTab} options={tabs} /></div>}
+            actions={<IconButton icon="vdots" label={t("board.actions")} onClick={() => setMenu(true)} popup="menu" expanded={menu} className="ph-ib" />} />
+          {tabs.length > 1 && <div className="ph-taskpage-tabs"><Segmented label={t("pres.tabs")} value={tab} onChange={setTab} options={tabs} className="ph-seg" /></div>}
         </div>
         <div className="ph-taskpage-body" hidden={tab !== "task"} data-tab="task">{taskTab}</div>
         {resultTab && (
@@ -71,7 +72,7 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
         <div ref={setSlot} className="ph-decide" />
       </DecisionSlot.Provider>
       {menu && (
-        <ActionSheet onClose={() => setMenu(false)} preview={{ title: task.title, meta: sub }} items={[
+        <Menu onClose={() => setMenu(false)} preview={{ title: task.title, meta: sub }} items={[
           ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
           { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
           ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: t(`board.col.${status}`) }), icon: "forward" as const, disabled: writeBlocked, onSelect: () => onMove(status) })),
@@ -79,7 +80,7 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
           ...tools.map((item) => ({ ...item, onSelect: () => { setTab("task"); item.onSelect(); } })),
           ...(tools.length ? ["-" as const] : []),
           ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
-        ]} />
+        ]} label={t("dlg.menu")} />
       )}
     </Sheet>
   );
@@ -131,8 +132,8 @@ export function FileDiff({ patch, files, index, notes, onLine, onIndex, onClose 
     <Sheet size="full" className="ph-filediff" onClose={onClose} ariaLabel={file.path}>
       <TopBar back={onClose} title={<span className="mono">{file.path.slice(cut + 1)}</span>} sub={sub}
         actions={<>
-          <IconButton icon="up" label={t("pres.file.prev")} disabled={index === 0} onClick={() => onIndex(index - 1)} />
-          <IconButton icon="down" label={t("pres.file.next")} disabled={index === files.length - 1} onClick={() => onIndex(index + 1)} />
+          <IconButton icon="up" label={t("pres.file.prev")} disabled={index === 0} onClick={() => onIndex(index - 1)} className="ph-ib" />
+          <IconButton icon="down" label={t("pres.file.next")} disabled={index === files.length - 1} onClick={() => onIndex(index + 1)} className="ph-ib" />
         </>} />
       <p className="ph-filediff-hint"><Icon name="pen" size={16} />{t("diff.commentHint")}</p>
       <div className="ph-filediff-body">

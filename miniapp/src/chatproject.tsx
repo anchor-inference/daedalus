@@ -14,7 +14,7 @@ import { type Folder, rememberFolder } from "./grouping";
 import { t } from "./i18n";
 import { invalidate } from "./store";
 import { errorText } from "./ui";
-import { type MenuItem, Sheet, toast } from "./ui/dialogs";
+import { type MenuAction, Sheet, toast } from "./ui/dialogs";
 
 function afterChange(): void {
   invalidate("/api/projects");
@@ -32,7 +32,7 @@ function ordinary(project: ProjectRef & { orchestrator?: ProjectFolder["orchestr
 }
 
 /** "Make a project" for a chat whose project is still its own, or nothing for any other session. */
-export function makeProjectCommand(chat: ProjectRef | null | undefined, open: () => void): Exclude<MenuItem, "-"> | null {
+export function makeProjectCommand(chat: ProjectRef | null | undefined, open: () => void): MenuAction | null {
   if (!chat?.settings?.ephemeral || !ordinary(chat)) return null;
   return { label: t("chat.toproject"), icon: "folderplus", onSelect: open };
 }
@@ -65,7 +65,7 @@ export function MakeProjectSheet({ project, title, onClose, onMade }: { project:
     }
   }
   return (
-    <Sheet title={t("chat.toproject")} onClose={onClose} size="narrow">
+    <Sheet title={t("chat.toproject")} onClose={onClose} size="sm">
       <form className="make-project" onSubmit={(event) => { event.preventDefault(); void make(); }}>
         <label className="field" htmlFor="make-project-name">{t("chat.toproject.name")}</label>
         <input id="make-project-name" className="field" autoFocus value={name} maxLength={200} onChange={(event) => setName(event.target.value)} />
@@ -94,7 +94,7 @@ async function asChat(project: ProjectRef): Promise<void> {
  * it holds exactly one chat, which the row's count says without asking. Whatever else would keep it a
  * project (a team, a schedule, a brief) only the server knows; its refusal is the toast.
  */
-export function asChatCommand(folder: Folder): Exclude<MenuItem, "-"> | null {
+export function asChatCommand(folder: Folder): MenuAction | null {
   if (folder.chat || folder.system || !ordinary(folder.project)) return null;
   const one = folder.total === 1;
   const title = folder.rows[0]?.s.title || folder.name;

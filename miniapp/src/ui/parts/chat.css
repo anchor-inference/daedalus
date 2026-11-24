@@ -39,13 +39,6 @@
 .title-edit { width:100%; font:inherit; font-weight:600; font-size:var(--fs-14); letter-spacing:-0.01em; background:var(--card); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--radius-xs); padding:2px 8px; outline:none; }
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
 .head-actions { display:flex; gap:2px; flex:none; }
-.menu { position:absolute; right:10px; top:48px; z-index:var(--z-menu); background:var(--surface-1); border:0; border-radius:var(--radius-md); padding:4px; min-width:190px; max-width:min(280px,calc(100vw - 16px)); box-shadow:var(--shadow-md); display:flex; flex-direction:column; }
-.menu button:active { background:var(--surface-4); }
-.menu button.danger { color:var(--bad); }
-/* A checkbox item sets how the items below it act; its box sits at the row's end, like a setting's. */
-.menu .menu-check { margin-left:auto; flex:none; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--line-strong); border-radius:4px; }
-.menu .menu-check.on { background:var(--fg); color:var(--bg); box-shadow:none; }
-.menu .menu-check .ic { color:inherit; }
 
 .chat-body { flex:1; min-height:0; display:flex; position:relative; }
 .chat-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
@@ -422,29 +415,11 @@ input.field[readonly] { text-overflow: ellipsis; }
    "… vllm" read as "vllr", a different word rather than a shortened one. */
 select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* At the top on a phone: at the foot it stood over the composer. Beside the chat it has the corner. */
-.toast { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); z-index:var(--z-toast); display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 0; padding: 8px 10px 8px 14px; border-radius: var(--radius-md); font-size: var(--fs-13); max-width: min(92vw, 460px); box-shadow: var(--shadow-lg); }
-.toast .btn.small { min-height: 30px; padding: 4px 8px; }
 .stat { display: flex; flex-direction: column; gap: 2px; }
 .stat b { font-size: var(--fs-18); font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 .summary-inline { margin:2px 0 8px 15px; padding:2px 8px 2px 16px; border:0; border-left:1px solid var(--line); border-radius:0; font-size:var(--fs-13); line-height:1.5; color:var(--fg-2); max-height:360px; overflow:auto; }
-.sheet-backdrop { position:fixed; inset:0; background:var(--scrim); z-index:var(--z-overlay); display:flex; align-items:flex-end; }
-.sheet { width:100%; max-height:88%; background:var(--surface-1); outline:none; border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:8px 16px calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; box-shadow:var(--shadow-xl); }
-.sheet .grip { width:36px; height:4px; border-radius:2px; background:var(--line-strong); margin:4px auto 10px; }
-.sheet h3 { margin:0 0 10px; font-size:var(--fs-16); font-weight:600; letter-spacing:-0.01em; }
-.sheet-body { overflow-y:auto; min-height:0; }
-/* More of the sheet waits below the fold (edgefade.ts): the body's lower edge fades, or, where a
-   sticky footer holds the actions, a shade rises above it. Without either, a touch screen showed a
-   hire sheet or a task's actions ending at the fold with nothing to say the rest was a swipe away. */
-.sheet-body[data-more="below"]:not(:has(.sheet-foot)) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
-.sheet-more-anchor { position: relative; height: 0; flex: none; }
-.sheet-more { position: absolute; left: 50%; bottom: var(--space-2); transform: translateX(-50%); display: none; align-items: center; justify-content: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-pill); border: 0; background: var(--surface-1); color: var(--fg-2); box-shadow: var(--shadow-md); cursor: pointer; }
-.sheet-body[data-more="below"] + .sheet-more-anchor .sheet-more { display: inline-flex; }
-/* A sheet with a sticky footer says it with the shade over the footer instead: the arrow, standing
-   above the footer, sat on the last field's words. */
-.sheet-body[data-more="below"]:has(.sheet-foot) + .sheet-more-anchor .sheet-more { display: none; }
-.sheet-body[data-more="below"] .sheet-foot::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 56px; background: linear-gradient(to bottom, transparent, var(--surface-1) 85%); pointer-events: none; }
 .menu-item { display:flex; justify-content:space-between; align-items:center; width:100%; min-height:var(--row-h); background:var(--card); border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 12px; margin-bottom:6px; color:var(--fg); font-size:var(--fs-14); cursor:pointer; text-align:left; }
 .card.row .pill { flex:none; }
 .card.row .avatar { flex:none; }
@@ -454,19 +429,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .radio { width:16px; height:16px; border-radius:50%; border:0; box-shadow:inset 0 0 0 1.5px var(--line-strong); background:none; flex:none; cursor:pointer; padding:0; }
 .radio.on { box-shadow:inset 0 0 0 5px var(--fg); }
 
-.segmented { display:flex; gap:2px; background:var(--surface-2); border:0; border-radius:var(--radius-sm); padding:2px; margin-bottom:12px; }
-/* A segment is a small control: by its padding alone it came to 27.5 px, under the 28 a finger is promised. */
-.segmented button { flex:1; min-height:var(--ctl-h-sm); border:0; background:none; color:var(--fg-2); padding:4px 8px; border-radius:var(--radius-xs); font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.segmented button.on { background:var(--card); color:var(--fg); box-shadow:var(--shadow-xs); }
-.segmented button:not(.on):hover { color:var(--fg); }
-/* The button is the touch target at a small control's height; the track inside is what shows. */
-.switch { display: inline-flex; align-items: center; flex: none; min-height: var(--ctl-h-sm); padding: 0; border: 0; background: none; cursor: pointer; }
-.switch:disabled { cursor: default; opacity: .5; }
-.switch-track { position: relative; display: block; width: 32px; height: 18px; border-radius: var(--radius-pill); background: var(--surface-4); transition: background var(--t-fast); }
-.switch-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: var(--shadow-xs); transition: transform var(--t-fast) var(--ease-out), background var(--t-fast); }
-.switch.on .switch-track { background: var(--primary); }
-.switch.on .switch-knob { transform: translateX(14px); background: var(--primary-ink); box-shadow: none; }
-.switch:focus-visible .switch-track { outline: 2px solid var(--ring); outline-offset: 2px; }
 .usage-row { display:grid; grid-template-columns: 52px 1fr auto; gap:6px 10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); cursor:pointer; }
 /* On a phone the counts take their own line and the two buttons share the one under it: squeezed
    beside them the counts broke in two, "· 1 failures" alone on a line next to the buttons. */

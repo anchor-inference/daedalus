@@ -6,7 +6,7 @@ import { ControlTrigger } from "./ui/control-trigger";
 
 import { useEffect, useId, useRef, useState } from "react";
 import { api, ModelFallback, Preset, ProviderConf } from "./api";
-import { SegmentedControl } from "./ui/phone";
+import { Segmented } from "./ui/primitives";
 import { REASONING_EFFORTS, effortIndex } from "./models";
 import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
@@ -119,7 +119,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         </Sheet>
       )}
       {open && !sheet && (
-        <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align={anchor ? "left" : "right"} label={t("session.model.for")}>
+        <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align={anchor ? "start" : "end"} label={t("session.model.for")}>
           {list}
         </Popover>
       )}
@@ -373,7 +373,7 @@ function PhoneModelList(p: PhoneListProps) {
       {p.onChooseEffort && p.browsing && !p.freeGroup && (
         <>
           <div className="ph-model-sec">{t("composer.effort.short")}</div>
-          <SegmentedControl className="ph-model-effort" label={t("composer.effort.short")}
+          <Segmented className="ph-seg ph-model-effort" label={t("composer.effort.short")}
             value={p.thinking ? REASONING_EFFORTS[effortIndex(p.effort)] : "off"}
             options={["off", ...REASONING_EFFORTS].map((value) => ({ id: value, label: t(value === "off" ? "composer.effort.offShort" : `add.effort.${value}`) }))}
             onChange={(value) => p.onChooseEffort!(value)} />

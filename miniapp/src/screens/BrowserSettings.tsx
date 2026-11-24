@@ -19,7 +19,7 @@ import { Icon } from "../icons";
 import { size } from "../loadbar";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Dropdown, Switch, timeAgo } from "../ui/components";
+import { Select, Switch, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { ModelPicker, type ModelCatalogue } from "../modelitems";
 import { ProcedureEditor } from "../browser/steps";
@@ -372,7 +372,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
       <div className="section-title">{t("bs.local.title")}</div>
       <div className="sub">{t("bs.local.sub")}</div>
       <Row title={t("bs.local.title")} stack data-setting="browser.local_sites">
-        <Dropdown id="browser-local-sites" label={t("bs.local.title")} value={b.local_sites} onChange={(local_sites) => set({ local_sites })} options={[
+        <Select id="browser-local-sites" label={t("bs.local.title")} value={b.local_sites} onChange={(local_sites) => set({ local_sites })} options={[
           { id: "services", label: t("bs.local.services") },
           { id: "ask", label: t("bs.local.ask") },
           { id: "allow", label: t("bs.local.allow") },
@@ -381,7 +381,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
       <div className="section-title">{t("bs.lan.title")}</div>
       <div className="sub">{t("bs.lan.sub")}</div>
       <Row title={t("bs.lan.title")} stack data-setting="browser.lan_sites">
-        <Dropdown id="browser-lan-sites" label={t("bs.lan.title")} value={b.lan_sites} onChange={(lan_sites) => set({ lan_sites })} options={[
+        <Select id="browser-lan-sites" label={t("bs.lan.title")} value={b.lan_sites} onChange={(lan_sites) => set({ lan_sites })} options={[
           { id: "ask", label: t("bs.lan.ask") },
           { id: "listed", label: t("bs.lan.listed") },
         ]} />
@@ -435,7 +435,7 @@ function Graphics({ b, set, envs }: { b: BrowserSettings; set: (patch: Partial<B
       <div className="section-title">{t("bs.webgl.title")}</div>
       <div className="sub">{t("bs.webgl.sub")}</div>
       <Row title={t("bs.webgl.allow")} stack data-setting="browser.webgl_allow">
-        <Dropdown
+        <Select
           id="browser-webgl-allow"
           label={t("bs.webgl.allow")}
           value={b.webgl_allow}

@@ -14,7 +14,7 @@ import { type Settings } from "../api";
 import { lang, t } from "../i18n";
 import { ModelPicker } from "../modelitems";
 import { NumRow, Row } from "../settingsrow";
-import { Dropdown } from "../ui/index";
+import { Select } from "../ui/index";
 import { AGENT_LANGUAGES, languageName } from "../agentlang";
 
 type SaveProps = { s: Settings; save: (patch: Partial<Settings>) => void; presetLabel: (id: string) => string };
@@ -42,7 +42,7 @@ function AnswerLanguage({ s, save }: Omit<SaveProps, "presetLabel">) {
   return (
     <div className="card" data-card="answer-language">
       <Row title={t("settings.answerlang")} desc={t("settings.answerlang.sub")} stack data-setting="answer_language">
-        <Dropdown
+        <Select
           id="answer-language"
           label={t("settings.answerlang")}
           value={value}
@@ -73,11 +73,11 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
     <div className="card" data-card="agent-language">
       <div className="section-title">{t("settings.translation")}</div>
       <Row title={t("settings.translation.operator")} desc={t("settings.translation.operator.sub")} stack data-setting="translation.operator_language">
-        <Dropdown id="translation-operator" label={t("settings.translation.operator")} value={current.operator_language} onChange={(operator_language) => put({ operator_language })}
+        <Select id="translation-operator" label={t("settings.translation.operator")} value={current.operator_language} onChange={(operator_language) => put({ operator_language })}
           options={ordered.map((code) => ({ id: code, label: code === ui ? t("settings.translation.applang", { lang: languageName(code) }) : languageName(code) }))} />
       </Row>
       <Row title={t("settings.translation.agent")} desc={t("settings.translation.agent.sub")} stack data-setting="translation.agent_language">
-        <Dropdown id="translation-agent" label={t("settings.translation.agent")} value={current.agent_language} onChange={(agent_language) => put({ agent_language })}
+        <Select id="translation-agent" label={t("settings.translation.agent")} value={current.agent_language} onChange={(agent_language) => put({ agent_language })}
           options={[{ id: "", label: t("agentlang.off") }, ...AGENT_LANGUAGES.filter((code) => code !== current.operator_language).map((code) => ({ id: code, label: languageName(code) }))]} />
       </Row>
       {/* The same picker as every other single model in Settings, so the translator is found by name,

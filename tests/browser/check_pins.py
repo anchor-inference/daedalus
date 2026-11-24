@@ -120,14 +120,14 @@ def main() -> int:
             page = context.new_page()
             page.route("**/api/**", shots.stub)
             page.goto(f"{BASE}/agents?view=chats&token=t&scheme=dark&lang={lang}")
-            expect(page.locator(".ph-row").first).to_be_visible(timeout=15000)
+            expect(page.locator(".list-row").first).to_be_visible(timeout=15000)
             pinned = page.locator("[data-pinned]")
             check(pinned.count() == 0, f"{lang} phone: no block while nothing is pinned")
 
             def sheet_pick(name: str, page=page) -> None:  # type: ignore[no-untyped-def]
-                page.locator(".ph-actions .ph-mrow", has_text=name).first.click()
+                page.locator(".menu-sheet .menu-row", has_text=name).first.click()
 
-            page.locator(f"[data-session='{shots.S6}'] .ph-row-more").click()
+            page.locator(f"[data-session='{shots.S6}'] .list-row-more").click()
             sheet_pick(words["pin"])
             expect(pinned.locator(f"[data-session='{shots.S6}']")).to_be_visible(timeout=5000)
             check(page.locator(f"[data-session='{shots.S6}']").count() == 1, f"{lang} phone: the pinned chat is not listed again under its day")
@@ -138,14 +138,14 @@ def main() -> int:
             check(pinned.locator(".ph-sec").first.inner_text().startswith(words["pinned"]), f"{lang} phone: the block is headed Pinned")
 
             page.reload()
-            expect(pinned.locator(".ph-row").first).to_be_visible(timeout=15000)
+            expect(pinned.locator(".list-row").first).to_be_visible(timeout=15000)
             order = pinned.evaluate("""el => [...el.querySelectorAll('[data-session], [data-project-head]')].filter((e) => !e.closest('.ph-pinkids')).map((e) => e.dataset.session || e.dataset.projectHead)""")
             check(order == [shots.P1, shots.S6], f"{lang} phone: the pins survive a reload, newest first ({order})")
             # Folded, the pinned project keeps its working chat in sight.
-            pinned.locator(f"[data-project-head='{shots.P1}'] .ph-row").click()
+            pinned.locator(f"[data-project-head='{shots.P1}'] .list-row").click()
             kids = pinned.locator(".ph-pinkids [data-session]").evaluate_all("els => els.map((e) => e.dataset.session)")
             check(kids == [shots.S1], f"{lang} phone: a folded pinned project keeps its working chat ({kids})")
-            pinned.locator(f"[data-project-head='{shots.P1}'] .ph-row").click()
+            pinned.locator(f"[data-project-head='{shots.P1}'] .list-row").click()
 
             open_drawer(page)
             drawer = page.locator(".ph-drawer-root.open")
@@ -155,12 +155,12 @@ def main() -> int:
             check(drawer.locator(f".ph-drow[data-session='{shots.S6}']").count() == 1, f"{lang} phone: nor the pinned chat among the recents")
             page.keyboard.press("Escape")
             page.goto(f"{BASE}/agents?view=chats&token=t&scheme=dark&lang={lang}")
-            expect(pinned.locator(".ph-row").first).to_be_visible(timeout=15000)
+            expect(pinned.locator(".list-row").first).to_be_visible(timeout=15000)
 
-            pinned.locator(f"[data-session='{shots.S6}'] .ph-row-more").click()
+            pinned.locator(f"[data-session='{shots.S6}'] .list-row-more").click()
             sheet_pick(words["unpin"])
             expect(pinned.locator(f"[data-session='{shots.S6}']")).to_have_count(0, timeout=5000)
-            pinned.locator(f"[data-project-head='{shots.P1}'] .ph-row-more").click()
+            pinned.locator(f"[data-project-head='{shots.P1}'] .list-row-more").click()
             sheet_pick(words["unpin"])
             expect(page.locator("[data-pinned]")).to_have_count(0, timeout=5000)
             check(page.locator(f"section[data-project='{shots.P1}']").count() == 1, f"{lang} phone: unpinned, the project has its section again")

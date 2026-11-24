@@ -17,7 +17,7 @@ import { plural, t } from "../i18n";
 import { mergeTtsView } from "../ttsview";
 import type { TtsView } from "../ttsview";
 import { errorText, haptic } from "../ui";
-import { Dropdown, Switch } from "../ui/index";
+import { Select, Switch } from "../ui/index";
 import { NumInput, Row } from "../settingsrow";
 
 const name = (code: string) => t(`lang.of.${code}`);
@@ -210,7 +210,7 @@ export function TtsVoices() {
 
       <div className="catalogue-filters">
         <input className="field" placeholder={t("tts.search")} aria-label={t("tts.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Dropdown label={t("tts.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("tts.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
+        <Select label={t("tts.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("tts.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
         <span className="filter-switch">
           <span>{t("tts.fast.only")}</span>
           <Switch checked={fastOnly} onChange={setFastOnly} label={t("tts.fast.only")} />
@@ -299,7 +299,7 @@ export function TtsVoices() {
         <div className="card catalogue-settings">
           {chosen.speakers.length > 1 && (
             <Row title={t("tts.speaker")} stack data-setting="companion.tts.local_speaker">
-              <Dropdown label={t("tts.speaker")} value={view.state.speaker} onChange={(speaker) => void settings({ speaker })} options={[{ id: "", label: t("tts.speaker.first") }, ...chosen.speakers.map((who) => ({ id: who, label: who }))]} />
+              <Select label={t("tts.speaker")} value={view.state.speaker} onChange={(speaker) => void settings({ speaker })} options={[{ id: "", label: t("tts.speaker.first") }, ...chosen.speakers.map((who) => ({ id: who, label: who }))]} />
             </Row>
           )}
           {/* The number beside the thumb follows the drag; the configuration file is written when the

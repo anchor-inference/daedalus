@@ -405,7 +405,7 @@ def run() -> int:
                         problems.append(f"the phone's banner covers {name}: {box} over {other}")
             # The home's bell is the Inbox on a phone and carries its unseen count (so does the drawer).
             bell = page.locator(".ph-top a.ph-ib[href$='/inbox']")
-            tab = bell.locator(".ph-badge")
+            tab = bell.locator(".iconbtn-badge")
             if not wait(page, lambda: tab.count() and tab.inner_text() == str(Centre.summary()["unseen"]), 3):
                 problems.append(f"the bell's badge is {tab.inner_text() if tab.count() else 'missing'}, not {Centre.summary()['unseen']}")
             bell.click()

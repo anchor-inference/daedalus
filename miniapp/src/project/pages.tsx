@@ -85,7 +85,7 @@ function BriefCard({ projectId, project, section, toast }: { projectId: string; 
         <span className="grow" />
         {draft === null && <button className="btn small ghost" onClick={() => (goal ? setChanging(true) : setDraft(section.body))}>{t("common.edit")}</button>}
       </div>
-      {changing && project && <Sheet title={t("goal.change.title")} onClose={() => setChanging(false)} size="narrow">
+      {changing && project && <Sheet title={t("goal.change.title")} onClose={() => setChanging(false)} size="sm">
         <GuidedGoal project={project} toast={toast} wide embedded change ready={null}
           onSaved={() => { setChanging(false); invalidate(briefKey(projectId)); }} />
       </Sheet>}
@@ -441,7 +441,7 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
     }
   }
   return (
-    <Sheet title={t("focus.enable.sheet", { name: project.name })} onClose={onClose} size="narrow" className="enable-sheet">
+    <Sheet title={t("focus.enable.sheet", { name: project.name })} onClose={onClose} size="sm" className="enable-sheet">
       <p className="focus-enable-intro">{t("focus.enable.first")}</p>
       <p className="focus-cost">{t("focus.enable.cost")}</p>
       {currentCheck.state === "checking" && <p className="sub" role="status">{t("focus.enable.model.checking")}</p>}

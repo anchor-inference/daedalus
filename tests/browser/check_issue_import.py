@@ -90,7 +90,7 @@ def check(page: Page, lang: str, unhandled: Unhandled, where: str) -> None:
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     # A desktop's card, or the row of a phone's list, each with the issue's number as its link.
-    card, issue = (".ph-row", ".ph-issue") if where == "phone" else (".pcard", ".pcard-issue")
+    card, issue = (".list-row", ".ph-issue") if where == "phone" else (".pcard", ".pcard-issue")
     existing = page.locator(card, has_text="Seasonal menu page")
     expect(existing.locator(issue)).to_have_text("#11")
     expect(existing.locator(issue)).to_have_attribute("href", f"https://github.com/{REPOSITORY}/issues/11")

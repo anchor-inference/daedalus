@@ -422,7 +422,7 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
     }
   }
   return (
-    <Sheet title={t("memory.topic.rename.title", { topic })} onClose={onClose} size="narrow">
+    <Sheet title={t("memory.topic.rename.title", { topic })} onClose={onClose} size="sm">
       <div className="sub">{t("memory.topic.rename.sub")}</div>
       <label className="field" htmlFor="topic-rename">{t("memory.topic.rename.to")}</label>
       <input id="topic-rename" className="field" autoFocus value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && parseTopics(to).length) void rename(to); }} />
@@ -466,7 +466,7 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
   }
   const list = data?.suggestions ?? [];
   return (
-    <Sheet title={t("memory.suggest.title")} onClose={onClose} size="wide" className="memory-suggestions">
+    <Sheet title={t("memory.suggest.title")} onClose={onClose} size="xl" className="memory-suggestions">
       <div className="sub">{t("memory.suggest.sub")}</div>
       {loading && !data && <Skeleton rows={3} />}
       {error && !data && <div className="empty">{error}</div>}
@@ -524,7 +524,7 @@ function HistorySheet({ onClose, onChanged, toast }: { onClose: () => void; onCh
   }
   const entries = data?.entries ?? [];
   return (
-    <Sheet title={t("memory.history.title")} onClose={onClose} size="wide" className="memory-history">
+    <Sheet title={t("memory.history.title")} onClose={onClose} size="xl" className="memory-history">
       {loading && !data && <Skeleton rows={3} />}
       {error && !data && <div className="empty">{error}</div>}
       {data && entries.length === 0 && <div className="empty"><b>{t("memory.history.empty")}</b></div>}

@@ -298,7 +298,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     # Without a chip: every open column that has something, finished work folded.
     expect(sections).to_have_count(4)
     fits(page, f"{lang} phone list")
-    rows = page.locator(".ph-board .ph-row")
+    rows = page.locator(".ph-board .list-row")
     for box in [r.bounding_box() for r in rows.all()]:
         assert box and 59.5 <= box["height"] <= 90, f"{lang}: a board row is {box}"
 
@@ -310,10 +310,10 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(sections).to_have_count(4)
 
     # A long press opens the task's sheet: Open, Move to as chips, then the rest.
-    row = page.locator(".ph-board .ph-row.ph-task:not(.need)", has_text="Checkout").first
+    row = page.locator(".ph-board .list-row.ph-task:not(.need)", has_text="Checkout").first
     box = row.bounding_box()
     assert box
-    page.evaluate("""([x, y]) => { const el = document.elementFromPoint(x, y).closest('.ph-row');
+    page.evaluate("""([x, y]) => { const el = document.elementFromPoint(x, y).closest('.list-row');
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: x, clientY: y })); }""", [box["x"] + 60, box["y"] + 20])
     page.wait_for_timeout(700)
     menu = page.locator(".ph-task-menu")
@@ -324,7 +324,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
 
     page.locator(".ph-board .ph-chip", has_text=words["review"]).click()
     expect(sections).to_have_count(1)
-    sections.first.locator(".ph-row", has_text="Notify endpoint").click()
+    sections.first.locator(".list-row", has_text="Notify endpoint").click()
     # The review page: its footer holds the decision, disabled until the result is current and checked.
     expect(page.locator(".ph-taskpage .ph-decide .ph-btn.primary")).to_be_disabled()
     assert not stub.accepted
@@ -332,11 +332,11 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".ph-taskpage")).to_have_count(0)
 
     page.locator(".ph-board .ph-chip", has_text=words["done"]).click()
-    expect(page.locator(".ph-board .ph-row", has_text="Old price list")).to_be_visible()
-    expect(page.locator(".ph-board .ph-row", has_text="Notify endpoint")).to_have_count(0)
+    expect(page.locator(".ph-board .list-row", has_text="Old price list")).to_be_visible()
+    expect(page.locator(".ph-board .list-row", has_text="Notify endpoint")).to_have_count(0)
 
     # The task on a phone is a page: every brief field reachable, nothing sideways.
-    page.locator(".ph-board .ph-row", has_text="Old price list").click()
+    page.locator(".ph-board .list-row", has_text="Old price list").click()
     sheet = page.locator(".ph-taskpage")
     expect(sheet).to_be_visible()
     # A part nobody wrote is offered once, under the others, and opens its editor in place.

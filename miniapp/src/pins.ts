@@ -6,7 +6,7 @@ import { api } from "./api";
 import { t } from "./i18n";
 import { invalidate } from "./store";
 import { errorText } from "./ui";
-import { type MenuItem, toast } from "./ui/dialogs";
+import { type MenuAction, toast } from "./ui/dialogs";
 
 /** Pin or unpin, then read the listing again so the block and the sections below it agree. */
 export async function setPinned(projectId: string, pinned: boolean): Promise<void> {
@@ -19,7 +19,7 @@ export async function setPinned(projectId: string, pinned: boolean): Promise<voi
 }
 
 /** The menu's command, worded for what it does now, with the sidebar's key beside it. */
-export function pinCommand(projectId: string, pinned: boolean, opts: { key?: boolean } = {}): Exclude<MenuItem, "-"> {
+export function pinCommand(projectId: string, pinned: boolean, opts: { key?: boolean } = {}): MenuAction {
   return {
     label: t(pinned ? "pin.off" : "pin.on"),
     icon: "pushpin",

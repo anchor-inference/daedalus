@@ -69,7 +69,9 @@ def folders(browser, width: int) -> None:  # type: ignore[no-untyped-def]
     assert overflow <= 0, f"the page scrolls sideways by {overflow}px at {width}px"
     page.locator('[data-tab="files"]').click()
     page.get_by_role("button", name="Folder", exact=True).click()
-    page.locator(".menu [role=menuitem]", has_text="bakery").click()
+    # On a phone the menu is a sheet whose rows show each folder's path under its name, and the path
+    # of "Docs" holds "bakery" too: the row is the one whose name starts with it.
+    page.locator(".menu").get_by_role("menuitem", name=re.compile(r"^bakery\b")).click()
     expect(tree.locator('[data-path="src"]')).to_be_visible()
     expect(page.locator(".explorer-head .explorer-readonly")).to_have_count(0)
     print(f"{width}px: the pane switched to the read-only folder, read and previewed it, offered no upload, and switched back")

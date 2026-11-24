@@ -16,7 +16,7 @@ import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
 import { invalidate } from "../store";
 import { errorText, haptic } from "../ui";
-import { Dropdown, Switch } from "../ui/index";
+import { Select, Switch } from "../ui/index";
 import { NumInput, Row } from "../settingsrow";
 import type { SpeechModel, SpeechView } from "../sttview";
 import { fetchSttView, mergeSttView, postSttSelect, sttFrame } from "../sttview";
@@ -215,7 +215,7 @@ export function SpeechModels() {
           "streaming only" a labelled switch, the same controls as every setting above them. */}
       <div className="catalogue-filters">
         <input className="field" placeholder={t("stt.search")} aria-label={t("stt.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Dropdown label={t("stt.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("stt.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
+        <Select label={t("stt.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("stt.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
         <span className="filter-switch">
           <span>{t("stt.streaming.only")}</span>
           <Switch checked={streamingOnly} onChange={setStreamingOnly} label={t("stt.streaming.only")} />
@@ -294,7 +294,7 @@ export function SpeechModels() {
       {view.selected && (
         <div className="card catalogue-settings">
           <Row title={t("stt.language")} stack data-setting="stt.local_language">
-            <Dropdown
+            <Select
               label={t("stt.language")}
               value={view.language}
               onChange={(language) => void postSttSelect({ language }).then(take).catch((x) => setProblem(errorText(x)))}

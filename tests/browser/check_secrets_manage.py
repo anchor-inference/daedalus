@@ -135,7 +135,7 @@ def open_sheet(page: Page, phone: bool) -> None:
     if phone:
         page.locator(".composer .iconbtn.plus").click()
         page.wait_for_selector(".ph-plus-sheet", timeout=5000)
-        page.locator(".ph-plus-sheet .ph-mrow").filter(has_text="Secret" if LANG == "en" else "Секрет").click()
+        page.locator(".ph-plus-sheet .menu-row").filter(has_text="Secret" if LANG == "en" else "Секрет").click()
     else:
         page.locator(".composer .plus").click()
         page.wait_for_selector(".plus-menu", timeout=5000)

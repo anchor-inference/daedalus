@@ -8,7 +8,7 @@ import { folderName } from "./folders";
 import { Icon } from "./icons";
 import { useEnvironments } from "./projects";
 import { Popover, Sheet } from "./ui/dialogs";
-import { SheetRow } from "./ui/phone";
+import { MenuRow } from "./ui/primitives";
 import { t } from "./i18n";
 
 export type RunEnv = "container" | "host";
@@ -97,7 +97,7 @@ export function RunOnChip({ run, project, onSettings }: { run: RunOn; project?: 
         <Icon name="chevron" size={12} />
       </button>
       {open && (
-        <Sheet title={t("runon.label")} onClose={() => setOpen(false)} className="runon-sheet" size="narrow">
+        <Sheet title={t("runon.label")} onClose={() => setOpen(false)} className="runon-sheet" size="sm">
           {project ? (
             <div className="runon-project" data-runon-project={project.id}>
               <p className="sub runon-project-why">{t("runon.project.body", { name: project.name })}</p>
@@ -119,9 +119,9 @@ export function RunOnChip({ run, project, onSettings }: { run: RunOn; project?: 
             <div className="runon-choices" role="menu" aria-label={t("runon.label")}>
               {(["container", "host"] as const).map((each) => {
                 const blocked = each === "host" && !run.hostReady;
-                return <SheetRow key={each} icon={each === "host" ? "lock" : "terminal"} label={t(`folder.env.${each}.long`)}
-                  hint={blocked ? t("runon.host.down") : t(`runon.${each}.hint`)} checked={run.env === each} disabled={blocked}
-                  data={{ runon: each }} onClick={() => choose(each)} />;
+                return <MenuRow key={each} icon={each === "host" ? "lock" : "terminal"} label={t(`folder.env.${each}.long`)}
+                  sub={blocked ? t("runon.host.down") : t(`runon.${each}.hint`)} checked={run.env === each} disabled={blocked}
+                  data={{ runon: each }} onSelect={() => choose(each)} />;
               })}
             </div>
           )}

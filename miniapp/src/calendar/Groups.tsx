@@ -117,7 +117,7 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
   }
 
   if (!group) {
-    return <Sheet title={t("cal.group")} onClose={onClose} size={phone ? "full" : "wide"}><div className="cal-blk-empty">{read.error ? t("cal.group.missing") : t("common.loading")}</div></Sheet>;
+    return <Sheet title={t("cal.group")} onClose={onClose} size={phone ? "full" : "xl"}><div className="cal-blk-empty">{read.error ? t("cal.group.missing") : t("common.loading")}</div></Sheet>;
   }
 
   const rangeText = range ? `${dayLabel(range.from, locale(), { day: "numeric", month: "short" })} – ${dayLabel(range.to, locale(), { day: "numeric", month: "short" })}` : "";
@@ -146,7 +146,7 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
   );
 
   return (
-    <Sheet ariaLabel={group.name} onClose={onClose} className={`cal-view cal-group-page ${phone ? "phone" : ""}`} size={phone ? "full" : "wide"} head={head}>
+    <Sheet ariaLabel={group.name} onClose={onClose} className={`cal-view cal-group-page ${phone ? "phone" : ""}`} size={phone ? "full" : "xl"} head={head}>
       <div className="cal-view-body">
         {group.description && <MarkdownView text={group.description} className="cal-view-desc" />}
         <div className="cal-bulk" role="group" aria-label={t("cal.group.bulk")}>

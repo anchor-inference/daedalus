@@ -137,7 +137,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
       {proposal?.state === "failed" && <div className="sub attn" role="alert">{sentence(proposal.error ?? "")}</div>}
       {problem && <div className="sub attn" role="alert">{problem}</div>}
     </div>
-    {review && ready && proposal.diff && <Sheet title={t("settings.rules.review.title")} size="wide" className="prompt-review-sheet" onClose={() => !busy && setReview(false)}>
+    {review && ready && proposal.diff && <Sheet title={t("settings.rules.review.title")} size="xl" className="prompt-review-sheet" onClose={() => !busy && setReview(false)}>
       <div className="prompt-review">
         <p>{proposal.summary}</p>
         <div className="prompt-review-diff"><DiffView text={proposal.diff} /></div>

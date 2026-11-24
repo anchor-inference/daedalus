@@ -4,7 +4,7 @@ import { usePetModel, usePetPreference } from "../ui/pet";
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
-import { Dropdown, LangPicker, Segmented, Switch } from "../ui/index";
+import { Select, LangPicker, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
 import { type Settings } from "../api";
 import { useQuery } from "../store";
@@ -162,10 +162,10 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
         {prefs.follow && (
           <>
             <Row title={t("theme.follow.dark")}>
-              <Dropdown label={t("theme.follow.dark")} value={prefs.dark} onChange={(dark: ThemeId) => update({ dark })} options={THEMES.filter((item) => !item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+              <Select label={t("theme.follow.dark")} value={prefs.dark} onChange={(dark: ThemeId) => update({ dark })} options={THEMES.filter((item) => !item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
             </Row>
             <Row title={t("theme.follow.light")}>
-              <Dropdown label={t("theme.follow.light")} value={prefs.light} onChange={(light: ThemeId) => update({ light })} options={THEMES.filter((item) => item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+              <Select label={t("theme.follow.light")} value={prefs.light} onChange={(light: ThemeId) => update({ light })} options={THEMES.filter((item) => item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
             </Row>
           </>
         )}

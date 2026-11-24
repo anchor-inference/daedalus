@@ -12,7 +12,7 @@ import { Icon } from "../icons";
 import { pathFor, sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Dropdown, OverflowMenu, Sheet, go, useMedia } from "../ui/index";
+import { Select, OverflowMenu, Sheet, go, useMedia } from "../ui/index";
 import type { MenuItem } from "../ui/dialogs";
 import { timeAgo } from "../ui/components";
 
@@ -59,7 +59,7 @@ export function CompanionTab({ tab, toast, onOpen }: { tab: CompanionTabId; toas
 /** Tools and Memory: what it may do and what it keeps, opened from the header's menu. */
 export function CompanionSheet({ kind, sessionId, toast, onClose }: { kind: "tools" | "memory"; sessionId: string; toast: (t: string) => void; onClose: () => void }) {
   return (
-    <Sheet title={t(`companion.sheet.${kind}`)} onClose={onClose} size="narrow" className="companion-sheet">
+    <Sheet title={t(`companion.sheet.${kind}`)} onClose={onClose} size="sm" className="companion-sheet">
       {kind === "tools" ? <Tools /> : <Memory sessionId={sessionId} toast={toast} />}
     </Sheet>
   );
@@ -188,7 +188,7 @@ function GoalForm({ onClose, onSaved, toast }: { onClose: () => void; onSaved: (
     }
   }
   return (
-    <Sheet title={t("companion.goals.add")} onClose={onClose} size="narrow">
+    <Sheet title={t("companion.goals.add")} onClose={onClose} size="sm">
       <form className="companion-goal-form" onSubmit={(e) => void add(e)}>
         <label className="companion-field">
           <span className="sub">{t("companion.goals.title.label")}</span>
@@ -200,7 +200,7 @@ function GoalForm({ onClose, onSaved, toast }: { onClose: () => void; onSaved: (
         </label>
         <div className="companion-field">
           <span className="sub">{t("companion.goals.cadence")}</span>
-          <Dropdown
+          <Select
             label={t("companion.goals.cadence")}
             value={preset}
             onChange={setPreset}
@@ -379,7 +379,7 @@ export function CompanionEditor({ profile, onClose, onSaved, toast }: { profile:
     }
   }
   return (
-    <Sheet title={t("companion.edit")} onClose={onClose} size="narrow">
+    <Sheet title={t("companion.edit")} onClose={onClose} size="sm">
       <div className="companion-editor">
         <div className="companion-editor-face">
           <CompanionAvatar avatar={avatar} size={96} name={name} />
@@ -390,7 +390,7 @@ export function CompanionEditor({ profile, onClose, onSaved, toast }: { profile:
         </label>
         <label className="companion-field">
           <span className="sub">{t("companion.edit.shape")}</span>
-          <Dropdown label={t("companion.edit.shape")} value={avatar.shape} onChange={(shape) => setAvatar({ ...avatar, shape })} options={SHAPES.map((id) => ({ id, label: t(`companion.shape.${id}`) }))} />
+          <Select label={t("companion.edit.shape")} value={avatar.shape} onChange={(shape) => setAvatar({ ...avatar, shape })} options={SHAPES.map((id) => ({ id, label: t(`companion.shape.${id}`) }))} />
         </label>
         <div className="companion-field">
           <span className="sub">{t("companion.edit.color")}</span>
@@ -403,11 +403,11 @@ export function CompanionEditor({ profile, onClose, onSaved, toast }: { profile:
         </div>
         <label className="companion-field">
           <span className="sub">{t("companion.edit.eyes")}</span>
-          <Dropdown label={t("companion.edit.eyes")} value={avatar.eyes} onChange={(eyes) => setAvatar({ ...avatar, eyes })} options={EYES.map((id) => ({ id, label: t(`companion.eyes.${id}`) }))} />
+          <Select label={t("companion.edit.eyes")} value={avatar.eyes} onChange={(eyes) => setAvatar({ ...avatar, eyes })} options={EYES.map((id) => ({ id, label: t(`companion.eyes.${id}`) }))} />
         </label>
         <label className="companion-field">
           <span className="sub">{t("companion.edit.accessory")}</span>
-          <Dropdown label={t("companion.edit.accessory")} value={avatar.accessory} onChange={(accessory) => setAvatar({ ...avatar, accessory })} options={ACCESSORIES.map((id) => ({ id, label: t(`companion.accessory.${id}`) }))} />
+          <Select label={t("companion.edit.accessory")} value={avatar.accessory} onChange={(accessory) => setAvatar({ ...avatar, accessory })} options={ACCESSORIES.map((id) => ({ id, label: t(`companion.accessory.${id}`) }))} />
         </label>
         <div className="btnrow">
           <button className="btn ghost small" onClick={onClose}>{t("companion.edit.cancel")}</button>

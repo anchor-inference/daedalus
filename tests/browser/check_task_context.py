@@ -91,7 +91,7 @@ def check(language: str, width: int) -> None:
 
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
-        page.locator(".pcard, .ph-row", has_text="Prepare catalog").first.click()
+        page.locator(".pcard, .list-row", has_text="Prepare catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
         open_task_tool(page, "Task context" if language == "en" else "Контекст задачи", language)
         expect(sheet).to_contain_text("Current context is unavailable" if language == "en" else "Текущий контекст недоступен")

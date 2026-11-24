@@ -63,8 +63,14 @@ describe("the anchor", () => {
     await act(async () => root.render(<Harness anchor={chip} />));
     const menu = document.querySelector<HTMLElement>(".model-menu")!;
     expect(menu).not.toBeNull();
-    expect(menu.style.top).toBe("80px");
-    expect(menu.style.left).toBe("700px");
+    // Base UI places the box through the positioner around it, once it has measured both, and moves
+    // it there with a transform. The document needs a size for that: jsdom lays nothing out, and in a
+    // window of no height every side collides and the box flips.
+    Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 900 });
+    await act(async () => { window.dispatchEvent(new Event("resize")); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    const placed = menu.closest<HTMLElement>(".popover-pos")!;
+    expect(placed.style.transform).toBe("translate(700px, 80px)");
     // No pill was asked for, so none is drawn: a running phone composer has no room for one.
     expect(host.querySelector(".model-select")).toBeNull();
   });
@@ -73,6 +79,8 @@ describe("the anchor", () => {
     await act(async () => root.render(<Harness anchor={chip} />));
     await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(document.querySelector(".model-menu")).toBeNull();
+    // The focus comes back a frame after the layer goes (ui/primitives/layers.ts says why).
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     expect(document.activeElement).toBe(chip);
   });
 });

@@ -27,7 +27,8 @@ import { agentName, isProject, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
 import { Dot, ToolPicker, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
-import { Banner, IconButton, ListRow, SectionHeader, SheetRow, TopBar } from "../ui/phone";
+import { Banner, SectionHeader, TopBar } from "../ui/phone";
+import { IconButton, MenuRow, Row } from "../ui/primitives";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 import { HostMark, RunOn, RunOnChip, RunOnSelect, useRunOn } from "../runon";
@@ -259,7 +260,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
         title={<>{model.label}<Icon name="chevron" size={14} /></>}
         onTitle={() => model.setOpen(true)}
         titleLabel={`${t("session.model.for")}: ${model.label}`}
-        actions={<IconButton icon="bell" label={screenTitle("inbox")} href={pathFor("inbox")} badge={summary.unseen} />}
+        actions={<IconButton icon="bell" label={screenTitle("inbox")} href={pathFor("inbox")} badge={summary.unseen} className="ph-ib" />}
       />
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       <div className="ph-page-body">
@@ -284,7 +285,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
               action={<button type="button" className="ph-link" onClick={() => navigate(CHATS_PATH)}>{t("ph.seeall")}</button>}>{t("ph.live")}</SectionHeader>
             <div className={`ph-list ph-live ${offline ? "stale" : ""}`}>
               {shown.map((s) => (
-                <ListRow key={s.id} data={{ session: s.id }} title={agentName(s)} onOpen={() => onOpen(s.id)}
+                <Row key={s.id} data={{ session: s.id }} title={agentName(s)} onOpen={() => onOpen(s.id)}
                   lead={<span className={`ph-sicon ${kindPlate(s).className}`} title={kindPlate(s).title}><Icon name={s.metadata?.loop ? "loop" : kindIcon(kindPlate(s).kind) ?? "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
                   meta={<LiveMeta s={s} />}
                   trail={relTime(s.last_message_at)} />
@@ -296,7 +297,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
       </div>
       <StartComposer phone project={picked ? target : ""} toast={toast} model={model} run={run} kind={kind} onKind={setKind} offers={offers} agent={agent} onAgent={setAgent} />
       {picking && (
-        <Sheet title={t("start.pick")} onClose={() => setPicking(false)} size="narrow">
+        <Sheet title={t("start.pick")} onClose={() => setPicking(false)} size="sm">
           <ProjectPickList projects={choosable} target={picked ? target : ""} onPick={(id) => { setTarget(id); setPicking(false); }} />
         </Sheet>
       )}
@@ -577,15 +578,15 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
     </div>
   );
   const toolsSheet = toolsOpen && (
-    <Sheet title={t("tools.title")} onClose={() => setToolsOpen(false)} size="narrow">
+    <Sheet title={t("tools.title")} onClose={() => setToolsOpen(false)} size="sm">
       <ToolPicker off={extra.toolsOff} onChange={(off) => edit({ toolsOff: off })} note={t("newagent.tools.note")} />
     </Sheet>
   );
   const foldersSheet = foldersOpen && (
-    <Sheet title={t("newagent.folder")} onClose={() => setFoldersOpen(false)} size="narrow" className="start-agent-folders">
+    <Sheet title={t("newagent.folder")} onClose={() => setFoldersOpen(false)} size="sm" className="start-agent-folders">
       {folderChoice.map((f) => (
-        <SheetRow key={f.id} icon="folder" label={folderName(f)} hint={f.position === 0 ? t("start.agent.folder.primary") : undefined} disabled={!f.reachable}
-          checked={(chosenFolder?.id ?? "") === (f.position === 0 ? "" : f.id)} onClick={() => { edit({ folder: f.position === 0 ? "" : f.id }); setFoldersOpen(false); }} />
+        <MenuRow key={f.id} icon="folder" label={folderName(f)} sub={f.position === 0 ? t("start.agent.folder.primary") : undefined} disabled={!f.reachable}
+          checked={(chosenFolder?.id ?? "") === (f.position === 0 ? "" : f.id)} onSelect={() => { edit({ folder: f.position === 0 ? "" : f.id }); setFoldersOpen(false); }} />
       ))}
     </Sheet>
   );
@@ -724,12 +725,12 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           onFiles={() => fileInput.current?.click()}
           onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
           extra={<>
-            <SheetRow icon="eyeoff" label={t("private.menu")} hint={`${t("private.menu.hint")}. ${t("private.newagent.hint")}`} checked={secret} data={{ private: "" }} onClick={() => { setSecret(!secret); setPlusOpen(false); }} />
-            {!agent && <SheetRow icon={AGENT_ICON} label={t("start.agent.switch")} hint={t("kind.mode.agent.hint")} chevron data={{ option: "agent" }} onClick={() => { setPlusOpen(false); onAgent(true); }} />}
-            {agent && project && <SheetRow icon="folderplus" label={t("newagent.directory.own")} hint={t("newagent.directory.own.hint")} checked={extra.ownDirectory} data={{ option: "own-directory" }} onClick={() => edit({ ownDirectory: !extra.ownDirectory })} />}
-            {agent && folderChoice.length > 0 && <SheetRow icon="folder" label={t("newagent.folder")} value={folderWord} chevron data={{ option: "folder" }} onClick={() => { setPlusOpen(false); setFoldersOpen(true); }} />}
-            {agent && <SheetRow icon="loop" label={t("newagent.loop")} hint={t("newagent.loop.hint")} checked={extra.loop.on} data={{ option: "loop" }} onClick={() => { setPlusOpen(false); editLoop({ on: !extra.loop.on }); }} />}
-            {agent && <SheetRow icon="wrench" label={t("tools.title")} value={extra.toolsOff.length ? t("start.agent.tools.off", { n: extra.toolsOff.length }) : t("start.agent.tools.all")} chevron data={{ option: "tools" }} onClick={() => { setPlusOpen(false); setToolsOpen(true); }} />}
+            <MenuRow icon="eyeoff" label={t("private.menu")} sub={`${t("private.menu.hint")}. ${t("private.newagent.hint")}`} checked={secret} data={{ private: "" }} onSelect={() => { setSecret(!secret); setPlusOpen(false); }} />
+            {!agent && <MenuRow icon={AGENT_ICON} label={t("start.agent.switch")} sub={t("kind.mode.agent.hint")} chevron data={{ option: "agent" }} onSelect={() => { setPlusOpen(false); onAgent(true); }} />}
+            {agent && project && <MenuRow icon="folderplus" label={t("newagent.directory.own")} sub={t("newagent.directory.own.hint")} checked={extra.ownDirectory} data={{ option: "own-directory" }} onSelect={() => edit({ ownDirectory: !extra.ownDirectory })} />}
+            {agent && folderChoice.length > 0 && <MenuRow icon="folder" label={t("newagent.folder")} aside={folderWord} chevron data={{ option: "folder" }} onSelect={() => { setPlusOpen(false); setFoldersOpen(true); }} />}
+            {agent && <MenuRow icon="loop" label={t("newagent.loop")} sub={t("newagent.loop.hint")} checked={extra.loop.on} data={{ option: "loop" }} onSelect={() => { setPlusOpen(false); editLoop({ on: !extra.loop.on }); }} />}
+            {agent && <MenuRow icon="wrench" label={t("tools.title")} aside={extra.toolsOff.length ? t("start.agent.tools.off", { n: extra.toolsOff.length }) : t("start.agent.tools.all")} chevron data={{ option: "tools" }} onSelect={() => { setPlusOpen(false); setToolsOpen(true); }} />}
           </>} />
       )}
       {toolsSheet}

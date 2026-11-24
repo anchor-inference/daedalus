@@ -76,7 +76,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
     // An existing conversation remains usable while its project goal is being established.
     body = orchestrator?.enabled && orchestrator.session_id ? <>
       {ready}
-      {goalOpen && <Sheet title={t("goal.start.title")} onClose={() => setGoalOpen(false)} size="narrow">
+      {goalOpen && <Sheet title={t("goal.start.title")} onClose={() => setGoalOpen(false)} size="sm">
         <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} embedded ready={null} onSaved={() => setGoalOpen(false)} />
       </Sheet>}
     </> : <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} ready={ready} />;

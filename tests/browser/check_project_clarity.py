@@ -64,7 +64,7 @@ def main() -> int:
                 expect(page.locator(".composer .attachments")).to_contain_text("evidence.txt")
 
                 bar.locator("button[data-tab='more']").click()
-                page.locator(".sheet.more-sheet .ph-mrow[data-more='attention']").click()
+                page.locator(".sheet.more-sheet .menu-row[data-more='attention']").click()
                 expect(page.locator(".focus-attention-item")).not_to_have_count(0)
                 # A request is a row that opens the one decision sheet, where it is answered.
                 page.locator("[data-kind='ask'] .focus-attention-item").first.click()
@@ -77,7 +77,7 @@ def main() -> int:
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "attention overflow")
 
                 bar.locator("button[data-tab='more']").click()
-                page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']").click()
+                page.locator(".sheet.more-sheet .menu-row[data-more='journal']").click()
                 expect(page.locator(".journal-entry")).not_to_have_count(0)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "history overflow")
                 context.close()

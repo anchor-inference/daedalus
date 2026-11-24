@@ -29,7 +29,7 @@ type Props = {
 export function QuickCreate(props: Props) {
   if (props.phone || !props.anchor) {
     return (
-      <Sheet title={t(props.draft.kind === "task" ? "cal.new.task" : "cal.new")} onClose={props.onClose} size="narrow" className="cal-quick-sheet">
+      <Sheet title={t(props.draft.kind === "task" ? "cal.new.task" : "cal.new")} onClose={props.onClose} size="sm" className="cal-quick-sheet">
         <QuickForm {...props} />
       </Sheet>
     );

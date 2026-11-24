@@ -66,7 +66,7 @@ def cards(page: Page, lang: str, width: int) -> None:
     serve(page, focus)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     # A desktop's cards, or the rows of a phone's list under its chips.
-    card_of = ".pcard" if width >= 1024 else ".ph-row"
+    card_of = ".pcard" if width >= 1024 else ".list-row"
     expect(page.locator(card_of, has_text=invented["task.photos"])).to_be_visible()
     # Work in progress carries no acceptance, even with requirements on it.
     expect(page.locator(".pcard-accept")).to_have_count(0)

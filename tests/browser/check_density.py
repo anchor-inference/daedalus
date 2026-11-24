@@ -57,7 +57,7 @@ READ = """
   const one = (...sels) => { for (const s of sels) { const el = document.querySelector(s); if (el) return el; } return null; };
   const all = (...sels) => { for (const s of sels) { const list = document.querySelectorAll(s); if (list.length) return [...list]; } return []; };
   const rows = all('.sidebar .erow', '.session-list-pane .erow', '.agents-screen .erow');
-  const phoneRows = all('.ph-row').map((r) => box(r).h);
+  const phoneRows = all('.list-row').map((r) => box(r).h);
   const single = rows.filter((r) => !r.querySelector('.erow-meta') && !r.querySelector('.erow-line2'));
   const double = rows.filter((r) => r.querySelector('.erow-meta') || r.querySelector('.erow-line2'));
   const acts = all('.act:not(.head)');
@@ -138,7 +138,7 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
     context.add_init_script(OPEN_FOLDERS)
     # A phone's list of chats is the Chats page now; its home holds only the live ones.
-    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".sb-row")
+    page = open_page(context, "agents?view=chats", ".list-row") if mobile else open_page(context, "agents", ".sb-row")
     out = page.evaluate(READ)
     out["vw"] = width
     context.close()
@@ -294,6 +294,9 @@ READ_PHONE = """
   const targets = [];
   for (const el of root.querySelectorAll('button, a[href], [role="link"], [role="radio"], input, textarea')) {
     if (!vis(el) || el.closest('[inert]') || el.type === 'file') continue;
+    // The form shadow a Base UI switch keeps beside itself: a 1 px input, hidden from the reader and
+    // out of the tab order. The switch itself is the target, and is measured as one.
+    if (el.tagName === 'INPUT' && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     const r = el.getBoundingClientRect();
     let w = r.width, h = r.height;
     // The composer's field is 34 px inside its 44 px pill, and a tap on the pill focuses the field.
@@ -318,7 +321,7 @@ READ_PHONE = """
     idle: rect('.composer[data-shape="idle"] .composer-box'),
     open: rect('.composer[data-shape="open"] .composer-box'),
     circle: rect('.composer[data-shape] .roundbtn'),
-    rows: [...document.querySelectorAll('.ph-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
+    rows: [...document.querySelectorAll('.list-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     chips: [...document.querySelectorAll('.ph-chip')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     nav: [...document.querySelectorAll('.ph-drawer-root.open .ph-nrow')].map((r) => Math.round(r.getBoundingClientRect().height)),
     drawer: rect('.ph-drawer-root.open .ph-drawer'),
@@ -403,24 +406,24 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         if page.locator(".ph-drawer-root.open").count():
             problems.append(f"drawer {lang}: Escape does not close it")
 
-        go("agents?view=chats", ".ph-row")
+        go("agents?view=chats", ".list-row")
         m = read("chats", ".ph-chats")
         if any(h != 54 for h in m["rows"]):
             problems.append(f"chats {lang}: rows {sorted(set(m['rows']))}, not 54")
         if any(h != 28 for h in m["chips"]):
             problems.append(f"chats {lang}: chips {sorted(set(m['chips']))}, not 28")
-        page.locator(".ph-row-more").first.click()
-        page.wait_for_selector(".ph-actions", timeout=5000)
+        page.locator(".list-row-more").first.click()
+        page.wait_for_selector(".menu-sheet", timeout=5000)
         page.wait_for_timeout(300)
-        read("row-sheet", ".ph-actions")
+        read("row-sheet", ".menu-sheet")
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
         # The same sheet on a finger held still, and the quick actions on a swipe to the left.
-        row = ".ph-chats .ph-row"
+        row = ".ph-chats .list-row"
         page.evaluate("""(sel) => { const el = document.querySelector(sel); const r = el.getBoundingClientRect();
           el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: r.x + 120, clientY: r.y + 20 })); }""", row)
         page.wait_for_timeout(700)
-        if not page.locator(".ph-actions").count():
+        if not page.locator(".menu-sheet").count():
             problems.append(f"chats {lang}: a long press does not open the row's sheet")
         page.evaluate("(sel) => document.querySelector(sel).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }))", row)
         page.keyboard.press("Escape")
@@ -429,7 +432,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
           const at = (type, x) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', clientX: x, clientY: r.y + 20 }));
           at('pointerdown', r.x + 300); at('pointermove', r.x + 280); at('pointermove', r.x + 200); at('pointermove', r.x + 60); at('pointerup', r.x + 60); }""", row)
         page.wait_for_timeout(400)
-        if page.locator(".ph-swipe.end .ph-swipe-act").count() < 2:
+        if page.locator(".list-row-swipe.end .list-row-swipe-act").count() < 2:
             problems.append(f"chats {lang}: a swipe to the left does not reveal the row's quick actions")
 
         # The session: the same 52 px bar with a two-line title and at most two glyphs, the answer's
@@ -527,7 +530,7 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
                 problems.append(f"{name} {lang}: the page scrolls sideways {m['scroll']}")
             return m
 
-        go("orchestration/projects", ".ph-orch .ph-row")
+        go("orchestration/projects", ".ph-orch .list-row")
         m = read("orchestration", ".ph-orch")
         if not m["top"] or m["top"]["h"] != 52:
             problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 52 tall")
@@ -542,7 +545,7 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
         read("decision sheet", ".ph-decisions")
         page.keyboard.press("Escape")
 
-        go(f"project/{pid}/board", ".ph-board .ph-row")
+        go(f"project/{pid}/board", ".ph-board .list-row")
         m = read("board", ".ph-board")
         if not m["top"] or m["top"]["h"] != 52:
             problems.append(f"board {lang}: the top bar is {m['top']}, not 52 tall")
@@ -550,7 +553,7 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
             problems.append(f"board {lang}: chips {sorted(set(m['chips']))}, not 28")
         if any(h < 54 for h in m["rows"]):
             problems.append(f"board {lang}: a row is shorter than 54: {sorted(set(m['rows']))}")
-        page.locator(".ph-board .ph-row.ph-task:not(.need) .ph-row-more").first.tap()
+        page.locator(".ph-board .list-row.ph-task:not(.need) .list-row-more").first.tap()
         page.wait_for_selector(".ph-task-menu", timeout=5000)
         page.wait_for_timeout(300)
         read("task sheet", ".ph-task-menu")
@@ -561,7 +564,7 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
         read("more sheet", ".ph-more-sheet")
         page.keyboard.press("Escape")
 
-        go(f"project/{pid}/attention", ".ph-attention .ph-row")
+        go(f"project/{pid}/attention", ".ph-attention .list-row")
         read("needs decision", ".ph-attention")
 
         go(f"project/{pid}/board?task=t-endpoint", ".ph-taskpage .ph-decide .ph-btn")

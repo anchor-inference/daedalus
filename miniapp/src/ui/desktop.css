@@ -24,7 +24,6 @@
 .control-trigger:hover { background:var(--surface-2); }
 .control-trigger[aria-expanded="true"] { background:var(--surface-2); border-color:var(--line-strong); }
 .control-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset:2px; }
-.menu.pop { border-radius:var(--radius-md); padding:var(--space-1); }
 .model-row { border-radius:var(--radius-sm); gap:var(--space-2); padding-inline:var(--space-2); }
 /* The chosen row says so with its check in ink at the right edge; the accent is kept for what is live. */
 .model-row.on > .ic { color:var(--fg); }
@@ -54,10 +53,6 @@
 .control-trigger[aria-invalid="true"] { border-color:var(--bad); }
 .control-trigger[aria-busy="true"] { cursor:progress; }
 
-.context-menu { z-index:var(--z-toast); max-height:calc(100dvh - 16px); overflow:auto; max-width:calc(100vw - 16px); }
-
-.context-menu { width:max-content; right:auto; bottom:auto; }
-.menu button:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 
 /* Cursor menus stay at their measured point throughout opening. */
 .context-menu { animation:none; }

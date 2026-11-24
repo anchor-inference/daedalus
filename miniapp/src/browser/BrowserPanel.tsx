@@ -507,7 +507,7 @@ function GiveBack({ anchor, onClose, onGive }: { anchor: HTMLElement; onClose: (
   const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => field.current?.focus(), []);
   return (
-    <Popover anchor={anchor} onClose={onClose} align="right" className="bp-give" label={t("browser.give")}>
+    <Popover anchor={anchor} onClose={onClose} align="end" className="bp-give" label={t("browser.give")}>
       <form
         onSubmit={(e) => {
           e.preventDefault();

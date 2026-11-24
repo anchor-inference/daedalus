@@ -41,7 +41,7 @@ ROWS = """
   const icon = row.firstElementChild;
   const lead = icon && icon.matches('svg.ic') ? icon.getBoundingClientRect() : null;
   // A row may stack a hint under its title (a phone's, the picker's Free): the icon is centred on both lines, not on the first.
-  const block = row.querySelector('.ph-mrow-main, .model-text');
+  const block = row.querySelector('.menu-row-main, .model-text');
   const middle = block ? block.getBoundingClientRect() : label;
   return {
     text: text.textContent.trim().slice(0, 24),
@@ -64,7 +64,7 @@ TABS = """
 }).filter(Boolean);
 """
 
-MENU_ROWS = ":scope > button, :scope > .ph-mrow"
+MENU_ROWS = ":scope > button, :scope > .menu-row"
 # The model picker's rows that lead with an icon of their own: Free, Effort, the account and Add model.
 PICKER_ROWS = ":scope .provider-row:not([data-provider]), :scope .effort-entry, :scope .model-add"
 
@@ -149,7 +149,7 @@ def phone(page: Page, scheme: str) -> None:
     judge(f"{scheme} phone text right click", rows(page, ".context-menu"), icons=4)
     page.keyboard.press("Escape")
     page.get_by_role("button", name="Add to the message").click()
-    page.wait_for_selector(".ph-sheet .ph-mrow")
+    page.wait_for_selector(".ph-sheet .menu-row")
     judge(f"{scheme} phone + sheet", rows(page, ".ph-sheet .sheet-body"), icons=3)
 
 

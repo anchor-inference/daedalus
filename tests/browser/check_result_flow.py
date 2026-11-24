@@ -110,7 +110,7 @@ def run() -> int:
         serve(page, stub, unhandled)
         page.goto(f"{BASE}/project/{PID}/board?token=t&lang=en")
         # A phone opens the task as its review page; the decision is that page's footer.
-        page.locator(".ph-board .ph-row, .pboard-list .pcard", has_text="Verify export").first.click()
+        page.locator(".ph-board .list-row, .pboard-list .pcard", has_text="Verify export").first.click()
         decide = page.locator(".ph-taskpage .ph-decide") if phone else page.locator(".result-flow .result-action")
         flow = page.locator(".result-flow")
         expect(flow).to_be_visible()
@@ -148,7 +148,7 @@ def run() -> int:
             sheet = page.locator(".ph-note-sheet")
             expect(sheet).to_contain_text("api/notify.py")
             sheet.locator("textarea").fill("Guard the unpaid case in a test too")
-            sheet.locator(".ph-sheet-foot .ph-btn.primary").click()
+            sheet.locator(".sheet-foot .ph-btn.primary").click()
             expect(sheet).to_have_count(0)
             expect(page.locator(".ph-filediff .ph-linenote")).to_contain_text("Guard the unpaid case")
             page.locator(".ph-filediff .ph-top .ph-ib").first.tap()

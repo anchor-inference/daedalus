@@ -55,7 +55,7 @@ export function GuestLinksSheet({ sessionId, toast, onClose }: { sessionId: stri
   const door = useQuery<GuestDoor>(`/api/guest/door?session_id=${encoded(sessionId)}`, { pollMs: 15000 });
   const data = door.data;
   return (
-    <Sheet title={t("guest.title")} onClose={onClose} size="narrow">
+    <Sheet title={t("guest.title")} onClose={onClose} size="sm">
       <div className="guest-sheet" data-guest-sheet="">
         {!data ? (
           <div className="sub" role="status">{door.error ? t("guest.off") : t("common.loading")}</div>

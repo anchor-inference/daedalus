@@ -48,7 +48,7 @@ export function ShareSheet({
   }
 
   return (
-    <Sheet title={t("session.share.title")} onClose={onClose} size="narrow">
+    <Sheet title={t("session.share.title")} onClose={onClose} size="sm">
       <div className="access-options" role="radiogroup" aria-label={t("session.share.title")}>
         {MODES.map((item) => (
           <label key={item} className={`access-option ${mode === item ? "on" : ""}`}>

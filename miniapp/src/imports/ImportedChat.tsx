@@ -10,7 +10,8 @@ import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
-import { ListRow, SectionHeader } from "../ui/phone";
+import { SectionHeader } from "../ui/phone";
+import { Row } from "../ui/primitives";
 import { openImport } from "./ImportExplorer";
 import { HarnessMark } from "./parts";
 import { cardDismissed, cardSessions, dismissCard, harnessMeta, originMessages, shortId, shortPath, type ForeignSession, type ImportedOrigin } from "./model";
@@ -216,7 +217,7 @@ export function PhoneImportCard() {
       <SectionHeader count={sessions.length} action={<button type="button" className="ph-link" onClick={dismiss}>{t("imp.card.hide.short")}</button>}>{t("imp.card")}</SectionHeader>
       <div className="ph-list imp-card">
         {sessions.map((s) => (
-          <ListRow key={`${s.harness}:${s.id}`} data={{ fresh: s.id }} title={s.title} onOpen={() => openImport({ harness: s.harness, path: s.cwd, session: s.id })}
+          <Row key={`${s.harness}:${s.id}`} data={{ fresh: s.id }} title={s.title} onOpen={() => openImport({ harness: s.harness, path: s.cwd, session: s.id })}
             lead={<HarnessMark id={s.harness} size="md" />}
             meta={<span className="truncate">{harnessMeta(s.harness).name} · {shortPath(s.cwd, home)}</span>}
             trail={relTime(s.updated_at)} />

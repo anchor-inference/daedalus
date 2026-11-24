@@ -124,7 +124,7 @@ function WakeupSheet({ projectId, collectionRevision, unverified, onClose, toast
     }
   }
   return (
-    <Sheet title={t("focus.wakeups.new")} onClose={onClose} size="narrow" className="wakeup-sheet">
+    <Sheet title={t("focus.wakeups.new")} onClose={onClose} size="sm" className="wakeup-sheet">
       <label className="field" htmlFor="wakeup-note">{t("focus.wakeups.note")}</label>
       <textarea id="wakeup-note" className="field" rows={3} maxLength={500} autoFocus value={draft.note} placeholder={t("focus.wakeups.note.hint")} onChange={(e) => set({ note: e.target.value })} />
       <label className="field">{t("sched.when")}</label>
@@ -365,7 +365,7 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
     </select>
   );
   return (
-    <Sheet title={t("focus.watches.new")} onClose={onClose} size="narrow" className="watch-sheet">
+    <Sheet title={t("focus.watches.new")} onClose={onClose} size="sm" className="watch-sheet">
       {pending && <div className="result-warning" role="status">{t("focus.watches.pendingWrite", { action: pending.label })} <button type="button" className="linkbtn" disabled={offline || unverified || busy} onClick={() => void retry()}>{t("project.write.retry")}</button></div>}
       {conflict && <div className="result-warning" role="status">{t("focus.watches.conflict")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("project.write.review")}</button></div>}
       {needsRefresh && <div className="result-warning" role="status">{t("focus.watches.unverified")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("common.retry")}</button></div>}

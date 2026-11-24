@@ -11,8 +11,10 @@ let mount: HTMLDivElement;
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} }); mount = document.createElement("div"); document.body.append(mount); root = createRoot(mount); });
 afterEach(() => { act(() => root.unmount()); mount.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const fire = (target: HTMLElement, event: Event) => act(() => { target.dispatchEvent(event); });
+// Base UI focuses a menu a moment after it mounts; the first command takes the focus from it then.
+const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
 
-it("right click runs the row command and Escape restores keyboard focus without activating it", () => {
+it("right click runs the row command and Escape restores keyboard focus without activating it", async () => {
   const rename = vi.fn();
   function Row() {
     const ref = useRef<HTMLButtonElement>(null);
@@ -25,12 +27,15 @@ it("right click runs the row command and Escape restores keyboard focus without 
   const right = new MouseEvent("contextmenu", { bubbles:true, cancelable:true, clientX:1000, clientY:700 });
   fire(row, right);
   expect(right.defaultPrevented).toBe(true);
+  await settle();
   expect(document.activeElement?.textContent).toBe("Rename");
   fire(document.activeElement as HTMLElement, new KeyboardEvent("keydown", { key:"Escape", bubbles:true }));
+  await settle();
   expect(document.querySelector('[role="menu"]')).toBeNull();
   expect(document.activeElement).toBe(row);
   expect(rename).not.toHaveBeenCalled();
   fire(row, new KeyboardEvent("keydown", { key:"F10", shiftKey:true, bubbles:true, cancelable:true }));
+  await settle();
   fire(document.querySelector('[role="menuitem"]')!, new MouseEvent("click", { bubbles:true }));
   expect(rename).toHaveBeenCalledOnce();
 });

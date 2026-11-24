@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { int, relTime, usd } from "../format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "../api";
@@ -41,208 +41,10 @@ export function ChipRow({ children, className = "", label }: { children: React.R
   );
 }
 
-/** One of a small fixed set, picked in place: the one choice control Settings uses, so a mode, an
- *  approval rule and an on/off setting all look and answer the same way. */
-export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; label?: string }) {
-  return (
-    <div className="segmented inline" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? "on" : ""} onClick={() => value !== option.id && onChange(option.id)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** An on/off setting that takes effect at once. It is a switch and not a button labelled "on" or "off",
- *  because such a button beside an action such as "Run now" read as a second action, and nobody
- *  could tell whether its word was the state or what pressing it would do. */
-export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean }) {
-  return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`switch ${checked ? "on" : ""}`} disabled={disabled} onClick={() => onChange(!checked)}>
-      <span className="switch-track" aria-hidden><span className="switch-knob" /></span>
-    </button>
-  );
-}
-
-export type DropdownOption<T extends string> = { id: T; label: string; hint?: string; disabled?: boolean };
-
-/** One of many, or of a few with long names, picked from a list that opens over the page: a compact
- *  button that shows the value and a caret, so a settings row keeps its control in the right-hand
- *  lane. A full-width native select there pushed the value under its label and made every such row
- *  two lines tall, and a native list could not carry a line saying what each choice means.
- *
- *  The list opens upward when the window has no room below the button, and closes on a pick, on
- *  Escape, on Tab and on a press anywhere else. Focus stays on the button; the arrow keys move the
- *  highlighted choice, as they do in a native select. */
-export function Dropdown<T extends string>({ value, options, onChange, label, id, invalid, disabled, className = "" }: {
-  value: T;
-  options: DropdownOption<T>[];
-  onChange: (id: T) => void;
-  label: string;
-  id?: string;
-  invalid?: boolean;
-  disabled?: boolean;
-  className?: string;
-}) {
-  const current = options.find((o) => o.id === value);
-  return (
-    <PickList
-      options={options}
-      chosen={(o) => o.id === value}
-      shown={current?.label ?? ""}
-      value={value}
-      onPick={(o) => o.id !== value && onChange(o.id)}
-      label={label}
-      id={id}
-      invalid={invalid}
-      disabled={disabled}
-      className={className}
-    />
-  );
-}
-
-function PickList<T extends string>({ options, chosen, shown, value, onPick, label, id, invalid, disabled, className = "" }: {
-  options: DropdownOption<T>[];
-  chosen: (o: DropdownOption<T>) => boolean;
-  shown: string;
-  value: string;
-  onPick: (o: DropdownOption<T>) => void;
-  label: string;
-  id?: string;
-  invalid?: boolean;
-  disabled?: boolean;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(-1);
-  const [up, setUp] = useState(false);
-  const wrap = useRef<HTMLSpanElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const list = useRef<HTMLSpanElement>(null);
-  const listId = useId();
-  // The list hangs from the control's right edge, and a control near the left edge of a phone hung
-  // it off the screen: only the order badges of the web search's fallbacks were left to see. Once
-  // drawn, it is moved sideways by whatever it overhangs, 8 px short of either edge.
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (!open || !el) return;
-    el.style.transform = "";
-    const r = el.getBoundingClientRect();
-    const edge = document.documentElement.clientWidth;
-    const shift = r.left < 8 ? 8 - r.left : r.right > edge - 8 ? Math.max(8 - r.left, edge - 8 - r.right) : 0;
-    if (shift) el.style.transform = `translateX(${Math.round(shift)}px)`;
-  }, [open, options.length]);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", away);
-    return () => document.removeEventListener("pointerdown", away);
-  }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    // Optional call: a document without layout (the unit tests' jsdom) has no scrollIntoView.
-    wrap.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView?.({ block: "nearest" });
-  }, [open, active]);
-
-  function show() {
-    const box = button.current?.getBoundingClientRect();
-    const below = box ? window.innerHeight - box.bottom : Infinity;
-    const wanted = Math.min(320, options.length * 40 + 12);
-    setUp(below < wanted && (box?.top ?? 0) > below);
-    setActive(Math.max(0, options.findIndex(chosen)));
-    setOpen(true);
-  }
-  function pick(option: DropdownOption<T>) {
-    if (option.disabled) return;
-    setOpen(false);
-    button.current?.focus();
-    onPick(option);
-  }
-  function step(from: number, by: number): number {
-    for (let i = 1; i <= options.length; i++) {
-      const next = (from + by * i + options.length * i) % options.length;
-      if (!options[next]?.disabled) return next;
-    }
-    return from;
-  }
-  function onKey(e: React.KeyboardEvent) {
-    if (!open) {
-      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
-        e.preventDefault();
-        show();
-      }
-      return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1));
-    } else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      if (options[active]) pick(options[active]);
-    } else if (e.key === "Tab") {
-      setOpen(false);
-    }
-  }
-  return (
-    <span ref={wrap} className={`dropdown ${className}`.trim()}>
-      <button
-        ref={button}
-        id={id}
-        type="button"
-        className="dropdown-btn"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-        aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
-        aria-label={`${label}: ${shown}`}
-        aria-invalid={invalid || undefined}
-        data-value={value}
-        disabled={disabled}
-        title={shown}
-        onClick={() => (open ? setOpen(false) : show())}
-        onKeyDown={onKey}
-      >
-        <span className="dropdown-value">{shown}</span>
-        <Icon name="chevron" size={14} />
-      </button>
-      {open && (
-        <span ref={list} id={listId} role="listbox" aria-label={label} className={`dropdown-list ${up ? "up" : ""}`}>
-          {options.map((option, i) => {
-            const on = chosen(option);
-            return (
-              <span
-                key={option.id}
-                id={`${listId}-${i}`}
-                data-index={i}
-                data-value={option.id}
-                role="option"
-                aria-selected={on}
-                aria-disabled={option.disabled || undefined}
-                className={`dropdown-item ${i === active ? "active" : ""} ${on ? "on" : ""}`}
-                onPointerEnter={() => !option.disabled && setActive(i)}
-                onClick={() => pick(option)}
-              >
-                <span className="dropdown-item-text">
-                  <span>{option.label}</span>
-                  {option.hint && <span className="sub">{option.hint}</span>}
-                </span>
-                {on && <Icon name="check" size={14} />}
-              </span>
-            );
-          })}
-        </span>
-      )}
-    </span>
-  );
-}
+export { Segmented } from "./primitives/segmented";
+export { Select } from "./primitives/select";
+export { Switch } from "./primitives/switch";
+export { Dot } from "./primitives/markup";
 
 export function Avatar({ status, seed }: { status: Status; seed: string }) {
   // Deterministic accessory per session so each "bot" stays recognisable.
@@ -275,10 +77,6 @@ export function Chevron({ open, size = 14 }: { open: boolean; size?: number }) {
       <Icon name="forward" size={size} />
     </span>
   );
-}
-
-export function Dot({ status, className }: { status: string; className?: string }) {
-  return <span className={`dot ${status} ${className ?? ""}`} aria-hidden />;
 }
 
 /** A dot and the word: "● Working", "● Needs you". */
@@ -532,7 +330,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
         {menu}
       </div>
       {share && s.status === "running" && (
-        <Sheet title={t("svc.sheet.title", { name: s.name })} onClose={() => setShare(false)} size="narrow">
+        <Sheet title={t("svc.sheet.title", { name: s.name })} onClose={() => setShare(false)} size="sm">
           <div className="access-options" role="radiogroup">
             {(["local", "key", "public"] as ShareMode[]).map((m) => (
               <label key={m} className={`access-option ${mode === m ? "on" : ""}`}>

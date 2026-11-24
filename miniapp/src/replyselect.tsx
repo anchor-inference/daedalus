@@ -9,7 +9,6 @@ import { Icon } from "./icons";
 import { t } from "./i18n";
 import { addQuoteReply, cleanQuote, type QuoteReply, removeQuoteReply, type SentReply, updateQuoteReply } from "./quotereply";
 import { Sheet, useLayer } from "./ui/dialogs";
-import { BottomSheet } from "./ui/phone";
 
 /** The attribute an element carries when a selection inside it may be answered: the seq of the agent
  *  message it draws, or empty when that is not known. Only an agent's answer carries it, so the
@@ -315,10 +314,10 @@ function ReplyPopover({ quote, range, scroller, onAdd, onClose }: { quote: strin
 /** The phone's reply: the same quote and field, in a sheet from the bottom, over the keyboard. */
 function ReplySheet({ quote, onAdd, onClose }: { quote: string; onAdd: (text: string) => void; onClose: () => void }) {
   return (
-    <BottomSheet title={t("quote.sheet")} onClose={onClose} className="reply-sheet">
+    <Sheet title={t("quote.sheet")} onClose={onClose} className="ph-sheet reply-sheet">
       <QuoteBar quote={quote} lines={3} />
       <ReplyField onAdd={onAdd} onCancel={onClose} />
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -361,8 +360,8 @@ export function ReplyDialog({ sessionId, reply, phone, onClose }: { sessionId: s
     </div>
   );
   return phone
-    ? <BottomSheet title={t("quote.dialog")} onClose={onClose} className="reply-sheet">{body}</BottomSheet>
-    : <Sheet title={t("quote.dialog")} onClose={onClose} size="narrow" className="reply-dialog-sheet">{body}</Sheet>;
+    ? <Sheet title={t("quote.dialog")} onClose={onClose} className="ph-sheet reply-sheet">{body}</Sheet>
+    : <Sheet title={t("quote.dialog")} onClose={onClose} size="sm" className="reply-dialog-sheet">{body}</Sheet>;
 }
 
 // ── in a sent message ────────────────────────────────────────────────────────────────────────

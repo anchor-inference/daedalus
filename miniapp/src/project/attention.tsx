@@ -8,7 +8,8 @@ import { Icon } from "../icons";
 import { askWords } from "../staff/model";
 import { StaffAvatar } from "../team/parts";
 import type { Staff } from "../team/team";
-import { Banner, EmptyState, IconButton, ListRow, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, EmptyState, SectionHeader, TopBar } from "../ui/phone";
+import { IconButton, Row } from "../ui/primitives";
 import { DecisionSheet } from "./needs";
 import { useStreamUp } from "../events";
 import { clock, relTime } from "../format";
@@ -111,7 +112,7 @@ function PhoneAttention({ projectId, name, back, toast, open, review, actions, b
   const empty = known && !uncertain && total === 0;
   return <div className="ph-page ph-attention">
     <TopBar title={t("focus.nav.attention")} sub={sub} back={back ? () => goBack(back) : undefined}
-      actions={<IconButton icon="reload" label={t("pattn.refresh")} onClick={refresh} />} />
+      actions={<IconButton icon="reload" label={t("pattn.refresh")} onClick={refresh} className="ph-ib" />} />
     <div className="ph-page-body list">
       {uncertain && <div className="ph-page-pad"><Banner tone="warn" icon="alert" className="focus-attention-warning" sub={checked || undefined} action={<button type="button" className="ph-btn sm" onClick={refresh}>{t("common.retry")}</button>}>{t("focus.attention.stale")}</Banner></div>}
       {!known && !failed && [0, 1, 2].map((i) => <div key={i} className="ph-skrow"><span className="ph-sk" style={{ width: 44, height: 44, borderRadius: "50%" }} /><span className="grow"><span className="ph-sk" style={{ height: 14, width: `${60 - i * 10}%` }} /><span className="ph-sk" style={{ height: 11, width: "45%", marginTop: 8 }} /></span></div>)}
@@ -122,11 +123,11 @@ function PhoneAttention({ projectId, name, back, toast, open, review, actions, b
           const permission = ask.kind === "permission" || ask.kind === "folder";
           const who = ask.staff_id ? names.get(ask.staff_id)?.name : undefined;
           const heading = ask.heading || ask.title || ask.text;
-          return <ListRow key={ask.id} className="focus-attention-item" data={{ ask: ask.short_id, kind: "ask" }}
+          return <Row key={ask.id} className="focus-attention-item" data={{ ask: ask.short_id, kind: "ask" }}
             lead={<span className="ph-avatar warn" aria-hidden><Icon name={permission ? "shield" : "ask"} size={22} /></span>}
             title={permission ? t("pattn.permission") : t("pattn.question", { title: heading })}
             meta={[who ?? t("pattn.orchestrator"), permission ? askWords(ask) : ask.heading || ask.title ? ask.text : ""].filter(Boolean).join(" · ")}
-            trail={<span className="ph-row-time">{relTime(ask.created_at)}</span>}
+            trail={<span className="list-row-time">{relTime(ask.created_at)}</span>}
             onOpen={() => setSheet(true)} />;
         })}
       </>}

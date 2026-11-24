@@ -77,7 +77,7 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
     it.run();
   };
   return (
-    <Sheet ariaLabel={t("shell.search.label")} onClose={onClose} size="narrow" className="palette-sheet">
+    <Sheet ariaLabel={t("shell.search.label")} onClose={onClose} size="sm" className="palette-sheet">
       <input
         className="field"
         autoFocus

@@ -230,7 +230,7 @@ function ResetSheet({ onClose }: { onClose: () => void }) {
     }
   }
   return (
-    <Sheet title={t("settings.memory.reset.title")} onClose={onClose} size="narrow" className="memory-reset">
+    <Sheet title={t("settings.memory.reset.title")} onClose={onClose} size="sm" className="memory-reset">
       <div className="sub">{t("settings.memory.reset.body")}</div>
       <label className="field" htmlFor="memory-reset-word">{t("settings.memory.reset.type", { word })}</label>
       <input id="memory-reset-word" className="field" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />

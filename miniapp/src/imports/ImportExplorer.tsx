@@ -86,7 +86,7 @@ function ImportDialog({ request, onClose, onDone, onOpenChat }: { request: OpenR
   };
 
   return (
-    <Sheet title={t("imp.title")} onClose={onClose} size="wide" className="imp-sheet">
+    <Sheet title={t("imp.title")} onClose={onClose} size="xl" className="imp-sheet">
       <div className="imp" onKeyDown={onKey}>
         <p className="sub imp-intro">{t("imp.intro")}</p>
         <HarnessStrip flow={flow} />

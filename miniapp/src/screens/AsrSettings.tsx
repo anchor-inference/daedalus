@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import type { Settings } from "../api";
 import { t } from "../i18n";
-import { Dropdown, Switch, go } from "../ui/index";
+import { Select, Switch, go } from "../ui/index";
 import { pathFor } from "../router";
 import { Row, TextBlock } from "../settingsrow";
 import { SpeechModel, fetchSttView } from "../sttview";
@@ -40,7 +40,7 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
   const cloudFields = (
     <div className="settings-disclosure asr-cloud">
       <Row title={t("settings.asr.provider")} stack data-setting="asr.provider">
-        <Dropdown
+        <Select
           id="asr-provider"
           label={t("settings.asr.provider")}
           value={asr.provider || ""}
@@ -78,11 +78,11 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
       <div className="section-title">{t("settings.asr.title")}</div>
       <div className="sub">{t("settings.asr.sub")}</div>
       <Row data-setting="asr.transcriber" title={t("settings.asr.engine")} desc={!anyLocal ? <>{t("settings.asr.nolocal")} <a href={catalogue} onClick={(e) => go(e, catalogue)}>{t("settings.asr.nolocal.link")}</a></> : undefined} stack>
-        <Dropdown id="asr-transcriber" label={t("settings.asr.engine")} value={transcriber} invalid={primary.some((o) => o.missing && o.value === transcriber)} onChange={(next) => put({ transcriber: next, fallback: fallback === next ? "" : fallback })} options={primary.map((o) => ({ id: o.value, label: o.label }))} />
+        <Select id="asr-transcriber" label={t("settings.asr.engine")} value={transcriber} invalid={primary.some((o) => o.missing && o.value === transcriber)} onChange={(next) => put({ transcriber: next, fallback: fallback === next ? "" : fallback })} options={primary.map((o) => ({ id: o.value, label: o.label }))} />
       </Row>
       {transcriber === CLOUD && cloudFields}
       <Row title={t("settings.asr.fallback")} desc={t("settings.asr.fallback.sub")} stack data-setting="asr.fallback">
-        <Dropdown id="asr-fallback" label={t("settings.asr.fallback")} value={fallback} invalid={second.some((o) => o.missing && o.value === fallback)} onChange={(next) => put({ fallback: next })} options={[{ id: "", label: t("settings.asr.fallback.none") }, ...second.map((o) => ({ id: o.value, label: o.label }))]} />
+        <Select id="asr-fallback" label={t("settings.asr.fallback")} value={fallback} invalid={second.some((o) => o.missing && o.value === fallback)} onChange={(next) => put({ fallback: next })} options={[{ id: "", label: t("settings.asr.fallback.none") }, ...second.map((o) => ({ id: o.value, label: o.label }))]} />
       </Row>
       {transcriber !== CLOUD && fallback === CLOUD && cloudFields}
       <Row title={t("settings.asr.autosend")} desc={t("settings.asr.autosend.sub")} data-setting="asr.autosend">

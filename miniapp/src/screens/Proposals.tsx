@@ -93,7 +93,7 @@ function ProposalSheet({ p, toast, onDone, onClose }: { p: Proposal; toast: (t: 
     }
   }
   return (
-    <Sheet title={p.title} onClose={onClose} size="wide" className="proposal-sheet">
+    <Sheet title={p.title} onClose={onClose} size="xl" className="proposal-sheet">
       <div className="erow-meta" style={{ marginBottom: 8 }}>
         <Pill status={p.status} />
         <span className="mono">{p.repo}</span>

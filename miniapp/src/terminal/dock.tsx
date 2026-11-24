@@ -534,7 +534,7 @@ function DockPicker({ dock, anchor, workspace, phone = false }: { dock: DockCont
       projects={projects}
       suggested={dock.preferredEnv}
       anchor={anchor}
-      align="left"
+      align="start"
       phone={phone}
       // The quick places start where the host puts a session's terminal (its own folder, or the
       // project's); only a folder chosen by hand is sent.
