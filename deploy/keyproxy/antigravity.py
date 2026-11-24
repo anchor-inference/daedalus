@@ -1,7 +1,8 @@
 """Google Antigravity (agy) login as a key-proxy upstream.
 
 The CLI stores OAuth tokens in ``~/.gemini/antigravity-cli/antigravity-oauth-token``.
-This module reads and refreshes them through Google's OAuth token endpoint, resolves the
+This module reads and refreshes them through Google's OAuth token endpoint, with the OAuth
+client of the installed agy, read out of its binary (no client is written down here), resolves the
 account's Cloud Code project via ``v1internal:loadCodeAssist``, lists models and quota
 windows via ``v1internal:fetchAvailableModels``, and translates OpenAI chat completions
 into ``v1internal:streamGenerateContent?alt=sse`` and back.
@@ -12,6 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mmap
+import os
+import re
+import shutil
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -27,8 +32,6 @@ logger = logging.getLogger("keyproxy.antigravity")
 
 ANTIGRAVITY_BASE = "https://daily-cloudcode-pa.googleapis.com"
 ANTIGRAVITY_TOKEN_URL = "https://oauth2.googleapis.com/token"
-ANTIGRAVITY_CLIENT_ID = "REMOVED-CLIENT-ID"
-ANTIGRAVITY_CLIENT_SECRET = "REMOVED-CLIENT-SECRET"
 DEFAULT_PROJECT = "aicode-consumers"
 REFRESH_SKEW_SECONDS = 300
 REASONING_FORMAT = "google-gemini-v1"
@@ -45,6 +48,162 @@ ANTIGRAVITY_FALLBACK_MODELS = (
     "claude-opus-5-5-medium",
     "gpt-oss-120b-medium",
 )
+
+
+CLIENT_FILE = "daedalus-oauth-client.json"
+"""Beside the login: the OAuth client a refresh last succeeded with, so a restart does not scan the CLI again."""
+CLIENT_ID_SUFFIX = b".apps.googleusercontent.com"
+CLIENT_ID_PATTERN = re.compile(rb"([0-9]{6,})-[a-z0-9]{32}\Z")
+CLIENT_SECRET_PREFIX = b"GOCSPX-"
+CLIENT_SECRET_BODY = re.compile(rb"[A-Za-z0-9_-]{28}")
+CLIENT_REJECTIONS = frozenset({"invalid_client", "unauthorized_client"})
+"""Google's answers to a refresh signed by the wrong client: try the next one. Anything else is about the login itself."""
+MAX_CLIENT_TRIALS = 24
+SHORTEST_PROJECT_NUMBER = 12
+CLIENT_MISSING = (
+    "antigravity: cannot refresh the login, the Antigravity CLI's OAuth client was not found "
+    "(not in the login file, and no agy binary to read it from); install or update agy on the host and sign in with it again"
+)
+
+
+class OAuthClient(tuple[str, str]):
+    """``(client_id, client_secret)``; its ``repr`` keeps the secret out of logs and test reports."""
+
+    __slots__ = ()
+
+    def __new__(cls, client_id: str, secret: str) -> OAuthClient:
+        return super().__new__(cls, (client_id, secret))
+
+    def __repr__(self) -> str:
+        return f"OAuthClient({self[0][:6]}…, ***)"
+
+
+_verified_client: OAuthClient | None = None
+"""The client the last refresh succeeded with. One CLI, one client: every account's login shares it."""
+_cli_scans: dict[tuple[str, int, int], list[OAuthClient]] = {}
+"""Per binary (path, size, mtime): the pairs read out of it. An update of agy changes the key and scans afresh."""
+
+
+def client_in_login(data: dict[str, Any]) -> OAuthClient | None:
+    """The client stored with the tokens, when the CLI writes one there (some Google CLIs do; agy 1.5 does not)."""
+    for holder in (data, data.get("token") or {}):
+        if not isinstance(holder, dict):
+            continue
+        client_id = holder.get("client_id") or holder.get("clientId")
+        secret = holder.get("client_secret") or holder.get("clientSecret")
+        if isinstance(client_id, str) and isinstance(secret, str) and client_id and secret:
+            return OAuthClient(client_id, secret)
+    return None
+
+
+def cli_binaries(login: Path) -> list[Path]:
+    """Where the agy binary may be, most specific first; only the ones that exist.
+
+    ``KEYPROXY_ANTIGRAVITY_CLI`` names it outright. ``bin/agentapi`` in the CLI's data folder is a
+    shell shim agy writes with the binary's absolute path in it, which is right on a native install.
+    In the compose stack that path is the host's and means nothing in here, so the stack mounts the
+    host's ``~/.local/bin`` (where agy's installer puts it) at this container's home.
+    """
+    found: list[Path] = []
+    explicit = os.environ.get("KEYPROXY_ANTIGRAVITY_CLI", "")
+    if explicit:
+        found.append(Path(explicit))
+    data_dirs = [login.parent]
+    # An account's login sits in <data dir>/daedalus-accounts/<id>/, and agy's shim is in the default one.
+    if login.parent.parent.name == "daedalus-accounts":
+        data_dirs.append(login.parent.parent.parent)
+    for data_dir in data_dirs:
+        try:
+            shim = (data_dir / "bin" / "agentapi").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = re.search(r'exec\s+"([^"]+)"', shim) or re.search(r"exec\s+(\S+)", shim)
+        if match:
+            found.append(Path(match.group(1)))
+    found.append(Path.home() / ".local" / "bin" / "agy")
+    which = shutil.which("agy")
+    if which:
+        found.append(Path(which))
+    unique: list[Path] = []
+    for path in found:
+        try:
+            if path.is_file() and path not in unique:
+                unique.append(path)
+        except OSError:
+            continue
+    return unique
+
+
+def _scan(view: Any, anchor: bytes) -> list[int]:
+    offsets, at = [], view.find(anchor)
+    while at != -1:
+        offsets.append(at)
+        at = view.find(anchor, at + 1)
+    return offsets
+
+
+def scan_cli(binary: Path) -> list[OAuthClient]:
+    """The OAuth client pairs worth trying from ``binary``, most likely first.
+
+    agy is a Go binary: its string literals are packed end to end with no separator, grouped by the
+    linker rather than by the code that uses them, so the id and the secret of one client are not
+    near each other and a greedy pattern runs into the next string. Hence fixed-length matching (a
+    Google secret is ``GOCSPX-`` and 28 characters, an id's hash 32), and pairs ranked rather than
+    known: the id and secret of the same rank first (which is how agy lays them out today), then
+    every other combination, then each id without a leading digit a neighbouring string may have
+    lent it. The refresh tries them in this order and Google says which one is right.
+    """
+    with binary.open("rb") as handle:
+        try:
+            view = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        except ValueError:
+            return []
+        with view:
+            # bytes.find on the mapping is a memchr-speed scan; a regex over 270 MB with a leading
+            # repetition took seconds.
+            ids: list[str] = []
+            stripped: list[str] = []
+            for at in _scan(view, CLIENT_ID_SUFFIX):
+                head = view[max(0, at - 80):at]
+                match = CLIENT_ID_PATTERN.search(head)
+                if not match:
+                    continue
+                client_id = match.group().decode() + CLIENT_ID_SUFFIX.decode()
+                if client_id not in ids:
+                    ids.append(client_id)
+                digits = match.group(1)
+                for drop in range(1, len(digits) - SHORTEST_PROJECT_NUMBER + 1):
+                    variant = client_id[drop:]
+                    if variant not in stripped:
+                        stripped.append(variant)
+            secrets: list[str] = []
+            for at in _scan(view, CLIENT_SECRET_PREFIX):
+                body = view[at + len(CLIENT_SECRET_PREFIX):at + len(CLIENT_SECRET_PREFIX) + 28]
+                if CLIENT_SECRET_BODY.fullmatch(body):
+                    secret = (CLIENT_SECRET_PREFIX + body).decode()
+                    if secret not in secrets:
+                        secrets.append(secret)
+    pairs: list[OAuthClient] = [OAuthClient(i, s) for i, s in zip(ids, secrets, strict=False)]
+    pairs += [OAuthClient(i, s) for i in ids for s in secrets if OAuthClient(i, s) not in pairs]
+    pairs += [OAuthClient(i, s) for i in stripped if i not in ids for s in secrets]
+    return pairs
+
+
+def cli_clients(binary: Path) -> list[OAuthClient]:
+    """:func:`scan_cli`, once per version of the binary."""
+    stat = binary.stat()
+    key = (str(binary), stat.st_size, stat.st_mtime_ns)
+    if key not in _cli_scans:
+        _cli_scans[key] = scan_cli(binary)
+    return _cli_scans[key]
+
+
+def _client_rejected(response: httpx.Response) -> bool:
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(error, str) and error in CLIENT_REJECTIONS
 
 
 def antigravity_user_agent() -> str:
@@ -102,19 +261,7 @@ class AntigravityAuth:
             refresh = str(tok.get("refresh_token") or "")
             if not refresh:
                 raise SubscriptionError("antigravity: missing refresh_token (run `agy` on the host)")
-            response = await client.post(
-                ANTIGRAVITY_TOKEN_URL,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh,
-                    "client_id": ANTIGRAVITY_CLIENT_ID,
-                    "client_secret": ANTIGRAVITY_CLIENT_SECRET,
-                },
-                headers={"accept": "application/json"},
-            )
-            if response.status_code != 200:
-                raise SubscriptionError(f"antigravity token refresh failed: HTTP {response.status_code} {response.text[:160]}")
-            fresh = response.json()
+            fresh = await self._refresh(client, data, refresh)
             tok["access_token"] = fresh.get("access_token") or access
             if fresh.get("refresh_token"):
                 tok["refresh_token"] = fresh["refresh_token"]
@@ -126,6 +273,92 @@ class AntigravityAuth:
             _write_json(self.path, data)
             logger.warning("antigravity token refreshed")
             return str(tok["access_token"])
+
+    @property
+    def client_file(self) -> Path:
+        return self.path.parent / CLIENT_FILE
+
+    def _stored_client(self) -> OAuthClient | None:
+        try:
+            data = json.loads(self.client_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return client_in_login(data) if isinstance(data, dict) else None
+
+    def _remember(self, found: OAuthClient) -> None:
+        global _verified_client
+        _verified_client = found
+        if self._stored_client() == found:
+            return
+        try:
+            _write_json(self.client_file, {"client_id": found[0], "client_secret": found[1]})
+        except OSError as exc:
+            # A read-only data folder costs one scan of the CLI per process, nothing more.
+            logger.warning("antigravity: could not keep the OAuth client beside the login: %s", exc)
+
+    def _forget(self, found: OAuthClient) -> None:
+        global _verified_client
+        if _verified_client == found:
+            _verified_client = None
+        if self._stored_client() == found:
+            try:
+                self.client_file.unlink()
+            except OSError:
+                pass
+
+    async def _candidates(self, data: dict[str, Any]) -> AsyncIterator[tuple[OAuthClient, bool]]:
+        """Each client worth a refresh, cheapest source first, with whether it is a remembered one.
+
+        Lazy on purpose: the binary is only read when nothing remembered works, which is once per
+        update of agy rather than once per refresh."""
+        in_login = client_in_login(data)
+        if in_login is not None:
+            yield in_login, False
+        for remembered in (_verified_client, self._stored_client()):
+            if remembered is not None:
+                yield remembered, True
+        for binary in cli_binaries(self.path):
+            try:
+                pairs = await asyncio.to_thread(cli_clients, binary)
+            except OSError as exc:
+                logger.warning("antigravity: cannot read %s for its OAuth client: %s", binary, exc)
+                continue
+            for pair in pairs:
+                yield pair, False
+
+    async def _refresh(self, client: httpx.AsyncClient, data: dict[str, Any], refresh: str) -> dict[str, Any]:
+        """Refresh with the CLI's own OAuth client, found rather than written down here.
+
+        The client used to be a literal in this file, copied out of agy; that put a Google client
+        secret into a public repository, and it went stale whenever agy changed its client."""
+        tried: set[OAuthClient] = set()
+        last = ""
+        async for found, remembered in self._candidates(data):
+            if found in tried:
+                continue
+            if len(tried) >= MAX_CLIENT_TRIALS:
+                break
+            tried.add(found)
+            response = await client.post(
+                ANTIGRAVITY_TOKEN_URL,
+                data={"grant_type": "refresh_token", "refresh_token": refresh, "client_id": found[0], "client_secret": found[1]},
+                headers={"accept": "application/json"},
+            )
+            if response.status_code == 200:
+                self._remember(found)
+                return response.json()
+            if _client_rejected(response):
+                last = f"HTTP {response.status_code} {response.text[:160]}"
+                if remembered:
+                    self._forget(found)
+                continue
+            raise SubscriptionError(f"antigravity token refresh failed: HTTP {response.status_code} {response.text[:160]}")
+        if not tried:
+            raise SubscriptionError(CLIENT_MISSING)
+        raise SubscriptionError(
+            f"antigravity: Google refused every OAuth client found for the Antigravity CLI ({len(tried)} tried, last {last}); "
+            "update agy on the host and sign in with it again"
+        )
 
     async def headers(self, client: httpx.AsyncClient) -> dict[str, str]:
         return {
@@ -544,11 +777,15 @@ __all__ = [
     "ANTIGRAVITY_FALLBACK_MODELS",
     "AntigravityAuth",
     "KEEPALIVE",
+    "OAuthClient",
     "REASONING_FORMAT",
     "antigravity_sse_to_chunks",
     "antigravity_usage_view",
     "antigravity_user_agent",
     "chat_to_antigravity",
+    "cli_binaries",
+    "client_in_login",
+    "scan_cli",
     "fetch_antigravity_models",
     "antigravity_models_view",
 ]

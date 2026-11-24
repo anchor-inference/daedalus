@@ -48,21 +48,194 @@ def test_identity_reads_email_and_method(tmp_path: Path) -> None:
     assert kp_accounts.identity("antigravity", cred) == {"email": "someone@example.com", "plan": "consumer"}
 
 
-@pytest.mark.asyncio
-async def test_auth_refresh_writes_back_token(tmp_path: Path) -> None:
+# Built by concatenation and of a shape no real client has (all zeros, all "f"), so no secret
+# scanner reads this file as carrying a Google OAuth client; the patterns in the module still match.
+FAKE_ID = "0" * 13 + "-" + "f" * 32 + ".apps." + "googleusercontent.com"
+DECOY_ID = "0" * 12 + "-" + "e" * 32 + ".apps." + "googleusercontent.com"
+FAKE_SECRET = "GOCS" + "PX-" + "fake" * 7
+DECOY_SECRET = "GOCS" + "PX-" + "deco" * 7
+
+
+@pytest.fixture(autouse=True)
+def no_installed_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the machine's own agy out of reach: a test reads only the fake binaries it writes."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("KEYPROXY_ANTIGRAVITY_CLI", raising=False)
+    monkeypatch.setattr(kp_ag.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(kp_ag, "_verified_client", None)
+    monkeypatch.setattr(kp_ag, "_cli_scans", {})
+
+
+def _fake_cli(path: Path) -> Path:
+    """A stand-in for agy's binary: string literals packed end to end, the way Go lays them out, so a
+    secret runs straight into the next string and an id follows a string ending in a digit."""
+    blob = (
+        b"\x7fELF\x00\x00" + b"\x00" * 64
+        + b"https://auth.example/authorize" + DECOY_SECRET.encode() + b"://cloudcode.example"
+        + b"/v1beta/models/%s:generate" + FAKE_SECRET.encode() + b".sandbox.example" + b"\x00" * 4096
+        + b"max)" + DECOY_ID.encode() + b"error" + FAKE_ID.encode() + b"version2"
+    )
+    path.write_bytes(blob)
+    return path
+
+
+def _client_checker(right: tuple[str, str], seen: list[tuple[str, str]], refreshed: str = "tok-refreshed"):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == kp_ag.ANTIGRAVITY_TOKEN_URL
+        form = dict(httpx.QueryParams(request.content.decode()))
+        assert form["refresh_token"] == "rtok-1"
+        pair = (form["client_id"], form["client_secret"])
+        seen.append(pair)
+        if pair == right:
+            return httpx.Response(200, json={"access_token": refreshed, "expires_in": 3600})
+        if pair[0] == right[0]:
+            return httpx.Response(401, json={"error": "invalid_client", "error_description": "Unauthorized"})
+        return httpx.Response(400, json={"error": "unauthorized_client", "error_description": "Unauthorized"})
+
+    return handler
+
+
+async def _refresh(auth: kp_ag.AntigravityAuth, handler) -> str:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        return await auth.token(client)
+
+
+async def test_refresh_uses_the_client_stored_in_the_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cred = tmp_path / "antigravity-oauth-token"
+    _make_auth_file(cred, expired=True)
+    data = json.loads(cred.read_text(encoding="utf-8"))
+    data["client_id"], data["client_secret"] = "fake-client-id", "fake-client-secret"
+    cred.write_text(json.dumps(data), encoding="utf-8")
+
+    def no_scan(_binary: Path) -> list:
+        raise AssertionError("the binary is read although the login carries the client")
+
+    monkeypatch.setattr(kp_ag, "scan_cli", no_scan)
+    monkeypatch.setenv("KEYPROXY_ANTIGRAVITY_CLI", str(_fake_cli(tmp_path / "agy")))
+    seen: list[tuple[str, str]] = []
+    assert await _refresh(kp_ag.AntigravityAuth(cred), _client_checker(("fake-client-id", "fake-client-secret"), seen)) == "tok-refreshed"
+    assert seen == [("fake-client-id", "fake-client-secret")]
+    saved = json.loads(cred.read_text(encoding="utf-8"))
+    assert saved["token"]["access_token"] == "tok-refreshed"
+    assert saved["client_id"] == "fake-client-id"
+
+
+def test_scan_reads_fixed_length_pairs_out_of_packed_strings(tmp_path: Path) -> None:
+    pairs = kp_ag.scan_cli(_fake_cli(tmp_path / "agy"))
+    ids = {pair[0] for pair in pairs}
+    secrets = {pair[1] for pair in pairs}
+    assert {DECOY_ID, FAKE_ID} <= ids
+    assert secrets == {DECOY_SECRET, FAKE_SECRET}
+    # Same rank first: the layout agy has today puts the right pair in that position.
+    assert pairs[:2] == [(DECOY_ID, DECOY_SECRET), (FAKE_ID, FAKE_SECRET)]
+    # An id whose project number may have swallowed a neighbour's digit is also tried without it, last.
+    assert pairs[-1][0] == FAKE_ID[1:]
+    assert "***" in repr(pairs[0]) and FAKE_SECRET not in repr(pairs)
+
+
+async def test_refresh_finds_the_client_in_the_cli_and_remembers_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cred = tmp_path / "antigravity-oauth-token"
+    _make_auth_file(cred, expired=True)
+    monkeypatch.setenv("KEYPROXY_ANTIGRAVITY_CLI", str(_fake_cli(tmp_path / "agy")))
+    scans: list[Path] = []
+    real_scan = kp_ag.scan_cli
+    monkeypatch.setattr(kp_ag, "scan_cli", lambda binary: scans.append(binary) or real_scan(binary))
+
+    seen: list[tuple[str, str]] = []
+    assert await _refresh(kp_ag.AntigravityAuth(cred), _client_checker((FAKE_ID, FAKE_SECRET), seen)) == "tok-refreshed"
+    assert seen == [(DECOY_ID, DECOY_SECRET), (FAKE_ID, FAKE_SECRET)]
+    assert len(scans) == 1
+    stored = json.loads((tmp_path / kp_ag.CLIENT_FILE).read_text(encoding="utf-8"))
+    assert (stored["client_id"], stored["client_secret"]) == (FAKE_ID, FAKE_SECRET)
+    assert (tmp_path / kp_ag.CLIENT_FILE).stat().st_mode & 0o077 == 0
+
+    # The next refresh goes straight to the client that worked, without reading the binary again.
+    _make_auth_file(cred, expired=True)
+    seen.clear()
+    assert await _refresh(kp_ag.AntigravityAuth(cred), _client_checker((FAKE_ID, FAKE_SECRET), seen, "tok-2")) == "tok-2"
+    assert seen == [(FAKE_ID, FAKE_SECRET)]
+    assert len(scans) == 1
+
+    # A new process has only the file beside the login, and that is enough.
+    monkeypatch.setattr(kp_ag, "_verified_client", None)
+    monkeypatch.setattr(kp_ag, "_cli_scans", {})
+    monkeypatch.delenv("KEYPROXY_ANTIGRAVITY_CLI")
+    _make_auth_file(cred, expired=True)
+    seen.clear()
+    assert await _refresh(kp_ag.AntigravityAuth(cred), _client_checker((FAKE_ID, FAKE_SECRET), seen, "tok-3")) == "tok-3"
+    assert seen == [(FAKE_ID, FAKE_SECRET)]
+    assert len(scans) == 1
+
+
+async def test_a_remembered_client_google_refuses_is_dropped_for_the_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cred = tmp_path / "antigravity-oauth-token"
+    _make_auth_file(cred, expired=True)
+    (tmp_path / kp_ag.CLIENT_FILE).write_text(json.dumps({"client_id": "stale-id", "client_secret": "stale-secret"}), encoding="utf-8")
+    monkeypatch.setenv("KEYPROXY_ANTIGRAVITY_CLI", str(_fake_cli(tmp_path / "agy")))
+    seen: list[tuple[str, str]] = []
+    assert await _refresh(kp_ag.AntigravityAuth(cred), _client_checker((FAKE_ID, FAKE_SECRET), seen)) == "tok-refreshed"
+    assert seen[0] == ("stale-id", "stale-secret") and seen[-1] == (FAKE_ID, FAKE_SECRET)
+    stored = json.loads((tmp_path / kp_ag.CLIENT_FILE).read_text(encoding="utf-8"))
+    assert stored["client_id"] == FAKE_ID
+
+
+async def test_refresh_without_any_client_says_what_to_do(tmp_path: Path) -> None:
     cred = tmp_path / "antigravity-oauth-token"
     _make_auth_file(cred, expired=True)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == kp_ag.ANTIGRAVITY_TOKEN_URL
-        return httpx.Response(200, json={"access_token": "tok-refreshed", "expires_in": 3600})
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("nothing to sign a refresh with, so nothing is sent")
 
-    auth = kp_ag.AntigravityAuth(cred)
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        tok = await auth.token(client)
-    assert tok == "tok-refreshed"
-    saved = json.loads(cred.read_text(encoding="utf-8"))
-    assert saved["token"]["access_token"] == "tok-refreshed"
+    with pytest.raises(kp_ag.SubscriptionError, match="install or update agy on the host and sign in with it again"):
+        await _refresh(kp_ag.AntigravityAuth(cred), handler)
+
+
+async def test_refresh_when_google_refuses_every_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cred = tmp_path / "antigravity-oauth-token"
+    _make_auth_file(cred, expired=True)
+    monkeypatch.setenv("KEYPROXY_ANTIGRAVITY_CLI", str(_fake_cli(tmp_path / "agy")))
+    seen: list[tuple[str, str]] = []
+    with pytest.raises(kp_ag.SubscriptionError, match="refused every OAuth client.*update agy"):
+        await _refresh(kp_ag.AntigravityAuth(cred), _client_checker(("other-id", "other-secret"), seen))
+    assert len(seen) == len(set(seen)) == len(kp_ag.scan_cli(tmp_path / "agy"))
+    assert not (tmp_path / kp_ag.CLIENT_FILE).exists()
+
+
+async def test_a_refused_login_is_not_retried_with_other_clients(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cred = tmp_path / "antigravity-oauth-token"
+    _make_auth_file(cred, expired=True)
+    monkeypatch.setenv("KEYPROXY_ANTIGRAVITY_CLI", str(_fake_cli(tmp_path / "agy")))
+    calls: list[int] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(400, json={"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+
+    with pytest.raises(kp_ag.SubscriptionError, match="HTTP 400"):
+        await _refresh(kp_ag.AntigravityAuth(cred), handler)
+    assert len(calls) == 1
+
+
+def test_cli_binaries_follows_the_shim_agy_writes(tmp_path: Path) -> None:
+    binary = _fake_cli(tmp_path / "elsewhere-agy")
+    data_dir = tmp_path / "antigravity-cli"
+    (data_dir / "bin").mkdir(parents=True)
+    (data_dir / "bin" / "agentapi").write_text(f'#!/bin/sh\nexec "{binary}" agentapi "$@"\n', encoding="utf-8")
+    assert kp_ag.cli_binaries(data_dir / "antigravity-oauth-token") == [binary]
+    # An account's login finds the same shim in the default data folder above it.
+    account = data_dir / "daedalus-accounts" / "work"
+    account.mkdir(parents=True)
+    assert kp_ag.cli_binaries(account / "antigravity-oauth-token") == [binary]
+
+
+def test_cli_binaries_finds_the_installer_location(tmp_path: Path) -> None:
+    installed = Path(kp_ag.os.environ["HOME"]) / ".local" / "bin" / "agy"
+    installed.parent.mkdir(parents=True)
+    _fake_cli(installed)
+    assert kp_ag.cli_binaries(tmp_path / "antigravity-cli" / "antigravity-oauth-token") == [installed]
 
 
 def test_chat_to_antigravity_translates_messages_tools_and_signatures() -> None:

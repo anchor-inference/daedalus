@@ -600,6 +600,10 @@ services:
       - ${DAEDALUS_HARNESS_HOME:-~}/.grok:/home/keyproxy/.grok
       - ${DAEDALUS_HARNESS_HOME:-~}/.claude:/home/keyproxy/.claude
       - ${DAEDALUS_HARNESS_HOME:-~}/.gemini/antigravity-cli:/home/keyproxy/.gemini/antigravity-cli
+      # Where agy's installer puts the binary, read for the OAuth client a refresh of its login needs
+      # (deploy/keyproxy/antigravity.py). The folder rather than the file: a missing file would be
+      # created on the host as an empty directory, in the way of a later install of agy.
+      - ${DAEDALUS_HARNESS_HOME:-~}/.local/bin:/home/keyproxy/.local/bin:ro
     # A model server the operator runs on this machine (Ollama, LM Studio) listens on the host's
     # loopback, which from in here is the container itself. The setup wizard writes such an endpoint
     # as host.docker.internal; this makes that name resolve to the Docker host.
