@@ -977,7 +977,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             elif isinstance(extra.get("tool_choice"), dict):
                 body["tool_choice"] = extra["tool_choice"]
         effort = str(extra.get("reasoning_effort") or "medium")
-        self._apply_thinking(body, thinking=thinking, effort=effort)
+        self._apply_thinking(body, thinking=thinking, effort=effort, off=bool(extra.get("thinking_off")))
         if extra.get("json_object") and self.endpoint.kind in DEEPSEEK_SHAPED:
             # A caller that parses the answer as JSON itself asks for it here. DeepSeek-shaped endpoints
             # otherwise scatter stray characters inside the object ('{"ops":#…') even on a trivial
@@ -1054,7 +1054,9 @@ class OpenAICompatibleProvider(ILLMProvider):
 
         return _remembering(load), inline
 
-    def _apply_thinking(self, body: dict[str, Any], *, thinking: bool, effort: str) -> None:
+    def _apply_thinking(self, body: dict[str, Any], *, thinking: bool, effort: str, off: bool = False) -> None:
+        """``off`` is a caller that must not think at all (a helper's short call), which for the key proxy's
+        Claude routes is a word of its own: sending no effort leaves a current Claude model thinking."""
         kind = self.endpoint.kind
         if kind == "llamacpp":
             # The loaded chat template reads these as jinja variables. Sending nothing leaves the
@@ -1082,6 +1084,8 @@ class OpenAICompatibleProvider(ILLMProvider):
         else:
             if thinking:
                 body["reasoning_effort"] = effort
+            elif off and keyproxy_upstream(self.endpoint.base_url) in PROXY_TRANSLATED_UPSTREAMS:
+                body["reasoning_effort"] = "none"
 
     async def _post(self, body: dict[str, Any], request: LLMRequest | None = None,
                     reservation: str | None = None, route: list[str] | None = None) -> dict[str, Any]:
