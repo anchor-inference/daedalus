@@ -485,6 +485,16 @@ describe("rows and controls", () => {
     expect(decl(".erow .avatar")).toContain("var(--avatar)");
   });
 
+  it("draw a menu row as an icon and a label centred on one line", () => {
+    // The row lost its flex layout once, which left the icon inline on the label's baseline: three
+    // pixels high, touching the word, and the text of an item with no icon a column further left.
+    // check_menu_icons.py measures the same claim on a drawn page.
+    expect(decl(".menu button")).toContain("display: flex");
+    expect(decl(".menu button")).toContain("align-items: center");
+    expect(decl(".menu button")).toContain("gap: var(--space-2)");
+    expect(decl(".menu button > .ic")).toContain("flex: none");
+  });
+
   it("give the terminal dock a dense tab row and the conversation's whole column", () => {
     // The tab row is a row like any other; the dock's own height is the operator's (dragged, then a
     // token). It is deliberately not held to the reading stripe: a terminal wants every column, and

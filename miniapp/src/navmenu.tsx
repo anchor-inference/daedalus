@@ -242,7 +242,7 @@ function Cell({ it, tile = false, phone, on, placed, pinned, selfdev, open, onGo
   const n = it.badge;
   const tone = it.screen === "services" ? "ok" : it.screen === "changes" ? "attn" : "";
   const items = useMemo<MenuItem[]>(() => [
-    { label: t("common.open"), onSelect: () => onGo(it.path) },
+    { label: t("common.open"), icon: "open", onSelect: () => onGo(it.path) },
     { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(it.path, location.href).href, "_blank", "noopener") },
     "-",
     { label: t(pinned ? "nav.launch.unpin" : "nav.launch.pin"), icon: "pushpin", onSelect: () => pin(it.id) },

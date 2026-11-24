@@ -671,7 +671,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   // No entry per subagent: a chat with many helpers made the menu taller than the screen, and the
   // helpers are one click away already, on the plate that folds them out under the row.
   const menu: MenuItem[] = [
-    { label: t("common.open"), hint: t("side.key.open"), onSelect: open },
+    { label: t("common.open"), icon: "open", hint: t("side.key.open"), onSelect: open },
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
     { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
     ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),

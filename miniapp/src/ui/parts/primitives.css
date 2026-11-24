@@ -126,8 +126,18 @@ a.btn { color: var(--fg); text-decoration: none; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .sheet-backdrop.confirm { align-items: center; justify-content: center; z-index:var(--z-confirm); }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
-.menu button { background:none; border:0; color:var(--fg); text-align:left; padding:6px 8px; min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
+/* A menu row is an icon and a label on one line: the icon centred on the row, a fixed gap from the
+   label, whatever draws the menu (an overflow button, a right click, a popover). The row lost its
+   flex layout when the palette was redrawn, leaving the icon inline on the text's baseline: three
+   pixels above the label's middle and touching it. `--menu-pad` is named so the rule below can line
+   a row that has no icon up with the ones that do. */
+.menu button { --menu-pad:10px; display:flex; align-items:center; gap:var(--space-2); background:none; border:0; color:var(--fg); text-align:left; padding:6px var(--menu-pad); min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
+.menu button > .ic { flex:none; }
 .menu button .ic { color: var(--fg-2); }
+/* A menu in which some rows carry an icon has one text column: a row without its own (Open, Cut, a
+   checkbox row) is pushed in by an icon's width and the gap, so its label stands under the others
+   and not to the left of them. */
+.menu:has(> button > .ic:first-child) > button:not(:has(> .ic:first-child)) { padding-left:calc(var(--menu-pad) + var(--icon-sm) + var(--space-2)); }
 .menu button:hover, .menu button:focus-visible { background: var(--surface-3); outline: none; }
 
 /* avatar: simple shape + expressive eyes; the motion carries the status */

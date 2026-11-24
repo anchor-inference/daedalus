@@ -92,7 +92,7 @@ function useItemMenu(ref: RefObject<HTMLElement | null>, href: string, nav: Reso
   const items = useMemo<MenuItem[]>(() => {
     const customise = pathFor("settings", "navigation");
     const out: MenuItem[] = [
-      { label: t("common.open"), onSelect: () => ref.current?.click() },
+      { label: t("common.open"), icon: "open", onSelect: () => ref.current?.click() },
       { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(href, location.href).href, "_blank", "noopener") },
     ];
     if (nav) out.push("-",

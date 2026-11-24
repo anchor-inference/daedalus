@@ -168,7 +168,6 @@
 /* Popovers open upward from the composer. `.menu` itself is `right:10px` for the header overflow;
    without `right:auto` a left-anchored popover is stretched to the window's right edge. */
 .menu.pop { top:auto; right:auto; z-index:var(--z-popover); overflow-y:auto; min-width:200px; width:max-content; max-width:min(340px, 92vw); }
-.menu.pop button { display:flex; align-items:center; gap:8px; min-height:var(--row-h); font-size:var(--fs-14); }
 .plus-menu { min-width: 200px; }
 .model-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .model-list { display:flex; flex-direction:column; }

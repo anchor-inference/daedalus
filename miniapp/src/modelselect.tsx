@@ -289,7 +289,7 @@ function AccountOptions({ choice, accounts, heading }: { choice: AccountChoice; 
 function AccountMenu({ choice, inline }: { choice: AccountChoice; inline: boolean }) {
   const accounts = useUpstreamAccounts(choice.upstream);
   if (accounts.length < 2) return null;
-  return <MenuBranch title={t("composer.account")} value={chosenName(choice, accounts)} label={t("composer.account.heading")} inline={inline} onChoose={choice.onChoose} branch="account">
+  return <MenuBranch icon="user" title={t("composer.account")} value={chosenName(choice, accounts)} label={t("composer.account.heading")} inline={inline} onChoose={choice.onChoose} branch="account">
     <AccountOptions choice={choice} accounts={accounts} heading />
   </MenuBranch>;
 }
@@ -408,7 +408,7 @@ function PhoneModelList(p: PhoneListProps) {
       {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "free-models")}>{t("free.chat.add")}</a></div>}
       {!p.browsing && p.matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
       {!p.browsing && p.matched.map(row)}
-      <button type="button" role="menuitem" className="model-row model-add" onClick={p.addModel}><Icon name="plus" size={18} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={16} /></button>
+      <button type="button" role="menuitem" className="model-row model-add" onClick={p.addModel}><span className="provider-mark provider-free" aria-hidden="true"><Icon name="plus" size={18} /></span><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={16} /></button>
     </div>
   );
 }

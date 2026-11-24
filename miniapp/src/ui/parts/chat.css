@@ -40,7 +40,6 @@
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
 .head-actions { display:flex; gap:2px; flex:none; }
 .menu { position:absolute; right:10px; top:48px; z-index:var(--z-menu); background:var(--surface-1); border:0; border-radius:var(--radius-md); padding:4px; min-width:190px; max-width:min(280px,calc(100vw - 16px)); box-shadow:var(--shadow-md); display:flex; flex-direction:column; }
-.menu button { background:none; border:0; color:var(--fg); text-align:left; padding:6px 10px; min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
 .menu button:active { background:var(--surface-4); }
 .menu button.danger { color:var(--bad); }
 /* A checkbox item sets how the items below it act; its box sits at the row's end, like a setting's. */
