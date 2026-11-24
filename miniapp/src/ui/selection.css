@@ -98,6 +98,11 @@
 }
 
 /* In a settings row the list takes the row's whole width under its title at every width: beside the
-   words it left them a column a word wide, and the rows of the list a sliver. */
-.settings-row:has(> .settings-row-ctl > :is(.sel, .subagent-models)) { grid-template-columns: minmax(0, 1fr); }
-.settings-row:has(> .settings-row-ctl > :is(.sel, .subagent-models)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
+   words it left them a column a word wide, and the rows of the list a sliver. The rule finds a list at
+   any depth in the control rather than only as its direct child: the quick agent models come wrapped,
+   and matched by nothing they were laid out as a column of no width beside their words, the list
+   hanging out of it past the card and the window. The subagent models are named as well because their
+   three ways stand without a list until "Chosen" opens one. */
+.settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) { grid-template-columns: minmax(0, 1fr); }
+.settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
+.settings-row-ctl > :has(.sel) { flex: 1 1 100%; min-width: 0; }

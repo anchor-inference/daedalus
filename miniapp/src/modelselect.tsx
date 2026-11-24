@@ -135,6 +135,15 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
   useEffect(() => {
     if (provider !== null) list.current?.querySelector<HTMLButtonElement>(".provider-back")?.focus({ preventScroll:true });
   }, [provider]);
+  // The popover gives the keyboard to its first control once it is placed, and on a page's first open
+  // that was before the models had arrived: only "Loading" was drawn, so the search field came after
+  // and the keyboard stayed on the pill. Once they arrive the field takes it, unless the reader has
+  // already moved into the list. A phone's sheet is left alone: a focused field there opens the keyboard.
+  const loaded = !!cat;
+  useEffect(() => {
+    if (!loaded || sheet || list.current?.contains(document.activeElement)) return;
+    list.current?.querySelector<HTMLInputElement>(".model-search")?.focus({ preventScroll: true });
+  }, [loaded, sheet]);
   if (failed) return <div className="sub model-row-note">{failed}</div>;
   if (!cat) return <div className="sub model-row-note">{t("common.loading")}</div>;
   const entries = Object.entries(cat.presets);

@@ -14,6 +14,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
+import { useLayer } from "./dialogs";
 import "./selection.css";
 
 export type SelectionItem = {
@@ -109,7 +110,7 @@ export function InheritNote({ inherit, disabled }: { inherit: InheritState; disa
   );
 }
 
-function Search({ value, onChange, placeholder, label, onDown, onEscape, controls }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; onDown: () => void; onEscape?: () => void; controls: string }) {
+function Search({ value, onChange, placeholder, label, onDown, controls }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; onDown: () => void; controls: string }) {
   return (
     <div className="sel-search">
       <Icon name="search" size={14} />
@@ -123,11 +124,33 @@ function Search({ value, onChange, placeholder, label, onDown, onEscape, control
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); onDown(); }
-          if (e.key === "Escape" && (value || onEscape)) { e.preventDefault(); e.stopPropagation(); if (value) onChange(""); else onEscape?.(); }
+          // An Escape a layer above has already answered (an open single list) is not answered twice.
+          if (e.key === "Escape" && !e.defaultPrevented && value) { e.preventDefault(); e.stopPropagation(); onChange(""); }
         }}
       />
     </div>
   );
+}
+
+/**
+ * Whether the list is being focused by a press on it rather than by the keyboard.
+ *
+ * The list takes the keyboard itself (it holds `aria-activedescendant`), and on a focus from the
+ * keyboard it marks a row so the arrows have somewhere to start: the current one, or the first. A
+ * press on a row focuses the list too, and that answer then ran between the press and the release:
+ * the marked row was scrolled into view, the list moved under the pointer, the release landed on
+ * another row, and the browser sent the click to the list rather than to either row. With the search
+ * field holding the keyboard, the first click on a model was lost and only a second one chose. A
+ * press now leaves the mark where the click will put it. The flag is cleared by the click, not by the
+ * release: a finger's focus arrives after it lifts.
+ */
+function usePress() {
+  const pressing = useRef(false);
+  const clear = () => { pressing.current = false; };
+  return {
+    pressing,
+    handlers: { onPointerDown: () => { pressing.current = true; }, onPointerCancel: clear, onClickCapture: clear, onKeyDownCapture: clear },
+  };
 }
 
 /**
@@ -155,6 +178,7 @@ export function SelectionList({ label, items, groups, value, onChange, ordered, 
   const [active, setActive] = useState(-1);
   const anchor = useRef<number | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  const press = usePress();
   const base = useId();
   const listId = `${id ?? base}-list`;
   const visible = useMemo(() => matchItems(items, query), [items, query]);
@@ -243,7 +267,8 @@ export function SelectionList({ label, items, groups, value, onChange, ordered, 
         aria-activedescendant={active >= 0 ? `${base}-o${active}` : undefined}
         tabIndex={0}
         onKeyDown={onListKey}
-        onFocus={() => { if (active < 0 && flat.length) setActive(0); }}
+        {...press.handlers}
+        onFocus={() => { if (!press.pressing.current && active < 0 && flat.length) setActive(0); }}
       >
         {flat.length === 0 && <div className="sel-empty sub">{searching ? t("sel.nothing", { query: query.trim() }) : t("sel.none")}</div>}
         {sections.map(({ group, items: rows }) => {
@@ -332,6 +357,12 @@ export function SelectionList({ label, items, groups, value, onChange, ordered, 
   );
 }
 
+/** An open list as a layer of its own: Escape closes the list before anything under it. */
+function EscapeLayer({ onEscape }: { onEscape: () => void }) {
+  useLayer(onEscape);
+  return null;
+}
+
 /**
  * One of a list. The choice is drawn as its full row, with what it is and its facts, rather than a
  * name cut short in a button; "Change" opens the same searchable, grouped list in place, and picking
@@ -353,6 +384,7 @@ export function SelectionSingle({ label, items, groups, value, onChange, default
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
   const list = useRef<HTMLDivElement>(null);
+  const press = usePress();
   const changeButton = useRef<HTMLButtonElement>(null);
   const base = useId();
   const listId = `${id ?? base}-list`;
@@ -385,7 +417,6 @@ export function SelectionSingle({ label, items, groups, value, onChange, default
     } else if (e.key === "Home") { e.preventDefault(); setActive(0); }
     else if (e.key === "End") { e.preventDefault(); setActive(last); }
     else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(flat[active]); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
   }
 
   let index = -1;
@@ -403,12 +434,17 @@ export function SelectionSingle({ label, items, groups, value, onChange, default
       </div>
       {open && (
         <>
+          {/* Escape empties the search first and then closes the list. It is a layer rather than a key
+              handler on the field: the sheet that holds Settings on a phone listens for Escape before
+              the field hears it, and closed the whole of Settings with the list still open. */}
+          <EscapeLayer onEscape={() => { if (query) { setQuery(""); setActive(-1); } else close(); }} />
           <Search value={query} onChange={(v) => { setQuery(v); setActive(v.trim() ? 0 : -1); }} placeholder={placeholder ?? t("sel.search")} label={t("sel.search.in", { what: label })} controls={listId}
-            onDown={() => { list.current?.focus(); setActive(0); }} onEscape={close} />
+            onDown={() => { list.current?.focus(); setActive(0); }} />
           <div ref={list} id={listId} className="sel-list" role="listbox" aria-label={label} tabIndex={0}
             aria-activedescendant={active >= 0 ? `${base}-o${active}` : undefined}
             onKeyDown={onListKey}
-            onFocus={() => { if (active < 0 && flat.length) setActive(Math.max(0, flat.findIndex((item) => item.id === value))); }}>
+            {...press.handlers}
+            onFocus={() => { if (!press.pressing.current && active < 0 && flat.length) setActive(Math.max(0, flat.findIndex((item) => item.id === value))); }}>
             {flat.length === 0 && <div className="sel-empty sub">{t("sel.nothing", { query: query.trim() })}</div>}
             {sections.map(({ group, items: rows }) => (
               <div key={group?.id ?? ""} className="sel-section" role="presentation">
