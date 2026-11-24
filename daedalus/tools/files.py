@@ -168,7 +168,7 @@ async def read_file(
         try:
             stored = await manager.files.in_scope(path, owner["project_id"])
             data = await manager.files.read(stored)
-            body = await kept_body(manager, data, stored, offset=offset, limit=limit)
+            body = await kept_body(manager, data, stored, offset=offset, limit=limit, session_id=services.session_id)
         except (FileRefused, VisionUnavailable, OSError, ValueError) as exc:
             return error(context, str(exc))
         return ok(context, f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}")

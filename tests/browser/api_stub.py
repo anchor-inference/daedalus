@@ -48,6 +48,10 @@ from pages_stub import PagesStub
 DEFAULT_PORT = 8163
 DEFAULT_APP = f"http://127.0.0.1:{DEFAULT_PORT}/app"
 
+VISION_DEFAULT = {"vision_default": "gpt-5.6-luna", "vision_default_label": "GPT-5.6 Luna"}
+"""The global vision model every stubbed session follows until its Details chooses one of its own: the
+image-capable preset ``screenshots.SETTINGS`` names under ``vision``."""
+
 
 def folder(path: str, *, position: int = 0, label: str = "", env: str = "container", reach: str = "agents", reachable: bool = True, writable: bool | None = None, readonly: bool = False, is_git: bool = False) -> dict[str, object]:
     """One folder of a project as ``/api/projects`` reports it."""
@@ -2201,6 +2205,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"standing": [] if method.upper() == "DELETE" else standing_grants()})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "vision":
+        # A session's own vision model, from its Details: the answer names the choice back, "" for the global one.
+        preset = str((body or {}).get("preset") or "") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"ok": True, "vision_preset": preset, "vision_label": preset, **VISION_DEFAULT})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "subagent-models":
         # Every session's Details shows which models its helpers may run on: the default here, every model;
         # a change answers the choice it was given. check_model_settings.py draws the others.
@@ -4272,6 +4280,7 @@ class FocusStub:
             # No subscription upstream: the model picker's account row stays out of the shots and of the
             # checks that find the effort's row by its class.
             "account": "", "account_upstream": "", "account_default": "",
+            "vision_preset": "", "vision_label": "", **VISION_DEFAULT,
             "messages": messages, "usd_cap": None, "brief": "", "spawned_by": None, "tools_off": [], "loop": None, "services": [], "subagents": [],
             "subagent_of": None, "subagent_name": None, "leader_title": None, "orchestrator_of": orchestrator_of, "staff": staff, "telegram_linked": False,
             "verifications": {}, "first_seq": messages[0]["seq"] if messages else 0, "has_older": False,

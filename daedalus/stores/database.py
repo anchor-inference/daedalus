@@ -4135,6 +4135,19 @@ async def _session_account(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_account))
 
+# 172 — the vision model the operator chose for one session from its Details. ``vision_preset`` is the
+# preset's id; NULL follows ``[vision] preset``. Its own column, apart from the model overrides, because
+# clearing the session's model must not take it along: the model answers and the vision model looks,
+# and the operator sets each for its own reason.
+async def _session_vision(conn: aiosqlite.Connection) -> None:
+    """Added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(live_control)")).fetchall()}
+    if "vision_preset" not in present:
+        await conn.execute("ALTER TABLE live_control ADD COLUMN vision_preset TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -1588,6 +1588,12 @@ export type SessionDetail = {
   account?: string;
   account_upstream?: string;
   account_default?: string;
+  /** The vision model this session looks at pictures with: its own preset and label ("" while it follows
+   *  the global one), and the global `vision.preset` with its label, which "default" stands for. */
+  vision_preset?: string;
+  vision_label?: string;
+  vision_default?: string;
+  vision_default_label?: string;
   /** The model name the session is set to answer with, and the one really answering; they differ during a fallback. */
   configured_model?: string;
   effective_model?: string;

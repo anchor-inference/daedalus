@@ -160,9 +160,10 @@ describe("the panels", () => {
     const on = new Proxy({}, { get: () => () => {} }) as DetailsActions;
     const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
     await render("orchestrator");
-    // The inspector lists one line a section; a section's page opens in place of the list.
+    // The inspector lists one line a section; a section's page opens in place of the list. The vision
+    // model stays for the orchestrators: they read the operator's screenshots through it too.
     const sections = () => [...host.querySelectorAll<HTMLElement>("[data-prop]")].map((s) => s.dataset.prop);
-    expect(sections()).toEqual(["context", "usage", "mcp", "grants", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["context", "usage", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
     const openPage = (id: string) => act(async () => { host.querySelector<HTMLElement>(`[data-prop="${id}"]`)!.click(); });
     await openPage("usage");
     expect(host.querySelector("[data-usage-today]")!.textContent).toContain("$0.75");
@@ -172,7 +173,7 @@ describe("the panels", () => {
     expect(host.querySelector("[data-last-compaction]")!.textContent).toContain("(auto)");
     await act(async () => { host.querySelector<HTMLElement>(".dt-back")!.click(); });
     await render("main");
-    expect(sections()).toEqual(["context", "usage", "workspace", "disk", "mcp", "grants", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["context", "usage", "workspace", "disk", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
     await render("session");
     // Clearing and deleting the session left the tab for the session's menu.
     expect(sections()).not.toContain("danger");
