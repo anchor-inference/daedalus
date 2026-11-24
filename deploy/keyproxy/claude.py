@@ -660,6 +660,10 @@ def chat_to_messages(body: dict[str, Any], *, login: bool = True) -> tuple[dict[
     max_tokens = min(int(body.get("max_tokens") or 8192), MAX_OUTPUT)
     effort = str(body.get("reasoning_effort") or "")
     adaptive = not model.startswith(("claude-3-", *_BUDGET_THINKING_MODELS))
+    thinking_off: dict[str, Any] = {}
+    if effort == "none":
+        thinking_off = _without_thinking(model) if adaptive else {}
+        effort = ""
     if effort and not adaptive:
         budget = max(1024, EFFORT_BUDGET.get(effort, 8192))
         if max_tokens <= budget:
@@ -715,7 +719,23 @@ def chat_to_messages(body: dict[str, Any], *, login: bool = True) -> tuple[dict[
         out["context_management"] = {"edits": [dict(_KEEP_THINKING_EDIT)]}
         if any(model.startswith(prefix) for prefix in EFFORT_MODELS) and effort in EFFORT_BUDGET:
             out["output_config"] = {"effort": effort}
+    out.update(thinking_off)
     return out, names
+
+
+def _without_thinking(model: str) -> dict[str, Any]:
+    """What a ``/v1/messages`` body carries for a caller that asked for no thinking (``reasoning_effort: none``).
+
+    Leaving ``thinking`` out is not "off" on the current models: Haiku 5.5 thinks by default, and a
+    translator's call given room for the translation alone spent all of it thinking and came back empty
+    or cut short. Each model takes a different word for off: Sonnet 5.5 refuses ``disabled`` and takes
+    ``between_tools``; Opus 5.5 and the Fable and Mythos lines cannot stop thinking at all, so the least
+    of it is asked for instead."""
+    if model.startswith(("claude-opus-5-5", "claude-fable-", "claude-mythos-")):
+        return {"output_config": {"effort": "low"}}
+    if model.startswith("claude-sonnet-5-5"):
+        return {"thinking": {"type": "between_tools"}}
+    return {"thinking": {"type": "disabled"}}
 
 
 def _chunk(completion_id: str, model: str, delta: dict[str, Any], finish: str | None = None, usage: dict[str, Any] | None = None) -> str:

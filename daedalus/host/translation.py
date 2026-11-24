@@ -86,6 +86,9 @@ RESULT_GRACE_SECONDS = 60
 SUMMARY_CHARS = 200
 """As much of the answer as a finished-run event carries, as the session manager's own summary does."""
 
+HEDGE_SECONDS = 20
+"""The least time a translation is waited for before it is asked for a second time (:func:`hedge_after`)."""
+
 TOKEN = "⟪{}⟫"
 _TOKEN_RE = re.compile(r"⟪(\d+)⟫")
 
@@ -215,8 +218,22 @@ def translator_preset(config: Any) -> str:
 
 def output_tokens(text: str) -> int:
     """Room for the translation: a script with longer words, or one that tokenises worse, needs more than
-    the source took. A ceiling keeps one answer from asking a cheap model for its whole window."""
-    return min(32_000, max(256, len(text) // 2 + 256))
+    the source took. A ceiling keeps one answer from asking a cheap model for its whole window.
+
+    A token per character of the source, not one per two: Cyrillic costs a Claude model about a token per
+    two or three characters, and an English answer put into Russian grows by a fifth, so half a token per
+    character cut long answers off before their last protected parts, which were then refused as lost."""
+    return min(32_000, max(1024, len(text) + 512))
+
+
+def hedge_after(text: str) -> float:
+    """Seconds without an answer after which the same text goes to the translator a second time.
+
+    A cheap route answers in a few seconds, but now and then one request sits upstream for two minutes
+    while the next is served at once (OpenCode Go did this to DeepSeek: 4–8 s as a rule, 145 s twice in an
+    afternoon, each past the translator's whole limit). Asking again then, and taking whichever answers
+    first, costs one more cheap call on the rare slow one. A longer text is given longer before that."""
+    return HEDGE_SECONDS + len(text) / 120
 
 
 def view_of(metadata: dict[str, Any], role: MessageRole, body: str) -> tuple[str, dict[str, Any] | None]:
@@ -360,21 +377,54 @@ class Translations:
         # An empty source is a text the operator asked about in a session that names no agent language: the
         # translator is left to recognise it, which a model does better than a guess made here would.
         instructions = PROMPT.format(source=LANGUAGES.get(source, source) if source else "the language it is written in", target=LANGUAGES.get(target, target))
+        preset = translator_preset(manager.config)
+
+        async def attempt() -> str:
+            try:
+                answer = await manager.small_model(masked, preset, purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — a refusal, an outage, a budget: the original goes instead
+                raise TranslationFailed(f"the translator failed: {type(exc).__name__}: {exc}"[:300]) from exc
+            translated = clean_answer(answer)
+            if not translated:
+                raise TranslationFailed("the translator answered with nothing")
+            return restore(translated, kept)
+
+        return await self._first_of(attempt, hedge_after(masked), settings.timeout_seconds)
+
+    @staticmethod
+    async def _first_of(attempt: Any, hedge: float, limit: float) -> str:
+        """The first good answer of ``attempt``, run once and once more if the first is still out after
+        ``hedge`` seconds; :class:`TranslationFailed` when both fail or ``limit`` passes. A failure that
+        comes before the hedge is final: a refusal asked again is refused again."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + limit
+        pending: set[asyncio.Task[str]] = {asyncio.ensure_future(attempt())}
+        hedged = False
+        failure: TranslationFailed | None = None
         try:
-            answer = await asyncio.wait_for(
-                manager.small_model(masked, translator_preset(manager.config), purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions),
-                timeout=settings.timeout_seconds,
-            )
-        except TimeoutError as exc:
-            raise TranslationFailed(f"the translator did not answer within {settings.timeout_seconds} s") from exc
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 — a refusal, an outage, a budget: the original goes instead
-            raise TranslationFailed(f"the translator failed: {type(exc).__name__}: {exc}"[:300]) from exc
-        translated = clean_answer(answer)
-        if not translated:
-            raise TranslationFailed("the translator answered with nothing")
-        return restore(translated, kept)
+            while pending:
+                wait = deadline - loop.time()
+                if not hedged:
+                    wait = min(wait, hedge)
+                done, pending = await asyncio.wait(pending, timeout=max(0.0, wait), return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if task.exception() is None:
+                        return task.result()
+                    error = task.exception()
+                    failure = error if isinstance(error, TranslationFailed) else TranslationFailed(f"the translator failed: {type(error).__name__}: {error}"[:300])
+                if done and not pending:
+                    raise failure or TranslationFailed("the translator failed")
+                if loop.time() >= deadline:
+                    break
+                if not done and not hedged:
+                    hedged = True
+                    pending.add(asyncio.ensure_future(attempt()))
+            raise TranslationFailed(f"the translator did not answer within {limit:g} s")
+        finally:
+            for task in pending:
+                task.cancel()
 
     async def outgoing(self, state: SessionState, text: str) -> Outgoing:
         """The operator's ``text`` as the agent is to get it.

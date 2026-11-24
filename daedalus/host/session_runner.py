@@ -5042,7 +5042,9 @@ class SessionManager:
             messages=[*lead, Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
             max_tokens=max_tokens,
             temperature=temperature,
-            extra={"enable_thinking": False},
+            # ``thinking_off`` as well: on the Claude routes "not enabled" still thinks, and a helper's small
+            # output budget went on thinking until the answer came back empty.
+            extra={"enable_thinking": False, "thinking_off": True},
             observability=LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, call_purpose=purpose, call_category="assist"),
         )
         response = await provider.complete_text(request)
