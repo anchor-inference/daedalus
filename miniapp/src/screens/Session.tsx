@@ -87,7 +87,7 @@ import { BrowserTab } from "../browser/BrowserPanel";
 import { BrowserPip } from "../browser/pip";
 import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browser/phone";
 import { BrowserLoginCard, loginAsk } from "../browser/login";
-import { pipGroup } from "../browser/model";
+import { needWords, pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
 import { SettingsChangeCard, settingsChangeIds } from "../settingschange";
@@ -110,7 +110,7 @@ import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { PanelStrip } from "../panelstrip";
-import type { ProjectEnvironments, QuickAgentRow } from "../api";
+import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
 // The Notes tab's editor and renderer are a chunk of their own, fetched the first time the tab opens.
@@ -1682,6 +1682,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       folders: paneFolders,
       preview: openFromChat,
       openJobs: () => panel.open("jobs"),
+      openBrowser,
       openSources,
       toast,
       link,
@@ -1694,7 +1695,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       reveal: revealReply,
       translateInto: detail?.translation?.operator,
     }),
-    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions, revealReply, detail?.translation?.operator],
+    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openBrowser, openSources, toast, link, detail?.pending?.questions, revealReply, detail?.translation?.operator],
   );
   const shownSources = useMemo(() => {
     if (panel.state.tab !== "sources") return null;
@@ -3627,15 +3628,83 @@ function useQuickSession(leaderId: string, item: ToolItem): string | null {
   return named ?? found;
 }
 
+/** How often a running QuickAgent call asks whether its helper waits for the operator. The helper's own
+ *  steps stream; whether its browser request is open is a row of the leader's list, read again. */
+const QUICK_WAIT_MS = 2000;
+
+/** What the helper of a running QuickAgent call waits for the operator to do, or null. */
+function useQuickWait(leaderId: string, item: ToolItem, child: string | null): QuickWait | null {
+  const [wait, setWait] = useState<QuickWait | null>(null);
+  useEffect(() => {
+    if (!leaderId || !child || !item.running) { setWait(null); return; }
+    let gone = false;
+    let timer: number | undefined;
+    const look = () => {
+      api.get<{ quick_agents?: QuickAgentRow[] }>(`/api/sessions/${encodeURIComponent(leaderId)}/quick-agents`)
+        .then((r) => { if (!gone) setWait((r?.quick_agents ?? []).find((q) => q.session_id === child)?.waiting ?? null); })
+        .catch(() => undefined)
+        .finally(() => { if (!gone) timer = window.setTimeout(look, QUICK_WAIT_MS); });
+    };
+    look();
+    return () => { gone = true; if (timer) window.clearTimeout(timer); };
+  }, [leaderId, child, item.running]);
+  return wait;
+}
+
+/** The minutes and seconds left of a wait, ticking once a second. */
+function useLeft(until: string): number {
+  const end = Date.parse(until);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return Number.isNaN(end) ? 0 : Math.max(0, end - now);
+}
+
+/** The helper waits, inside the leader's call, for what only the operator can do in the browser: said
+ *  under the call with what to do and how long it waits, and the way to it. The hand-over and the
+ *  sign-in form are the conversation's own browser's, opened from here; the move into their Chrome is
+ *  answered on the request card below the conversation, so it names that instead of opening anything. */
+function QuickWaitRow({ wait }: { wait: QuickWait }) {
+  const { openBrowser, toast } = useContext(SessionContext);
+  const left = useLeft(wait.until);
+  const [declining, setDeclining] = useState(false);
+  const chrome = wait.kind === "chrome";
+  const login = wait.kind === "login";
+  const title = chrome ? t("qagent.wait.chrome") : login ? t("qagent.wait.login") : t("qagent.wait.title");
+  const what = needWords({ reason: wait.kind, what: wait.what });
+  const decline = () => {
+    setDeclining(true);
+    api.post(`/api/browsers/${encodeURIComponent(wait.group_id)}/decline`, {})
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)))
+      .finally(() => setDeclining(false));
+  };
+  return (
+    <div className="quick-wait" role="status" data-quick-wait={wait.kind}>
+      <Icon name={login ? "lock" : "globe"} size={16} />
+      <span className="quick-wait-main">
+        <span className="quick-wait-t">{title}</span>
+        <span className="quick-wait-m">{what}</span>
+        <span className="quick-wait-left num">{chrome ? t("qagent.wait.left.chrome", { time: duration(left) }) : t("qagent.wait.left", { time: duration(left) })}</span>
+      </span>
+      {!chrome && openBrowser && <button type="button" className="btn small primary" onClick={openBrowser}>{login ? t("qagent.wait.form") : t("qagent.wait.open")}</button>}
+      {!chrome && !login && wait.group_id && <button type="button" className="btn small ghost" disabled={declining} onClick={decline}>{t("qagent.wait.decline")}</button>}
+    </div>
+  );
+}
+
 /** A quick agent's work under the call that ran it: its own conversation, steps open, following it live.
  *  Before its session is known, and for a call whose helper is gone, the call and its answer as any step. */
 function QuickAgentSteps({ item }: { item: ToolItem }) {
   const { id: leaderId, preview, toast } = useContext(SessionContext);
   const child = useQuickSession(leaderId, item);
+  const wait = useQuickWait(leaderId, item, child);
   if (!child) return item.running ? <div className="quick-agent pending sub faint">{t("qagent.starting")}</div> : <ToolCard item={item} />;
   return (
     <div className="quick-agent" data-quick-agent={child}>
       <SubagentTranscript id={child} onPreview={preview} toast={toast} inline fallback={<ToolCard item={item} />} />
+      {wait && <QuickWaitRow wait={wait} />}
     </div>
   );
 }
@@ -3796,7 +3865,9 @@ const NO_FOLDERS: SessionFolder[] = [];
  *  call that asked them reads as waiting and an older unanswered one does not. */
 /** `compose`: put text into the conversation's composer for the operator to send (a widget's ask);
  *  absent where the transcript has no composer of its own. */
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void; reveal?: (reply: SentReply) => void;
+/** `openBrowser`: open the conversation's Browser tab, where a quick agent's hand-over or sign-in form is
+ *  answered; absent where the transcript is not the conversation's own screen. */
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void; reveal?: (reply: SentReply) => void; openBrowser?: () => void;
   /** The operator's language, which "Translate" under the agent's texts asks for; only the conversation's own view offers it. */
   translateInto?: string }>({
   id: "",

@@ -693,6 +693,12 @@
       "synonyms": ["subagent models", "helper models", "allowed models", "SubAgent model", "модели субагентов", "модели помощников", "разрешённые модели"]
     },
     {
+      "section": "tasks", "anchor": "subagents.operator_wait_minutes", "config": "subagents.operator_wait_minutes",
+      "title": { "en": "Quick agent waits for you", "ru": "Быстрый агент ждёт вас" },
+      "about": { "en": "How long a quick agent waits for you to do in the browser what only you may (a CAPTCHA, a sign-in, a payment, your Chrome), from 1 to 60 minutes; then it takes the request back and reports where it stopped.", "ru": "Сколько быстрый агент ждёт, пока вы сделаете в браузере то, что можете только вы (капча, вход, оплата, ваш Chrome), от 1 до 60 минут; потом он снимает запрос и сообщает, где остановился." },
+      "synonyms": ["operator wait", "quick agent wait", "captcha wait", "handoff timeout", "login wait", "ожидание оператора", "ожидание быстрого агента", "таймаут капчи", "ожидание входа"]
+    },
+    {
       "section": "budget", "anchor": "limits.usd_per_day", "config": "limits.usd_per_day",
       "title": { "en": "Daily spend cap", "ru": "Потолок трат в день" },
       "about": { "en": "The most everything together may spend in one UTC day, in USD; 0 means no cap.", "ru": "Сколько USD может потратить всё вместе за сутки по UTC; 0 — без лимита." },
