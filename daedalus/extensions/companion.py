@@ -399,6 +399,8 @@ class Companion:
     def __init__(self, app: Application) -> None:
         self.app = app
         self.store = CompanionStore(app.db)
+        self._efforts: dict[str, str] = {}
+        """The effort of each companion session's current turn, by session, for :meth:`effort_for`."""
         self._listeners: set[asyncio.Queue[tuple[str, dict[str, Any]]]] = set()
         self._pending: list[tuple[float, str]] = []
         """What an agent said while nobody was listening (or the companion was paused), each line with
@@ -468,7 +470,7 @@ class Companion:
             state = await manager.create_session(self.config.name, metadata={FLAG: True, "telegram_detached": True}, project_id=project.id)
             await self.app.db.kv_set(SESSION_KEY, state.session.id)
             self._id = state.session.id
-            await self._point_at(state.session.id, preset=background_preset(self.app.config))
+            await self._point_at(state.session.id, preset=background_preset(self.app.config), effort=self.app.config.companion.background_effort)
             return state.session.id
 
     async def project(self) -> Any:
@@ -496,7 +498,7 @@ class Companion:
         if current is not None and not current.settings.system and not await manager.projects.sessions_of(current.id):
             await manager.projects.delete(current.id)
 
-    async def _point_at(self, session_id: str, *, preset: str) -> str:
+    async def _point_at(self, session_id: str, *, preset: str, effort: str = "") -> str:
         """Put this turn's preset on the session, or take the override off when it is the default.
 
         The session carries the choice, not the configuration: the run reads a live override written
@@ -509,6 +511,10 @@ class Companion:
         """
         manager = self.app.manager
         assert manager is not None
+        # The effort goes with the turn the same way, but through the manager's effort hook rather than
+        # the session's overrides: an override cannot be taken back to "the preset's own" without
+        # clearing the model with it.
+        self._efforts[session_id] = effort
         current = str((await manager.live.load(session_id)).get("preset") or "")
         if preset == current:
             return preset
@@ -526,12 +532,25 @@ class Companion:
             return preferred_preset(self.app.config)
         return background_preset(self.app.config)
 
+    def _effort_for(self, channel: str) -> str:
+        """The effort beside :meth:`_preset_for`'s preset, chosen by the same rule."""
+        if channel == "voice" or (channel == "report" and self.call_on):
+            return self.app.config.companion.effort
+        return self.app.config.companion.background_effort
+
+    def effort_for(self, state: Any) -> str | None:
+        """The manager's effort hook: the companion thinks as its last turn's model was chosen to."""
+        if not state.metadata.get("companion"):
+            return None
+        # A turn not pointed at a model since the restart is a background one until it is.
+        return self._efforts.get(state.session.id, self.app.config.companion.background_effort)
+
     async def apply_model(self) -> str:
         """Point the standing conversation at the configured background preset; the app calls this after a change."""
         if self.app.manager is None:
             return ""
         session_id = await self.session_id(create=False)
-        return await self._point_at(session_id, preset=self._preset_for("text")) if session_id else ""
+        return await self._point_at(session_id, preset=self._preset_for("text"), effort=self._effort_for("text")) if session_id else ""
 
     async def restore(self) -> str:
         """Pick the remembered session up after a restart, so the sink knows it before the page is opened."""
@@ -617,6 +636,8 @@ class Companion:
             # what there is to pick from. A page that had only the first showed "—" for the model
             # an installation was in fact talking to.
             "preset": chosen,
+            "effort": config.effort,
+            "background_effort": config.background_effort,
             "using": resolved[0] if resolved else "",
             "model": resolved[1].display(resolved[0]) if resolved else "",
             "background_preset": background,
@@ -692,7 +713,7 @@ class Companion:
         # Read the configured model at every turn rather than once at the birth of the session: the
         # engine is built per run, so this is the last moment the choice can still take effect
         # without a restart and without a new conversation.
-        await self._point_at(session_id, preset=self._preset_for(channel))
+        await self._point_at(session_id, preset=self._preset_for(channel), effort=self._effort_for(channel))
         self._channel = channel
         await self.emit("status", {"state": "thinking"})
         return await manager.submit(session_id, body or "File attached.", attachments, via=via)
@@ -707,7 +728,7 @@ class Companion:
         """
         if not self._id or session_id != self._id:
             return False
-        await self._point_at(session_id, preset=self._preset_for("text"))
+        await self._point_at(session_id, preset=self._preset_for("text"), effort=self._effort_for("text"))
         self._channel = "text"
         await self.emit("status", {"state": "thinking"})
         return True
@@ -981,7 +1002,7 @@ class Companion:
         if manager is None:
             raise RuntimeError("there is no session manager to say anything to")
         session_id = await self.session_id()
-        await self._point_at(session_id, preset=self._preset_for(channel))
+        await self._point_at(session_id, preset=self._preset_for(channel), effort=self._effort_for(channel))
         self._channel = channel
         await manager.submit(session_id, text, as_answer=False, origin="agent" if channel == "report" else "goal")
 
@@ -1655,6 +1676,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.manager.add_sink(companion.on_event)
     app.manager.on_finished(companion.on_run_finished)
     app.manager.turn_notes_hooks.append(companion.turn_notes)
+    app.manager.effort_hooks.append(companion.effort_for)
     if getattr(app, "notifications", None) is not None:
         app.notifications.register_resolver(RISK_REF, companion.resolve_goal_risk)
     return [asyncio.create_task(companion.goal_loop(), name="companion-goals")]

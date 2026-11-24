@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from daedalus.config import TASK_EFFORTS
 from daedalus.stores.control import ControlStore
 from daedalus.stores.database import Database
 from daedalus.stores.purge import Purge
@@ -99,6 +100,8 @@ class OrchestratorSettings:
     enabled: bool = False
     session_id: str = ""
     model: str = ""
+    effort: str = ""
+    """How hard it thinks (:mod:`daedalus.host.task_effort`); empty is the Settings default for project orchestrators."""
     autonomy: str = "normal"
     concurrency: int = CONCURRENCY_DEFAULT
     concurrency_cap: int = CONCURRENCY_CAP_DEFAULT
@@ -109,10 +112,12 @@ class OrchestratorSettings:
         data = raw if isinstance(raw, dict) else {}
         cap = max(1, _int(data.get("concurrency_cap"), CONCURRENCY_CAP_DEFAULT))
         autonomy = str(data.get("autonomy") or "normal")
+        effort = str(data.get("effort") or "")
         return cls(
             enabled=bool(data.get("enabled", False)),
             session_id=str(data.get("session_id") or ""),
             model=str(data.get("model") or ""),
+            effort=effort if effort in TASK_EFFORTS else "",
             autonomy=autonomy if autonomy in AUTONOMY else "normal",
             concurrency=min(cap, max(1, _int(data.get("concurrency"), CONCURRENCY_DEFAULT))),
             concurrency_cap=cap,
@@ -124,6 +129,7 @@ class OrchestratorSettings:
             "enabled": self.enabled,
             "session_id": self.session_id,
             "model": self.model,
+            "effort": self.effort,
             "autonomy": self.autonomy,
             "concurrency": self.concurrency,
             "concurrency_cap": self.concurrency_cap,
@@ -1168,6 +1174,7 @@ class ProjectStore:
         *,
         enabled: bool | None = None,
         model: str | None = None,
+        effort: str | None = None,
         autonomy: str | None = None,
         concurrency: int | None = None,
         concurrency_cap: int | None = None,
@@ -1193,6 +1200,8 @@ class ProjectStore:
             raise ProjectError(f"{project.name} is {kind} and cannot have an orchestrator; keep it as a project first")
         if autonomy is not None and autonomy not in AUTONOMY:
             raise ProjectError(f"autonomy is one of {', '.join(AUTONOMY)}, not {autonomy!r}")
+        if effort is not None and effort not in TASK_EFFORTS:
+            raise ProjectError(f"effort is empty or one of {', '.join(TASK_EFFORTS[1:])}, not {effort!r}")
         cap = current.concurrency_cap if concurrency_cap is None else int(concurrency_cap)
         if cap < 1:
             raise ProjectError("the concurrency cap is at least one")
@@ -1207,6 +1216,8 @@ class ProjectStore:
             patch["enabled"] = bool(enabled)
         if model is not None:
             patch["model"] = model.strip()
+        if effort is not None:
+            patch["effort"] = effort
         if autonomy is not None:
             patch["autonomy"] = autonomy
         if telegram_topic_id is not None:

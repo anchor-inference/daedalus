@@ -112,6 +112,7 @@ class Heartbeat:
             "interval_minutes": cfg.interval_minutes,
             "active_hours": cfg.active_hours,
             "preset": cfg.preset,
+            "effort": cfg.effort,
             "max_runs_per_day": cfg.max_runs_per_day,
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "runs_today": self.runs_today[1] if self.runs_today[0] == datetime.now(UTC).strftime("%Y-%m-%d") else 0,
@@ -220,12 +221,21 @@ class Heartbeat:
             await notifications.post(Draft("reminder", f"Heartbeat run {status}", "", kind="heartbeat", tone="warning", session_id=session_id, run_id=run_id, source="heartbeat"))
 
 
+def effort_for(app: Any, state: Any) -> str | None:
+    """The manager's effort hook: a heartbeat run thinks as Settings → Heartbeat say."""
+    return app.config.heartbeat.effort if state.metadata.get("heartbeat") else None
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     heartbeat = Heartbeat(app)
     app.extensions["heartbeat"] = heartbeat
     assert app.manager is not None
     await heartbeat.load()
     app.manager.on_finished(heartbeat.on_run_finished)
+    # Through the manager's effort hook rather than the session's overrides, as the preset could not be: an
+    # override is never taken back, and a heartbeat session lives on, so "default" chosen after "high"
+    # would have gone on thinking hard.
+    app.manager.effort_hooks.append(lambda state: effort_for(app, state))
     if not heartbeat.path.exists():
         try:
             heartbeat.write("")

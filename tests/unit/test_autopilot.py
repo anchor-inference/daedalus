@@ -77,8 +77,8 @@ async def pilot(settings: Settings, db: Database) -> Any:
     asked: list[dict[str, Any]] = []
 
     async def small_model(prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200,
-                          temperature: float = 0.0, instructions: str = "") -> str:
-        asked.append({"prompt": prompt, "purpose": purpose, "instructions": instructions})
+                          temperature: float = 0.0, instructions: str = "", effort: str = "") -> str:
+        asked.append({"prompt": prompt, "purpose": purpose, "instructions": instructions, "effort": effort})
         return verdicts.pop(0) if verdicts else '{"verdict": "done", "summary": "finished"}'
 
     manager.small_model = small_model  # type: ignore[method-assign]
@@ -344,3 +344,11 @@ async def test_the_check_can_be_switched_off(pilot: Any) -> None:
     await quiet(pilot)
     await risky_run(pilot.manager, sid, "r-off", RESTART)
     assert await pilot.service.judge(sid, "r-off") == "done"
+
+
+async def test_the_judge_thinks_as_settings_say(pilot: Any) -> None:
+    pilot.manager.config.autopilot.effort = "medium"
+    sid = await chat(pilot)
+    await pilot.manager.submit(sid, "fix the bug")
+    await quiet(pilot)
+    assert pilot.asked and all(call["effort"] == "medium" for call in pilot.asked)

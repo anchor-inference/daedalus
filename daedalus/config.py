@@ -207,6 +207,12 @@ ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
 REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("low", "medium", "high", "xhigh")
 """Efforts a preset or a session may ask for. Hosted vendors map these onto their own names;
 Bonsai's chat template only knows ``low``, ``medium`` and ``xhigh`` (and defaults to xhigh)."""
+TaskEffort = Literal["", "none", "low", "medium", "high", "xhigh"]
+TASK_EFFORTS: tuple[TaskEffort, ...] = ("", "none", *REASONING_EFFORTS)
+"""How hard a task that names a model preset has its model think: empty for the task's default, ``none``
+for no thinking, or one of the reasoning efforts. What the default is depends on the task, and
+:mod:`daedalus.host.task_effort` is the one place that says: a one-shot helper call does not think, a
+task that runs a whole agent run keeps the preset's own thinking and effort."""
 ApprovalMode = Literal["manual", "auto"]
 ScheduleTopicMode = Literal["per_task", "per_run"]
 TelegramMode = Literal["topics", "private"]
@@ -725,6 +731,8 @@ class VisionConfig(BaseModel):
 
     preset: str = ""
     """A preset with ``images = true``; empty picks the first image-capable preset."""
+    effort: TaskEffort = ""
+    """How hard the vision model thinks: ``none`` or a reasoning effort. Empty is no thinking, as a short helper call wants."""
     max_output_tokens: int = Field(default=2000, ge=100, le=32_000)
 
 
@@ -1108,6 +1116,8 @@ class ActionRulesConfig(BaseModel):
     review_preset: str = ""
     """The model preset the review asks; empty = a middle one of the table. A fast, cheap model: it
     answers one word and a sentence, and the action waits for it."""
+    review_effort: TaskEffort = ""
+    """How hard the review's model thinks. Empty is no thinking, as a short helper call wants."""
     review_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     """How long an action waits for the review. A review that does not answer in time asks the
     operator: a check that cannot be made has not said yes."""
@@ -1116,6 +1126,8 @@ class ActionRulesConfig(BaseModel):
     patterns every fetched or browsed page is scanned for. Off by default: a model call per fetch."""
     injection_preset: str = ""
     """The model preset that check asks; empty = a middle one of the table."""
+    injection_effort: TaskEffort = ""
+    """How hard that check's model thinks. Empty is no thinking, as a short helper call wants."""
 
     @field_validator("levels")
     @classmethod
@@ -1159,6 +1171,8 @@ class MemoryConfig(BaseModel):
     """Preset id of the model that names a memory's category and topics when Remember was given
     none, and double-checks it for sensitive subjects; empty = word lists only, which cost nothing
     and are right most of the time. One short call per such Remember."""
+    classify_effort: TaskEffort = ""
+    """How hard the classifier thinks. Empty is no thinking, as a short helper call wants."""
     sensitive_allowed: list[Literal["health", "finances", "intimate", "identity_documents", "precise_location"]] = Field(default_factory=list)
     """Sensitive subjects Remember may store. Everything not listed is refused, and the refusal tells
     the model why, so a diagnosis, a card number or a home address is never kept by accident."""
@@ -1178,6 +1192,8 @@ class MemoryConfig(BaseModel):
     """Preset id of the model the background pass and the Memory screen's "tell it what to change" use;
     any configured preset. Empty = the recommended cheap model when it is configured, else the
     classifier's, the summariser's or a middle preset — the Memory settings say which one runs."""
+    synthesis_effort: TaskEffort = ""
+    """How hard memory's model thinks. Empty is no thinking, as a short helper call wants."""
     synthesis_usd_per_day: float = Field(default=0.5, ge=0)
     """What memory's model calls may spend in a day (UTC); the background pass stops for the day when
     it is reached. A model that costs nothing (a subscription, a local one) is not stopped by it.
@@ -1227,6 +1243,8 @@ class CompactionConfig(BaseModel):
     """Where the core's own mid-run compaction starts; above the host's ratio so runs boundaries compact first."""
     preset: str = ""
     """Preset id the summariser runs on; empty = the session's own model. A cheaper model here saves on every long session."""
+    effort: TaskEffort = ""
+    """How hard the summariser thinks. Empty is no thinking, as a short helper call wants."""
 
 
 COMPACTION_HEADROOM_TOKENS = 80_000
@@ -1521,8 +1539,12 @@ class CompanionConfig(BaseModel):
     avatar: AvatarConfig = Field(default_factory=AvatarConfig)
     preset: str = ""
     """The model for live voice turns; pick a fast one (no thinking, or low effort). Empty = the default preset."""
+    effort: TaskEffort = ""
+    """How hard the voice model thinks. Empty is the model preset's own thinking and effort."""
     background_preset: str = ""
     """The model for typed messages, agent reports and goal checks. Empty = the default preset."""
+    background_effort: TaskEffort = ""
+    """How hard the background model thinks. Empty is the model preset's own thinking and effort."""
     progress: bool = True
     """Whether an agent's mid-run words are relayed to the companion at all. Off leaves the final answer
     and the questions, which is the quieter conversation and the cheaper one."""
@@ -1553,6 +1575,8 @@ class AssistConfig(BaseModel):
     """Whether the composer offers the operator's likely next message after an answer settles."""
     predict_preset: str = ""
     """The model preset that guesses it; empty = a middle one of the table, as the action review uses."""
+    predict_effort: TaskEffort = ""
+    """How hard the guess's model thinks. Empty is no thinking, as a short helper call wants."""
     predict_max_messages: int = Field(default=400, ge=10)
     """A session with more messages than this gets no guess: the context the guess would be sent is
     the whole conversation's tail, and a long session is where it is least needed and most costly."""
@@ -1579,6 +1603,8 @@ class TranslationConfig(BaseModel):
     """What a session that never chose works in; empty means no translation."""
     preset: str = ""
     """The translator's model preset; empty = the helper preset the next-message guess uses, a middle one."""
+    effort: TaskEffort = ""
+    """How hard the translator thinks. Empty is no thinking, as a short helper call wants."""
     timeout_seconds: int = Field(default=120, ge=5, le=900)
     """How long one translation may take before the original is used instead. The turn never waits on it."""
 
@@ -1595,6 +1621,8 @@ class AutopilotConfig(BaseModel):
     preset: str = ""
     """The judge's model preset; empty = the one the next-message guess uses, since the judge is
     that guess made explicit and wants the same cheap model."""
+    effort: TaskEffort = ""
+    """How hard the judge thinks. Empty is no thinking, as a short helper call wants."""
     max_continuations: int = Field(default=3, ge=0, le=20)
     """Turns autopilot may start on its own after one message of the operator's. Reached, the
     judge may still say the work is done or ask, but it no longer continues silently."""
@@ -1849,6 +1877,8 @@ class SubagentModels(BaseModel):
     """``all`` is every preset that can run; ``session`` only the leader's own model; ``chosen`` the list below."""
     presets: list[str] = Field(default_factory=list)
     """For ``chosen``. A preset deleted later drops out of it rather than making the setting invalid."""
+    effort: TaskEffort = ""
+    """How hard a subagent thinks, whichever of these presets it runs on. Empty is the model preset's own thinking and effort."""
 
 
 class SubagentsConfig(BaseModel):
@@ -1866,6 +1896,8 @@ class SubagentsConfig(BaseModel):
     """The presets QuickAgent may run on, the first being the one it takes when the call names none.
     Empty turns the tool off: a quick agent is only worth its call on a model that is fast and cheap,
     and which ones are is the operator's to say. A session may choose its own list."""
+    quick_effort: TaskEffort = ""
+    """How hard a quick agent thinks. Empty is the model preset's own thinking and effort."""
     quick_wait_minutes: int = Field(default=15, ge=1, le=120)
     """How long a QuickAgent call waits before it stops the helper and returns what it had done. The
     leader's turn is held for the whole call, so it is shorter than a subagent's wait."""
@@ -1899,6 +1931,8 @@ class DispatcherConfig(BaseModel):
     preset: str = ""
     """Its model preset; empty is a mid-tier preset (:meth:`RuntimeConfig.middle_preset`). It routes and
     follows, which a mid-tier model does as well as the strongest, and it runs on every report."""
+    effort: TaskEffort = ""
+    """How hard the main orchestrator thinks. Empty is the model preset's own thinking and effort."""
     batch_seconds: int = Field(default=10, ge=1, le=600)
     """Reports on dispatches arriving together are told in one turn."""
     max_wakes_per_hour: int = Field(default=20, ge=1)
@@ -1919,6 +1953,8 @@ class OrchestratorConfig(BaseModel):
     preset: str = ""
     """The model preset of a project orchestrator whose project names none; empty is the strongest
     preset (:meth:`RuntimeConfig.strongest_preset`). A project's own choice overrides it."""
+    effort: TaskEffort = ""
+    """How hard a project orchestrator thinks when its project chose no effort of its own. Empty is the model preset's own thinking and effort."""
     batch_seconds: int = Field(default=20, ge=1, le=600)
     """Routine events wait this long after the first of them, so one wake-up carries several."""
     batch_max_lines: int = Field(default=30, ge=5, le=200)
@@ -2403,10 +2439,14 @@ class BrowserConfig(BaseModel):
     injection_monitor_preset: str = ""
     """The model preset the monitor asks; empty = a middle one of the table (the weaker of two), which
     is what reading one page for one word needs."""
+    injection_monitor_effort: TaskEffort = ""
+    """How hard the monitor's model thinks. Empty is no thinking, as a short helper call wants."""
     extract_preset: str = ""
     """The model preset ``BrowserText(query=…)`` reads a page with, part by part, to hand the agent
     only what it asked for; empty = a middle one of the table, as for the monitor. Its answer is
     fenced as page content: the model read the page, so it speaks for the page, not the operator."""
+    extract_effort: TaskEffort = ""
+    """How hard the reading model thinks. Empty is no thinking, as a short helper call wants."""
     point_clicks: bool = False
     """Whether the agent may click, hover or double-click at a point of the viewport rather than on a
     ref, for what the outline does not name (a canvas, a map). Off by default: a point is harder for
@@ -2498,6 +2538,8 @@ class HeartbeatConfig(BaseModel):
     """UTC window ``HH:MM-HH:MM`` in which heartbeats run; may wrap past midnight."""
     preset: str = ""
     """Model preset for heartbeat runs; empty = the default preset."""
+    effort: TaskEffort = ""
+    """How hard a heartbeat run thinks. Empty is the model preset's own thinking and effort."""
     max_runs_per_day: int = Field(default=24, ge=1)
 
 

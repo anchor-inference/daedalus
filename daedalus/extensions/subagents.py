@@ -80,6 +80,14 @@ def check_effort(effort: str | None) -> str | None:
     return effort
 
 
+def settings_effort(effort: str) -> str | None:
+    """A task effort from the settings (:mod:`daedalus.host.task_effort`) as a leader's effort: ``none`` is
+    ``off``, and empty is ``None``, which leaves the subagent on its model's own."""
+    if effort == "none":
+        return "off"
+    return effort or None
+
+
 async def set_effort(manager: Any, session_id: str, effort: str) -> None:
     """Set a subagent's reasoning effort on top of its model, whichever way that model was chosen.
     An effort without thinking means nothing to the model, so any effort turns thinking back on."""
@@ -424,6 +432,8 @@ class Subagents:
                     thinking_enabled=overrides.get("thinking_enabled"),
                     reasoning_effort=overrides.get("reasoning_effort"),
                 )
+        # The leader's word first, then Settings → Subagents; neither leaves the model's own (or the leader's).
+        effort = effort if effort is not None else settings_effort(manager.config.subagents.models.effort)
         if effort is not None:
             await set_effort(manager, cid, effort)
         opening = (f"[persona: {persona}]\n{persona_text}\n\n" if persona_text else "")
@@ -513,6 +523,7 @@ class Subagents:
         await manager.sessions.set_bypass(cid, True, datetime.now(UTC).isoformat())
         child.bypass = True
         await manager.set_model(cid, preset=preset)
+        effort = effort if effort is not None else settings_effort(manager.config.subagents.quick_effort)
         if effort is not None:
             await set_effort(manager, cid, effort)
         self._waited.add(cid)
