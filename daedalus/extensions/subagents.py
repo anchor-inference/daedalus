@@ -205,7 +205,12 @@ QUICK_BRIEF = (
     "for your final reply, which it receives verbatim as that call's result and sees nothing else of. Do exactly the "
     "task in as few steps as do it well (batch browser actions, find before reading whole files), then stop. You work "
     "in the leader's workspace and in its browser: the same tabs, and the operator's Chrome when the leader works "
-    "there. Nobody can answer you: do not ask, decide within the task, or end with what blocked you. Your checks are "
+    "there. Ask nobody questions: decide within the task, and when it leaves a choice you cannot make from it, stop "
+    "and end with that choice; the leader holds the context and asks the operator. The one thing you wait for is what "
+    "only the operator can do in the browser: a CAPTCHA, a sign-in, a code, a payment or a confirmation (BrowserHandoff), "
+    "the private sign-in form (BrowserLogin), the move into their Chrome (BrowserAskOperatorChrome). That call waits for "
+    "them and returns their answer, so do not end your turn after it; when they decline or do not answer, finish "
+    "without that step or end with where you stopped. Your checks are "
     "lifted, so an action that would wait for approval goes straight through: stay strictly inside what the task "
     "allows, and when it does not say whether something is allowed, leave it and say so. The leader's chat is "
     "session {leader}; read it only for what the task refers to and does not spell out, with "
@@ -213,7 +218,10 @@ QUICK_BRIEF = (
     "End with the result itself: the values found, what you did and what you could not, no preamble."
 )
 
-QUICK_TASK_HEADER = "[task from your leader session {leader} via QuickAgent — your final reply is returned to it verbatim as the result of its call]\n\n"
+QUICK_TASK_HEADER = (
+    "[task from your leader session {leader} via QuickAgent — your final reply is returned to it verbatim as the result of its call; "
+    "ask no questions: a choice the task leaves open goes into that reply]\n\n"
+)
 
 CARRIED_FROM_LEADER = (tool_groups.CARRIED_KEY, "discovered_tools", tool_groups.SESSION_LOADS_KEY)
 """The leader's loaded tools, handed to its quick agent: a helper sent to finish a form in the browser
@@ -521,7 +529,10 @@ class Subagents:
             run_id = await manager.submit(cid, QUICK_TASK_HEADER.format(leader=leader_id) + task, as_answer=False, origin=f"subagent-task:{leader_id}")
             ended = await self._await_quick(cid, 60 * (timeout_minutes or self.app.config.subagents.quick_wait_minutes))
         except asyncio.CancelledError:
-            # The leader was stopped mid-call: its helper goes too rather than working on for nobody.
+            # The leader was stopped mid-call: its helper goes too rather than working on for nobody, and
+            # what it asked the operator for in the browser is taken back first, so no "needs you" card,
+            # paused browser or notification is left waiting on a helper that no longer exists.
+            await asyncio.shield(self._withdraw_waits(cid))
             await asyncio.shield(manager.delete_session(cid, delete_workspace=False))
             raise
         finally:
@@ -543,20 +554,33 @@ class Subagents:
         return {"session_id": cid, "run_id": run_id, "completed": True, "header": header, "answer": await self.answer(cid) or no_answer(state)}
 
     async def _await_quick(self, cid: str, seconds: float) -> str:
-        """``done`` once the quick agent's run (and any job it waits on) is over; ``timeout`` after stopping it."""
+        """``done`` once the quick agent's run (and any job it waits on) is over; ``timeout`` after stopping it.
+
+        The time limit stands still while the helper waits for the operator in the browser: the limit
+        is for the helper's own work, and an operator taking four minutes over a CAPTCHA would otherwise
+        leave it a minute for the form it was sent to fill. The call's dispatch budget
+        (:data:`quick_agent.CALL_CEILING_SECONDS`) is the bound on the whole."""
         manager = self.app.manager
         assert manager is not None
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + seconds
+        began = loop.time()
+        deadline = began + seconds
+        ceiling = began + quick_agent.CALL_CEILING_SECONDS - QUICK_STOP_SECONDS
+        last = began
         while True:
             await asyncio.sleep(QUICK_POLL_SECONDS)
+            now = loop.time()
+            if self.operator_waits(cid):
+                deadline += now - last
+            last = now
             state = await manager.get_state(cid)
             if state is None:
                 raise RuntimeError("the quick agent's session disappeared")
             if not state.running and state.pending is None and not unfinished_jobs(manager, cid):
                 return "done"
-            if loop.time() >= deadline:
+            if now >= min(deadline, ceiling):
                 break
+        await self._withdraw_waits(cid)
         await manager.stop(cid)
         for _ in range(int(QUICK_STOP_SECONDS / QUICK_POLL_SECONDS)):
             state = await manager.get_state(cid)
@@ -564,6 +588,26 @@ class Subagents:
                 break
             await asyncio.sleep(QUICK_POLL_SECONDS)
         return "timeout"
+
+    def _browsers(self) -> Any:
+        """The browser service, where a quick agent's waits for the operator are; ``None`` without a browser."""
+        manager = self.app.manager
+        agent = manager.service_hooks.get("browser") if manager is not None else None
+        return getattr(agent, "service", None)
+
+    def operator_waits(self, cid: str) -> list[dict[str, Any]]:
+        """What the quick agent waits for the operator to do in the browser now (empty: nothing)."""
+        service = self._browsers()
+        return list(service.operator_waits_of(cid)) if service is not None else []
+
+    async def _withdraw_waits(self, cid: str) -> None:
+        service = self._browsers()
+        if service is None:
+            return
+        try:
+            await service.cancel_waits_of(cid)
+        except Exception:  # noqa: BLE001 — the helper goes whether or not its request could be taken back
+            logger.exception("could not withdraw what quick agent %s asked of the operator", cid)
 
     async def _steps(self, session_id: str) -> int:
         row = await self.app.db.fetchone("SELECT count(*) n FROM tool_calls WHERE session_id = ?", (session_id,))
@@ -587,12 +631,18 @@ class Subagents:
             except ValueError:
                 metadata = {}
             state = manager.live_state(str(row["id"]))
-            out.append({
+            running = bool(state is not None and (state.running or state.pending is not None))
+            entry: dict[str, Any] = {
                 "session_id": str(row["id"]),
                 "call": quick_agent.call_of(metadata),
                 "created_at": str(row["created_at"]),
-                "running": bool(state is not None and (state.running or state.pending is not None)),
-            })
+                "running": running,
+            }
+            if running and (waits := self.operator_waits(str(row["id"]))):
+                # What the leader's transcript says under the call while the helper waits: what the
+                # operator is to do, where, and until when.
+                entry["waiting"] = waits[0]
+            out.append(entry)
         return out
 
     async def _prune_quick(self, leader_id: str) -> None:

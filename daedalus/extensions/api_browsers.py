@@ -408,6 +408,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise InvalidRequest("taking control names the live view that drives: its client_id")
         return await service().control(group_id, body.owner, client_id=body.client_id, ttl_ms=body.ttl_ms, reason=body.reason, note=body.note, by="operator")
 
+    @api.post("/api/browsers/{group_id}/decline")
+    async def browsers_decline(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator will not do what the agent handed over: it gets the browser back, told they said no."""
+        await service().decline(group_id, by="operator")
+        return {"ok": True}
+
     @api.post("/api/browsers/{group_id}/viewport")
     async def browsers_viewport(group_id: str, body: ViewportBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's picture asks the page to become this size, so the pane is the page."""

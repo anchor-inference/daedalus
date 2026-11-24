@@ -1479,6 +1479,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   onChange={(quick_models) => save({ subagents: { ...s.subagents!, quick_models } })}
                 />
               </Row>
+              {/* Beside the models it limits: how long a quick agent holds its leader waiting for the operator in the browser. */}
+              <NumRow id="quick-operator-wait" setting="subagents.operator_wait_minutes" title={t("qagent.wait.setting")} desc={t("qagent.wait.setting.sub")} unit={t("settings.unit.minutes")} value={s.subagents?.operator_wait_minutes ?? 10} min={1} max={60} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, operator_wait_minutes: v } })} {...shipped(s.subagents?.operator_wait_minutes ?? 10, 10, () => save({ subagents: { ...s.subagents!, operator_wait_minutes: 10 } }))} />
             </div>
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card">
