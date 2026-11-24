@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clipboardChord, isKeyPress, keyInput, modsOf, mouseButton, tapKey, viewerChord } from "./keys";
+import { clipboardChord, isKeyPress, keyInput, modsOf, mouseButton, tapKey, viewerChord, zoomChord } from "./keys";
 
 const key = (k: string, code = "", mods: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey", boolean>> = {}, keyCode = 0) => ({ key: k, code, keyCode, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
 
@@ -111,5 +111,20 @@ describe("the clipboard's chords", () => {
   it("leaves the chords themselves keys, so the viewer asks about the clipboard first", () => {
     expect(isKeyPress(key("c", "KeyC", { ctrlKey: true }))).toBe(true);
     expect(isKeyPress(key("v", "KeyV", { ctrlKey: true }))).toBe(true);
+  });
+});
+
+describe("the zoom's chords", () => {
+  it("are Ctrl (⌘ on a Mac) with plus, minus or zero, by key or by place", () => {
+    expect(zoomChord(key("=", "Equal", { ctrlKey: true }), false)).toBe("in");
+    expect(zoomChord(key("+", "Equal", { ctrlKey: true, shiftKey: true }), false)).toBe("in");
+    expect(zoomChord(key("+", "NumpadAdd", { ctrlKey: true }), false)).toBe("in");
+    expect(zoomChord(key("-", "Minus", { metaKey: true }), true)).toBe("out");
+    expect(zoomChord(key("0", "Digit0", { ctrlKey: true }), false)).toBe("reset");
+    // A layout whose key there types something else is still read by the key's place.
+    expect(zoomChord(key("ъ", "Equal", { ctrlKey: true }), false)).toBe("in");
+    expect(zoomChord(key("=", "Equal"), false)).toBeNull();
+    expect(zoomChord(key("0", "Digit0", { ctrlKey: true }), true)).toBeNull();
+    expect(zoomChord(key("0", "Digit0", { ctrlKey: true, altKey: true }), false)).toBeNull();
   });
 });

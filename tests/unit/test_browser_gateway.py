@@ -303,6 +303,14 @@ async def test_the_routes_list_hand_over_and_keep_downloads(served: Served, tmp_
         assert resized["viewport"] == {"w": 960, "h": 720}
         assert (await http.get(f"/api/browsers/{group}", headers=H)).json()["viewport"] == {"w": 960, "h": 720}
         assert (await http.get(f"/api/browsers/{group}/asks/abcdef012345/thumbnail", headers=H)).status_code == 404
+        # The take-over view's sharp frame: the zoomed part, drawn by the browser at the scale asked,
+        # read back in chunks, the secret fields left as the operator sees them.
+        still = await http.post(f"/api/browsers/{group}/still", json={"x": 600, "y": 300, "w": 45, "h": 45, "scale": 4}, headers=H)
+        assert still.status_code == 200 and still.headers["content-type"] == "image/png" and still.content == served.daemon.png
+        asked = [p for m, p in served.daemon.calls if m == "page.screenshot"][-1]
+        assert asked["clip"] == {"x": 600, "y": 300, "w": 45, "h": 45} and asked["scale"] == 4 and asked["keep"] and asked["unmasked"]
+        assert asked["origin"] == {"actor": "operator"} and asked["tab_id"] == served.daemon.tab_of(group).id and not served.daemon.shots
+        assert (await http.post(f"/api/browsers/{group}/still", json={"x": 0, "y": 0, "w": 10, "h": 10, "scale": 9}, headers=H)).status_code == 422
         load = (await http.get("/api/workloads/load", headers=H)).json()
         assert load["browsers"]["running"] == 1 and load["terminals"] is None
         caps = (await http.get("/api/capabilities", headers=H)).json()

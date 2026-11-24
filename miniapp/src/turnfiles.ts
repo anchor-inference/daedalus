@@ -96,10 +96,18 @@ export function placeOf(path: string, workspace: string, folders: readonly Pick<
 }
 
 /**
+ * A screenshot the agent sent in the same step (`BrowserScreenshot(send=true)`) is a sent file like
+ * SendFile's, but its path is the one the host chose, so it is read from the result's first line.
+ */
+const SCREENSHOT = "BrowserScreenshot";
+const SAVED_RE = /^Saved .+? to (.+)\.$/m;
+
+/**
  * The file a call put in front of the operator. A folder sent with `zip` arrives as the archive the host
  * writes beside it under the folder's name, so the card names and opens that, not the folder.
  */
-export function sentPath(name: string, args: Record<string, unknown> | undefined): string {
+export function sentPath(name: string, args: Record<string, unknown> | undefined, result = ""): string {
+  if (name === SCREENSHOT) return args?.send === true ? SAVED_RE.exec(result)?.[1] ?? "" : "";
   const path = typeof args?.path === "string" ? args.path : "";
   return name === "SendFile" && path && args?.zip === true ? `${path.replace(/[\\/]+$/, "")}.zip` : path;
 }
@@ -122,12 +130,12 @@ export function turnFiles(items: readonly Activity[], workspace = "", folders: r
   const changed = new Map<string, ChangedFile>();
   for (const a of items) {
     if (a.kind !== "tool" || a.running || a.error) continue;
-    if (a.name !== "SendFile" && !WRITERS.has(a.name)) continue;
-    const path = sentPath(a.name, a.args);
+    if (a.name !== "SendFile" && a.name !== SCREENSHOT && !WRITERS.has(a.name)) continue;
+    const path = sentPath(a.name, a.args, a.result ?? "");
     if (!path) continue;
     const place = placeOf(path, workspace, folders);
     const key = keyOf(path, place);
-    if (a.name === "SendFile") {
+    if (a.name === "SendFile" || a.name === SCREENSHOT) {
       const caption = typeof a.args.caption === "string" ? a.args.caption : "";
       const counted = BYTES_RE.exec(a.result ?? "");
       const size = counted ? bytes(Number(counted[1])) : SIZE_RE.exec(a.result ?? "")?.[1] ?? null;

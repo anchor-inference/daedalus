@@ -95,6 +95,22 @@ export function viewerChord(e: KeyLike, mac: boolean): ViewerChord | null {
 }
 
 /**
+ * The zoom's chords, a browser's own: Ctrl (⌘) with plus, minus or zero, by the key or by its place, so
+ * a layout without "=" on that key and the number pad both work. Sent on, they would zoom the remote
+ * page itself, which changes its layout under the agent.
+ */
+export type ZoomChord = "in" | "out" | "reset";
+
+export function zoomChord(e: KeyLike, mac: boolean): ZoomChord | null {
+  const primary = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  if (!primary || e.altKey) return null;
+  if (e.key === "+" || e.key === "=" || e.code === "Equal" || e.code === "NumpadAdd") return "in";
+  if (e.key === "-" || e.key === "_" || e.code === "Minus" || e.code === "NumpadSubtract") return "out";
+  if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") return "reset";
+  return null;
+}
+
+/**
  * The clipboard's chords, which cross between the operator's machine and the page. A paste is never
  * sent as keys: the page's browser would paste its own clipboard, which holds nothing of the
  * operator's. It is left to the viewer's hidden field, whose `paste` event carries the operator's

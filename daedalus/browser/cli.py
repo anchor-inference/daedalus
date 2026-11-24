@@ -99,7 +99,8 @@ class StaffFiles:
         extension reaches the browser from a member's workspace as a .zip of its folder."""
         return None
 
-    async def save(self, name: str, data: bytes, to: str | None) -> str:
+    async def save(self, name: str, data: bytes, to: str | None, *, folder: str = "downloads", source: str = "a site, through the browser") -> str:
+        # Whatever the folder, a member's file goes to its inbox: the team's handoff writes nowhere else.
         project = await self.team.project(self.live.staff.project_id)
         try:
             stored = await self.team.manager.files.add(data, name=name, origin="browser", origin_ref=f"staff:{self.live.staff.name}", scope=project.id, actor=f"staff:{self.live.staff.name}")
@@ -109,8 +110,8 @@ class StaffFiles:
         except FileRefused as exc:
             raise Forbidden(str(exc)) from None
         where = delivered[0].path if delivered else ""
-        note = " (a path was asked for; a download goes to your inbox)" if to else ""
-        report = saved_report(where, len(data), stored.sha256, source="a site, through the browser")
+        note = " (a path was asked for; a file of the browser's goes to your inbox)" if to else ""
+        report = saved_report(where, len(data), stored.sha256, source=source)
         return f"Saved {name} to {where}{note}.\n{report}\nIt is also kept as {stored.handle}, which passes to the team by handle."
 
 

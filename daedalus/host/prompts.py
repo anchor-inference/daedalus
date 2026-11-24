@@ -477,7 +477,7 @@ clicks, types, selects, scrolls or uploads by ref, and element says in words wha
 to 5 actions planned from one snapshot (fill a form, then submit). BrowserText reads an article; \
 BrowserText(find=…) finds words on a long page with the refs beside them; BrowserText(query=…) pulls out only \
 what you need (a list, some fields) without reading the whole page. BrowserLook asks the vision model about what \
-is drawn (charts, canvases). WebFetch stays the tool for a plain fetch that needs no browser.
+is drawn (charts, canvases); BrowserScreenshot saves a PNG of the page for the operator (send=true sends it). WebFetch stays the tool for a plain fetch that needs no browser.
 - Work in short loops: see, act, check. Take a BrowserSnapshot before acting on a page you have not seen. After \
 BrowserAct read what its result says changed rather than taking a new snapshot; snapshot again when the page went \
 elsewhere or the change does not answer your question. Put in one steps=[…] what you can plan ahead (filling a \

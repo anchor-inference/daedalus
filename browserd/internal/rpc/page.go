@@ -18,6 +18,7 @@ func (d *Daemon) registerPage(s handles) {
 		"page.find":       d.find,
 		"page.text":       d.text,
 		"page.screenshot": d.screenshot,
+		"shot.read":       d.shotRead,
 		"page.act":        d.act,
 		"page.wait":       d.wait,
 		"dialog.answer":   d.dialogAnswer,
@@ -204,6 +205,23 @@ func (d *Daemon) downloadRead(ctx context.Context, c *server.Conn, params json.R
 		return nil, wire.Errorf(wire.CodeInvalidParams, "max is at most %d", page.ChunkBytes)
 	}
 	return d.Page.ReadDownload(p.ID, p.Offset, p.Max)
+}
+
+// shotRead reads a picture page.screenshot kept (keep), a chunk at a time. It names no tab: the
+// picture's id is what the screenshot's caller was given, and it is forgotten at its end.
+func (d *Daemon) shotRead(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		ID     string `json:"id"`
+		Offset int64  `json:"offset"`
+		Max    int    `json:"max,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if p.Max < 0 || p.Max > page.ChunkBytes {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "max is at most %d", page.ChunkBytes)
+	}
+	return d.Page.ReadShot(p.ID, p.Offset, p.Max)
 }
 
 func (d *Daemon) downloadDelete(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

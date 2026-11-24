@@ -2,6 +2,7 @@ package page
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"math"
 	"strings"
@@ -318,21 +319,57 @@ func (p *Model) Text(ctx context.Context, t *browser.Tab, ref string, max int) (
 
 // ScreenshotParams are page.screenshot's.
 type ScreenshotParams struct {
-	TabID    string          `json:"tab_id"`
-	Ref      string          `json:"ref,omitempty"`
-	FullPage bool            `json:"full_page,omitempty"`
-	MaxWidth int             `json:"max_width,omitempty"`
-	Format   string          `json:"format,omitempty"`
-	Quality  int             `json:"quality,omitempty"`
+	TabID    string `json:"tab_id"`
+	Ref      string `json:"ref,omitempty"`
+	FullPage bool   `json:"full_page,omitempty"`
+	MaxWidth int    `json:"max_width,omitempty"`
+	Format   string `json:"format,omitempty"`
+	Quality  int    `json:"quality,omitempty"`
+	// Scale, when set, is the picture's pixels per CSS pixel of the page, in place of max_width's fit
+	// to CSS pixels: 2 is a crisp picture of text for a person to read, whatever the screen the page
+	// is shown on. It is lowered to keep the picture within MaxShotSide and MaxShotPixels.
+	Scale float64 `json:"scale,omitempty"`
+	// Clip is a part of the viewport, in its CSS pixels: what the operator has zoomed into.
+	Clip *Clip `json:"clip,omitempty"`
+	// Keep holds the picture in the daemon for shot.read instead of answering it: a reply is one
+	// frame of at most 1 MiB, and a crisp PNG is larger.
+	Keep bool `json:"keep,omitempty"`
+	// Unmasked leaves the secret fields as the page shows them. Only the operator's call may ask: the
+	// masks keep secrets from the agent and its model, and the operator's live view shows them anyway,
+	// while masking flickers the fields of the page the operator is looking at.
+	Unmasked bool            `json:"unmasked,omitempty"`
 	Origin   *browser.Origin `json:"origin,omitempty"`
 }
 
+// Clip is a rectangle of the viewport in CSS pixels.
+type Clip struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+// The bounds of a scaled picture. Chromium draws a capture into one texture, whose side it caps near
+// 16384; the area keeps a full page at twice its size from becoming a hundred megapixels the host
+// then has to carry and store.
+const (
+	MaxShotScale  = 4.0
+	MaxShotSide   = 16000.0
+	MaxShotPixels = 25_000_000.0
+)
+
 // Screenshot is page.screenshot's result.
 type Screenshot struct {
-	Format  string   `json:"format"`
-	Width   int      `json:"width"`
-	Height  int      `json:"height"`
+	Format string `json:"format"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	// Scale is the picture's pixels per CSS pixel as taken.
+	Scale float64 `json:"scale"`
+	// Data is the picture, or empty when it was kept: then ShotID names it for shot.read and Size
+	// is its length in bytes.
 	Data    string   `json:"data_b64"`
+	ShotID  string   `json:"shot_id,omitempty"`
+	Size    int      `json:"size,omitempty"`
 	Masked  []string `json:"masked"`
 	Blocker *Blocker `json:"blocker,omitempty"`
 }
@@ -361,9 +398,24 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 	if maxW < 64 || maxW > 2560 {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "max_width must be 64-2560")
 	}
+	if sp.Scale != 0 && (sp.Scale < 0.25 || sp.Scale > MaxShotScale) {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "scale must be 0.25-%g", MaxShotScale)
+	}
+	if sp.Unmasked && sp.Origin.IsAgent() {
+		return nil, wire.Errorf(wire.CodeForbidden, "only the operator's picture may leave the secret fields showing")
+	}
+	if sp.Clip != nil && (sp.Ref != "" || sp.FullPage) {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "give a clip, a ref or full_page, not two")
+	}
 	var x, y, w, h float64
 	beyond := false
 	switch {
+	case sp.Clip != nil:
+		// Kept within the viewport: the operator's zoomed rectangle is computed from a frame that may
+		// be a moment older than a resize.
+		vp := t.Group.ViewportNow()
+		x, y = math.Max(0, sp.Clip.X), math.Max(0, sp.Clip.Y)
+		w, h = math.Min(sp.Clip.W, float64(vp.W)-x), math.Min(sp.Clip.H, float64(vp.H)-y)
 	case sp.Ref != "":
 		d, local, err := p.docOf(ctx, t, sp.Ref)
 		if err != nil {
@@ -394,6 +446,12 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 		return nil, wire.Errorf(wire.CodeForbidden, "the element has no size on the page")
 	}
 	scale := math.Min(1, float64(maxW)/w)
+	if sp.Scale != 0 {
+		scale = math.Min(sp.Scale, math.Min(MaxShotSide/w, MaxShotSide/h))
+		scale = math.Min(scale, math.Sqrt(MaxShotPixels/(w*h)))
+	}
+	// What was asked is in picture pixels per CSS pixel; the capture's scale is not.
+	asked := scale
 	// Page.captureScreenshot draws in device pixels, so on the operator's high-density screen a
 	// 1280-wide viewport came back 2560 pixels wide while the result said 1280. The model then
 	// clicked at points read off the picture, twice the page's coordinates, and every such click was
@@ -403,11 +461,18 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 	}
 	// Every document's secret fields are hidden, the frames' of other sites too: each world masks
 	// its own.
-	cross, missed := p.crossDocs(ctx, t, top, maxMaskedFrames)
+	var cross []*doc
+	missed := 0
+	if !sp.Unmasked {
+		cross, missed = p.crossDocs(ctx, t, top, maxMaskedFrames)
+	}
 	if missed > 0 {
 		return nil, wire.Errorf(wire.CodeForbidden, "%d frame(s) of another site could not be reached to hide their secret fields; no screenshot is taken", missed)
 	}
 	docs := append([]*doc{top}, cross...)
+	if sp.Unmasked {
+		docs = nil
+	}
 	masked := []string{}
 	defer func() {
 		// The masks come off whatever happened to the capture.
@@ -443,9 +508,16 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 	if err := t.Call(ctx, "Page.captureScreenshot", params, &shot); err != nil {
 		return nil, err
 	}
-	out := &Screenshot{Format: format, Width: int(math.Round(w * scale)), Height: int(math.Round(h * scale)), Data: shot.Data,
+	out := &Screenshot{Format: format, Width: int(math.Round(w * asked)), Height: int(math.Round(h * asked)), Scale: asked, Data: shot.Data,
 		Masked: masked}
-	if sp.Ref == "" {
+	if sp.Keep {
+		data, err := base64.StdEncoding.DecodeString(shot.Data)
+		if err != nil {
+			return nil, err
+		}
+		out.Data, out.ShotID, out.Size = "", p.keepShot(data), len(data)
+	}
+	if sp.Ref == "" && sp.Clip == nil {
 		// The vision model may describe the popup or not; the refs to close it come from the page.
 		out.Blocker = p.blocker(ctx, t)
 	}

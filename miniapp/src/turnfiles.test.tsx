@@ -63,6 +63,17 @@ describe("the files of a turn", () => {
     const { sent } = turnFiles(items, "/srv/ws/a1");
     expect(sent.map((f) => [f.name, f.size, f.place?.rel])).toEqual([["reports.zip", "5 KB", "reports.zip"]]);
   });
+
+  it("counts a screenshot sent in the same step as sent, by the path the host chose, and one kept only as nothing", () => {
+    const said = "Tab t1 — https://shop.test/; a PNG of the viewport, 2560×1600 px at 2× its CSS pixels.\nSaved shop.test-20261124-101500.png to /srv/ws/a1/screenshots/shop.test-20261124-101500.png.\n";
+    const items: Activity[] = [
+      { kind: "tool", id: "b1", name: "BrowserScreenshot", args: { send: true, caption: "the cart" }, result: `${said}shown shop.test-20261124-101500.png (4096 bytes) to the operator as a file card in the app`, running: false },
+      { kind: "tool", id: "b2", name: "BrowserScreenshot", args: {}, result: said.replace("101500", "101600").replace("101500", "101600"), running: false },
+    ];
+    const { sent, changed } = turnFiles(items, "/srv/ws/a1");
+    expect(sent.map((f) => [f.name, f.caption, f.size, f.place?.rel])).toEqual([["shop.test-20261124-101500.png", "the cart", "4 KB", "screenshots/shop.test-20261124-101500.png"]]);
+    expect(changed).toEqual([]);
+  });
 });
 
 describe("drawn under the answer", () => {

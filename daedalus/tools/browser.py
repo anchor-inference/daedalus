@@ -33,7 +33,7 @@ from daedalus.tools._common import FETCH_MAX_BYTES, FRAME_CHARS, error, ok, outp
 from daedalus.tools.vision import VisionUnavailable, look
 
 BROWSER_TOOLS = (
-    "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
+    "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserScreenshot", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
     "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin", "BrowserReplay", "BrowserAskOperatorChrome",
     "BrowserEval", "BrowserScripts", "BrowserExtensions",
@@ -62,6 +62,8 @@ class SessionFiles:
         self.services = services
         self.manager = manager
         self.owner = owner
+        self.saved: Path | None = None
+        """The file :meth:`save` wrote last, which BrowserScreenshot's ``send`` hands over."""
 
     async def read(self, path: str) -> tuple[str, bytes]:
         store = getattr(self.manager, "files", None)
@@ -129,9 +131,9 @@ class SessionFiles:
             files[rel.replace(os.sep, "/")] = data
         return target.name, files
 
-    async def save(self, name: str, data: bytes, to: str | None) -> str:
+    async def save(self, name: str, data: bytes, to: str | None, *, folder: str = DOWNLOADS_DIR, source: str = "a site, through the browser") -> str:
         clean = safe_name(name) or "download"
-        wanted = to or f"{DOWNLOADS_DIR}/{clean}"
+        wanted = to or f"{folder}/{clean}"
         try:
             target = self.services.resolve(wanted, write=True)
         except PermissionError as exc:
@@ -144,7 +146,8 @@ class SessionFiles:
             target = await _write_new_remote(fs, target, data, keep=to is not None)
         else:
             target = await asyncio.to_thread(_write_new, target, data, keep=to is not None)
-        said = f"Saved {clean} to {target}.\n" + saved_report(str(target), len(data), hashlib.sha256(data).hexdigest(), source="a site, through the browser") + "\n"
+        self.saved = target
+        said = f"Saved {clean} to {target}.\n" + saved_report(str(target), len(data), hashlib.sha256(data).hexdigest(), source=source) + "\n"
         store = getattr(self.manager, "files", None)
         if store is not None and self.owner.project_id:
             try:
@@ -243,9 +246,23 @@ def _caller(context: ToolContext) -> Caller | None:
         if settled is not None:
             settled(context.session_id, key)
 
+    files = SessionFiles(services, manager, owner)
+
+    async def send_saved(caption: str | None) -> str:
+        if files.saved is None:
+            return "Nothing was saved to send."
+        # SendFile itself, so the operator gets what that tool gives: the file card, and the chat's copy.
+        from daedalus.tools.chat import send_file  # Lazy: the chat tools import the whole tool package
+
+        arguments: dict[str, Any] = {"path": str(files.saved)}
+        if caption:
+            arguments["caption"] = caption
+        result = await send_file().invoke(context, arguments)
+        return ("Sending it failed: " if result.is_error else "") + str(result.content)
+
     return Caller(
-        owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules,
-        ask_operator=ask_operator, operator_words=operator_words, used=used,
+        owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=files, look=looked, budget=budget, note_scope=lasting, rules=rules,
+        ask_operator=ask_operator, operator_words=operator_words, used=used, send_saved=send_saved,
     )
 
 
@@ -386,6 +403,28 @@ async def browser_text(
 )
 async def browser_look(context: ToolContext, question: str, tab: str | None = None, ref: str | None = None, full_page: bool = False) -> ToolResult:
     return await _run(context, "BrowserLook", {"question": question, "tab": tab, "ref": ref, "full_page": full_page})
+
+
+@tool_group("browser")
+@search_hint(
+    "screenshot screen shot capture picture image png save page send to operator full page element "
+    "скриншот снимок экрана заскринить сфоткать снять страницу картинка сохранить отправить"
+)
+@tool(
+    name="BrowserScreenshot",
+    description=(
+        "Save a screenshot of the page as a PNG in your workspace (screenshots/), for the operator: the viewport, "
+        "full_page the whole length, or one element by ref or CSS selector. scale is picture pixels per CSS pixel, "
+        "1-4 (default 2, crisp text). Secret fields are blanked. You are told the path, not shown the picture "
+        "(BrowserLook is for seeing it); send=true also sends it to the operator as SendFile does, with caption. "
+        "to is the path (default screenshots/<site>-<time>.png)."
+    ),
+)
+async def browser_screenshot(
+    context: ToolContext, tab: str | None = None, ref: str | None = None, selector: str | None = None, full_page: bool = False, scale: float | None = None,
+    to: str | None = None, send: bool = False, caption: str | None = None,
+) -> ToolResult:
+    return await _run(context, "BrowserScreenshot", {"tab": tab, "ref": ref, "selector": selector, "full_page": full_page, "scale": scale, "to": to, "send": send, "caption": caption})
 
 
 @tool_group("browser")
@@ -766,7 +805,7 @@ async def browser_extensions(context: ToolContext, action: str = "list", path: s
 
 
 TOOLS = [
-    browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
+    browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_screenshot, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
     browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login, browser_replay, browser_ask_operator_chrome,
     browser_eval, browser_scripts, browser_extensions,
 ]
