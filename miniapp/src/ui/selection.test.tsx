@@ -219,6 +219,39 @@ describe("the single choice", () => {
     expect(host.querySelector(".sel-list")).toBeNull();
   });
 
+  it("empties the search on the first Escape and closes the list on the second", () => {
+    act(() => root.render(<SelectionSingle label="Model" items={ITEMS} value="flash" onChange={vi.fn()} />));
+    act(() => host.querySelector<HTMLButtonElement>(".sel-current button")!.click());
+    const input = host.querySelector<HTMLInputElement>(".sel-search-field")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => { setter.call(input, "sonnet"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(host.querySelector<HTMLInputElement>(".sel-search-field")!.value).toBe("");
+    expect(host.querySelector(".sel-list")).not.toBeNull();
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(host.querySelector(".sel-list")).toBeNull();
+  });
+
+  it("leaves the current row unmarked when a press focuses the list, so the list does not scroll under the pointer", () => {
+    const onChange = vi.fn();
+    act(() => root.render(<SelectionSingle label="Model" items={ITEMS} value="pro" onChange={onChange} />));
+    act(() => host.querySelector<HTMLButtonElement>(".sel-current button")!.click());
+    const list = host.querySelector<HTMLElement>(".sel-list")!;
+    const row = host.querySelector<HTMLElement>('[role=option][data-id="opus"]')!;
+    act(() => { row.dispatchEvent(new Event("pointerdown", { bubbles: true })); list.focus(); });
+    expect(list.querySelector(".sel-row.active")).toBeNull();
+    act(() => row.click());
+    expect(onChange).toHaveBeenCalledWith("opus");
+  });
+
+  it("marks the current row when the keyboard brings the focus to the list", () => {
+    act(() => root.render(<SelectionSingle label="Model" items={ITEMS} value="pro" onChange={vi.fn()} />));
+    act(() => host.querySelector<HTMLButtonElement>(".sel-current button")!.click());
+    const list = host.querySelector<HTMLElement>(".sel-list")!;
+    act(() => list.focus());
+    expect(list.querySelector(".sel-row.active")!.getAttribute("data-id")).toBe("pro");
+  });
+
   it("picks the default row as the empty value", () => {
     const onChange = vi.fn();
     act(() => root.render(<SelectionSingle label="Model" items={ITEMS} value="flash" onChange={onChange} defaultOption={{ label: "Automatic" }} />));
