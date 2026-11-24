@@ -195,6 +195,22 @@ function MenuFloating({ anchor, items, label, side, align, width, onClose, onTic
   const placed = useRef(side ?? lowerHalf(anchor));
   useFocusBack(() => (element instanceof HTMLElement ? element : null));
   useFirstItem(popup);
+  // A key pressed before the focus has reached the menu (End straight after Shift+F10) still moves
+  // in it, rather than in the page behind it.
+  useEffect(() => {
+    const early = (e: KeyboardEvent) => {
+      const box = popup.current;
+      if (!box || !isTop() || box.contains(document.activeElement) || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      const items = Array.from(box.querySelectorAll<HTMLElement>(ENABLED));
+      const to = e.key === "End" || e.key === "ArrowUp" ? items[items.length - 1] : items[0];
+      if (!to) return;
+      e.preventDefault();
+      e.stopPropagation();
+      to.focus({ preventScroll: true });
+    };
+    document.addEventListener("keydown", early, { capture: true });
+    return () => document.removeEventListener("keydown", early, { capture: true });
+  }, [isTop]);
   return (
     <Base.Root open modal={false} onOpenChange={closeHandler(isTop, onClose, (target) => element?.contains(target) ?? false)}>
       <Base.Portal>

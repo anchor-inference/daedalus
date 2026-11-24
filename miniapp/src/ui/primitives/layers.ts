@@ -49,7 +49,9 @@ export function useLayer(onEscape: () => void, active = true): () => boolean {
       if (me.current === mine) me.current = null;
     };
   }, [active]);
-  return () => me.current !== null && layers[layers.length - 1] === me.current;
+  // One function for the life of the layer, so an effect that asks it is not re-run on every render.
+  const isTop = useRef(() => me.current !== null && layers[layers.length - 1] === me.current);
+  return isTop.current;
 }
 
 /** The reasons Base UI may give for closing a popup that only the top layer may act on: Escape and

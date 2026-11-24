@@ -15,11 +15,13 @@
 .layer-pos.tooltip-pos { z-index: var(--z-toast); pointer-events: none; }
 .sheet-backdrop .layer-pos { z-index: var(--z-menu); }
 
-@keyframes layer-in { from { opacity: 0; transform: translateY(var(--layer-from, 4px)) scale(.98); } }
+@keyframes layer-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
 @keyframes scrim-in { from { opacity: 0; } }
 @keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
-.layer-pos > .menu, .layer-pos > .dropdown-list, .layer-pos > .tooltip { transform-origin: var(--transform-origin); animation: layer-in var(--t-base) var(--ease-out); }
-.layer-pos[data-side="top"] { --layer-from: -4px; }
+/* A floating popup fades in without moving: a transform on it, even for the 180 ms of its entrance,
+   makes it the box a `position: fixed` inside it is measured from, and the model list's effort panel
+   (effortselect.tsx) stood a popover's offset away until the entrance ended. */
+.layer-pos > .menu, .layer-pos > .dropdown-list, .layer-pos > .tooltip { animation: scrim-in var(--t-base) var(--ease-out); }
 .layer-pos > [data-ending-style] { opacity: 0; transition: opacity 120ms var(--ease-in); }
 @media (prefers-reduced-motion: reduce) {
   .layer-pos > .menu, .layer-pos > .dropdown-list, .layer-pos > .tooltip, .sheet-backdrop, .sheet { animation: none !important; }
