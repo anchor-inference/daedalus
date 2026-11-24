@@ -1266,6 +1266,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   },
   "shell.nav.primary": { en: "Primary", ru: "Основная навигация" },
   "dlg.menu": { en: "More", ru: "Ещё" },
+  "dlg.toasts": { en: "Status messages", ru: "Сообщения о состоянии" },
   "app.stale.title": { en: "This screen belongs to an older version of the app", ru: "Этот экран — из старой версии приложения" },
   "app.stale.body": { en: "The app was updated while this page was open.", ru: "Приложение обновилось, пока страница была открыта." },
   "app.stale.action": { en: "Reload the app", ru: "Обновить приложение" },
