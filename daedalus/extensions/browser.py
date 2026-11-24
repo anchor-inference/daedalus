@@ -22,7 +22,15 @@ from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.browser import login
-from daedalus.browser.agent import SWITCH_ASK, WEBGL_ASK, WEBGL_MODES, WEBGL_WORDS, BrowserAgent, webgl_line
+from daedalus.browser.agent import (
+    SWITCH_ASK,
+    WEBGL_ASK,
+    WEBGL_MODES,
+    WEBGL_WORDS,
+    BrowserAgent,
+    chrome_slot,
+    webgl_line,
+)
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
 from daedalus.browser.control import EVENTS as CONTROL_EVENTS
 from daedalus.browser.control import ChromeControl
@@ -159,12 +167,14 @@ async def chrome_answered(app: Application, service: Browsers, session_id: str, 
     owner = Owner("session", session_id, session_id=session_id, staff_id=staff_id or None)
     live = service.user_chromes()
     name = ", ".join(str(c.get("profile_name") or "Chrome") for c in live) or "Chrome"
+    switched = False
     if allowed:
         try:
             await service.switch_conversation(session_id, USER, consent=True)
         except BrowserError as exc:
             text = f"[browser] The operator said yes to their Chrome, but the conversation could not be switched: {exc.message}. Tell them, or use your own browser if they agree."
         else:
+            switched = True
             text = (
                 f"[browser] The operator switched this conversation to their own Chrome «{name}». BrowserOpen now opens your tabs there, "
                 "signed in as them; every new site still asks them first."
@@ -172,6 +182,10 @@ async def chrome_answered(app: Application, service: Browsers, session_id: str, 
             )
     else:
         text = "[browser] The operator declined to let you work in their Chrome. Use your own browser (BrowserOpen) for the task, or stop and tell them what it needs."
+    # A quick agent of this conversation asked, and waits in its call; the conversation's own agent sits
+    # in the call that waits on the helper, and woken it would act on the answer as well.
+    if service.answer_wait(chrome_slot(session_id), "given_back" if switched else "declined", text):
+        return
     if service.wake is not None:
         await service.wake(owner, text)
 

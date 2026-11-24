@@ -167,7 +167,9 @@ async def test_the_helper_reaches_what_the_leader_reaches_and_nothing_that_asks(
     blocked = manager.blocked_tools_for(child)
     known = {t.name for t in manager.tools.list_all()}
     # No agents of its own, no questions to anyone, no message on the way, and the leader's refusals hold.
-    for name in ("QuickAgent", "SubAgent", "AskUser", "ReportToLeader", "BrowserAskOperatorChrome", "ServiceStart"):
+    # The browser's requests to the operator are not among them: they wait in the call
+    # (test_quick_agent_operator_wait.py).
+    for name in ("QuickAgent", "SubAgent", "AskUser", "ReportToLeader", "ServiceStart"):
         assert name in blocked or name not in known
     assert "ReportToLeader" in known and "ReportToLeader" in blocked
     with pytest.raises(ValueError, match="cannot start a quick agent"):

@@ -1738,11 +1738,11 @@ SUBAGENT_ONLY_TOOLS = ["ReportToLeader"]
 """What only a subagent may call: a message to the session that started it. A session without a
 leader has nobody to report to, and the tool on its surface would be a distraction it can only fail."""
 
-QUICK_AGENT_BLOCKED_TOOLS = ["ReportToLeader", "BrowserAskOperatorChrome"]
+QUICK_AGENT_BLOCKED_TOOLS = ["ReportToLeader"]
 """What a quick agent may not call on top of a subagent's refusals. Its leader is blocked in the very
-call that waits for it, so a message on the way would only arrive after the result it belongs to; and
-it never asks the operator anything, the move into their Chrome included: it works in whichever browser
-its leader's conversation already uses."""
+call that waits for it, so a message on the way would only arrive after the result it belongs to. The
+browser's requests to the operator (a hand-over, the private sign-in, the move into their Chrome) are
+not refused: in a quick agent they wait inside the call for the answer, which an ended turn could not."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
     "Brief",
@@ -1868,7 +1868,13 @@ class SubagentsConfig(BaseModel):
     and which ones are is the operator's to say. A session may choose its own list."""
     quick_wait_minutes: int = Field(default=15, ge=1, le=120)
     """How long a QuickAgent call waits before it stops the helper and returns what it had done. The
-    leader's turn is held for the whole call, so it is shorter than a subagent's wait."""
+    leader's turn is held for the whole call, so it is shorter than a subagent's wait. Time the helper
+    spends waiting for the operator in the browser does not count against it."""
+    operator_wait_minutes: int = Field(default=10, ge=1, le=60)
+    """How long a quick agent waits, inside its tool call, for the operator to do in the browser what
+    only they may (a CAPTCHA, a sign-in, a payment, the move into their Chrome). Past it the request is
+    withdrawn and the helper wraps up with what it has: the leader is held for the whole wait, and an
+    operator away from the screen would otherwise hold it for good."""
 
 
 class StaffConfig(BaseModel):

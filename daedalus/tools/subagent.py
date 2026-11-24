@@ -11,7 +11,8 @@ from protocore.tools.decorator import tool
 
 from daedalus.config import REASONING_EFFORTS
 from daedalus.host import call_scope
-from daedalus.tools import search_hint, tool_group
+from daedalus.host import quick_agent as quick_agents
+from daedalus.tools import own_clock, search_hint, tool_group
 from daedalus.tools._common import clip, error, idle_words, ok, services_for
 
 
@@ -90,6 +91,9 @@ def _report(context: ToolContext, result: dict, *, started: bool) -> ToolResult:
     return ok(context, f"{what} (session {result['session_id']}); its report arrives as a message when it finishes", session_id=result["session_id"], run_id=result.get("run_id"))
 
 
+# Its own clock, not the flat tool timeout: the call holds the leader for as long as the helper works, waits
+# for the operator in the browser included, and the flat 900 s cancelled it, which deleted the helper.
+@own_clock(quick_agents.CALL_CEILING_SECONDS + 300)
 @tool_group("agents")
 @search_hint(
     "quick agent fast cheap model inline helper delegate browser form clicks sweep files lookup extract mechanical sonnet haiku "
@@ -101,10 +105,14 @@ def _report(context: ToolContext, result: dict, *, started: bool) -> ToolResult:
         "Hand a bounded, mechanical job to a fast model and get its final reply back as this call's result: "
         "browser work (forms, clicking through a site, reading pages), sweeping many files, web lookups, extracting "
         "data, routine edits, checking a page or an output. It works in your workspace and your browser (the same "
-        "tabs, the same Chrome), never asks for approval, and starts no agents. It sees only `task` and the usual "
-        "environment; it can read this chat's history when the task says what to look for. Write `task` as a "
-        "complete instruction: the exact values, what it must not touch, and what to report. `model` picks one of "
-        "the QuickAgent models in your environment (default: the first); `effort` is off, low, medium, high or xhigh."
+        "tabs, the same Chrome), never asks for approval, asks the operator no questions, and starts no agents. When it "
+        "meets a choice the task does not settle it stops and reports the choice: you ask the operator, then call it "
+        "again. It does wait for what only the operator can do in the browser (a CAPTCHA, a sign-in, a payment, the "
+        "move into their Chrome): the operator is notified in this chat, this call waits meanwhile, and its time limit "
+        "stands still. It sees only `task` and the usual environment; it can read this chat's history when the task "
+        "says what to look for. Write `task` as a complete instruction: the exact values, what it must not touch, and "
+        "what to report. `model` picks one of the QuickAgent models in your environment (default: the first); `effort` "
+        "is off, low, medium, high or xhigh."
     ),
 )
 async def quick_agent(context: ToolContext, task: str, model: str | None = None, effort: str | None = None, timeout_minutes: int | None = None) -> ToolResult:
