@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.host.btw import BTW_KEY
 from daedalus.host.filesystem import LocalFS
+from daedalus.host.quick_agent import KEY as QUICK_KEY
 from daedalus.host.services import PathOutsideProject
 
 if TYPE_CHECKING:
@@ -232,14 +233,14 @@ async def _create_new(fs: Any, target: Path, body: str) -> bool:
 
 
 def hidden(metadata: Any) -> bool:
-    """Whether no list shows this session: a coach, or a side question, lives in its chat's window. Takes
-    stored JSON text too."""
+    """Whether no list shows this session: a coach, or a side question, lives in its chat's window, and a
+    quick agent under the call that started it. Takes stored JSON text too."""
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata or "{}")
         except ValueError:
             return False
-    return isinstance(metadata, dict) and bool(metadata.get(COACH_KEY) or metadata.get(BTW_KEY))
+    return isinstance(metadata, dict) and bool(metadata.get(COACH_KEY) or metadata.get(BTW_KEY) or metadata.get(QUICK_KEY))
 
 
 __all__ = [

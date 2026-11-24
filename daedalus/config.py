@@ -1723,7 +1723,7 @@ AGENT_MESH_TOOLS = ["ListAgents", "ReadAgent", "SendToAgent"]
 them; every other session is blocked from them, having no team to talk to."""
 
 SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "SideQuestion", "DropSideQuestion", "AskPeer", "PeerList", "SubAgent", "SpawnAgent",
-                          *AGENT_MESH_TOOLS]
+                          "QuickAgent", *AGENT_MESH_TOOLS]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
 notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
@@ -1737,6 +1737,12 @@ beside the staff rule, so no mode or leader can hand it back."""
 SUBAGENT_ONLY_TOOLS = ["ReportToLeader"]
 """What only a subagent may call: a message to the session that started it. A session without a
 leader has nobody to report to, and the tool on its surface would be a distraction it can only fail."""
+
+QUICK_AGENT_BLOCKED_TOOLS = ["ReportToLeader", "BrowserAskOperatorChrome"]
+"""What a quick agent may not call on top of a subagent's refusals. Its leader is blocked in the very
+call that waits for it, so a message on the way would only arrive after the result it belongs to; and
+it never asks the operator anything, the move into their Chrome included: it works in whichever browser
+its leader's conversation already uses."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
     "Brief",
@@ -1856,6 +1862,13 @@ class SubagentsConfig(BaseModel):
     """How long a finished subagent sits idle before its leader is asked, once, whether it still needs
     it. A helper used a minute ago is between jobs, not forgotten; one left for half an hour usually is,
     and kept helpers otherwise pile up in a session for weeks."""
+    quick_models: list[str] = Field(default_factory=list)
+    """The presets QuickAgent may run on, the first being the one it takes when the call names none.
+    Empty turns the tool off: a quick agent is only worth its call on a model that is fast and cheap,
+    and which ones are is the operator's to say. A session may choose its own list."""
+    quick_wait_minutes: int = Field(default=15, ge=1, le=120)
+    """How long a QuickAgent call waits before it stops the helper and returns what it had done. The
+    leader's turn is held for the whole call, so it is shorter than a subagent's wait."""
 
 
 class StaffConfig(BaseModel):
@@ -3467,6 +3480,7 @@ __all__ = [
     "AGENT_MESH_TOOLS",
     "SUBAGENT_BLOCKED_TOOLS",
     "SUBAGENT_ONLY_TOOLS",
+    "QUICK_AGENT_BLOCKED_TOOLS",
     "compaction_ratio",
     "core_compaction_trigger",
     "ORCHESTRATOR_TOOLS",

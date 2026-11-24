@@ -24,6 +24,7 @@ from protocore.tools.decorator import tool
 
 from daedalus.browser.agent import LOOK_INSTRUCTION, SWITCH_ASK, UPLOAD_MAX_BYTES, BrowserAgent, Caller, SensitiveAsk
 from daedalus.browser.model import EnvUnavailable, Forbidden, NotFound, Owner
+from daedalus.host import quick_agent
 from daedalus.host.filesystem import ShellFS
 from daedalus.host.services import SessionServices
 from daedalus.stores.files import FileRefused, parse_handle, safe_name, saved_report
@@ -199,7 +200,15 @@ def _caller(context: ToolContext) -> Caller | None:
     # A chat's own throwaway project goes with its last session; a site note learnt there is kept for
     # every agent rather than filed under a project nobody will open again.
     lasting = project if state is not None and state.project is not None and not state.project.settings.ephemeral else ""
-    owner = Owner("session", context.session_id, project_id=project, session_id=context.session_id, staff_id=str(metadata.get("staff_id") or "") or None)
+    # A quick agent works in its leader's browser: the same tabs, and the operator's Chrome when they gave
+    # the leader's conversation theirs. Owned by itself, it opened a browser of its own, not signed in to
+    # the site its leader was half-way through, and its one way into the operator's Chrome was to ask them
+    # again for a session they never see — a subagent handed a bank form stopped on exactly that. The
+    # leader waits in the call meanwhile, so the two never drive the tabs at once; the actor below stays
+    # the helper's, so the action log says which of them clicked.
+    browsing = str(metadata.get("subagent_of") or "") if quick_agent.is_quick(metadata) else ""
+    who = browsing or context.session_id
+    owner = Owner("session", who, project_id=project, session_id=who, staff_id=str(metadata.get("staff_id") or "") or None)
 
     async def gate(ask: SensitiveAsk) -> tuple[bool, str]:
         allowed, why = manager.browser_gate(context.session_id, ask)

@@ -218,6 +218,16 @@ SubAgentDelete(name) removes a kept or idle helper you no longer need (its files
 message you before it finishes (ReportToLeader): such a message says the helper is still working.
 """
 
+BOARD_QUICK = """- QuickAgent(task) runs a fast model inside your call and returns its reply as the result. When you run on \
+a strong, slow model, hand it the mechanical work rather than doing it step by step yourself: a browser job (a \
+form to fill, a site to click through, pages to read — it uses your tabs and the operator's Chrome when you work \
+there), a sweep of many files or a repository for facts, web lookups, data to extract, routine edits across \
+files, checking a page or a command's output. Give it the exact values, the limits and the report you want; it \
+never asks and its approvals are lifted, so say what it must not do. Keep the judgement, the plan and the answer \
+yourself, and check what it reports before you build on it. For something you would wait for anyway, prefer it \
+to SubAgent.
+"""
+
 BOARD_SERVICES = """- A demo, a server or any process that must keep running after your turn ends is a service: \
 ServiceStart(name, command, port="auto") runs it detached in your workspace, on a port the operator can \
 open (bind to the $HOST and use the $PORT the tool gives you); ServiceList shows them \
@@ -895,6 +905,7 @@ HISTORY_PARTS: ToolParts = (
 BOARD_PARTS: ToolParts = (
     (("SubAgent", "SpawnAgent"), BOARD_TWO_WAYS),
     (("SubAgent", "SubAgentSend", "SubAgentList"), BOARD_SUBAGENT),
+    (("QuickAgent",), BOARD_QUICK),
     (("ServiceStart", "ServiceList", "ServiceLogs", "ServiceStop"), BOARD_SERVICES),
     (("TerminalRead",), BOARD_TERMINALS),
     (("SubAgentList", "JobList", "ServiceList"), BOARD_WAKES),

@@ -129,6 +129,13 @@ presets = []                 # held for SubAgent, SpawnAgent and a Daedalus memb
                              # and handed to each child as its own, so it cannot reach further.
                              # A chat sets its own in Details › Models for subagents, which wins over this
 
+[subagents]
+quick_models = []            # presets QuickAgent may run on, the first its default; empty = no QuickAgent.
+                             # A fast model the agent hands mechanical work to (a browser job, a sweep
+                             # of files) inside its own call, in its workspace and browser, never asking
+                             # for approval. A chat sets its own in Details, under Models for subagents
+quick_wait_minutes = 15      # a QuickAgent call past this stops the helper and returns its work so far
+
 [harness]                    # command-line agents hired as staff
 max_output_tokens = 64000    # one call's output ceiling for OpenCode and Claude Code members, whose
                              # defaults of about 32k cut a large file written in one call; 0 = theirs

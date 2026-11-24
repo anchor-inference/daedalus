@@ -76,6 +76,7 @@ from daedalus.config import (
     ORCHESTRATOR_TOOLS,
     PROMPT_COACH_ONLY_TOOLS,
     PROMPT_COACH_TOOLS,
+    QUICK_AGENT_BLOCKED_TOOLS,
     REASONING_EFFORTS,
     STAFF_BLOCKED_TOOLS,
     STAFF_ONLY_TOOLS,
@@ -101,6 +102,7 @@ from daedalus.host import (
     nested_rules,
     prompt_coach,
     prompts,
+    quick_agent,
     standing,
     subagent_models,
     summaries,
@@ -5104,8 +5106,10 @@ class SessionManager:
             raise KeyError(session_id)
         await self.sessions.set_bypass(session_id, on, datetime.now(UTC).isoformat())
         state.bypass = on
-        for sub in [s for s in self._states.values() if s.metadata.get("subagent_of") == session_id]:
-            # A helper already at work follows its leader, as one started later inherits the switch.
+        for sub in [s for s in self._states.values() if s.metadata.get("subagent_of") == session_id and not quick_agent.is_quick(s.metadata)]:
+            # A helper already at work follows its leader, as one started later inherits the switch. A quick
+            # agent does not: its checks are lifted for its whole life, and the leader switching them back on
+            # mid-call would leave it facing a question nobody can answer while the leader waits on it.
             await self.sessions.set_bypass(sub.session.id, on, datetime.now(UTC).isoformat())
             sub.bypass = on
         logger.warning("session %s: bypass all checks switched %s (via %s)", session_id, "on" if on else "off", via)
@@ -7401,6 +7405,12 @@ class SessionManager:
         # there would be inherited down the chain and take the tool from the very subagents it is for.
         if not state.metadata.get("subagent_of"):
             blocked |= known & set(SUBAGENT_ONLY_TOOLS)
+        if quick_agent.is_quick(state.metadata):
+            blocked |= known & set(QUICK_AGENT_BLOCKED_TOOLS)
+        elif "QuickAgent" in known and not self.quick_models(state.metadata):
+            # Off the surface rather than refusing when called: with no quick model chosen the tool can
+            # only fail, and its definition and the prompt's paragraph about it would cost every request.
+            blocked.add("QuickAgent")
         return blocked
 
     async def _load_capability_ancestors(self, state: SessionState) -> None:
@@ -7752,6 +7762,25 @@ class SessionManager:
         mode, chosen, _ = subagent_models.choice(metadata, self.config.subagents.models)
         return subagent_models.allowance(mode, chosen, available=ready, session_preset=self.session_preset_id(overrides))
 
+    def quick_models(self, metadata: dict[str, Any]) -> list[str]:
+        """The presets this session's quick agents may run on now, the default first (:mod:`daedalus.host.quick_agent`)."""
+        available = set(self.providers.available())
+        ready = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
+        return quick_agent.allowed(metadata, self.config.subagents.quick_models, ready=ready)
+
+    async def set_quick_models(self, session_id: str, presets: list[str] | None) -> None:
+        """The session's own quick-agent models; ``None`` returns it to the default from Settings. The
+        environment notes carry the list, so it reaches the model at the next run."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        for meta in (state.metadata, state.session.metadata):
+            if presets is None:
+                meta.pop(quick_agent.MODELS_KEY, None)
+            else:
+                meta[quick_agent.MODELS_KEY] = list(dict.fromkeys(presets))
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+
     async def set_subagent_models(self, session_id: str, mode: str | None, presets: list[str]) -> None:
         """The session's own choice of helper models; ``mode=None`` returns it to the global default.
         It reaches the environment at the next run, the one place the list is written for the model."""
@@ -7831,6 +7860,9 @@ class SessionManager:
             parts.append("- SubAgent runs only on your own model in this session: do not pass `model`")
         elif allowed.limited:
             parts.append("- No model is allowed for helpers in this session: SubAgent and SpawnAgent will refuse")
+        quick = self.quick_models(state.metadata) if not state.metadata.get("subagent_of") else []
+        if quick:
+            parts.append("- Models QuickAgent accepts (preset ids, the first is its default): " + ", ".join(quick))
         loop_note = str(state.metadata.get("loop_note") or "").strip()
         if loop_note:
             parts.append(loop_note)

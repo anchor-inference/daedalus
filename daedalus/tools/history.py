@@ -87,6 +87,16 @@ async def _target(context: ToolContext, manager: Any, project: str) -> tuple[cha
     return named, here
 
 
+def _leader_of(context: ToolContext) -> str:
+    """The session that started this one as a helper, whose conversation it may read whole; ``""`` for none.
+
+    A quick agent starts with its task alone and reads its leader's chat when the task leans on it; the
+    leader's chat is the one it works for, so its being private is no reason to refuse that one reader."""
+    manager = _manager(context)
+    state = manager.live_state(context.session_id) if manager is not None and hasattr(manager, "live_state") else None
+    return str(state.metadata.get("subagent_of") or "") if state is not None else ""
+
+
 def _moment(text: str, name: str) -> datetime | str | None:
     """``before``/``after`` as an aware time: an ISO date or date-time, UTC unless it names an offset."""
     text = text.strip()
@@ -109,14 +119,21 @@ def _moment(text: str, name: str) -> datetime | str | None:
         "Full-text search over this session's complete transcript, including turns that were "
         "compacted into summaries. Returns matching turns with their seq numbers and a snippet; "
         "read the full text with HistoryExpand. Words are matched as prefixes; quote a phrase "
-        "for an exact match. Other chats: ChatSearch."
+        "for an exact match. A helper passes its leader's id as session_id to search the leader's chat. "
+        "Other chats: ChatSearch."
     ),
 )
-async def history_search(context: ToolContext, query: str, limit: int = 10) -> ToolResult:
+async def history_search(context: ToolContext, query: str, limit: int = 10, session_id: str | None = None) -> ToolResult:
     store = _store(context)
     if store is None:
         return error(context, "history is not available in this session")
-    hits = [h for h in await store.search_transcript(query, session_id=context.session_id, limit=max(1, min(int(limit), 50))) if not h.get("queued")]
+    target = context.session_id
+    if session_id and session_id != context.session_id:
+        if session_id != _leader_of(context):
+            # Another chat is found by ChatSearch, under its rules of reach; this search is for one's own.
+            return error(context, "session_id here is only your leader's; search other chats with ChatSearch")
+        target = session_id
+    hits = [h for h in await store.search_transcript(query, session_id=target, limit=max(1, min(int(limit), 50))) if not h.get("queued")]
     if not hits:
         rebuilding = getattr(_manager(context), "index_rebuild", None)
         if rebuilding:
@@ -267,7 +284,7 @@ async def history_expand(
         start, end = end, start
     if end - start + 1 > MAX_EXPAND_ROWS:
         end = start + MAX_EXPAND_ROWS - 1
-    if session_id and session_id != context.session_id:
+    if session_id and session_id != context.session_id and session_id != _leader_of(context):
         row = await _manager(context).db.fetchone("SELECT metadata FROM sessions WHERE id = ?", (session_id,))
         try:
             metadata = json.loads(row["metadata"] or "{}") if row is not None else {}
