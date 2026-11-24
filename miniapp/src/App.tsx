@@ -71,6 +71,7 @@ const MemoryScreen = lazy(retried(() => import("./screens/Memory"), (m) => ({ de
 const TerminalsScreen = lazy(retried(() => import("./screens/Terminals"), (m) => ({ default: m.TerminalsScreen })));
 const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m) => ({ default: m.BrowserFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
+const PrimitivesScreen = lazy(retried(() => import("./screens/Primitives"), (m) => ({ default: m.PrimitivesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
 const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
 const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
@@ -691,6 +692,7 @@ export function App() {
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
         {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
+        {route.screen === "primitives" && <PrimitivesScreen />}
         {route.screen === "memory" && <MemoryScreen toast={showToast} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}

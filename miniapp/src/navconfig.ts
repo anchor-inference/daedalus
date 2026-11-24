@@ -13,7 +13,7 @@ import type { Screen } from "./router";
 
 export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
 
-export const ICONS: Record<Screen, IconName> = { agents: "bots", companion: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", canvas: "grid", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file" };
+export const ICONS: Record<Screen, IconName> = { agents: "bots", companion: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", canvas: "grid", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file", primitives: "apps" };
 
 /** A destination's name, in the reader's language. */
 export function screenTitle(s: Screen): string {

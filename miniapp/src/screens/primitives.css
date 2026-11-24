@@ -1,0 +1,17 @@
+/* The primitives page (/app/primitives): the parts on cards, two to four columns by the window. */
+.screen.primitives { max-width: 1400px; margin: 0 auto; width: 100%; }
+.prim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; padding: 4px 0 var(--space-8); align-items: start; }
+.prim-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); min-width: 0; }
+.prim-h { margin: 0; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.prim-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.prim-kv { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--ctl-h); font-size: var(--fs-14); }
+.prim-kvs { display: flex; flex-direction: column; }
+.prim-kv .dot { margin-right: 4px; }
+.prim-tip { font-size: var(--fs-13); color: var(--fg-2); text-decoration: underline dotted; cursor: default; }
+/* A popup drawn in place on the page: the same box, standing in the flow instead of floating. */
+.prim-still { position: static; max-width: none; width: auto; animation: none; }
+.prim-card > .menu.prim-still { width: 300px; }
+.prim-picker { width: 336px; }
+.prim-picker .combo-list { max-height: 228px; }
+.prim-card > .toast.prim-still { align-self: flex-start; }
+.prim-card > .dialog.prim-still { width: auto; box-shadow: none; }
