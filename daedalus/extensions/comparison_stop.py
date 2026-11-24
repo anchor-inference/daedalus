@@ -86,13 +86,14 @@ async def stop_comparison_slot(
                                                       effects=("execution.stop",))
                 response = {"group_id": group_id, "slot": slot, "task_id": task_id,
                             "attempt_id": member["attempt_id"], "effect_id": action_id, "state": "queued"}
-        task_row = await one(conn, "SELECT title,project_id,assignee_staff_id FROM board_tasks WHERE id = ?",
+        task_row = await one(conn, "SELECT title,project_id,origin_session_id,assignee_staff_id FROM board_tasks WHERE id = ?",
                              (task_id,))
         assert task_row is not None
         events.append(await bus.persist_in(conn, "task.changed",
                                            {"task_id": task_id, "title": task_row["title"],
                                             "actor": principal.origin_class, "actor_id": principal.actor_id},
                                            project_id=task_row["project_id"],
+                                           session_id=task_row["origin_session_id"],
                                            staff_id=task_row["assignee_staff_id"]))
         return response
 

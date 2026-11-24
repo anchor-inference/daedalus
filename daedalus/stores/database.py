@@ -4148,6 +4148,14 @@ async def _session_vision(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
 
+# 173 — the board filtered by the chat that created a task. ``origin_session_id`` has had no index
+# since it was added: the only board index is by project. A chat's own board, and the plan the
+# board exports for a chat's family, read every task of the installation to find a handful. The
+# column is NULL for a task the operator posted outside any chat, which the index simply holds.
+MIGRATIONS.append("""
+CREATE INDEX IF NOT EXISTS board_tasks_by_origin ON board_tasks(origin_session_id);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

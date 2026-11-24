@@ -1160,9 +1160,12 @@ class Orchestrators:
             return None
         mine = project.settings.orchestrator.session_id
         p = event.payload
-        if p.get("actor_id") == f"orchestrator:{mine}" or (
-            event.session_id and event.session_id == mine and event.type not in SELF_EVENTS_ALLOWED
-        ):
+        # A task event's session is the chat that created the task, so the operator moving a card the
+        # orchestrator made carries the orchestrator's session id. Only ``actor_id`` says who acted
+        # there; matching the session would leave the orchestrator deaf to the operator's decisions on
+        # its own tasks.
+        own_session = bool(event.session_id) and event.session_id == mine and not event.type.startswith("task.") and event.type not in SELF_EVENTS_ALLOWED
+        if p.get("actor_id") == f"orchestrator:{mine}" or own_session:
             return None
         kind = event.type
         explored = self.app.extensions.get("explorations")

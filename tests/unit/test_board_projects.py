@@ -364,3 +364,125 @@ async def test_the_board_over_http(app: Any, tmp_path: Path) -> None:
         assert archived.status_code == 200
         assert await app.db.fetchone("SELECT id FROM board_tasks WHERE id = ?", (task["id"],))
         assert await app.db.fetchone("SELECT task_id FROM task_contract_versions WHERE task_id = ?", (task["id"],))
+
+
+async def test_a_chats_board_is_what_it_and_its_subagents_created(app: Any, tmp_path: Path) -> None:
+    """``session_id`` asks for tasks by origin, which is not the actor's view: that adds the operator's
+    unaddressed pool, and for staff or the coordinator the whole project."""
+    board = Board(app)
+    team = await _team(app, tmp_path)
+    helper = (await app.manager.create_session("[sub] helper", project_id=team.project, metadata={"subagent_of": team.agent})).session.id
+    own = await board.add(title="Look at the logs", session_id=team.agent)
+    from_helper = await board.add(title="Check the cron", session_id=helper)
+    finished = await board.add(title="Old chore", session_id=team.agent)
+    await app.db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (finished["id"],))
+    removed = await board.add(title="Removed chore", session_id=team.agent)
+    await app.db.execute("UPDATE board_tasks SET removed_at = '2026-01-01T00:00:00' WHERE id = ?", (removed["id"],))
+    unaddressed = await board.add(title="Anyone: rotate the keys")
+    assigned = await board.add(title="Menu page", project_id=team.project, assignee_staff_id=team.ada.id, operator=True)
+    outside = await board.add(title="Water the beds", session_id=team.outsider)
+    by_orchestrator = await board.add(title="Plan the sprint", session_id=team.orchestrator)
+
+    ids = lambda tasks: {t["id"] for t in tasks}  # noqa: E731
+    both = {own["id"], from_helper["id"]}
+    assert ids(await board.list(None, session_id=team.agent, include_done=False)) == both
+    assert ids(await board.list(None, session_id=team.agent)) == both | {finished["id"]}
+    # A subagent's id names its leader's chat, because a subagent works on its leader's board.
+    assert ids(await board.list(None, session_id=helper, include_done=False)) == both
+    # Staff assignment does not make a task a chat's; only its origin does.
+    assert assigned["id"] not in ids(await board.list(None, session_id=team.ada_session))
+    assert ids(await board.list(None, session_id=team.ada_session)) == set()
+    assert ids(await board.list(None, session_id=team.outsider)) == {outside["id"]}
+    assert ids(await board.list(None, session_id=team.orchestrator)) == {by_orchestrator["id"]}
+    assert ids(await board.list(None, session_id="no-such-chat")) == set()
+    # It narrows further what the other filters already narrow.
+    assert ids(await board.list(None, session_id=team.agent, project_id=team.other)) == set()
+    assert ids(await board.list(None, session_id=team.agent, project_id=team.project, include_done=False)) == both
+    assert ids(await board.list(None, session_id=team.agent, actor=team.outsider)) == set()
+    assert unaddressed["id"] not in ids(await board.list(None, session_id=team.agent))
+
+    api = build_app(app, "tok")  # type: ignore[arg-type]
+    app.extensions["board"] = board
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
+        listed = await client.get(f"/api/board?session={team.agent}", headers=HEADERS)
+        assert listed.status_code == 200
+        assert {t["id"] for t in listed.json()} == both
+        assert all("needs_you" in t and t["project_name"] == "Bakery" for t in listed.json())
+        everything = await client.get(f"/api/board?session={team.agent}&include_done=1", headers=HEADERS)
+        assert {t["id"] for t in everything.json()} == both | {finished["id"]}
+        assert (await client.get("/api/board?session=no-such-chat", headers=HEADERS)).json() == []
+        assert (await client.get("/api/board?session=", headers=HEADERS)).status_code == 200  # an empty value is no filter
+        assert len((await client.get("/api/board?include_done=1", headers=HEADERS)).json()) >= 7
+
+
+async def test_task_events_name_the_chat_that_created_the_task(app: Any, tmp_path: Path) -> None:
+    """A chat follows its own board through ``session_id`` on the event, whoever moved the card: the
+    operator in the app, the system unblocking it, a staff member, or the chat itself."""
+    board = Board(app)
+    team = await _team(app, tmp_path)
+    app.extensions["board"] = board
+    api = build_app(app, "tok")  # type: ignore[arg-type]
+    seen: list[tuple[str, str | None]] = []
+
+    async def drain(events: Any, count: int) -> None:
+        for _ in range(count):
+            event = await anext(events)
+            seen.append((event.type, event.session_id))
+
+    async with app.manager.bus.subscribe(EventFilter(types=("task.",)), name="test") as events:
+        # The path the agent's tools take: the chat adds a task and a dependent one, then starts the first.
+        first = await board.add(title="Menu", session_id=team.agent)
+        await board.add(title="Photos", depends_on=[first["id"]], session_id=team.agent)
+        await board.update(first["id"], status="doing", actor=team.agent)
+        await drain(events, 3)
+        assert seen == [("task.created", team.agent)] * 2 + [("task.moved", team.agent)]
+        seen.clear()
+        # Who acted is no longer the event's session; the orchestrator's own doing says so by actor_id.
+        await board.update(first["id"], priority=2, assignee_staff_id=team.ada.id, actor=team.orchestrator)
+        event = await anext(events)
+        assert (event.type, event.session_id) == ("task.assigned", team.agent)
+        assert event.payload["actor_id"] == f"orchestrator:{team.orchestrator}"
+        # The operator posts outside any chat: no chat to follow it.
+        await board.add(title="Anyone: rotate the keys", operator=True)
+        await drain(events, 1)
+        assert seen == [("task.created", None)]
+        seen.clear()
+
+        # The command path, over the operator's route: create from a chat of the project, then edit.
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
+            base = f"/api/projects/{team.project}/board"
+            collection = (await client.get(f"/api/control/revisions?project={team.project}", headers=HEADERS)).json()["collection_revision"]
+            made = await client.post(base, headers=HEADERS, json={
+                "title": "From the chat", "session_id": team.agent, "client_operation_id": "chat-create",
+                "expected_collection_revision": collection})
+            assert made.status_code == 201, made.text
+            task = made.json()["task"]
+            assert task["origin_session_id"] == team.agent
+            await drain(events, 1)
+            edited = await client.put(f"/api/board/{task['id']}", headers=HEADERS, json={
+                "priority": 1, "client_operation_id": "chat-edit", "expected_entity_revision": task["entity_revision"]})
+            assert edited.status_code == 200, edited.text
+            await drain(events, 1)
+    assert seen == [("task.created", team.agent), ("task.changed", team.agent)]
+
+
+async def test_the_orchestrator_still_hears_the_operator_about_tasks_it_created(app: Any, tmp_path: Path) -> None:
+    """A task event's session is now the chat that created the task. For a card the orchestrator made,
+    that is its own session, and matching on it would silence the operator's decisions about its work;
+    only the actor says whose doing an event is."""
+    from datetime import UTC, datetime
+
+    from daedalus.extensions.orchestrator import Orchestrators
+    from daedalus.host.events import AppEvent
+
+    team = await _team(app, tmp_path)
+    await app.manager.projects.update_orchestrator(team.project, enabled=True, autonomy="normal", concurrency=6)
+    orchestrators = Orchestrators(app)
+    payload = {"task_id": "t1", "title": "Plan", "from": "doing", "to": "review"}
+
+    def moved(**extra: Any) -> AppEvent:
+        return AppEvent(seq=1, at=datetime.now(UTC).isoformat(), type="task.moved", payload={**payload, **extra},
+                        project_id=team.project, session_id=team.orchestrator)
+
+    assert await orchestrators.classify(team.project, moved(actor="operator")) is not None
+    assert await orchestrators.classify(team.project, moved(actor="orchestrator", actor_id=f"orchestrator:{team.orchestrator}")) is None

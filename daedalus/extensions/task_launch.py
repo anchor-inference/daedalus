@@ -492,7 +492,7 @@ class TaskLaunchEffect:
                 "task.launch_waiting",
                 {"task_id": task.id, "title": task.title, "actor": "system",
                  "assignee_staff_id": claim.payload["staff_id"], "error": said},
-                project_id=task.project_id,
+                project_id=task.project_id, session_id=task.origin_session_id,
             )
         except Exception:  # noqa: BLE001 — the outbox keeps the wait whatever the report did
             logger.exception("reporting the waiting launch of task %s failed", claim.payload.get("task_id"))

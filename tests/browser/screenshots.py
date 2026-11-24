@@ -1083,7 +1083,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if answered is not None:
             return respond(route, answered[1], status=answered[0])
     if rel == "/api/board":
-        return respond(route, BOARD)
+        # ``session=`` is one chat's own board: the tasks that chat created.
+        chat = params.get("session", [""])[0]
+        return respond(route, [t for t in BOARD if t["origin_session_id"] == chat] if chat else BOARD)
     if rel == "/api/notifications/summary":
         return respond(route, INBOX_SUMMARY)
     if rel == "/api/notifications":
