@@ -113,9 +113,9 @@ export function ContextMenuHost() {
           // A browser edit emits input, keeping React, undo and the persisted draft in agreement.
           if (!document.execCommand("insertText", false, text)) toast(t("context.edit.failed"));
         };
-        if (editable && !secret && selected) items.push({ label:t("context.cut"), onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
-        if (editable) items.push({ label:t("context.paste"), onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
-        items.push({ label:t("context.selectAll"), disabled:field.disabled, onSelect:() => { field.focus(); field.select(); } });
+        if (editable && !secret && selected) items.push({ label:t("context.cut"), icon:"cut", onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
+        if (editable) items.push({ label:t("context.paste"), icon:"paste", onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
+        items.push({ label:t("context.selectAll"), icon:"selectall", disabled:field.disabled, onSelect:() => { field.focus(); field.select(); } });
       } else if (editable) {
         // An editable element (the composer's field) has no value or selection range of its own: the
         // page's selection is it. The range is kept from the click, since the menu takes the focus.
@@ -131,9 +131,9 @@ export function ContextMenuHost() {
           restore();
           if (!document.execCommand(text ? "insertText" : "delete", false, text)) toast(t("context.edit.failed"));
         };
-        if (selected) items.push({ label:t("context.cut"), onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
-        items.push({ label:t("context.paste"), onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
-        items.push({ label:t("context.selectAll"), onSelect:() => {
+        if (selected) items.push({ label:t("context.cut"), icon:"cut", onSelect:() => void copyText(selected).then((ok) => { if (ok) replace(""); else report(false); }) });
+        items.push({ label:t("context.paste"), icon:"paste", onSelect:() => { if (navigator.clipboard) void navigator.clipboard.readText().then(replace).catch(() => toast(t("context.paste.failed"))); else toast(t("context.paste.failed")); } });
+        items.push({ label:t("context.selectAll"), icon:"selectall", onSelect:() => {
           editable.focus();
           const range = document.createRange();
           range.selectNodeContents(editable);
@@ -143,7 +143,7 @@ export function ContextMenuHost() {
       }
       const link = target.closest<HTMLAnchorElement>("a[href]");
       if (link) items.push(
-        { label:t("common.open"), onSelect:() => link.click() },
+        { label:t("common.open"), icon:"external", onSelect:() => link.click() },
         { label:t("context.copyLink"), icon:"link", onSelect:() => void copyText(link.href).then(report) },
       );
       // Nothing here belongs to what was clicked: no menu of ours. It used to offer "Search and go"

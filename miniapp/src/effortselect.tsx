@@ -1,7 +1,7 @@
 // Named choices keep a discrete setting understandable without dragging an unlabeled track.
 import { ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useLayer } from "./ui/dialogs";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { REASONING_EFFORTS, effortIndex } from "./models";
 
@@ -44,7 +44,7 @@ export function EffortOptions({ effort, thinking, onChoose }: EffortOptionsProps
 
 /** Effort belongs to the model picker; its child panel stays in the same owned menu layer. */
 export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptionsProps & { inline: boolean }) {
-  return <MenuBranch title={t("composer.effort.short")} value={effortWord(effort, thinking)} label={t("composer.effort")} inline={inline} onChoose={onChoose}>
+  return <MenuBranch icon="sliders" title={t("composer.effort.short")} value={effortWord(effort, thinking)} label={t("composer.effort")} inline={inline} onChoose={onChoose}>
     <EffortOptions effort={effort} thinking={thinking} onChoose={onChoose} />
   </MenuBranch>;
 }
@@ -54,7 +54,7 @@ export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptions
  * where there is no room), with the effort's look and keys. The account row is drawn by the same code,
  * so the two branches of one menu cannot drift apart; ``children`` is a fieldset of radio rows.
  */
-export function MenuBranch({ title, value, label, inline, onChoose, branch, children }: { title: string; value: string; label: string; inline: boolean; onChoose: (value: string) => void; branch?: string; children: ReactNode }) {
+export function MenuBranch({ icon, title, value, label, inline, onChoose, branch, children }: { icon: IconName; title: string; value: string; label: string; inline: boolean; onChoose: (value: string) => void; branch?: string; children: ReactNode }) {
   const owner = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -68,6 +68,7 @@ export function MenuBranch({ title, value, label, inline, onChoose, branch, chil
   return <div ref={owner} className="effort-branch" data-branch={branch}>
     <button ref={trigger} type="button" role="menuitem" className={`model-row effort-entry ${open ? "on" : ""}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(!open)} onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); setOpen(true); } }}>
+      <Icon name={icon} size={16} />
       <span className="grow">{title}</span>
       <span className="sub">{value}</span><Icon name="chevron" size={14} />
     </button>
