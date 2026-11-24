@@ -2820,11 +2820,13 @@ class BoardStub:
         """Open issues as the host's listing reads them: number, title, labels and an optional body_length."""
         self.issue_lists: list[dict] = []
         self.issue_imports: list[dict] = []
+        self.subagent_of: dict[str, str] = {}
+        """Subagent session id to its leader's: a chat's board is its family's, as the host's ``Board.family`` has it."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
         row = {
-            "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "notes": "",
+            "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": None, "notes": "",
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
             "acceptance_state": "", "requirements": [], "entity_revision": 1,
@@ -2926,7 +2928,6 @@ class BoardStub:
             return self._issues(method, path, body)
         launches = f"/api/projects/{self.project['id']}/uncertain-launches"
         if path == launches and method == "GET":
-            from urllib.parse import parse_qs
             params = parse_qs(query)
             after = params.get("after", [""])[0]
             limit = int(params.get("limit", ["50"])[0])
@@ -2946,7 +2947,6 @@ class BoardStub:
         if path == stops and method == "GET":
             if self.unknown_stops_failed:
                 return 503, {"detail": "inspection unavailable"}
-            from urllib.parse import parse_qs
             params = parse_qs(query)
             after = params.get("after", [""])[0]
             limit = int(params.get("limit", ["50"])[0])
@@ -3087,7 +3087,8 @@ class BoardStub:
             self.created.append(payload)
             brief = {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}
             brief.update(payload.get("brief") or {})
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"])
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
+                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"))
             self._assign(row, payload.get("assignee_staff_id"))
             self.tasks.append(row)
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
@@ -3095,12 +3096,22 @@ class BoardStub:
             payload = dict(body or {})
             self.created.append(payload)
             row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
+                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
                             acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []])
             self.tasks.append(row)
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
             listed = [t for t in self.tasks if not t.get("removed_at") and ("include_done=1" in query or t["status"] not in ("done", "dropped"))]
+            # ``project=`` is one project's board and ``session=`` the tasks that chat or its subagents
+            # created, as the host answers them; an unknown value lists nothing.
+            asked = parse_qs(query)
+            if asked.get("project", [""])[0]:
+                listed = [t for t in listed if t.get("project_id") == asked["project"][0]]
+            if asked.get("session", [""])[0]:
+                leader = self.subagent_of.get(asked["session"][0], asked["session"][0])
+                family = {leader, *(sub for sub, lead in self.subagent_of.items() if lead == leader)}
+                listed = [t for t in listed if t.get("origin_session_id") in family]
             # And why a card waits on the operator, as the host marks it: an open request tied to the
             # task, a question before an approval, else review.
             waiting: dict[str, str] = {}
@@ -3151,8 +3162,6 @@ class BoardStub:
                                           "permission_mode": member.get("permission_mode", "default")}
                                          for member in self.staff if member["harness"] != source_harness and not member.get("archived_at")] if source_id else []}
             if path.endswith("/handoff-preview") and method == "GET":
-                from urllib.parse import parse_qs
-
                 args = parse_qs(query)
                 source_id = args.get("source_attempt_id", [""])[0]
                 target_id = args.get("target_staff_id", [""])[0]
