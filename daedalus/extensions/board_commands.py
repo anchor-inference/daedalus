@@ -249,7 +249,7 @@ class BoardCommands:
         async def commit(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             prior = await _one(conn, "SELECT status,assignee_staff_id FROM board_tasks WHERE id = ?", (entity.id,)) if entity.kind == "task" else None
             response = await effect(conn, mutation)
-            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id FROM board_tasks WHERE id = ?",
+            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id,origin_session_id FROM board_tasks WHERE id = ?",
                               (response["task_id"],))
             assert task is not None
             payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class,
@@ -261,7 +261,9 @@ class BoardCommands:
                 assigned = {**payload, "assignee_staff_id": task["assignee_staff_id"]} if task["assignee_staff_id"] else payload
                 announced.append(("task.assigned", assigned))
             for kind, body in announced:
+                # The chat that created the task, so that chat's board reloads on its own tasks only.
                 events.append(await self.bus.persist_in(conn, kind, body, project_id=task["project_id"],
+                                                        session_id=task["origin_session_id"],
                                                         staff_id=task["assignee_staff_id"]))
             return response
 

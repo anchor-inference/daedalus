@@ -5380,13 +5380,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return board
 
     @api.get("/api/board")
-    async def board_list(include_done: int = 0, project: str | None = None, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+    async def board_list(include_done: int = 0, project: str | None = None, session: str | None = None, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         """Every task, or with ``project`` one project's board: the shell's project lens over the Board screen.
+
+        ``session`` narrows it to the tasks that chat or its subagents created (``origin_session_id``),
+        for the chat's own board in its panel; a subagent's id answers with its leader's. Tasks merely
+        assigned to a staff member's chat are not that chat's. An unknown session lists nothing. It
+        combines with ``project`` and ``include_done``.
 
         A project's task carries its project's and its assignee's names: the screen's card is the only
         place it is read there, and a card that names neither the work's project nor who did it read as
         an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter."""
-        tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None)
+        tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None, session_id=session or None)
         await _board().mark_needs_you(tasks)
         await _board().mark_chat_finishes(tasks)
         projects = {r["id"]: r["name"] for r in await manager.db.fetchall("SELECT id, name FROM projects")}

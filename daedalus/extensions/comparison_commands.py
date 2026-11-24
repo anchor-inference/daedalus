@@ -29,17 +29,18 @@ if TYPE_CHECKING:
 
 async def _task_events(conn: Any, bus: Any, principal: Principal, task_id: str,
                        prior_status: str | None) -> list[AppEvent]:
-    task = await one(conn, "SELECT title,status,project_id,assignee_staff_id FROM board_tasks WHERE id = ?",
+    task = await one(conn, "SELECT title,status,project_id,assignee_staff_id,origin_session_id FROM board_tasks WHERE id = ?",
                      (task_id,))
     assert task is not None
     payload = {"task_id": task_id, "title": task["title"], "actor": principal.origin_class,
                "actor_id": principal.actor_id}
     events = [await bus.persist_in(conn, "task.changed", payload, project_id=task["project_id"],
-                                   staff_id=task["assignee_staff_id"])]
+                                   session_id=task["origin_session_id"], staff_id=task["assignee_staff_id"])]
     if prior_status is not None and prior_status != task["status"]:
         events.append(await bus.persist_in(conn, "task.moved",
                                            {**payload, "from": prior_status, "to": task["status"]},
-                                           project_id=task["project_id"], staff_id=task["assignee_staff_id"]))
+                                           project_id=task["project_id"], session_id=task["origin_session_id"],
+                                           staff_id=task["assignee_staff_id"]))
     return events
 
 

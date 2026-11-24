@@ -218,7 +218,13 @@ class Board:
         if task.get("assignee_staff_id"):
             payload["assignee_staff_id"] = task["assignee_staff_id"]
         try:
-            await bus.publish(event_type, payload, project_id=task.get("project_id"), staff_id=task.get("assignee_staff_id") or actor.staff_id, session_id=actor.session_id)
+            # The event names the chat that created the task, not the one acting on it: a chat shows
+            # its own board and reloads on exactly these events, and a move by the operator or an
+            # unblock by the system has no acting chat at all. Who acted is ``actor_id``, which is what
+            # the orchestrator reads to ignore its own doing.
+            if actor.kind == "orchestrator" and actor.session_id:
+                payload["actor_id"] = f"orchestrator:{actor.session_id}"
+            await bus.publish(event_type, payload, project_id=task.get("project_id"), staff_id=task.get("assignee_staff_id") or actor.staff_id, session_id=task.get("origin_session_id"))
         except Exception:  # noqa: BLE001
             logger.warning("could not publish %s for task %s", event_type, task["id"], exc_info=True)
 
@@ -264,15 +270,23 @@ class Board:
         row["brief"] = _brief(row.pop("brief_json", None))
         return row
 
-    async def list(self, status: str | None = None, *, include_done: bool = True, actor: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
+    async def list(self, status: str | None = None, *, include_done: bool = True, actor: str | None = None, project_id: str | None = None, session_id: str | None = None) -> list[dict[str, Any]]:
         """The board as ``actor`` sees it; ``None`` is the operator, who sees every session's tasks.
-        ``project_id`` narrows it to one project's board."""
+        ``project_id`` narrows it to one project's board, ``session_id`` to what that chat and its
+        subagents created.
+
+        ``session_id`` is not ``actor``: an actor's view adds the operator's unaddressed pool, and for
+        staff or the coordinator the whole project, which is wrong for "this chat's tasks". A subagent's
+        id names its leader's chat, because a subagent works on its leader's board."""
         where, args = await self._scope(actor)
         # A removed card is still found by its id (a journal entry or an old message names it), but
         # no board lists it again.
         where = f"{where} AND removed_at IS NULL"
         if project_id is not None:
             where, args = f"{where} AND project_id = ?", (*args, project_id)
+        if session_id is not None:
+            family = await self.family(session_id)
+            where, args = f"{where} AND origin_session_id IN ({','.join('?' for _ in family)})", (*args, *family)
         if status:
             rows = await self.app.db.fetchall(f"SELECT * FROM board_tasks WHERE status = ? AND {where} ORDER BY priority, created_at", (status, *args))
         elif include_done:
