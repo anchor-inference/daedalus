@@ -5640,6 +5640,13 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "details.prop.next": { en: " · next {when}", ru: " · след. {when}" },
   "details.prop.today": { en: " today", ru: " сегодня" },
   "details.prop.attn": { en: "Needs a look", ru: "Требует внимания" },
+  "details.vision": { en: "Vision model", ru: "Модель зрения" },
+  "details.vision.sub": {
+    en: "The model that looks at the pictures in this chat: images it opens, screenshots, pages in the browser. Default follows Settings → Models for tasks → Image understanding.",
+    ru: "Модель, которая смотрит картинки в этом чате: открытые изображения, скриншоты, страницы в браузере. «По умолчанию» берёт её из Настройки → Модели для задач → Понимание изображений.",
+  },
+  "details.vision.default": { en: "default ({name})", ru: "по умолчанию ({name})" },
+  "details.vision.default.none": { en: "default (not set)", ru: "по умолчанию (не задана)" },
   "details.workspace.moves": { en: "Moving the chat to a project, or its folder between the host and the container, is in the session menu (⋯).", ru: "Перенос чата в проект или его папки между хостом и контейнером — в меню сессии (⋯)." },
   "details.usage.col.total": { en: "total", ru: "всего" },
   "details.usage.col.today": { en: "today", ru: "сегодня" },

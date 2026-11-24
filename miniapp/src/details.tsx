@@ -23,6 +23,7 @@ import { SessionToolGroups } from "./toolgroupsview";
 import { ServerGrantButton, StandingGrants, type Standing } from "./servergrant";
 import { McpQuickAdd } from "./mcpquickadd";
 import { SessionSubagentModels } from "./subagentmodels";
+import { SessionVisionModel, visionValue } from "./sessionvision";
 import type { SubagentModelsView } from "./api";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
@@ -66,7 +67,7 @@ export type SessionDetailsProps = {
   focusKey?: number;
 };
 
-type PageId = "origin" | "context" | "usage" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "grants" | "helpers" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
+type PageId = "origin" | "context" | "usage" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "grants" | "helpers" | "vision" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
 
 /** One line of the inspector: what it opens, its icon and name, and its state in a few words. */
 type Prop = { id: PageId; icon: IconName; label: string; value?: ReactNode; title?: string; attn?: boolean; body: () => ReactNode };
@@ -82,6 +83,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   const mcp = useMcp(id, toast, () => setGrantsTick((n) => n + 1));
   const grants = useStanding(id, grantsTick);
   const helpers = useHelperModels(id);
+  const vision = visionValue(detail);
   const [page, setPage] = useState<PageId | null>(null);
   // The line a page was opened from, so Back puts the keyboard where it was.
   const from = useRef<PageId | null>(null);
@@ -135,6 +137,10 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
       ...(helpers ? [{ id: "helpers" as const, icon: "spawn" as IconName, label: t("subm.title"),
         value: helpers.inherited ? <span className="quiet">{t("subm.inherited")}</span> : helpers.mode === "chosen" ? t("details.prop.models", { n: helpers.presets.length }) : t(`subm.mode.${helpers.mode}`),
         body: () => <SessionSubagentModels sessionId={id} toast={toast} /> }] : []),
+      // The model that looks at this session's pictures: its own choice, or the global one from Settings.
+      { id: "vision", icon: "eye", label: t("details.vision"),
+        value: <span className={`truncate${vision.own ? "" : " quiet"}`}>{vision.text}</span>,
+        body: () => <SessionVisionModel sessionId={id} detail={detail} toast={toast} onSaved={() => reload(true)} /> },
       { id: "toolgroups", icon: "skill", label: t("session.toolgroups"), body: () => <SessionToolGroups sessionId={id} toast={toast} /> },
       ...(!conductor ? [{ id: "tools" as const, icon: "wrench" as IconName, label: t("session.tools"),
         value: (detail.tools_off?.length ?? 0) > 0 ? t("details.prop.off", { n: detail.tools_off!.length }) : <span className="quiet">{t("details.prop.allon")}</span>,

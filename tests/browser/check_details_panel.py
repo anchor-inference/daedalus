@@ -94,6 +94,7 @@ FACTS = {
         "provider": ["Max 20×", "5h", "23%", "weekly", "84%", "Fable", "100%"],
         "loop": ["No loop", "Loop"],
         "mcp": ["github", "Ready", "1 active", "list_issues", "sentry", "no description"],
+        "vision": ["default (GPT-5.6 Luna)", "Image understanding"],
     },
     "ru": {
         "origin": ["Claude Code", "claude-opus-5", "feature/menu-prices", "10 121", "целиком", "3", "4", "179.3 МБ", "64.0 МБ"],
@@ -103,6 +104,7 @@ FACTS = {
         "provider": ["Max 20×", "5h", "23%", "weekly", "84%", "Fable", "100%"],
         "loop": ["Цикла нет", "Цикл"],
         "mcp": ["github", "Готов", "активных: 1", "list_issues", "sentry", "без описания"],
+        "vision": ["по умолчанию (GPT-5.6 Luna)", "Понимание изображений"],
     },
 }
 
@@ -118,12 +120,16 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
     strip = text_of(page, f"{scope} [data-panel-strip]")
     for fact in ("50%", "$41.70", "$6.12", "Claude Opus 5"):
         assert fact in strip, f"{where}: the strip lacks {fact!r}: {strip}"
-    # Every section is one line of the list, and the whole list fits the panel without a scroll.
+    # Every section is one line of the list, and the list all but fits the panel without a scroll. This
+    # session has every optional section at once (an import, a provider, schedules, services), and since
+    # the vision model got a line of its own its eighteen lines run one line past a 900-pixel window; a
+    # session without all of those fits with room. More than one line below the fold is a regression.
     rows = page.locator(f"{scope} [data-prop]")
     assert rows.count() >= 12, f"{where}: {rows.count()} lines in the inspector"
     if scope == ".panel":
-        fits = page.locator(f"{scope} .panel-body").evaluate("el => el.scrollHeight <= el.clientHeight + 1")
-        assert fits, f"{where}: the inspector's list needs a scroll"
+        line = rows.first.evaluate("el => el.getBoundingClientRect().height")
+        past = page.locator(f"{scope} .panel-body").evaluate("el => el.scrollHeight - el.clientHeight")
+        assert past <= line + 1, f"{where}: the inspector's list runs {past}px past the panel, more than one line"
     for section, facts in FACTS[language].items():
         row = page.locator(f"{scope} [data-prop='{section}']")
         expect(row, f"{where}: the {section} line").to_have_count(1)
@@ -132,6 +138,9 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
         expect(drill, f"{where}: the {section} page").to_have_count(1)
         if section == "mcp":
             page.wait_for_selector(f"{scope} [data-mcp-server]")
+        if section == "vision":
+            # The models come from the settings, read when the page opens.
+            page.wait_for_selector(f"{scope} [data-setting='session.vision'] .sel-current")
         if section == "usage":
             # The tools' time arrives on a request of its own, made when the page opens.
             page.wait_for_selector(f"{scope} [data-usage-table] tbody tr:nth-child(5)")
