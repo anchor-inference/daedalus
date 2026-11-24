@@ -268,6 +268,33 @@ async def test_tabs_waits_dialogs_downloads_and_close(rig: Rig) -> None:
     assert closed and closed[-1].payload["reason"] == "closed"
 
 
+async def test_a_screenshot_is_kept_as_a_file_and_can_be_sent(rig: Rig) -> None:
+    """BrowserScreenshot saves a PNG the operator can be given, not a picture the agent sees: crisp by
+    default, read back from the daemon in chunks, masked as every agent's picture is, and with send
+    handed over by SendFile itself."""
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://login.test/")
+    text, failed = await rig.call(sid, "BrowserScreenshot")
+    assert not failed, text
+    asked = [p for m, p in rig.daemon.calls if m == "page.screenshot"][-1]
+    assert asked["format"] == "png" and asked["scale"] == 2 and asked["keep"] and not asked.get("unmasked")
+    saved = next(Path(line.split(" to ", 1)[1].rstrip(".")) for line in text.splitlines() if line.startswith("Saved "))
+    assert saved.parent.name == "screenshots" and saved.name.startswith("login.test-") and saved.suffix == ".png"
+    assert saved.read_bytes() == rig.daemon.png and len(rig.daemon.png) > 512 << 10
+    assert "2560×1600 px at 2× its CSS pixels" in text and "1 secret field(s) blanked" in text and "SendFile(path)" in text
+    text, failed = await rig.call(sid, "BrowserScreenshot", ref="e32", selector="#go")
+    assert failed and "not two" not in text and "ref, selector or full_page" in text
+    text, failed = await rig.call(sid, "BrowserScreenshot", scale=9)
+    assert failed and "scale is 1-4" in text
+    rig.daemon.tab_of(next(iter(rig.daemon.groups))).page.inspected["#qr"] = {"tag": "div"}
+    text, failed = await rig.call(sid, "BrowserScreenshot", selector="#qr", to="shots/code.png", send=True, caption="the sign-in code")
+    assert not failed, text
+    asked = [p for m, p in rig.daemon.calls if m == "page.screenshot"][-1]
+    assert asked["ref"] == "#qr" and "element #qr" in text
+    assert (rig.manager.workspace_for(sid) / "shots" / "code.png").read_bytes() == rig.daemon.png
+    assert "code.png" in text and "to the operator" in text and "SendFile(path)" not in text
+
+
 async def test_uploads_are_read_under_the_walls_and_always_asked_about(rig: Rig, settings: Settings) -> None:
     sid = await rig.session()
     await rig.call(sid, "BrowserOpen", url="https://shop.test/cart")

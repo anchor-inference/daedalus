@@ -140,7 +140,8 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `page.snapshot` | `{tab_id, scope_ref?, max_chars? ≤ 200000 = 40000, view? "page" \| "viewport", origin?}` → `{url, title, text, refs, truncated, frames, viewport{w, h}, scroll{top, height, view, above, below, pane?}, loading}` |
 | `page.find` | `{tab_id, query ≤ 500 bytes, regex?, case_sensitive?, max? ≤ 100 = 20, origin?}` → `{url, matches: [{text, in?{ref, role, name}, near?: [{ref, role, name}]}], total, text}` (The snapshot, below) |
 | `page.text` | `{tab_id, ref?, max_chars? ≤ 200000 = 40000, origin?}` → `{url, title, text, truncated}` |
-| `page.screenshot` | `{tab_id, ref?, full_page?, max_width? ≤ 2560 = 1280, format? "jpeg" \| "png", quality?, origin?}` → `{format, width, height, data_b64, masked}` |
+| `page.screenshot` | `{tab_id, ref? \| full_page? \| clip?{x, y, w, h}, max_width? ≤ 2560 = 1280, scale? 0.25–4, format? "jpeg" \| "png", quality?, keep?, unmasked?, origin?}` → `{format, width, height, scale, data_b64, shot_id?, size?, masked}` |
+| `shot.read` | `{id, offset, max? ≤ 512 KiB}` → `{data_b64, size, eof}`: a picture `page.screenshot` kept (`keep`); forgotten at its end, or after two minutes |
 | `page.act` | see Actions → `{action_id, ok, effects, point?, box?, diff?, ref?}` |
 | `page.wait` | `{tab_id, for: "load" \| "idle" \| "text" \| "gone" \| "url", value?, timeout_ms ≤ 60000, origin?}` → `{matched: <for> \| "timeout", url}` |
 | `dialog.answer` | `{tab_id, accept, text?, origin?}` → `{diff?, effects?{navigated, url} \| {dialog}, dialogs_auto?}`: when an action opened the dialog, `diff` is what the action and the answer changed together (the page cannot be read between them); a navigation or a next dialog the answer started is said in `effects`, and an alert it brought, which the daemon answered, in `dialogs_auto`. `1001` with no dialog open |
@@ -439,7 +440,14 @@ without its navigation, header and footer), or one element's (a frame's ref: the
 with the same masking. `page.screenshot` masks secret fields before the capture (their text is hidden
 and a blank box drawn over them, then both removed), in every frame of another site as well, and
 `masked` lists their refs; a page whose frames of other sites cannot all be reached for it (more than
-64, or one that does not answer) is not captured.
+64, or one that does not answer) is not captured. `scale`, when given, is the picture's pixels per
+CSS pixel in place of `max_width`'s fit, lowered to keep the picture within 16000 pixels a side and
+25 megapixels: Chromium draws the part again at that scale, so text and a sign-in code are crisp, not
+enlarged. `clip` is a part of the viewport in its CSS pixels. `keep` holds the picture in the daemon
+for `shot.read` instead of answering it, since a reply is one frame of at most 1 MiB and a crisp PNG
+is more. `unmasked` leaves the secret fields as the page shows them and is refused unless the call is
+the operator's: the take-over view's sharp frame, which shows only what the live view already shows
+the operator, and would make their fields blink if it masked them.
 
 ## The console, the requests and one element
 
@@ -666,6 +674,14 @@ so a frame sent down the wrong kind of channel is refused rather than misread.
   it names, so a client going back to the defaults names them. The app's presets: Auto (its box up to
   2560×1600, the defaults), Smooth (1280×800, quality 50, 15 a second), Balanced (1920×1200, 75, 8),
   Sharp (its whole box, 92, 4, not adaptive), chosen in the viewer and kept on the device.
+- While the operator drives, the viewer zooms its picture (its corner's buttons, Ctrl with plus, minus
+  and zero, Ctrl with the wheel about the pointer, two fingers on a phone; the middle button drags it).
+  Zoomed, it asks for its box times the zoom, up to 4096, at quality 92 and not adaptive, whatever the
+  preset, and once the zoom settles lays a sharp frame (`POST …/still`) over the part the box shows, at
+  the screen's pixels: a frame is never larger than the page's window, so a code drawn one pixel a
+  module is unreadable however far the frame alone is enlarged. The page itself is never zoomed or
+  emulated for this — in the pinned build the screencast shows the window whatever Emulation says —
+  so handing the page back, which resets the zoom, leaves the agent the page as it was.
 - The golden frames are `browserd/internal/wire/testdata/frames.json` and
   `miniapp/src/browser/testdata/frames.json`, byte-identical (a host test checks it); each codec is
   tested against its copy. JSON in these frames is compact, with keys in the order this document
@@ -1184,7 +1200,8 @@ browser to make room.
 
 `BrowserOpen(url?, fresh?, webgl?: off|software|gpu, chrome?)`, `BrowserNavigate(url? | go: back|forward|reload, tab?)`,
 `BrowserSnapshot(tab?, scope?, view?: page|viewport)`, `BrowserText(tab?, ref?, max_chars?, find?,
-regex?, query?, schema?)`, `BrowserLook(question, tab?, ref?, full_page?)`, `BrowserAct(action?,
+regex?, query?, schema?)`, `BrowserLook(question, tab?, ref?, full_page?)`, `BrowserScreenshot(tab?, ref? |
+selector? | full_page?, scale? 1–4 = 2, to?, send?, caption?)`, `BrowserAct(action?,
 element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|left|right, paths?, x?,
 y?, steps?, tab?)`, `BrowserTabs(action: list|new|select|close, tab?, url?)`, `BrowserWait(until:
 load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept, text?, tab?)`,
@@ -1284,7 +1301,9 @@ session working there) and handed over with `upload.put`; a command-line member 
   and are refused; a pause refuses at once.
 - **Files** cross only through the host. `BrowserDownload` writes into the session's workspace under
   its walls (default `downloads/<name>`), and in a project also keeps it by handle (`att:…`, origin
-  `browser`); an upload's `paths` are read under the walls (or are handles of the project). A
+  `browser`); `BrowserScreenshot` writes a PNG the same way (default `screenshots/<site>-<time>.png`),
+  masked as every picture the agent takes, and with `send` hands it over through SendFile itself, so
+  the operator gets the same file card and chat copy; an upload's `paths` are read under the walls (or are handles of the project). A
   command-line member gets its download in its inbox (`.agents/inbox/downloads/`) through the
   team's file handoff, wherever it runs.
 - **The audit** (`browser_audit`) records opens and closes, every navigation and action with the
@@ -1399,6 +1418,7 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `POST /api/browsers/workflows/<id>/skill {name, description, steps: [{n, text?, option?, to?, signin?, secrets?}]}` | save a stopped recording, as the operator edited it in the step editor, as a recorded skill (Replaying a recording): `{skill, path, params, steps, valid, errors}` |
 | `GET /api/browsers/<group>/recording?after&limit` · `POST … {frames, human?}` · `DELETE …` | the group's recording switch and keyframes; the operator's switch; delete its keyframes |
 | `GET /api/browsers/<group>/frames/<no>` | one keyframe's JPEG |
+| `POST /api/browsers/<group>/still {tab_id?, x, y, w, h, scale 1–4}` | the take-over view's sharp frame: a PNG of that part of the viewport (CSS pixels) drawn by the browser at `scale`, unmasked, as the operator; it changes nothing on the page |
 | `GET /api/browsers/recordings` | the recordings on disk per environment, against their size and age |
 
 `BrowserGroup` is `{id, owner{kind, id, label}, session_id, staff_id, project_id, profile, env,

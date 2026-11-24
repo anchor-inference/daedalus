@@ -108,6 +108,9 @@ RELAY_WAIT = 20.0
 """How long the user daemon holds a call while the operator's Chrome is reconnecting
 (``browserd/internal/browser``, RelayWait): its calls get that much more slack."""
 DOWNLOAD_CHUNK = 512 << 10
+SHOT_MAX_BYTES = 40 << 20
+"""The largest picture a screenshot is read back as: a full page at twice its size is a few tens of
+MiB at worst, and the daemon caps its pixels before this is reached."""
 UPLOAD_CHUNK = 384 << 10
 """What one ``upload.put`` carries: base64 of it stays under the daemon's 512 KiB and one frame."""
 PROFILE = "browser"
@@ -1388,6 +1391,49 @@ class Browsers:
         if len(out) > limit:
             raise InvalidRequest(f"{download.get('name')} grew past {limit} bytes while it was read")
         return bytes(out)
+
+    async def picture(self, group: str, params: dict[str, Any], *, what: str, limit: int = SHOT_MAX_BYTES, timeout: float = 40.0) -> tuple[dict[str, Any], bytes]:
+        """A ``page.screenshot`` kept in the daemon and read back in chunks, with what the daemon said
+        of it. A reply is one frame of at most a MiB, and a crisp PNG is several, so the picture is
+        never asked for inline.
+
+        The operator's own Chrome is driven by the daemon the desktop app ships, which is updated on
+        its own schedule: one older than the host refuses the parameters it does not know, and is
+        told apart from a wrong request by naming the update it needs."""
+        try:
+            shot = await self.call(group, "page.screenshot", {**params, "keep": True}, what=what, timeout=timeout)
+        except InvalidRequest as exc:
+            if "unknown field" not in str(exc):
+                raise
+            raise Unsupported("This browser service cannot keep a screenshot yet: it is older than the host (the browser image, or the desktop app for the operator's Chrome, needs updating).") from None
+        shot_id = str(shot.get("shot_id") or "")
+        size = int(shot.get("size") or 0)
+        if size > limit:
+            raise InvalidRequest(f"the picture is {size} bytes, past the {limit >> 20} MiB a screenshot may be; take a part of the page (ref) or a smaller scale")
+        out = bytearray()
+        while True:
+            chunk = await self.call(group, "shot.read", {"id": shot_id, "offset": len(out), "max": DOWNLOAD_CHUNK}, what=what, timeout=30.0)
+            out.extend(base64.b64decode(chunk.get("data_b64") or ""))
+            if chunk.get("eof") or not chunk.get("data_b64") or len(out) > limit:
+                break
+        return shot, bytes(out)
+
+    async def still(self, group: str, *, tab_id: str, clip: dict[str, float], scale: float) -> bytes:
+        """The part of the page the operator has zoomed into, drawn at ``scale`` picture pixels per CSS
+        pixel, as a PNG: the take-over view's sharp frame.
+
+        The screencast never carries more pixels than the page's window has, so a code drawn one pixel
+        a module stays unreadable however far the picture is enlarged; this capture has Chromium draw
+        the part again at the scale asked. It changes nothing on the page — no zoom, no emulation —
+        so nothing has to be put back when the operator hands the page back, and the agent's next
+        look is the page as it was. Secret fields are left as the page shows them, as the live view
+        shows them to the operator: masking them would blink them on the page the operator watches."""
+        if not tab_id:
+            listing = await self.call(group, "tab.list", {"group_id": group}, what="listing the tabs")
+            tab_id = str(listing.get("active_tab") or "")
+        params = {"tab_id": tab_id, "clip": clip, "scale": scale, "format": "png", "unmasked": True, "origin": {"actor": "operator"}}
+        _, data = await self.picture(group, params, what="taking a sharp picture of the page")
+        return data
 
     async def upload(self, group: str, name: str, data: bytes) -> str:
         """Stream a file's bytes to the daemon's upload area; returns the upload id for ``page.act``."""

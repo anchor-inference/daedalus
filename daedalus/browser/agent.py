@@ -126,6 +126,12 @@ NETWORK_WORDS = {
 PAGE_BUDGET = 40_000
 """Characters of a page a result carries when the caller names no budget of its own."""
 THUMB_WIDTH = 320
+SCREENSHOTS_DIR = "screenshots"
+"""Where BrowserScreenshot keeps its pictures in the workspace, beside ``downloads``."""
+SHOT_SCALE, SHOT_SCALE_MIN, SHOT_SCALE_MAX = 2.0, 1.0, 4.0
+"""A screenshot's picture pixels per CSS pixel: twice by default, which is a high-density screen's
+own and keeps small text legible when the operator opens the file; the daemon lowers it for a page
+too long to draw at that size."""
 DIRECTIONS = ("up", "down", "left", "right")
 POINT_ACTIONS = ("click", "double_click", "right_click", "hover")
 """What may be done at a point of the viewport rather than on a ref: a pointer, never typing."""
@@ -576,8 +582,9 @@ class Files(Protocol):
         """``(name, bytes)`` of a file the caller may read; raises ``Forbidden`` with the refusal."""
         ...
 
-    async def save(self, name: str, data: bytes, to: str | None) -> str:
-        """Put a download where the caller can open it; returns a sentence naming where."""
+    async def save(self, name: str, data: bytes, to: str | None, *, folder: str = "downloads", source: str = "a site, through the browser") -> str:
+        """Put a file the browser produced (a download, a screenshot) where the caller can open it,
+        under ``folder`` unless ``to`` names the path; returns a sentence naming where."""
         ...
 
     async def read_folder(self, path: str, *, max_files: int, max_bytes: int) -> tuple[str, dict[str, bytes]] | None:
@@ -725,6 +732,10 @@ class Caller:
     """The operator's own passages in the caller's conversation, read when a site is about to be asked
     about: a site they named by address there is theirs already. ``None`` for a caller with no
     conversation of the operator's (a staff member's command-line browser)."""
+    send_saved: Callable[[str | None], Awaitable[str]] | None = None
+    """Hands the file :attr:`files` saved last to the operator, as SendFile does, with a caption; the
+    sentence it answers says how it went. ``None`` for a caller with no chat of the operator's to
+    send to (a staff member's command-line browser, whose files reach the operator through its team)."""
 
     @property
     def scope(self) -> str:
@@ -1591,6 +1602,48 @@ class BrowserAgent:
         url = str(current.get("url") or "")
         banner = popup_banner(shot.get("blocker"))
         return f"Tab {current['id']} — {url}; what the vision model saw:\n{fenced(origin_of(url), answer)}" + (f"\n{banner}" if banner else "")
+
+    async def screenshot(
+        self, caller: Caller, *, tab: str | None = None, ref: str | None = None, selector: str | None = None, full_page: bool = False,
+        scale: float | None = None, to: str | None = None, send: bool = False, caption: str | None = None,
+    ) -> str:
+        """A picture of the page kept as a file for the operator: PNG, drawn at ``scale`` picture pixels
+        per CSS pixel (2 by default, crisp text on any screen), of the viewport, the whole page or one
+        element. Unlike :meth:`look` no model sees it and the agent gets only where it was saved.
+        Secret fields are masked as for every picture the agent takes: the file can travel further
+        than the screen does, to a chat, to the team."""
+        if sum(bool(x) for x in (ref, selector, full_page)) > 1:
+            raise InvalidRequest("give ref, selector or full_page, or none of them for the viewport")
+        wanted = SHOT_SCALE if scale is None else float(scale)
+        if not SHOT_SCALE_MIN <= wanted <= SHOT_SCALE_MAX:
+            raise InvalidRequest(f"scale is {SHOT_SCALE_MIN:g}-{SHOT_SCALE_MAX:g} picture pixels per CSS pixel")
+        group = await self._group(caller)
+        current = await self._tab(group, tab)
+        if selector:
+            # The element a selector names gets a ref from the inspection, which is what a
+            # screenshot of one element is taken by.
+            found = await self.service.call(group["id"], "page.inspect", {"tab_id": current["id"], "selector": selector, "max_chars": 200, "origin": self._origin(caller)}, what="finding the element")
+            ref = str(found.get("ref") or "")
+            if not ref:
+                raise NotFound(f"no element matches {selector!r}")
+        params: dict[str, Any] = {"tab_id": current["id"], "full_page": bool(full_page), "format": "png", "scale": wanted, "origin": self._origin(caller)}
+        if ref:
+            params["ref"] = ref
+        shot, data = await self.service.picture(group["id"], params, what="taking a screenshot", timeout=60.0)
+        url = str(current.get("url") or "")
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        name = f"{host_of(url) or 'page'}-{stamp}.png"
+        told = await caller.files.save(name, data, to, folder=SCREENSHOTS_DIR, source="a screenshot of a site, through the browser")
+        await self._audit(group, caller, "screenshot", {"tab": current["id"], "ref": ref or "", "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "masked": shot.get("masked") or []})
+        what = "the whole page" if full_page else f"element {ref}" if ref else "the viewport"
+        size = f"{int(shot.get('width') or 0)}×{int(shot.get('height') or 0)} px at {float(shot.get('scale') or wanted):g}× its CSS pixels"
+        masked = shot.get("masked") or []
+        said = [f"Tab {current['id']} — {url}; a PNG of {what}, {size}" + (f", {len(masked)} secret field(s) blanked" if masked else "") + ".", told]
+        if send:
+            said.append(await caller.send_saved(caption) if caller.send_saved is not None else "It was not sent: hand the file to the operator the way your files reach them.")
+        else:
+            said.append("The picture was not shown to you. SendFile(path) sends it to the operator, AttachMedia puts it in your answer.")
+        return "\n".join(said)
 
     async def act(self, caller: Caller, step: Step, *, tab: str | None = None) -> str:
         step.check()
@@ -2891,6 +2944,11 @@ class BrowserAgent:
                 ), False
             if tool == "BrowserLook":
                 return await self.look(caller, question=_str(a, "question") or "describe the page", tab=_str(a, "tab"), ref=_str(a, "ref"), full_page=bool(a.get("full_page"))), False
+            if tool == "BrowserScreenshot":
+                return await self.screenshot(
+                    caller, tab=_str(a, "tab"), ref=_str(a, "ref"), selector=_str(a, "selector"), full_page=bool(a.get("full_page")), scale=_float(a, "scale"),
+                    to=_str(a, "to"), send=bool(a.get("send")), caption=_str(a, "caption"),
+                ), False
             if tool == "BrowserAct":
                 steps = a.get("steps")
                 if steps is not None:

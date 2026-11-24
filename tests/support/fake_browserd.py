@@ -245,6 +245,9 @@ class FakeBrowserd:
         """What a test adds to every page.navigate's reply: a page that did not finish, its timing."""
         """Method → the error its next call answers with, once."""
         self.screenshot = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
+        # What a picture asked for as PNG is: larger than one shot.read chunk, so the reading is tested.
+        self.png = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 3000
+        self.shots: dict[str, bytes] = {}
         self.machine: dict[str, Any] = {"mem_total_bytes": 16 << 30, "mem_available_bytes": 8 << 30, "cpus": 8, "cpu_percent": 10.0}
         self._server: asyncio.AbstractServer | None = None
         self._subscribers: list[tuple[asyncio.StreamWriter, asyncio.Queue[dict[str, Any] | None]]] = []
@@ -852,8 +855,25 @@ class FakeBrowserd:
             group, tab = self._tab(params)
             await self._held_back(group, params)
             self._page_call(tab)
-            masked = [e.ref for e in tab.page.elements.values() if e.secret]
-            return {"format": "jpeg", "width": 1280, "height": 800, "data_b64": base64.b64encode(self.screenshot).decode(), "masked": masked} | self._blocker(tab)
+            masked = [] if params.get("unmasked") else [e.ref for e in tab.page.elements.values() if e.secret]
+            scale = float(params.get("scale") or 1)
+            data = self.png if params.get("format") == "png" else self.screenshot
+            shot = {"format": params.get("format") or "jpeg", "width": int(1280 * scale), "height": int(800 * scale), "scale": scale, "masked": masked}
+            if params.get("keep"):
+                shot_id = f"s{len(self.shots) + 1}"
+                self.shots[shot_id] = data
+                return {**shot, "data_b64": "", "shot_id": shot_id, "size": len(data)} | self._blocker(tab)
+            return {**shot, "data_b64": base64.b64encode(data).decode()} | self._blocker(tab)
+        if method == "shot.read":
+            sid = str(params.get("id"))
+            if sid not in self.shots:
+                raise _Fail(1001, "no such picture")
+            data = self.shots[sid]
+            offset = int(params.get("offset") or 0)
+            piece = data[offset : offset + int(params.get("max") or 512 << 10)]
+            if offset + len(piece) >= len(data):
+                del self.shots[sid]
+            return {"data_b64": base64.b64encode(piece).decode(), "size": len(data), "eof": offset + len(piece) >= len(data)}
         if method == "page.act":
             return await self._act(params)
         if method == "page.find" and not self.legacy:

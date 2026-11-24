@@ -73,6 +73,19 @@ class ControlBody(BaseModel):
     """For ``agent``: what the operator tells the agent when handing the browser back."""
 
 
+class StillBody(BaseModel):
+    """The part of the page the take-over view is zoomed into, in the viewport's CSS pixels, and the
+    picture pixels each of them is drawn at."""
+
+    model_config = ConfigDict(extra="forbid")
+    tab_id: str = Field(default="", max_length=64)
+    x: float = Field(ge=0, le=3840)
+    y: float = Field(ge=0, le=3840)
+    w: float = Field(ge=1, le=3840)
+    h: float = Field(ge=1, le=3840)
+    scale: float = Field(ge=1, le=4)
+
+
 class SaveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     to: str = Field(default="", max_length=500)
@@ -399,6 +412,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def browsers_viewport(group_id: str, body: ViewportBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's picture asks the page to become this size, so the pane is the page."""
         return {"viewport": await service().resize(group_id, body.w, body.h)}
+
+    @api.post("/api/browsers/{group_id}/still")
+    async def browsers_still(group_id: str, body: StillBody, _: dict[str, Any] = Depends(auth)) -> Response:
+        """A sharp picture (PNG) of the part of the page the operator has zoomed into, drawn by the
+        browser at the scale asked rather than enlarged from the live view's frame."""
+        clip = {"x": body.x, "y": body.y, "w": body.w, "h": body.h}
+        data = await service().still(group_id, tab_id=body.tab_id, clip=clip, scale=body.scale)
+        return Response(data, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @api.post("/api/browsers/{group_id}/dialog")
     async def browsers_dialog(group_id: str, body: DialogBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
