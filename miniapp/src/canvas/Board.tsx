@@ -789,10 +789,10 @@ function resized(origin: Box, handle: Handle, dx: number, dy: number): Box {
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 
-function ToolButton({ icon, label, onClick, disabled, pressed, className }: { icon: IconName | "minus"; label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; className?: string }) {
+function ToolButton({ icon, label, onClick, disabled, pressed, className }: { icon: IconName; label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; className?: string }) {
   return (
     <button type="button" className={`cv-tool ${className ?? ""} ${pressed ? "on" : ""}`} onClick={onClick} disabled={disabled} aria-label={label} title={label} aria-pressed={pressed === undefined ? undefined : pressed}>
-      {icon === "minus" ? <svg className="ic" viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg> : <Icon name={icon} size={16} />}
+      <Icon name={icon} size={16} />
     </button>
   );
 }

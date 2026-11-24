@@ -9,6 +9,7 @@ import { relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { Sheet } from "../ui/dialogs";
+import { FamilyGlyph } from "../ui/provider-mark";
 import { confirmAsync, errorText } from "../ui";
 import { useQuery, invalidate } from "../store";
 import { ACCOUNTS, CALENDARS, PALETTE, refreshPlanner } from "./data";
@@ -44,14 +45,7 @@ function whereOf(account: Account): string {
 export function ProviderGlyph({ provider }: { provider: Provider }) {
   return (
     <span className={`cal-provider cal-provider-${provider}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        {provider === "google" ? <path d="M20 12.2c0 4.6-3.2 7.8-8 7.8a8 8 0 1 1 5.4-13.9M20 12h-8" />
-          : provider === "outlook" ? <><rect x="3" y="6" width="11" height="12" rx="2" /><circle cx="8.5" cy="12" r="2.5" /><path d="M14 8h7v8h-7M14 9l3.5 3L21 9" /></>
-          : provider === "yandex" ? <path d="M14 20V4h-1.6C9.6 4 8 5.6 8 8.2s1.4 4 4 4.6M12 12.8L7.5 20" />
-          : provider === "icloud" ? <path d="M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.4A3.3 3.3 0 0 0 7 18z" />
-          : provider === "ics" ? <><path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14" /><circle cx="6" cy="18" r="1.5" /></>
-          : <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4M9 15l2 2 4-4" /></>}
-      </svg>
+      <FamilyGlyph family={`cal-${provider}`} />
     </span>
   );
 }
