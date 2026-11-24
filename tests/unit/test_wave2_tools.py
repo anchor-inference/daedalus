@@ -134,9 +134,10 @@ async def test_a_working_session_is_blocked_only_from_other_roles_tools_and_what
         state = await manager.create_session("work")
         known = {t.name for t in manager.tools.list_all()}
         # A working session is blocked from the concierge's, staff's, orchestrator's, subagents' and prompt coach's own tools, and from
-        # the tools that reach a project's agents, which only its staff and orchestrator have, and from nothing else.
+        # the tools that reach a project's agents, which only its staff and orchestrator have, and from nothing else
+        # but QuickAgent, which is off while no quick model is chosen.
         others = (set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS)
-                  | set(PROMPT_COACH_ONLY_TOOLS) | set(AGENT_MESH_TOOLS))
+                  | set(PROMPT_COACH_ONLY_TOOLS) | set(AGENT_MESH_TOOLS) | {"QuickAgent"})
         assert manager.blocked_tools_for(state) == others
         await manager.set_tools_off(state.session.id, ["WebSearch"])
         assert manager.blocked_tools_for(state) == {"WebSearch"} | others
