@@ -2220,6 +2220,17 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         allowed = ids if mode == "all" else ["deepseek-flash"] if mode == "session" else [p for p in chosen.get("presets") or [] if p in ids]
         return 200, "application/json", json.dumps({"mode": mode, "presets": list(chosen.get("presets") or []), "inherited": not chosen.get("mode"), "from_parent": False, "allowed": allowed,
                                                     "default": {"mode": "all", "presets": []}, "session_preset": "deepseek-flash", "options": options})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "quick-models":
+        # Details shows, under the helper models, which fast models QuickAgent may run on; the default is
+        # one, and a change answers the list it was given (null: back to the default).
+        options = [{"id": "deepseek-flash", "label": "DeepSeek Flash"}, {"id": "claude-opus-5", "label": "Claude Opus 5"}, {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna"}, {"id": "qwen-local", "label": "Local Qwen3.8"}]
+        chosen = body.get("presets") if method.upper() == "PUT" and isinstance(body, dict) else None
+        presets = list(chosen) if isinstance(chosen, list) else ["deepseek-flash"]
+        return 200, "application/json", json.dumps({"presets": presets, "inherited": not isinstance(chosen, list), "allowed": [p for p in presets if p in {o["id"] for o in options}],
+                                                    "default": ["deepseek-flash"], "options": options})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "quick-agents":
+        # A running QuickAgent call finds its helper here by the call's id; the stub's chats have none running.
+        return 200, "application/json", json.dumps({"quick_agents": []})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "tool-groups":
         # Every session's Details lists its tool groups; a change or a "Load now" answers the same list.
         return 200, "application/json", json.dumps(session_tool_groups())
