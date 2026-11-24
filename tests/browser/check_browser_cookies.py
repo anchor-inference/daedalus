@@ -39,7 +39,7 @@ def check(browser, scenes, lang: str) -> None:  # type: ignore[no-untyped-def]
     with page.expect_file_chooser() as chosen:
         page.get_by_role("menuitem", name=item).click()
     chosen.value.set_files({"name": "shop.example_cookies.txt", "mimeType": "text/plain", "buffer": FILE.encode()})
-    expect(page.locator(f".bp-toolbar button[aria-label='{menu}'] svg path[d='M5 12l5 5 9-11']")).to_be_visible(timeout=5000)
+    expect(page.locator(f".bp-toolbar button[aria-label='{menu}'] svg.ic-check")).to_be_visible(timeout=5000)
     assert page.get_by_text(said).count() == 0, f"{lang}: a line says what the tick says"
     sent = bs.posted("/g1/cookies")
     assert len(sent) == 1 and sent[0]["text"] == FILE, f"{lang}: the app sent {sent!r}"

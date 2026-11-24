@@ -7,6 +7,7 @@ import { Icon, isIconName } from "./icons";
 import { t, useLang } from "./i18n";
 import { useQuery } from "./store";
 import { navigate, pagePath } from "./router";
+import { iconPath as drawablePath } from "./navconfig";
 import type { PageDetail } from "./api";
 import type { ShownPage } from "./turnfiles";
 
@@ -23,16 +24,9 @@ export function shownPath(page: ShownPage): string {
 }
 
 function PageGlyph({ icon, iconPath }: { icon: string | null | undefined; iconPath: string | null | undefined }) {
-  if (iconPath) {
-    // A page's own glyph: one path on the app's 24-unit grid, stroked like the app's icons (the host
-    // accepts only path commands and numbers in it, so it carries no markup).
-    return (
-      <svg className="ic" viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d={iconPath} />
-      </svg>
-    );
-  }
-  return <Icon name={isIconName(icon) ? icon : "grid"} size={18} />;
+  // A page's own glyph goes through the same check as on the sidebar: the host accepts a longer path,
+  // and one that is not drawn there must not be drawn here either.
+  return <Icon name={isIconName(icon) ? icon : "grid"} size={16} path={drawablePath(iconPath)} />;
 }
 
 export function PageCard({ page }: { page: ShownPage }) {
