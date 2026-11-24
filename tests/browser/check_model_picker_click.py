@@ -134,7 +134,7 @@ def settings_single(browser, width: int, failures: list[str]) -> None:  # type: 
     target = row.locator(".sel-list [data-id='claude-opus-5']")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/single-{width}-open.png")
-    press_once(page, target, f"[data-setting='action_rules.review_preset'] .sel-list", where, failures)
+    press_once(page, target, "[data-setting='action_rules.review_preset'] .sel-list", where, failures)
     picked = [body for kind, body in sent if kind == "settings" and isinstance(body, dict) and "action_rules" in body]
     if not picked or picked[-1]["action_rules"].get("review_preset") != "claude-opus-5":
         failures.append(f"{where}: one click on Claude Opus 5 did not choose it: {picked}")
