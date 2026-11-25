@@ -34,6 +34,10 @@ const SAME_IN_BOTH = [
   "address.provider.tailscale",
   // The kind under an attached file's name: a PDF is called a PDF in Russian too.
   "attach.kind.pdf",
+  // A card's move in its history is the two column names and an arrow; its priority's words end in
+  // the same P1..P5 mark in both languages, and the name before it is a hole.
+  "board.event.moved",
+  "board.priority.named",
   // The agent's name on its browser cursor is the product's name in both languages.
   "browser.agent",
   // Two calendar services whose names are the same brand in Russian.
@@ -217,6 +221,10 @@ describe("the keys the code asks for", () => {
       ["fmt.dow.", ["0", "1", "2", "3", "4", "5", "6"]],
       ["fmt.dur.", ["s", "m", "h", "d"]],
       ["board.col.", ["todo", "doing", "review", "blocked", "done", "dropped"]],
+      ["board.needs.", ["question", "approval", "review", "assigned"]],
+      ["board.need.", ["question", "approval", "review", "assigned"]],
+      ["board.priority.", ["1", "2", "3", "4", "5"]],
+      ["board.due.", ["today", "tomorrow", "yesterday", "today.full", "tomorrow.full", "yesterday.full"]],
       ["sched.kind.", ["agent", "message", "lazy"]],
       ["sched.group.", ["approval", "active", "paused", "done"]],
       ["sched.cycle.", ["completed", "failed", "unknown", "skipped", "pending"]],

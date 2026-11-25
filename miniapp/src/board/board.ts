@@ -62,6 +62,8 @@ export type ProjectTask = {
   checklist: CheckItem[];
   depends_on: string[];
   session_id: string | null;
+  /** The chat that created the card, whose own board lists it. */
+  origin_session_id?: string | null;
   notes: string;
   created_at: string;
   updated_at: string;

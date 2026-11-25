@@ -85,7 +85,9 @@ def check(page: Page, lang: str, phone: bool, unhandled: Unhandled) -> None:
 
     # The Board screen, where the operator sees every chat's tasks.
     page.goto(f"{BASE}/board/t-chat?token=t&lang={lang}")
-    finish = page.locator(".sheet .chat-finish")
+    # The pane beside a wide board, the sheet on a phone; its way back to work is in the pane's foot.
+    pane = page.locator(".task-pane:not(.in-sheet), .task-sheet")
+    finish = pane.locator(".chat-finish")
     expect(finish).to_contain_text(words["title"])
     expect(finish).to_contain_text(words["who"])
     expect(finish.get_by_role("button", name="Menu planning")).to_be_visible()
@@ -93,7 +95,7 @@ def check(page: Page, lang: str, phone: bool, unhandled: Unhandled) -> None:
     overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 0, f"{lang}: the page scrolls sideways by {overflow}px"
     with page.expect_response(lambda response: urlsplit(response.url).path.endswith("/api/board/t-chat") and response.request.method == "PUT"):
-        finish.get_by_role("button", name=words["reopen"]).click()
+        pane.get_by_role("button", name=words["reopen"]).click()
     sent = stub.updated[-1]
     assert sent[0] == "t-chat" and sent[1]["status"] == "todo" and sent[1]["expected_entity_revision"] == 1 and sent[1]["client_operation_id"], sent
     expect(page.locator(".chat-finish")).to_have_count(0)
