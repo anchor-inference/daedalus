@@ -6,11 +6,11 @@
 import { useRef, useState } from "react";
 import { api, ApiError, type ProjectWatch, type Wakeup, type WatchList } from "../api";
 import { Skeleton } from "../ui/components";
-import { Sheet } from "../ui/dialogs";
+import { Button, IconButton, Segmented, Select, Sheet, Switch } from "../ui/primitives";
 import { absTime, describeCron, relTime, relTimeLong, untilShort } from "../format";
 import { t } from "../i18n";
 import { Icon } from "../icons";
-import { PageHeader } from "../shell";
+import { Page, PageHeader } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { useFocus, useProject, wakeupsKey, watchesKey } from "./data";
@@ -52,12 +52,12 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
         <div className="wakeup-section-head">
           <span className="wakeup-section-title">{t("focus.wakeups.title")}</span>
           <span className="grow" />
-          {enabled && <button className="btn small" disabled={offline || !!error} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.wakeups.add")}</button>}
+          {enabled && <Button size="sm" icon="plus" disabled={offline || !!error} onClick={() => setAdding(true)}>{t("focus.wakeups.add")}</Button>}
         </div>
         {!data && !error && <Skeleton rows={2} />}
-        {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {data && list.length === 0 && <div className="empty calm">{t(enabled ? "focus.wakeups.empty" : "focus.wakeups.off")}</div>}
-        {list.map((w) => (
+        {error && !data && <div className="empty"><div>{error}</div><Button variant="primary" onClick={refresh}>{t("common.retry")}</Button></div>}
+        {data && list.length === 0 && <div className="wakeup-none">{t(enabled ? "focus.wakeups.empty" : "focus.wakeups.off")}</div>}
+        {list.length > 0 && <div className="wakeup-list">{list.map((w) => (
           <div key={w.id} className={`wakeup-row ${w.enabled ? "" : "off"}`}>
             <Icon name="clock" size={16} />
             <div className="wakeup-main">
@@ -71,11 +71,9 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
                 {w.cron && <span className="mono"> · {w.cron} UTC</span>}
               </div>
             </div>
-            <button className="iconbtn small quiet" disabled={offline || !!error || !Number.isInteger(data?.collection_revision) || !Number.isInteger(w.schedule_revision)} onClick={() => void cancel(w)} title={t("focus.wakeups.cancel")} aria-label={t("focus.wakeups.cancel")}>
-              <Icon name="close" size={16} />
-            </button>
+            <IconButton icon="close" size={28} className="quiet" label={t("focus.wakeups.cancel")} disabled={offline || !!error || !Number.isInteger(data?.collection_revision) || !Number.isInteger(w.schedule_revision)} onClick={() => void cancel(w)} />
           </div>
-        ))}
+        ))}</div>}
       </section>
       <WatchesSection projectId={projectId} toast={say} />
       {adding && <WakeupSheet projectId={projectId} collectionRevision={data?.collection_revision} unverified={!!error} onClose={() => setAdding(false)} toast={say} />}
@@ -85,7 +83,7 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
   return (
     <>
       <PageHeader title={project ? t("focus.wakeups.page", { name: project.name }) : t("focus.wakeups.title")} back={back ?? undefined} />
-      <div className="screen narrow">{body}</div>
+      <Page width="list">{body}</Page>
     </>
   );
 }
@@ -128,11 +126,8 @@ function WakeupSheet({ projectId, collectionRevision, unverified, onClose, toast
       <label className="field" htmlFor="wakeup-note">{t("focus.wakeups.note")}</label>
       <textarea id="wakeup-note" className="field" rows={3} maxLength={500} autoFocus value={draft.note} placeholder={t("focus.wakeups.note.hint")} onChange={(e) => set({ note: e.target.value })} />
       <label className="field">{t("sched.when")}</label>
-      <div className="chips" aria-label={t("sched.when")}>
-        {WAKEUP_WHENS.map((w: WakeupWhen) => (
-          <button key={w} className="chip select" aria-pressed={draft.when === w} onClick={() => set({ when: w })}>{t(w === "cron" ? "sched.when.cron" : `focus.wakeups.when.${w}`)}</button>
-        ))}
-      </div>
+      <Segmented label={t("sched.when")} value={draft.when} onChange={(when) => set({ when })}
+        options={WAKEUP_WHENS.map((w: WakeupWhen) => ({ id: w, label: t(w === "cron" ? "sched.when.cron" : `focus.wakeups.when.${w}`) }))} />
       {draft.when === "in" && (
         <>
           <label className="field" htmlFor="wakeup-minutes">{t("focus.wakeups.minutes")}</label>
@@ -160,8 +155,8 @@ function WakeupSheet({ projectId, collectionRevision, unverified, onClose, toast
       <div className="sub preview-line">{preview ? t("focus.wakeups.preview", { when: preview }) : t("sched.preview.none")}</div>
       <div className="sub form-hint">{t("focus.wakeups.hint")}</div>
       <div className="sheet-foot">
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request || offline || unverified || !Number.isInteger(collectionRevision)} onClick={() => void save()}>{t("focus.wakeups.set")}</button>
+        <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={busy || !request || offline || unverified || !Number.isInteger(collectionRevision)} onClick={() => void save()}>{t("focus.wakeups.set")}</Button>
       </div>
     </Sheet>
   );
@@ -292,12 +287,12 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
       <div className="wakeup-section-head">
         <span className="wakeup-section-title">{t("focus.watches.title")}</span>
         <span className="grow" />
-        <button className="btn small" disabled={!writes.ready} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
+        <Button size="sm" icon="plus" disabled={!writes.ready} onClick={() => setAdding(true)}>{t("focus.watches.add")}</Button>
       </div>
       {!data && !error && <Skeleton rows={2} />}
-      {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-      {data && list.length === 0 && <div className="empty calm">{t("focus.watches.empty")}</div>}
-      {list.map((w) => (
+      {error && !data && <div className="empty"><div>{error}</div><Button variant="primary" onClick={refresh}>{t("common.retry")}</Button></div>}
+      {data && list.length === 0 && <div className="wakeup-none">{t("focus.watches.empty")}</div>}
+      {list.length > 0 && <div className="wakeup-list">{list.map((w) => (
         <div key={w.id} className={`wakeup-row watch-row ${w.enabled && w.authority_state === "current" ? "" : "off"}`}>
           <Icon name="eye" size={16} />
           <div className="wakeup-main">
@@ -321,14 +316,13 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
               {w.latest_delivery.last_error && <details><summary>{t("focus.watches.delivery.reason")}</summary>{w.latest_delivery.last_error}</details>}
             </div>}
           </div>
-          <button className="iconbtn small quiet" disabled={!writes.ready || !Number.isInteger(w.condition_revision) || !w.authority_state || (w.authority_state === "capability_unavailable" && !w.enabled)} onClick={() => void act(w, "toggle")} title={t(w.authority_state === "needs_approval" || w.stopped === "needs_approval" ? "focus.watches.approval.action" : w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-label={t(w.authority_state === "needs_approval" || w.stopped === "needs_approval" ? "focus.watches.approval.action" : w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-pressed={!w.enabled || w.authority_state !== "current"}>
-            <Icon name={w.enabled && w.authority_state !== "needs_approval" ? "pause" : "play"} size={16} />
-          </button>
-          <button className="iconbtn small quiet" disabled={!writes.ready || !Number.isInteger(w.condition_revision)} onClick={() => void act(w, "remove")} title={t("focus.watches.remove")} aria-label={t("focus.watches.remove")}>
-            <Icon name="close" size={16} />
-          </button>
+          <IconButton icon={w.enabled && w.authority_state !== "needs_approval" ? "pause" : "play"} size={28} className="quiet"
+            label={t(w.authority_state === "needs_approval" || w.stopped === "needs_approval" ? "focus.watches.approval.action" : w.enabled ? "focus.watches.pause" : "focus.watches.resume")}
+            pressed={!w.enabled || w.authority_state !== "current"}
+            disabled={!writes.ready || !Number.isInteger(w.condition_revision) || !w.authority_state || (w.authority_state === "capability_unavailable" && !w.enabled)} onClick={() => void act(w, "toggle")} />
+          <IconButton icon="close" size={28} className="quiet" label={t("focus.watches.remove")} disabled={!writes.ready || !Number.isInteger(w.condition_revision)} onClick={() => void act(w, "remove")} />
         </div>
-      ))}
+      ))}</div>}
       {adding && <WatchSheet projectId={projectId} providers={data?.providers ?? []} minCooldown={data?.min_cooldown_minutes ?? 1} unverified={!!error} onClose={() => setAdding(false)} write={writes.write} canWrite={writes.ready} pending={writes.pending} retry={async () => { if (await writes.retry()) setAdding(false); }} conflict={writes.conflict} review={writes.review} needsRefresh={writes.needsRefresh} />}
     </section>
   );
@@ -358,11 +352,9 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
     await write("POST", watchesKey(projectId), { ...request, deadline_at: deadlineAt }, t("focus.watches.added"), undefined, onClose);
     setBusy(false);
   }
-  const staffSelect = (id: string, value: string, onChange: (v: string) => void, anyone: boolean) => (
-    <select id={id} className="field" value={value} onChange={(e) => onChange(e.target.value)}>
-      {anyone ? <option value="">{t("focus.watch.anyone")}</option> : <option value="" disabled>{t("focus.watches.pick")}</option>}
-      {staff.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
-    </select>
+  const staffSelect = (id: string, label: string, value: string, onChange: (v: string) => void, anyone: boolean) => (
+    <Select id={id} size="md" className="form-select" label={label} value={value} onChange={onChange}
+      options={[anyone ? { id: "", label: t("focus.watch.anyone") } : { id: "", label: t("focus.watches.pick"), disabled: true }, ...staff.map((m) => ({ id: m.name, label: m.name }))]} />
   );
   return (
     <Sheet title={t("focus.watches.new")} onClose={onClose} size="sm" className="watch-sheet">
@@ -370,13 +362,12 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
       {conflict && <div className="result-warning" role="status">{t("focus.watches.conflict")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("project.write.review")}</button></div>}
       {needsRefresh && <div className="result-warning" role="status">{t("focus.watches.unverified")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("common.retry")}</button></div>}
       <label className="field" htmlFor="watch-kind">{t("focus.watches.when")}</label>
-      <select id="watch-kind" className="field" value={kind} onChange={(e) => set({ kind: e.target.value as WatchKind })}>
-        {WATCH_KINDS.map((k) => <option key={k} value={k}>{t(`focus.watches.kind.${k}`)}</option>)}
-      </select>
+      <Select id="watch-kind" size="md" className="form-select" label={t("focus.watches.when")} value={kind} onChange={(next) => set({ kind: next as WatchKind })}
+        options={WATCH_KINDS.map((k) => ({ id: k, label: t(`focus.watches.kind.${k}`) }))} />
       {staffKind && (
         <>
           <label className="field" htmlFor="watch-staff">{t("focus.watches.staff")}</label>
-          {staffSelect("watch-staff", draft.staff, (v) => set({ staff: v }), kind !== "staff_silent")}
+          {staffSelect("watch-staff", t("focus.watches.staff"), draft.staff, (v) => set({ staff: v }), kind !== "staff_silent")}
         </>
       )}
       {kind === "staff_silent" && (
@@ -389,28 +380,23 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
         <div className="grid2">
           <div>
             <label className="field" htmlFor="watch-task">{t("focus.watches.task")}</label>
-            <select id="watch-task" className="field" value={draft.task} onChange={(e) => set({ task: e.target.value })}>
-              <option value="">{t("focus.watch.anytask")}</option>
-              {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-            </select>
+            <Select id="watch-task" size="md" className="form-select" label={t("focus.watches.task")} value={draft.task} onChange={(task) => set({ task })}
+              options={[{ id: "", label: t("focus.watch.anytask") }, ...tasks.map((task) => ({ id: task.id, label: task.title }))]} />
           </div>
           <div>
             <label className="field" htmlFor="watch-to">{t("focus.watches.to")}</label>
-            <select id="watch-to" className="field" value={draft.to} onChange={(e) => set({ to: e.target.value })}>
-              <option value="">{t("focus.watches.anycolumn")}</option>
-              {TASK_STATUSES.map((status) => <option key={status} value={status}>{t(`board.col.${status}`)}</option>)}
-            </select>
+            <Select id="watch-to" size="md" className="form-select" label={t("focus.watches.to")} value={draft.to} onChange={(to) => set({ to })}
+              options={[{ id: "", label: t("focus.watches.anycolumn") }, ...TASK_STATUSES.map((status) => ({ id: status, label: t(`board.col.${status}`) }))]} />
           </div>
         </div>
       )}
       {kind === "terminal_output" && (
         <>
           <label className="field" htmlFor="watch-terminal">{t("focus.watches.terminal")}</label>
-          <select id="watch-terminal" className="field" value={draft.terminal} onChange={(e) => set({ terminal: e.target.value })}>
-            <option value="" disabled>{t("focus.watches.pick")}</option>
-            {running.map((term) => <option key={term.id} value={term.id}>{term.title || t("term.untitled")}</option>)}
-            {cli.map((m) => <option key={m.id} value={`staff:${m.name}`}>{t("focus.watches.terminal.of", { name: m.name })}</option>)}
-          </select>
+          <Select id="watch-terminal" size="md" className="form-select" label={t("focus.watches.terminal")} value={draft.terminal} onChange={(terminal) => set({ terminal })}
+            options={[{ id: "", label: t("focus.watches.pick"), disabled: true },
+              ...running.map((term) => ({ id: term.id, label: term.title || t("term.untitled") })),
+              ...cli.map((m) => ({ id: `staff:${m.name}`, label: t("focus.watches.terminal.of", { name: m.name }) }))]} />
           <label className="field" htmlFor="watch-regex">{t("focus.watches.regex")}</label>
           <input id="watch-regex" className="field mono" maxLength={200} placeholder="FAILED|Error:" value={draft.regex} onChange={(e) => set({ regex: e.target.value })} />
         </>
@@ -419,10 +405,8 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
         <div className="grid2">
           <div>
             <label className="field" htmlFor="watch-folder">{t("focus.watches.folder")}</label>
-            <select id="watch-folder" className="field" value={draft.folder} onChange={(e) => set({ folder: e.target.value })}>
-              <option value="">{t("focus.watches.primary")}</option>
-              {(project?.folders ?? []).filter((f) => f.is_git).map((f) => <option key={f.id} value={f.id}>{f.label || f.path.split("/").pop()}</option>)}
-            </select>
+            <Select id="watch-folder" size="md" className="form-select" label={t("focus.watches.folder")} value={draft.folder} onChange={(folder) => set({ folder })}
+              options={[{ id: "", label: t("focus.watches.primary") }, ...(project?.folders ?? []).filter((f) => f.is_git).map((f) => ({ id: f.id, label: f.label || f.path.split("/").pop() || f.path }))]} />
           </div>
           <div>
             <label className="field" htmlFor="watch-branch">{t("focus.watches.branch")}</label>
@@ -434,9 +418,8 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
         <>
           <label className="field" htmlFor="watch-provider">{t("focus.watches.provider")}</label>
           {providers.length === 0 ? <div className="sub form-hint">{t("focus.watches.noproviders")}</div> : (
-            <select id="watch-provider" className="field" value={draft.provider} onChange={(e) => set({ provider: e.target.value })}>
-              {providers.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
+            <Select id="watch-provider" size="md" className="form-select" label={t("focus.watches.provider")} value={draft.provider} onChange={(provider) => set({ provider })}
+              options={providers.map((name) => ({ id: name, label: name }))} />
           )}
           {kind === "webhook" ? (
             <>
@@ -458,11 +441,8 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
         </>
       )}
       <label className="field">{t("focus.watches.then")}</label>
-      <div className="chips">
-        {WATCH_ACTIONS.filter((a) => a !== "wake" || orchestrated).map((a) => (
-          <button key={a} className="chip select" aria-pressed={draft.action === a} onClick={() => set({ action: a })}>{t(`focus.watches.action.${a}`)}</button>
-        ))}
-      </div>
+      <Segmented label={t("focus.watches.then")} value={draft.action} onChange={(action) => set({ action })}
+        options={WATCH_ACTIONS.filter((a) => a !== "wake" || orchestrated).map((a) => ({ id: a, label: t(`focus.watches.action.${a}`) }))} />
       {draft.action === "wake" && (
         <>
           <label className="field" htmlFor="watch-wake-note">{t("focus.wakeups.note")}</label>
@@ -472,12 +452,11 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
       {draft.action === "tell" && (
         <>
           <label className="field" htmlFor="watch-tell-staff">{t("focus.watches.staff")}</label>
-          {staffSelect("watch-tell-staff", draft.tellStaff, (v) => set({ tellStaff: v }), false)}
+          {staffSelect("watch-tell-staff", t("focus.watches.staff"), draft.tellStaff, (v) => set({ tellStaff: v }), false)}
           <label className="field" htmlFor="watch-tell-text">{t("focus.watches.message")}</label>
           <textarea id="watch-tell-text" className="field" rows={2} maxLength={2000} value={draft.tellText} onChange={(e) => set({ tellText: e.target.value })} />
-          <div className="chips">
-            {TELL_TIMINGS.map((when) => <button key={when} className="chip select" aria-pressed={draft.tellWhen === when} onClick={() => set({ tellWhen: when })}>{t(`focus.watches.when.${when}`)}</button>)}
-          </div>
+          <Segmented label={t("focus.watches.message")} value={draft.tellWhen} onChange={(tellWhen) => set({ tellWhen })}
+            options={TELL_TIMINGS.map((when) => ({ id: when, label: t(`focus.watches.when.${when}`) }))} />
         </>
       )}
       {draft.action === "notify" && (
@@ -486,9 +465,8 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
           <input id="watch-title" className="field" maxLength={120} value={draft.title} onChange={(e) => set({ title: e.target.value })} />
           <label className="field" htmlFor="watch-text">{t("focus.watches.text")}</label>
           <textarea id="watch-text" className="field" rows={2} maxLength={1000} value={draft.text} onChange={(e) => set({ text: e.target.value })} />
-          <div className="chips">
-            {NOTIFY_LEVELS.map((level) => <button key={level} className="chip select" aria-pressed={draft.level === level} onClick={() => set({ level })}>{t(`focus.watches.level.${level}`)}</button>)}
-          </div>
+          <Segmented label={t("focus.watches.text")} value={draft.level} onChange={(level) => set({ level })}
+            options={NOTIFY_LEVELS.map((level) => ({ id: level, label: t(`focus.watches.level.${level}`) }))} />
         </>
       )}
       <div className="grid2">
@@ -496,30 +474,25 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, wr
           <label className="field" htmlFor="watch-cooldown">{t("focus.watches.cooldown.field")}</label>
           <input id="watch-cooldown" className="field" type="number" inputMode="numeric" min={minCooldown} value={draft.cooldown} onChange={(e) => set({ cooldown: e.target.value })} />
         </div>
-        <label className="toggle-row watch-once">
-          <input type="checkbox" checked={draft.once} onChange={(e) => set({ once: e.target.checked })} />
+        <label className="watch-once">
+          <Switch checked={draft.once} onChange={(once) => set({ once })} label={t("focus.watches.once.field")} />
           <span>{t("focus.watches.once.field")}</span>
         </label>
       </div>
       <label className="field" htmlFor="watch-deadline">{t("focus.watches.deadline")}</label>
-      <select id="watch-deadline" className="field" value={deadlineChoice} onChange={(e) => {
-        const choice = e.target.value;
+      <Select id="watch-deadline" size="md" className="form-select" label={t("focus.watches.deadline")} value={deadlineChoice} onChange={(choice) => {
         setDeadlineChoice(choice);
         setDeadlineAt(choice ? new Date(Date.now() + Number(choice) * 60 * 60 * 1000).toISOString() : null);
-      }}>
-        <option value="">{t("focus.watches.deadline.none")}</option>
-        <option value="24">{t("focus.watches.deadline.day")}</option>
-        <option value="168">{t("focus.watches.deadline.week")}</option>
-        <option value="720">{t("focus.watches.deadline.month")}</option>
-      </select>
+      }}
+        options={[{ id: "", label: t("focus.watches.deadline.none") }, { id: "24", label: t("focus.watches.deadline.day") }, { id: "168", label: t("focus.watches.deadline.week") }, { id: "720", label: t("focus.watches.deadline.month") }]} />
       {deadlineAt && <div className="sub form-hint">{t("focus.watches.until", { when: absTime(deadlineAt) })}</div>}
       <label className="field" htmlFor="watch-note">{t("focus.watches.note")}</label>
       <input id="watch-note" className="field" maxLength={300} value={draft.note} onChange={(e) => set({ note: e.target.value })} />
       {request && <div className="sub preview-line">{watchWhenText(request.when)} → {watchThenText(request.then)}</div>}
       <div className="sub form-hint">{t("focus.watches.hint")}</div>
       <div className="sheet-foot">
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request || offline || unverified || !canWrite} onClick={() => void save()}>{t("focus.watches.set")}</button>
+        <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={busy || !request || offline || unverified || !canWrite} onClick={() => void save()}>{t("focus.watches.set")}</Button>
       </div>
     </Sheet>
   );

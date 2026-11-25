@@ -2539,6 +2539,16 @@ def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-unt
     page.wait_for_timeout(400)
 
 
+def choose_option(page, trigger, value: str) -> None:  # type: ignore[no-untyped-def]
+    """Pick `value` in a `Select` primitive: press its button (`trigger`, a locator or a selector),
+    then the item whose data-value it is. The list is drawn over the page, not inside the form, and
+    only while it is open."""
+    button = page.locator(trigger) if isinstance(trigger, str) else trigger
+    button.click()
+    page.locator(f".dropdown-list .dropdown-item[data-value=\"{value}\"]").click()
+    page.wait_for_selector(".dropdown-list", state="detached", timeout=5000)
+
+
 def switch_mode(page, mode: str, scope: str = "") -> None:  # type: ignore[no-untyped-def]
     """Choose Agents or Orchestration from the mode menu at the top of the sidebar, the desktop's
     column or the phone's drawer (`scope`). The menu lists the two modes in that order in either

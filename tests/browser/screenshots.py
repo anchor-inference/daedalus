@@ -1671,7 +1671,7 @@ def open_projects(page: Page) -> None:
 
 def open_hire(page: Page) -> None:
     # The team's header also links to the board; hiring is its primary action.
-    page.locator(".pagehead-actions .iconbtn.primary").click()
+    page.locator(".pagehead-actions .btn.primary").click()
     page.wait_for_selector(".staff-sheet .executor")
     page.locator("#staff-name").fill("Mira")
     page.locator("#staff-role").fill(word("role"))

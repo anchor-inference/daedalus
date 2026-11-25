@@ -1,0 +1,58 @@
+/* Orchestration mode: the main orchestrator's row and the orchestrated projects in the column, and
+   what the main chat carries in its flow. The rows are the Agents column's (.sb-row, sidebar.css):
+   one 32 px line with a 16 px glyph, the name, and a state word or a time at the right edge. */
+
+.orch-body .sb-list { padding: 0 var(--space-2) var(--space-3); }
+.orch-main { display: flex; flex-direction: column; }
+.main-entry, .orch-row { color: var(--fg); text-decoration: none; }
+.main-entry .sb-tile { color: var(--fg); }
+.main-entry.working .sb-tile { color: var(--live); }
+.main-entry-name { font-weight: 500; }
+.orch-section { margin-top: 14px; }
+/* What waits for the operator: a figure in the attention colour, as the Inbox's count in the pinned
+   block, so the eye finds the projects that need a reply without reading their words. */
+.needs-badge { flex: none; min-width: 12px; color: var(--attention); font-size: var(--fs-12); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.orch-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) 10px; color: var(--fg-3); font-size: var(--fs-13); }
+.orch-empty p { margin: 0; line-height: 1.5; }
+
+/* The main chat's flow, after its latest turn: the projects being set up, then the work handed out
+   as a board's cards. */
+.main-flow { display: grid; gap: var(--space-2); margin: var(--space-2) 0 var(--space-1); min-width: 0; }
+.main-setup { display: flex; align-items: center; gap: 10px; min-height: var(--card-row-h); padding: 6px 8px 6px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-14); }
+.main-setup > .ic { flex: none; color: var(--fg-2); }
+.main-dispatches { display: grid; gap: var(--space-2); }
+.dispatch-card { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.dispatch-card.tone-faint { opacity: .8; }
+.dispatch-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.dispatch-title { font-size: var(--fs-14); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.dispatch-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-13); }
+.dispatch-state { display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: 500; color: var(--fg-2); }
+.dispatch-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.dispatch-state.tone-info { color: var(--live); }
+.dispatch-state.tone-warn { color: var(--attention); }
+.dispatch-state.tone-bad { color: var(--bad); }
+.dispatch-state.tone-ok, .dispatch-state.tone-faint { color: var(--fg-3); }
+.dispatch-last { min-width: 0; color: var(--fg-2); }
+.dispatch-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; color: var(--fg-3); font-size: var(--fs-12); }
+.dispatch-project { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); text-decoration: none; }
+.dispatch-project:hover { color: var(--fg); }
+.dispatch-project > .ic { flex: none; }
+.dispatch-age { flex: none; }
+.dispatch-actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
+.dispatch-detail { display: grid; gap: 6px; padding-top: var(--space-2); border-top: 1px solid var(--line); font-size: var(--fs-13); }
+.dispatch-asked { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
+.dispatch-message { display: grid; gap: 2px; }
+.dispatch-message-head { color: var(--fg-3); font-size: var(--fs-12); }
+.dispatch-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* A section's label on a project's pages (the team, the journal, the wake-ups): Settings' label, 28
+   px of 12/500 in the meta colour with its count, 20 px above every one but the first. */
+.orch-label { display: flex; align-items: center; gap: var(--space-2); height: 28px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.orch-label:not(:first-child) { margin-top: 20px; }
+.orch-label-n { font-weight: 400; }
+.orch-label > .grow { flex: 1; }
+
+/* A select that fills its form's column, in a sheet's grid. */
+.dropdown.form-select { display: flex; max-width: none; }
+.dropdown.form-select .dropdown-btn { flex: 1; min-width: 0; max-width: none; font-weight: 400; }
+.dropdown.form-select .dropdown-value { flex: 1; text-align: left; }

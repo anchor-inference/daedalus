@@ -1463,6 +1463,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "project.team.for": { en: "Team of {name}", ru: "Команда проекта «{name}»" },
   "team.title": { en: "Team", ru: "Команда" },
   "team.title.of": { en: "Team · {name}", ru: "Команда · {name}" },
+  "team.members": { en: "Members", ru: "Участники" },
   "team.noproject": { en: "No project is named in this address", ru: "В этом адресе не указан проект" },
   "team.count.staff": { en: "{n} staff|{n} staff", ru: "{n} сотрудник|{n} сотрудника|{n} сотрудников" },
   "team.count.working": { en: "{n} working|{n} working", ru: "{n} работает|{n} работают|{n} работают" },
@@ -7852,6 +7853,7 @@ Object.assign(DICT, {
   "focus.brief.empty": { en: "Empty", ru: "Пусто" },
 
   "focus.journal.title": { en: "Journal · {name}", ru: "Журнал · {name}" },
+  "focus.journal.history": { en: "History", ru: "История" },
   "focus.journal.placeholder": { en: "A note for the journal…", ru: "Заметка в журнал…" },
   "focus.journal.add": { en: "Add a note", ru: "Добавить заметку" },
   "focus.journal.older": { en: "Older entries", ru: "Более ранние записи" },
@@ -8497,7 +8499,7 @@ Object.assign(DICT, {
 Object.assign(DICT, {
   "main.title": { en: "Main orchestrator", ru: "Главный оркестратор" },
   "main.entry.sub": { en: "hand work to a project", ru: "поручить работу проекту" },
-  "main.entry.working": { en: "working…", ru: "работает…" },
+  "main.entry.working": { en: "working", ru: "работает" },
   "main.entry.going": { en: "{n} dispatch under way|{n} dispatches under way", ru: "{n} поручение в работе|{n} поручения в работе|{n} поручений в работе" },
   "main.questions": { en: "{n} question|{n} questions", ru: "{n} вопрос|{n} вопроса|{n} вопросов" },
   "main.composer": { en: "Say which project and what to do…", ru: "Какой проект и что сделать…" },
@@ -8564,8 +8566,8 @@ Object.assign(DICT, {
   "orch.empty.noProjects": { en: "Create a project with a clear first task to get started.", ru: "Создайте проект с понятной первой задачей, чтобы начать работу." },
   "orch.empty": { en: "No project has an orchestrator yet. Ask the main orchestrator to start one, or find a project with ⌘K and switch its orchestrator on.", ru: "Пока ни у одного проекта нет оркестратора. Попросите главного оркестратора начать проект или найдите проект через ⌘K и включите ему оркестратор." },
   "orch.row.setup": { en: "setting up", ru: "настройка" },
-  "orch.row.working": { en: "working…", ru: "работает…" },
-  "orch.row.waiting": { en: "waiting for an answer", ru: "ждёт ответа" },
+  "orch.row.working": { en: "working", ru: "работает" },
+  "orch.row.waiting": { en: "needs you", ru: "ждёт вас" },
   "orch.row.idle": { en: "idle", ru: "не занят" },
 });
 

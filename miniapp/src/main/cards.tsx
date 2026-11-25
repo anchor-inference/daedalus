@@ -7,6 +7,7 @@ import { useState } from "react";
 import { api, type Dispatch, type DispatchMessage, type MainView } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
+import { Button } from "../ui/primitives";
 import { projectHome } from "../router";
 import { go } from "../shell";
 import { invalidate, useQuery } from "../store";
@@ -63,9 +64,9 @@ export function SetupLine({ projectId, name, toast }: { projectId: string; name:
   const { busy, finish } = useFinishSetup(projectId, toast);
   return (
     <div className="main-setup" data-setup={projectId}>
-      <Icon name="conductor" size={14} />
+      <Icon name="conductor" size={16} />
       <span className="grow">{t("main.setup.line", { name })}</span>
-      <button className="btn small" disabled={busy} onClick={() => void finish()}>{t("main.setup.finish")}</button>
+      <Button size="sm" disabled={busy} onClick={() => void finish()}>{t("main.setup.finish")}</Button>
     </div>
   );
 }
@@ -90,26 +91,30 @@ export function DispatchCard({ dispatch, toast }: { dispatch: Dispatch; toast: T
     }
   }
   const home = projectHome(dispatch.project_id);
+  // A board's card: the title, the state in its colour with the project's last word beside it, and
+  // a quiet foot with whose it is, its number and age, and what can be done to it.
   return (
     <article className={`dispatch-card tone-${state.tone} ${going ? "going" : "over"}`} data-dispatch={dispatch.id}>
-      <div className="dispatch-head">
-        <a className="dispatch-project truncate" href={home} onClick={(e) => go(e, home)}>{dispatch.project_name || dispatch.project_id}</a>
-        <span className="dispatch-seq num">#{dispatch.seq}</span>
-        <span className={`dispatch-state tone-${state.tone}`}>{state.word}</span>
-        <span className="dispatch-age faint">{relTime(dispatch.closed_at ?? dispatch.created_at)}</span>
-      </div>
       <button className="dispatch-body" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="dispatch-title">{dispatch.title || dispatch.text.split("\n")[0]}</span>
-        {said && <span className="dispatch-last truncate">{lastLine(said)}</span>}
+        <span className="dispatch-line">
+          <span className={`dispatch-state tone-${state.tone}`}>{state.word}</span>
+          {said && <span className="dispatch-last truncate">{lastLine(said)}</span>}
+        </span>
       </button>
       {open && <DispatchDetail dispatch={dispatch} />}
-      {going && (
-        <div className="dispatch-actions">
-          {/* A phone has no column of projects beside the chat: the card is the way into its project. */}
-          <a className="btn small phone-only dispatch-open" href={home} onClick={(e) => go(e, home)}>{t("common.open")}</a>
-          <button className="btn small ghost" disabled={busy} onClick={() => void cancel()}>{t("main.dispatch.cancel")}</button>
-        </div>
-      )}
+      <div className="dispatch-head">
+        <a className="dispatch-project truncate" href={home} onClick={(e) => go(e, home)}><Icon name="conductor" size={14} />{dispatch.project_name || dispatch.project_id}</a>
+        <span className="dispatch-seq num">#{dispatch.seq}</span>
+        <span className="dispatch-age">{relTime(dispatch.closed_at ?? dispatch.created_at)}</span>
+        {going && (
+          <span className="dispatch-actions">
+            {/* A phone has no column of projects beside the chat: the card is the way into its project. */}
+            <a className="btn small phone-only dispatch-open" href={home} onClick={(e) => go(e, home)}>{t("common.open")}</a>
+            <Button size="sm" variant="quiet" disabled={busy} onClick={() => void cancel()}>{t("main.dispatch.cancel")}</Button>
+          </span>
+        )}
+      </div>
     </article>
   );
 }

@@ -192,63 +192,6 @@
 .harness-step { min-height: 24px; }
 .harness-actions .harness-update-all { margin-left: auto; }
 
-/* The main orchestrator: its pinned entry, and the questions and dispatches above its conversation. */
-.main-entry { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; border: 1px solid transparent; }
-.main-entry:hover { background: var(--surface-2); }
-.main-entry.current { background: var(--surface-3); border-color: transparent; }
-.main-entry-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); flex: none; }
-.main-entry.working .main-entry-icon { color: var(--live); }
-.main-entry-text { display: grid; min-width: 0; flex: 1; }
-.main-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
-.main-entry-name { font-size: var(--fs-14); font-weight: 500; }
-.main-entry-sub { font-size: var(--fs-12); color: var(--fg-2); }
-.main-pill { flex: none; font-size: var(--fs-11); font-weight: 500; padding: 1px 6px; border-radius: var(--radius-xs); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); white-space: nowrap; }
-/* The main chat's open questions and the work under way, after the latest turn in the timeline. */
-.main-flow { display: grid; gap: 10px; margin: 8px 0 4px; min-width: 0; }
-.main-setup { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); font-size: var(--fs-13); }
-.main-dispatches { display: grid; gap: 6px; }
-.dispatch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
-.dispatch-card.tone-faint { opacity: 0.8; }
-.dispatch-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-12); }
-.dispatch-project { font-weight: 500; color: var(--fg); text-decoration: none; min-width: 0; }
-.dispatch-seq { color: var(--fg-2); }
-.dispatch-state { padding: 0 6px; border-radius: var(--radius-xs); font-weight: 500; background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); }
-.dispatch-state.tone-info { color: var(--info); }
-.dispatch-state.tone-ok { color: var(--ok); }
-.dispatch-state.tone-warn { color: var(--warn); }
-.dispatch-state.tone-bad { color: var(--bad); }
-.dispatch-age { margin-left: auto; flex: none; }
-.dispatch-body { display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; min-width: 0; }
-.dispatch-title { font-size: var(--fs-13); overflow-wrap: anywhere; }
-.dispatch-last { font-size: var(--fs-12); color: var(--fg-2); }
-.dispatch-detail { display: grid; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); font-size: var(--fs-12); }
-.dispatch-asked { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
-.dispatch-message { display: grid; gap: 1px; }
-.dispatch-message-head { color: var(--fg-2); }
-.dispatch-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Cancel sits beside the description, not on a row of its own: on its own row it roughly doubled
-   every card's height with empty space, and on a phone pushed the questions line and the composer
-   down the screen. */
-.dispatch-head, .dispatch-detail { grid-column: 1 / -1; }
-.dispatch-body { grid-column: 1; }
-.dispatch-actions { grid-column: 2; grid-row: 2; align-self: end; display: flex; justify-content: flex-end; }
-/* ── the two modes (orchestration.tsx, mode.ts) ─────────────────────────────────────────────
-   The rail's two mode items switch between them (the first two tabs on a phone). The count on
-   Orchestration is the one trace of that mode in Agents, so it is drawn quietly — a neutral pill, not
-   the red of an unread badge. */
-.mode-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
-.tab-badge.mode-count { background: var(--surface-3); color: var(--fg-2); }
-.orch-body { padding: 0 8px 12px; gap: 1px; }
-.orch-main { flex: none; }
-.orch-section { padding: 10px 9px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.orch-empty { padding: 4px 9px; font-size: var(--fs-12); }
-.orch-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; }
-.orch-row:hover { background: var(--surface-2); }
-.orch-row-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); flex: none; }
-.orch-row-text { display: grid; min-width: 0; flex: 1; }
-.orch-row-name { font-size: var(--fs-14); font-weight: 500; }
-.orch-row-meta { font-size: var(--fs-12); color: var(--fg-3); }
-.orch-list { display: flex; flex-direction: column; gap: 2px; }
 /* On a phone the tab bar holds both modes, five tabs to a row; a long word ends in an ellipsis rather
    than pushing the bar wider than the screen. */
 .tabbar.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
