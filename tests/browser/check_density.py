@@ -18,7 +18,7 @@ large next to Claude and ChatGPT on the same phone.
 On every window nothing is drawn under 12 px, the floor the approved design sets for meta and
 labels (the session, the agents list and the phone's Chats page are read for it).
 
-The desktop's session header is two lines inside its 48 px since the desktop redesign, the title and
+The desktop's session header is two lines inside its 52 px (48 until every header took 52), the title and
 then the project, the model and the live state; the start screen and the projects page that came with
 it have their own claims (check_start).
 
@@ -662,12 +662,13 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: a two-line row is {h}px")
     if m["avatar"] and m["avatar"]["w"] > 24:
         problems.append(f"{m['vw']}: an avatar in a row is {m['avatar']['w']}px")
-    # A phone's top bar is 52 px, one row of 44 px targets with room around them; a desktop's 48.
-    if m["head"] and m["head"]["h"] > (52 if phone else 48):
+    # A phone's top bar is 52 px, one row of 44 px targets with room around them, and so is a
+    # desktop's header since every header took --head-h's 52 (it was 48).
+    if m["head"] and m["head"]["h"] > 52:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
-    # The desktop header is two lines inside the same 48 px: the title, then the project, the model
+    # The desktop header is two lines inside the same 52 px: the title, then the project, the model
     # and the live state in the meta size — the phone's title button, not a second row of chips.
     if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
         problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
@@ -679,10 +680,10 @@ def judge(m: dict) -> list[str]:
         else:
             if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
                 problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            # 48, the header's height: the tabs draw their icon over their word, so six named tabs fit
+            # 52, the header's height: the tabs draw their icon over their word, so six named tabs fit
             # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
-            if not m["panelTabs"] or m["panelTabs"]["h"] != 48:
-                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 48")
+            if not m["panelTabs"] or m["panelTabs"]["h"] != 52:
+                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 52")
     elif m["panel"]:
         problems.append(f"{m['vw']}: a phone shows the panel as a column")
     # Running phones reserve the composer for steering; idle settings use a full touch target.
