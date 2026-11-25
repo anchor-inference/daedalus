@@ -37,7 +37,7 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
   const tasks = useQuery<{ tasks: TaskView[] }>(jobs ? `/api/sessions/${encodeURIComponent(sessionId)}/tasks` : null, { staleMs: 5000 }).data?.tasks;
   const job = jobRow(tasks);
   // The Terminal row stands where the mockup's work group has it: after the changes and the helpers.
-  const at = rows.findIndex((row) => row.tab !== "changes" && row.tab !== "subagents" && row.tab !== "questions");
+  const at = rows.findIndex((row) => row.tab !== "changes" && row.tab !== "board" && row.tab !== "subagents" && row.tab !== "questions");
   const all = job ? [...rows.slice(0, at < 0 ? rows.length : at), job, ...rows.slice(at < 0 ? rows.length : at)] : rows;
   return (
     <div className="ov" data-tool-page="overview">

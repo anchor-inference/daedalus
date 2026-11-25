@@ -92,7 +92,7 @@ export function ChatBoard({ sessionId, tasks, projectId, leaderTitle, taskId, on
             {tally.all > 0 && <span className="cb-count">{t("chatboard.count", { done: tally.done, all: tally.all })}</span>}
           </div>
           {helper && <div className="cb-sub">{t("chatboard.helper")}</div>}
-          <div className="cb-bar" role="img" aria-label={t("chatboard.bar", { n: tally.percent })}><i style={{ width: `${tally.percent}%` }} /></div>
+          {tally.all > 0 && <div className="cb-bar" role="img" aria-label={t("chatboard.bar", { n: tally.percent })}><i style={{ width: `${tally.percent}%` }} /></div>}
         </div>
         <IconButton icon="external" label={t("chatboard.full")} href={pathFor("board", null, { scope: "chat", session: sessionId })} />
       </div>
