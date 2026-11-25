@@ -161,7 +161,12 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     check(page.locator(".voice-read").count() == 1, f"{where}: closing the sheets with Escape left the conversation on its transcript")
     page.locator(".voice-compose-btn.mic").click()
     page.wait_for_selector(".voice-stage", timeout=10000)
-    page.wait_for_timeout(500)
+    # The stage is drawn before the call is posted, and on a busy machine the post came more than
+    # half a second later: the fixed wait that stood here failed the check without a fault in the app.
+    for _ in range(50):
+        if ("POST", "/api/companion/call", {"on": True}) in posted:
+            break
+        page.wait_for_timeout(100)
     check(("POST", "/api/companion/call", {"on": True}) in posted, f"{where}: the microphone opens a call on the server")
     check(page.locator(".voice-compose-btn.hangup").count() == 1, f"{where}: and the button turns into Hang up")
     check(page.locator(".pagehead .ic-mic, .pagehead [aria-label='Call'], .pagehead [aria-label='Позвонить']").count() == 0, f"{where}: with no second microphone in the header")
