@@ -42,7 +42,7 @@ def check(page: Page, lang: str, phone: bool, unhandled: Unhandled) -> None:
     words = WORDS[lang]
     serve(page, board(), unhandled)
     page.goto(f"{BASE}/board?token=t&lang={lang}")
-    cards = page.locator(".ph-task" if phone else ".task")
+    cards = page.locator(".ph-task" if phone else ".task-card")
     expect(cards).to_have_count(4)
     if phone:
         chip = page.locator(".ph-chip", has_text=words["needs"])
@@ -64,15 +64,18 @@ def check(page: Page, lang: str, phone: bool, unhandled: Unhandled) -> None:
         expect(groups).to_have_count(2)
         expect(groups.last).to_contain_text(words["none"])
         return
-    page.locator('button[data-group="project"]').click()
+    # The grouping is a menu in the header: by status, or the columns are projects.
+    page.locator(".board-group-btn").click()
+    page.get_by_role("menuitemcheckbox", name=words["project"]).click()
     columns = page.locator('[data-grouping="project"] .kanban-col')
     expect(columns).to_have_count(2)
     expect(columns.first).to_contain_text("Bakery")
-    expect(columns.first.locator(".task")).to_have_count(3)
+    expect(columns.first.locator(".task-card")).to_have_count(3)
     expect(columns.last).to_contain_text(words["none"])
     page.reload()
     expect(page.locator('[data-grouping="project"] .kanban-col')).to_have_count(2)
-    page.locator('button[data-group="status"]').click()
+    page.locator(".board-group-btn").click()
+    page.get_by_role("menuitemcheckbox", name=words["status"]).click()
     expect(page.locator('[data-grouping="project"]')).to_have_count(0)
 
 

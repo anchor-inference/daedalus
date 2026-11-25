@@ -2880,6 +2880,8 @@ class BoardStub:
         """Subagent session id to its leader's: a chat's board is its family's, as the host's ``Board.family`` has it."""
         self.history: dict[str, list[dict]] = {}
         """A task's stored events as ``GET /api/board/{id}/events`` answers them; a task without any has its creation."""
+        self.refusals: dict[str, str] = {}
+        """A task's id to the host's reason for refusing a move of it, as the update command words a conflict."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -3400,6 +3402,8 @@ class BoardStub:
             if method == "PUT":
                 payload = dict(body or {})
                 self.updated.append((row["id"], payload))
+                if payload.get("status") and row["id"] in self.refusals:
+                    return 409, {"detail": self.refusals[row["id"]]}
                 if "assignee_staff_id" in payload:
                     self._assign(row, payload["assignee_staff_id"] or None)
                 if payload.get("assignee_operator") is not None:
