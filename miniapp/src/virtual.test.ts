@@ -4,7 +4,7 @@
 // reader leaving, and nothing pinned it again.
 
 import { describe, expect, it } from "vitest";
-import { keepOpened, openedLine, stillAtEnd } from "./virtual";
+import { heldGuess, keepOpened, openedLine, stillAtEnd } from "./virtual";
 
 describe("the pin to the end", () => {
   it("holds through the pin's own scroll, even when the history grew before the event came", () => {
@@ -70,5 +70,19 @@ describe("a line the reader opened", () => {
     expect(keepOpened(host, line, 900)).toBe(false);
     head.remove();
     expect(keepOpened(host, line, 100)).toBe(false);
+  });
+});
+
+// A reader a few screens from the end of a long history was thrown to the end by the list itself: the
+// turns the jump rendered were measured, the average moved, and every unseen turn above them with it.
+describe("the height guessed for turns nobody has seen", () => {
+  it("follows what has been measured while nobody drives the list", () => {
+    expect(heldGuess(340, 420, false)).toBe(340);
+    expect(heldGuess(340, null, false)).toBe(340);
+  });
+
+  it("stays where it was while a hand is on the list, and is taken once there is none to hold", () => {
+    expect(heldGuess(340, 420, true)).toBe(420);
+    expect(heldGuess(340, null, true)).toBe(340);
   });
 });
