@@ -46,7 +46,7 @@ def record(page, bs: BrowserStub) -> None:  # type: ignore[no-untyped-def]
     page.locator(f"{ROOT} .bp-control.take").click()
     page.wait_for_selector(f"{ROOT} .bp-rec-btn", timeout=5000)
     page.locator(f"{ROOT} .bp-rec-btn").click()
-    page.locator(".bp-rec-start input[type=checkbox]").check()
+    page.locator(".bp-rec-start [role=switch]").click()
     page.locator(".bp-rec-start .btn.primary").click()
     page.wait_for_selector(f"{ROOT} .bp-recbar", timeout=5000)
     bs.record_step("g1", action="type", element={"role": "textbox", "name": "Period", "selector": "#period"}, slot="period", value="2026-10", submit=True)
@@ -106,7 +106,8 @@ def check(browser, scenes, lang: str, width: int, problems: list[str]) -> None: 
 
     # A sign-in bound to secrets: a bare value holds Save back.
     signin = editor.locator(".bp-skill-step[data-action='handoff']")
-    signin.locator(".bp-skill-mode").select_option("secrets")
+    signin.locator(".bp-skill-mode .dropdown-btn").click()
+    page.locator(".dropdown-item[data-value='secrets']").click()
     secrets = signin.locator(".bp-skill-secret input")
     if secrets.count() != 2:
         say(f"the sign-in offers {secrets.count()} secret fields, not one per recorded field")

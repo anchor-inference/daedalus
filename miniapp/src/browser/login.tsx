@@ -11,6 +11,7 @@ import type { BrowserGroup, BrowserLoginAsk, Notification } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { errorText } from "../ui";
+import { Switch } from "../ui/primitives";
 import { declineLogin, submitLogin, useBrowserGroup } from "./data";
 import "./login.css";
 
@@ -116,9 +117,10 @@ function LoginForm({ group, ask, toast, compact }: { group: string; ask: Browser
           <label className="login-label" htmlFor={id("otp")}>{t("browser.login.otp")}</label>
           <input id={id("otp")} className="field" value={otp} onChange={(e) => setOtp(e.target.value)} inputMode="numeric" autoComplete="off"
             autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore="" data-lpignore="true" placeholder={t("browser.login.otp.optional")} />
-          <label className="login-save">
-            <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} /> {t("browser.login.save", { site: ask.site })}
-          </label>
+          <div className="login-save">
+            <span>{t("browser.login.save", { site: ask.site })}</span>
+            <Switch checked={save} onChange={setSave} label={t("browser.login.save", { site: ask.site })} />
+          </div>
           <div className="login-actions">
             <button type="submit" className="btn primary" disabled={!ready}>{t("browser.login.submit")}</button>
             {ask.saved && <button type="button" className="btn ghost" disabled={busy} onClick={() => setTyping(false)}>{t("browser.login.saved.back")}</button>}
