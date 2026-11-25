@@ -1,10 +1,10 @@
 """Drive the Terminals screen, its full-screen grid and the ways to reach it, and refuse what does not behave.
 
-The list: the header counts what runs; the load bar is there, coloured by the projection and saying
-what the numbers are; the filters and the project groups hold the right cards; the previews keep the
-programs' colours; a host card is amber with a lock; the three new-terminal flows POST the right body
-(and go to the new terminal); past the cap the operator is asked and the request goes again with
-``confirm``; Remove on a finished card sends DELETE.
+The list: the header counts what runs and says who waits; the memory meter is there, coloured by the
+projection, with what the numbers are one press away; the filters, the search and the project groups
+hold the right rows; a row says its command, its owner and where it runs; the three new-terminal flows
+POST the right body (and go to the new terminal); past the cap the operator is asked and the request
+goes again with ``confirm``; Remove all finished sends DELETE.
 
 The workspace: four panes each send exactly one size when shown, each pane's own header follows its
 terminal, and a workspace left behind sends no size however the window changes. Navigation: ``g t``, the menu, the palette, and the More sheet on a 390 px phone.
@@ -69,27 +69,42 @@ def open_page(context, term: TerminalStub, path: str, wait: str):  # type: ignor
 
 
 def ids_of(page) -> list[str]:  # type: ignore[no-untyped-def]
-    return page.eval_on_selector_all(".term-card", "(cards) => cards.map((c) => c.dataset.terminal)")
+    return page.eval_on_selector_all(".tp-list .tp-row", "(rows) => rows.map((r) => r.dataset.terminal)")
 
 
 def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     term = fleet()
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     context.add_init_script(LENS)
-    page = open_page(context, term, "terminals", ".term-card")
+    page = open_page(context, term, "terminals", ".tp-list .tp-row")
     page.wait_for_timeout(400)
 
     subtitle = page.locator(".pagehead .pagehead-title .sub").inner_text().strip()
     print("header:", subtitle)
     if subtitle != "5 open · 2 on host · 2 with staff":
         problems.append(f"the header counts {subtitle!r}, not '5 open · 2 on host · 2 with staff'")
+    waiting = page.locator(".pagehead .tp-waiting").inner_text().strip()
+    if waiting != "Waiting for you: 1":
+        problems.append(f"the header says {waiting!r} of who waits, not 'Waiting for you: 1'")
 
-    # The load bar: coloured by the projection, and in words. 20 GB of 62 in use, 5 running at 1.4 GB,
-    # 15 more at 500 MB each would make 27.3 GB = 44 % — ok.
-    bar = page.locator(".term-screen-list .loadbar")
-    if not bar.count():
-        problems.append("the page has no load bar")
+    # The memory meter at the list's foot: the terminals' share of the machine, in words and as a bar;
+    # the projection for the cap is one press away, coloured by its level, with the key to its fills.
+    meter = page.locator(".tp-mem")
+    if not meter.count():
+        problems.append("the list has no memory meter")
     else:
+        line = meter.inner_text().replace("\n", " | ")
+        print("memory meter:", line, "| level", meter.get_attribute("data-level"))
+        if "1.4 GB of 62 GB" not in line:
+            problems.append(f"the memory meter does not say the terminals' share of the machine: {line!r}")
+        if meter.get_attribute("data-level") != "ok":
+            problems.append(f"the memory meter is {meter.get_attribute('data-level')!r} on a machine at 44 %")
+        if page.locator(".tp-mem [role=meter]").get_attribute("aria-valuenow") != "1":
+            problems.append("the meter's value is not the terminals' gigabytes")
+        page.locator(".tp-mem-button").click()
+        page.wait_for_selector(".tp-mem-pop .loadbar", timeout=5000)
+        bar = page.locator(".tp-mem-pop .loadbar")
+        # 20 GB of 62 in use, 5 running at 1.4 GB, 15 more at 500 MB each would make 27.3 GB = 44 % — ok.
         words = bar.inner_text().replace("\n", " | ")
         print("load bar:", words, "| level", bar.get_attribute("data-level"))
         if bar.get_attribute("data-level") != "ok":
@@ -105,14 +120,16 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
         ok = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--ok)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
         if colour != ok:
             problems.append(f"the bar's 'now' part is {colour}, not the ok token {ok}")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
 
     # Groups: the project, then the terminals of none.
-    groups = page.eval_on_selector_all(".term-group .section-title > span:first-child", "(s) => s.map((e) => e.textContent)")
+    groups = page.eval_on_selector_all(".tp-list-group .tp-label-name", "(s) => s.map((e) => e.textContent)")
     print("groups:", groups)
     if groups != ["Bakery site", "No project"]:
         problems.append(f"the groups are {groups}")
 
-    # Filters.
+    # Filters: the counts on the chips say what each one shows, and the rows are those.
     expected = {
         "all": {"k1tests00000", "k2devsrv0000", "k3staff00000", "k4htop000000", "k5hoststaff0", "k6psql000000"},
         "container": {"k1tests00000", "k2devsrv0000", "k3staff00000"},
@@ -121,67 +138,68 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
         "finished": {"k6psql000000"},
     }
     for name, want in expected.items():
-        page.locator(f".term-filters .chip[data-filter='{name}']").click()
+        chip = page.locator(f".tp-filter[data-filter='{name}']")
+        chip.click()
         page.wait_for_timeout(150)
         got = set(ids_of(page))
         if got != want:
             problems.append(f"the {name} filter shows {sorted(got)}, not {sorted(want)}")
-    page.locator(".term-filters .chip[data-filter='all']").click()
+        if chip.locator(".tp-filter-n").inner_text().strip() != str(len(want)):
+            problems.append(f"the {name} chip counts {chip.locator('.tp-filter-n').inner_text()!r}, not {len(want)}")
+        if chip.get_attribute("aria-pressed") != "true":
+            problems.append(f"the {name} chip is not pressed after it was chosen")
+    page.locator(".tp-filter[data-filter='all']").click()
 
-    # Previews keep the programs' colours: the ✗ is the scheme's red.
-    red = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--ansi-1)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
-    cross = page.eval_on_selector("[data-terminal='k1tests00000'] .term-card-preview span", "(e) => [e.textContent, getComputedStyle(e).color]")
-    print("preview's first run:", cross, "red is", red)
-    if cross[0] != "✗" or cross[1] != red:
-        problems.append(f"the preview's ✗ is not drawn in the terminal's red: {cross}")
-    rows = page.locator("[data-terminal='k1tests00000'] .term-card-line").count()
-    if rows != 5:
-        problems.append(f"the preview shows {rows} rows, not the five that hold text")
+    # The search narrows by title, owner or command.
+    page.locator(".tp-list-search").fill("grammy")
+    page.wait_for_timeout(150)
+    if ids_of(page) != ["k3staff00000"] and ids_of(page) != []:
+        problems.append(f"searching the folder or the command of a terminal shows {ids_of(page)}")
+    page.locator(".tp-list-search").fill("Ira")
+    page.wait_for_timeout(150)
+    if ids_of(page) != ["k3staff00000"]:
+        problems.append(f"searching an owner shows {ids_of(page)}")
+    page.locator(".tp-list-search").fill("")
 
-    # A host card is amber and carries the lock; a container card does not.
-    host = page.locator("[data-terminal='k4htop000000']")
-    if "host" not in (host.get_attribute("class") or "") or not host.locator(".term-env.host svg").count():
-        problems.append("the host card is not marked amber with a lock")
-    border = host.evaluate("(e) => getComputedStyle(e).boxShadow")
-    if "inset" not in border:
-        problems.append(f"the host card has no amber edge: {border}")
-    if page.locator("[data-terminal='k1tests00000'] .term-env.host").count():
-        problems.append("a container card carries the host marker")
+    # A row says what it is in three lines: the title and its tag, the command, the owner and where it runs.
+    row = lambda i: page.locator(f".tp-row[data-terminal='{i}']")  # noqa: E731
+    lines = {i: [row(i).locator(sel).inner_text().strip() for sel in (".tp-row-title", ".tp-row-cmd", ".tp-row-owner")] for i in ("k1tests00000", "k3staff00000", "k4htop000000", "k6psql000000")}
+    print("rows:", lines)
+    if lines["k1tests00000"][2] != "chat «Checkout page»":
+        problems.append(f"a chat's terminal names its owner {lines['k1tests00000'][2]!r}")
+    if lines["k3staff00000"][2] != "staff Ira":
+        problems.append(f"a staff member's terminal names its owner {lines['k3staff00000'][2]!r}")
+    if lines["k4htop000000"][2] != "you · host" or row("k4htop000000").get_attribute("data-env") != "host":
+        problems.append(f"a host terminal does not say it runs on the host: {lines['k4htop000000']}")
+    if not lines["k6psql000000"][1].startswith("code 1"):
+        problems.append(f"a finished terminal does not say how it ended: {lines['k6psql000000']}")
+    tags = {i: row(i).locator(".tp-row-tag").inner_text().strip() for i in ("k1tests00000", "k3staff00000", "k6psql000000")}
+    print("tags:", tags)
+    if tags["k1tests00000"] != "38m" or tags["k3staff00000"] != "waiting" or tags["k6psql000000"] != "20m":
+        problems.append(f"the row tags are {tags}")
+    if row("k3staff00000").locator(".tp-row-tag").get_attribute("data-level") != "wait":
+        problems.append("the waiting tag is not drawn as one")
 
-    # Status lines and actions.
-    status = {i: page.locator(f"[data-terminal='{i}'] .term-card-status").inner_text().strip() for i in ("k1tests00000", "k3staff00000", "k4htop000000", "k6psql000000")}
-    print("status lines:", status)
-    if not status["k1tests00000"].startswith("running 3"):
-        problems.append(f"a watched terminal says {status['k1tests00000']!r}")
-    if status["k3staff00000"] != "waiting for permission · 1 min":
-        problems.append("the staff member's activity is not the card's status")
-    if not status["k4htop000000"].startswith("nobody watching · 1h"):
-        problems.append(f"an unwatched terminal says {status['k4htop000000']!r}")
-    if not status["k6psql000000"].startswith("code 1 · 20m ago"):
-        problems.append(f"a finished terminal says {status['k6psql000000']!r}")
-    answer = page.locator("[data-terminal='k3staff00000'] .term-card-foot .btn:not([data-action='end'])").inner_text().strip()
-    if answer != "Answer":
-        problems.append(f"the staff card's action is {answer!r}, not its activity's Answer")
-
-    # Remove on the finished card sends DELETE.
-    page.locator("[data-terminal='k6psql000000'] .term-card-foot .btn").click()
+    # Forgetting what ended is one command of the list's menu, and sends DELETE.
+    page.locator(".tp-list-actions").click()
+    page.locator("[role=menuitem]", has_text="Remove all finished").click()
     page.wait_for_timeout(500)
     deletes = [p for m, p, _ in term.requests if m == "DELETE"]
     if deletes != ["/api/terminals/k6psql000000"]:
-        problems.append(f"Remove sent {deletes}")
+        problems.append(f"Remove all finished sent {deletes}")
     if page.locator("[data-terminal='k6psql000000']").count():
-        problems.append("the removed card is still listed")
+        problems.append("the removed terminal is still listed")
 
-    # Open goes to the full-screen view of that terminal.
-    page.locator("[data-terminal='k1tests00000'] .term-card-foot .btn:not([data-action='end'])").click()
+    # A row opens its terminal in the panes, and the pane's owner is a link to where it lives.
+    page.locator("[data-terminal='k1tests00000'] .tp-row-open").click()
     page.wait_for_selector(".tp-ws .term-view[data-terminal-view='k1tests00000']", timeout=10000)
     if not page.url.split("?")[0].endswith("/app/terminals/k1tests00000"):
         problems.append(f"Open went to {page.url}")
     owner = page.locator(".tp-pane[data-pane='k1tests00000'] .tp-pane-owner")
     if not owner.count() or owner.get_attribute("href") != f"/app/agents/{S1}":
         problems.append("the pane's owner is not a link to the session")
-    page.go_back()
-    page.wait_for_selector(".term-card", timeout=10000)
+    if "tp-row" in (page.locator("[data-terminal='k1tests00000']").first.get_attribute("class") or "") and "on" not in (page.locator(".tp-list [data-terminal='k1tests00000']").get_attribute("class") or "").split():
+        problems.append("the opened terminal's row is not the chosen one")
 
     # The three ways to open a free terminal.
     def create(choice: str, then=None) -> dict | None:  # type: ignore[no-untyped-def]
@@ -193,8 +211,7 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
             then()
         page.wait_for_url("**/app/terminals/new*", timeout=10000)
         bodies = stub_requests(term, "POST", "/api/terminals")[before:]
-        page.go_back()
-        page.wait_for_selector(".term-card", timeout=10000)
+        page.wait_for_selector(".tp-ws .term-view", timeout=10000)
         return bodies[-1] if bodies else None
 
     body = create("container")
@@ -233,20 +250,23 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     if len(bodies) != 2 or bodies[0].get("confirm") or bodies[1].get("confirm") is not True:
         problems.append(f"past the cap the requests were {bodies}, not one refused and one confirmed")
 
-    # A machine that would not carry the cap: the bar turns to the bad token and says so, without refusing.
+    # A machine that would not carry the cap: the meter turns to the attention colour and the
+    # projection says so, without refusing.
     term.cap = 20
     term.load = load_answer(used_gb=54)
-    # The Overview by name: a terminal opened above set up a pane, so a bare address opens the Workspace.
-    page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".term-screen-list .loadbar[data-level='bad']", timeout=15000)
-    colour = page.eval_on_selector(".loadbar-now", "(e) => getComputedStyle(e).backgroundColor")
-    bad = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--bad)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
+    page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang=en")
+    page.wait_for_selector(".tp-mem[data-level='bad']", timeout=15000)
+    colour = page.eval_on_selector(".tp-mem-fill", "(e) => getComputedStyle(e).backgroundColor")
+    attention = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--attention)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
+    page.locator(".tp-mem-button").click()
+    page.wait_for_selector(".tp-mem-pop .loadbar", timeout=5000)
     warning = page.locator(".loadbar-warning")
-    print("bad bar:", colour, "|", warning.inner_text() if warning.count() else None)
-    if colour != bad:
-        problems.append(f"a bar past 90 % is {colour}, not the bad token {bad}")
+    print("bad meter:", colour, "|", warning.inner_text() if warning.count() else None)
+    if colour != attention:
+        problems.append(f"a meter past 90 % is {colour}, not the attention token {attention}")
     if not warning.count():
         problems.append("a cap the machine cannot carry is not called out")
+    page.keyboard.press("Escape")
     if page.locator(".term-new-button").is_disabled():
         problems.append("a heavy machine disabled New terminal: a warning must not become a refusal")
     context.close()
@@ -301,17 +321,18 @@ def the_grid(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     if not page.locator(".tp-pane.on[data-pane='k4htop000000']").count():
         problems.append("the touched pane is not the active one")
 
-    # Leave the grid: nothing it held may size anything any more, whatever the window does.
+    # Narrow the grid to one pane: the three it hides may not size anything any more, whatever the
+    # window does.
     count = len(term.resizes())
-    page.locator(".tp-top .tp-views [data-view='overview']").click()
-    page.wait_for_selector(".term-card", timeout=10000)
+    page.locator(".tp-layouts [role=radio]").nth(0).click()
+    page.wait_for_timeout(300)
     for w in (1200, 1000, 1300):
         page.set_viewport_size({"width": w, "height": 800})
         page.wait_for_timeout(200)
     page.wait_for_timeout(400)
-    later = term.resizes()[count:]
+    later = [r for r in term.resizes()[count:] if r[0] != ids[0]]
     if later:
-        problems.append(f"a grid left behind sent sizes: {later}")
+        problems.append(f"panes hidden by the layout sent sizes: {later}")
     context.close()
 
 
@@ -332,7 +353,7 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
     page.locator(".rail [data-rail='terminals']").click()
     page.wait_for_url("**/app/terminals", timeout=5000)
     # The palette offers the running terminals and a new one; they are read from the listing already made.
-    page.wait_for_selector(".term-card", timeout=10000)
+    page.wait_for_selector(".tp-list .tp-row", timeout=10000)
     page.keyboard.press("Control+k")
     page.locator(".palette-sheet .field").fill("terminal")
     labels = page.locator(".palette-row").all_inner_texts()

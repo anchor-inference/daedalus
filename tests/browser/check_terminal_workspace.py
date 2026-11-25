@@ -8,10 +8,10 @@ double click puts them back at half; a splitter drag ends in at most a couple of
 pane; Alt+1…4 focuses a place and does not reach the shell; the layout, the places, the fractions and
 the active pane survive a reload and the address names the active pane; opening a terminal already in
 a pane focuses it instead of showing it twice; closing a pane leaves the others alone; a staff member
-waiting for permission lights the bar's indicator and the pane's own; a title double-clicked is
-renamed through the host; `/app/terminals` opens on the Workspace once panes are set up and on the
-Overview once the operator chose it; at 1280 × 720 nothing scrolls sideways and no pane is narrower
-than 200 px. The Russian page has Russian words, and no page throws.
+waiting for permission lights the header's indicator and the pane's own; a title double-clicked is
+renamed through the host; `/app/terminals` opens the list with the panes that were set up; at
+1280 × 720 nothing scrolls sideways and no pane is narrower than 200 px. The Russian page has Russian
+words, and no page throws.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -71,7 +71,7 @@ def open_page(context, term: TerminalStub, path: str, lang: str = "en") -> Page:
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.errors = errors  # type: ignore[attr-defined]
     page.goto(f"{BASE}/{path}{'&' if '?' in path else '?'}token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".tp-ws, .term-card, .term-phone", timeout=20000)
+    page.wait_for_selector(".tp-ws, .term-phone", timeout=20000)
     return page
 
 
@@ -136,28 +136,29 @@ def grid_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(panes(page) == IDS, f"the places hold {panes(page)}, not the address's order")
     c.that(len({round(b["x"]) for b in boxes}) == 2 and len({round(b["y"]) for b in boxes}) == 2, "four panes are not a 2 × 2 grid")
     c.that(page.locator(".tp-pane-head").count() == 4, "not every pane has its own header")
-    c.that(page.locator(".tp-tab").count() == 4, "the bar does not have one tab per pane")
+    c.that(page.locator(".tp-list .tp-row").count() == 5, "the list does not have a row for every terminal")
 
-    # The staff member waiting for permission: the bar's indicator, the pane's own, the tab's word.
-    c.that(page.locator(".tp-top .tp-waiting").count() == 1, "the bar does not say something is waiting")
+    # The staff member waiting for permission: the header's indicator, the pane's own, the row's word.
+    c.that(page.locator(".pagehead .tp-waiting").count() == 1, "the header does not say something is waiting")
     c.that(page.locator(f".tp-pane[data-pane='{IDS[2]}'] .tp-attn").count() == 1, "the waiting pane has no attention marker")
-    c.that(page.locator(".tp-tab[data-slot='2']").get_attribute("data-state") == "waiting", "the waiting pane's tab does not say so")
+    c.that(page.locator(f".tp-pane[data-pane='{IDS[2]}']").get_attribute("data-state") == "waiting", "the waiting pane does not say so")
+    c.that(page.locator(f".tp-row[data-terminal='{IDS[2]}'] .tp-row-tag").inner_text().strip() == "waiting", "the waiting terminal's row does not say waiting")
     # The waiting dot is the orange of "needs you", flat: a lit dot once carried a halo, and the
     # design has no glows.
     dot = page.eval_on_selector(f".tp-pane[data-pane='{IDS[2]}'] .tp-pane-head .tp-dot", "(e) => { const s = getComputedStyle(e); return { shadow: s.boxShadow, bg: s.backgroundColor, attention: getComputedStyle(document.documentElement).getPropertyValue('--attention').trim() }; }")
     c.that(dot["shadow"] == "none" or all("inset" in part for part in dot["shadow"].split("), ")), f"the waiting dot still glows: {dot['shadow']}")
     c.that(dot["bg"] == hex_rgb(dot["attention"]), f"the waiting dot is {dot['bg']}, not the attention colour {dot['attention']}")
-    c.that(page.locator(".tp-tab[data-slot='1']").get_attribute("data-state") == "working", "the busy dev server's tab does not say working")
+    c.that(page.locator(f".tp-pane[data-pane='{IDS[1]}']").get_attribute("data-state") == "working", "the busy dev server's pane does not say working")
 
     # 4 → 1 → 4 keeps every pane, its element and its scrollback.
     mark_elements(page)
     before = {i: len(text(page, i)) for i in IDS}
     sockets = {i: len(term.of(i)) for i in IDS}
-    page.locator(".tp-layout[data-layout='1']").click()
+    page.locator(".tp-layouts [role=radio]").nth(0).click()
     page.wait_for_timeout(300)
     c.that(visible(page) == [IDS[0]], f"one pane shows {visible(page)}")
     c.that(page.locator(".tp-pane.hidden").count() == 3, "the hidden panes were dropped, not hidden")
-    page.locator(".tp-layout[data-layout='4']").click()
+    page.locator(".tp-layouts [role=radio]").nth(2).click()
     page.wait_for_timeout(300)
     c.that(sorted(visible(page)) == sorted(IDS), f"back at four the grid shows {visible(page)}")
     c.that(not same_elements(page, IDS), f"4 → 1 → 4 remounted {same_elements(page, IDS)}")
@@ -288,35 +289,30 @@ def grid_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(300)
     c.that(page.locator(f".tp-pane.on[data-pane='{IDS[2]}']").count() == 1, "the waiting indicator did not focus the waiting pane")
 
-    # Which view opens: the Workspace once panes are set up; the Overview once it is chosen.
+    # The bare address opens the same page: the list, and the panes that were set up.
     page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".tp-ws, .term-card", timeout=15000)
-    c.that(page.locator(".tp-ws").count() == 1, "/app/terminals did not open the set-up Workspace")
-    page.locator(".tp-top .tp-views [data-view='overview']").click()
-    page.wait_for_selector(".term-card", timeout=10000)
-    page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".tp-ws, .term-card", timeout=15000)
-    c.that(page.locator(".term-card").count() > 0 and page.locator(".tp-ws").count() == 0, "/app/terminals did not remember the Overview")
+    page.wait_for_selector(".tp-ws .tp-list", timeout=15000)
+    c.that(page.locator(".tp-pane:not(.hidden)").count() > 0 and page.locator(".tp-list .tp-row").count() == 5, "/app/terminals did not open the list with the set-up panes")
     c.that(not page.errors, f"the page threw: {page.errors}")  # type: ignore[attr-defined]
     context.close()
 
 
 def narrow(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
-    """1280 × 720 with the list open: nothing sideways, no pane under 200 px, the bar on one row."""
+    """1280 × 720 with the list open: nothing sideways, no pane under 200 px, the header on one row."""
     term = fleet()
     context = browser.new_context(viewport={"width": 1280, "height": 720}, color_scheme="dark")
     page = open_page(context, term, f"terminals/{IDS[0]}?with={','.join(IDS[1:])}")
     page.wait_for_timeout(800)
     sideways = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     widths = page.eval_on_selector_all(".tp-pane:not(.hidden)", "(p) => p.map((e) => Math.round(e.getBoundingClientRect().width))")
-    bar = box(page, ".tp-top")
+    bar = box(page, ".pagehead-row")
     head = box(page, ".tp-pane-head")
-    print("1280 × 720: panes", widths, "bar", round(bar["h"]), "pane header", round(head["h"]))
+    print("1280 × 720: panes", widths, "header", round(bar["h"]), "pane header", round(head["h"]))
     c.that(sideways <= 0, f"the workspace scrolls sideways by {sideways} px")
     c.that(min(widths) >= 200, f"a pane is narrower than 200 px: {widths}")
-    c.that(bar["h"] <= 36.5, f"the bar is {bar['h']} px, more than a row")
-    c.that(head["h"] <= 32.5, f"a pane header is {head['h']} px, more than a dense row")
-    big = page.evaluate("""() => [...document.querySelectorAll('.tp-ws *')].filter((e) => !e.closest('.xterm') && e.childNodes.length && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(getComputedStyle(e).fontSize) > 14).map((e) => e.className + ' ' + getComputedStyle(e).fontSize)""")
+    c.that(abs(bar["h"] - 52) <= 0.5, f"the page header is {bar['h']} px, not 52")
+    c.that(abs(head["h"] - 40) <= 0.5, f"a pane header is {head['h']} px, not 40")
+    big = page.evaluate("""() => [...document.querySelectorAll('.tp-ws *')].filter((e) => !e.closest('.xterm') && !e.matches('.pagehead h1') && e.childNodes.length && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(getComputedStyle(e).fontSize) > 14).map((e) => e.className + ' ' + getComputedStyle(e).fontSize)""")
     c.that(not big, f"text above 14 px in the workspace: {big[:5]}")
     context.close()
 
@@ -326,10 +322,10 @@ def russian(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = open_page(context, term, f"terminals/{IDS[0]}?with={','.join(IDS[1:])}", lang="ru")
     page.wait_for_timeout(500)
-    words = page.locator(".tp-top").inner_text()
-    print("Russian bar:", words.replace("\n", " | "))
-    c.that("Рабочее место" in words and "Обзор" in words, f"the Russian bar has no Russian view names: {words!r}")
-    c.that("Ждут вас" in words, f"the Russian bar does not say who waits: {words!r}")
+    words = page.locator(".pagehead").inner_text()
+    print("Russian header:", words.replace("\n", " | "))
+    c.that("Одна" in words and "Сетка" in words, f"the Russian header has no Russian layout names: {words!r}")
+    c.that("Ждут вас" in words, f"the Russian header does not say who waits: {words!r}")
     c.that(not page.errors, f"the Russian page threw: {page.errors}")  # type: ignore[attr-defined]
     context.close()
 

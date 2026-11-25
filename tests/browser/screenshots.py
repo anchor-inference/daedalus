@@ -1941,18 +1941,29 @@ def themed(page: Page) -> None:
 
 
 def terminals_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
-    """The Terminals screen: cards by project with the load bar in the header (desktop), or its list (phone)."""
+    """The Terminals page: the list beside two live panes, the tests and the dev server (desktop), or the
+    cards by project (phone)."""
     from terminal_stub import load_answer
 
     term = terminals_fleet()
     term.load = load_answer(total_gb=62, used_gb=21, terminals_gb=2.1, likely_mb=640)
+    if not prefix:
+        term.terms["m2devsrv0000"].busy = True
+        dock_tests(term, "m1tests00000")
+        term.emit("m2devsrv0000", DOCK_DEV)
     page = context.new_page()
     page.route("**/api/**", stub)
     term.install(page)
     themed(page)
-    page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang={LANG}")
-    page.wait_for_selector(".term-card .term-card-line, .ph-tcard .ph-tcard-term", timeout=15000)
-    page.wait_for_timeout(700)
+    if prefix:
+        page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang={LANG}")
+        page.wait_for_selector(".ph-tcard .ph-tcard-term", timeout=15000)
+    else:
+        page.add_init_script("try { localStorage.setItem('daedalus.term.renderer', 'dom'); } catch (e) {}")
+        page.goto(f"{BASE}/terminals/m1tests00000?layout=2&panes=m1tests00000,m2devsrv0000&token=t&scheme=dark&lang={LANG}")
+        page.wait_for_selector(".tp-list .tp-row", timeout=15000)
+        page.wait_for_selector(".term-view[data-state='live']", timeout=15000)
+    page.wait_for_timeout(1200)
     page.screenshot(path=str(OUT / f"{prefix}terminals.png"))
     print(f"wrote {prefix}terminals")
     page.close()
@@ -1970,7 +1981,7 @@ WS_OPENCODE = (
 
 
 def terminals_workspace_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
-    """The Workspace: four live panes in a 2 × 2 grid with mixed states — tests that failed, a dev
+    """The page with four live panes in a 2 × 2 grid with mixed states — tests that failed, a dev
     server, a staff member working and one waiting for permission (desktop); the same four as one pane
     at a time with the switcher (phone)."""
     term = terminals_fleet()
