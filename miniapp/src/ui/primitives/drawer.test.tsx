@@ -3,8 +3,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLang } from "../i18n";
-import { Drawer, closeDrawer, openDrawer, useDrawerOpen } from "./phone";
+import { setLang } from "../../i18n";
+import { Drawer, closeDrawer, openDrawer, useDrawerOpen } from "./drawer";
 
 let host: HTMLDivElement;
 let root: Root;

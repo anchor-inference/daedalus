@@ -72,7 +72,7 @@ export type RowProps = {
   /** The chosen row of a list: the open chat, the selected task. */
   selected?: boolean;
   /** 32 for a line of its own, 44 for a title over a meta line, 56 for a large list; left out, 44
-      with a meta line and 32 without on a desktop (a phone's own heights come from phone.css). */
+      with a meta line and 32 without on a desktop (a phone's own heights come from lists.css). */
   height?: 32 | 44 | 56;
   /** The row's commands: long-press, right click and the ⋮ all open them as a menu. */
   actions?: MenuItem[];

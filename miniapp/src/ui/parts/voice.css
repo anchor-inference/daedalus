@@ -3,6 +3,15 @@
    sticky and the page scrolls under it. */
 .offline-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }
 .main.chat-open .offline-strip { flex: none; }
+@media (max-width: 1023px) {
+  /* The global offline line, in the strip's shape: red, 32 px, under the bar. */
+  /* A page drawn from the primitives puts the strip under its own top bar; elsewhere the strip moves
+     under the page header, where the design has it, rather than above it. */
+  .main:has(> .ph-page) > .offline-strip { display: none; }
+  .main > .offline-strip { order: 1; }
+  .main > :not(.pagehead):not(.offline-strip) { order: 2; }
+  .offline-strip { min-height: 32px; display: flex; align-items: center; justify-content: center; padding: 6px var(--gutter); font-size: var(--fs-13); font-weight: 500; color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); border-bottom: 0; }
+}
 
 /* The agent's own changes. Three states, one shape: waiting for a restart, applied, refused. */
 .change-strip { position: sticky; top: 0; z-index: 13; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 8px 14px; font-size: var(--fs-13); background: var(--surface-1); }

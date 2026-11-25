@@ -153,3 +153,24 @@
   .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 0 0 8px; }
   .pboard-col > .section-title.kanban-head { position: sticky; top: 0; z-index: 1; }
 }
+
+/* On a phone: a project's new task. */
+@media (max-width: 1023px) {
+  /* A new task, as the design's form: Create beside the title, the brief as one grouped card with its
+     labels at the left, and the footer's pair left to the desktop. */
+  .pboard-sheet.new .sheet-foot { display: none; }
+  .pboard-sheet.new .pboard-create { margin-left: auto; }
+  .pboard-sheet.new .sheet-head h3 { flex: 1; }
+  .pboard-sheet.new label.field { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .pboard-sheet.new input.field { height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .pboard-sheet.new .pboard-brief { display: flex; flex-direction: column; gap: 0; margin: var(--space-4) 0 0; padding: 0; border: 0; }
+  .pboard-sheet.new .pboard-brief legend { padding: 0 4px var(--space-2); font-size: var(--fs-13); text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--fg-3); }
+  .pboard-sheet.new .pboard-brief > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: start; gap: var(--space-2); padding: 4px 4px 4px 14px; border-radius: 0; background: var(--surface-2); }
+  .pboard-sheet.new .pboard-brief > div + div { border-top: 1px solid var(--line); }
+  .pboard-sheet.new .pboard-brief > div:first-of-type { border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md); }
+  .pboard-sheet.new .pboard-brief > div:last-of-type { border-bottom-left-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); }
+  .pboard-sheet.new .pboard-brief label.field { margin: 12px 0 0; font-size: var(--fs-14); font-weight: 400; color: var(--fg-2); }
+  .pboard-sheet.new .pboard-brief textarea.field { min-height: var(--tap); border: 0; background: none; padding: 10px 8px; font-size: var(--fs-16); resize: none; }
+  .pboard-sheet.new details > summary { min-height: var(--tap); display: flex; align-items: center; font-size: var(--fs-15); }
+  .pboard-sheet.new .pboard-import { min-height: var(--tap); }
+}

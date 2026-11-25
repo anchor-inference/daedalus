@@ -4,7 +4,7 @@
 // around it is the phone's own — the scrim, the swipe that closes it, the history entry Back takes —
 // and its sizes are the phone's touch sizes (ui/parts/sidebar.css). A drawer of its own used to list
 // other destinations under other names, so the two sizes of the app taught two different maps.
-// Every screen's hamburger opens it (ui/phone.tsx, openDrawer).
+// Every screen's hamburger opens it (ui/primitives/drawer.tsx, openDrawer).
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { Project } from "./api";
@@ -17,7 +17,7 @@ import { Launcher } from "./navmenu";
 import { placeItem } from "./navplace";
 import { OrchestrationSidebar } from "./orchestration";
 import { Sidebar, SidebarFrame } from "./sidebar";
-import { Drawer, closeDrawer, useDrawerOpen } from "./ui/phone";
+import { Drawer, closeDrawer, useDrawerOpen } from "./ui/primitives";
 import { Sheet } from "./ui/primitives";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */

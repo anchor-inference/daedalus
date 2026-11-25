@@ -95,7 +95,7 @@ import { FullResult, ToolResultView } from "../toolresult";
 import { SettingsChangeCard, settingsChangeIds } from "../settingschange";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
-import { Banner } from "../ui/phone";
+import { Banner } from "../ui/primitives";
 import { IconButton } from "../ui/primitives";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
@@ -3314,7 +3314,7 @@ function MessageTime({ at, took }: { at: string | number; took?: number | null }
  *  `lead` and `trail` stand before and after the buttons: the message's time, on the side of the row
  *  away from the text it answers to. */
 function MessageActions({ text, actions = [], more, lead, trail, shown = false }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode; shown?: boolean }) {
-  // A phone shows the same icons as a desktop, in 44 px targets (ui/phone.css): the word "Copy"
+  // A phone shows the same icons as a desktop, in 44 px targets (chat.css): the word "Copy"
   // beside one icon and every other action behind ⋯ made the turn's commands a hunt.
   const menu = more ?? [];
   const [copied, setCopied] = useState(false);

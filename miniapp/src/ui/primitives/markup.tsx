@@ -9,8 +9,8 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 /** A count or a short word beside a name. Its tone is one of the three accents or none. */
-export function Badge({ children, tone }: { children: ReactNode; tone?: "live" | "attention" | "accent" }) {
-  return <span className={`badge ${tone ?? ""}`.trim()}>{children}</span>;
+export function Badge({ children, tone, className = "" }: { children: ReactNode; tone?: "live" | "attention" | "accent"; className?: string }) {
+  return <span className={`badge ${tone ?? ""} ${className}`.replace(/\s+/g, " ").trim()}>{children}</span>;
 }
 
 /** A state as a dot: live (running, connected), attention (needs the operator, failed) or idle.

@@ -442,3 +442,23 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .share-field input.field { flex: 1; min-width: 0; margin: 0; }
 .share-field .ic { color: var(--fg-3); flex: none; }
 .share-field .btn { flex: none; white-space: nowrap; }
+
+/* On a phone: the Secret form. */
+@media (max-width: 1023px) {
+  /* The Secret form in the phone's dress: the labels and fields of the other phone forms, and 16 px in the
+     fields so Safari does not zoom into them. */
+  .secret-sheet .field-label, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .secret-sheet .secret-form { padding: 0 var(--gutter); }
+  .secret-sheet input.field, .secret-sheet textarea.field { font-size: var(--fs-16); }
+  .secret-sheet input.field { height: var(--tap); }
+  .secret-sheet .secret-form .sub { font-size: var(--fs-13); }
+  .secret-sheet .secret-chip, .msg-secrets .secret-chip { font-size: var(--fs-13); }
+  .secret-sheet .secrets-manager { padding: 0 var(--gutter) var(--space-4); }
+  .secret-sheet .secret-add { padding: var(--space-3); }
+  .secret-sheet .secret-edit { padding: 0; }
+  .secrets-search input.field { font-size: var(--fs-16); height: var(--tap); }
+  .secret-row-dots { font-size: var(--fs-14); }
+  .secret-row-scope, .secret-row-meta, .secret-row-attached, .secrets-group > .secret-heading { font-size: var(--fs-13); }
+  .secret-row-tools .iconbtn { width: var(--tap); height: var(--tap); }
+  .secret-row-tools { gap: 0; }
+}

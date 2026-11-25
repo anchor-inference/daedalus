@@ -30,7 +30,7 @@ import { steadySession } from "./details";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { HARNESS_BADGES, HARNESS_NAMES, type Staff } from "../team/team";
 import { act } from "../team/phone";
-import { TopBar } from "../ui/phone";
+import { TopBar } from "../shell";
 import { Button, IconButton, Segmented } from "../ui/primitives";
 import { firstWait, staffTone, waitKey } from "../project/focus";
 import { PhoneAskAnswers } from "./phoneask";
@@ -269,9 +269,9 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
             title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{member.name}</span><span className="ph-sheet-kt-m">{[member.role, version].filter(Boolean).join(" · ")}</span></span>}
             footer={member.live ? (
               <div className="ph-foot-row wrap">
-                <button type="button" className="ph-btn" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}><Icon name="pause" size={16} />{t("ph.team.pause")}</button>
-                <button type="button" className="ph-btn" onClick={() => void act(member, projectId, "interrupt", toast)}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
-                <button type="button" className="ph-btn danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</button>
+                <Button icon="pause" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}>{t("ph.team.pause")}</Button>
+                <Button icon="stop" onClick={() => void act(member, projectId, "interrupt", toast)}>{t("focus.staff.interrupt")}</Button>
+                <Button variant="danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</Button>
               </div>
             ) : undefined}>
             {panel}

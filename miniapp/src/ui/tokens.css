@@ -155,7 +155,7 @@
   --head-h: 52px;        /* every header: a page's, a conversation's, the sidebar's head, a pane's */
   --page-pad: 14px;     /* a page's side padding; 24 on a desktop, 40 on a wide one */
   /* The phone's own geometry. Declared here with the rest so every size has one home, and used only
-     by rules inside the phone media query (ui/phone.css, and the phone blocks of the shared parts):
+     by rules inside the phone media query (the phone blocks of the shared parts):
      a desktop never reads them. Measured from
      the two chat apps the operator holds on the same phone every day, and taken down a step after the
      operator measured the first cut as too large next to them on that phone: their single-line rows

@@ -10,7 +10,7 @@ import { useQuery } from "../store";
 import { errorText } from "../ui";
 import { useCopied } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
-import { Banner } from "../ui/phone";
+import { Banner } from "../ui/primitives";
 import { type CoachResult, type CoachView, POSITION_KEY, seedMessage } from "./coach";
 import { FloatingWindow } from "../ui/primitives/floatingwindow";
 

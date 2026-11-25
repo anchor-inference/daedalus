@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Project, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
-import { Chip, ChipBar, EmptyState, TopBar } from "../ui/phone";
+import { Chip, ChipBar, EmptyState } from "../ui/primitives";
+import { TopBar } from "../shell";
 import { Button, Combobox, Field, IconButton, Menu, MenuRow, Popover, Row, Segmented, Select, Sheet, type MenuItem } from "../ui/primitives";
 import { colourOf, initials } from "../drawer";
 import { useMedia } from "../shell";

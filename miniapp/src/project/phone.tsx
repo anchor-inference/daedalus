@@ -1,7 +1,9 @@
-// A project on a phone: four tabs at the bottom instead of the app's own (the orchestrator, the board,
-// the team, the terminals) and a More whose sheet holds the project's other pages, a header with the project and how its work goes, and a banner with the
-// request that has waited longest for the operator, answered with one tap and no need to open a
-// conversation or a terminal. `phoneTab` in focus.ts decides where the bar shows; App.tsx draws it.
+// A project on a phone: four tabs and a More at the foot of the window instead of the app's own (the
+// orchestrator, the board, the team, the terminals, and a sheet that holds the project's other pages),
+// a header with the project and how its work goes, and a card with the request that has waited longest
+// for the operator, answered with one tap and no need to open a conversation or a terminal.
+// `phoneTab` in focus.ts decides where the bar shows; App.tsx draws it. The bar is the shared Tabs, the
+// sheet the shared Sheet and its rows, the team's rows the shared Row.
 //
 // Everything here is sized for a thumb: rows and answers take the touch row height, and a field is
 // 16 px so Safari does not zoom into it.
@@ -9,15 +11,14 @@
 import { FormEvent, ReactNode, useId, useMemo, useState } from "react";
 import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnv, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/components";
-import { Sheet, toast } from "../ui/dialogs";
+import { toast } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
-import { relTime } from "../format";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
-import { go, PageHeader } from "../shell";
+import { PageHeader } from "../shell";
 import { ORCHESTRATION_LIST, navigate, useRoute, projectHome, projectPagePath } from "../router";
-import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
+import { alwaysServer, answeredBy, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { invalidate, useOffline, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalCard } from "../terminal/phonecard";
@@ -37,7 +38,7 @@ import { budgetAttention, distinctOperatorActions, operatorAttentionCount, type 
 import { NeedsYouCard } from "./needs";
 import { operatorReviewReady } from "./focus";
 import { absDate } from "../format";
-import { MenuRow } from "../ui/primitives";
+import { Badge, IconButton, MenuRow, Sheet, Tabs, type TabItem } from "../ui/primitives";
 import { useReveal } from "../reveal";
 
 const enc = encodeURIComponent;
@@ -80,9 +81,10 @@ export function useOperatorAsks(projectId: string) {
 
 // ── the tab bar ──────────────────────────────────────────────────────────────────────────────
 
-/** The project's tabs, in the place of the app's, and "More" for its other pages. The team's tab
- *  carries how many requests wait; More carries how many decisions wait, because the page that lists
- *  them sits in its sheet, and a count nobody can see from the bar is a decision nobody makes. */
+/** The project's tabs, in the place of the app's, and "More" for its other pages: the shared Tabs, laid
+ *  out as a bar at the foot of the window. The team's tab carries how many requests wait; More carries
+ *  how many decisions wait, because the page that lists them sits in its sheet, and a count nobody can
+ *  see from the bar is a decision nobody makes. */
 export function ProjectTabs({ projectId, current }: { projectId: string; current: PhoneTab | "more" | null }) {
   const { waiting, openAsks, unverified: asksUnverified } = useOperatorAsks(projectId);
   const live = useStreamUp();
@@ -101,28 +103,19 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
   // "nothing waits", which is the one thing it cannot say.
   const badge = countKnown ? (decisions > 0 ? (decisions > 99 ? "99+" : String(decisions)) : null) : "?";
   const unknown = countKnown ? undefined : t("focus.attention.countUnknown");
+  const items: TabItem[] = [
+    ...PHONE_TABS.map((tab) => ({
+      id: tab, label: t(`phone.tab.${tab}`), icon: TAB_ICONS[tab],
+      count: tab === "team" && waiting > 0 ? <Badge tone="attention">{waiting > 99 ? "99+" : waiting}</Badge> : undefined,
+    })),
+    { id: "more", label: t("nav.more"), icon: "more" as const, expanded: moreOpen, onPress: () => setMoreOpen((open) => !open),
+      count: badge ? <Badge tone="attention"><span title={unknown} aria-label={unknown ?? plural("phone.more.decisions", decisions)}>{badge}</span></Badge> : undefined },
+  ];
   return (
     <>
-      <nav className="tabbar five project-tabs" aria-label={t("phone.tabs")}>
-        {PHONE_TABS.map((tab) => {
-          const href = tabPath(projectId, tab);
-          return (
-            <a key={tab} href={href} data-tab={tab} className={current === tab && !moreOpen ? "active" : ""} aria-current={current === tab ? "page" : undefined} onClick={(e) => go(e, href)}>
-              <span className="glyph">
-                <Icon name={TAB_ICONS[tab]} size={22} />
-                {tab === "team" && waiting > 0 && <span className="tab-badge">{waiting > 99 ? "99+" : waiting}</span>}
-              </span>
-              <span className="tab-label">{t(`phone.tab.${tab}`)}</span>
-            </a>
-          );
-        })}
-        <button data-tab="more" className={current === "more" || moreOpen ? "active" : ""} onClick={() => setMoreOpen((open) => !open)} aria-haspopup="dialog" aria-expanded={moreOpen}>
-          <span className="glyph">
-            <Icon name="more" size={22} />
-            {badge && <span className="tab-badge" title={unknown} aria-label={unknown ?? plural("phone.more.decisions", decisions)}>{badge}</span>}
-          </span>
-          <span className="tab-label">{t("nav.more")}</span>
-        </button>
+      <nav className="project-tabs" aria-label={t("phone.tabs")}>
+        <Tabs variant="page" label={t("phone.tabs")} tabs={items} value={moreOpen || current === "more" ? "more" : current ?? ""}
+          onChange={(id) => { if (id !== "more") navigate(tabPath(projectId, id as PhoneTab)); }} />
       </nav>
       {moreOpen && <ProjectMoreSheet projectId={projectId} current={current === "more"} badge={badge} unknown={unknown} parts={parts} onClose={() => setMoreOpen(false)} />}
     </>
@@ -134,9 +127,8 @@ type DecisionParts = { asks: number; review: number; blocked: number };
 
 const MORE_HINTS: Partial<Record<PhoneMorePage, string>> = { journal: "pmore.journal.hint" };
 
-/** The project's other pages on a phone, as the design's sheet: the project's name and where it runs at
- *  the top, a row for each page with what waits there, its settings, and the way back to every project
- *  after a divider. */
+/** The project's other pages on a phone: the project's name and where it runs at the top, a row for
+ *  each page with what waits there, its settings, and the way back to every project after a divider. */
 function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }: { projectId: string; current: boolean; badge: string | null; unknown?: string; parts: DecisionParts; onClose: () => void }) {
   const { project } = useProject(projectId);
   const route = useRoute();
@@ -148,19 +140,19 @@ function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }
   const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
   const decisionHint = [parts.asks ? plural("pmore.asks", parts.asks) : "", parts.review ? plural("pmore.review", parts.review) : "", parts.blocked ? plural("pmore.blocked", parts.blocked) : ""].filter(Boolean).join(" · ");
   const hint = (page: PhoneMorePage) => page === "attention" ? (decisionHint || undefined) : MORE_HINTS[page] ? t(MORE_HINTS[page]!) : undefined;
-  const value = (page: PhoneMorePage) => page === "attention" && badge ? <span className="ph-badge warn" title={unknown} aria-label={unknown ?? plural("phone.more.decisions", parts.asks + parts.review + parts.blocked)}>{badge}</span>
+  const value = (page: PhoneMorePage) => page === "attention" && badge ? <Badge tone="attention"><span title={unknown} aria-label={unknown ?? plural("phone.more.decisions", parts.asks + parts.review + parts.blocked)}>{badge}</span></Badge>
     : page === "folders" && project ? project.folders.length : undefined;
   return (
-    <Sheet onClose={onClose} className="ph-sheet more-sheet ph-more-sheet" ariaLabel={t("nav.more")}
-      title={<span className="ph-sheet-title two"><span className="truncate">{project?.name ?? t("nav.more")}</span>{project && <span className="ph-sheet-sub truncate">{[t(`term.env.${env}`), t("pmore.created", { date: absDate(project.created_at) })].join(" · ")}</span>}</span>}>
-      <div role="menu" className="ph-more-list">
+    <Sheet onClose={onClose} className="ph-sheet more-sheet" ariaLabel={t("nav.more")} title={t("nav.more")}
+      preview={project ? { title: project.name, meta: [t(`term.env.${env}`), t("pmore.created", { date: absDate(project.created_at) })].join(" · ") } : undefined}>
+      <div className="menu in-sheet" role="menu" aria-label={t("nav.more")}>
         {PHONE_MORE.map((page) => (
           <MenuRow key={page} icon={MORE_ICONS[page]} label={t(MORE_LABELS[page])} sub={hint(page)} aside={value(page)} checked={here === page ? true : undefined}
             data={{ more: page }} onSelect={() => goTo(projectPagePath(projectId, page))} />
         ))}
         <MenuRow icon="settings" label={t("phone.more.settings")} sub={t("pmore.settings.hint")} disabled={!project} data={{ more: "settings" }} onSelect={() => setSettings(true)} />
         {revealer && project && <MenuRow icon="external" label={revealer.label} data={{ more: "reveal" }} onSelect={() => { onClose(); void revealer.reveal({ project_id: project.id }); }} />}
-        <div className="ph-msep" role="separator" />
+        <div className="menu-sep" role="separator" />
         <MenuRow icon="grid" label={t("focus.all")} data={{ more: "projects" }} onSelect={() => goTo(ORCHESTRATION_LIST)} />
       </div>
     </Sheet>
@@ -198,13 +190,6 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions }: { proj
 }
 
 // ── the banner ───────────────────────────────────────────────────────────────────────────────
-
-/** Who is asking, in words: the member by name, or the orchestrator. */
-function askerLine(ask: Ask, names: Map<string, string>): string {
-  const name = ask.staff_id ? names.get(ask.staff_id) : undefined;
-  if (!name) return t(ask.kind === "permission" ? "phone.ask.orchestrator.permission" : "phone.ask.orchestrator");
-  return t(ask.kind === "permission" ? "phone.ask.permission" : ask.kind === "folder" ? "phone.ask.folder" : "phone.ask.question", { name });
-}
 
 /**
  * The answers to one request, each a thumb-sized button: its options, or allow and deny, and
@@ -315,7 +300,7 @@ export function PhoneTeam({ projectId, toast }: { projectId: string; toast: (tex
     <>
       <ProjectPhoneHead
         projectId={projectId}
-        actions={team && !team.project.ephemeral ? <button className="iconbtn" onClick={() => setHiring(true)} aria-label={t("team.hire")} title={t("team.hire")}><Icon name="plus" /></button> : undefined}
+        actions={team && !team.project.ephemeral ? <IconButton icon="plus" label={t("team.hire")} onClick={() => setHiring(true)} /> : undefined}
       />
       <div className="screen phone-project ph-team">
         <NeedsYouBanner projectId={projectId} toast={toast} />
@@ -353,7 +338,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
         projectId={projectId}
         title={t("focus.page.terminals")}
         subtitle={project?.name}
-        actions={<button className="iconbtn" disabled={!project || offline} onClick={() => setPicking(true)} aria-label={t("term.new")} title={t("term.new")}><Icon name="plus" /></button>}
+        actions={<IconButton icon="plus" label={t("term.new")} disabled={!project || offline} onClick={() => setPicking(true)} />}
       />
       <div className="screen phone-project">
         {offline && <div className="result-warning" role="status">{t("focus.terminalOffline")}</div>}

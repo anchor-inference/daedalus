@@ -8,7 +8,8 @@ import { Icon } from "../icons";
 import { askWords } from "../staff/model";
 import { StaffAvatar } from "../team/parts";
 import type { Staff } from "../team/team";
-import { Banner, EmptyState, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, EmptyState, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
 import { Button, IconButton, Row } from "../ui/primitives";
 import { DecisionSheet } from "./needs";
 import { useStreamUp } from "../events";
@@ -122,9 +123,9 @@ function PhoneAttention({ projectId, name, back, toast, open, review, actions, b
     <TopBar title={t("focus.nav.attention")} sub={sub} back={back ? () => goBack(back) : undefined}
       actions={<IconButton icon="reload" label={t("pattn.refresh")} onClick={refresh} className="ph-ib" />} />
     <div className="ph-page-body list">
-      {uncertain && <div className="ph-page-pad"><Banner tone="warn" icon="alert" className="focus-attention-warning" sub={checked || undefined} action={<button type="button" className="ph-btn sm" onClick={refresh}>{t("common.retry")}</button>}>{t("focus.attention.stale")}</Banner></div>}
+      {uncertain && <div className="ph-page-pad"><Banner tone="warn" icon="alert" className="focus-attention-warning" sub={checked || undefined} action={<Button size="sm" onClick={refresh}>{t("common.retry")}</Button>}>{t("focus.attention.stale")}</Banner></div>}
       {!known && !failed && [0, 1, 2].map((i) => <div key={i} className="ph-skrow"><span className="ph-sk" style={{ width: 44, height: 44, borderRadius: "50%" }} /><span className="grow"><span className="ph-sk" style={{ height: 14, width: `${60 - i * 10}%` }} /><span className="ph-sk" style={{ height: 11, width: "45%", marginTop: 8 }} /></span></div>)}
-      {!known && failed && <EmptyState icon="alert" tone="bad" title={t("pattn.error")} body={t("focus.attention.stale")} action={<button type="button" className="ph-btn primary" onClick={refresh}>{t("common.retry")}</button>} />}
+      {!known && failed && <EmptyState icon="alert" tone="bad" title={t("pattn.error")} body={t("focus.attention.stale")} action={<Button variant="primary" onClick={refresh}>{t("common.retry")}</Button>} />}
       {open.length > 0 && <>
         <SectionHeader tone="warn" count={open.length}>{t("pattn.now")}</SectionHeader>
         {open.map((ask) => {
@@ -150,7 +151,7 @@ function PhoneAttention({ projectId, name, back, toast, open, review, actions, b
               {task.checklist.length > 0 && <span className="ph-pill">{done}/{task.checklist.length}</span>}
             </div>
             <p>{task.acceptance || t("focus.attention.reviewHint")}</p>
-            <button type="button" className="ph-btn primary" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id }))}>{t("pattn.inspect")}</button>
+            <Button variant="primary" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id }))}>{t("pattn.inspect")}</Button>
           </section>;
         })}
       </>}
@@ -160,12 +161,12 @@ function PhoneAttention({ projectId, name, back, toast, open, review, actions, b
           <div className="ph-card-head"><b className="truncate">{titles.get(action.task_id) || t("focus.attention.task")}</b></div>
           <p>{action.enabled ? t(`focus.attention.action.${action.kind}`)
             : <><span className="waiting">{t("pattn.waitsFor")}</span> {actionBlockerKeys(action.blockers).map((key) => t(key)).join(" · ")}</>}</p>
-          <button type="button" className="ph-btn" onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.task")}</button>
+          <Button onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.task")}</Button>
         </section>)}
         {budgetIssue && <section className="ph-card focus-attention-item" data-kind="budget">
           <div className="ph-card-head"><b>{t(`focus.attention.budget.${budgetIssue.reason}`)}</b></div>
           <p><span className="waiting">{t("pattn.waitsFor")}</span> {t("focus.attention.budget.scope", { scope: budgetIssue.scopes.map((scope) => t(`budget.${scope}`)).join(" · ") })}</p>
-          {onBudget && <button type="button" className="ph-btn" onClick={onBudget}>{t("focus.attention.budget.inspect")}</button>}
+          {onBudget && <Button onClick={onBudget}>{t("focus.attention.budget.inspect")}</Button>}
         </section>}
       </>}
       {empty && <EmptyState icon="check" tone="ok" title={t("focus.attention.empty")} body={t("pattn.empty.sub")} />}

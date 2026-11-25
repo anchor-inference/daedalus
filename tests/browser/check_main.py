@@ -171,9 +171,9 @@ def phone(page: Page, lang: str) -> None:
     switch_mode(page, "orchestration", scope=".ph-drawer-root.open")
     page.wait_for_url("**/app/orchestration/projects**")
     assert ("/api/main", {}) not in main.posts, "the list opened the main chat's session"
-    first = page.locator(".ph-orch [data-main-entry] .list-row")
+    first = page.locator(".ph-orch [data-main-entry]")
     expect(first).to_be_visible()
-    expect(first.locator(".ph-pill")).to_have_text(WORDS[lang]["pill"])
+    expect(first.locator(".main-pill")).to_have_text(WORDS[lang]["pill"])
     # The chat is a detail of the list: a back of its own, no tab bar, the line in its flow and the
     # questions a sheet away, behind the header's button.
     first.click()
@@ -194,7 +194,7 @@ def phone(page: Page, lang: str) -> None:
     expect(page.locator(".panel-sheet")).to_have_count(0)
     page.locator(".chat-head .pagehead-row > .ph-ib, .chat-head > button.iconbtn").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(page.locator(".ph-orch [data-main-entry] .list-row")).to_be_visible()
+    expect(page.locator(".ph-orch [data-main-entry]")).to_be_visible()
 
 
 def main() -> int:
