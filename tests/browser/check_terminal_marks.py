@@ -103,7 +103,7 @@ def dot_colours(page: Page) -> dict[str, str]:
             el.remove();
             return colour;
           };
-          const out = { tokens: { ok: probe('--ok'), failed: probe('--bad'), running: probe('--accent') } };
+          const out = { tokens: { ok: probe('--ok'), failed: probe('--bad'), running: probe('--live') } };
           for (const el of document.querySelectorAll('.term-mark')) out[el.dataset.result] = getComputedStyle(el, '::before').backgroundColor;
           return out;
         }"""

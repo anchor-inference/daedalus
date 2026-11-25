@@ -144,7 +144,8 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     check.that(order[-3:] == ["tp-pane-body", "tp-pane-compose", "tp-pane-foot"], f"{lang}: the pane's parts are in the order {order}")
     line = page.locator(f"{pane(IRA)} .tp-compose")
     height = line.bounding_box()["height"]  # type: ignore[index]
-    check.that(31 <= height <= 33, f"{lang}: the compose line is {height:.0f} px tall, not a dense row")
+    # A dense row is 28 px since the rows took the design's 32 / 28 (it was 32).
+    check.that(27 <= height <= 29, f"{lang}: the compose line is {height:.0f} px tall, not a dense row")
     field = f"{pane(IRA)} .tp-compose-field"
     expect(page.locator(field)).to_have_attribute("placeholder", words["placeholder"])
     # The member waiting on a request: the line says the message waits for the answer.
@@ -265,8 +266,9 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expect(page.locator(pane(IRA))).to_have_attribute("data-state", "message")
     expect(tab.locator(".tp-tab-state")).to_have_attribute("data-state", "message")
     dot = page.eval_on_selector(f"{pane(IRA)} .tp-pane-head .tp-dot", "(e) => getComputedStyle(e).backgroundColor")
-    info = page.evaluate("() => { const probe = document.createElement('span'); probe.style.color = 'var(--info)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }")
-    check.that(dot == info, f"{lang}: the message dot is {dot}, not the theme's information colour {info}")
+    # Violet, the accent: cyan is running and orange needs you, so a message is the third colour.
+    info = page.evaluate("() => { const probe = document.createElement('span'); probe.style.color = 'var(--accent)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }")
+    check.that(dot == info, f"{lang}: the message dot is {dot}, not the theme's accent {info}")
     shot(page, f"{lang}-terminals-message-flash.png")
     expect(tab).to_have_attribute("data-state", before or "idle", timeout=6000)
     # A refusal, and a message to the member waiting on a request: nothing lights.

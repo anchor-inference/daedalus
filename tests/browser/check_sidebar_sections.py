@@ -5,7 +5,7 @@ A chat's own scratch project (settings.ephemeral) is listed among the chats, by 
 hand, or kept, is listed under "Projects" whatever it holds, and so is Voice. Projects start collapsed,
 the one holding the open chat opens itself, and a collapsed project keeps its waiting, working and
 failed chats in sight. "All projects" and "New project" share one row, and neither label is cut at the
-column's 288 px, in English or in Russian.
+column's 300 px default, in English or in Russian.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 9047 /tmp/app-root &
@@ -47,8 +47,8 @@ def main() -> int:
             expect(side.locator(".sb-row").first).to_be_visible(timeout=15000)
 
             width = side.evaluate("el => Math.round(el.getBoundingClientRect().width)")
-            # 288 less the one pixel its right edge's line reserves, as check_density.py measures it.
-            check(width == 287, f"{lang}: the column is 288 px wide ({width} inside its edge)")
+            # 300 less the one pixel its right edge's line reserves, as check_density.py measures it.
+            check(width == 299, f"{lang}: the column is 300 px wide ({width} inside its edge)")
             buttons = side.locator(".sb-pbtns button")
             check(buttons.count() == 2, f"{lang}: All projects and New project share one row")
             clipped = side.evaluate("""el => [...el.querySelectorAll('.sb-pbtns button .truncate')].filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.textContent)""")

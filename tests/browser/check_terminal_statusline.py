@@ -9,7 +9,7 @@ little about shows what it knows and never "undefined". A narrow pane drops the 
 first and nothing spills out of its line; every value is in the tooltip. The Overview's cards carry
 the same line, shorter. The bar's four tabs at 1440 px keep their titles readable. The Russian page
 has Russian words, and no page throws. The same colour check runs in a second theme (THEME, default
-`serebro`), since the line must follow whichever theme the reader picked.
+`paper`, the light one), since the line must follow whichever theme the reader picked.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -34,7 +34,7 @@ from terminal_stub import TerminalStub, wait_live  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
-SECOND_THEME = os.environ.get("THEME", "serebro")
+SECOND_THEME = os.environ.get("THEME", "paper")
 CLAUDE, CODEX, SHELL, BARE = "s1claude0000", "s2codex00000", "s3shell00000", "s4bare000000"
 IDS = [CLAUDE, CODEX, SHELL, BARE]
 
@@ -136,7 +136,8 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that("Context: 61,000 of 200,000 tokens (31%)" in tip and "Folder: /home/operator/work/bakery-site/.agents/worktrees/ira" in tip, f"the tooltip does not carry the full values: {tip!r}")
     colours(page, c, "the default theme")
     size = page.eval_on_selector(foot(page, CLAUDE), "(e) => ({ h: e.getBoundingClientRect().height, f: parseFloat(getComputedStyle(e).fontSize) })")
-    c.that(size["h"] <= 25 and size["f"] <= 11.5, f"the status line is {size}, more than a 24 px line of 11 px text")
+    # 12 px since nothing is drawn under the 12 px floor; it was the 11 px step before.
+    c.that(size["h"] <= 25 and size["f"] <= 12, f"the status line is {size}, more than a 24 px line of 12 px text")
 
     # A CLI that reported no window: a count and no meter; nothing else invented.
     print("codex:", page.locator(foot(page, CODEX)).inner_text().replace("\n", " "))
