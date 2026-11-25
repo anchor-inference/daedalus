@@ -23,7 +23,9 @@ describe("the words", () => {
   });
 });
 
-describe("the chip and its menu", () => {
+// Each test draws the chip and opens its popover in jsdom, the first with the start-up of React and
+// jsdom besides: a few tenths of a second on an idle machine, past the default five seconds on a busy one.
+describe("the chip and its menu", { timeout: 30_000 }, () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {

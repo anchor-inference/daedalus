@@ -88,7 +88,9 @@ const projectRow = (id: string) => host.querySelector<HTMLElement>(`[data-projec
 const rowsOf = (id: string) => Array.from(host.querySelectorAll<HTMLElement>(`[data-project="${id}"] [data-session]`)).map((r) => r.dataset.session);
 const key = (target: Element, init: KeyboardEventInit) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
 
-describe("the sidebar", () => {
+// Each test draws the whole column in jsdom and opens menus on it: a fifth of a second on an idle
+// machine, and a busy one stretches that past the default five seconds.
+describe("the sidebar", { timeout: 30_000 }, () => {
   it("lists projects and chats apart by the project rule, and the chats by day", async () => {
     await render();
     const sections = Array.from(host.querySelectorAll(".sb-sec")).map((s) => s.textContent);
@@ -313,6 +315,9 @@ describe("the sidebar", () => {
 
   it("searches after a pause and says when the search is exact only", async () => {
     const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ sessions: [{ ...chat("c1", "c1", 1), match: { snippet: "Grow tomatoes on the balcony", score: 1 } }], projects: listing.data.projects, semantic: false, reason: "off", partial: false, indexing: false })));
+    // The pause is stepped over on a clock of its own: waited out, it was a third of a second of real
+    // time that a busy machine stretched past the test's limit. Faked from here, before the field is typed in.
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: NOW });
     await render(undefined, true);
     expect(host.querySelector(".sb-chats-menu")).not.toBeNull();
     const input = host.querySelector('input[type="search"]') as HTMLInputElement;
@@ -320,7 +325,7 @@ describe("the sidebar", () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "vegetables outside");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/api/sessions/search?q=vegetables%20outside"), expect.anything());
     expect(host.textContent).toContain("Exact search only");
     expect(host.querySelector(".search-passage")?.textContent).toBe("Grow tomatoes on the balcony");

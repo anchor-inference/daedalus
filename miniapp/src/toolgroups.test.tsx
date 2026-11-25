@@ -90,7 +90,9 @@ function respond(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-describe("the panels", () => {
+// The settings panel is drawn whole in jsdom, with a dropdown opened on it: a quarter of a second on an
+// idle machine, past the default five seconds on a busy one.
+describe("the panels", { timeout: 30_000 }, () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
