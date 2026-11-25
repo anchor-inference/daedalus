@@ -96,9 +96,10 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/new-agent-{lang}-1440.png")
 
-    # The split New chat button's menu.
+    # The menu at the end of the sidebar's New chat row.
     page.goto(home)
-    page.locator(".sb-newsplit .sb-new-more").click()
+    page.locator(".sb-newchat").hover()
+    page.locator(".sb-newchat .sb-new-more").click()
     page.get_by_role("menuitem", name=words["palette"]).click()
     check(in_agent_mode(page, None), f"{where}: the New chat button's menu offers New agent")
 

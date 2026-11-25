@@ -186,17 +186,11 @@ def survives_reload(page: Page, lang: str, unhandled: Unhandled, name: str, mobi
 
     # A reload in the middle: the row still says so, and the inbox lists it.
     page.reload()
-    if mobile:
-        page.goto(f"{BASE}/inbox?token=t&lang={lang}")
-        expect(page.locator(".moves-now-row")).to_contain_text("Bakery")
-        expect(page.locator(".moves-now")).to_contain_text(words["now"])
-    else:
-        page.locator(".bell").first.click()
-        expect(page.locator(".bell-pop .moves-now-row")).to_contain_text("Bakery")
-        expect(page.locator(".bell-pop .moves-now-row")).to_contain_text(words["live"])
-        if SHOTS:
-            page.screenshot(path=f"{SHOTS}/move-inbox-{name}.png")
-        page.keyboard.press("Escape")
+    page.goto(f"{BASE}/inbox?token=t&lang={lang}")
+    expect(page.locator(".moves-now-row")).to_contain_text("Bakery")
+    expect(page.locator(".moves-now")).to_contain_text(words["now"])
+    if SHOTS:
+        page.screenshot(path=f"{SHOTS}/move-inbox-{name}.png")
     open_settings(page, lang)
     row = page.locator(f".dir-row[data-folder='{SITE['id']}']")
     expect(row.locator("[data-folder-move-live]")).to_contain_text(words["live"])

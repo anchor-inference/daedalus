@@ -217,7 +217,7 @@ this exact text anywhere on the page."""
 
 def launcher_state(*, upgrade: bool = False, package: str = "", installable: bool = True, download: dict | None = None, **over: object) -> dict[str, object]:
     """``GET /api/system/launcher``: by default a desktop application beside the server, up to date,
-    so every picture and check that does not ask about updates draws the rail as it always has."""
+    so every picture and check that does not ask about updates draws the sidebar without an update button."""
     offer = {
         "from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "url": "https://example.invalid/releases/tag/desktop-v0.15.2",
         "command": LAUNCHER_COMMAND, "package": package,
@@ -676,9 +676,9 @@ GATES: dict[str, object] = {
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
     # The subscriptions' accounts on the same tab; check_accounts.py adds and removes one of its own.
     "/api/subscription-accounts": SUBSCRIPTION_ACCOUNTS,
-    # Where the rail, its More launcher and the phone drawer put each destination: nothing configured, the
+    # Where the sidebar's pinned rows, its More launcher and the phone drawer put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
-    "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "/api/navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # The pages the agent published: one, so the menus show where a page goes until it is placed.
     "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.
@@ -694,13 +694,13 @@ GATES: dict[str, object] = {
     "/api/prompt-change": {"models": [{"id": "default", "label": "Test model"}], "proposal": None},
     "/api/auth/me": {"user": "operator"},
     "/api/auth/config": {"telegram": None, "pairing": False, "second_factor": False},
-    # The rail's account item opens Settings' security section, whose first card is two-factor
+    # The sidebar's account row opens Settings' security section, whose first card is two-factor
     # sign-in: off here. check_two_factor.py keeps a host of its own that enrols.
     "/api/auth/totp": {"enabled": False, "enrolling": False, "recovery_left": 0, "enabled_at": None},
     "/api/status": {"ok": True},
-    # The desktop application beside the server, up to date: the rail has no update button.
+    # The desktop application beside the server, up to date: the sidebar has no update button.
     "/api/system/launcher": launcher_state(),
-    # The badge on the Inbox entry of the navigation and on the bell.
+    # The count on the Inbox row of the navigation.
     "/api/notifications/summary": {"unseen": 0, "needs_you": 0},
     # The centre itself, whichever view the bell's popover or the Inbox asks for: nothing yet.
     "/api/notifications": {"entries": [], "next_before": None, "summary": {"unseen": 0, "needs_you": 0}},
@@ -735,7 +735,7 @@ GATES: dict[str, object] = {
     "/api/main": {"session_id": "", "dispatches": [], "asks": [], "questions": 0, "setup": []},
     # The Questions tab of a project or of the main chat: nothing waits.
     "/api/questions": {"questions": []},
-    # The shell asks which projects there are before it draws the rail.
+    # The shell asks which projects there are before it draws the sidebar.
     "/api/projects": [],
     # The folder form asks where a folder may live before it offers the environment choice.
     "/api/project-environments": ENVIRONMENTS,
@@ -2497,12 +2497,19 @@ def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-unt
     page.wait_for_timeout(400)
 
 
+def switch_mode(page, mode: str) -> None:  # type: ignore[no-untyped-def]
+    """Choose Agents or Orchestration from the mode menu at the top of the desktop sidebar. The menu
+    lists the two modes in that order in either language."""
+    page.locator("nav.sidebar .sidebar-head .sb-mode").click()
+    page.locator(".menu [role=menuitem]").nth(0 if mode == "agents" else 1).click()
+
+
 def open_projects(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the projects: the column's project chip on a desktop, which opens the projects page in the
-    conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
-    page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
-    if page.locator(".project-chip:visible").count():
-        page.locator(".project-chip:visible").first.click()
+    """Open the projects: the "Projects" label of the sidebar on a desktop, which opens the projects
+    page in the conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
+    page.wait_for_selector("[data-action='all-projects']:visible, .ph-menu:visible")
+    if page.locator("[data-action='all-projects']:visible").count():
+        page.locator("[data-action='all-projects']:visible").first.click()
         page.wait_for_selector(".projects-page")
         return
     open_drawer(page)

@@ -618,7 +618,7 @@ SETTINGS = {
     # and the translator is left to the host, which names the cheap model it picks.
     "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
     # Settings → Navigation: the layout the app ships with.
-    "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
@@ -1533,10 +1533,10 @@ def open_phone_new_project(page: Page) -> None:
 
 def open_projects(page: Page) -> None:
     """The projects page beside the list already grouped by project: the folders in the column, the table in the conversation's place."""
-    # A picture before this one folds the sidebar, and folded there is only the rail: unfold it first.
+    # A picture before this one folds the sidebar, and folded there is only the corner's button: unfold it first.
     if not page.locator("nav.sidebar").count():
-        page.locator(".rail .rail-home.folded").click()
-    page.locator(".sidebar .project-chip").click()
+        page.locator(".sidebar-unfold").click()
+    page.locator(".sidebar [data-action='all-projects']").click()
     page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
 
 
@@ -1549,13 +1549,13 @@ def open_hire(page: Page) -> None:
 
 
 def open_menu(page: Page) -> None:
-    """The More launcher from the rail's foot: its search, the Frequent tiles and every destination with its count — over the conversation."""
-    page.locator(".rail [data-rail='menu']").click()
+    """The More launcher from the sidebar's More row: its search, the Frequent tiles and every destination with its count — over the conversation."""
+    page.locator(".sb-pinned-nav [data-nav='menu']").click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
 
 
 def fold_sidebar(page: Page) -> None:
-    """The sidebar folded away: the rail alone beside the conversation, its Home turned into the way to unfold."""
+    """The sidebar folded away: the conversation has the window, and a button in its corner brings the sidebar back."""
     page.keyboard.press("Control+\\")
     page.wait_for_timeout(400)
 
@@ -2013,12 +2013,6 @@ def run_terminals() -> int:
     return UNHANDLED.report()
 
 
-def open_bell(page: Page) -> None:
-    """The bell's popover over the agents: what needs you, with its buttons, and the day's feed."""
-    page.locator(".sidebar .bell").click()
-    page.wait_for_selector(".bell-pop .needs-you .notice-row", timeout=5000)
-
-
 def raise_toasts(page: Page) -> None:
     """Three notifications arriving while the operator reads another conversation."""
     page.wait_for_selector(".notice-toasts .notice-toast", timeout=10000)
@@ -2027,7 +2021,7 @@ def raise_toasts(page: Page) -> None:
 
 
 def run_notifications() -> int:
-    """The bell, the toasts and the Inbox as the centre, on a desktop and on a phone."""
+    """The toasts and the Inbox as the centre, on a desktop and on a phone."""
     OUT.mkdir(parents=True, exist_ok=True)
     finished = next(e for e in INBOX if e["id"] == 31)
     with sync_playwright() as p:
@@ -2035,7 +2029,6 @@ def run_notifications() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "bell", "agents", before=open_bell, settle=500)
         shot(page, "inbox", "inbox")
         stub.events = notify_frames(finished, QUESTION, PERMISSION)  # type: ignore[attr-defined]
         shot(page, "toasts", f"agents/{S1}", wait=".chat-scroll .timeline", before=raise_toasts, settle=300)
@@ -2481,10 +2474,10 @@ def run() -> int:
         shot(page, "team", f"project/{P1}/team", wait=".staff-row")
         shot(page, "team-hire", f"project/{P1}/team", wait=".staff-row", before=open_hire, settle=700)
         # The start canvas under a folded sidebar has neither a list nor a chat, so waiting for
-        # either timed out here and stopped every picture after this one; the rail is there either
-        # way, and the switcher opens from the sidebar it unfolds.
-        shot(page, "projects", "agents", wait=".rail", before=open_projects)
-        shot(page, "new-project", "agents", wait=".rail", before=open_new_project, settle=600)
+        # either timed out here and stopped every picture after this one; the sidebar or its corner's
+        # button is there either way, and the projects open from the sidebar it unfolds.
+        shot(page, "projects", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_projects)
+        shot(page, "new-project", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_new_project, settle=600)
         shot(page, "voice", "companion")
         shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
@@ -2712,7 +2705,7 @@ def run_canvas() -> int:
             if toggle.count():
                 toggle.click()
             page.locator(".cv-comment textarea").fill("Сделай заголовок как на вывеске" if ru else "Make the heading look like the shop sign")
-            # Off the rail, whose tooltips would otherwise sit in the picture.
+            # Off the sidebar, whose tooltips would otherwise sit in the picture.
             page.mouse.move(1300, 840)
             page.wait_for_timeout(700)
             page.screenshot(path=str(OUT / "canvas.png"))
@@ -2918,9 +2911,9 @@ def run_imports() -> int:
         desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); } catch (e) {}")
         page = desk.new_page()
         page.route("**/api/**", route)
-        shot(page, "import-explorer", "agents", wait=".rail", before=explorer, settle=600)
-        shot(page, "import-large", "agents", wait=".rail", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
-        shot(page, "import-progress", "agents", wait=".rail", before=progress, settle=400)
+        shot(page, "import-explorer", "agents", wait="nav.sidebar, .sidebar-unfold", before=explorer, settle=600)
+        shot(page, "import-large", "agents", wait="nav.sidebar, .sidebar-unfold", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
+        shot(page, "import-progress", "agents", wait="nav.sidebar, .sidebar-unfold", before=progress, settle=400)
         imports.hold = None
         shot(page, "import-session", f"agents/{IMPORTED_ID}", wait=".imp-banner", settle=900)
         desk.close()

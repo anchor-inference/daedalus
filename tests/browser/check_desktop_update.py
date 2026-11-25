@@ -1,20 +1,20 @@
-"""The desktop application's update, from the rail's button to "Install and restart", with no command.
+"""The desktop application's update, from the sidebar's button to "Install and restart", with no command.
 
 Updating the desktop application used to take terminal commands. Now a new release lights a blue
-button at the foot of the desktop rail, above the menu and Settings; it opens a dialog that downloads
+button in the foot of the desktop sidebar, beside Settings; it opens a dialog that downloads
 the release, shows how far it got, and then installs it and lets the window close. Settings → About
 shows the application's version and checks for a release on demand. The launcher still reports the
 command it would have run, and the app must not draw it anywhere: the check looks for it in the whole
 document, attributes included.
 
-On a 390 px phone there is no rail, so no button. And one thing beside the update: on the empty start
+On a 390 px phone there is no sidebar, so no button. And one thing beside the update: on the empty start
 screen a toast stack sits in the bottom-right corner, not lifted to the middle of the window by the
 start page's composer standing there.
 
     cd miniapp && npm run build
     APP_URL=http://127.0.0.1:<port>/app CHROMIUM=... python3 tests/browser/check_desktop_update.py
 
-With ``SHOTS=<directory>`` it also leaves pictures of the rail and of the dialog ready to install, in
+With ``SHOTS=<directory>`` it also leaves pictures of the sidebar's foot and of the dialog ready to install, in
 English and in Russian.
 """
 
@@ -34,9 +34,9 @@ from screenshots import BASE, CHROMIUM, INBOX, UNHANDLED, notify_frames, stub  #
 
 SHOTS = os.environ.get("SHOTS", "")
 WORDS = {
-    "en": {"rail": "Update to 0.15.2", "current": "Installed now: 0.15.1", "notes": "What's new", "download": "Download", "install": "Install and restart",
+    "en": {"offer": "Update to 0.15.2", "current": "Installed now: 0.15.1", "notes": "What's new", "download": "Download", "install": "Install and restart",
            "closing": "Closing…", "mb": "/ 222 MB", "check": "Check"},
-    "ru": {"rail": "Обновить до 0.15.2", "current": "Сейчас установлена 0.15.1", "notes": "Что нового", "download": "Скачать", "install": "Установить и перезапустить",
+    "ru": {"offer": "Обновить до 0.15.2", "current": "Сейчас установлена 0.15.1", "notes": "Что нового", "download": "Скачать", "install": "Установить и перезапустить",
            "closing": "Закрываемся…", "mb": "/ 222 МБ", "check": "Проверить"},
 }
 
@@ -104,23 +104,23 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page = context.new_page()
     serve(page, launcher)
     go(page, "/agents", lang)
-    rail = page.locator("nav.rail")
-    button = rail.locator("[data-rail='update']")
+    foot = page.locator("nav.sidebar .sidebar-foot")
+    button = foot.locator("[data-nav='update']")
     expect(button).to_be_visible(timeout=20000)
-    if button.get_attribute("aria-label") != words["rail"]:
-        problems.append(f"{lang}: the rail's button is named {button.get_attribute('aria-label')!r}")
-    # Directly above the menu and Settings, at the rail's foot.
-    order = rail.locator(".rail-foot [data-rail]").evaluate_all("els => els.map(e => e.dataset.rail)")
-    if order[:3] != ["update", "menu", "settings"]:
-        problems.append(f"{lang}: the rail's foot is {order}, not the update above the menu and Settings")
-    up, menu = button.bounding_box(), rail.locator("[data-rail='menu']").bounding_box()
-    if not up or not menu or up["y"] + up["height"] > menu["y"]:
-        problems.append(f"{lang}: the update button is not above the menu: {up} / {menu}")
+    if button.get_attribute("aria-label") != words["offer"]:
+        problems.append(f"{lang}: the sidebar's update button is named {button.get_attribute('aria-label')!r}")
+    # In the foot, just before Settings.
+    order = foot.locator("[data-nav]").evaluate_all("els => els.map(e => e.dataset.nav)")
+    if order != ["account", "update", "settings"]:
+        problems.append(f"{lang}: the sidebar's foot is {order}, not the account, the update and Settings")
+    up, gear = button.bounding_box(), foot.locator("[data-nav='settings']").bounding_box()
+    if not up or not gear or up["x"] + up["width"] > gear["x"] or abs(up["y"] - gear["y"]) > 1:
+        problems.append(f"{lang}: the update button is not beside Settings: {up} / {gear}")
     button.hover()
-    expect(button.locator(".rail-tip")).to_have_text(words["rail"])
+    expect(page.locator(".tooltip").filter(has_text=words["offer"])).to_be_visible()
     if up:
-        shoot(page, f"update-rail-{lang}", {"x": 0, "y": max(0, up["y"] - 120), "width": 360, "height": 260})
-    no_command(page, f"{lang} rail", problems)
+        shoot(page, f"update-sidebar-{lang}", {"x": 0, "y": max(0, up["y"] - 120), "width": 360, "height": 260})
+    no_command(page, f"{lang} sidebar", problems)
 
     # The dialog: the offer, then the download with its progress, then the install.
     button.click()
@@ -174,8 +174,8 @@ def phone(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     go(page, "/agents", "en")
     page.wait_for_selector(".ph-top .ph-menu", timeout=20000)
     page.wait_for_timeout(500)
-    if page.locator(".rail-update").count():
-        problems.append("the phone draws the rail's update button")
+    if page.locator(".sb-update:visible").count():
+        problems.append("the phone draws the sidebar's update button")
     context.close()
 
 

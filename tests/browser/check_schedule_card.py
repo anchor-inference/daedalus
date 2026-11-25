@@ -6,7 +6,7 @@ refuses anything but: both cards under the answer without opening the turn's ste
 its time in the reader's own words, its next run and a way to Schedules, and no button to decide; the
 waiting one with Accept and Decline, Accept posting the exact proposal to the host and the card turning
 into the schedule it became; Decline on a fresh copy turning it declined. The Inbox lists the waiting
-proposal with its own Accept and counts it on the Inbox entry of the rail. On a phone (390 px) the
+proposal with its own Accept and counts it on the Inbox row of the sidebar. On a phone (390 px) the
 waiting card fits the width with no sideways scroll and its buttons are thumb-sized.
 
     cd miniapp && npm run build
@@ -158,10 +158,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("a schedule set at once offers Accept or Decline")
     if not done.locator("button[data-action='open']").count():
         problems.append("the set card has no way to Schedules")
-    rail = page.locator(".rail-item[data-rail='inbox'] .rail-badge")
-    counted = rail.first.get_attribute("data-count") if rail.count() else None
+    badge = page.locator(".sb-pinned-nav [data-nav='inbox'] .sb-nav-n")
+    counted = badge.first.get_attribute("data-count") if badge.count() else None
     if counted != str(INBOX_SUMMARY["unseen"] + 1):
-        problems.append(f"the waiting schedule is not counted on the Inbox entry of the rail beside the unread entries ({counted})")
+        problems.append(f"the waiting schedule is not counted on the Inbox row of the sidebar beside the unread entries ({counted})")
     waiting = turn.locator(f".schedcard[data-schedule='{WAITING}']")
     if waiting.get_attribute("data-status") != "pending":
         problems.append("the waiting card is not drawn as pending")

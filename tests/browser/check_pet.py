@@ -64,7 +64,7 @@ def main() -> None:
         page.on("request", lambda request: requests.append(request.url))
         page.route("**/api/**", stub)
         page.goto(base + "/?token=t&scheme=dark&lang=en")
-        page.wait_for_selector(".rail", timeout=15000)
+        page.wait_for_selector("nav.sidebar", timeout=15000)
         assert page.locator(".pet-host").count() == 0
         assert not any("/assets/stage-" in address for address in requests)
         # The companion is turned on where the rest of the app's looks are: it left the More menu.

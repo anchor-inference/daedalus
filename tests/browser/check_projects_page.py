@@ -73,7 +73,7 @@ def run(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".start-composer", timeout=15000)
 
     # The sidebar's opener: the projects chip today; whatever button replaces it calls the same opener.
-    page.locator(".sidebar .project-chip, .sidebar [data-action='all-projects']").first.click()
+    page.locator(".sidebar [data-action='all-projects']").click()
     page.wait_for_selector(".projects-page", timeout=10000)
     check(page.evaluate("location.pathname + location.search").endswith("/agents?view=projects"), f"{where}: All projects opens the page at /agents?view=projects")
     check(page.locator(".sheet").count() == 0, f"{where}: and no sheet over it")

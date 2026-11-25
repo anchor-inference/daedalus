@@ -19,9 +19,9 @@ def main() -> None:
             page.route("**/api/**", stub)
             page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang=en")
             expect(page.locator(".chat-title")).to_be_visible()
-            # Folded, the column is gone and the rail's Home is the way to unfold it.
+            # Folded, the column is gone and the button in the window's corner brings it back.
             if not page.locator("nav.sidebar").count():
-                page.locator(".rail .rail-home.folded").click()
+                page.locator(".sidebar-unfold").click()
                 expect(page.locator("nav.sidebar")).to_be_visible()
             assert page.locator(".chat-title").get_attribute("aria-haspopup") is None
             page.get_by_role("button", name="Session actions", exact=True).click()

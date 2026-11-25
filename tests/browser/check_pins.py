@@ -80,7 +80,7 @@ def main() -> int:
             check(pinned_order() == [shots.P3, shots.S4], f"{lang}: newest pin first ({pinned_order()})")
             check(side.locator(f"[data-project='{shots.P3}']").count() == 1, f"{lang}: the pinned project is not listed again under Projects")
             box = block.bounding_box()
-            first_project = side.locator(".sb-sec").nth(1).bounding_box()
+            first_project = side.locator(".sb-sec-projects").bounding_box()
             check(bool(box and first_project and box["y"] < first_project["y"]), f"{lang}: the block stands above Projects")
 
             # It keeps its fold.
@@ -96,11 +96,15 @@ def main() -> int:
             expect(block.locator(".sb-row").first).to_be_visible(timeout=15000)
             check(pinned_order() == [shots.P3, shots.S4], f"{lang}: the pins survive a reload ({pinned_order()})")
 
-            # The chips filter the block: under Waiting only the chat that waits is left in it.
-            side.locator(".sb-chips .sb-chip.warn").click()
+            # The filters narrow the block: under Waiting only the chat that waits is left in it.
+            side.locator(".sb-chats-menu").click()
+            page.get_by_role("menuitemcheckbox").nth(6).click()
+            page.keyboard.press("Escape")
             page.wait_for_timeout(400)
             check(pinned_order() == [shots.S4], f"{lang}: under Waiting the block keeps what waits ({pinned_order()})")
-            side.locator(".sb-chips .sb-chip").first.click()
+            side.locator(".sb-chats-menu").click()
+            page.get_by_role("menuitemcheckbox").nth(5).click()
+            page.keyboard.press("Escape")
             page.wait_for_timeout(400)
 
             # Unpin: the chat from its right-click menu, the project with P.

@@ -137,7 +137,7 @@ def check_page(page: Page, words: dict[str, str], width: int) -> None:
     expect(page.get_by_text("How does the gate work?")).to_be_visible()
     expect(page.get_by_text("It opens when the slug is known.")).to_be_visible()
     expect(page.locator(".composer")).to_have_count(0)
-    expect(page.locator("nav.sidebar, nav.rail")).to_have_count(0)
+    expect(page.locator("nav.sidebar, .sidebar-unfold")).to_have_count(0)
     # A widget is named, never run: no frame, its title, and the way to the conversation in the app.
     widget = page.locator("[data-widget-static]")
     expect(widget).to_have_count(1)

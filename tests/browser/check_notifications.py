@@ -1,4 +1,4 @@
-"""Toasts, the bell and the Inbox as the notification centre, driven by the host's event stream.
+"""Toasts, the Inbox row's count and the Inbox as the notification centre, driven by the host's event stream.
 
 Everything but the stream and the notifications is the screenshot stub's installation. The stream is
 a small server here that holds the connection open and writes the frames this script tells it to
@@ -13,8 +13,8 @@ What is checked, in order:
 - Close all empties the stack; "Don't show pop-ups" switches them off for this device, after which
   none is drawn, and the switch in Settings → Notifications turns them back on;
 - in a conversation the stack stays clear of the composer and its send button;
-- the bell's badge counts them;
-- a permission request: the popover shows it under "Needs you" with Allow and Deny; Allow posts
+- the sidebar's Inbox row counts them;
+- a permission request: the Inbox shows it under "Needs you" with Allow and Deny; Allow posts
   ``…/act {action: "allow"}``, and the ``notify.resolved`` that follows takes it off the list;
 - a notification about the session on screen raises no toast, and one about another session does;
 - on a phone: one banner at the top, the Inbox tab's badge, and "Needs you" first on the Inbox.
@@ -205,7 +205,7 @@ def run() -> int:
             context.route("**/api/**", route_api)
             page = context.new_page()
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
-            page.wait_for_selector(".sidebar .bell", timeout=20000)
+            page.wait_for_selector(".sidebar [data-nav='inbox']", timeout=20000)
             if not wait(page, lambda: len(Streams.open) == 1, 10):
                 problems.append("the app did not open the event stream")
                 raise RuntimeError
@@ -226,9 +226,9 @@ def run() -> int:
                 problems.append(f"the two waiting toasts are not counted: {more.inner_text() if more.count() else 'no line'}")
             if not page.locator(".notice-toasts [data-close-all]").count():
                 problems.append("a stack of three has no Close all")
-            badge = page.locator(".sidebar .bell .bell-badge")
+            badge = page.locator(".sidebar [data-nav='inbox'] .sb-nav-n")
             if not wait(page, lambda: badge.count() and badge.inner_text() == "5", 3):
-                problems.append(f"the bell's badge says {badge.inner_text() if badge.count() else 'nothing'}, not 5")
+                problems.append(f"the Inbox row's count says {badge.inner_text() if badge.count() else 'nothing'}, not 5")
             page.wait_for_timeout(int((TOAST_S - 1) * 1000))
             if len(toasts(page)) != 3:
                 problems.append("a toast left before its time")
@@ -287,7 +287,7 @@ def run() -> int:
             if page.locator(".notice-toast").count():
                 problems.append("a pop-up was drawn with pop-ups switched off")
             if not wait(page, lambda: badge.count() and badge.inner_text() == str(Centre.summary()["unseen"]), 3):
-                problems.append("with pop-ups off the bell stopped counting")
+                problems.append("with pop-ups off the Inbox row stopped counting")
             page.goto(f"{BASE}/settings/notifications?token=t&lang=en", wait_until="commit")
             # A switch now, not a button labelled with its own state: its state is aria-checked.
             switch = page.locator("[data-popups-card] [role=switch]")
@@ -298,34 +298,32 @@ def run() -> int:
             if page.evaluate("() => localStorage.getItem('daedalus.notice.popups')") is not None:
                 problems.append("the switch in Settings did not turn pop-ups back on")
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
-            page.wait_for_selector(".sidebar .bell", timeout=20000)
+            page.wait_for_selector(".sidebar [data-nav='inbox']", timeout=20000)
             if not wait(page, lambda: len(Streams.open) >= 1, 10):
                 problems.append("the stream did not come back after Settings")
             page.wait_for_timeout(1500)
             page.mouse.move(700, 300)
 
-            # A permission request, answered from the bell's popover.
+            # A permission request, answered from the Inbox the sidebar's row opens.
             arrive(notification(6, "Bakery site: photos is waiting for permission", session=S2, category="permission", level="urgent", tone="warning", project=P1, request=f"policy:{S2}:exec"))
             if not wait(page, lambda: toasts(page) == ["6"], 3):
                 problems.append("the permission request raised no toast")
             page.locator(".notice-toast[data-notice='6'] button[aria-label='Dismiss']").click()
-            page.locator(".sidebar .bell").click()
-            needs = page.locator(".bell-pop .needs-you .notice-row[data-notice='6']")
+            page.locator(".sidebar [data-nav='inbox']").click()
+            page.wait_for_url("**/app/inbox**")
+            needs = page.locator(".needs-you .notice-row[data-notice='6']")
             try:
                 needs.wait_for(timeout=5000)
             except Exception:  # noqa: BLE001
-                problems.append("the popover does not show the permission under Needs you")
+                problems.append("the Inbox does not show the permission under Needs you")
                 raise RuntimeError from None
             if needs.locator("[data-action='allow']").count() != 1 or needs.locator("[data-action='deny']").count() != 1:
-                problems.append("the permission in the popover has no Allow and Deny")
+                problems.append("the permission in the Inbox has no Allow and Deny")
             needs.locator("[data-action='allow']").click()
             if not wait(page, lambda: Centre.acted == [(6, {"action": "allow"})], 3):
                 problems.append(f"Allow posted {Centre.acted}, not one allow for entry 6")
-            if not wait(page, lambda: page.locator(".bell-pop .needs-you").count() == 0, 4):
+            if not wait(page, lambda: page.locator(".needs-you .notice-row[data-notice='6']").count() == 0, 4):
                 problems.append("the answered permission is still under Needs you")
-            page.keyboard.press("Escape")
-            if page.locator(".bell-pop").count():
-                problems.append("Escape did not close the popover")
 
             # The conversation on screen says it itself; another one still gets a toast.
             page.goto(f"{BASE}/agents/{S1}?token=t&lang=en", wait_until="commit")

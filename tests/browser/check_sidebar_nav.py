@@ -1,17 +1,17 @@
-"""The rail at the left edge of a desktop, and the phone's tab bar, in both languages.
+"""The sidebar on a desktop, and the phone's drawer, in both languages.
 
-What is checked is what the operator asked for. On a desktop a narrow rail of icons is always there, except on Settings, which takes the window,
-beside the sidebar or alone when the sidebar is folded: Home, Agents, Orchestration, Terminals, Board,
-Inbox with its unseen count, Services, and at its foot the menu, Settings and the account. Every icon
-names itself in a tooltip of its own. The two mode items choose the mode — there is no switch at the
-top of the sidebar any more — and the count of what waits in orchestration sits quietly on its icon
-while the operator is in Agents. With the sidebar folded, Home is the way to unfold it: pointed at, it
-shows the sidebar's icon and "Toggle sidebar" with the shortcut, and a click unfolds; with the sidebar
-open it goes home. Folded, nothing of the sidebar is left — the rail is the folded form.
+What is checked is what the operator asked for. On a desktop the sidebar is the whole of the
+navigation — there is no rail of icons beside it — 300 px wide, with a 52 px head (the mark, the mode
+menu, search, the fold), the pinned rows (New chat, Inbox with its unseen count, Board, Calendar,
+Changes, Terminals, More), the mode's list, and a 52 px foot (the account and Settings). Every row is
+one 32 px line with its text 12 px in. The mode menu at the top chooses the mode and says how much
+waits in orchestration while the operator is in Agents. Folded, nothing of the sidebar is left but a
+button in the window's corner that brings it back; the shortcut folds and unfolds it, and the fold is
+remembered.
 
-On a 390 px phone there is no rail; the tab bar holds Agents, Orchestration, Terminals and Board, and
-More, which now holds the Inbox and carries its unseen count. Orchestration opens its list, Main
-first. Nothing scrolls sideways.
+On a 390 px phone there is no sidebar; every top bar's hamburger opens the drawer, which holds the
+switch between the modes, the destinations and More. Orchestration opens its list, Main first.
+Nothing scrolls sideways.
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
-ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules", "menu", "settings"]
+ORDER = ["new", "inbox", "board", "calendar", "changes", "terminals", "menu"]
 WORDS = {
-    "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "calendar": "Calendar", "canvas": "Canvas", "changes": "Changes", "companion": "Companion", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
-    "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "calendar": "Календарь", "canvas": "Холсты", "changes": "Изменения", "companion": "Компаньон", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
+    "en": {"new": "New chat", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
+           "calendar": "Calendar", "changes": "Changes", "menu": "More", "settings": "Settings", "account": "Account", "unfold": "Show the sidebar", "mode": "Mode"},
+    "ru": {"new": "Новый чат", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
+           "calendar": "Календарь", "changes": "Изменения", "menu": "Ещё", "settings": "Настройки", "account": "Аккаунт", "unfold": "Показать боковую панель", "mode": "Режим"},
 }
-# The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
+# The unseen notifications the Inbox counts, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).
 UNSEEN = 3
 WAITING = "2"
@@ -79,136 +79,138 @@ def go(page: Page, path: str, lang: str) -> None:
     page.goto(f"{BASE}{path}{'&' if '?' in path else '?'}token=t&lang={lang}")
 
 
-def tip(page: Page, item: str) -> str:
-    """Point at an item and read its tooltip, which must be shown and inside the window."""
-    target = page.locator(f".rail [data-rail='{item}']")
-    target.hover()
-    shown = target.locator(".rail-tip")
-    expect(shown).to_be_visible()
-    box = shown.bounding_box()
-    width = page.viewport_size["width"] if page.viewport_size else 0
-    assert box and box["x"] >= 52 and box["x"] + box["width"] <= width, f"the tooltip of {item} is outside the window: {box}"
-    return shown.inner_text()
+def box(page: Page, selector: str) -> dict:
+    found = page.locator(selector).first.bounding_box()
+    assert found, f"{selector} is not drawn"
+    return found
+
+
+def mode_to(page: Page, lang: str, mode: str) -> None:
+    """Choose a mode from the menu at the top of the sidebar."""
+    page.locator(".sidebar-head .sb-mode").click()
+    page.get_by_role("menuitem", name=re.compile(rf"^{WORDS[lang][mode]}")).click()
 
 
 def desktop(page: Page, lang: str) -> None:
     words = WORDS[lang]
     serve(page, lang)
     go(page, "/agents", lang)
-    rail = page.locator("nav.rail")
-    expect(rail).to_be_visible()
+    side = page.locator("nav.sidebar")
+    expect(side).to_be_visible()
+    expect(page.locator(".rail, [data-rail]")).to_have_count(0)
 
-    # Expanded navigation names its destinations, in one column shared with the session list.
-    expect(rail.locator("[data-rail]")).to_have_count(len(ORDER))
-    assert rail.locator("[data-rail]").evaluate_all("els => els.map(e => e.dataset.rail)") == ORDER
-    box = page.locator(".desktop-column").bounding_box()
-    # The 52 px rail and the sidebar at its 300 px default.
-    assert box and box["width"] == 352, f"{lang}: the rail and contextual column do not fit their declared widths"
+    # The geometry the design draws: 300 px, a 52 px head and foot, 32 px rows with their text 12 px in.
+    column = box(page, ".desktop-column")
+    assert column["x"] == 0 and column["width"] == 300, f"{lang}: the sidebar is {column}, not 300 px at the left edge"
+    assert round(box(page, ".main")["x"]) == 300, f"{lang}: the screen does not start where the sidebar ends"
+    assert round(box(page, ".sidebar-head")["height"]) == 52 and round(box(page, ".sidebar-foot")["height"]) == 52, f"{lang}: the head or the foot is not 52 px"
+    pinned = side.locator(".sb-pinned-nav [data-nav]")
+    order = pinned.evaluate_all("els => els.map(e => e.dataset.nav)")
+    assert order == ORDER, f"{lang}: the pinned rows are {order}"
+    for row in side.locator(".sb-pinned-nav .sb-nav").all():
+        b = row.bounding_box()
+        # 8 px in from either side of the 299 px inside the column's right-hand line, as the design draws it.
+        assert b and round(b["height"]) == 32 and round(b["x"]) == 8 and round(b["width"]) == 283, f"{lang}: a pinned row is {b}"
     for key in ORDER:
-        want = words[key] if key != "inbox" else f"{words['inbox']} · {UNSEEN}"
-        said = rail.locator(f"[data-rail='{key}']").get_attribute("aria-label") or ""
-        assert said.startswith(want), f"{lang}: {key} is not named: {said!r}"
+        row = side.locator(f".sb-pinned-nav [data-nav='{key}']")
+        said = (row.get_attribute("aria-label") or row.inner_text()).strip()
+        assert said.startswith(words[key]), f"{lang}: {key} is not named: {said!r}"
+        text = row.locator(".sb-nav-t")
+        tb, rb = text.bounding_box(), side.locator(f".sb-nav:has([data-nav='{key}']), .sb-nav[data-nav='{key}']").first.bounding_box()
+        assert tb and rb and round(tb["x"] - rb["x"]) == 38, f"{lang}: {key}'s name starts {tb and rb and tb['x'] - rb['x']} px in, not 12 + 16 + 10"
 
-    # The badges: the Inbox's unseen count in red, and the quiet count of what waits in orchestration.
-    expect(rail.locator("[data-rail='inbox'] .rail-badge")).to_have_text(str(UNSEEN))
-    expect(rail.locator("[data-rail='inbox'] .rail-badge.quiet")).to_have_count(0)
-    expect(rail.locator("[data-rail='orchestration'] .rail-badge.quiet")).to_have_text(WAITING)
-
-    # The mode items are the switch; the sidebar has none of its own any more.
-    expect(page.locator(".mode-switch, .mode-tab")).to_have_count(0)
-    expect(rail.locator("[data-rail='agents']")).to_have_class(re.compile(r"\bon\b.*\bmode\b"))
-    rail.locator("[data-rail='orchestration']").click()
+    # The Inbox's unseen count in the attention colour; what waits in orchestration is a dot on the
+    # mode's name and a count in its menu.
+    expect(side.locator("[data-nav='inbox'] .sb-nav-n.urgent")).to_have_text(str(UNSEEN))
+    expect(side.locator(".sb-mode")).to_have_attribute("data-mode", "agents")
+    expect(side.locator(".sb-mode .sb-mode-pip")).to_have_count(1)
+    side.locator(".sb-mode").click()
+    expect(page.get_by_role("menuitem", name=re.compile(rf"^{words['orchestration']}")).locator(".sb-mode-wait")).to_have_text(WAITING)
+    page.keyboard.press("Escape")
+    mode_to(page, lang, "orchestration")
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator("nav.orch-sidebar")).to_be_visible()
-    expect(rail.locator("[data-rail='orchestration']")).to_have_class(re.compile(r"\bon\b.*\bmode\b"))
-    expect(rail.locator("[data-rail='agents']")).not_to_have_class(re.compile(r"\bmode\b"))
-    expect(rail.locator("[data-rail='orchestration'] .rail-badge")).to_have_count(0)
-    # A screen both modes share keeps the mode's column and its marker, and lights its own item.
-    rail.locator("[data-rail='terminals']").click()
+    expect(page.locator("nav.orch-sidebar .sb-mode")).to_have_attribute("data-mode", "orchestration")
+    expect(page.locator("nav.orch-sidebar .sb-mode-pip")).to_have_count(0)
+    # A screen both modes share keeps the mode's column, and lights its own row.
+    page.locator(".sb-pinned-nav [data-nav='terminals']").click()
     page.wait_for_url("**/app/terminals")
     expect(page.locator("nav.orch-sidebar")).to_be_visible()
-    expect(rail.locator("[data-rail='terminals']")).to_have_class(re.compile(r"\bon\b"))
-    expect(rail.locator("[data-rail='orchestration']")).to_have_class(re.compile(r"\bmode\b"))
-    # Home, with the sidebar open, goes to the mode's home.
-    rail.locator("[data-rail='home']").click()
+    expect(page.locator(".sb-pinned-nav [data-nav='terminals']")).to_have_class(re.compile(r"\bon\b"))
+    # The mark goes to the mode's home.
+    page.locator(".sidebar-head .sb-mark").click()
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
-    rail.locator("[data-rail='agents']").click()
+    mode_to(page, lang, "agents")
     page.wait_for_url("**/app/agents")
     expect(page.locator("nav.sidebar:not(.orch-sidebar)")).to_be_visible()
     assert page.evaluate("localStorage.getItem('daedalus.mode')") == "agents"
-    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("calendar", "/app/calendar"), ("schedules", "/app/schedules")):
-        rail.locator(f"[data-rail='{key}']").click()
+    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("calendar", "/app/calendar")):
+        page.locator(f".sb-pinned-nav [data-nav='{key}']").click()
         page.wait_for_url(f"**{path}")
-        expect(rail.locator(f"[data-rail='{key}']")).to_have_class(re.compile(r"\bon\b"))
-    # Settings is a dialog over the screen it was opened from: the rail and the screen stay under it,
-    # and closing it goes back there however many sections were opened inside it.
-    rail.locator("[data-rail='settings']").click()
+        expect(page.locator(f".sb-pinned-nav [data-nav='{key}']")).to_have_class(re.compile(r"\bon\b"))
+    # Settings is a dialog over the screen it was opened from: the sidebar and the screen stay under
+    # it, and closing it goes back there however many sections were opened inside it.
+    page.locator(".sidebar-foot [data-nav='settings']").click()
     page.wait_for_url("**/app/settings")
     dialog = page.locator(".settings-dialog[role='dialog'][aria-modal='true']")
     expect(dialog).to_be_visible()
-    expect(rail).to_be_visible()
-    rail_box = rail.bounding_box()
-    assert rail_box and round(rail_box["width"]) == 52, f"{lang}: the rail is {rail_box} wide under Settings, not 52"
+    expect(side).to_be_visible()
+    assert round(box(page, ".desktop-column")["width"]) == 300, f"{lang}: the sidebar changed width under Settings"
     page.locator(".settings-nav a[href$='/settings/security']").click()
     page.wait_for_url("**/app/settings/security")
     expect(page.locator("h1.settings-title")).to_have_text("Security" if lang == "en" else "Безопасность")
     page.locator(".settings-close").click()
-    page.wait_for_url(re.compile(r"/app/schedules(/|$)"))
+    page.wait_for_url(re.compile(r"/app/calendar(/|\?|$)"))
     expect(dialog).to_be_hidden()
-    rail.locator("[data-rail='agents']").click()
+    # The account is Settings' security section.
+    page.locator(".sidebar-foot [data-nav='account']").click()
+    page.wait_for_url("**/app/settings/security")
+    page.locator(".settings-close").click()
+    expect(dialog).to_be_hidden()
+    page.locator(".sb-pinned-nav [data-nav='new']").click()
     page.wait_for_url("**/app/agents")
-    # The menu opens from the rail's foot with everything else.
-    rail.locator("[data-rail='menu']").click()
+    expect(page.locator(".sb-pinned-nav .sb-newchat")).to_have_class(re.compile(r"\bon\b"))
+    # More opens beside its row with everything else.
+    page.locator(".sb-pinned-nav [data-nav='menu']").click()
     expect(page.locator(".navmenu[role='dialog']")).to_be_visible()
-    menu_box = page.locator(".navmenu").bounding_box()
-    trigger_box = rail.locator("[data-rail='menu']").bounding_box()
-    assert menu_box and trigger_box and abs(menu_box["x"] - trigger_box["x"] - trigger_box["width"] - 6) <= 1, "More must overlay the list beside its own trigger"
-    assert menu_box["y"] >= 8 and menu_box["y"] + menu_box["height"] <= page.viewport_size["height"] - 7
-    field_box = page.locator(".start-composer").bounding_box()
-    main_box = page.locator(".main").bounding_box()
-    assert field_box and main_box and field_box["x"] >= main_box["x"] and field_box["x"] + field_box["width"] <= main_box["x"] + main_box["width"] + 1, "Opening More must not displace the composer"
+    menu_box = box(page, ".navmenu")
+    trigger_box = box(page, ".sb-pinned-nav [data-nav='menu']")
+    assert abs(menu_box["x"] - trigger_box["x"] - trigger_box["width"] - 6) <= 1, "More must open beside its own row"
+    assert menu_box["y"] >= 8 and menu_box["y"] + menu_box["height"] <= page.viewport_size["height"] - 7  # type: ignore[index]
+    field_box = box(page, ".start-composer")
+    main_box = box(page, ".main")
+    assert field_box["x"] >= main_box["x"] and field_box["x"] + field_box["width"] <= main_box["x"] + main_box["width"] + 1, "Opening More must not displace the composer"
     page.keyboard.press("Escape")
     expect(page.locator(".navmenu")).to_have_count(0)
     go(page, "/agents", lang)
     fits(page, f"{lang} desktop, sidebar open")
 
-    # Folded: the sidebar is gone, the rail alone is left, and the conversation starts where it ends.
+    # Folded: the sidebar is gone, the screen has the window, and one button in the corner brings it back.
     page.locator("nav.sidebar .sidebar-fold").click()
     expect(page.locator("nav.sidebar")).to_have_count(0)
-    expect(rail).to_be_visible()
-    assert round(page.locator(".main").bounding_box()["x"]) == round(page.locator(".desktop-column").bounding_box()["width"])  # type: ignore[index]
-    home = rail.locator("[data-rail='home']")
-    expect(home).to_have_attribute("aria-label", words["toggle"])
-    expect(home).to_have_attribute("aria-expanded", "false")
-    page.mouse.move(700, 400)
-    # Folded, Home is the unfold button without being pointed at: a tablet has no hover, so the
-    # sidebar's icon and its word show at rest, and the word fits the rail uncut.
-    expect(home.locator(".rail-unfold")).to_be_visible()
-    expect(home.locator(".rail-unfold-word")).to_have_text(words["unfold"])
-    cut = home.locator(".rail-unfold-word").evaluate("e => e.scrollWidth > e.clientWidth")
-    assert not cut, f"{lang}: the folded Home's word is cut"
-    expect(home.locator("img")).to_have_count(0)
-    # In orchestration the folded sidebar is the projects, and the longer Russian word must fit as well.
-    go(page, "/orchestration", lang)
-    expect(home.locator(".rail-unfold-word")).to_have_text(words["unfold.projects"])
-    cut = home.locator(".rail-unfold-word").evaluate("e => e.scrollWidth > e.clientWidth")
-    assert not cut, f"{lang}: the folded Home's word in orchestration is cut"
-    go(page, "/agents", lang)
+    unfold = page.locator(".sidebar-unfold")
+    expect(unfold).to_be_visible()
+    assert round(box(page, ".main")["x"]) == 0, f"{lang}: folded, the screen does not start at the window's edge"
+    corner = box(page, ".sidebar-unfold")
+    assert corner["x"] <= 12 and corner["y"] <= 12 and round(corner["width"]) == 32, f"{lang}: the unfold button is {corner}"
+    expect(unfold).to_have_attribute("aria-label", words["unfold"])
+    expect(unfold).to_have_attribute("aria-expanded", "false")
+    # A header under the button moves its title over by the button's width.
+    go(page, "/inbox", lang)
     expect(page.locator("nav.sidebar")).to_have_count(0)
-    # Pointed at, it adds its words and its shortcut.
-    said = tip(page, "home")
-    assert said.startswith(words["toggle"]) and "\\" in said, f"{lang}: the folded Home's tooltip says {said!r}"
-    expect(home.locator(".rail-tip kbd")).to_have_count(1)
-    home.click()
+    title = box(page, ".pagehead-title")
+    assert title["x"] >= corner["x"] + corner["width"] + 4, f"{lang}: the folded header's title {title} sits under the unfold button {corner}"
+    unfold.hover()
+    expect(page.locator(".tooltip").filter(has_text=words["unfold"])).to_be_visible()
+    unfold.click()
     expect(page.locator("nav.sidebar")).to_be_visible()
-    assert page.url.split("?")[0].endswith("/app/agents"), f"{lang}: unfolding moved the page to {page.url}"
-    expect(rail.locator("[data-rail='home']")).not_to_have_attribute("aria-expanded", "false")
+    assert page.url.split("?")[0].endswith("/app/inbox"), f"{lang}: unfolding moved the page to {page.url}"
     # The shortcut folds and unfolds as well, and the fold is remembered.
     page.mouse.move(700, 400)
     page.keyboard.press("Control+\\")
     expect(page.locator("nav.sidebar")).to_have_count(0)
     page.reload()
-    expect(rail.locator(".rail-home.folded")).to_be_visible()
+    expect(page.locator(".sidebar-unfold")).to_be_visible()
     expect(page.locator("nav.sidebar")).to_have_count(0)
     page.keyboard.press("Control+\\")
     expect(page.locator("nav.sidebar")).to_be_visible()
@@ -216,14 +218,14 @@ def desktop(page: Page, lang: str) -> None:
 
 
 def phone(page: Page, lang: str) -> None:
-    """A phone has no bottom bar and no rail: every top bar's hamburger opens the drawer, which holds
+    """A phone has no bottom bar and no sidebar: every top bar's hamburger opens the drawer, which holds
     the switch between the two modes, the destinations of the old tabs and More, and the mode's own
     lists. Escape, Back and the scrim close it, and focus goes back to the hamburger."""
     words = WORDS[lang]
     serve(page, lang)
     go(page, "/agents", lang)
     expect(page.locator("nav.tabbar")).to_have_count(0)
-    expect(page.locator("nav.rail")).to_have_count(0)
+    expect(page.locator("nav.sidebar:visible")).to_have_count(0)
     menu = page.locator(".ph-top .ph-menu")
     expect(menu).to_be_visible()
     fits(page, f"{lang} phone")
@@ -287,7 +289,7 @@ def main() -> int:
             context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
             phone(context.new_page(), lang)
             context.close()
-            print(f"nav rail {lang}: ok")
+            print(f"sidebar nav {lang}: ok")
         browser.close()
     return UNHANDLED.report()
 
