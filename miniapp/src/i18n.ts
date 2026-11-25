@@ -6550,6 +6550,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.steer.returned": { en: "The run was stopped: what was waiting is back in the field, unsent", ru: "Запуск остановлен: неотправленное вернулось в поле ввода" },
   "composer.steer.returned.files": { en: "The run was stopped: what was waiting is back in the field, unsent. Attach again: {names}", ru: "Запуск остановлен: неотправленное вернулось в поле ввода. Приложите заново: {names}" },
   "composer.steer.returned.revert": { en: "The conversation was rewound: what was waiting is back in the field, unsent", ru: "Разговор откатился назад: неотправленное вернулось в поле ввода" },
+  "composer.steer.returned.revert.files": { en: "The conversation was rewound: what was waiting is back in the field, unsent. Attach again: {names}", ru: "Разговор откатился назад: неотправленное вернулось в поле ввода. Приложите заново: {names}" },
   "composer.steer.returned.clear": { en: "The history was cleared: what was waiting is back in the field, unsent", ru: "История очищена: неотправленное вернулось в поле ввода" },
   "composer.steer.returned.clear.files": { en: "The history was cleared: what was waiting is back in the field, unsent. Attach again: {names}", ru: "История очищена: неотправленное вернулось в поле ввода. Приложите заново: {names}" },
   "composer.steer.edit.files": { en: "Back in the field. Attach again: {names}", ru: "Вернулось в поле ввода. Приложите заново: {names}" },
