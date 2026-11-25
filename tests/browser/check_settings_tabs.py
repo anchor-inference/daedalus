@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app, terminal_load  # noqa: E402
 from browser_stub import browser_load, render_scenes  # noqa: E402
 from check_settings_browser import BROWSER, prepared  # noqa: E402
-from main_thread import prepare, quiet  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -138,12 +137,13 @@ BOUND_MS = 90_000
 
 
 def redirected(page: Page, home: str) -> bool:
-    """Whether the address ends up on `home`: when it does, or once the page has stopped arriving.
+    """Whether the address ends up on `home`: when it does, or shortly after the settings screen has drawn.
 
-    The redirect is made by the settings screen, which is a chunk of its own: it comes after the
-    app, the capabilities and the settings have loaded, so how long it takes is the machine's. A
-    page that has nothing in flight and has stopped changing is the page that is not going to
-    redirect, and that is what is reported, rather than whatever a fixed number of seconds found.
+    The redirect is made by the settings screen as it mounts, and that screen is a chunk of its own
+    that comes after the app and its first answers, so how long it takes is the machine's. A page that
+    has stopped changing is not told apart from one between two chunks, so what is waited for is the
+    screen itself: once it is there the redirect follows in the same moment, and only then is its
+    absence reported.
     """
     pattern = f"**/settings/{home}**"
     deadline = time.monotonic() + 4 * BOUND_MS / 1000
@@ -153,12 +153,9 @@ def redirected(page: Page, home: str) -> bool:
             return True
         except PlaywrightTimeout:
             pass
-        # Nothing in flight before the app has even mounted is the gap between the document and its
-        # first script, not a page that has finished.
-        mounted = page.evaluate("() => (document.getElementById('root')?.childElementCount ?? 0) > 0")
-        if mounted and quiet(page, quiet_ms=1500, limit_ms=20_000):
+        if page.locator(".settings-index, .settings-col").count():
             try:
-                page.wait_for_url(pattern, timeout=1500, wait_until="commit")
+                page.wait_for_url(pattern, timeout=10_000, wait_until="commit")
                 return True
             except PlaywrightTimeout:
                 return False
@@ -194,12 +191,12 @@ def rows(browser, problems: list[str]) -> None:
 
 def old_addresses(browser, lang: str, width: int, problems: list[str]) -> None:
     page = open_page(browser, width, lang)
-    prepare(page)  # counts the page's requests in flight, for `redirected`
     for old, row, home in OLD:
         where = f"[{lang} {width}] /settings/{old}{'#' + row if row else ''}"
         page.goto(f"{BASE}/settings/{old}{'&' if '?' in old else '?'}token=t&lang={lang}{'#' + row if row else ''}")
         if not redirected(page, home):
-            problems.append(f"{where}: stayed at {page.url}, not /settings/{home}")
+            mounted = page.locator(".settings-index, .settings-col").count() > 0
+            problems.append(f"{where}: stayed at {page.url}, not /settings/{home}" + ("" if mounted else " (the page never drew the settings screen)"))
             continue
         page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row", timeout=BOUND_MS)
         if "tab=" in page.url:
