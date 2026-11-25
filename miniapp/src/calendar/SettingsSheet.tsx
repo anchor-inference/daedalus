@@ -61,7 +61,7 @@ export function SettingsSheet({ settings, zone, onClose, toast }: { settings: Ca
               <ClockSelect value={s.work_end} onChange={(v) => set({ work_end: v })} label={t("cal.settings.work.end")} />
             </span>
           </Row>
-          <Row label={t("cal.settings.zone")} hint={t("cal.settings.zone.hint")}>
+          <Row label={t("cal.settings.zone")} hint={t("cal.settings.zone.hint")} stack>
             <ZonePicker value={s.timezone} onChange={(timezone) => set({ timezone })} />
           </Row>
         </div>
@@ -80,9 +80,9 @@ export function SettingsSheet({ settings, zone, onClose, toast }: { settings: Ca
 }
 
 /** A card's row: what it sets and, under it, the one line that says what that does; the control at the end. */
-function Row({ label, hint, children, wide, bad }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean; bad?: boolean }) {
+function Row({ label, hint, children, wide, bad, stack }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean; bad?: boolean; stack?: boolean }) {
   return (
-    <div className={`cal-set-row ${wide ? "wide" : ""}`}>
+    <div className={`cal-set-row ${wide ? "wide" : ""} ${stack ? "stack" : ""}`}>
       <div className="cal-set-title"><span>{label}</span>{hint && <small className={bad ? "bad" : ""}>{hint}</small>}</div>
       <div className="cal-set-control">{children}</div>
     </div>

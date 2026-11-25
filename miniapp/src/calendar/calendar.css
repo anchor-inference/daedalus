@@ -415,6 +415,8 @@ input.field.cal-num { width: 72px; }
 .cal-set-title small.bad { color: var(--attention); }
 .cal-set-control { flex: none; display: flex; align-items: center; min-width: 0; }
 .cal-set-row.wide .cal-set-control { flex: 1; }
+/* A row whose control is wider than the words beside it asks for its own line on a phone. */
+@media (max-width: 1023px) { .cal-set-row.stack { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 12px; } .cal-set-row.stack .cal-set-control { flex: 1; } }
 .cal-set-row .dropdown-btn { border-color: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
 .cal-set-row .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .cal-settings-pair { display: flex; align-items: center; gap: 6px; }

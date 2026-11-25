@@ -903,9 +903,6 @@
   .ph-linenote-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--fs-13); color: var(--fg-3); }
   .ph-linenote-body { margin-top: 6px; font-size: var(--fs-15); line-height: 1.4; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-  /* The planner's add button sat above the bottom bar; without one it sits above the home indicator. */
-  .cal-fab { bottom: calc(16px + env(safe-area-inset-bottom)); }
-
   /* ── Settings and Usage in grouped cards ─────────────────────────────────────────────────── */
   /* The language switch is a pair of small pills; each reaches 44 px to the finger. */
   .segmented.lang button { position: relative; min-height: var(--chip-h); min-width: var(--tap); }
