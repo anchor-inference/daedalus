@@ -195,8 +195,8 @@
 .step-asks { display: grid; gap: 6px; margin: 2px 0 8px; }
 
 /* The panel beside the orchestrator: the board drawn as one list inside it. */
-.pboard-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
-.pboard.embedded { padding: 4px 12px 16px; }
+.pboard-bar { display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; }
+.pboard.embedded { padding: 8px 20px 20px; }
 
 /* The brief, the journal, the wake-ups, the folders: pages that are also panel tabs. A page is the
    880 list column; what it lists sits in one card with a hairline between rows, as Settings and the
