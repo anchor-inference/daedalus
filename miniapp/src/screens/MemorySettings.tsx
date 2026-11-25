@@ -8,13 +8,13 @@ import { api, MemoryStatus, MemoryTidy, SENSITIVE_SUBJECTS, Settings } from "../
 import { plural, t } from "../i18n";
 import { learningLines, tidyLines } from "../memory/model";
 import { ImportSheet, downloadExport } from "../memory/transfer";
-import { NumRow, Row } from "../settingsrow";
+import { NumRow, Row, SetBlock, SetGroup } from "../settingsrow";
 import { invalidate, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
+import { errorText } from "../ui";
 import { Sheet, toast } from "../ui/dialogs";
-import { Switch } from "../ui/index";
+import { Button, Switch, confirmDialog } from "../ui/primitives";
 import { undoToast } from "../memory/undo";
-import { ModelPicker } from "../modelitems";
+import { ModelChoice } from "../modelchoice";
 import { WithEffort } from "../taskeffort";
 
 type MemorySection = NonNullable<Settings["memory"]>;
@@ -47,7 +47,7 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
     try {
       const { count } = await api.post<{ count: number }>("/api/memory/sensitive", { subjects });
       if (!count) return;
-      if (!(await confirmAsync(plural("settings.memory.sensitive.purge.title", count), { body: t("settings.memory.sensitive.purge.body"), action: t("settings.memory.sensitive.purge") }))) return;
+      if (!(await confirmDialog({ title: plural("settings.memory.sensitive.purge.title", count), body: t("settings.memory.sensitive.purge.body"), action: t("settings.memory.sensitive.purge"), danger: true }))) return;
       const res = await api.post<{ removed: number; history_id: number | null }>("/api/memory/sensitive", { subjects, apply: true });
       undoToast(plural("memory.forgotten", res.removed), res.history_id, () => invalidate("/api/memory"));
       invalidate("/api/memory");
@@ -58,7 +58,7 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
 
   if (part === "memory") return (
     <>
-      <div className="card memory-settings-main">
+      <SetGroup title={t("settings.memory.group.use")}>
         <Row title={t("settings.memory.generate")} desc={t("settings.memory.generate.sub")} data-setting="memory.generate">
           <Switch checked={memory.generate} label={t("settings.memory.generate")} onChange={(generate) => put({ generate })} />
         </Row>
@@ -70,7 +70,7 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
         </Row>
         <Row title={t("settings.memory.synthesis")} desc={t("settings.memory.synthesis.sub")} stack data-setting="memory.synthesis_preset">
           <WithEffort id="memory-synthesis-effort" value={memory.synthesis_effort} onChange={(synthesis_effort) => put({ synthesis_effort })} fallback="off">
-            <ModelPicker
+  <ModelChoice
               id="memory-synthesis"
               label={t("settings.memory.synthesis")}
               catalogue={s}
@@ -82,15 +82,15 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
         </Row>
         <NumRow id="memory-budget" setting="memory.synthesis_usd_per_day" title={t("settings.memory.budget")} desc={t("settings.memory.budget.sub")} unit="$"
           value={memory.synthesis_usd_per_day} min={0} step="0.05" onSave={(synthesis_usd_per_day) => put({ synthesis_usd_per_day })} />
-      </div>
+      </SetGroup>
       <LearningCard />
-      <div className="card memory-settings" data-setting="memory.sensitive_allowed">
+      <SetGroup title={t("settings.memory.sensitive")} className="memory-settings" data-setting="memory.sensitive_allowed">
         <Row title={t("settings.memory.sensitive.master")} desc={t("settings.memory.sensitive.master.sub")} data-setting="memory.sensitive">
           <Switch checked={sensitiveOn} label={t("settings.memory.sensitive.master")} onChange={(on) => { setRevealed(on); if (!on) void disallow(memory.sensitive_allowed, []); }} />
         </Row>
         {sensitiveOn && (
           <>
-            <div className="sub memory-sensitive-sub">{t("settings.memory.sensitive.sub")}</div>
+            <SetBlock><span className="set-hint">{t("settings.memory.sensitive.sub")}</span></SetBlock>
             {SENSITIVE_SUBJECTS.map((subject) => {
               const on = memory.sensitive_allowed.includes(subject);
               return (
@@ -101,16 +101,16 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
             })}
           </>
         )}
-      </div>
+      </SetGroup>
     </>
   );
 
   return (
     <>
-      <div className="card">
+      <SetGroup title={t("settings.memory.group.tidy")}>
         <Row title={t("settings.memory.classify")} desc={t("settings.memory.classify.sub")} stack data-setting="memory.classify_preset">
           <WithEffort id="memory-classify-effort" value={memory.classify_effort} onChange={(classify_effort) => put({ classify_effort })} fallback="off">
-            <ModelPicker
+  <ModelChoice
               id="memory-classify"
               label={t("settings.memory.classify")}
               catalogue={s}
@@ -127,18 +127,18 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
           <Switch checked={memory.auto_merge} disabled={!memory.consolidate} label={t("settings.memory.automerge")} onChange={(auto_merge) => put({ auto_merge })} />
         </Row>
         <TidyNow />
-      </div>
-      <div className="card">
+      </SetGroup>
+      <SetGroup title={t("settings.memory.group.data")}>
         <Row title={t("settings.memory.import")} desc={t("settings.memory.import.sub")} data-setting="memory.import">
-          <button className="btn small" data-action="memory-import" onClick={() => setImporting(true)}>{t("memory.import.start")}</button>
+          <Button size="sm" data-action="memory-import" onClick={() => setImporting(true)}>{t("memory.import.start")}</Button>
         </Row>
         <Row title={t("settings.memory.export")} desc={t("settings.memory.export.sub")} data-setting="memory.export">
-          <button className="btn small" data-action="memory-export" onClick={() => downloadExport().catch((e) => toast(errorText(e)))}>{t("memory.export")}</button>
+          <Button size="sm" data-action="memory-export" onClick={() => downloadExport().catch((e) => toast(errorText(e)))}>{t("memory.export")}</Button>
         </Row>
         <Row title={t("settings.memory.reset")} desc={t("settings.memory.reset.sub")} data-setting="memory.reset">
-          <button className="btn small danger" data-action="memory-reset" onClick={() => setResetting(true)}>{t("settings.memory.reset.action")}</button>
+          <Button size="sm" variant="danger" data-action="memory-reset" onClick={() => setResetting(true)}>{t("settings.memory.reset.action")}</Button>
         </Row>
-      </div>
+      </SetGroup>
       {importing && <ImportSheet onClose={() => setImporting(false)} onDone={() => { setImporting(false); invalidate("/api/memory"); }} />}
       {resetting && <ResetSheet onClose={() => setResetting(false)} />}
     </>
@@ -158,7 +158,7 @@ function LearningCard() {
   async function learnNow(again = false) {
     // Reading every chat again is for recovering what a pass dropped; it costs a pass over the whole
     // backlog, so it asks first. What memory holds already is merged, not written twice.
-    if (again && !(await confirmAsync(t("settings.memory.learning.reread.title"), { body: t("settings.memory.learning.reread.body"), action: t("settings.memory.learning.reread.action") }))) return;
+    if (again && !(await confirmDialog({ title: t("settings.memory.learning.reread.title"), body: t("settings.memory.learning.reread.body"), action: t("settings.memory.learning.reread.action") }))) return;
     setBusy(true);
     try {
       const res = await api.post<{ started: boolean }>(again ? "/api/memory/synthesis/reread" : "/api/memory/synthesis/run", {});
@@ -172,17 +172,19 @@ function LearningCard() {
     }
   }
   return (
-    <div className="card memory-learning" data-setting="memory.learning">
-      <Row title={t("settings.memory.learning")} desc={t("settings.memory.learning.sub")}>
-        <button className="btn small" data-action="memory-learn-now" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow()}>{t("settings.memory.learning.now")}</button>
+    <SetGroup title={t("settings.memory.learning")} className="memory-learning" data-setting="memory.learning">
+      <Row title={t("settings.memory.learning.now")} desc={t("settings.memory.learning.sub")}>
+        <Button size="sm" data-action="memory-learn-now" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow()}>{t("settings.memory.learning.now")}</Button>
       </Row>
       <Row title={t("settings.memory.learning.reread")} desc={t("settings.memory.learning.reread.sub")} data-setting="memory.reread">
-        <button className="btn small ghost" data-action="memory-reread" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow(true)}>{t("settings.memory.learning.reread.action")}</button>
+        <Button size="sm" variant="quiet" data-action="memory-reread" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow(true)}>{t("settings.memory.learning.reread.action")}</Button>
       </Row>
-      <ul className="memory-learning-lines">
-        {learningLines(data).map((line, i) => <li key={i} data-tone={line.tone || undefined}>{line.text}</li>)}
-      </ul>
-    </div>
+      <SetBlock>
+        <ul className="memory-learning-lines">
+          {learningLines(data).map((line, i) => <li key={i} data-tone={line.tone || undefined}>{line.text}</li>)}
+        </ul>
+      </SetBlock>
+    </SetGroup>
   );
 }
 
@@ -200,7 +202,7 @@ function TidyNow() {
         return;
       }
       const probes = preview.probe_list.length ? `\n\n${t("settings.memory.tidynow.probelist")}\n${preview.probe_list.map((p) => `• ${p.text}`).join("\n")}` : "";
-      if (!(await confirmAsync(t("settings.memory.tidynow.title"), { body: lines.join("\n") + probes, action: t("settings.memory.tidynow.action") }))) return;
+      if (!(await confirmDialog({ title: t("settings.memory.tidynow.title"), body: lines.join("\n") + probes, action: t("settings.memory.tidynow.action"), danger: true }))) return;
       const done = await api.post<MemoryTidy>("/api/memory/tidy", { dry_run: false });
       undoToast(t("settings.memory.tidynow.done"), done.history_id, () => invalidate("/api/memory"));
       invalidate("/api/memory");
@@ -212,7 +214,7 @@ function TidyNow() {
   }
   return (
     <Row title={t("settings.memory.tidynow")} desc={t("settings.memory.tidynow.sub")} data-setting="memory.tidy_now">
-      <button className="btn small ghost" data-action="memory-tidy-now" disabled={busy} onClick={() => void tidy()}>{t("settings.memory.tidynow.action")}</button>
+      <Button size="sm" variant="quiet" data-action="memory-tidy-now" disabled={busy} onClick={() => void tidy()}>{t("settings.memory.tidynow.action")}</Button>
     </Row>
   );
 }

@@ -4,8 +4,8 @@
 // A device is a token the server issued to one computer after the operator approved it; revoking it
 // ends that token and closes the computer's open link at once, while the conversations it started
 // stay, readable, and pause their next tool call until the computer is paired again and takes them
-// back. Revoking asks first, in the row itself: the viewer the app runs in inside Telegram refuses
-// `confirm()`. Requests still waiting for an answer are listed above the devices too, for an operator
+// back. Revoking asks first, in the app's own confirm dialog: the viewer the app runs in inside
+// Telegram refuses the browser's `confirm()`. Requests still waiting for an answer are listed above the devices too, for an operator
 // who closed the notice.
 
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +18,8 @@ import { CLI_DEVICES, PAIRS, normCode, openPairing, osLabel, showCode } from "..
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { useCopied } from "../ui/components";
+import { Button, confirmDialog } from "../ui/primitives";
+import { Row, SetBlock, SetGroup } from "../settingsrow";
 
 /** How daedalus-cli is installed, as its guide (`cli/README.md`) says: the install script downloads
  *  the archive for the machine from the newest desktop release, checks it against the release's
@@ -61,24 +63,19 @@ function Waiting() {
   const waiting = (read.data?.requests ?? []).filter((r) => r.state === "pending" && Date.parse(r.expires_at) > now);
   if (!waiting.length) return null;
   return (
-    <div className="card" data-setting="devices.waiting">
-      <div className="section-title">{t("devices.waiting.title")}</div>
-      <div className="mlist">
-        {waiting.map((r) => (
-          <div key={r.id} className="mrow device-row" data-pair-request={r.user_code}>
-            <div className="mline noradio">
-              <div className="mmain">
-                <span className="mtitle"><Icon name="laptop" size={15} /><span className="truncate">{r.name}</span></span>
-                <span className="mmeta device-meta">{[osLabel(r.os, r.arch), showCode(r.user_code), t("pair.sheet.asked", { t: relTimeLong(r.created_at) })].filter(Boolean).join(" · ")}</span>
-              </div>
-              <div className="mactions">
-                <button type="button" className="btn small primary" onClick={() => openPairing(r.user_code)}>{t("pair.notice.review")}</button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <SetGroup title={t("devices.waiting.title")} data-setting="devices.waiting">
+      {waiting.map((r) => (
+        <Row
+          key={r.id}
+          className="device-row"
+          data-pair-request={r.user_code}
+          title={<span className="device-name"><Icon name="laptop" size={15} /><span className="truncate">{r.name}</span></span>}
+          desc={[osLabel(r.os, r.arch), showCode(r.user_code), t("pair.sheet.asked", { t: relTimeLong(r.created_at) })].filter(Boolean).join(" · ")}
+        >
+          <Button size="sm" variant="primary" onClick={() => openPairing(r.user_code)}>{t("pair.notice.review")}</Button>
+        </Row>
+      ))}
+    </SetGroup>
   );
 }
 
@@ -102,29 +99,30 @@ function PairCard({ toast }: { toast: (text: string) => void }) {
     setCode("");
   };
   return (
-    <div className="card" data-setting="devices.pair">
-      <div className="section-title">{t("devices.pair.title")}</div>
-      <ol className="devices-steps">
-        <li>
-          <span>{t("devices.install")}</span>
-          <Command text={installCommand()} toast={toast} />
-        </li>
-        <li>
-          <span>{t("devices.login")}</span>
-          <Command text={loginCommand()} toast={toast} />
-        </li>
-        <li><span>{t("devices.approve")}</span></li>
-      </ol>
-      <form className="devices-code" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        <label className="settings-row-title" htmlFor="pair-code">{t("devices.code.label")}</label>
-        <div className="devices-code-row">
-          <input id="pair-code" className="field mono" value={code} autoComplete="off" spellCheck={false} autoCapitalize="characters"
-            placeholder="ABCD-EFGH" maxLength={16} onChange={(e) => setCode(e.target.value)} />
-          <button type="submit" className="btn primary" disabled={!ready}>{t("devices.code.go")}</button>
-        </div>
-        <div className="sub">{t("devices.code.sub")}</div>
+    <SetGroup title={t("devices.pair.title")} data-setting="devices.pair">
+      <SetBlock>
+        <ol className="devices-steps">
+          <li>
+            <span>{t("devices.install")}</span>
+            <Command text={installCommand()} toast={toast} />
+          </li>
+          <li>
+            <span>{t("devices.login")}</span>
+            <Command text={loginCommand()} toast={toast} />
+          </li>
+          <li><span>{t("devices.approve")}</span></li>
+        </ol>
+      </SetBlock>
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <Row title={t("devices.code.label")} htmlFor="pair-code" desc={t("devices.code.sub")}>
+          <span className="devices-code-row">
+            <input id="pair-code" className="field mono" value={code} autoComplete="off" spellCheck={false} autoCapitalize="characters"
+              placeholder="ABCD-EFGH" maxLength={16} onChange={(e) => setCode(e.target.value)} />
+            <Button type="submit" variant="primary" disabled={!ready}>{t("devices.code.go")}</Button>
+          </span>
+        </Row>
       </form>
-    </div>
+    </SetGroup>
   );
 }
 
@@ -134,36 +132,33 @@ function DeviceList({ toast }: { toast: (text: string) => void }) {
   useEvent(["device.changed", "device.connection", "device.pairing"], () => invalidate(CLI_DEVICES));
   const devices = read.data?.devices ?? [];
   return (
-    <div className="card" data-setting="devices.list">
-      <div className="section-title">{t("devices.list.title")}</div>
-      {read.error && <div className="sub push-error">{read.error}</div>}
-      {read.data && devices.length === 0 && <div className="sub" data-devices-empty="">{t("devices.empty")}</div>}
-      {!read.data && !read.error && <div className="sub">{t("common.loading")}</div>}
-      <div className="mlist">
-        {devices.map((d) => <DeviceRow key={d.id} device={d} toast={toast} />)}
-      </div>
-    </div>
+    <SetGroup title={t("devices.list.title")} data-setting="devices.list">
+      {read.error && <SetBlock><span className="set-hint push-error">{read.error}</span></SetBlock>}
+      {read.data && devices.length === 0 && <SetBlock data-devices-empty=""><span className="set-hint">{t("devices.empty")}</span></SetBlock>}
+      {!read.data && !read.error && <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>}
+      {devices.map((d) => <DeviceRow key={d.id} device={d} toast={toast} />)}
+    </SetGroup>
   );
 }
 
 function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: string) => void }) {
-  const [mode, setMode] = useState<"view" | "rename" | "revoke">("view");
+  const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(d.name);
   const [busy, setBusy] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (mode === "rename") field.current?.select();
-  }, [mode]);
+    if (renaming) field.current?.select();
+  }, [renaming]);
   async function rename() {
     const next = name.trim();
-    if (!next || next === d.name) return setMode("view");
+    if (!next || next === d.name) return setRenaming(false);
     setBusy(true);
     try {
       await api.patch(`${CLI_DEVICES}/${encodeURIComponent(d.id)}`, { name: next });
       invalidate(CLI_DEVICES);
       // A remote chat's rows and header name its computer: they are read again with the new name.
       invalidate("/api/sessions");
-      setMode("view");
+      setRenaming(false);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -171,6 +166,7 @@ function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: stri
     }
   }
   async function revoke() {
+    if (!(await confirmDialog({ title: t("devices.revoke.title", { name: d.name }), body: t("devices.revoke.body"), action: t("devices.revoke.confirm"), cancel: t("devices.revoke.keep"), danger: true }))) return;
     setBusy(true);
     try {
       await api.delete(`${CLI_DEVICES}/${encodeURIComponent(d.id)}`);
@@ -178,7 +174,6 @@ function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: stri
       invalidate("/api/sessions");
     } catch (e) {
       toast(errorText(e));
-      setMode("view");
     } finally {
       setBusy(false);
     }
@@ -198,44 +193,33 @@ function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: stri
     t("devices.lapses", { date: absDate(d.expires_at) }),
   ].filter(Boolean).join(" · ");
   return (
-    <div className={`mrow device-row ${mode === "revoke" ? "open" : ""}`} data-device={d.id}>
-      <div className="mline noradio">
-        <div className="mmain">
-          {mode === "rename" ? (
-            <form className="device-rename" onSubmit={(e) => { e.preventDefault(); void rename(); }}>
-              <input ref={field} className="field" value={name} maxLength={64} aria-label={t("devices.rename.label")} disabled={busy}
-                onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setName(d.name); setMode("view"); } }} />
-              <button type="submit" className="btn small primary" disabled={busy || !name.trim()}>{t("common.save")}</button>
-              <button type="button" className="btn small" disabled={busy} onClick={() => { setName(d.name); setMode("view"); }}>{t("common.cancel")}</button>
-            </form>
-          ) : (
-            <span className="mtitle">
-              <Icon name="laptop" size={15} />
-              <span className="truncate">{d.name}</span>
-              <span className={`device-link ${d.connected ? "on" : ""}`} data-connected={d.connected ? "" : undefined}>
-                <span className="remote-dot" aria-hidden />{t(d.connected ? "devices.connected" : "devices.disconnected")}
-              </span>
-            </span>
-          )}
-          <span className="mmeta device-meta" title={about}>{meta}</span>
-        </div>
-        {mode === "view" && (
-          <div className="mactions">
-            <button type="button" className="btn small" data-action="rename" onClick={() => setMode("rename")}>{t("devices.rename")}</button>
-            <button type="button" className="btn small danger" data-action="revoke" onClick={() => setMode("revoke")}>{t("devices.revoke")}</button>
-          </div>
-        )}
-      </div>
-      {mode === "revoke" && (
-        <div className="device-confirm" role="group" aria-label={t("devices.revoke.title", { name: d.name })}>
-          <div><b>{t("devices.revoke.title", { name: d.name })}</b></div>
-          <div className="sub">{t("devices.revoke.body")}</div>
-          <div className="device-confirm-actions">
-            <button type="button" className="btn small" disabled={busy} onClick={() => setMode("view")}>{t("devices.revoke.keep")}</button>
-            <button type="button" className="btn small danger" disabled={busy} data-action="revoke-confirm" onClick={() => void revoke()}>{t("devices.revoke.confirm")}</button>
-          </div>
-        </div>
+    <Row
+      className="device-row"
+      data-device={d.id}
+      title={renaming ? (
+        <form className="device-rename" onSubmit={(e) => { e.preventDefault(); void rename(); }}>
+          <input ref={field} className="field" value={name} maxLength={64} aria-label={t("devices.rename.label")} disabled={busy}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setName(d.name); setRenaming(false); } }} />
+          <Button type="submit" size="sm" variant="primary" disabled={busy || !name.trim()}>{t("common.save")}</Button>
+          <Button size="sm" disabled={busy} onClick={() => { setName(d.name); setRenaming(false); }}>{t("common.cancel")}</Button>
+        </form>
+      ) : (
+        <span className="device-name">
+          <Icon name="laptop" size={15} />
+          <span className="truncate">{d.name}</span>
+          <span className={`device-link ${d.connected ? "on" : ""}`} data-connected={d.connected ? "" : undefined}>
+            <span className="remote-dot" aria-hidden />{t(d.connected ? "devices.connected" : "devices.disconnected")}
+          </span>
+        </span>
       )}
-    </div>
+      desc={<span title={about}>{meta}</span>}
+    >
+      {!renaming && (
+        <>
+          <Button size="sm" data-action="rename" onClick={() => setRenaming(true)}>{t("devices.rename")}</Button>
+          <Button size="sm" variant="danger" data-action="revoke" disabled={busy} onClick={() => void revoke()}>{t("devices.revoke")}</Button>
+        </>
+      )}
+    </Row>
   );
 }

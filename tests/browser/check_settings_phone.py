@@ -1,6 +1,7 @@
 """Every Settings page on a phone, 390 and 360 px wide, in both languages: nothing leaves the screen
 sideways, an open list stays on it, and each kind of control stands in one place in its row (the
-row's content box: on a phone each row is a padded tile).
+row's content box: on a phone each row is a padded tile). A choice reads as its value and a caret
+at the end of the words, as in Models and providers; a number or a line of text goes under them.
 
 On a phone the rows' controls stood wherever their content put them. A long pick (the web search's
 fallbacks) grew its control past the row, and the row, aligned to its end, pushed it off the left
@@ -120,6 +121,12 @@ def sweep(page: Page, width: int, lang: str, problems: list[str]) -> None:
         for item in found["outside"][:5]:
             problems.append(f"{where}: past the screen's edge: {item}")
         for row in found["rows"]:
+            if row["kind"] in ("dropdown", "multi"):
+                # A choice reads as its value and a caret at the end of the words, as in Models and providers,
+                # or under them across the row; either way it ends inside the row's padding.
+                if row["right"] < -1:
+                    problems.append(f"{where}: the {row['kind']} of «{row['title']}» runs {-row['right']} px past the row's right edge")
+                continue
             if not row["below"]:
                 problems.append(f"{where}: the {row['kind']} of «{row['title']}» is beside its words, not under them")
             if abs(row["left"]) > 1 or abs(row["right"]) > 1:

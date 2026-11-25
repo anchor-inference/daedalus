@@ -2,15 +2,15 @@
 //
 // The owner opened Settings → Voice on a portable build and found two sentences about the browser's
 // own synthesiser where the model pickers should have been. Nothing on that page said a download
-// would put them there, because nothing anywhere did. This is that page: one card per component,
-// with what it unlocks, what it costs, and either a button or the command that does it instead.
+// would put them there, because nothing anywhere did. This is that page: one row per component, with
+// its state, what it unlocks, what it costs, and either a button or the command that does it instead.
 //
-// Three things the cards are careful about, because each of them was a way to mislead:
+// Three things the rows are careful about, because each of them was a way to mislead:
 //
 //  * A button appears only where this process can really do the work. Everywhere else the card
 //    carries the command or the image tag, which is a thing the operator can act on; a button that
 //    answers 501 is not.
-//  * A finished install that needs a restart says so, on the card and once at the top, with the
+//  * A finished install that needs a restart says so, on the row and once at the top, with the
 //    restart offered where the launcher can give it. Node and the browser are found through the
 //    environment the agent was started with, so "installed" alone would be a half-truth.
 //  * Progress is a live stream, not a spinner. A three-hundred-megabyte browser looks like one.
@@ -18,13 +18,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { SearchComponent } from "../searchcomponent";
 import { api } from "../api";
-import { Icon } from "../icons";
 import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
-import { Row } from "../settingsrow";
+import { Row, SetBlock, SetGroup } from "../settingsrow";
 import { pathFor } from "../router";
 import { go } from "../ui/index";
-import { confirmAsync, errorText, haptic } from "../ui";
+import { Badge, Button, confirmDialog } from "../ui/primitives";
+import { errorText, haptic } from "../ui";
 import type { ComponentEntry, ComponentsView } from "../componentsview";
 import {
   applyFrame,
@@ -41,14 +41,16 @@ import {
 
 const label = (id: string) => t(`comp.name.${id}`);
 
-/** The state word, as a chip. Colour carries the same thing the word does, never instead of it.
+/** The state word, as a badge. Colour carries the same thing the word does, never instead of it.
  *  A component that is a running process says whether it runs: "installed" over a SearXNG that has
- *  stopped is the half-truth the card is there to avoid. */
-function StateChip({ entry }: { entry: ComponentEntry }) {
+ *  stopped is the half-truth the row is there to avoid. */
+export function StateBadge({ entry }: { entry: ComponentEntry }) {
   if (entry.service && entry.state === "installed") {
-    return <span className={`comp-chip comp-svc-${entry.service.state}`}>{t(`comp.service.${entry.service.state}`)}</span>;
+    const tone = entry.service.state === "running" ? "live" : entry.service.state === "starting" ? "accent" : entry.service.state === "failed" ? "attention" : undefined;
+    return <span className="comp-state"><Badge tone={tone}>{t(`comp.service.${entry.service.state}`)}</Badge></span>;
   }
-  return <span className={`comp-chip comp-${entry.state}`}>{t(`comp.state.${entry.state}`)}</span>;
+  const tone = entry.state === "installed" ? "live" : entry.state === "installing" ? "accent" : undefined;
+  return <span className="comp-state"><Badge tone={tone}>{t(`comp.state.${entry.state}`)}</Badge></span>;
 }
 
 /** What is happening right now, under the card: the line the installer last published. */
@@ -72,7 +74,10 @@ function Progress({ entry }: { entry: ComponentEntry }) {
   return null;
 }
 
-function Card({
+/** One component: its name and state, what it is and what it unlocks, and the one thing to do about it.
+ *  What is happening to it (the live bar, a missing launcher, the command that does it by hand) takes
+ *  the lines under the row. */
+function ComponentRow({
   entry,
   view,
   busy,
@@ -95,59 +100,51 @@ function Card({
   // Without it running there is no button to offer, however native the installation is.
   const needsLauncher = entry.how === "launcher" && !view.launcher;
   const canInstall = entry.installable && !needsLauncher;
+  const settingsPage = entry.id === "stt-models" ? "speech-models" : "voice";
+  const byHand = entry.state !== "installed" && !canInstall && entry.fix;
+  const progress = entry.progress && (entry.progress.state === "failed" || entry.progress.state === "queued" || entry.progress.state === "running");
   return (
-    <div className={`comp-card ${entry.state === "installed" ? "comp-card-on" : ""}`}>
-      <div className="comp-head">
-        <b>{label(entry.id)}</b>
-        <StateChip entry={entry} />
-      </div>
-      <div className="sub comp-what">{t(`comp.what.${entry.id}`)}</div>
-
-      {entry.total_count > 0 && (
-        <div className="kv">
-          <span>{t("comp.models.count", { n: String(entry.installed_count), total: String(entry.total_count) })}</span>
-          <b>{entry.disk_bytes ? size(entry.disk_bytes) : "—"}</b>
-        </div>
-      )}
-
-      <div className="comp-enables">
-        <span className="sub faint">{t("comp.unlocks")}</span>
-        <span className="comp-tags">
-          {entry.enables.map((key) => (
-            <span key={key} className="comp-tag">
-              {t(`comp.enables.${key}`)}
-            </span>
-          ))}
-        </span>
-      </div>
-
-      {entry.skills.length > 0 && <div className="sub faint comp-line">{plural("comp.skills", entry.skills.length)}: {entry.skills.join(", ")}</div>}
-
-      <Progress entry={entry} />
-
-      <div className="btnrow comp-actions">
+    <div className="comp-item" data-component={entry.id} data-state={entry.state}>
+      <Row
+        className="comp-row"
+        title={<><span className="comp-name">{label(entry.id)}</span><StateBadge entry={entry} /></>}
+        desc={
+          <>
+            <span className="comp-note">{t(`comp.what.${entry.id}`)}</span>
+            {entry.total_count > 0 && (
+              <span className="comp-note">{t("comp.models.count", { n: String(entry.installed_count), total: String(entry.total_count) })} · {entry.disk_bytes ? size(entry.disk_bytes) : "—"}</span>
+            )}
+            <span className="comp-note comp-unlocks">{t("comp.unlocks")}: {entry.enables.map((key) => t(`comp.enables.${key}`)).join(", ")}</span>
+            {entry.skills.length > 0 && <span className="comp-note">{plural("comp.skills", entry.skills.length)}: {entry.skills.join(", ")}</span>}
+            {/* What the server found, in the reader's language and kept small: the row above it is the
+                answer, this is the evidence. It is hidden while an install is going, because the fact it
+                reports is the one the install is in the middle of changing and a live bar with "not
+                installed" under it says two things at once. The two model rows are the other exception —
+                their sentence is the count, and the count is already above. */}
+            {!installing && entry.total_count === 0 && (entry.detail_key || entry.detail) && (
+              <span className="comp-note comp-detail">{entry.detail_key ? t(entry.detail_key, entry.detail_args) : entry.detail}</span>
+            )}
+          </>
+        }
+      >
         {entry.how === "models" && (
-          <a className="btn small" href={pathFor("settings", entry.id === "stt-models" ? "speech-models" : "voice")} onClick={(e) => go(e, pathFor("settings", entry.id === "stt-models" ? "speech-models" : "voice"))}>
+          <a className="btn small" href={pathFor("settings", settingsPage)} onClick={(e) => go(e, pathFor("settings", settingsPage))}>
             {t("comp.models.open")}
           </a>
         )}
         {canInstall && !installing && entry.state !== "installed" && (
-          <button className="btn small primary" disabled={elsewhere} onClick={() => onInstall(entry.id)}>
+          <Button size="sm" variant="primary" disabled={elsewhere} onClick={() => onInstall(entry.id)}>
             {failed
               ? t("comp.retry")
               : entry.download_bytes
                 ? t("comp.install.size", { size: size(entry.download_bytes) })
                 : t("comp.install")}
-          </button>
+          </Button>
         )}
-        {installing && (
-          <button className="btn small" onClick={() => onCancel(entry.id)}>
-            {t("comp.cancel")}
-          </button>
-        )}
+        {installing && <Button size="sm" onClick={() => onCancel(entry.id)}>{t("comp.cancel")}</Button>}
         {entry.removable && !installing && (
-          <button
-            className="btn small"
+          <Button
+            size="sm"
             disabled={removing || Boolean(busy)}
             onClick={() => {
               setRemoving(true);
@@ -155,24 +152,20 @@ function Card({
             }}
           >
             {t("comp.remove")}
-          </button>
+          </Button>
         )}
-      </div>
-
-      {needsLauncher && <div className="sub attn comp-line">{t("comp.nolauncher")}</div>}
-      {entry.state !== "installed" && !canInstall && entry.fix && (
-        <div className="comp-byhand">
-          <div className="sub faint">{t("comp.byhand")}</div>
-          <code className="mono comp-fix">{entry.fix}</code>
+      </Row>
+      {(progress || needsLauncher || byHand) && (
+        <div className="comp-extra">
+          <Progress entry={entry} />
+          {needsLauncher && <div className="sub attn comp-line">{t("comp.nolauncher")}</div>}
+          {byHand && (
+            <div className="comp-byhand">
+              <div className="sub faint">{t("comp.byhand")}</div>
+              <code className="mono comp-fix">{entry.fix}</code>
+            </div>
+          )}
         </div>
-      )}
-      {/* What the server found, in the reader's language and kept small: the card above it is the
-          answer, this is the evidence. It is hidden while an install is going, because the fact it
-          reports is the one the install is in the middle of changing and a live bar with "not
-          installed" under it says two things at once. The two model cards are the other exception —
-          their sentence is the count, and the count is already above. */}
-      {!installing && entry.total_count === 0 && (entry.detail_key || entry.detail) && (
-        <div className="sub faint comp-detail">{entry.detail_key ? t(entry.detail_key, entry.detail_args) : entry.detail}</div>
       )}
     </div>
   );
@@ -266,7 +259,7 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
   }
 
   async function remove(id: string) {
-    if (!(await confirmAsync(t("comp.remove.confirm", { name: label(id) }), { action: t("comp.remove") }))) return;
+    if (!(await confirmDialog({ title: t("comp.remove.confirm", { name: label(id) }), action: t("comp.remove"), danger: true }))) return;
     setProblem("");
     try {
       await removeComponent(id);
@@ -289,50 +282,36 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
 
   if (!view) {
     return (
-      <div className="card">
-        <div className="sub">{problem || t("comp.loading")}</div>
-      </div>
+      <SetGroup title={t("comp.group.installation")}>
+        <SetBlock><span className="set-hint">{problem || t("comp.loading")}</span></SetBlock>
+      </SetGroup>
     );
   }
 
   const busy = view.busy || view.components.find((c) => c.state === "installing")?.id || "";
   return (
-    <div className="catalogue settings-groups" data-setting="components.catalogue">
-      {/* The words and the way the installation runs are one card and the components lie on the page
-          under it, each a card of its own: drawn inside the first, they were cards in a card. */}
-      <div className="card">
-      <div className="section-title">
-        {t("comp.title")}
-      </div>
-      <div className="sub">{t("comp.intro")}</div>
-      {/* How the installation runs and what the downloads take, as a row with the way to the other
-          half of "what agents can use" as its action. */}
-      <Row className="comp-mode" title={t(`comp.mode.${view.mode === "native" ? "native" : "docker"}`)} desc={view.disk_bytes > 0 ? t("comp.disk", { size: size(view.disk_bytes) }) : undefined}>
-        <a className="btn small" href={pathFor("settings", "dependencies")} onClick={(event) => go(event, pathFor("settings", "dependencies"))}>{t("settings.sec.dependencies")}</a>
-      </Row>
+    <>
+      {/* How the installation runs and what the downloads take, with the way to the other half of
+          "what agents can use" as the row's action. */}
+      <SetGroup title={t("comp.group.installation")} help={t("comp.intro")}>
+        <Row title={t(`comp.mode.${view.mode === "native" ? "native" : "docker"}`)} desc={view.disk_bytes > 0 ? t("comp.disk", { size: size(view.disk_bytes) }) : undefined}>
+          <a className="btn small" href={pathFor("settings", "dependencies")} onClick={(event) => go(event, pathFor("settings", "dependencies"))}>{t("settings.sec.dependencies")}</a>
+        </Row>
+        {restartPending(view) && (
+          <Row title={t("comp.restart.title")} desc={t("comp.restart.why")}>
+            <Button size="sm" variant="primary" disabled={restarting} onClick={restart}>{t("comp.restart.do")}</Button>
+          </Row>
+        )}
+        {problem && <SetBlock><div className="sub attn comp-line">{problem}</div></SetBlock>}
+      </SetGroup>
 
-      {restartPending(view) && (
-        <div className="comp-restart">
-          <b>{t("comp.restart.title")}</b>
-          <div className="sub">{t("comp.restart.why")}</div>
-          <div className="btnrow" style={{ marginTop: 8 }}>
-            <button className="btn small primary" disabled={restarting} onClick={restart}>
-              {t("comp.restart.do")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {problem && <div className="sub attn comp-line">{problem}</div>}
-      </div>
-
-      <div className="comp-grid">
+      <SetGroup title={t("comp.group.list")} data-setting="components.catalogue">
         <SearchComponent />
         {view.components.map((entry) => (
-          <Card key={entry.id} entry={entry} view={view} busy={busy} onInstall={install} onCancel={cancel} onRemove={remove} />
+          <ComponentRow key={entry.id} entry={entry} view={view} busy={busy} onInstall={install} onCancel={cancel} onRemove={remove} />
         ))}
-      </div>
-    </div>
+      </SetGroup>
+    </>
   );
 }
 

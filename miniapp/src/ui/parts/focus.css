@@ -322,41 +322,38 @@
 .focus-cost { margin: 12px 0 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); }
 
 /* Settings → Notifications. The matrix is a table on a desktop; on a phone each kind is a row that
-   opens into one line per channel, because four columns of three-state cells do not fit 390 px. */
-.nmatrix { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: var(--fs-13); }
-.nmatrix th, .nmatrix td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
-.nmatrix thead th { color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; text-align: center; }
-.nmatrix thead th:first-child, .nmatrix tbody th { text-align: left; padding-left: 0; }
-.nmatrix tbody th { font-weight: 500; color: var(--fg); }
+   opens into one line per channel, because four columns of three-state cells do not fit 390 px. Both
+   run edge to edge of their card, so a kind is a 44 px row like every other row of a settings card. */
+.set-card > .nmatrix-block { padding: 0; }
+.nmatrix { width: 100%; border-collapse: collapse; font-size: var(--fs-14); }
+.nmatrix th, .nmatrix td { height: var(--card-row-h); padding: 0 8px; }
+.nmatrix tbody tr + tr > * { border-top: 1px solid var(--line); }
+.nmatrix thead th { height: 36px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; text-align: center; }
+.nmatrix thead th:first-child, .nmatrix tbody th { padding-left: 16px; text-align: left; }
+.nmatrix thead th:last-child, .nmatrix td:last-child { padding-right: 16px; }
+.nmatrix tbody th { font-weight: 400; color: var(--fg); }
 .nmatrix td { text-align: center; }
 .ncell { min-height: var(--ctl-h-sm); min-width: 72px; padding: 0 10px; border-radius: var(--radius-xs); border: 1px solid var(--line); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .ncell:hover { border-color: var(--line-strong); }
 .ncell[data-cell="on"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border-color: transparent; }
 .ncell[data-cell="urgent"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: transparent; }
 .ncell.static { display: inline-block; min-height: 0; min-width: 0; padding: 1px 8px; cursor: default; }
-.nmatrix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
-.nrows { margin-top: 8px; border-top: 1px solid var(--line); }
-.nrow { border-bottom: 1px solid var(--line); }
-.nrow-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h); padding: 6px 0; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.set-block.nmatrix-legend { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; }
+.nrow + .nrow { border-top: 1px solid var(--line); }
+.nrow-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--card-row-h); padding: 6px 16px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
 .nrow-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.nrow-text b { font-weight: 600; font-size: var(--fs-14); }
-.nrow-head .chev { color: var(--fg-3); transition: transform var(--t-fast); }
-.nrow.open .nrow-head .chev { transform: rotate(90deg); }
-.nrow-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; min-height: var(--row-h); padding: 2px 0 2px 12px; font-size: var(--fs-13); color: var(--fg-2); }
-.nrow-line .segmented.inline button { min-height: var(--ctl-h-sm); padding: 0 10px; }
+.nrow-text b { font-weight: 400; font-size: var(--fs-14); }
+.nrow-head .ic { color: var(--fg-3); transition: transform var(--t-fast); }
+.nrow.open .nrow-head .ic { transform: rotate(90deg); }
+.nrow-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; min-height: var(--row-h); padding: 2px 16px 2px 28px; font-size: var(--fs-13); color: var(--fg-2); }
 .nrow:last-child .nrow-line:last-child { padding-bottom: 8px; }
 .quiet-hours { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
 .quiet-hours label { display: inline-flex; align-items: center; gap: 6px; }
 .quiet-hours .field { width: 116px; margin: 0; padding: 6px 8px; }
-.ndevice .mtitle .chip { margin-left: 8px; vertical-align: middle; }
+.ndevice .mtitle { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
 /* The browser's own description is what tells two Chrome-on-Android devices apart, and its model and
-   version sit at the end: clipped to one line on a phone, exactly that part was lost. */
-.ndevice .mmeta { white-space: normal; overflow-wrap: anywhere; }
-@media (max-width: 1023px) {
-  .nmute .mline.noradio, .ndevice .mline.noradio { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "actions"; }
-  .nmute .mactions, .ndevice .mactions { padding-bottom: 6px; flex-wrap: wrap; }
-  .nmute .segmented.inline button { min-height: var(--ctl-h-sm); }
-}
+   version sit at the end: it wraps instead of being clipped, exactly that part was lost on a phone. */
+.ndevice .settings-row-desc { overflow-wrap: anywhere; }
 
 /* The cap on running terminals and the load bar under it. The track is the machine's memory: what
    everything else holds, what the terminals hold now, and — lighter — what the cap would add. */

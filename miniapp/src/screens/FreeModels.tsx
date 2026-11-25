@@ -3,6 +3,9 @@ import { api, Settings } from "../api";
 import { t, useLang } from "../i18n";
 import { errorText } from "../ui";
 import { presetIdFor } from "../models";
+import { Icon } from "../icons";
+import { Badge, Button, Field } from "../ui/primitives";
+import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 
 export type FreeModel = {
   id: string;
@@ -118,42 +121,45 @@ export function FreeModels({ onSaved, toast }: { onSaved: (id: string, settings:
     }
   }
 
-  return <div className="free-catalog">
-    <div className="sub">{t("free.intro")}</div>
-    <div className="btnrow" style={{ marginTop: 12 }}>
-      <button className="btn small" disabled={!!busy} onClick={() => void load(true)}>{t("free.refresh")}</button>
-      {catalog?.updated_at && <span className="sub">{t("free.updated")} {new Date(catalog.updated_at * 1000).toLocaleString()}</span>}
-      {catalog?.stale && <span className="pill waiting">{t("free.stale")}</span>}
-    </div>
-    {error && <div className="empty calm" role="status">{error}</div>}
-    {!catalog && !error && <div className="empty calm">{t("common.loading")}</div>}
+  return <div className="free-catalog" data-setting="models.free">
+    <p className="set-help">{t("free.intro")}</p>
+    {error && <SetBlock className="free-error"><span className="sub" role="status">{error}</span></SetBlock>}
+    {!catalog && !error && <SetBlock><span className="sub">{t("common.loading")}</span></SetBlock>}
     {catalog && <>
-      <div className="section-title" style={{ marginTop: 20 }}>{t("free.providers")}</div>
-      <div className="pickgrid">
-        {catalog.providers.map((p) => <button key={p.id} type="button" className={`pick ${selected === p.id ? "on" : ""}`} aria-pressed={selected === p.id} onClick={() => { setSelected(p.id); setQuery(""); setKey(""); }}>
-          <span className="pick-main"><b className="truncate">{p.name}</b><span className="pick-line">{p.key_required ? t("free.key.needed") : t("free.key.none")}</span></span>
-          <span className="pick-state" data-tone="idle">{p.models.length}</span>
+      <SetGroup
+        title={t("free.providers")}
+        note={catalog.updated_at ? <>{t("free.updated")} {new Date(catalog.updated_at * 1000).toLocaleString()}</> : undefined}
+        action={<>
+          {catalog.stale && <Badge tone="attention">{t("free.stale")}</Badge>}
+          <Button size="sm" disabled={!!busy} onClick={() => void load(true)}>{t("free.refresh")}</Button>
+        </>}
+      >
+        {catalog.providers.map((p) => <button key={p.id} type="button" className={`prov-row free-pick ${selected === p.id ? "on" : ""}`} aria-pressed={selected === p.id} data-provider={p.id} onClick={() => { setSelected(p.id); setQuery(""); setKey(""); }}>
+          <span className="prov-name">{p.name}</span>
+          <span className="free-pick-key">{p.key_required ? t("free.key.needed") : t("free.key.none")}</span>
+          <Badge>{p.models.length}</Badge>
+          <span className="free-pick-mark">{selected === p.id && <Icon name="check" size={16} />}</span>
         </button>)}
-      </div>
-      {provider && <>
-        <div className="section-title" style={{ marginTop: 22 }}>{provider.name} → {t("free.models")}</div>
-        {!connected && <div className="card" style={{ marginTop: 12 }}>
-          <label className="mfield"><span>{t("free.key.label")}</span><input className="field" type="password" autoComplete="new-password" value={key} onChange={(e) => setKey(e.target.value)} /></label>
-          <div className="sub">{t("free.key.get")} <a href={provider.key_url} target="_blank" rel="noopener noreferrer">{provider.name} ↗</a></div>
-          <div className="btnrow" style={{ marginTop: 12 }}><button className="btn primary" disabled={!key.trim() || !!busy} onClick={() => void connect()}>{t("free.connect")}</button></div>
-        </div>}
-        <input className="field" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("free.search")} aria-label={t("free.search")} style={{ marginTop: 12 }} />
-        <div className="mlist" style={{ marginTop: 12 }}>
-          {shown.map((m) => <div className="mrow" key={m.id}>
-            <div className="mline noradio"><div className="mmain"><span className="mtitle">{m.name ?? m.id}</span><span className="mmeta">{m.id}</span></div>
-              <div className="mtags"><span className={`pill ${m.mechanism === "zero_price" ? "idle" : "waiting"}`}>{t(m.mechanism === "zero_price" ? "free.zero" : "free.promotion")}</span>{m.may_train && <span className="pill waiting">{t("free.training")}</span>}</div>
-              <button className="btn small" disabled={!connected || !provider.fresh || m.mechanism !== "zero_price" || !!busy} onClick={() => void install(m)}>{busy === m.id ? t("free.testing") : t("free.add")}</button>
-            </div>
-            <div className="sub" style={{ padding: "0 14px 12px" }}>{t(m.tools_reported ? "free.tools.reported" : "free.tools.unknown")}</div>
-          </div>)}
-          {shown.length === 0 && <div className="empty calm">{t("free.empty")}</div>}
-        </div>
-      </>}
+      </SetGroup>
+      {provider && <SetGroup title={`${provider.name} → ${t("free.models")}`}>
+        {!connected && <>
+          <SetBlock>
+            <Field label={t("free.key.label")} type="password" autoComplete="new-password" value={key} onChange={(e) => setKey(e.target.value)} hint={<>{t("free.key.get")} <a href={provider.key_url} target="_blank" rel="noopener noreferrer">{provider.name} ↗</a></>} />
+          </SetBlock>
+          <SetFoot><Button variant="primary" size="sm" disabled={!key.trim() || !!busy} onClick={() => void connect()}>{t("free.connect")}</Button></SetFoot>
+        </>}
+        <SetBlock>
+          <input className="field" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("free.search")} aria-label={t("free.search")} />
+        </SetBlock>
+        {shown.map((m) => <div className="free-model" key={m.id}>
+          <Row stack title={m.name ?? m.id} desc={<><span className="mono">{m.id}</span><br />{t(m.tools_reported ? "free.tools.reported" : "free.tools.unknown")}</>}>
+            <Badge tone={m.mechanism === "zero_price" ? "live" : "attention"}>{t(m.mechanism === "zero_price" ? "free.zero" : "free.promotion")}</Badge>
+            {m.may_train && <Badge tone="attention">{t("free.training")}</Badge>}
+            <Button size="sm" disabled={!connected || !provider.fresh || m.mechanism !== "zero_price" || !!busy} onClick={() => void install(m)}>{busy === m.id ? t("free.testing") : t("free.add")}</Button>
+          </Row>
+        </div>)}
+        {shown.length === 0 && <SetBlock><span className="sub">{t("free.empty")}</span></SetBlock>}
+      </SetGroup>}
     </>}
   </div>;
 }

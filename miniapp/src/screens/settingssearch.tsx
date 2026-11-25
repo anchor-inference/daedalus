@@ -18,7 +18,7 @@ import { fieldPath, type IndexField } from "./settingsindex";
 /** The attribute a row the search found carries, and the one on everything the search hides. */
 const HIT = "data-hit";
 const OFF = "data-search-off";
-const HEADINGS = ".section-title, .settings-subhead";
+const HEADINGS = ".section-title, .settings-subhead, .set-label";
 
 /**
  * Leaves in `root` only the rows whose `data-setting` is in `anchors`, the boxes that hold them and

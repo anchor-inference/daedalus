@@ -2500,7 +2500,7 @@ NAV_LIST_MAX = 200
 
 
 class NavigationConfig(BaseModel):
-    """Where each destination of the app sits: pinned in the desktop sidebar, its More launcher, the phone drawer.
+    """Where each destination of the app sits: pinned in the sidebar (the phone's drawer is that sidebar) or in its More launcher.
 
     Every list empty is the layout the app ships with. An id the app does not know (a page that was
     removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
@@ -2509,19 +2509,16 @@ class NavigationConfig(BaseModel):
     """
 
     pinned: list[str] = Field(default_factory=list)
-    """Pinned under New chat at the top of the desktop sidebar, top to bottom. A built-in place not
-    listed anywhere keeps its usual spot."""
+    """Pinned under New chat at the top of the sidebar, top to bottom. A built-in place not
+    listed anywhere keeps its usual spot. A phone's drawer is the same sidebar, so it follows this list."""
     more: list[str] = Field(default_factory=list)
     """Items in the sidebar's More launcher, in order within their group."""
-    drawer: list[str] = Field(default_factory=list)
-    """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
-    waits in the phone's More launcher. Empty is each mode's usual drawer."""
     hidden: list[str] = Field(default_factory=list)
-    """Never shown, on any device. It wins over the three lists above."""
+    """Never shown, on any device. It wins over the two lists above."""
     icons: dict[str, str] = Field(default_factory=dict)
     """Item id → the name of a built-in icon to draw in place of its own."""
 
-    @field_validator("pinned", "more", "drawer", "hidden")
+    @field_validator("pinned", "more", "hidden")
     @classmethod
     def _ids(cls, value: list[str]) -> list[str]:
         if len(value) > NAV_LIST_MAX:
@@ -2573,7 +2570,7 @@ class AgentSettingsConfig(BaseModel):
     auto_apply: list[str] = Field(default_factory=lambda: ["navigation", "answer_language", "compaction"])
     """Sections a change of the agent's applies at once, the operator told afterwards in the chat. The
     defaults change how things look and read, never what the agent may do or spend: the sidebar's
-    pinned rows and the drawer, the language of the answers, and when and how long the history is summarised."""
+    pinned rows, the language of the answers, and when and how long the history is summarised."""
     proposal_hours: int = Field(default=24, ge=1, le=24 * 14)
     """How long a change waiting for the operator stays open; then it expires and the agent is told."""
 
@@ -3386,6 +3383,16 @@ def _migrate_compaction_ratio(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _drop_phone_drawer(raw: dict[str, Any]) -> bool:
+    """``[navigation] drawer`` is gone: the phone's drawer is the sidebar and follows ``pinned``.
+
+    The key is removed rather than left to be ignored, so the file does not keep advertising a list
+    nothing reads. It runs before the renames below, which no longer look at it.
+    """
+    navigation = raw.get("navigation")
+    return isinstance(navigation, dict) and navigation.pop("drawer", None) is not None
+
+
 def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     """``[voice]`` became ``[companion]`` when the voice concierge became the standing companion.
 
@@ -3404,7 +3411,7 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
         changed = True
     navigation = raw.get("navigation")
     if isinstance(navigation, dict):
-        for field in ("rail", "more", "drawer", "hidden"):
+        for field in ("rail", "more", "hidden"):
             items = navigation.get(field)
             if isinstance(items, list) and "voice" in items:
                 renamed = ["companion" if item == "voice" else item for item in items]
@@ -3425,7 +3432,7 @@ def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
     if not isinstance(navigation, dict):
         return False
     changed = False
-    for field in ("rail", "more", "drawer", "hidden"):
+    for field in ("rail", "more", "hidden"):
         items = navigation.get(field)
         if isinstance(items, list) and "diagrams" in items:
             navigation[field] = list(dict.fromkeys("canvas" if item == "diagrams" else item for item in items))
@@ -3482,6 +3489,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_context_window_source(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
+    changed = _drop_phone_drawer(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
     changed = _migrate_diagrams_to_canvas(raw) or changed

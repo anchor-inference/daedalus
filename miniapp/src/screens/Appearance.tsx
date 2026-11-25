@@ -1,11 +1,11 @@
-import { usePetModel, usePetPreference } from "../ui/pet";
 // Appearance is this browser's look: the named themes, then the few adjustments that are not a new theme.
 
 import { useState } from "react";
+import { usePetModel, usePetPreference } from "../ui/pet";
 import { COLOR_KEYS, FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
-import { t } from "../i18n";
-import { Select, LangPicker, Segmented, Switch } from "../ui/index";
-import { Row } from "../settingsrow";
+import { LANGS, t, useLang } from "../i18n";
+import { Button, Combobox, Segmented, Select, Switch } from "../ui/primitives";
+import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { type Settings } from "../api";
 import { useQuery } from "../store";
 
@@ -31,15 +31,28 @@ function ProseStepper({ prefs, update }: { prefs: Prefs; update: (patch: Partial
   const set = (next: number) => update({ prose: Math.min(PROSE_MAX, Math.max(PROSE_MIN, next)) });
   return (
     <div className="prose-stepper" data-pinned={prefs.prose !== null ? "true" : "false"}>
-      <div className="prose-stepper-ctl">
-        <button type="button" className="btn small" aria-label={t("theme.prose.smaller")} disabled={size <= PROSE_MIN} onClick={() => set(size - 1)}>{"\u2212"}</button>
-        <output className="prose-stepper-value" aria-live="polite">{t("theme.prose.px", { n: size })}{prefs.prose === null ? ` \u00b7 ${t("theme.prose.auto")}` : ""}</output>
-        <button type="button" className="btn small" aria-label={t("theme.prose.larger")} disabled={size >= PROSE_MAX} onClick={() => set(size + 1)}>+</button>
-        <button type="button" className="btn small" disabled={prefs.prose === null} onClick={() => update({ prose: null })}>{t("theme.prose.reset")}</button>
-      </div>
-      <p className="prose-stepper-preview" style={{ fontSize: `${size}px` }}>{t("theme.prose.preview")}</p>
+      <Button size="sm" aria-label={t("theme.prose.smaller")} disabled={size <= PROSE_MIN} onClick={() => set(size - 1)}>{"\u2212"}</Button>
+      <output className="prose-stepper-value" aria-live="polite">{t("theme.prose.px", { n: size })}{prefs.prose === null ? ` \u00b7 ${t("theme.prose.auto")}` : ""}</output>
+      <Button size="sm" aria-label={t("theme.prose.larger")} disabled={size >= PROSE_MAX} onClick={() => set(size + 1)}>+</Button>
+      <Button size="sm" variant="quiet" disabled={prefs.prose === null} onClick={() => update({ prose: null })}>{t("theme.prose.reset")}</Button>
     </div>
   );
+}
+
+/** What a face's combobox offers: the system face, a face of the catalogue, or what was typed — a name
+ *  to fetch from Google Fonts, or an address (a stylesheet or a .woff2 file). */
+type FaceChoice = { kind: "system" } | { kind: "face"; family: string; local: boolean } | { kind: "load"; name: string } | { kind: "address"; address: string };
+
+/** The family and the address that choosing a typed address gives, as the form it replaces did: a
+ *  Google Fonts stylesheet names its family, a .woff2 file is given a family of its own per role. */
+function familyForAddress(address: string, role: FontRole, current: string): string {
+  let family = current;
+  try {
+    const parsed = new URL(address).searchParams.get("family");
+    if (parsed) family = decodeURIComponent(parsed.split(":")[0].replace(/\+/g, " "));
+  } catch { /* the allow check already rejected a bad address */ }
+  if (/\.woff2$/i.test(address)) family = role === "ui" ? "Daedalus UI" : role === "prose" ? "Daedalus Prose" : "Daedalus Code";
+  return family;
 }
 
 /** Two sections draw from here: the look (`theme`) — language, theme, colours, contrast, the companion
@@ -47,13 +60,13 @@ function ProseStepper({ prefs, update }: { prefs: Prefs; update: (patch: Partial
  *  both read and write the same preferences of this browser. */
 export function AppearancePanel({ part }: { part: "theme" | "text" }) {
   const [prefs, update, replace] = usePrefs();
+  const [lang, pickLang] = useLang();
   const [pet, setPet] = usePetPreference();
   const [petModel, setPetModel] = usePetModel();
   const petSettings = useQuery<Settings>(pet ? "/api/settings" : null);
-  const [role, setRole] = useState<FontRole>("prose");
-  const [query, setQuery] = useState("");
-  const [url, setUrl] = useState("");
-  const [urlBad, setUrlBad] = useState(false);
+  // What was typed in each face's field; null while it shows the face in use.
+  const [typed, setTyped] = useState<Partial<Record<FontRole, string>>>({});
+  const [badAddress, setBadAddress] = useState<FontRole | null>(null);
   const env = { scheme: null as null, prefersDark: window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? true };
   let scheme: "dark" | "light" | null = null;
   try {
@@ -63,78 +76,89 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
     /* private mode */
   }
   const resolved = resolvedTheme(prefs, { scheme, prefersDark: env.prefersDark });
-  const needle = query.trim().toLowerCase();
-  const faces = FONT_CATALOG.filter((face) => !needle || face.family.toLowerCase().includes(needle));
-  const known = FONT_CATALOG.some((face) => face.family.toLowerCase() === needle);
 
-  const setFace = (family: string, address = "") => {
+  const setFace = (role: FontRole, family: string, address = "") => {
     if (role === "ui") update({ fontUi: family, fontUiUrl: address });
     else if (role === "prose") update({ fontProse: family, fontProseUrl: address });
     else update({ fontCode: family, fontCodeUrl: address });
+    setTyped((now) => ({ ...now, [role]: undefined }));
+    setBadAddress(null);
   };
+  const choices = (role: FontRole): FaceChoice[] => {
+    const query = (typed[role] ?? "").trim();
+    const needle = query.toLowerCase();
+    if (/^https?:\/\//i.test(query)) return [{ kind: "address", address: query }];
+    const faces = FONT_CATALOG.filter((face) => !needle || face.family.toLowerCase().includes(needle));
+    const known = FONT_CATALOG.some((face) => face.family.toLowerCase() === needle);
+    return [
+      ...(needle ? [] : [{ kind: "system" } as FaceChoice]),
+      ...faces.map((face): FaceChoice => ({ kind: "face", family: face.family, local: !!face.local })),
+      ...(needle && !known ? [{ kind: "load", name: query } as FaceChoice] : []),
+    ];
+  };
+  const choose = (role: FontRole, choice: FaceChoice) => {
+    if (choice.kind === "system") setFace(role, "");
+    else if (choice.kind === "face") setFace(role, choice.family);
+    else if (choice.kind === "load") setFace(role, choice.name);
+    else if (!fontUrlAllowed(choice.address)) setBadAddress(role);
+    else setFace(role, familyForAddress(choice.address, role, familyOf(prefs, role)), choice.address);
+  };
+  const faceLabel = (choice: FaceChoice) => choice.kind === "system" ? t("theme.font.system") : choice.kind === "face" ? choice.family : choice.kind === "load" ? t("theme.font.load", { name: choice.name }) : t("theme.font.use");
 
   const color = (key: ColorKey, fallback: string) => prefs.colors[key] ?? fallback;
 
   if (part === "text") return (
     <>
-      <div className="section-title">{t("theme.font")}</div>
-      <p className="sub">{t("theme.font.lead")}</p>
-      <div className="card settings-font" data-setting="appearance.font">
-        <Segmented value={role} onChange={setRole} options={FONT_ROLES.map((id) => ({ id, label: t(`theme.font.${id}`) }))} />
-        <div className="settings-font-preview">
-          <h2 className="settings-specimen" style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : undefined }}>{t("theme.font.sample")}</h2>
-          <div className="sub">{familyOf(prefs, role) || t("theme.font.system")}{urlOf(prefs, role) ? ` · ${urlOf(prefs, role)}` : ""}</div>
-        </div>
-        <div className="settings-font-catalogue">
-          <input className="field" value={query} placeholder={t("theme.font.search")} aria-label={t("theme.font.search")} onChange={(e) => setQuery(e.target.value)} />
-          <div className="settings-faces">
-            <button type="button" className={!familyOf(prefs, role) ? "on" : ""} aria-pressed={!familyOf(prefs, role)} onClick={() => setFace("")}>{t("theme.font.system")}</button>
-            {faces.map((face) => (
-              <button key={face.family} type="button" className={familyOf(prefs, role) === face.family ? "on" : ""} aria-pressed={familyOf(prefs, role) === face.family} style={{ fontFamily: face.local ? `"${face.family}"` : undefined }} onClick={() => setFace(face.family)}>
-                {face.family}
-                {face.local && <span className="sub"> · {t("theme.font.builtin")}</span>}
-              </button>
-            ))}
-            {needle && !known && (
-              <button type="button" onClick={() => setFace(query.trim())}>{t("theme.font.load", { name: query.trim() })}</button>
-            )}
-          </div>
-        </div>
-        <form className="settings-font-url" onSubmit={(e) => {
-          e.preventDefault();
-          const address = url.trim();
-          if (!fontUrlAllowed(address) || !address) { setUrlBad(true); return; }
-          setUrlBad(false);
-          let family = familyOf(prefs, role);
-          try {
-            const parsed = new URL(address).searchParams.get("family");
-            if (parsed) family = decodeURIComponent(parsed.split(":")[0].replace(/\+/g, " "));
-          } catch { /* the allow check already rejected a bad address */ }
-          if (/\.woff2$/i.test(address)) family = role === "ui" ? "Daedalus UI" : role === "prose" ? "Daedalus Prose" : "Daedalus Code";
-          setFace(family, address);
-        }}>
-          <input className="field" value={url} placeholder={t("theme.font.url")} aria-label={t("theme.font.url")} onChange={(e) => { setUrl(e.target.value); setUrlBad(false); }} />
-          <button type="submit" className="btn small">{t("theme.font.use")}</button>
-        </form>
-        {urlBad && <div className="sub attn">{t("theme.font.url.bad")}</div>}
-      </div>
+      <SetGroup title={t("theme.font")} help={t("theme.font.lead")} data-setting="appearance.font">
+        {FONT_ROLES.map((role) => {
+          const family = familyOf(prefs, role);
+          const address = urlOf(prefs, role);
+          return (
+            <Row key={role} title={t(`theme.font.${role}`)} desc={badAddress === role ? <span className="attn">{t("theme.font.url.bad")}</span> : address || undefined} data-font-role={role}>
+              <Combobox<FaceChoice>
+                className="set-face"
+                label={t(`theme.font.${role}`)}
+                placeholder={t("theme.font.search")}
+                items={choices(role)}
+                value={null}
+                query={typed[role] ?? (family || t("theme.font.system"))}
+                onQuery={(query) => setTyped((now) => ({ ...now, [role]: query }))}
+                onChoose={(choice) => choose(role, choice)}
+                toLabel={faceLabel}
+                render={(choice) => (
+                  <>
+                    <span style={choice.kind === "face" && choice.local ? { fontFamily: `"${choice.family}"` } : undefined}>{faceLabel(choice)}</span>
+                    {choice.kind === "face" && choice.local && <span className="sub"> · {t("theme.font.builtin")}</span>}
+                  </>
+                )}
+              />
+            </Row>
+          );
+        })}
+        <SetBlock className="set-specimen">
+          {FONT_ROLES.map((role) => (
+            <p key={role} data-role={role}>
+              <span className="set-specimen-role">{t(`theme.font.${role}`)}</span>
+              <span style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : role === "code" ? "var(--mono)" : undefined }}>{t("theme.font.sample")}</span>
+            </p>
+          ))}
+        </SetBlock>
+      </SetGroup>
 
-      <div className="section-title">{t("theme.size")}</div>
-      <p className="sub">{t("theme.size.lead")}</p>
-      <div className="card">
+      <SetGroup title={t("theme.size")} help={t("theme.size.lead")}>
         <Row title={t("theme.size.step")} data-setting="appearance.scale"><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
-        <Row title={t("theme.prose")} desc={t("theme.prose.sub")} stack data-setting="appearance.prose"><ProseStepper prefs={prefs} update={update} /></Row>
+        <Row title={t("theme.prose")} desc={t("theme.prose.sub")} data-setting="appearance.prose"><ProseStepper prefs={prefs} update={update} /></Row>
+        <SetBlock className="set-specimen"><p style={{ fontSize: `${prefs.prose ?? Math.round(usualProse(prefs.scale, window.matchMedia?.("(max-width: 1023px)")?.matches ?? false))}px` }}>{t("theme.prose.preview")}</p></SetBlock>
         <Row title={t("theme.leading")} data-setting="appearance.leading"><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
         <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
-      </div>
+      </SetGroup>
 
-      <div className="section-title">{t("theme.layout")}</div>
-      <div className="card">
+      <SetGroup title={t("theme.layout")}>
         <Row title={t("theme.radius")} data-setting="appearance.radius"><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></Row>
         <Row title={t("theme.motion")} data-setting="appearance.motion"><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
         <Row title={t("theme.replies")} desc={t("theme.replies.sub")} data-setting="appearance.replies"><Segmented label={t("theme.replies")} value={prefs.replies} onChange={(replies) => update({ replies })} options={([{ id: "split" as const, label: t("theme.replies.split") }, { id: "merged" as const, label: t("theme.replies.merged") }])} /></Row>
         <Row title={t("theme.bubble")} data-setting="appearance.bubble"><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
-      </div>
+      </SetGroup>
     </>
   );
 
@@ -142,21 +166,23 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
     <>
       {/* The language and the companion live here, not in the More launcher: they are settings of this
           browser like the theme, and a menu of places had grown two switches nobody looked for there. */}
-      <div className="section-title">{t("settings.group.langtheme")}</div>
-      <div className="card">
-        <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language"><LangPicker /></Row>
-      </div>
-      <p className="sub">{t("theme.lead")}</p>
-      <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
-        {THEMES.map((item) => (
-          <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
-            {/* The page with the frame along its left edge: Dark and Soot differ more in the frame than in the page. */}
-            <span className="settings-swatch" style={{ background: item.wash, boxShadow: `inset 0 0 0 1px var(--line), inset 18px 0 0 ${item.side}` }} />
-            <span>{t(`theme.${item.id}`)}</span>
-          </button>
-        ))}
-      </div>
-      <div className="card">
+      <SetGroup title={t("settings.group.langtheme")}>
+        <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language">
+          <Segmented label={t("lang.pick")} value={lang} onChange={pickLang} options={LANGS.map((id) => ({ id, label: id.toUpperCase() }))} />
+        </Row>
+      </SetGroup>
+      <SetGroup title={t("theme.themes")} help={t("theme.lead")} data-setting="appearance.theme">
+        <SetBlock>
+          <div className="settings-themes" role="listbox" aria-label={t("settings.sec.appearance")}>
+            {THEMES.map((item) => (
+              <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
+                {/* The page with the frame along its left edge: Dark and Soot differ more in the frame than in the page. */}
+                <span className="settings-swatch" style={{ background: item.wash, boxShadow: `inset 0 0 0 1px var(--line), inset 18px 0 0 ${item.side}` }} />
+                <span>{t(`theme.${item.id}`)}</span>
+              </button>
+            ))}
+          </div>
+        </SetBlock>
         <Row title={t("theme.follow")} data-setting="appearance.follow" desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
           <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
         </Row>
@@ -170,11 +196,9 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
             </Row>
           </>
         )}
-      </div>
+      </SetGroup>
 
-      <div className="section-title">{t("theme.colors")}</div>
-      <p className="sub">{t("theme.colors.lead")}</p>
-      <div className="card" data-setting="appearance.colors">
+      <SetGroup title={t("theme.colors")} help={t("theme.colors.lead")} data-setting="appearance.colors">
         {COLOR_KEYS.map((key) => {
           const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : resolved.fg2;
           const value = color(key, fallback);
@@ -190,27 +214,22 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
         <Row title={t("theme.wash")} desc={t("theme.wash.sub")} data-setting="appearance.wash">
           <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
         </Row>
-        <div className="btnrow">
-          <button type="button" className="btn small" onClick={() => replace(resetColors())}>{t("theme.reset")}</button>
-        </div>
-      </div>
+        <SetFoot>
+          <Button size="sm" onClick={() => replace(resetColors())}>{t("theme.reset")}</Button>
+        </SetFoot>
+      </SetGroup>
 
-      <div className="section-title">{t("theme.more")}</div>
-      <div className="card">
+      <SetGroup title={t("theme.more")}>
         <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")} data-setting="appearance.contrast"><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
         <Row title={t("theme.code")} desc={t("theme.code.sub")} data-setting="appearance.code"><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
-      </div>
+      </SetGroup>
 
-      <div className="section-title">{t("settings.group.companion")}</div>
-      <div className="card">
+      <SetGroup title={t("settings.group.companion")}>
         <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
         {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
-          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
-            <option value="">{t("pet.model.off")}</option>
-            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
-          </select>
+          <Select label={t("pet.model")} value={petModel} onChange={setPetModel} options={[{ id: "", label: t("pet.model.off") }, ...Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => ({ id, label: preset.label || `${preset.provider}/${preset.model}` }))]} />
         </Row>}
-      </div>
+      </SetGroup>
     </>
   );
 }

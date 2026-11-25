@@ -1,10 +1,10 @@
 // The resolver that places every destination. The first claim is the one a fresh installation rests
-// on: with nothing configured the sidebar's pinned rows, the menu and the drawer are exactly the
+// on: with nothing configured the sidebar's pinned rows and the menu are exactly the
 // lists the app ships, written out here rather than imported so a change to the defaults is a change to this
 // file too.
 
 import { describe, expect, it } from "vitest";
-import { type NavConfig, type PageInfo, catalogue, desktopLayout, drawerLayout, iconPath, launcherLayout, moveItem, pagePath, resolveNav } from "./navconfig";
+import { type NavConfig, type PageInfo, catalogue, desktopLayout, iconPath, launcherLayout, moveItem, pagePath, resolveNav } from "./navconfig";
 
 const ids = (items: { id: string }[]) => items.map((it) => it.id);
 const DOSING: PageInfo = { slug: "dosing", title: { en: "Dosing", ru: "Дозировка" }, icon: null, icon_path: "M4 12h16M12 4v16", path: "/app/p/dosing", version: 3, updated_at: "2026-10-11T08:00:00Z" };
@@ -25,14 +25,8 @@ describe("with nothing configured", () => {
     ]);
   });
 
-  it("gives each mode its own phone drawer and one More sheet", () => {
-    expect(ids(nav.drawer.agents)).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
-    expect(ids(nav.drawer.orchestration)).toEqual(["inbox", "terminals", "usage"]);
-    expect(ids(nav.phoneMore)).toEqual(["calendar", "canvas", "changes", "schedules", "services", "memory", "harnesses", "health"]);
-  });
-
   it("is the same answer for an empty section as for a missing one", () => {
-    expect(resolveNav({ config: { pinned: [], more: [], drawer: [], hidden: [], icons: {} }, selfdev: "server" })).toEqual(nav);
+    expect(resolveNav({ config: { pinned: [], more: [], hidden: [], icons: {} }, selfdev: "server" })).toEqual(nav);
   });
 
   it("names every item and links it to its screen", () => {
@@ -45,7 +39,6 @@ describe("what the installation has", () => {
   it("leaves Changes out where the agent cannot change its own code", () => {
     const nav = resolveNav({ selfdev: "off" });
     expect(ids(nav.pinned)).not.toContain("changes");
-    expect(ids(nav.phoneMore)).not.toContain("changes");
     expect(nav.catalogue.some((it) => it.id === "changes")).toBe(false);
   });
 
@@ -72,8 +65,8 @@ describe("the operator's layout", () => {
   });
 
   it("hides an item everywhere, over every other list", () => {
-    const nav = resolveNav({ config: { pinned: ["companion"], drawer: ["companion", "inbox"], hidden: ["companion", "usage"] }, selfdev: "server" });
-    for (const list of [nav.pinned, nav.more.flatMap((g) => g.items), nav.drawer.agents, nav.drawer.orchestration, nav.phoneMore, nav.shown]) {
+    const nav = resolveNav({ config: { pinned: ["companion"], hidden: ["companion", "usage"] }, selfdev: "server" });
+    for (const list of [nav.pinned, nav.more.flatMap((g) => g.items), nav.shown]) {
       expect(ids(list)).not.toContain("companion");
       expect(ids(list)).not.toContain("usage");
     }
@@ -81,17 +74,9 @@ describe("the operator's layout", () => {
   });
 
   it("ignores ids it does not know", () => {
-    const nav = resolveNav({ config: { pinned: ["page:gone", "nonsense", "inbox"], drawer: ["page:gone", "board"], hidden: ["ghost"], icons: { ghost: "bolt", inbox: "not-an-icon" } }, selfdev: "server" });
+    const nav = resolveNav({ config: { pinned: ["page:gone", "nonsense", "inbox"], hidden: ["ghost"], icons: { ghost: "bolt", inbox: "not-an-icon" } }, selfdev: "server" });
     expect(ids(nav.pinned)[0]).toBe("inbox");
-    expect(ids(nav.drawer.agents)).toEqual(["board"]);
     expect(nav.pinned[0].icon).toBe("inbox");
-  });
-
-  it("takes a set drawer as the whole drawer, for both modes, and sends the rest to More", () => {
-    const nav = resolveNav({ config: { drawer: ["board", "inbox"] }, selfdev: "server" });
-    expect(ids(nav.drawer.agents)).toEqual(["board", "inbox"]);
-    expect(ids(nav.drawer.orchestration)).toEqual(["board", "inbox"]);
-    expect(ids(nav.phoneMore)).toEqual(["companion", "calendar", "canvas", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
   });
 
   it("draws an icon chosen in place of the item's own", () => {
@@ -101,19 +86,16 @@ describe("the operator's layout", () => {
 });
 
 describe("pages", () => {
-  it("join the menu under their own heading and the phone's More, and stay unpinned until placed", () => {
+  it("join the menu under their own heading, and stay unpinned until placed", () => {
     const nav = resolveNav({ pages: [DOSING], selfdev: "server" });
     const page = nav.more.find((g) => g.key === "pages")!.items[0];
     expect(page).toMatchObject({ id: "page:dosing", kind: "page", screen: null, title: "Dosing", icon: "file", iconPath: "M4 12h16M12 4v16", path: "/app/p/dosing", badge: 0 });
     expect(ids(nav.pinned)).not.toContain("page:dosing");
-    expect(ids(nav.phoneMore).at(-1)).toBe("page:dosing");
-    expect(ids(nav.drawer.agents)).not.toContain("page:dosing");
   });
 
   it("go where they are placed, like any screen", () => {
-    const nav = resolveNav({ config: { pinned: ["page:dosing", "inbox"], drawer: ["inbox", "page:dosing"] }, pages: [DOSING], selfdev: "server" });
+    const nav = resolveNav({ config: { pinned: ["page:dosing", "inbox"] }, pages: [DOSING], selfdev: "server" });
     expect(ids(nav.pinned).slice(0, 2)).toEqual(["page:dosing", "inbox"]);
-    expect(ids(nav.drawer.agents)).toEqual(["inbox", "page:dosing"]);
     expect(nav.more.find((g) => g.key === "pages")).toBeUndefined();
   });
 
@@ -158,7 +140,6 @@ describe("what Settings writes", () => {
       more: [],
       hidden: ["companion", "page:gone"],
     });
-    expect(drawerLayout({ drawer: ["page:away", "inbox"] }, ["board"], known)).toEqual(["board", "page:away"]);
   });
 
   it("moves one item and closes the gap", () => {
@@ -180,10 +161,6 @@ describe("the More launcher", () => {
 
   it("offers what the surface does not show while Frequent has learned nothing", () => {
     expect(launcherLayout(nav, nav.pinned).fallback).toEqual(["companion", "canvas", "harnesses", "schedules", "services", "memory", "usage", "page:dosing"]);
-    const phone = launcherLayout(nav, nav.drawer.agents);
-    expect([...phone.placed]).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
-    expect(phone.fallback).not.toContain("inbox");
-    expect(phone.fallback).not.toContain("health");
-    expect(phone.fallback.slice(0, 3)).toEqual(["canvas", "harnesses", "schedules"]);
+    expect(launcherLayout(nav, nav.pinned).fallback).not.toContain("inbox");
   });
 });

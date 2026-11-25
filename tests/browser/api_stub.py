@@ -686,7 +686,20 @@ GATES: dict[str, object] = {
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "ruBERT mini FRIDA", "size_bytes": 131205411, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
-    "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    "/api/providers/free-catalog": {
+        "providers": [
+            {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key_url": "https://openrouter.ai/settings/keys", "key_required": True, "fresh": True,
+             "models": [
+                 {"id": "vendor/free-chat:free", "name": "Free Chat", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": True},
+                 {"id": "vendor/free-code:free", "name": "Free Code", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": False, "agent_ready": False, "may_train": False},
+                 {"id": "vendor/promo", "name": "Promo", "provider": "openrouter", "mechanism": "unverified_promotion", "tools_reported": True, "agent_ready": False, "may_train": False},
+             ]},
+            {"id": "kilo", "name": "Kilo Gateway", "base_url": "https://api.kilo.ai/api/gateway", "key_url": "https://kilo.ai", "key_required": False, "fresh": True,
+             "models": [{"id": "kilo/free", "name": "Kilo Free", "provider": "kilo", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": False}]},
+        ],
+        "updated_at": 1790000000,
+        "stale": False,
+    },
     # Settings → Models → Providers and Settings → Tools → Search keys read what the key proxy holds.
     # check_keyproxy.py keeps a proxy of its own that stores what is written.
     "/api/keyproxy": KEYPROXY_VIEW,
@@ -694,9 +707,9 @@ GATES: dict[str, object] = {
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
     # The subscriptions' accounts on the same tab; check_accounts.py adds and removes one of its own.
     "/api/subscription-accounts": SUBSCRIPTION_ACCOUNTS,
-    # Where the sidebar's pinned rows, its More launcher and the phone drawer put each destination: nothing configured, the
+    # Where the sidebar's pinned rows and its More launcher put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
-    "/api/navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "/api/navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # The pages the agent published: one, so the menus show where a page goes until it is placed.
     "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.
@@ -1305,6 +1318,7 @@ class FakeSecrets:
         self.chat = "sess-1"
         self.project: dict | None = None
         self.projects: list[dict] = []
+        self.logins: list[dict] = []
 
     def seed(self, name: str, *, scope: str = "session", scope_id: str = "", scope_title: str = "", note: str = "",
              value: str = FAKE_SECRET_VALUE, used: str | None = None, uses: int = 0, by: str = "") -> dict:
@@ -1326,7 +1340,7 @@ class FakeSecrets:
             if session_id:
                 return 200, {"secrets": [r for r in self.items if self._here(r)], "others": [r for r in self.items if not self._here(r)],
                              "project_id": self.project["id"] if self.project else None, "project_name": self.project["name"] if self.project else None}
-            return 200, {"secrets": self.items, "logins": [], "projects": self.projects}
+            return 200, {"secrets": self.items, "logins": self.logins, "projects": self.projects}
         if path == "/api/secrets" and method == "POST":
             scope = str(data.get("scope") or "session")
             scope_id = str(data.get("project_id") or (self.project["id"] if scope == "project" and self.project else data.get("session_id") or self.chat))

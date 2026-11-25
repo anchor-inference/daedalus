@@ -75,7 +75,10 @@ def main() -> None:
         assert page.locator(".pet-host").count() == 1
         page.goto(base + "/settings/appearance?token=t&scheme=dark&lang=en")
         page.wait_for_selector(".settings-themes", timeout=15000)
-        page.get_by_label("Reaction model").select_option("deepseek-flash")
+        # The companion floats over this corner of the page, so the list is opened from the keyboard.
+        page.get_by_label("Reaction model").focus()
+        page.keyboard.press("Enter")
+        page.locator('.dropdown-item[data-value="deepseek-flash"]').click()
         page.locator(".pet-figure").click(button="right")
         page.get_by_role("button", name="Generate a line").click()
         page.locator(".pet-bubble").get_by_text("I'm here.").wait_for()

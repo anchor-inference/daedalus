@@ -8,7 +8,9 @@ import { t } from "./i18n";
 import { Icon } from "./icons";
 import { errorText } from "./ui";
 import { Sheet, toast } from "./ui/dialogs";
-import { Select, Segmented, timeAgo, useCopied } from "./ui/components";
+import { timeAgo, useCopied } from "./ui/components";
+import { Button, Field, IconButton, Segmented, Select, confirmDialog } from "./ui/primitives";
+import { Row, SetBlock, SetGroup } from "./settingsrow";
 
 export type SecretScope = "session" | "project";
 
@@ -76,16 +78,19 @@ export function matchesSecret(secret: SecretView, query: string): boolean {
 }
 
 /** The masked value field with its eye: a textarea, because a certificate or a key has several lines. */
-function ValueField({ id, value, onChange, placeholder }: { id: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+function ValueField({ id, label, value, onChange, placeholder }: { id: string; label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
   const [shown, setShown] = useState(false);
   return (
-    <div className="secret-value-row">
-      <textarea id={id} className={`field secret-value ${shown ? "shown" : ""}`} value={value} onChange={(e) => onChange(e.target.value)} rows={2} placeholder={placeholder}
-        autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore="" data-lpignore="true" />
-      <button type="button" className="iconbtn flat secret-eye" onClick={() => setShown((s) => !s)} aria-pressed={shown}
-        aria-label={t(shown ? "secret.value.hide" : "secret.value.show")} title={t(shown ? "secret.value.hide" : "secret.value.show")}>
-        <Icon name={shown ? "eyeoff" : "eye"} size={16} />
-      </button>
+    <div className="field-box">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <div className="secret-value-row">
+        <textarea id={id} className={`field secret-value ${shown ? "shown" : ""}`} value={value} onChange={(e) => onChange(e.target.value)} rows={2} placeholder={placeholder}
+          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore="" data-lpignore="true" />
+        <button type="button" className="iconbtn flat secret-eye" onClick={() => setShown((s) => !s)} aria-pressed={shown}
+          aria-label={t(shown ? "secret.value.hide" : "secret.value.show")} title={t(shown ? "secret.value.hide" : "secret.value.show")}>
+          <Icon name={shown ? "eyeoff" : "eye"} size={16} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -138,38 +143,36 @@ function AddForm({ sessionId, phone, project, projects, onKept, onCancel, attach
   ];
   return (
     <div className="secret-form secret-add" data-secret-add="">
-      <label className="field" htmlFor="secret-name">{t("secret.name")}</label>
-      <input id="secret-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="router_admin"
-        autoComplete="off" autoCapitalize="none" spellCheck={false} data-1p-ignore="" data-lpignore="true" maxLength={64} />
-      {name.trim() && <div className={`sub secret-hint ${okName ? "" : "bad"}`}>{okName ? t("secret.name.as", { placeholder: placeholderOf(secretName(name)) }) : t("secret.name.bad")}</div>}
-      <label className="field" htmlFor="secret-value">{t("secret.value")}</label>
-      <ValueField id="secret-value" value={value} onChange={setValue} />
-      <label className="field" htmlFor="secret-note">{t("secret.note")}</label>
-      <input id="secret-note" className="field" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("secret.note.placeholder")} maxLength={500} />
+      <Field id="secret-name" label={t("secret.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder="router_admin"
+        autoComplete="off" autoCapitalize="none" spellCheck={false} data-1p-ignore="" data-lpignore="true" maxLength={64}
+        hint={name.trim() && okName ? t("secret.name.as", { placeholder: placeholderOf(secretName(name)) }) : undefined}
+        error={name.trim() && !okName ? t("secret.name.bad") : undefined} />
+      <ValueField id="secret-value" label={t("secret.value")} value={value} onChange={setValue} />
+      <Field id="secret-note" label={t("secret.note")} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("secret.note.placeholder")} maxLength={500} />
       {sessionId && scopes.length > 1 && (
-        <>
-          <div className="secret-heading">{t("secret.scope")}</div>
+        <div className="field-box">
+          <div className="field-label">{t("secret.scope")}</div>
           {phone
             ? <Segmented value={scope} options={scopes} onChange={setScope} label={t("secret.scope")} className="ph-seg" />
             : <Segmented value={scope} options={scopes} onChange={setScope} label={t("secret.scope")} />}
-          {scope === "project" && <div className="sub secret-hint">{t("secret.scope.project.hint", { project: project || "" })}</div>}
-        </>
+          {scope === "project" && <div className="sub field-hint">{t("secret.scope.project.hint", { project: project || "" })}</div>}
+        </div>
       )}
       {!sessionId && (
         projects.length > 0
           ? (
-            <>
-              <div className="secret-heading">{t("secret.scope.pick")}</div>
+            <div className="field-box">
+              <label className="field-label" htmlFor="secret-project">{t("secret.scope.pick")}</label>
               <Select value={projectId} options={projects.map((p) => ({ id: p.id, label: p.name }))} onChange={setProjectId} label={t("secret.scope.pick")} id="secret-project" />
-              <div className="sub secret-hint">{t("secret.scope.settings.hint")}</div>
-            </>
+              <div className="sub field-hint">{t("secret.scope.settings.hint")}</div>
+            </div>
           )
-          : <div className="sub secret-hint">{t("secret.scope.noproject")}</div>
+          : <div className="sub field-hint">{t("secret.scope.noproject")}</div>
       )}
-      {problem && <div className="sub secret-hint bad" role="alert">{problem}</div>}
+      {problem && <div className="field-error" role="alert">{problem}</div>}
       <div className="secret-form-actions">
-        {onCancel && <button type="button" className="btn ghost" onClick={onCancel}>{t("common.cancel")}</button>}
-        <button type="button" className="btn primary" disabled={!ready} onClick={() => void keep()}>{t(attaching ? "secret.attach" : "secret.save")}</button>
+        {onCancel && <Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>}
+        <Button variant="primary" disabled={!ready} onClick={() => void keep()}>{t(attaching ? "secret.attach" : "secret.save")}</Button>
       </div>
     </div>
   );
@@ -208,19 +211,16 @@ function EditForm({ secret, onSaved, onCancel }: { secret: SecretView; onSaved: 
   const base = `secret-edit-${secret.id}`;
   return (
     <div className="secret-form secret-edit" data-secret-edit={secret.name}>
-      <label className="field" htmlFor={`${base}-name`}>{t("secret.name")}</label>
-      <input id={`${base}-name`} className="field" value={name} onChange={(e) => setName(e.target.value)}
-        autoComplete="off" autoCapitalize="none" spellCheck={false} data-1p-ignore="" data-lpignore="true" maxLength={64} />
-      {!okName && <div className="sub secret-hint bad">{t("secret.name.bad")}</div>}
-      {okName && secretName(name) !== secret.name && <div className="sub secret-hint">{t("secret.rename.hint", { placeholder: placeholderOf(secretName(name)) })}</div>}
-      <label className="field" htmlFor={`${base}-value`}>{t("secret.value.new")}</label>
-      <ValueField id={`${base}-value`} value={value} onChange={setValue} placeholder={t("secret.value.keep")} />
-      <label className="field" htmlFor={`${base}-note`}>{t("secret.note")}</label>
-      <input id={`${base}-note`} className="field" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("secret.note.placeholder")} maxLength={500} />
-      {problem && <div className="sub secret-hint bad" role="alert">{problem}</div>}
+      <Field id={`${base}-name`} label={t("secret.name")} value={name} onChange={(e) => setName(e.target.value)}
+        autoComplete="off" autoCapitalize="none" spellCheck={false} data-1p-ignore="" data-lpignore="true" maxLength={64}
+        hint={okName && secretName(name) !== secret.name ? t("secret.rename.hint", { placeholder: placeholderOf(secretName(name)) }) : undefined}
+        error={!okName ? t("secret.name.bad") : undefined} />
+      <ValueField id={`${base}-value`} label={t("secret.value.new")} value={value} onChange={setValue} placeholder={t("secret.value.keep")} />
+      <Field id={`${base}-note`} label={t("secret.note")} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("secret.note.placeholder")} maxLength={500} />
+      {problem && <div className="field-error" role="alert">{problem}</div>}
       <div className="secret-form-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>{t("common.cancel")}</button>
-        <button type="button" className="btn primary" disabled={!ready} onClick={() => void save()}>{t("secret.save")}</button>
+        <Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={!ready} onClick={() => void save()}>{t("secret.save")}</Button>
       </div>
     </div>
   );
@@ -230,9 +230,11 @@ function scopeLabel(secret: SecretView): string {
   return t(secret.scope === "project" ? "secret.list.project" : "secret.list.session", { title: secret.scope_title || secret.scope_id });
 }
 
-/** One secret: its name and where it belongs, the note, the value as dots (or, for half a minute after the
- *  eye, as itself), when it changed and was used, and what can be done with it. */
-function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, copied, onEdit, onRemove, confirming, onConfirm, onCancelConfirm, editing, onSaved, onCancelEdit }: {
+/** One secret as a row of the card it is listed in: its name, where it belongs and what it says, when it
+ *  changed and was used; at the right the value as dots and what can be done with it. A revealed value
+ *  takes the line under the row, for half a minute: a certificate has several lines and would not fit
+ *  the lane. */
+function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, copied, onEdit, onRemove, editing, onSaved, onCancelEdit }: {
   secret: SecretView;
   attach?: () => void;
   attached: boolean;
@@ -242,70 +244,46 @@ function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, copie
   copied: boolean;
   onEdit: () => void;
   onRemove: () => void;
-  confirming: Usage | "loading" | null;
-  onConfirm: () => void;
-  onCancelConfirm: () => void;
   editing: boolean;
   onSaved: (secret: SecretView) => void;
   onCancelEdit: () => void;
 }) {
-  if (editing) return <div className="secret-row editing" data-secret={secret.name}><EditForm secret={secret} onSaved={onSaved} onCancel={onCancelEdit} /></div>;
+  if (editing) return <SetBlock className="secret-row editing" data-secret={secret.name}><EditForm secret={secret} onSaved={onSaved} onCancel={onCancelEdit} /></SetBlock>;
   const shown = revealed !== undefined;
   const used = secret.last_used_at
     ? t("secret.row.used", { t: timeAgo(secret.last_used_at), n: String(secret.uses), by: secret.last_used_by })
     : t("secret.list.unused");
   return (
     <div className="secret-row" data-secret={secret.name} data-scope={secret.scope}>
-      <div className="secret-row-head">
-        <Icon name="lock" size={14} />
-        <span className="secret-row-name">{secret.name}</span>
-        <span className="secret-row-scope" title={scopeLabel(secret)}>{scopeLabel(secret)}</span>
+      <Row
+        title={<span className="secret-row-name">{secret.name}</span>}
+        desc={
+          <>
+            <span className="secret-row-scope" title={scopeLabel(secret)}>{scopeLabel(secret)}</span>
+            {secret.note && <> · <span className="secret-row-note">{secret.note}</span></>}
+            <span className="secret-row-meta">{t("secret.row.updated", { t: timeAgo(secret.updated_at) })} · {used}</span>
+          </>
+        }
+      >
         {attach && (
           attached
             ? <span className="secret-row-attached"><Icon name="check" size={12} />{t("secret.row.attached")}</span>
-            : <button type="button" className="btn small primary secret-row-attach" onClick={attach}>{t("secret.row.attach")}</button>
+            : <Button size="sm" variant="primary" className="secret-row-attach" onClick={attach}>{t("secret.row.attach")}</Button>
         )}
-      </div>
-      {secret.note && <div className="secret-row-note">{secret.note}</div>}
-      <div className="secret-row-value">
-        {secret.readable
-          ? <code className={`secret-row-dots ${shown ? "shown" : ""}`} aria-label={shown ? t("secret.value") : t("secret.row.hidden")}>{shown ? revealed : MASK}</code>
-          : <span className="secret-row-dots bad">{t("secret.list.unreadable")}</span>}
+        {!shown && (secret.readable
+          ? <code className="secret-row-dots" aria-label={t("secret.row.hidden")}>{MASK}</code>
+          : <span className="secret-row-dots bad">{t("secret.list.unreadable")}</span>)}
         <span className="secret-row-tools">
-          <button type="button" className={`iconbtn flat secret-reveal ${shown ? "on" : ""}`} onClick={onReveal} disabled={!secret.readable} aria-pressed={shown}
-            aria-label={t(shown ? "secret.value.hide" : "secret.value.show")} title={t(shown ? "secret.value.hide" : "secret.value.show")}>
-            <Icon name={shown ? "eyeoff" : "eye"} size={16} />
-          </button>
-          <button type="button" className="iconbtn flat secret-copy" onClick={onCopy} disabled={!secret.readable} aria-label={t("secret.row.copy")} title={t("secret.row.copy")}>
-            <Icon name={copied ? "check" : "copy"} size={16} />
-          </button>
-          <button type="button" className="iconbtn flat secret-edit-open" onClick={onEdit} aria-label={t("secret.row.edit")} title={t("secret.row.edit")}>
-            <Icon name="pen" size={16} />
-          </button>
-          <button type="button" className="iconbtn flat danger secret-remove" onClick={onRemove} aria-label={t("common.remove")} title={t("common.remove")}>
-            <Icon name="trash" size={16} />
-          </button>
+          <IconButton className="flat secret-reveal" icon={shown ? "eyeoff" : "eye"} label={t(shown ? "secret.value.hide" : "secret.value.show")} pressed={shown} onClick={onReveal} disabled={!secret.readable} />
+          <IconButton className="flat secret-copy" icon={copied ? "check" : "copy"} label={t("secret.row.copy")} onClick={onCopy} disabled={!secret.readable} />
+          <IconButton className="flat secret-edit-open" icon="pen" label={t("secret.row.edit")} onClick={onEdit} />
+          <IconButton className="flat danger secret-remove" icon="trash" label={t("common.remove")} onClick={onRemove} />
         </span>
-      </div>
-      {shown && <div className="secret-timer" aria-hidden="true" key={revealed} />}
-      <div className="secret-row-meta">
-        {t("secret.row.updated", { t: timeAgo(secret.updated_at) })} · {used}
-      </div>
-      {confirming && (
-        <div className="secret-confirm" role="alert">
-          <div className="secret-confirm-text">
-            <b>{t("secret.remove.title", { name: secret.name })}</b>
-            {confirming === "loading"
-              ? <span>{t("common.loading")}</span>
-              : confirming.conversations > 0
-                ? <span className="warn">{t("secret.remove.used", { n: String(confirming.conversations), titles: confirming.titles.map((c) => c.title || c.id).join(", ") })}</span>
-                : null}
-            <span>{t("secret.remove.body")}</span>
-          </div>
-          <div className="secret-form-actions">
-            <button type="button" className="btn ghost small" onClick={onCancelConfirm}>{t("common.cancel")}</button>
-            <button type="button" className="btn small danger secret-remove-yes" onClick={onConfirm} disabled={confirming === "loading"}>{t("common.remove")}</button>
-          </div>
+      </Row>
+      {shown && (
+        <div className="secret-revealed">
+          <code className="secret-row-dots shown" aria-label={t("secret.value")}>{revealed}</code>
+          <div className="secret-timer" aria-hidden="true" key={revealed} />
         </div>
       )}
     </div>
@@ -314,10 +292,12 @@ function SecretRow({ secret, attach, attached, revealed, onReveal, onCopy, copie
 
 /** The secrets manager: a search, "Add secret", and the list. With a chat (`sessionId`) the chat's own and
  *  its project's secrets come first and each can be attached, which is the point of opening it from the
- *  composer; the others follow, folded, to change or remove. Without one (Settings) it is every secret. */
-export function SecretsManager({ sessionId, phone, attached = [], onAttach, onChanged, onFetched }: {
+ *  composer; the others follow, folded, to change or remove. Without one (Settings, drawn as `settings`:
+ *  a group of the page rather than the body of a sheet) it is every secret. */
+export function SecretsManager({ sessionId, phone, settings, attached = [], onAttach, onChanged, onFetched }: {
   sessionId?: string;
   phone: boolean;
+  settings?: boolean;
   attached?: string[];
   onAttach?: (secret: AttachedSecret) => void;
   /** A secret was renamed (its new name) or removed (null): a draft holding it follows. */
@@ -329,7 +309,6 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
   const [adding, setAdding] = useState<boolean | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<{ id: string; usage: Usage | "loading" } | null>(null);
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [othersOpen, setOthersOpen] = useState(!sessionId);
   const hideTimers = useRef(new Map<string, number>());
@@ -402,18 +381,23 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
   }
 
   async function askRemove(secret: SecretView) {
-    setConfirming({ id: secret.id, usage: "loading" });
-    try {
-      const usage = await api.get<Usage>(`/api/secrets/${secret.id}/usage`);
-      setConfirming((cur) => (cur?.id === secret.id ? { id: secret.id, usage } : cur));
-    } catch {
-      // Not knowing where it is named is no reason to refuse removing it; the warning is a courtesy.
-      setConfirming((cur) => (cur?.id === secret.id ? { id: secret.id, usage: { conversations: 0, titles: [] } } : cur));
-    }
+    // Not knowing where it is named is no reason to refuse removing it; the warning is a courtesy.
+    const usage = await api.get<Usage>(`/api/secrets/${secret.id}/usage`).catch((): Usage => ({ conversations: 0, titles: [] }));
+    const sure = await confirmDialog({
+      title: t("secret.remove.title", { name: secret.name }),
+      body: (
+        <>
+          {usage.conversations > 0 && <p className="secret-warn">{t("secret.remove.used", { n: String(usage.conversations), titles: usage.titles.map((c) => c.title || c.id).join(", ") })}</p>}
+          {t("secret.remove.body")}
+        </>
+      ),
+      action: t("common.remove"),
+      danger: true,
+    });
+    if (sure) remove(secret);
   }
 
   function remove(secret: SecretView) {
-    setConfirming(null);
     hide(secret.id);
     setGone((all) => new Set(all).add(secret.id));
     onChanged?.(secret.id, null);
@@ -470,44 +454,57 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
       onReveal={() => void reveal(secret)}
       onCopy={() => void copy(secret)}
       copied={copied === secret.id}
-      onEdit={() => { setConfirming(null); setEditing(secret.id); }}
+      onEdit={() => setEditing(secret.id)}
       onRemove={() => void askRemove(secret)}
-      confirming={confirming?.id === secret.id ? confirming.usage : null}
-      onConfirm={() => remove(secret)}
-      onCancelConfirm={() => setConfirming(null)}
       editing={editing === secret.id}
       onSaved={(next) => saved(next, secret)}
       onCancelEdit={() => setEditing(null)}
     />
   );
 
+  const adder = !adding && (
+    <Button size={settings ? "sm" : "md"} icon="plus" className="secrets-add-open" onClick={() => { setEditing(null); setAdding(true); }}>{t("secret.add")}</Button>
+  );
+  const search = total > 0 && (
+    <label className="secrets-search">
+      <Icon name="search" size={14} />
+      <input type="search" className="field" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("secret.search")} aria-label={t("secret.search")} />
+    </label>
+  );
+  const empty = list !== null && total === 0 && !adding && t(sessionId ? "secret.list.none.chat" : "secret.list.none");
+  const noMatch = list !== null && total > 0 && ownShown.length + othersShown.length === 0 && t("secret.search.none");
+
+  if (settings) {
+    return (
+      <SetGroup title={t("secret.list.title")} help={t("secret.list.sub")} action={adder} className="secrets-card" data-setting="security.secrets">
+        {adding && <SetBlock><AddForm sessionId={sessionId} phone={phone} project={project} projects={list?.projects ?? []} attaching={false} onKept={kept} onCancel={() => setAdding(false)} /></SetBlock>}
+        {search && <SetBlock className="secrets-toolbar">{search}</SetBlock>}
+        {list === null && <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>}
+        {empty && <SetBlock><span className="set-hint secrets-none">{empty}</span></SetBlock>}
+        {noMatch && <SetBlock><span className="set-hint secrets-none">{noMatch}</span></SetBlock>}
+        {ownShown.map((s) => row(s, false))}
+      </SetGroup>
+    );
+  }
+
   return (
     <div className="secrets-manager">
       {sessionId && <p className="sub secret-why">{t("secret.why")}</p>}
       <div className="secrets-toolbar">
-        {total > 0 && (
-          <label className="secrets-search">
-            <Icon name="search" size={14} />
-            <input type="search" className="field" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("secret.search")} aria-label={t("secret.search")} />
-          </label>
-        )}
-        {!adding && (
-          <button type="button" className="btn secrets-add-open" onClick={() => { setEditing(null); setAdding(true); }}>
-            <Icon name="plus" size={14} />{t("secret.add")}
-          </button>
-        )}
+        {search}
+        {adder}
       </div>
       {adding && (
         <AddForm sessionId={sessionId} phone={phone} project={project} projects={list?.projects ?? []} attaching={!!onAttach} onKept={kept}
           onCancel={total > 0 || !sessionId ? () => setAdding(false) : undefined} />
       )}
       {list === null && <div className="empty">{t("common.loading")}</div>}
-      {list !== null && total === 0 && !adding && <div className="sub secrets-none">{t(sessionId ? "secret.list.none.chat" : "secret.list.none")}</div>}
-      {list !== null && total > 0 && ownShown.length + othersShown.length === 0 && <div className="sub secrets-none">{t("secret.search.none")}</div>}
+      {empty && <div className="sub secrets-none">{empty}</div>}
+      {noMatch && <div className="sub secrets-none">{noMatch}</div>}
       {ownShown.length > 0 && (
         <div className="secrets-group">
           {sessionId && <div className="secret-heading">{t("secret.group.here")}</div>}
-          <div className="secrets-list">{ownShown.map((s) => row(s, !!sessionId))}</div>
+          <div className="secrets-list set-card">{ownShown.map((s) => row(s, !!sessionId))}</div>
         </div>
       )}
       {othersShown.length > 0 && (
@@ -515,7 +512,7 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onCh
           <button type="button" className="secret-heading secrets-others-toggle" aria-expanded={othersOpen || !!query.trim()} onClick={() => setOthersOpen((open) => !open)}>
             <Icon name="chevron" size={12} />{t("secret.group.others", { n: String(othersShown.length) })}
           </button>
-          {(othersOpen || !!query.trim()) && <div className="secrets-list">{othersShown.map((s) => row(s, false))}</div>}
+          {(othersOpen || !!query.trim()) && <div className="secrets-list set-card">{othersShown.map((s) => row(s, false))}</div>}
         </div>
       )}
     </div>
@@ -555,11 +552,11 @@ export function SecretChip({ name, scope, onRemove }: { name: string; scope: Sec
 }
 
 /** Settings → Security: the same manager over every secret, and the sign-ins the browser saved. */
-export function SecretsCard({ toast: say, confirm, ago }: { toast: (text: string) => void; confirm: (title: string, body: string) => Promise<boolean>; ago: (iso: string) => string }) {
+export function SecretsCard({ toast: say }: { toast: (text: string) => void }) {
   const [logins, setLogins] = useState<SavedLoginView[]>([]);
   const fetched = useCallback((list: SecretsList) => setLogins(list.logins ?? []), []);
   async function forget(login: SavedLoginView) {
-    if (!(await confirm(t("secret.logins.remove.title", { site: login.site }), t("secret.logins.remove.body")))) return;
+    if (!(await confirmDialog({ title: t("secret.logins.remove.title", { site: login.site }), body: t("secret.logins.remove.body"), action: t("common.remove"), danger: true }))) return;
     try {
       await api.delete(`/api/secrets/logins/${login.id}`);
       setLogins((list) => list.filter((l) => l.id !== login.id));
@@ -568,34 +565,23 @@ export function SecretsCard({ toast: say, confirm, ago }: { toast: (text: string
     }
   }
   return (
-    <div className="card secrets-card" data-setting="security.secrets">
-      <div className="section-title">{t("secret.list.title")}</div>
-      <div className="sub">{t("secret.list.sub")}</div>
-      <SecretsManager phone={false} onFetched={fetched} />
+    <>
+      <SecretsManager phone={false} settings onFetched={fetched} />
       {logins.length > 0 && (
-        <>
-          <div className="section-title">{t("secret.logins.title")}</div>
-          <div className="sub">{t("secret.logins.sub")}</div>
-          <div className="mlist">
-            {logins.map((l) => (
-              <div key={l.id} className="mrow" data-login={l.site}>
-                <div className="mline noradio">
-                  <div className="mmain">
-                    <span className="mtitle"><Icon name="key" size={12} /> {l.name}</span>
-                    <span className="mmeta">
-                      {l.last_used_at ? t("secret.logins.used", { t: ago(l.last_used_at) }) : t("secret.list.unused")}
-                      {!l.readable && <> · {t("secret.list.unreadable")}</>}
-                    </span>
-                  </div>
-                  <div className="mactions">
-                    <button className="btn small" onClick={() => void forget(l)}>{t("common.remove")}</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
+        <SetGroup title={t("secret.logins.title")} help={t("secret.logins.sub")}>
+          {logins.map((l) => (
+            <Row
+              key={l.id}
+              className="secret-login"
+              data-login={l.site}
+              title={l.name}
+              desc={<>{l.last_used_at ? t("secret.logins.used", { t: timeAgo(l.last_used_at) }) : t("secret.list.unused")}{!l.readable && <> · {t("secret.list.unreadable")}</>}</>}
+            >
+              <Button size="sm" onClick={() => void forget(l)}>{t("common.remove")}</Button>
+            </Row>
+          ))}
+        </SetGroup>
       )}
-    </div>
+    </>
   );
 }

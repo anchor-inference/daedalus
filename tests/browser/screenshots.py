@@ -48,6 +48,7 @@ from api_stub import (  # noqa: E402
     HarnessesStub,
     MainStub,
     MemoryStub,
+    PublicAddressStub,
     TeamStub,
     Unhandled,
     agent_usage,
@@ -66,6 +67,7 @@ from api_stub import (  # noqa: E402
     session_tasks,
     session_tool_groups,
     terminal_agent,
+    terminal_load,
     worktree_route,
 )
 from schedule_stub import ScheduleStub  # noqa: E402
@@ -687,7 +689,7 @@ SETTINGS = {
     # Settings → Models: nothing known about any model's health yet, so no mark (check_model_health.py draws them).
     "model_health": {},
     # Settings → Navigation: the layout the app ships with.
-    "navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
@@ -996,6 +998,40 @@ COMPONENTS = {
 # ---- the stub API -------------------------------------------------------------------------
 
 
+# Settings -> Public address is the native application's alone, so the section's own picture is taken as
+# one: the address stub answers while the page is the section's, and every other picture stays a server's.
+PUBLIC_ADDRESS = PublicAddressStub()
+
+_SETTINGS_BROWSER: list = []
+USER_CHROME = {"chrome": "c1", "connected": True, "profile_id": "c1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
+               "transport": "native", "since": "2026-10-20T09:00:00Z", "last_seen": "2026-10-20T09:59:58Z", "groups": 0, "tabs": 2}
+USER_CHROME_CARD = {
+    "configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "chromes": [USER_CHROME]}, "native": True,
+    "launcher": {"connector": {"registered": True}, "extension": {"path": "/data/browser-extension", "ready": True, "version": "0.1.0"}},
+    "launcher_error": "", "devices": [], "server_url": "", "consent": "The agent will work in your own Chrome, signed in as you. Every new site asks you first.",
+}
+
+
+def settings_browser():  # type: ignore[no-untyped-def]
+    """The agent's browser as Settings -> Environments, Browser and Browser safety read it: one running
+    browser, two profiles, and three site notes. Built on first use, since it needs the browser stub's
+    imaging libraries, which no other picture does."""
+    if not _SETTINGS_BROWSER:
+        from browser_stub import BrowserStub
+
+        bs = BrowserStub({})
+        bs.running = [{"env": "container", "id": "b1a2b3c4", "profile": f"project-{P1}", "started_at": ago(minutes=12), "rss_bytes": 318 << 20, "cpu_percent": 3.1, "tabs": 2,
+                       "memory_basis": "cgroup", "groups": [{"id": "g1", "owner": {"kind": "session", "id": S1, "label": "Bakery site"}, "url": "https://shop.example.com/", "title": "Rye flour"}]}]
+        bs.profiles = [
+            {"id": f"project-{P1}", "env": "container", "scope": "project", "project_id": P1, "session_id": None, "staff_id": None, "created_at": ago(days=6), "last_used_at": ago(minutes=2), "size_bytes": 21 << 20, "running": True},
+            {"id": "session-old", "env": "container", "scope": "session", "project_id": None, "session_id": "old", "staff_id": None, "created_at": ago(days=9), "last_used_at": ago(days=8), "size_bytes": 4 << 20, "running": False},
+        ]
+        bs.notes = [
+            {"id": "n1", "project_id": P1, "project": "Bakery", "host": "shop.example.com", "text": "Search answers only to Enter; the magnifier button does nothing.", "status": "proposed", "by": "agent:s1", "proposed_at": 1790600000, "approved_at": 0},
+            {"id": "n2", "project_id": "", "project": "", "host": "docs.example.org", "text": "The API reference is under Guides, not under Docs.", "status": "active", "by": "agent:s2", "proposed_at": 1790500000, "approved_at": 1790500600},
+        ]
+        _SETTINGS_BROWSER.append(bs)
+    return _SETTINGS_BROWSER[0]
 TEAM = _team()
 # The team page is a page of the project's focus mode, whose column also reads the project's board.
 TEAM_BOARD = BoardStub(next(p for p in PROJECTS if p["id"] == P1))
@@ -1005,12 +1041,39 @@ def respond(route, body, *, content_type: str = "application/json", status: int 
     route.fulfill(status=status, content_type=content_type, body=body if isinstance(body, (bytes, str)) else json.dumps(body))
 
 
+def seed_secrets() -> None:
+    """What Settings → Security lists in the pictures: three secrets and a saved sign-in, once per run.
+
+    A store a check has filled already is left as it is."""
+    from api_stub import SECRETS
+
+    if SECRETS.items or SECRETS.logins or getattr(SECRETS, "pictured", False):
+        return
+    SECRETS.pictured = True  # type: ignore[attr-defined]
+    SECRETS.projects = [{"id": "p1", "name": "Home network"}]
+    SECRETS.seed("router_admin", scope_id="s1", scope_title="Router setup", note="ISP router web admin", used=(datetime.now(UTC) - timedelta(hours=5)).isoformat(), uses=3, by="BrowserAct")
+    SECRETS.seed("nas_ssh", scope="project", scope_id="p1", scope_title="Home network", note="NAS admin over SSH")
+    SECRETS.seed("release_token", scope_id="s2", scope_title="Release notes")
+    SECRETS.logins = [{"id": "l1", "site": "router.local", "name": "router.local", "created_at": "2026-10-28T09:00:00Z", "updated_at": "2026-10-28T09:00:00Z",
+                       "last_used_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(), "uses": 4, "readable": True}]
+
+
 def stub(route) -> None:  # type: ignore[no-untyped-def]
     request = route.request
     url = request.url
     path = url.split("?", 1)[0]
     rel = path[path.index("/api/") :]
     params = parse_qs(urlsplit(url).query)
+    if rel == "/api/public-address" and request.method == "GET" and "/settings/address" in request.headers.get("referer", ""):
+        return respond(route, PUBLIC_ADDRESS.view)
+    if "/settings/" in request.headers.get("referer", "") and (rel.startswith("/api/browsers") or rel in ("/api/browser/user", "/api/workloads/load")):
+        if rel == "/api/browser/user":
+            return respond(route, USER_CHROME_CARD)
+        if rel == "/api/workloads/load":
+            from browser_stub import browser_load
+
+            return respond(route, {"terminals": terminal_load(), "browsers": browser_load(running=1), "together": None})
+        return settings_browser().route(route)
     if rel == "/api/pet/react" and request.method == "POST":
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
@@ -1172,6 +1235,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"user_id": 1, "via": "token"})
     if rel == "/api/auth/config":
         return respond(route, {"telegram": None, "pairing": True, "second_factor": bool(getattr(stub, "second_factor", False))})
+    if rel == "/api/secrets" or rel.startswith("/api/secrets/"):
+        seed_secrets()
     if rel == "/api/auth/totp":
         # On, with two recovery codes spent: the state the Security picture is of.
         return respond(route, {"enabled": True, "enrolling": False, "recovery_left": 8, "enabled_at": "2026-10-01T09:30:00+00:00"})
@@ -1650,10 +1715,10 @@ def scroll_to_accounts(page: Page) -> None:
 def scroll_to_voices(page: Page) -> None:
     """The settings body scrolls inside itself, so a full-page shot would still show only the top of it.
 
-    The synthesis picker is the last card in the Voice section; bringing it into view is what makes
-    the picture about the voices rather than about the recogniser above them.
+    The voice catalogue is the second group of the Voice section; bringing its rows into view is what
+    makes the picture about the voices rather than about the companion above them.
     """
-    page.locator(".stt-list").last.scroll_into_view_if_needed()
+    page.locator(".cat-row").last.scroll_into_view_if_needed()
     page.wait_for_timeout(400)
 
 
@@ -2670,7 +2735,7 @@ def run() -> int:
         shot(page, "projects", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_projects)
         shot(page, "new-project", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_new_project, settle=600)
         shot(page, "voice", "companion")
-        shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
+        shot(page, "voice-settings", "settings/voice", wait=".cat-row", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
         shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "cron", "schedules")
@@ -2681,7 +2746,7 @@ def run() -> int:
         # Settings is a popup over the screen it was opened from, on its first section; it has no
         # `.screen` of its own to wait for.
         shot(page, "settings", "settings", wait=".settings-page")
-        shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
+        shot(page, "components", "settings/components", wait=".comp-item .comp-row", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)

@@ -9,7 +9,8 @@ import { t } from "./i18n";
 import { Icon } from "./icons";
 import { Sheet } from "./ui/dialogs";
 import { relTimeLong } from "./format";
-import { Row } from "./settingsrow";
+import { Row, SetGroup } from "./settingsrow";
+import { Button } from "./ui/primitives";
 import { checkLauncher, closeUpdate, downloadFraction, downloadProgress, failureText, openUpdate, releaseVersion, startDownload, startInstall, updateStage, useUpdates } from "./updates";
 
 export function UpdateHost() {
@@ -118,7 +119,8 @@ export function DesktopAppCard({ toast }: { toast: (text: string) => void }) {
       toast(failureText(e));
     }
   };
-  const value = (text: string) => <span className="settings-value mono" data-app-version>{text}</span>;
+  // A version number is the one thing here that is code; "not connected" is a sentence.
+  const value = (text: string, code: boolean) => <span className={`settings-value ${code ? "mono" : ""}`} data-app-version>{text}</span>;
   let status = "";
   if (state?.connected) {
     if (state.error) status = t("update.status.error", { error: state.error });
@@ -128,17 +130,16 @@ export function DesktopAppCard({ toast }: { toast: (text: string) => void }) {
     if (state.checked_at) status = `${status} · ${t("update.status.checked", { when: relTimeLong(state.checked_at) })}`;
   }
   return (
-    <div className="card" data-desktop-app data-setting="desktop.updates">
-      <div className="section-title">{t("update.card")}</div>
-      <Row title={t("update.version")}>{value(state?.connected ? state.version || "—" : t("update.notconnected"))}</Row>
+    <SetGroup title={t("update.card")} data-desktop-app="" data-setting="desktop.updates">
+      <Row title={t("update.version")}>{state?.connected ? value(state.version || "—", true) : value(t("update.notconnected"), false)}</Row>
       {state?.connected && (
         <Row title={t("update.updates")} desc={<span data-update-status>{status}</span>}>
           <span className="update-row-actions">
-            <button className="btn small" disabled={checking} onClick={() => void check()} data-update-check>{t(checking ? "update.checking" : "update.check")}</button>
-            {state.upgrade && <button className="btn small primary" onClick={openUpdate} data-update-open>{t("update.open")}</button>}
+            <Button size="sm" disabled={checking} onClick={() => void check()} data-update-check="">{t(checking ? "update.checking" : "update.check")}</Button>
+            {state.upgrade && <Button size="sm" variant="primary" onClick={openUpdate} data-update-open="">{t("update.open")}</Button>}
           </span>
         </Row>
       )}
-    </div>
+    </SetGroup>
   );
 }

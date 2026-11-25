@@ -80,7 +80,7 @@ def walk_to_providers(page, lang: str) -> None:  # type: ignore[no-untyped-def]
 
 
 def ticks(page, slug: str):  # type: ignore[no-untyped-def]
-    return page.locator(f".orp-row[data-slug='{slug}'] input")
+    return page.locator(f".orp-row[data-slug='{slug}'] [role=switch]")
 
 
 def wizard(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]

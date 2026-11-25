@@ -1,12 +1,12 @@
 ---
 name: daedalus-pages
-description: Build the operator's own screens inside the Daedalus app (dashboards, tools, viewers, forms, embedded web apps, anything) with the Page tools, make them native on phone and desktop, check, publish and put them on the rail.
+description: Build the operator's own screens inside the Daedalus app (dashboards, tools, viewers, forms, embedded web apps, anything) with the Page tools, make them native on phone and desktop, check, publish and pin them in the sidebar.
 requires: pages, services
 ---
 # Custom pages
 
 A custom page is a screen of the operator's own inside the Daedalus app, at `/app/p/<slug>`. It can
-sit in the rail and the phone drawer, follows the app's theme, and works on a phone and a desktop.
+sit pinned in the sidebar (a phone's drawer is the same sidebar), follows the app's theme, and works on a phone and a desktop.
 People bring into Daedalus what they would otherwise open in a separate browser tab or app: a view
 of your results, a specialised client for some service, a calculator, a 3D or CAD viewer, a form,
 an existing web app. **There is no limit on what a page contains.** Any framework, any library,
@@ -38,7 +38,7 @@ a page's own agent `PageBind`, `PageEmit`, `PageStorage`.
 6. **Show it**: `PageShow(slug)` puts a card with an Open button in the chat; link it in your answer as
    `[Orders](/app/p/orders)`. If the operator is away from this chat, `Notify` with
    `link="/app/p/orders"`.
-7. **Put it on the rail** when the operator wants it there (see the end of this file).
+7. **Pin it in the sidebar** when the operator wants it there (see the end of this file).
 
 Later changes repeat 3–5: the draft is separate from the live version until you publish. A bad
 publish is undone with `PageRollback(slug, version)`; `PageList` shows the versions kept.
@@ -176,20 +176,19 @@ finish loading". `draft=false` checks the live version.
 - `PageRollback(slug, version)` makes any kept version live again; the draft is untouched.
 - `PageRemove(slug, confirm=true)` deletes the page, every version and its stored values, for good.
   For a page that was ever published, ask the operator with `AskUser` first unless they asked for
-  the removal themselves. Taking a page off the rail is a navigation change, not a removal.
+  the removal themselves. Taking a page off the sidebar is a navigation change, not a removal.
 
-## Putting it on the rail
+## Pinning it in the sidebar
 
 A published page is in the app's list of pages at once. Where it sits is the `[navigation]` setting:
-`rail` (the desktop rail, in order), `drawer` (the phone's list), `more` (under More), `hidden`, and
+`pinned` (the rows at the top of the sidebar, in order; a phone's drawer is the same sidebar), `more` (under More), `hidden`, and
 `icons` (an icon per item). A page's item id is `page:<slug>`. Read the current value first and keep
 what is there:
 
 ```
 SettingsGet("navigation")
-SettingsChange({"navigation": {"rail": ["agents", "projects", "...the items already there...", "page:orders"]}})
+SettingsChange({"navigation": {"pinned": ["agents", "projects", "...the items already there...", "page:orders"]}})
 ```
 
-Navigation applies without asking. Put the page on the phone's `drawer` too when the operator uses a
-phone. If these tools are not available in this installation, tell the operator the page is at
+Navigation applies without asking. If these tools are not available in this installation, tell the operator the page is at
 `/app/p/<slug>` and that Settings → Navigation places it.

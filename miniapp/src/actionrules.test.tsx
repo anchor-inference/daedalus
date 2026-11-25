@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Settings → Approvals: a level picked in the grid is saved as the `action_rules` section, the review's
+// Settings → Approvals: a level picked in a category's row is saved as the `action_rules` section, the review's
 // switch follows the level (always on at "on command", nothing to switch at "asks" or "hands to you"),
 // and the review log shows what was decided.
 
@@ -23,10 +23,11 @@ describe("the review's state", () => {
   });
 });
 
-describe("the grid", () => {
+describe("the rows", () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     setLang("en");
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -41,6 +42,7 @@ describe("the grid", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    vi.unstubAllGlobals();
   });
 
   it("saves a level and shows the decisions", async () => {
@@ -49,7 +51,9 @@ describe("the grid", () => {
     await act(async () => root.render(<ActionRules s={s} save={save} />));
     const row = host.querySelector('[data-category="publish"]')!;
     expect(row.getAttribute("data-level")).toBe("auto");
-    await act(async () => (row.querySelector('[data-level="handoff"]') as HTMLButtonElement).click());
+    await act(async () => row.querySelector<HTMLButtonElement>(".dropdown-btn")!.click());
+    expect([...document.querySelectorAll<HTMLElement>("[role=option]")].map((o) => o.dataset.value)).toEqual(["auto", "on_command", "ask", "handoff"]);
+    await act(async () => document.querySelector<HTMLElement>('[role=option][data-value="handoff"]')!.click());
     expect(save).toHaveBeenCalledTimes(1);
     const patch = (save.mock.calls[0] as unknown as [Partial<Settings>])[0];
     expect(patch.action_rules?.levels.publish).toBe("handoff");

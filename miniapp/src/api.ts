@@ -2512,7 +2512,7 @@ export type Settings = {
   terminals?: { running_cap: number; host_memory_cap?: string };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;
-  /** The sidebar's pinned rows, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */
+  /** The sidebar's pinned rows and its More launcher (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
   assist?: { predict: boolean; predict_preset?: string; predict_effort?: string; predict_usd_per_day?: number };

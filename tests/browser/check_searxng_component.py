@@ -77,7 +77,7 @@ class Host:
 def no_overflow(page: Page, where: str) -> None:
     sideways = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     assert sideways <= 1, f"{where}: the page scrolls sideways by {sideways}px"
-    card = page.locator(".comp-card", has=page.locator(".comp-head b", has_text="SearXNG")).first
+    card = page.locator(".comp-item[data-component='searxng']")
     box = card.bounding_box()
     width = page.viewport_size["width"]  # type: ignore[index]
     assert box is not None and box["x"] >= 0 and box["x"] + box["width"] <= width + 1, f"{where}: the card runs off the side: {box}"
@@ -94,11 +94,11 @@ def scene(browser, lang: str, viewport: dict[str, int], scheme: str, mobile: boo
     page = context.new_page()
     page.route("**/api/**", host.route)
     page.goto(f"{BASE}/settings/components?token=t&scheme={scheme}&lang={lang}")
-    card = page.locator(".comp-card", has=page.locator(".comp-head b", has_text=words["name"])).first
+    card = page.locator(".comp-item", has=page.locator(".comp-name", has_text=words["name"])).first
     expect(card).to_be_visible(timeout=15000)
     card.scroll_into_view_if_needed()
-    expect(card.locator(".comp-chip")).to_have_text(words["missing"])
-    expect(card.locator(".comp-tag")).to_have_text(words["unlocks"])
+    expect(card.locator(".comp-state")).to_have_text(words["missing"])
+    expect(card.locator(".comp-unlocks")).to_contain_text(words["unlocks"])
     expect(card.get_by_role("button", name=words["remove"])).to_have_count(0)
     install = card.get_by_role("button", name=words["install"])
     expect(install).to_have_count(1)
@@ -107,7 +107,7 @@ def scene(browser, lang: str, viewport: dict[str, int], scheme: str, mobile: boo
         card.screenshot(path=str(Path(SHOTS) / f"searxng-missing-{lang}-{scheme}.png"))
 
     install.click()
-    expect(card.locator(".comp-chip")).to_have_text(words["running"])
+    expect(card.locator(".comp-state")).to_have_text(words["running"])
     expect(card.locator(".comp-detail")).to_have_text(words["at"])
     expect(card.get_by_role("button", name=words["install"])).to_have_count(0)
     no_overflow(page, where + " running")
@@ -118,8 +118,8 @@ def scene(browser, lang: str, viewport: dict[str, int], scheme: str, mobile: boo
     # A failure is a word and a reason on the card, not an "installed" over a dead instance.
     host.searxng = dict(FAILED)
     page.reload()
-    card = page.locator(".comp-card", has=page.locator(".comp-head b", has_text=words["name"])).first
-    expect(card.locator(".comp-chip")).to_have_text(words["failed"], timeout=15000)
+    card = page.locator(".comp-item", has=page.locator(".comp-name", has_text=words["name"])).first
+    expect(card.locator(".comp-state")).to_have_text(words["failed"], timeout=15000)
     expect(card.locator(".comp-detail")).to_contain_text("exited with code 1")
     no_overflow(page, where + " failed")
 
@@ -127,7 +127,7 @@ def scene(browser, lang: str, viewport: dict[str, int], scheme: str, mobile: boo
     dialog = page.get_by_role("alertdialog")
     expect(dialog).to_be_visible()
     dialog.get_by_role("button", name=words["remove"]).click()
-    expect(card.locator(".comp-chip")).to_have_text(words["missing"])
+    expect(card.locator(".comp-state")).to_have_text(words["missing"])
     assert host.calls == ["install", "remove"], host.calls
     no_overflow(page, where + " after")
     context.close()

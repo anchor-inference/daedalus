@@ -88,19 +88,20 @@
 .mfield.end { justify-content: flex-end; }
 .mfield > span { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .mfield > span .faint { color: var(--fg-3); font-weight: 400; }
-/* Settings → MCP servers: a server's buttons wrap under its name on a narrow screen rather than
-   pushing the card wider than the page; the sign-in switch reads as one line, box then words. */
-/* The servers are rows of their card, one under a hairline from the next: as filled tiles they were
-   cards inside the card, and two of them ran together where the tiles touched. */
-.mcp-list { gap: 0; margin-top: 10px; border-top: 1px solid var(--line); }
-.mcp-list > * + * { border-top: 1px solid var(--line); }
-.mcp-list:empty { display: none; }
-.mcp-list .dt-server-head { flex-wrap: wrap; }
-.mcp-list .dt-hint[data-tone="bad"] { color: var(--bad); }
-.mcp-form { margin-top: 12px; }
-.mcp-form .mcp-check { flex-direction: row; align-items: center; gap: 8px; }
-.mcp-form .mcp-check > span { color: var(--fg); font-size: var(--fs-14); }
-.mcp-form .mcp-actions { flex-direction: row; gap: 8px; }
+/* Settings → MCP servers. A server is its name, its state and its buttons as a row of the card, then rows
+   for where it runs and what it may do unasked; the card's hairlines run between them. */
+.mcp-server > * + * { border-top: 1px solid var(--line); }
+.mcp-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.mcp-cmd, .mcp-line { display: block; overflow-wrap: anywhere; }
+.mcp-bad { color: var(--bad); }
+.mcp-warn { color: var(--warn); }
+.set-block .mcp-quick { margin-top: 0; }
+.mcp-form { margin: 0; }
+@media (max-width: 599px) {
+  .set-card .mcp-server > .settings-row:first-child { flex-wrap: wrap; }
+  .set-card .mcp-server > .settings-row:first-child > .settings-row-text { flex: 1 1 100%; }
+  .set-card .mcp-server > .settings-row:first-child > .settings-row-ctl { flex-wrap: wrap; max-width: none; justify-content: flex-start; }
+}
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 /* "Allow all from <server>": the button and its span read as one control, in the card's own button
@@ -130,11 +131,8 @@
 .mcp-trial .mcp-actions, .mcp-quick .mcp-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .mcp-stderr summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-3); }
 .mcp-stderr pre { margin: 4px 0 0; max-height: 180px; overflow: auto; padding: 6px 8px; font-size: var(--fs-mono); background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
-.mcp-policy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.mcp-policy .segmented { flex-wrap: wrap; }
 .mcp-tools summary { cursor: pointer; font-size: var(--fs-12); color: var(--fg-3); }
-.mcp-tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px 0; }
-.mcp-tool-row .field { margin: 0; width: auto; flex: none; }
+.mcp-tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 4px 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
 .btnrow .sub.mid { margin-left: auto; align-self: center; }
 .btnrow-labelled { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
