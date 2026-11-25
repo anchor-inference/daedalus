@@ -21,6 +21,11 @@ export type PopoverProps = {
   /** A fixed box (the model picker is one size whatever it lists). */
   width?: number;
   height?: number;
+  /** How far the box stands from its anchor, in pixels. */
+  offset?: number;
+  /** `dialog` for a box that holds a field and groups of links, which a menu's role may not: a screen
+      reader in a menu takes the letter keys for itself, and a field could not be typed into. */
+  role?: "menu" | "dialog";
   /** The window width below which it is a sheet. */
   sheetBelow?: number;
   className?: string;
@@ -31,20 +36,20 @@ export type PopoverProps = {
     current choice, else the first control. */
 const FIRST = ".model-search, [aria-checked='true'], input:checked, button[aria-current='true'], button:not(:disabled), input, [role='slider']";
 
-export function Popover({ anchor, open = true, onClose, label, side, align = "start", width, height, sheetBelow = SHEET_BELOW, className = "", children }: PopoverProps) {
+export function Popover({ anchor, open = true, onClose, label, side, align = "start", width, height, offset, role = "menu", sheetBelow = SHEET_BELOW, className = "", children }: PopoverProps) {
   const sheet = useSheetForm(anchor, sheetBelow, width);
   if (!open) return null;
   if (sheet) {
     return (
       <Sheet title={label} onClose={onClose} size="sm" className={`pop-sheet ${className}`}>
-        <div className={`menu pop in-sheet ${className}`} role="menu" aria-label={label}>{children}</div>
+        <div className={`menu pop in-sheet ${className}`} role={role} aria-label={label}>{children}</div>
       </Sheet>
     );
   }
-  return <Floating anchor={anchor} onClose={onClose} label={label} side={side} align={align} width={width} height={height} className={className}>{children}</Floating>;
+  return <Floating anchor={anchor} onClose={onClose} label={label} side={side} align={align} width={width} height={height} offset={offset} role={role} className={className}>{children}</Floating>;
 }
 
-function Floating({ anchor, onClose, label, side, align, width, height, className, children }: Omit<PopoverProps, "open" | "sheetBelow">) {
+function Floating({ anchor, onClose, label, side, align, width, height, offset = 6, role = "menu", className, children }: Omit<PopoverProps, "open" | "sheetBelow">) {
   const isTop = useLayer(onClose);
   const popup = useRef<HTMLDivElement>(null);
   const element = anchorElement(anchor);
@@ -56,11 +61,11 @@ function Floating({ anchor, onClose, label, side, align, width, height, classNam
   return (
     <Base.Root open modal={false} onOpenChange={closeHandler(isTop, onClose, (target) => element?.contains(target) ?? false)}>
       <Base.Portal>
-        <Base.Positioner className="layer-pos popover-pos" anchor={anchor ?? undefined} side={placed.current} align={align} sideOffset={6} collisionPadding={8} collisionAvoidance={SHIFT}>
+        <Base.Positioner className="layer-pos popover-pos" anchor={anchor ?? undefined} side={placed.current} align={align} sideOffset={offset} collisionPadding={8} collisionAvoidance={SHIFT}>
           <Base.Popup
             ref={popup}
             className={`menu pop ${className}`}
-            role="menu"
+            role={role}
             aria-label={label}
             style={style}
             initialFocus={() => popup.current?.querySelector<HTMLElement>(FIRST) ?? true}

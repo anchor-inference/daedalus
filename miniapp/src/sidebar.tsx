@@ -11,26 +11,23 @@
 
 import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { retried } from "./chunks";
-import { api, type Project, type Settings } from "./api";
+import { type Project } from "./api";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
 import { type Mode, modeHome } from "./mode";
-import { type NavConfig, type NavItem, type ResolvedNav, currentId, desktopLayout } from "./navconfig";
+import { type NavItem, type ResolvedNav, currentId } from "./navconfig";
+import { placeItem } from "./navplace";
 import { type Screen, navigate, newAgentPath, pathFor, useRoute } from "./router";
 import { go } from "./shell";
 import { openUpdate, releaseVersion, useUpdates } from "./updates";
 import { type MenuItem, Menu, OverflowMenu, Tooltip, useContextActions } from "./ui/primitives";
-import { toast } from "./ui/dialogs";
 import { openImport } from "./imports/ImportExplorer";
-import { prime } from "./store";
-import { NAV_KEY } from "./usenav";
-import { errorText } from "./ui";
 
 const SessionsScreen = lazy(retried(() => import("./screens/Sessions"), (m) => ({ default: m.SessionsScreen })));
 
 /** A Mac says ⌘ where everything else says Ctrl; the shortcut is the same key either way. */
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K", settings: MAC ? "⌘ ," : "Ctrl ," , newChat: MAC ? "⌘ ⇧ O" : "Ctrl ⇧ O" };
+export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K", settings: MAC ? "⌘ ," : "Ctrl ," , newChat: MAC ? "⌘ ⇧ O" : "Ctrl ⇧ O", escape: "Esc", enter: "Enter", beside: MAC ? "⌘ Enter" : "Ctrl Enter" };
 
 /** The account is Settings' security section: two-factor sign-in, the operator's secrets, and signing
  *  every browser out. There is one operator, so there is no profile beyond it. */
@@ -119,27 +116,6 @@ export function SidebarHead({ onSearch, searching = false }: { onSearch?: () => 
       ) : <FoldButton onToggle={f.onToggle} />}
     </div>
   );
-}
-
-/** Moves one pinned destination into the More launcher or out of sight, through the same settings write
- *  as Settings → Navigation, and shows the answer in the sidebar at once. */
-async function placeItem(nav: ResolvedNav, id: string, to: "more" | "hidden"): Promise<void> {
-  const placement: Record<string, "pinned" | "more" | "hidden"> = {};
-  const order: string[] = [];
-  for (const it of nav.pinned) { placement[it.id] = "pinned"; order.push(it.id); }
-  for (const it of nav.more.flatMap((g) => g.items)) { placement[it.id] = "more"; order.push(it.id); }
-  for (const it of nav.catalogue) if (nav.hidden.has(it.id)) { placement[it.id] = "hidden"; order.push(it.id); }
-  placement[id] = to;
-  try {
-    const settings = await api.get<Settings>("/api/settings");
-    const previous: NavConfig = settings.navigation ?? {};
-    const known = new Set(nav.catalogue.map((it) => it.id));
-    const navigation = { drawer: [], icons: {}, ...previous, ...desktopLayout(previous, order, placement, known) };
-    const next = await api.put<Settings>("/api/settings", { navigation, base_revision: settings.revision });
-    if (next.navigation) prime(NAV_KEY, next.navigation);
-  } catch (e) {
-    toast(errorText(e));
-  }
 }
 
 /** One pinned destination: its icon, its name and its count. A right click offers the destination and

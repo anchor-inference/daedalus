@@ -202,11 +202,12 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
 
     page.locator('.sb-pinned-nav [data-nav="menu"]').click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
-    out["menuItems"] = page.locator(".navmenu [data-launch]").count()
+    out["menuItems"] = page.locator(".navmenu .launch-grid .launch-row").count()
+    out["menuChips"] = page.locator(".navmenu .launch-chip").count()
     out["menuLang"] = page.locator(".navmenu .lang").count()
     out["menuFocusInside"] = page.evaluate("() => !!document.activeElement && document.activeElement.matches('.navmenu .launch-field')")
     out["menuBox"] = page.evaluate("() => { const r = document.querySelector('.navmenu').getBoundingClientRect(); return { x: Math.round(r.x), bottom: Math.round(innerHeight - r.bottom), w: Math.round(r.width) }; }")
-    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu .launch-catalogue [data-launch]').getBoundingClientRect().height)")
+    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu .launch-grid .launch-row').getBoundingClientRect().height)")
     page.keyboard.press("ArrowDown")
     page.keyboard.press("ArrowRight")
     out["arrowMoves"] = page.evaluate("() => document.activeElement === document.querySelectorAll('.navmenu [data-launch]')[1]")
@@ -764,19 +765,19 @@ def judge_sidebar(s: dict) -> list[str]:
         got = s[key]
         if (got["column"], got["sidebar"], got["main"]) != (column, sidebar, main):
             problems.append(f"{key}: column/sidebar/conversation start {got['column']}/{got['sidebar']}/{got['main']}, not {column}/{sidebar}/{main}")
-    # The launcher lists every destination, the pinned ones included, as Frequent tiles and the catalogue
-    # (the stub's thirteen screens and its one published page), then Settings, Customise and About.
-    if s["menuItems"] != 17:
-        problems.append(f"the launcher has {s['menuItems']} items")
+    # The launcher lists every destination, the pinned ones included, in its groups (the stub's thirteen
+    # screens and its one published page), and four of them again as Frequent chips.
+    if s["menuItems"] != 14 or s["menuChips"] != 4:
+        problems.append(f"the launcher has {s['menuItems']} destinations and {s['menuChips']} chips")
     # The language and the companion went to Settings -> Appearance.
     if s["menuLang"]:
         problems.append("the launcher still has a language switch")
-    # It opens from the sidebar's More row, beside the sidebar rather than over it, 600 wide while the
-    # window allows.
-    if not 296 <= s["menuBox"]["x"] <= 306 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 600:
-        problems.append(f"the launcher is not beside its More row at 600 wide: {s['menuBox']}")
-    if s["menuRow"] != 32:
-        problems.append(f"a catalogue row is {s['menuRow']}px")
+    # It opens from the sidebar's More row, beside the sidebar rather than over it (8 px from its edge),
+    # 560 wide while the window allows, in rows of 44 with a line under each name.
+    if s["menuBox"]["x"] != 308 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 560:
+        problems.append(f"the launcher is not beside its More row at 560 wide: {s['menuBox']}")
+    if s["menuRow"] != 44:
+        problems.append(f"a launcher row is {s['menuRow']}px")
     for key in ("menuFocusInside", "arrowMoves", "escClears", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):
         if not s[key]:
             problems.append(f"{key} is false")

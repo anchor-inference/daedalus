@@ -1,4 +1,4 @@
-/* ── palette, offline strip ──────────────────────────────────────────────── */
+/* ── offline strip ──────────────────────────────────────────────── */
 /* One quiet row: warn text on a 12% wash. The wash sits on --bg, not on nothing, because the strip is
    sticky and the page scrolls under it. */
 .offline-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }
@@ -17,19 +17,6 @@
 .nudge-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; min-height: 28px; padding: 4px 12px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
 .nudge-strip a { color: var(--fg); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 .main.chat-open .nudge-strip { flex: none; }
-/* The search is a 40px row closed by a hairline, part of the surface rather than a field lying on it. */
-.palette-sheet .field { height: var(--ctl-h-lg); margin: 0 0 4px; padding-inline: var(--space-3); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; }
-.palette-sheet .field:focus { box-shadow: none; }
-.palette-list { display: flex; flex-direction: column; gap: 1px; max-height: 50vh; overflow-y: auto; }
-/* The hint's column is at most 40 % of the row and no wider than its text. A max-width in percent on
-   the hint itself resolved against its own auto column, a cycle the browser settled at a few
-   characters: "Al…" for "All projects" with half the row empty. */
-.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(40%); gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
-.palette-row .ic { color: var(--fg-3); }
-.palette-row:hover { background: var(--surface-2); }
-.palette-row.on { background: var(--surface-3); }
-.palette-row .sub { text-align: right; font-size: var(--fs-12); color: var(--fg-3); }
-.palette-row .sub.tail { direction: rtl; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
 .erow-meta > .mono:not(:first-child) { flex: 0 1 auto; }

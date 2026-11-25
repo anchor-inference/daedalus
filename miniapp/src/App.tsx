@@ -6,10 +6,11 @@ import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
 import type { OnboardingState } from "./screens/AddModel";
 import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
-import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
+import { Counts, ICONS, PaletteItem, besideSession, chatStatus, go, goKey, screenTitle, useMedia, useShortcuts } from "./shell";
+import { Palette } from "./palette";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
-import { Sidebar, SidebarFrame, UnfoldButton, useSidebar } from "./sidebar";
+import { KEYS, Sidebar, SidebarFrame, UnfoldButton, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { useRecordVisit } from "./navfrequent";
 import { shortcutFor } from "./navigation";
@@ -221,7 +222,8 @@ export function App() {
   }, [routeMode, lastMode]);
   const mode = routeMode ?? lastMode;
   const [picking, setPicking] = useState(false);
-  const [palette, setPalette] = useState(false);
+  // The palette is open while this is a string: what it starts with typed in (empty from Ctrl K).
+  const [palette, setPalette] = useState<string | null>(null);
   // Which project the operator is looking at ("" is all of them). A lens over every list of agents
   // rather than a destination, so it lives in the shell and not in the route.
   const [project, setProject] = useState(storedProject);
@@ -262,7 +264,8 @@ export function App() {
   const sidebarToggle = useCallback(() => (canvasOpen ? setColumnShown((open) => !open) : toggleSidebar()), [canvasOpen, toggleSidebar]);
   const [menu, setMenu] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const openPalette = useCallback(() => setPalette(true), []);
+  const openPalette = useCallback(() => setPalette(""), []);
+  const searchPalette = useCallback((query: string) => setPalette(query), []);
   const offline = useOffline();
   useEffect(prefetchSession, []);
   // In orchestration mode a project, or the main chat from inside one, is what the operator opens
@@ -572,35 +575,43 @@ export function App() {
       await openFreeTerminal(env, env === "container" ? place?.path : home || undefined, place?.projectId ?? null, showToast);
     };
     const terminalItems: PaletteItem[] = [
-      ...(listing?.terminals ?? []).filter((r) => r.status === "running").map((r) => ({ id: `t-${r.id}`, label: t("term.palette.open", { title: r.title }), hint: r.cwd, icon: "terminal" as const, run: () => navigate(pathFor("terminals", r.id)) })),
+      ...(listing?.terminals ?? []).filter((r) => r.status === "running").map((r): PaletteItem => ({ id: `t-${r.id}`, group: "go", label: t("term.palette.open", { title: r.title }), hint: r.cwd, icon: "terminal", run: () => navigate(pathFor("terminals", r.id)) })),
       // Before the first listing nothing is known about the environments: offer the container one,
       // which is the one an installation has; the host one only once it is known to answer.
-      ...(!listing || envUp("container") ? [{ id: "new-term-container", label: t("term.palette.container"), icon: "terminal" as const, run: () => void newTerminal("container")() }] : []),
-      ...(envUp("host") ? [{ id: "new-term-host", label: t("term.palette.host"), icon: "lock" as const, run: () => void newTerminal("host")() }] : []),
+      ...(!listing || envUp("container") ? [{ id: "new-term-container", group: "actions" as const, label: t("term.palette.container"), icon: "terminal" as const, run: () => void newTerminal("container")() }] : []),
+      ...(envUp("host") ? [{ id: "new-term-host", group: "actions" as const, label: t("term.palette.host"), icon: "lock" as const, run: () => void newTerminal("host")() }] : []),
     ];
     // Both modes' places are offered whichever mode is open: a project with an orchestrator opens in
     // orchestration mode, a lens is Agents mode's, and each item says which by where it leads.
     const orchestratedIds = new Set(projectList.filter((p) => p.settings.orchestrator?.enabled).map((p) => p.id));
+    const projectsOpen = projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived);
     return [
-      { id: "new-agent", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(newAgentPath(project)) },
-      { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
-      { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
-      { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
-      { id: "import-session", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
-      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
+      { id: "new-chat", group: "actions", label: t("ph.newchat"), icon: "compose", right: KEYS.newChat, run: () => navigate(pathFor("agents")) },
+      { id: "new-agent", group: "actions", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(newAgentPath(project)) },
+      { id: "mode", group: "actions", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
+      { id: "main", group: "go", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
+      { id: "new-project", group: "actions", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
+      { id: "import-session", group: "actions", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
+      { id: "projects", group: "go", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
       // "Work in {name}" read like opening the project, and quietly narrowed the column instead; the
       // items now say what they do, and the one that lifts a lens is offered while one is on.
-      ...(project ? [{ id: "show-all-projects", label: t("shell.search.showall"), hint: agentProjects.find((p) => p.id === project)?.name, icon: "grid" as const, run: clearProject }] : []),
-      ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("projects.lens", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
-      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      ...(project ? [{ id: "show-all-projects", group: "actions" as const, label: t("shell.search.showall"), hint: agentProjects.find((p) => p.id === project)?.name, icon: "grid" as const, run: clearProject }] : []),
+      ...agentProjects.map((p): PaletteItem => ({ id: `p-${p.id}`, group: "actions", label: t("projects.lens", { name: p.name }), hint: projectPath(p), icon: "folder", run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `open-${p.id}`, group: "projects", label: t("focus.palette", { name: p.name }), icon: "conductor", run: () => navigate(projectHome(p.id)) })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `team-${p.id}`, group: "projects", label: t("shell.search.team", { name: p.name }), icon: "bots", run: () => navigate(projectPagePath(p.id, "team")) })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `board-${p.id}`, group: "projects", label: t("shell.search.board", { name: p.name }), icon: "board", run: () => navigate(projectPagePath(p.id, "board")) })),
+      // A screen is a place to go, under its own name and, where it has one, the key that goes there.
+      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s): PaletteItem => ({ id: `go-${s}`, group: "go", label: screenTitle(s), icon: ICONS[s], right: goKey(s), run: () => navigate(pathFor(s)) })),
       // A page is a destination like a screen, offered under its own name and glyph.
-      ...nav.shown.filter((it) => it.kind === "page").map((it) => ({ id: `go-${it.id}`, label: t("shell.search.goto", { name: it.title }), icon: it.icon, iconPath: it.iconPath, run: () => navigate(it.path) })),
-      // An orchestrated session opens inside its project, not in the Agents list.
-      ...sessions.filter((s) => !s.metadata?.dispatcher).map((s) => ({ id: `s-${s.id}`, label: s.title, hint: orchestratedIds.has(s.project_id) ? `${s.project} · ${s.model ?? ""}` : s.model ?? "", icon: orchestratedIds.has(s.project_id) ? "conductor" as const : "bots" as const, run: () => (orchestratedIds.has(s.project_id) ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id)) })),
+      ...nav.shown.filter((it) => it.kind === "page").map((it): PaletteItem => ({ id: `go-${it.id}`, group: "go", label: it.title, icon: it.icon, iconPath: it.iconPath, right: t("palette.right.page"), run: () => navigate(it.path) })),
       ...terminalItems,
+      // An orchestrated session opens inside its project, not in the Agents list.
+      // The leaders first: a helper is found by its name but is not one of the chats to come back to.
+      ...[...sessions.filter((s) => !s.metadata?.subagent_of), ...sessions.filter((s) => s.metadata?.subagent_of)].filter((s) => !s.metadata?.dispatcher).map((s): PaletteItem => {
+        const orchestrated = orchestratedIds.has(s.project_id);
+        const run = () => (orchestrated ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id));
+        return { id: `s-${s.id}`, group: "chats", label: s.title, hint: orchestrated ? `${s.project} · ${s.model ?? ""}` : s.project, icon: orchestrated ? "conductor" : "bots", ...chatStatus(s), run, beside: () => besideSession(s.id, run) };
+      }),
     ];
   };
 
@@ -756,7 +767,7 @@ export function App() {
         )}
         </SidebarFrame>
       )}
-      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} search={paletteItems} />}
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearchAll={searchPalette} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
@@ -770,7 +781,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
+      {palette !== null && <Palette items={paletteItems} initialQuery={palette} onClose={() => setPalette(null)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once.
           It used to become the lens as well, which narrowed the whole column to one empty project and
@@ -785,7 +796,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} search={paletteItems} onPalette={openPalette} mainOpen={mainChat}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} onPalette={openPalette} onSearchAll={searchPalette} mainOpen={mainChat}
         session={sessionId} projects={agentProjects} project={project} onProjects={() => setSwitching(true)} onClearProject={clearProject} onOpen={open} toast={showToast} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />

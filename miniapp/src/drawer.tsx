@@ -14,7 +14,7 @@ import { type Mode } from "./mode";
 import { inLayer, navigate, pathFor, useRoute } from "./router";
 import { type ResolvedNav, currentId } from "./navconfig";
 import { Launcher } from "./navmenu";
-import type { PaletteItem } from "./shell";
+import { placeItem } from "./navplace";
 import { OrchestrationSidebar } from "./orchestration";
 import { Sidebar, SidebarFrame } from "./sidebar";
 import { Drawer, closeDrawer, useDrawerOpen } from "./ui/phone";
@@ -43,10 +43,10 @@ export type AppDrawerProps = {
   /** What waits for the operator in orchestration mode. */
   waiting: number;
   selfdev: SelfDevMode;
-  /** The Ctrl K palette's items, which the More launcher's search field searches. */
-  search?: () => PaletteItem[];
   /** The palette, which the head's search opens outside the Agents list. */
   onPalette: () => void;
+  /** The palette on what was typed in the More sheet's field, which finds chats and settings too. */
+  onSearchAll: (query: string) => void;
   /** Orchestration mode's list: whether the main chat is the page under the drawer. */
   mainOpen: boolean;
   /** Agents mode's list, as the desktop's column gets it. */
@@ -109,10 +109,10 @@ export function AppDrawer(p: AppDrawerProps) {
             placed={p.nav.pinned}
             current={route.session ? "" : here}
             selfdev={p.selfdev}
-            search={p.search}
             phone
             onGo={(path) => { setMore(false); navigate(path); }}
-            onRun={(run) => { setMore(false); closeThen(run); }}
+            onPlace={(id, on) => placeItem(p.nav, id, on ? "pinned" : "more")}
+            onEverywhere={(query) => { setMore(false); closeThen(() => p.onSearchAll(query)); }}
             onClose={() => setMore(false)}
           />
         </Sheet>

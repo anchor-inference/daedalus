@@ -1,8 +1,8 @@
-// The launcher's Frequent tiles: pinned first and fixed, then what was opened most this month, then
-// the shipped fallback; and nothing the operator hid ever comes back through them.
+// The launcher's Frequent chips: what was opened most this month, then the shipped fallback; and
+// nothing the operator hid ever comes back through them.
 
 import { describe, expect, it } from "vitest";
-import { EMPTY, MAX_IDS, WINDOW_DAYS, type FrequentState, dayOf, frequent, parse, prune, recordVisit, score, togglePin } from "./navfrequent";
+import { EMPTY, MAX_IDS, WINDOW_DAYS, type FrequentState, dayOf, frequent, parse, prune, recordVisit, score } from "./navfrequent";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 10, 12);
@@ -48,28 +48,9 @@ describe("learning from use", () => {
   });
 });
 
-describe("pins", () => {
-  it("come first, in the order they were pinned, and stay put whatever is used", () => {
-    let state = togglePin(togglePin(EMPTY, "services"), "inbox");
-    state = visit(state, "usage", 20);
-    expect(frequent(state, ALL, NOW, 4)).toEqual(["services", "inbox", "usage"]);
-  });
-
-  it("toggle off and leave the others where they were", () => {
-    const state = togglePin(togglePin(togglePin(EMPTY, "a"), "b"), "a");
-    expect(state.pins).toEqual(["b"]);
-  });
-
-  it("past the limit are kept but not drawn", () => {
-    const state = ["inbox", "board", "usage", "memory", "health"].reduce(togglePin, EMPTY);
-    expect(frequent(state, ALL, NOW, 4)).toEqual(["inbox", "board", "usage", "memory"]);
-    expect(frequent(togglePin(state, "board"), ALL, NOW, 4)).toEqual(["inbox", "usage", "memory", "health"]);
-  });
-});
-
 describe("what may be offered", () => {
-  it("is only what is shown: a hidden item never returns through a pin or its history", () => {
-    let state = togglePin(EMPTY, "board");
+  it("is only what is shown: a hidden item never returns through its history", () => {
+    let state = visit(EMPTY, "board", 3);
     state = visit(state, "usage", 5);
     const shown = ALL.filter((id) => id !== "board" && id !== "usage");
     expect(frequent(state, shown, NOW, 4, ["memory", "board", "health"])).toEqual(["memory", "health"]);
@@ -83,7 +64,7 @@ describe("what may be offered", () => {
 
 describe("what was stored", () => {
   it("survives a round trip", () => {
-    const state = togglePin(visit(EMPTY, "usage", 2), "memory");
+    const state = visit(visit(EMPTY, "usage", 2), "memory", 1);
     expect(parse(JSON.stringify(state))).toEqual(state);
   });
 
@@ -91,6 +72,6 @@ describe("what was stored", () => {
     expect(parse(null)).toEqual(EMPTY);
     expect(parse("not json")).toEqual(EMPTY);
     expect(parse("[1,2]")).toEqual(EMPTY);
-    expect(parse(JSON.stringify({ visits: { usage: { "20000": "x", abc: 2, "20001": 3 }, bad: 4 }, pins: ["a", 1, "a", ""] }))).toEqual({ visits: { usage: { "20001": 3 } }, pins: ["a"] });
+    expect(parse(JSON.stringify({ visits: { usage: { "20000": "x", abc: 2, "20001": 3 }, bad: 4 } }))).toEqual({ visits: { usage: { "20001": 3 } } });
   });
 });

@@ -108,7 +108,7 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".start-composer", timeout=15000)
     page.keyboard.press("Control+k")
     page.wait_for_selector("[role=option]", timeout=5000)
-    page.locator(".palette-sheet input").click()
+    page.locator(".palette-sheet .combo-input").click()
     page.keyboard.type(words["palette"])
     page.wait_for_function("w => document.querySelector('[role=option]')?.textContent === w", arg=words["palette"], timeout=5000)
     page.keyboard.press("Enter")

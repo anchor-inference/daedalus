@@ -232,6 +232,12 @@ const CONTENT_BOXES = [
   // The model picker's list is a window onto six 32 px rows (six and the five 1 px gaps between them),
   // the same height whatever the tab or the search holds, so the box around it never changes size.
   { selector: ".model-picker-list", property: "height", max: 197 },
+  // The More launcher's row is a name over a line saying what it is, 44 px, with its pin; its search
+  // field is a 40 px row. The palette's field is a 48 px row.
+  { selector: ".launch-q", property: "height", max: 40 },
+  { selector: ".launch-cell", property: "height", max: 44 },
+  { selector: ".launch-row", property: "height", max: 44 },
+  { selector: ".palette-box .combo-bar", property: "height", max: 48 },
   // An Inbox row is a title over a preview over where it came from: three lines, 64 px, as drawn. The
   // line under an open question is the 48 px field the composer's answer line shares.
   { selector: ".inbox-row", property: "height", max: 64 },
@@ -447,6 +453,31 @@ describe("a page's header", () => {
     expect(column("reading")).toContain("calc(760px + 48px)");
     expect(column("full")).toContain("padding-inline: 24px");
     expect(column("full")).not.toContain("width:");
+  });
+});
+
+describe("the More launcher and the command palette", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("opens the launcher as a 560 box of 44 px rows in two columns, its search 40 px, its foot row 36", () => {
+    expect(rule(".menu.pop.navmenu")).toContain("width: 560px");
+    expect(rule(".launch-q")).toContain("height: 40px");
+    expect(rule(".launch-grid")).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(rule(".launch-cell")).toContain("height: 44px");
+    expect(rule(".launch-row")).toContain("height: 44px");
+    expect(rule(".launch-foot-row")).toContain("height: 36px");
+    // The pin is a 28 px square that only the hovered, focused or pinned row shows.
+    expect(rule(".launch-pin")).toContain("width: 28px");
+    expect(rule(".launch-pin")).toContain("opacity: 0");
+  });
+
+  it("draws the palette as a 640 box with a 48 px field, 28 px group labels over 36 px rows, and a 36 px foot", () => {
+    const desktop = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
+    expect(desktop(".sheet.md.palette-sheet")).toContain("width: min(640px, 92vw)");
+    expect(rule(".palette-box .combo-bar")).toContain("height: 48px");
+    expect(rule(".palette-box .combo-group-label")).toContain("height: 28px");
+    expect(rule(".combo-item.palette-row")).toContain("height: 36px");
+    expect(rule(".palette-foot")).toContain("height: 36px");
   });
 });
 

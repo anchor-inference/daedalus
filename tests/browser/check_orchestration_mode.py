@@ -188,7 +188,7 @@ def desktop(page: Page, lang: str) -> None:
     go(page, "/agents", lang)
     expect(page.locator("nav.sidebar")).to_be_visible()
     page.keyboard.press("Control+k")
-    page.locator(".palette-sheet input").fill("Bakery")
+    page.locator(".palette-sheet .combo-input").fill("Bakery")
     page.locator(".palette-row", has_text=words["open"]).first.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}")
     expect(page.locator("nav.project-sidebar")).to_be_visible()

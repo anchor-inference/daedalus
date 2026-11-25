@@ -203,6 +203,26 @@ describe("Popover", () => {
     expect(active()).toBe(anchor);
   });
 
+  it("is a dialog, not a menu, when it holds a field", async () => {
+    function Field() {
+      const anchor = useRef<HTMLButtonElement>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" ref={anchor} className="anchor" onClick={() => setOpen(true)}>Model</button>
+          {open && <Popover anchor={anchor.current} onClose={() => setOpen(false)} label={MODEL_FOR} role="dialog" offset={20} className="field-box"><input aria-label={FIND} /></Popover>}
+        </>
+      );
+    }
+    await act(async () => root.render(<Field />));
+    await press(host.querySelector(".anchor")!);
+    await settle();
+    const box = document.querySelector<HTMLElement>(".menu.pop.field-box")!;
+    expect(box.getAttribute("role")).toBe("dialog");
+    expect(box.getAttribute("aria-label")).toBe(MODEL_FOR);
+    expect(active()?.tagName).toBe("INPUT");
+  });
+
   it("is a sheet below 1024 px", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
     await act(async () => root.render(<Harness />));
@@ -340,6 +360,32 @@ describe("Combobox", () => {
     await key("ArrowDown");
     await key("Enter");
     expect(choose).toHaveBeenCalled();
+  });
+});
+
+describe("Combobox rows and field", () => {
+  it("hands the press that chose a row to the caller, and draws what is put beside the field", async () => {
+    const choose = vi.fn();
+    await act(async () => root.render(
+      <Combobox inline label={FIND} items={["Opus", "Sonnet"]} query="" onQuery={() => {}} onChoose={choose} lead={<i className="lead" />} trail={<kbd className="trail">Esc</kbd>} itemClassName="pick" />,
+    ));
+    expect(host.querySelector(".combo-bar .lead")).not.toBeNull();
+    expect(host.querySelector(".combo-bar .trail")?.textContent).toBe("Esc");
+    expect(host.querySelectorAll(".combo-item.pick")).toHaveLength(2);
+    await act(async () => {
+      host.querySelectorAll<HTMLElement>(".combo-item")[1].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
+    });
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(choose.mock.calls[0][0]).toBe("Sonnet");
+    expect((choose.mock.calls[0][1] as MouseEvent).ctrlKey).toBe(true);
+  });
+
+  it("labels each group, with a note at its far end where the caller has one", async () => {
+    await act(async () => root.render(
+      <Combobox inline label={FIND} items={[]} groups={[{ label: "Chats", items: ["Opus"], note: "searching" }, { label: "Actions", items: ["Sonnet"] }]} query="" onQuery={() => {}} onChoose={() => {}} />,
+    ));
+    expect([...host.querySelectorAll(".combo-group-label")].map((el) => el.textContent)).toEqual(["Chatssearching", "Actions"]);
+    expect(host.querySelector(".combo-group-note")?.textContent).toBe("searching");
   });
 });
 

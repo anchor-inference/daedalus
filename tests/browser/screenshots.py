@@ -1148,6 +1148,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, INTEGRATIONS)
     if rel == "/api/services":
         return respond(route, SERVICES_ALL)
+    if rel == "/api/sessions/search":
+        # The host's search by words and by meaning: a name or a project holding the words, and a few
+        # words that mean a chat without being in its name ("budget" is the expense tracker).
+        word = params.get("q", [""])[0].strip().lower()
+        by_meaning = {"budget": S6, "bread": S1, "invoice": S10}
+        found = [s | {"match": {"score": 1.0, "snippet": f"...{word}..."}} for s in SESSIONS if word and (word in s["title"].lower() or word in s["project"].lower() or by_meaning.get(word) == s["id"])]
+        return respond(route, {**listing("all"), "sessions": found, "semantic": True, "reason": "ready", "partial": False, "indexing": False})
     if rel.startswith("/api/sessions/"):
         parts = rel.split("/")
         sid = parts[3]
