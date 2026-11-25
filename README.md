@@ -38,7 +38,7 @@ It is built to run for weeks: sessions survive restarts, runs resume from snapsh
 ## What you get
 
 - **💬 Telegram-native** — every session has its own workspace and speaks in the chat under its own name, in the private chat or in a forum topic each; files, voice notes, inline-button questions and answers that stream as they are written.
-- **🖥️ A real web app** — agents, live transcripts, a side panel that keeps a chat's model, context and spend over its details, files, previews, jobs and notes, two sessions side by side, a ⌘K palette and a More launcher on a desk and a drawer on a phone; installable as a PWA.
+- **🖥️ A real web app** — agents, live transcripts, a side panel whose Overview sums up a chat (its state, model, changes, board, helpers, context and spend) with each of them a tab beside it, two sessions side by side, a ⌘K palette and a More launcher on a desk and a drawer on a phone; installable as a PWA.
 - **🖥️ An app, not a deployment** — one download opens a window of its own on macOS, Linux and Windows; native mode needs no Docker at all and is ready four seconds after launch.
 - **🛠️ Real tools** — shell, files, search, web fetch and search, a vision model, a Chromium you watch and take over, verification runs, MCP servers, skills loaded on demand.
 - **🖱️ Your screen and your Chrome** — in the native app a chat can be given one window, one app, one display or the whole desktop for a time you choose, with a border around it and Ctrl+Alt+Esc to stop; a Chrome extension ([its own repository](https://github.com/anchor-inference/daedalus-chrome-extension)) lets the agent work in your own browser with your sign-ins, beside a side panel of its conversations. Chats, computer chats and browser chats each have a tab over the lists.
@@ -131,7 +131,7 @@ What makes them survive: runs resume from snapshots after a restart; a run the p
 
 <p align="center"><img src="docs/diagrams/selfdev.png" alt="Self-development: worktree → edit → pull request → your approval in the chat → merge → rebuild → rollback on a failed preflight" width="100%" /></p>
 
-<p align="center"><img src="docs/screenshots/selfdev.gif" alt="Changes: a proposed change to the agent's code, its summary and diff, with the approval action available" width="100%" /></p>
+<p align="center"><img src="docs/screenshots/selfdev.gif" alt="Changes: the agent's proposed changes listed, one opened with what the agent did and its diff, then side by side, with Accept and Reject in the header" width="100%" /></p>
 
 The PR text passes a public-text gate (nothing about your machine leaks into a public repository), the diff is checked for references it must not carry, and `GOVERNANCE.md` — the rules the agent always sees and can never edit — is mounted read-only. Approval is manual by default; `/approval auto` hands it over when you trust it.
 
