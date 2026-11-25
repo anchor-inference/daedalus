@@ -153,10 +153,10 @@ async def test_the_changed_files_of_a_folder_inside_a_repository(repo: Path) -> 
     answer = await changed_files(local_run, str(repo / "src"))
     assert answer["root"] == str(repo) and answer["branch"] == "main" and answer["base"] == "HEAD" and answer["reason"] == ""
     assert answer["files"] == [
-        {"path": ".gitignore", "status": "?", "added": None, "removed": None},
-        {"path": "old.txt", "status": "D", "added": 0, "removed": 1},
-        {"path": "src/app.py", "status": "M", "added": 2, "removed": 1},
-        {"path": "src/новый.py", "status": "?", "added": None, "removed": None},
+        {"path": ".gitignore", "status": "?", "added": None, "removed": None, "binary": False},
+        {"path": "old.txt", "status": "D", "added": 0, "removed": 1, "binary": False},
+        {"path": "src/app.py", "status": "M", "added": 2, "removed": 1, "binary": False},
+        {"path": "src/новый.py", "status": "?", "added": None, "removed": None, "binary": False},
     ]
 
 

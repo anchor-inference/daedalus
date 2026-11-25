@@ -17,6 +17,24 @@ through the containment the file browser uses, so a symlink out of the tree, a `
 belonging to the installation itself are absent from the answer rather than refused. Content search
 needs ripgrep: without it, `files/grep` answers **501** and a sentence saying to search by name.
 
+**A chat's changes.** `GET /api/sessions/{id}/changes` lists what changed in the folder the chat works
+in against its last commit: `{"repository", "env", "directory", "root", "prefix", "branch", "head",
+"upstream", "ahead", "behind", "files": [{"path", "status", "added", "removed", "binary"}], "added",
+"removed", "truncated", "busy"}`. `status` is git's letter or `?` for a file git does not track yet;
+paths are from the repository's top, and a chat in a sub-folder sees only that sub-folder. A folder
+outside any repository is `"repository": false`, not an error, and so is a remote conversation's,
+whose tools run on your own machine where this host cannot run git (`"reason": "out_of_reach"`). At
+most 500 files are listed, with `truncated` saying there are more. `GET …/changes/diff?path=` is one
+file's unified diff, cut at 512 KB, with `binary` for a file git only says differs. `POST
+…/changes/revert` with `{"confirm": true, "paths": [...]}` or `{"confirm": true, "all": true}` puts the
+files back as committed and **deletes** new ones, answering `restored` and `deleted`; `POST
+/api/sessions/{id}/commit` with `{"message", "paths"?}` commits those files, or every changed one, as
+the identity the repository's git configuration names, and answers `commit`. Neither pushes. Both
+take only paths the list shows, exactly, are refused with **409** while a run of the chat — or of
+another chat in the same folder — is in progress or waits on a question, and publish a
+`session.changes` event. git runs where the chat's tools run, through that environment's terminal
+daemon, with the repository's hooks, external diffs, pager, signing program and prompts switched off.
+
 **The queue in front of a working agent.** A message sent to a session that is already running is a
 steer: it waits in a queue and is placed in front of the model's next call rather than starting a
 second run. `GET /api/sessions/{id}/steer` lists what is still waiting, oldest first, as

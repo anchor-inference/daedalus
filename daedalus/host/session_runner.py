@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -3647,6 +3647,16 @@ class SessionManager:
             # Nothing here holds ``submit``: a run may have started in the moment we waited.
             if state.running or state.pending is not None:
                 raise RuntimeError(f"{what} is busy; stop the run (or answer the question) first")
+
+    @asynccontextmanager
+    async def held_quiet(self, state: SessionState, *, what: str = "the session") -> AsyncIterator[None]:
+        """Keep the session from starting a run while the body changes its files from outside one: a
+        revert or a commit of its working tree from the Changes tab. Refused, with a ``RuntimeError``,
+        while a run is in flight or a question is outstanding, as an undo is: the agent would go on
+        from files that are no longer there."""
+        async with state.submit_lock, state.lock:
+            await self._wait_until_quiet(state, what=what)
+            yield
 
     def running_run_ids(self) -> set[str]:
         return {s.run_id for s in self._states.values() if s.run_id and (s.running or s.pending is not None or self._settling(s))}

@@ -132,6 +132,15 @@ class SessionJobs(TypedDict):
     running: int
 
 
+class SessionChanges(TypedDict):
+    """The operator reverted or committed files of the session's working tree from its Changes tab, so
+    the open lists of those files read them again. ``commit`` is the new commit's hash."""
+
+    change: Literal["reverted", "committed"]
+    files: int
+    commit: NotRequired[str]
+
+
 class AskOption(TypedDict):
     label: str
     description: str
@@ -793,6 +802,7 @@ REGISTRY: dict[str, EventSpec] = {
     "session.bypass": EventSpec(SessionBypass),
     "session.deleted": EventSpec(SessionDeleted),
     "session.jobs": EventSpec(SessionJobs),
+    "session.changes": EventSpec(SessionChanges),
     "ask.pending": EventSpec(AskPending),
     "ask.answered": EventSpec(AskAnswered),
     "ask.routed": EventSpec(AskRouted),
