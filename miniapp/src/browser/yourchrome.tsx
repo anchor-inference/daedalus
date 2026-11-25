@@ -14,7 +14,7 @@ import type { BrowserChrome, BrowserUserChoice, BrowserUserDevice, BrowserUserSe
 import { api } from "../api";
 import { t } from "../i18n";
 import { invalidate, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
+import { errorText } from "../ui";
 import { timeAgo, useCopied } from "../ui/components";
 import { Button, confirmDialog, Dot, Segmented, Switch } from "../ui/primitives";
 import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
@@ -251,7 +251,7 @@ export function BrowserSwitch({ sessionId, user, consent, toast }: { sessionId: 
     if (env === user.env || busy) return;
     let agreed = false;
     if (env === "user" && !user.consented) {
-      agreed = await confirmAsync(t("uc.switch.consent.title"), { body: consent || t("uc.switch.consent.body"), action: t("uc.switch.consent.action"), danger: false });
+      agreed = await confirmDialog({ title: t("uc.switch.consent.title"), body: consent || t("uc.switch.consent.body"), action: t("uc.switch.consent.action") });
       if (!agreed) return;
     }
     setBusy(true);

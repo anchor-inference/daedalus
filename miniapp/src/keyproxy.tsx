@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { relTimeLong } from "./format";
 import { t } from "./i18n";
-import { confirmAsync, errorText } from "./ui";
+import { errorText } from "./ui";
 import { Badge, Button, IconButton, confirmDialog } from "./ui/primitives";
 import { NumInput, Row, SetBlock, SetFoot, SetGroup } from "./settingsrow";
 
@@ -84,7 +84,7 @@ function KeyInput({ v, label, onSave, disabled }: { v: KeyproxyVar; label: strin
       />
       {v.set && (
         <button className="btn small danger" disabled={disabled} onClick={async () => {
-          if (await confirmAsync(t("keyproxy.forget.title"), { body: t("keyproxy.forget.body"), action: t("keyproxy.forget"), danger: true })) void onSave("");
+          if (await confirmDialog({ title: t("keyproxy.forget.title"), body: t("keyproxy.forget.body"), action: t("keyproxy.forget"), danger: true })) void onSave("");
         }}>{t("keyproxy.forget")}</button>
       )}
     </div>
