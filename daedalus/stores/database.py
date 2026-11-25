@@ -4156,13 +4156,17 @@ MIGRATIONS.append("""
 CREATE INDEX IF NOT EXISTS board_tasks_by_origin ON board_tasks(origin_session_id);
 """)
 
-# A due date on a card: an instant in UTC, NULL for none. Whether it is overdue is read at the moment
-# of asking and never stored.
+# A due date on a card, and a card's own history. ``due_at`` is an instant in UTC, NULL for none;
+# whether it is overdue is read at the moment of asking and never stored. The history reads the
+# stored ``task.*`` events by the ``task_id`` in their payload; with no column for it that was a scan
+# of the whole event table, so the index is over the extracted id, and only over events that have one.
 async def _task_extras(conn: aiosqlite.Connection) -> None:
-    """Added only when it is missing, for the reason ``_usage_speed`` gives."""
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
     present = {row[1] for row in await (await conn.execute("PRAGMA table_info(board_tasks)")).fetchall()}
     if "due_at" not in present:
         await conn.execute("ALTER TABLE board_tasks ADD COLUMN due_at TEXT")
+    await conn.execute("CREATE INDEX IF NOT EXISTS app_events_by_task ON app_events(json_extract(payload_json, '$.task_id'), seq)"
+                       " WHERE json_extract(payload_json, '$.task_id') IS NOT NULL")
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _task_extras))

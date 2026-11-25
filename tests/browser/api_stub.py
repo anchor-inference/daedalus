@@ -2822,6 +2822,8 @@ class BoardStub:
         self.issue_imports: list[dict] = []
         self.subagent_of: dict[str, str] = {}
         """Subagent session id to its leader's: a chat's board is its family's, as the host's ``Board.family`` has it."""
+        self.history: dict[str, list[dict]] = {}
+        """A task's stored events as ``GET /api/board/{id}/events`` answers them; a task without any has its creation."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -3215,6 +3217,12 @@ class BoardStub:
             if path.endswith("/contract") and method == "GET":
                 return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"],
                              "checklist": [{"id": f"C{index}", "text": item["text"]} for index, item in enumerate(row["checklist"], 1)]}
+            if path.endswith("/events") and method == "GET":
+                kept = self.history.get(row["id"])
+                if kept is None:
+                    kept = [{"seq": 1, "type": "task.created", "at": row["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None},
+                             "from": None, "to": None, "text": f"Created in {row['status']}"}]
+                return 200, kept[-int(parse_qs(query).get("limit", ["200"])[0]):]
             if path.endswith("/results") and method == "GET":
                 if row["id"] in self.result_rows:
                     return 200, self.result_rows[row["id"]]

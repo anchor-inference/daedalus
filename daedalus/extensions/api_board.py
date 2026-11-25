@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.board import Board
 from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.board_history import task_history
 from daedalus.extensions.orchestrator_domain import DomainConflict
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal, Scope
 
@@ -165,3 +166,18 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             return await projection(result)
         except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
             raise rejected(exc) from exc
+
+    @api.get("/api/board/{task_id}/events")
+    async def history(task_id: str, limit: int = Query(default=200, ge=1, le=1000),
+                      _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        """What happened to one card, oldest first, from the stored ``task.*`` events.
+
+        Read for a removed card too: its history stays readable. The events are the bus's own table, so
+        the list reaches back as far as that table's retention does, and no further; nothing is
+        written for a change made without an event. An edit is announced as ``task.changed`` and,
+        when it also moved or reassigned the card, as ``task.moved`` or ``task.assigned`` in the same
+        step; the bare ``task.changed`` of such a step is left out, since it says nothing the other does not.
+        """
+        if await app.db.fetchone("SELECT 1 FROM board_tasks WHERE id = ?", (task_id,)) is None:
+            raise HTTPException(404, "no such task")
+        return await task_history(app.db, task_id, limit=limit)

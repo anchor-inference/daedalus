@@ -154,3 +154,52 @@ async def test_the_agents_tools_carry_the_due_date(app: Any, tmp_path: Path) -> 
     with pytest.raises(ValueError, match="ISO"):
         await hook("update", session_id=chat.session.id, task_id=task["id"], client_operation_id="a-3",
                    expected_entity_revision=task["entity_revision"], due_at="whenever")
+
+
+# -- the history ---------------------------------------------------------------------------------
+
+
+async def test_a_cards_history_is_its_stored_events_oldest_first(client: httpx.AsyncClient) -> None:
+    task = await create(client, "Plan the launch")
+    other = await create(client, "Somebody else's card")
+    await edit(client, task, due_at=day(5))
+    await edit(client, task, status="blocked", note="waiting for the venue")
+    await edit(client, task, due_at="")
+    await edit(client, other, priority=1)
+
+    got = await client.get(f"/api/board/{task['id']}/events", headers=HEADERS)
+    assert got.status_code == 200, got.text
+    events = got.json()
+    assert [e["type"] for e in events] == ["task.created", "task.changed", "task.moved", "task.changed"]
+    assert [e["seq"] for e in events] == sorted(e["seq"] for e in events)
+    created, due, moved, cleared = events
+    assert created["text"] == "Created in todo" and created["actor"]["kind"] == "operator" and created["actor"]["id"] == "operator:1"
+    assert due["due_at"] == f"{day(5)}T23:59:59Z" and due["text"].startswith("Due ")
+    # One edit that moved the card is one line: the move, not "edited" and then the move.
+    assert (moved["from"], moved["to"], moved["text"]) == ("todo", "blocked", "todo → blocked")
+    assert cleared["due_at"] is None and cleared["text"] == "Due date cleared"
+    assert all(e["at"].endswith("Z") for e in events)
+
+    assert [e["type"] for e in (await client.get(f"/api/board/{task['id']}/events?limit=2", headers=HEADERS)).json()] == ["task.moved", "task.changed"]
+    assert (await client.get("/api/board/nope/events", headers=HEADERS)).status_code == 404
+    assert (await client.get(f"/api/board/{task['id']}/events")).status_code == 401
+    assert (await client.get(f"/api/board/{task['id']}/events?limit=0", headers=HEADERS)).status_code == 422
+
+
+async def test_a_removed_cards_history_stays_readable(client: httpx.AsyncClient) -> None:
+    task = await create(client, "Short lived")
+    revision = (await edit(client, task, priority=2)).json()["task"]["entity_revision"]
+    gone = await client.delete(f"/api/board/{task['id']}", headers=HEADERS,
+                               params={"client_operation_id": "remove-it", "expected_entity_revision": revision})
+    assert gone.status_code == 200, gone.text
+    assert task["id"] not in {t["id"] for t in await board(client)}
+    events = (await client.get(f"/api/board/{task['id']}/events", headers=HEADERS)).json()
+    assert events[0]["type"] == "task.created" and "task.moved" in {e["type"] for e in events}
+    assert events[-1]["to"] == "dropped"
+
+
+async def test_the_history_is_found_by_an_index_not_a_scan(app: Any) -> None:
+    plan = " ".join(str(r["detail"]) for r in await app.db.fetchall(
+        "EXPLAIN QUERY PLAN SELECT seq FROM app_events WHERE json_extract(payload_json, '$.task_id') = ? AND type LIKE 'task.%' ORDER BY seq DESC LIMIT 5",
+        ("abc",)))
+    assert "app_events_by_task" in plan and "SCAN" not in plan
