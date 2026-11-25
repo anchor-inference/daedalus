@@ -1,7 +1,7 @@
 """Settings → Tools → MCP servers, in a real browser.
 
 At 1440 × 900 and on a 390 px phone: the card lists each server with its state and what it runs, a
-server waiting for its sign-in offers Sign in, Add server opens a form whose fields follow the
+server waiting for its sign-in offers Sign in, Add server opens a sheet whose fields follow the
 connection kind and whose save sends the server to the host, Remove asks first and sends a delete,
 and a sign-in that came back says so once and leaves the address clean. A stdio server offers where
 it runs (the Daedalus server or the host machine) and an HTTP one does not; a pasted command tried
@@ -82,13 +82,15 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
         problems.append(f"the server was not added where it was tried: {added}")
     sent.clear()
     card.get_by_role("button", name="Fill in by hand" if LANG == "en" else "Заполнить вручную").click()
-    form = card.locator("[data-mcp-form]")
+    # The form is a sheet over the page: its fields and its Add are the sheet's, not the card's.
+    sheet = page.locator(".sheet")
+    form = sheet.locator("[data-mcp-form]")
     form.locator("input.field").first.fill("linear")
     form.locator("input.field.mono").nth(1).fill("https://mcp.linear.example/mcp")
-    form.locator("input[type=checkbox]").check()
+    form.get_by_role("switch").click()
     if form.locator("input[type=password]").count() != 1:
         problems.append("turning sign-in on does not offer the client fields")
-    form.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
+    sheet.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
     until(page, lambda: any(item[0] == "PUT" and item[1] == "/api/mcp/servers/linear" for item in sent))
     put = next((item for item in sent if item[0] == "PUT"), None)
     if put is None or put[1] != "/api/mcp/servers/linear" or put[2].get("url") != "https://mcp.linear.example/mcp" or put[2].get("oauth") is None:

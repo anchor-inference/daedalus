@@ -130,6 +130,8 @@ def desktop(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped
     browser = playwright.chromium.launch(executable_path=CHROMIUM)
     page = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
+    # The terminals' own bar: this check is about their cap, and the picture stub also reports a browser.
+    page.route("**/api/workloads/load", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"terminals": terminal_load(), "browsers": None, "together": None})))
     page.goto(f"{BASE}/settings/notifications?token=t&lang={LANG}")
     page.wait_for_selector(".nmatrix tbody tr", timeout=15000)
 
@@ -170,7 +172,8 @@ def desktop(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped
 
     # Mute the second project for an hour.
     count = len(host.puts)
-    page.locator(f'.nmute[data-project="{P2}"] .segmented button').first.click()
+    page.locator(f'.nmute[data-project="{P2}"] .dropdown-btn').click()
+    page.locator('.dropdown-item[data-value="hour"]').click()
     if wait_for(page, lambda: len(host.puts) == count + 1, problems, "muting sent no PUT"):
         until = host.puts[-1]["preferences"]["muted_projects"].get(P2)
         minutes = (datetime.fromisoformat(until.replace("Z", "+00:00")) - datetime.now(UTC)).total_seconds() / 60 if until else 0
@@ -184,6 +187,7 @@ def desktop(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped
     if names != ["Chrome · Linux", "Firefox · Android"]:
         problems.append(f"the devices read {names}")
     page.locator('.ndevice[data-device="2"] .btn').click()
+    page.locator(".dialog-actions .btn.danger").click()
     wait_for(page, lambda: host.deleted == [2], problems, "removing a device sent no DELETE")
     try:
         page.wait_for_function("document.querySelectorAll('.ndevice').length === 1", timeout=5000)

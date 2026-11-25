@@ -164,8 +164,11 @@ describe("PublicAddressPanel", () => {
 
   it("offers the four providers and writes the one chosen", async () => {
     const { box, done, sent } = await show(TUNNEL, (body) => ({ ...TUNNEL, provider: body.provider as Tunnel["provider"] }));
-    expect(box.querySelectorAll("input[type=radio]")).toHaveLength(4);
-    await click(box.querySelector("[data-address-provider=frp] input"));
+    await click(box.querySelector("#address-provider"));
+    // The list opens over the page, outside the box: Base UI draws it in a portal.
+    const options = [...document.querySelectorAll<HTMLElement>("[role=option]")];
+    expect(options.map((o) => o.dataset.value)).toEqual(["ngrok", "tailscale", "cloudflare", "frp"]);
+    await click(options.find((o) => o.dataset.value === "frp"));
     expect(sent).toEqual([{ method: "PUT", body: { provider: "frp" } }]);
     expect(box.querySelector("#address-frp-server")).not.toBeNull();
     done();
@@ -245,7 +248,7 @@ describe("PublicAddressPanel", () => {
     expect(box.querySelector("#address-frp-server")).not.toBeNull();
     expect(box.querySelector("#address-frp-domain")).not.toBeNull();
     expect(box.querySelector("#address-frp-token")).not.toBeNull();
-    expect(box.querySelector<HTMLAnchorElement>(".sub a")!.href).toContain("desktop/README.md#public-address");
+    expect(box.querySelector<HTMLAnchorElement>(".set-hint a")!.href).toContain("desktop/README.md#public-address");
     expect(box.querySelector("[data-address-defender]")).not.toBeNull();
     done();
   });

@@ -70,7 +70,7 @@
 .settings-col .card > .card-foot > .sub { flex: 1 1 200px; min-width: 0; }
 /* What follows is the desktop card's own arithmetic: a row or a list at the card's edge gives back the
    padding it doubles, and the foot runs to the card's edges. A phone draws a group as its own list
-   (ui/phone.css) with no padding to give back, so none of it applies there. */
+   (the phone block of settings.css) with no padding to give back, so none of it applies there. */
 .settings-col .card > .card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 @media (min-width: 1024px) {
   .settings-col .card > .settings-row:first-child { margin-top: -8px; }
@@ -97,16 +97,6 @@
 .settings-col .card > .sub + .keyproxy-add { padding-top: 12px; border-top: 1px solid var(--line); }
 .keyproxy-add > .sub { margin-bottom: 10px; }
 .keyproxy-add > .btnrow { margin-top: 12px; }
-/* The secrets under their card's words: with nothing to search yet the toolbar is the one button, and
-   it starts the line as a card's action does instead of hanging at the far edge over an empty list. */
-.settings-col .secrets-manager { margin-top: 10px; }
-.settings-col .secrets-toolbar > .secrets-add-open:only-child { margin-left: 0; }
-/* A catalogue (voices, recognition models, components): what is in use in a card, the filters and the
-   tiles on the page under it, the chosen one's settings in a card after them. */
-.catalogue > .catalogue-filters { margin: 0 0 12px; }
-.catalogue > .stt-list, .catalogue > .comp-grid { margin: 0 0 16px; }
-.catalogue > .sub.attn { margin: 0 2px 12px; }
-.catalogue > .card:last-child, .catalogue > :is(.stt-list, .comp-grid):last-child { margin-bottom: 0; }
 /* Six themes, three to a row: at any width a fill of 148 px columns left the sixth alone on a row. */
 .settings-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
 .settings-themes button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: var(--row-h); padding: 8px 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; text-align: left; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
@@ -139,10 +129,8 @@
 .settings-num { display: inline-flex; align-items: center; gap: 8px; }
 .settings-num input.field { width: 104px; margin: 0; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .settings-num input.field[aria-invalid="true"] { border-color: var(--bad); }
-/* Settings → Chat: the learned style as the host wrote it, and what autopilot did today. */
-.style-profile { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-13); color: var(--fg-2); background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); max-height: 240px; overflow: auto; }
-.style-empty, .style-learned { margin-top: var(--space-2); }
-.autopilot-today { margin-top: var(--space-2); }
+/* Settings → Chat: the learned style, as the host wrote it. */
+.style-profile { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); max-height: 240px; overflow: auto; }
 .prose-stepper { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0; }
 .prose-stepper-ctl { display: inline-flex; align-items: center; gap: 6px; }
 .prose-stepper-value { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }
@@ -157,14 +145,14 @@
 .model-price { border-top: 1px solid var(--line); }
 .model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
 .model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-/* Which models helpers may use: three labelled ways stacked, each saying what it allows, then the list. */
+/* Which models helpers may use: three ways as one choice, the sentence for the chosen one under it, then the list. */
 .dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
 .subagent-models, .quick-models { display: grid; gap: var(--space-2); min-width: 0; width: 100%; }
-.subm-modes { display: grid; gap: 2px; }
-.subm-mode { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-2); border-radius: var(--radius-sm); cursor: pointer; min-width: 0; }
-.subm-mode:hover { background: var(--surface-2); }
-.subm-mode.on { background: var(--surface-3); }
-.subm-mode input { margin: 0; flex: none; accent-color: var(--fg); }
+.subagent-models .subm-modes { display: flex; width: 100%; min-width: 0; box-sizing: border-box; margin: 0; }
+.subagent-models .subm-modes.segmented button { flex: 1 1 0; min-width: 0; padding: 4px 6px; }
+/* The names of the three ways are long in Russian and wrap in their segment rather than being cut. */
+.subagent-models .subm-modes .segmented-label { white-space: normal; text-align: center; line-height: 1.25; }
+.subm-explain { margin-top: -2px; }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
@@ -243,3 +231,111 @@
 }
 .settings-faces button.on { background: var(--surface-3); }
 h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; }
+
+/* On a phone: Usage. */
+@media (max-width: 1023px) {
+  /* Usage: the period as a segmented track, the tightest quota first and wide, the rest as the
+     settings' cards */
+  .pagehead:has(+ .screen.usage) .chips { display: flex; gap: 2px; margin: 0 var(--gutter) var(--space-2); padding: 2px; border-radius: 10px; background: var(--surface-2); }
+  .pagehead:has(+ .screen.usage) .chip.select { position: relative; flex: 1; justify-content: center; min-height: 34px; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--fg-2); font-size: var(--fs-14); font-weight: 500; }
+  .pagehead:has(+ .screen.usage) .chip.select::after { content: ""; position: absolute; inset: -5px 0; }
+  .pagehead:has(+ .screen.usage) .chip.select[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
+  .usage .kpi-grid { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+  .usage .kpi { padding: 12px 14px; border-radius: var(--radius-md); }
+  .usage .kpi:has(.bar) { grid-column: 1 / -1; order: -1; }
+  .usage .kpi .label { font-size: var(--fs-13); color: var(--fg-3); }
+  .usage .kpi .bar { margin-top: var(--space-2); }
+  .usage > .section-title, .usage section > .section-title { margin: var(--space-5) 4px var(--space-2); }
+  .usage .usage-cards { gap: 0; }
+  .usage .usage-cards .card { padding: 12px var(--space-4); border-radius: 0; box-shadow: none; }
+  .usage .usage-cards .card + .card { border-top-width: 0; }
+  .usage .usage-cards .card:first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .usage .usage-cards .card:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .usage .card { padding: 4px var(--space-4); border-radius: var(--radius-xl); }
+  .usage .card .kv, .usage .card .usage-row { min-height: var(--set-row-h); }
+  .usage .card .kv { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-15); }
+  .usage .card .usage-row .what .l1 .name { font-size: var(--fs-15); }
+  .usage .card .usage-row .cost { font-size: var(--fs-14); color: var(--fg-3); }
+  .usage .card, .usage-card, .screen .kpi { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
+  .kpi .value { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; }
+}
+
+/* On a phone: Settings and its grouped cards. */
+@media (max-width: 1023px) {
+  /* Settings' pages in the grouped-card language
+     A card's heading becomes the grey label over its group, and a run of setting rows one card: each
+     row carries the card's surface and its side edges, a hairline parts it from the row above, and
+     the first and last of the run close the card with 20 px corners. Anything else a card holds (a
+     meter, a list, a theme grid) is a card of its own. Done here rather than in every section's
+     markup, so the desktop's cards and their rows stay exactly as they are. The rows were separate
+     tiles with 2 px of page between them, which read as a stack of buttons rather than one list. */
+  .main .settings-col .card { margin: 0 0 var(--space-2); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+  .main .settings-col .card > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .main .settings-col .card > .section-title:first-child { margin-top: var(--space-2); }
+  .main .settings-col .card > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
+  .main .settings-col .card > :is(.settings-row, .settings-block) { margin-top: 0; padding: 8px var(--space-4); border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; background: var(--card); }
+  .main .settings-col .card > .settings-row { min-height: var(--set-row-h); }
+  .main .settings-col .card > :is(.settings-row, .settings-block):not(:is(.settings-row, .settings-block) + *) { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .main .settings-col .card > :is(.settings-row, .settings-block):not(:has(+ :is(.settings-row, .settings-block))) { border-bottom-width: 1px; border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); box-shadow: var(--drop-xs); }
+  .main .settings-col .card > :not(.section-title):not(.sub):not(.settings-row):not(.settings-block):not(.btnrow):not(.card-foot):not(details):not(label):not(.field) { border-radius: var(--radius-xl); }
+  .main .settings-col .card > :is(.loadbar, .integrations-list, .tgroups, ul) { padding: 12px var(--space-4); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); }
+  .main .settings-col .card > .btnrow { margin: var(--space-2) 0 0; padding: 0; border: 0; }
+  /* A card's foot is the desktop card's recessed last band; here the card is only a group, so the foot
+     is a plain row of its button and note under the list. */
+  .main .settings-col .card > .card-foot { margin: var(--space-3) 4px 0; padding: 0; border: 0; border-radius: 0; background: none; }
+  /* The lists inside a card (models, keys, devices, the kinds of notification) are one card each, with
+     hairlines between their rows. The default model is named by its tag; the blue stripe down the
+     row's side said it a second time in a colour kept for what is live. An open row is tinted, so
+     its fields read as belonging to it. */
+  .main .settings-col .card :is(.mlist, .nrows) { display: flex; flex-direction: column; gap: 0; margin-top: 0; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--drop-xs); }
+  /* A list with nothing in it yet would draw its ring as a 2 px bar under the card's description. */
+  .main .settings-col .card :is(.mlist, .nrows):empty { display: none; }
+  .main .settings-col .card :is(.mlist, .nrows) > :is(.mrow, .nrow) { margin: 0; padding: 8px var(--space-4); border: 0; border-radius: 0; background: none; }
+  .main .settings-col .card :is(.mlist, .nrows) > :first-child { border-top-left-radius: calc(var(--radius-xl) - 1px); border-top-right-radius: calc(var(--radius-xl) - 1px); }
+  .main .settings-col .card :is(.mlist, .nrows) > :last-child { border-bottom-left-radius: calc(var(--radius-xl) - 1px); border-bottom-right-radius: calc(var(--radius-xl) - 1px); }
+  .main .settings-col .card :is(.mlist, .nrows) > :is(.mrow, .nrow):not(:first-child) { border-top: 1px solid var(--line); }
+  .main .settings-col .card .mlist > .mrow.open { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+  .main .settings-col .card :is(.settings-row, .settings-block) + :is(.mlist, .nrows) { margin-top: var(--space-2); }
+  .main .settings-col .card > .mrow { margin: 0 0 var(--space-2); padding: 8px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--drop-xs); }
+  .main .settings-col .card .nrow-head { min-height: var(--set-row-h); }
+  /* A model's or a provider's card leads with the provider's mark, as the model sheet does. */
+  .mtitle { font-weight: 500; font-size: var(--fs-15); }
+  .mtitle > .provider-mark { display: inline-grid; width: 24px; height: 24px; margin-right: var(--space-2); vertical-align: -6px; border-radius: var(--radius-xs); }
+  .mtitle > .provider-mark svg { width: 16px; height: 16px; }
+  .mtitle > .provider-letter { font-size: var(--fs-12); }
+  .main .settings-col .card > details { margin: var(--space-2) 4px; }
+  .settings-row-title { font-size: var(--fs-15); font-weight: 400; }
+  .settings-row-desc { font-size: var(--fs-13); color: var(--fg-3); }
+  .settings-row-ctl .btn { min-height: 36px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; }
+  .settings-num input.field, .settings-row-ctl input.field, .settings-row-ctl select.field { border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; }
+  .main .settings-col .card > label.field { margin: var(--space-4) 4px 6px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  /* Every control in a Settings row reaches 44 px to the finger: the segmented choices and the
+     switches by an invisible margin (6 px on each side of the 32 px switch), the fields by their own
+     height. */
+  .main .settings-col .segmented button { position: relative; min-height: 32px; min-width: var(--tap); }
+  .main .settings-col .segmented button::after { content: ""; position: absolute; inset: -6px 0; }
+  .main .settings-col .switch { position: relative; }
+  .main .settings-col .switch::after { content: ""; position: absolute; inset: -6px; }
+  .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn) { position: relative; }
+  .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn)::after { content: ""; position: absolute; inset: -6px 0; }
+  .main .settings-col .card input.field:not([type="checkbox"]):not([type="range"]), .main .settings-col .card select.field { min-height: var(--tap); }
+  /* Inside a tile a long unit ("characters") would push a full-width number past the tile's edge at
+     360 px; the field gives way instead. */
+  .main .settings-col .card .settings-num { max-width: 100%; min-width: 0; }
+  .main .settings-col .card .settings-num input.field { min-width: 0; }
+  .main .settings-col .card .settings-unit { min-width: 0; }
+  .main .settings-col .card > :is(input, select, textarea).field { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  /* A group that is not itself a card (a catalogue, the key proxy's lists) reads as the cards do: the
+     same grey label and line of words over it, and its tiles with the grouped card's corners. */
+  .main .settings-col .settings-groups > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .main .settings-col .settings-groups > .section-title:first-child { margin-top: var(--space-2); }
+  .main .settings-col .settings-groups > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
+  /* Settings and Usage in grouped cards */
+  /* The language switch is a pair of small pills; each reaches 44 px to the finger. */
+  .segmented.lang button { position: relative; min-height: var(--chip-h); min-width: var(--tap); }
+  .segmented.lang button::after { content: ""; position: absolute; inset: -8px 0; }
+  .settings-col .card { border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); }
+  .settings-row { min-height: var(--set-row-h); }
+  /* Section labels are words in the grey of the design, not tracked capitals. */
+  .section-title { font-size: var(--fs-13); font-weight: 500; text-transform: none; letter-spacing: 0; margin: var(--space-5) 4px var(--space-2); }
+}

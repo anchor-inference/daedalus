@@ -4,9 +4,11 @@
 // preset that was chosen here and later deleted stays in the configuration (the runtime quietly
 // summarises with the session's own model instead), so the picker must still show it — as missing —
 // rather than silently displaying the first option and leaving the operator to believe it is in use.
+// The row says so in words as well as in the value, because a value alone reads as a choice.
 
 import { t } from "./i18n";
-import { ModelPicker, type ModelCatalogue } from "./modelitems";
+import { ModelChoice } from "./modelchoice";
+import type { ModelCatalogue } from "./modelitems";
 import { Row } from "./settingsrow";
 import { WithEffort } from "./taskeffort";
 
@@ -25,7 +27,7 @@ export function CompactionModelSelect({ catalogue, value, onSave, effort, onEffo
       data-setting="compaction.preset"
     >
       <WithEffort id="compaction-effort" value={effort} onChange={onEffort} fallback="off">
-        <ModelPicker id="compaction-preset" label={t("settings.compaction.model")} catalogue={catalogue} value={value} onChange={onSave} defaultOption={{ label: t("settings.compaction.model.own") }} />
+        <ModelChoice id="compaction-preset" label={t("settings.compaction.model")} catalogue={catalogue} value={value} onChange={onSave} defaultOption={{ label: t("settings.compaction.model.own") }} />
       </WithEffort>
     </Row>
   );

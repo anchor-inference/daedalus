@@ -10,7 +10,7 @@ import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
-import { SectionHeader } from "../ui/phone";
+import { SectionHeader } from "../ui/primitives";
 import { Row } from "../ui/primitives";
 import { openImport } from "./ImportExplorer";
 import { HarnessMark } from "./parts";

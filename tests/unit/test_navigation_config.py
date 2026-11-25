@@ -1,4 +1,4 @@
-"""The ``[navigation]`` section: where the sidebar's pinned rows, its More launcher and the phone drawer put each destination."""
+"""The ``[navigation]`` section: where the sidebar's pinned rows and its More launcher put each destination."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from tests.unit.test_components import HEAD, FakeApp
 def test_an_empty_section_is_the_shipped_layout_and_survives_the_file(tmp_path) -> None:
     config = RuntimeConfig()
     assert config.navigation == NavigationConfig()
-    assert config.navigation.model_dump() == {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
+    assert config.navigation.model_dump() == {"pinned": [], "more": [], "hidden": [], "icons": {}}
     path = tmp_path / "config.toml"
     laid_out = config.model_copy(update={"navigation": NavigationConfig(pinned=["board", "page:dosing"], hidden=["harnesses"], icons={"board": "flag"})})
     laid_out.save(path)
@@ -48,7 +48,7 @@ def test_settings_save_the_section_and_a_field_sent_replaces_it_whole(tmp_path) 
     app = FakeApp(tmp_path, native=True)
     with TestClient(build_app(app, "tok")) as client:
         view = client.get("/api/settings", headers=HEAD).json()
-        assert view["navigation"] == {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
+        assert view["navigation"] == {"pinned": [], "more": [], "hidden": [], "icons": {}}
         assert client.get("/api/navigation", headers=HEAD).json() == view["navigation"]
 
         saved = client.put("/api/settings", headers=HEAD, json={
@@ -82,3 +82,16 @@ def test_a_file_written_with_the_rail_keeps_its_places_as_pinned(tmp_path) -> No
     assert "rail" not in written and "pinned" in written
     # Loading the rewritten file changes nothing more.
     assert RuntimeConfig.load(path) == config
+
+
+def test_a_file_written_with_a_phone_drawer_loses_the_list_once(tmp_path) -> None:
+    # The phone's drawer is the sidebar and follows `pinned`; a list kept for it is dropped from the
+    # file, and the places that were not about the drawer carry over untouched.
+    path = tmp_path / "config.toml"
+    path.write_text('[navigation]\npinned = ["inbox"]\ndrawer = ["voice", "board"]\nhidden = ["voice"]\n', encoding="utf-8")
+    config = RuntimeConfig.load(path)
+    assert config.navigation.pinned == ["inbox"]
+    assert "drawer" not in config.navigation.model_dump()
+    rewritten = path.read_text(encoding="utf-8")
+    assert "drawer" not in rewritten
+    assert RuntimeConfig.load(path).navigation.hidden == ["companion"]

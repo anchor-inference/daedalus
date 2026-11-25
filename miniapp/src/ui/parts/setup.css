@@ -31,11 +31,11 @@
 .orp-filter { margin-bottom: var(--space-2); }
 .orp-list { max-height: min(60vh, 440px); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .orp-head { display: none; }
-.orp-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: var(--space-2); align-items: start; padding: 6px 10px; cursor: pointer; }
+.orp-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: var(--space-2); align-items: start; padding: 6px 10px; cursor: pointer; }
 .orp-row + .orp-row, .orp-head + .orp-row { border-top: 1px solid var(--line); }
 .orp-row:hover { background: var(--surface-2); }
 .orp-row.on { background: var(--surface-3); }
-.orp-row input { margin: 3px 0 0; accent-color: var(--fg); }
+.orp-row .switch { margin: 3px 0 0; }
 .orp-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .orp-name b { font-weight: 500; white-space: nowrap; }
 .orp-name .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); }
@@ -47,7 +47,7 @@
   .orp-head, .orp-row { grid-template-columns: 20px minmax(130px, 1fr) repeat(3, 62px) 58px 74px 82px minmax(240px, 2.2fr); column-gap: var(--space-2); align-items: center; }
   .orp-head { display: grid; position: sticky; top: 0; z-index: 1; padding: 6px 10px; background: var(--surface-2); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
   .orp-row { padding: 2px 10px; min-height: var(--row-h); }
-  .orp-row input { margin: 0; }
+  .orp-row .switch { margin: 0; }
   .orp-cells { display: contents; }
   .orp-cell::before { content: none; }
   .orp-cell { text-align: right; font-size: var(--fs-13); }
@@ -207,53 +207,11 @@
 .project-ephemeral { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .project-ephemeral .sub { flex: 1 1 200px; }
 
-/* ── speech models: the picker for a recogniser that runs on this machine ────────────────── */
-/* Cards on a lighter step than the card they sit in, as everything raised here is: the list is
-   inside a panel, so it lifts rather than sinks, and the hairline is what separates two cards that
-   are nearly the same shade. The grid fills the width it is given — one column at 400 px, as many
-   as fit on a wide screen — because a list of twelve read one at a time is a list nobody finishes. */
-
-/* A catalogue's filters (speech models, voices): the search takes the room, the rest are compact. */
-.catalogue-filters { display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; margin: 12px 0 4px; }
-.catalogue-filters > .field { flex: 1 1 200px; min-width: 160px; margin: 0; padding: 6px 10px; }
-.filter-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+/* The speed of a voice: the range input a catalogue's chosen voice has, the one control with no primitive. */
 .settings-range { display: inline-flex; align-items: center; gap: 10px; }
 .settings-range input[type="range"] { width: 200px; accent-color: var(--fg); }
-
-/* Uneven tiles made the catalogue hard to scan. Let the longest description set their height
-   without clipping text, and keep every action at the bottom of its tile. */
-.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 10px; }
-/* A tile is a card on the page, as every group in Settings is. The one in use is the one with the ink
-   edge, the way the chosen theme is; its "in use" tag says the same in words. */
-.stt-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.stt-card > .btnrow { margin-top: auto; padding-top: 10px; }
-.stt-card.using { border-color: var(--fg); }
-.stt-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.stt-head b { font-size: var(--fs-14); font-weight: 600; margin-right: 2px; }
-.stt-facts { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); color: var(--fg-3); }
-.stt-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px; }
-.stt-bar { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
-.stt-bar > .sub { flex: none; width: 56px; }
-.stt-bar-track { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
-.stt-bar-fill { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
-.stt-bar-fill.accent { background: var(--fg); }
-.stt-progress { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.stt-progress .stt-bar-fill { background: var(--fg); }
-.stt-progress .sub { flex: none; min-width: 64px; text-align: right; }
-/* The chosen model's weights on their way into memory: a line that says the wait is happening now
-   rather than under the first thing the operator says. */
-.stt-load b.stt-loading { color: var(--warn); }
-.stt-load b.stt-loading::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
-
-@media (max-width: 480px) {
-  .stt-list { grid-template-columns: 1fr; }
-  .stt-bars { grid-template-columns: 1fr; }
-}
-
-/* The synthesis picker shares every class above — the two lists are the same list of cards with a
-   different thing on them — and adds one control the recogniser has no use for: a speed slider. A
-   range input inherits the text field's frame, which reads as an input box drawn around a track, so
-   it gives the frame back and keeps only the height and the accent. */
+/* A range input inherits the text field's frame, which reads as an input box drawn around a track,
+   so it gives the frame back and keeps only the height and the accent. */
 input.field[type="range"] {
   padding: 0;
   height: 28px;
@@ -263,47 +221,25 @@ input.field[type="range"] {
   accent-color: var(--fg);
 }
 
-/* Settings -> Components. The optional pieces of an installation, one card each.
-   Dark elevation: the page's card is --card, a component sits on --surface-2 above it, and the one
-   that is already installed sits on --surface-3 — lighter to come forward, never a darker slab, with
-   a hairline for the seam. The grid is the same auto-fill the two speech pickers use, so the three
-   sections of Settings that are lists of things read as one thing. */
-.comp-restart { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
-.comp-restart > b { font-size: var(--fs-14); font-weight: 500; }
-/* The minimum is capped at the column's width and a card may shrink below its content: a card's fix
-   command is `white-space: pre`, and with the default `auto` minimum it widened the one phone column
-   past the screen, cutting every card's text at the right edge. */
-/* Match catalogue tile sizes so status and capabilities can be compared down the columns. */
-.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 12px; }
+/* Settings -> Components. The optional pieces of an installation, one row each in a settings card:
+   the name and its state, grey lines under it for what it is and what it unlocks, one action at the
+   end. What an install is doing, or the command that does it by hand, takes the lines under the row. */
+.comp-name { margin-right: 8px; }
+.comp-state { display: inline-flex; vertical-align: 1px; }
+.comp-note { display: block; }
+.comp-extra { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
+.comp-extra progress { width: 100%; accent-color: var(--accent); }
 @media (max-width: 599px) {
   /* A single column does not need matching heights across separate rows. */
-  .comp-grid, .stt-list { grid-auto-rows: auto; }
 }
-/* Each component is a card on the page; an installed one is marked by its tag, not by a brighter
-   fill or a stronger edge that made the grid a patchwork. */
-.comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.comp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.comp-head b { font-size: var(--fs-14); font-weight: 600; flex: 1 1 auto; }
-.comp-what { margin: 0; }
-/* The state is a tag: a wash of its own colour and no edge. */
-.comp-chip { flex: none; padding: 2px 7px; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); background: color-mix(in srgb, currentColor 12%, transparent); }
-.comp-chip.comp-installed, .comp-chip.comp-svc-running { color: var(--ok); }
-.comp-chip.comp-installing, .comp-chip.comp-svc-starting { color: var(--live); }
-.comp-chip.comp-unavailable { color: var(--fg-3); }
-.comp-chip.comp-svc-failed { color: var(--bad); }
-.comp-enables { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-.comp-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.comp-tag { padding: 2px 7px; border-radius: var(--radius-xs); background: var(--surface-2); font-size: var(--fs-12); color: var(--fg-2); }
 .comp-line { margin-top: 2px; }
 .comp-running { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .comp-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
 .comp-bar-fill { display: block; height: 100%; width: 40%; border-radius: 2px; background: var(--live); animation: comp-slide 1.5s ease-in-out infinite; }
 @keyframes comp-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
 .comp-step { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.comp-actions { margin-top: 4px; }
 .comp-byhand { margin-top: 4px; }
 .comp-fix { display: block; margin-top: 4px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-mono); overflow-x: auto; white-space: pre; }
-.comp-detail { margin-top: 2px; font-size: var(--fs-12); }
 .voice-needs { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
 
 
@@ -461,6 +397,7 @@ input.field[type="range"] {
 /* Keep the newest-message shortcut above a card of any height. */
 .composer-jump-anchor { position:relative; flex:none; height:0; }
 .composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); }
+@media (max-width: 1023px) { .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); } .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; } }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
 .search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
@@ -487,16 +424,14 @@ input.field[type="range"] {
   .chat-scroll { overflow-x:hidden; padding-top:var(--space-3); }
   .chat-head .head-status { max-width:40%; gap:var(--space-1); font-size:var(--fs-12); }
   .chat-head .head-status > span:not(.dot):not(.num) { display:none; }
-  .thinking-head { min-height:var(--row-h-touch); flex-wrap:wrap; gap:var(--space-1); }
+  .thinking-head { flex-wrap:wrap; }
   /* What the run did wraps under the head rather than going missing: without it a phone said less
      about the same run than the other two sizes. */
   .thinking-head .families { flex:1 1 100%; order:1; }
   .sysnote-head { min-height:var(--row-h-touch); }
   .run-disclosure { flex:none; }
   .activity { border-left:1px solid var(--line-strong); padding-left:var(--space-2); }
-  .msg-actions .iconbtn.small, .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
-  .msg-actions { opacity:1; }
+  .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
   .composer-row .model-select, .composer-row .composer-access { min-height:var(--row-h-touch); }
   .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }
@@ -526,7 +461,6 @@ input.field[type="range"] {
   .folder.single .folder-expand { display:none; }
   .folder.single .folder-top > .erow { padding-right:0; }
 }
-.search-component progress { width: 100%; accent-color: var(--accent); }
 
 /* Subagents are peers of files and jobs, but opening one is navigation rather than panel content.
    Keep the roster at the session edge where it is visible without occupying the Details tab. */

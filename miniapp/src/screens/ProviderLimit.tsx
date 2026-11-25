@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { shortDateTime } from "../format";
 import { t } from "../i18n";
 import { useOffline, useQuery } from "../store";
+import { Badge, Button } from "../ui/primitives";
 
 type Observation = {
   id: string;
@@ -63,16 +64,16 @@ export function ProviderLimit({ providerId }: { providerId: string }) {
 
   if (!data?.observations.length && !error) return null;
   return <div className="provider-limit sub" role="status">
-    {error && <span>{t("provider.limit.readFailed")} <button type="button" className="linkbtn" onClick={refresh}>{t("common.retry")}</button></span>}
+    {error && <span>{t("provider.limit.readFailed")} <Button size="sm" variant="quiet" onClick={refresh}>{t("common.retry")}</Button></span>}
     {latest && <>
-      <span>{t(`provider.limit.${latest.failure_class}`)} · {latest.model}</span>
+      <span><Badge tone="attention">{t(`provider.limit.${latest.failure_class}`)}</Badge> {latest.model}</span>
       {latest.reset_at && <span> · {t("provider.limit.reset", { when: shortDateTime(latest.reset_at) })}</span>}
       {!latest.reset_at && latest.retry_after_at && <span> · {t("provider.limit.retryAfter", { when: shortDateTime(latest.retry_after_at) })}</span>}
       {!latest.reset_at && !latest.retry_after_at && <span> · {t("provider.limit.timeUnknown")}</span>}
       {latest.hold_state && <span> · {t(`provider.limit.state.${latest.hold_state}`)}</span>}
-      {latest.hold_available && latest.project_id && !latest.hold_id && <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void decide("hold", latest)}>{t("provider.limit.hold")}</button>}
-      {latest.hold_state === "held" && latest.hold_id && latest.project_id && latest.reset_at && new Date(latest.reset_at).getTime() <= Date.now() && <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void decide("resume", latest)}>{t("provider.limit.resume")}</button>}
+      {latest.hold_available && latest.project_id && !latest.hold_id && <Button size="sm" disabled={busy || offline} onClick={() => void decide("hold", latest)}>{t("provider.limit.hold")}</Button>}
+      {latest.hold_state === "held" && latest.hold_id && latest.project_id && latest.reset_at && new Date(latest.reset_at).getTime() <= Date.now() && <Button size="sm" disabled={busy || offline} onClick={() => void decide("resume", latest)}>{t("provider.limit.resume")}</Button>}
     </>}
-    {writeError && <span> · {writeError} {intent.current && latest?.project_id && <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void decide(intent.current!.key.startsWith("hold:") ? "hold" : "resume", latest)}>{t("provider.limit.retryCommand")}</button>}</span>}
+    {writeError && <span> · {writeError} {intent.current && latest?.project_id && <Button size="sm" variant="quiet" disabled={busy || offline} onClick={() => void decide(intent.current!.key.startsWith("hold:") ? "hold" : "resume", latest)}>{t("provider.limit.retryCommand")}</Button>}</span>}
   </div>;
 }

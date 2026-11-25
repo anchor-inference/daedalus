@@ -73,25 +73,31 @@ def check(page: Page, width: int, lang: str, saved: list[dict], problems: list[s
     if categories != ACTION_RULES["categories"]:
         problems.append(f"{where}: the rows are {categories}, not the host's categories")
     for i in range(rows.count()):
-        cells = rows.nth(i).locator(".ar-cell")
-        if cells.count() != 4:
-            problems.append(f"{where}: {categories[i]} has {cells.count()} levels, not four")
+        trigger = rows.nth(i).locator(".dropdown-btn")
+        trigger.click()
+        page.wait_for_selector("[role=option]", timeout=5000)
+        levels = page.locator("[role=option]").evaluate_all("els => els.map(e => e.dataset.value)")
+        # The chosen level is pressed to close the list: choosing what is chosen saves nothing.
+        page.locator(f"[role=option][data-value='{rows.nth(i).get_attribute('data-level')}']").click()
+        page.wait_for_selector("[role=option]", state="detached", timeout=5000)
+        if levels != ["auto", "on_command", "ask", "handoff"]:
+            problems.append(f"{where}: {categories[i]} offers {levels}, not the four levels")
     publish = page.locator('.ar-row[data-category="publish"]')
-    if publish.locator('.ar-cell[aria-checked="true"]').get_attribute("data-level") != "ask":
-        problems.append(f"{where}: the saved level of publishing (ask) is not the one marked")
+    if publish.get_attribute("data-level") != "ask" or publish.locator(".dropdown-btn").get_attribute("data-value") != "ask":
+        problems.append(f"{where}: the saved level of publishing (ask) is not the one shown")
     if publish.locator(".ar-review").get_attribute("data-review") != "none" or not publish.locator(".ar-review button").is_disabled():
         problems.append(f"{where}: at 'asks' the review's switch is not locked off")
     if width < 600:
         for i in range(rows.count()):
-            for j in range(4):
-                box = rows.nth(i).locator(".ar-cell").nth(j).bounding_box()
-                if box and box["height"] < 36:
-                    problems.append(f"{where}: a level of {categories[i]} is {round(box['height'])} px tall, under a finger's 36")
+            box = rows.nth(i).locator(".dropdown-btn").bounding_box()
+            if box and box["height"] < 32:
+                problems.append(f"{where}: the level of {categories[i]} is {round(box['height'])} px tall, under a finger's 32")
     outside = page.evaluate(OVERFLOW)
     for item in outside[:5]:
         problems.append(f"{where}: past the screen's edge: {item}")
     before = len(saved)
-    page.locator('.ar-row[data-category="external_write"] .ar-cell[data-level="on_command"]').click()
+    page.locator('.ar-row[data-category="external_write"] .dropdown-btn').click()
+    page.locator('[role=option][data-value="on_command"]').click()
     until(page, lambda: len(saved) > before)
     if len(saved) != before + 1:
         problems.append(f"{where}: picking a level did not save")

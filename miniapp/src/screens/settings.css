@@ -51,6 +51,8 @@
 .settings-hit-body [data-search-off] { display: none !important; }
 .settings-hit-body > .section-title:first-child, .settings-hit-body .card > .section-title:first-child { margin-top: 0; }
 .settings-hit-body .section-title { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+/* A found row keeps the label of its group above it, as it does on its page; the group's help does not come along. */
+.settings-hit-body .set-group + .set-group { margin-top: 12px; }
 .settings-hit-links { display: flex; flex-direction: column; padding: 0; }
 .settings-hit-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; color: var(--fg); text-decoration: none; }
 .settings-hit-link + .settings-hit-link { border-top: 1px solid var(--line); }
@@ -138,19 +140,150 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 
 /* ── the cards a section is drawn in ─────────────────────────────────────────────────────────
    A small label over a card of 44 px rows with a hairline between them, the control at the row's
-   end. Models and providers is drawn in them; the other sections move into them one by one. */
+   end, and a sentence of help in the secondary ink under the label. Every section is drawn in them:
+   `SetGroup` (settingsrow.tsx) is the label, the help and the card; a row is `Row`'s `.settings-row`,
+   which looks like this inside a card and like a plain form row anywhere else (a sheet, an editor). */
+.set-group + .set-group, .set-group + .set-label, .set-card + .set-group, .set-card + .set-label { margin-top: 20px; }
 .set-label { display: flex; align-items: center; gap: 12px; height: 28px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .set-label:not(:first-child) { margin-top: 20px; }
+.set-group > .set-label:first-child { margin-top: 0; }
 .set-label > :first-child { flex: 1; }
 .set-label-note { font-weight: 400; }
+.set-help { margin: -2px 0 8px; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; text-wrap: pretty; }
 .set-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.set-group > .set-card > * + *, .set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 0 16px; font-size: var(--fs-14); }
-.set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row-title { flex: 1; min-width: 0; }
+/* The rows of the shared kind, `Row`: the words left (a title, a grey line under it), one control in the
+   lane at the right, the same 44 px and the same padding as the rows written out above. */
+.set-card .settings-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 8px 16px; font-size: var(--fs-14); }
+.set-card .settings-row-text { flex: 1; min-width: 0; }
+.set-card .settings-row-title { font-weight: 400; line-height: 1.35; }
+.set-card .settings-row-desc { margin-top: 1px; max-width: 66ch; font-size: var(--fs-13); }
+.set-card .settings-row-ctl { flex: none; max-width: 64%; }
+/* A list, a paragraph or a field that needs the width: the card's padding, no row of its own. */
+.set-block, .set-card .settings-block { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+.set-block > .field, .set-card .settings-block > .field { margin: 0; }
+.set-group > .set-card > .btnrow { margin: 0; padding: 12px 16px; }
+.set-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; }
+.set-hint { color: var(--fg-2); font-size: var(--fs-13); }
+.set-warn { color: var(--bad); font-size: var(--fs-13); }
+.set-card .settings-value { font-size: var(--fs-14); }
+/* On a phone a row whose control needs the width (a number, a line of text, a key) puts it under its
+   words, as the same rows do outside a card (pages.css); a switch, a segmented choice, a select and a
+   button stay beside them. */
+@media (max-width: 599px) {
+  .set-card .settings-row.stack, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+  .set-card .settings-row.stack > .settings-row-ctl, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+  /* The field takes what the unit leaves, however narrow: its own width made a number run 16 px past the row's padding at 360. */
+  .set-card .settings-row-ctl > .settings-num { min-width: 0; max-width: 100%; }
+  .set-card .settings-row-ctl > .settings-num input.field { flex: 1 1 0; width: 0; }
+}
+/* What a face or a size looks like, in the card under the rows that choose it. */
+.set-specimen { gap: 8px; }
+.set-specimen p { display: flex; gap: 16px; margin: 0; font-size: var(--fs-15); line-height: 1.45; overflow-wrap: anywhere; }
+.set-specimen p[data-role="code"] { font-size: var(--fs-14); }
+.set-specimen-role { flex: none; width: 96px; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); line-height: 24px; }
+.set-card .set-face { width: 260px; }
+.set-card .set-face .combo-input { margin: 0; }
+.set-card .settings-themes { margin: 0; }
+.set-card .prose-stepper { flex-direction: row; align-items: center; gap: 8px; }
+/* A model with the effort it thinks at under it: both read as values at the row's end, the effort's
+   name beside its value rather than at the far side of a wide lane. */
+.set-card .settings-row-ctl .task-model { align-items: flex-end; }
+.set-card .settings-row-ctl .task-effort { justify-content: flex-end; }
 /* A value and its caret, as the row's end: the box round a select is the card's own edge. */
-.set-row .set-value .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
-.set-row .set-value .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
-.set-row .set-value { max-width: 420px; }
+.set-card .set-value .dropdown-btn, .set-card .settings-row-ctl > .dropdown > .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; background: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
+.set-card .set-value .dropdown-btn:hover:not(:disabled), .set-card .settings-row-ctl > .dropdown > .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.set-card .set-value, .set-card .settings-row-ctl > .dropdown { max-width: 420px; }
+
+/* ── Security, components, dependencies and About: rows whose control is more than one thing ───
+   A row that holds several buttons has the lane's width to share with its words; on a phone it goes
+   under them, which is the shape a lone select or number already has. */
+.set-block.secrets-toolbar { flex-direction: row; }
+.set-block .secrets-search { flex: 1; }
+@media (max-width: 599px) {
+  .set-card .secret-row .settings-row, .set-card .settings-row.comp-row { flex-wrap: wrap; }
+  .set-card .secret-row .settings-row-ctl, .set-card .settings-row.comp-row > .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
+  .secret-row .secret-row-tools { margin-left: auto; }
+}
+
+/* ── Navigation: one row per destination, in the list it sits in ───────────────────────────── */
+.nav-cfg-row { display: flex; align-items: center; gap: 8px; min-height: var(--card-row-h); padding: 0 8px 0 12px; font-size: var(--fs-14); cursor: grab; }
+.nav-cfg-row + .nav-cfg-row { border-top: 1px solid var(--line); }
+.nav-cfg-row:hover { background: var(--hover); }
+.nav-cfg-row.dragging { opacity: 0.5; }
+.nav-cfg-grip { display: inline-flex; color: var(--fg-3); }
+.nav-cfg-title { flex: 1; min-width: 0; }
+.nav-cfg-arrows { display: inline-flex; gap: 2px; }
+.nav-cfg-place { flex: none; width: 128px; }
+.nav-cfg-place .dropdown-btn { width: 100%; justify-content: space-between; }
+.nav-cfg-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--ctl-h), 1fr)); gap: var(--space-1); margin-bottom: var(--space-3); }
+.nav-cfg-icons .iconbtn.on { background: var(--surface-3); color: var(--fg); }
+.nav-cfg > .set-help { margin: 0 0 12px; }
+.nav-cfg-list + .nav-cfg-list { margin-top: 20px; }
+.set-actions { margin-top: 20px; }
+
+/* A row whose control is a list of models (a picker, the helpers' choice) takes the whole width under
+   its words at every width, as it does outside a card (selection.css): beside them it was clipped. */
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+
+/* ── Catalogues of downloadable models: voices and recognition models ───────────────────────── */
+.set-card .settings-value { color: var(--fg-2); font-size: var(--fs-14); }
+/* A value that is only the state of something loading: the pulse says the wait is happening now,
+   rather than under the first thing the operator says. */
+.stt-loading { color: var(--warn); }
+.stt-loading::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
+/* A field in a row's lane: wide enough for an address or a model name, as the face fields are. */
+.set-card .settings-row-ctl > .field { width: 280px; max-width: 100%; margin: 0; }
+.cat-filters { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.cat-filters > .field { flex: 1 1 200px; min-width: 160px; }
+.cat-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.cat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 24px; padding: 12px 16px; font-size: var(--fs-14); }
+/* The one in use is the row with the selected ground, as the chosen section is in the list of sections. */
+.cat-row[data-using] { background: var(--selected); }
+.cat-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cat-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cat-name > b { margin-right: 4px; font-weight: 500; }
+.cat-note { color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+.cat-facts { color: var(--fg-3); font-size: var(--fs-12); line-height: 1.4; }
+.cat-meters { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-top: 3px; }
+.cat-meter { display: flex; align-items: center; gap: 8px; width: 168px; color: var(--fg-3); font-size: var(--fs-12); }
+.cat-meter > span:first-child { flex: none; width: 64px; }
+.cat-track { flex: 1; height: 4px; overflow: hidden; border-radius: 2px; background: var(--surface-3); }
+.cat-fill { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
+.cat-progress { display: flex; align-items: center; gap: 8px; margin-top: 3px; color: var(--fg-3); font-size: var(--fs-12); }
+.cat-progress .cat-fill { background: var(--fg); }
+.cat-progress > span:last-child { flex: none; min-width: 64px; text-align: right; }
+.cat-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+/* What offers the speech runtime, where the card above says the browser's own is all there is. */
+.set-card > .voice-needs { margin: 0; padding: 12px 16px; border-radius: 0; background: transparent; }
+
+/* ── Key proxy ───────────────────────────────────────────────────────────────────────────── */
+/* A line that says the section cannot do what it normally does, or does it with a caveat. */
+.set-note { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-13); }
+.set-note .ic { flex: none; margin-top: 2px; }
+.set-note[data-tone="warn"] { background: color-mix(in srgb, var(--attention) 12%, transparent); color: var(--attention); }
+.keyproxy-card > .set-group, .keyproxy-card > .keyproxy-clients { margin-top: var(--space-5); }
+.keyproxy-card > .set-help + .set-group { margin-top: 0; }
+.kp-item + .kp-item { border-top: 1px solid var(--line); }
+.kp-open .ic { transition: transform var(--t-fast) var(--ease-out); }
+.kp-item.open .kp-open .ic { transform: rotate(180deg); }
+.kp-edit { border-top: 1px solid var(--line); background: var(--bg); gap: var(--space-3); }
+.kp-add { gap: var(--space-3); }
+.kp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kp-field .field { margin: 0; }
+.kp-field code { color: var(--fg-3); font-size: var(--fs-12); }
+.kp-edit-foot { display: flex; }
+
+/* ── Free models: the providers as rows to choose from, the chosen one's models under them ───── */
+.free-catalog > .set-group { margin-top: var(--space-5); }
+.free-catalog > .set-help + .set-group { margin-top: 0; }
+.accounts > .set-help, .keyproxy-card > .set-help, .free-catalog > .set-help { margin: 0 0 var(--space-4); }
+.free-pick.on { background: var(--selected); }
+.free-pick-key { flex: none; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.free-pick-mark { display: grid; flex: none; place-items: center; width: var(--ctl-h-sm); color: var(--fg); }
 
 /* ── Models and providers ─────────────────────────────────────────────────────────────────── */
 .prov + .prov { border-top: 1px solid var(--line); }
@@ -215,7 +348,9 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .fallback-n { color: var(--fg-3); font-size: var(--fs-12); }
 .fallback-warn { flex: 1; color: var(--attention); font-size: var(--fs-12); text-align: right; }
 
-.project-approvals-none { margin: 8px 0 0; }
+/* ── Approvals: what a project holds, a project at a time ─────────────────────────────────── */
+.project-approvals-name { padding: 6px 16px; background: var(--bg); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.project-approvals-group > * + * { border-top: 1px solid var(--line); }
 
 @media (max-width: 1023px) {
   /* A phone keeps the name and the state: kind and count leave the line rather than squeeze it. */
@@ -225,8 +360,22 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .prov-body { padding: 8px var(--space-4) 12px; }
   .pmodel-row { height: var(--row-h-touch); }
   .pmodel-open { height: var(--row-h-touch); }
-  .set-row { min-height: var(--set-row-h); }
-  .set-row .set-value, .set-row .set-value .dropdown-btn { max-width: 60vw; }
+  .set-row, .set-card .settings-row { min-height: var(--set-row-h); }
+  .set-card .set-value, .set-card .set-value .dropdown-btn { max-width: 60vw; }
   .fallback-warn { flex-basis: 100%; text-align: left; }
+  .cat-row { grid-template-columns: minmax(0, 1fr); }
+  .cat-meter { flex: 1; min-width: 140px; }
+  .cat-actions { justify-content: flex-start; }
+  .set-card .settings-row-ctl > .field { width: 100%; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) { flex-direction: column; align-items: stretch; gap: 8px; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) > .settings-row-ctl { max-width: none; }
+  .settings-range input[type="range"] { flex: 1; width: auto; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
+}
+
+/* ── A phone: a number field is a finger's height ───────────────────────────────────────────── */
+/* Stacked under its words a number is a row's only control and the thing the finger lands on; the
+   35 px the field takes from its padding is under the 44 px every target on a phone reaches. */
+@media (max-width: 599px) {
+  .set-card .settings-num input.field { min-height: var(--tap); }
 }

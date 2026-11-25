@@ -2,7 +2,7 @@
 // Remote chats and pairing: the folder shortened for a header, the state a remote chat's header says
 // (a paused turn outranking the link), the code compared however it was typed, the time a request has
 // left, the paused banner's Cancel turn, the approval sheet that posts the code it shows and says so
-// when nobody waits with a code, and the Devices page's revoke that asks in the row before it acts.
+// when nobody waits with a code, and the Devices page's revoke that asks in a dialog before it acts.
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -12,6 +12,7 @@ import { setLang } from "./i18n";
 import { PairSheet, RECONNECT_GRACE_MS, RemoteHead, RemotePaused, findRequest, normCode, noteConnection, osLabel, remoteOf, remoteRowWords, remoteState, shortFolder, showCode, timeLeft } from "./remote";
 import { DevicesPanel, INSTALL_COMMAND, INSTALL_COMMAND_WINDOWS, installCommand, loginCommand, tokenAge } from "./screens/DevicesSettings";
 import { prime } from "./store";
+import { ConfirmHost } from "./ui/dialogs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -169,22 +170,23 @@ describe("the remote parts on screen", () => {
     expect(closed).not.toHaveBeenCalled();
   });
 
-  it("asks in the row before revoking a device, and revokes only on the second press", async () => {
+  it("asks before revoking a device, and revokes only when the question is answered yes", async () => {
     // Paired a month ago, token rotated just now: the age is the token's, not the pairing's.
     const device: CliDevice = { id: "d1", name: "laptop-graceful-unicorn", hostname: "laptop", os: "linux", arch: "amd64", client_version: "0.1.0", paired_at: "2026-10-01T00:00:00Z",
       token_issued_at: new Date().toISOString(), approved_via: "app", last_seen_at: null, last_address: "127.0.0.1", expires_at: "2027-01-01T00:00:00Z", revoked_at: null, connected: true, sessions: 2 };
     prime("/api/cli/devices", { devices: [device] });
     vi.spyOn(api, "get").mockResolvedValue({ devices: [device] });
     const remove = vi.spyOn(api, "delete").mockResolvedValue({ revoked: true });
-    act(() => root.render(<DevicesPanel toast={() => undefined} />));
+    act(() => root.render(<><DevicesPanel toast={() => undefined} /><ConfirmHost /></>));
     const row = host.querySelector("[data-device=d1]")!;
     expect(row.textContent).toContain("Connected");
     expect(row.textContent).toContain("2 chats");
     expect(row.innerHTML).toContain("issued today");
-    act(() => row.querySelector<HTMLButtonElement>("[data-action=revoke]")!.click());
+    await act(async () => row.querySelector<HTMLButtonElement>("[data-action=revoke]")!.click());
     expect(remove).not.toHaveBeenCalled();
-    expect(row.textContent).toContain("Revoke laptop-graceful-unicorn?");
-    await act(async () => row.querySelector<HTMLButtonElement>("[data-action=revoke-confirm]")!.click());
+    // The question is a dialog over the page, drawn in a portal outside the host.
+    expect(document.querySelector(".dialog")!.textContent).toContain("Revoke laptop-graceful-unicorn?");
+    await act(async () => document.querySelector<HTMLButtonElement>(".dialog-actions .btn.danger")!.click());
     expect(remove).toHaveBeenCalledWith("/api/cli/devices/d1");
   });
 });

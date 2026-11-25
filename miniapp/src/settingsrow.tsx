@@ -1,17 +1,57 @@
 // The one shape a setting takes in Settings: what it is and one grey line about it on the left,
-// exactly one control on the right, and a hairline between it and the next.
+// exactly one control on the right, and a hairline between it and the next. A section is a column of
+// groups (`SetGroup`): a small label, an optional sentence of help, and one card of these rows.
 //
 // Settings grew four ways of drawing one value — a button whose label was its own state, a
 // full-width select under a label, a number field under a label, and this row in two places — and a
 // page that mixed them read as a form rather than as a list of settings. Every scalar setting is now
 // one of these rows; only free text that needs the width (addresses, keys, lists, the rules) keeps
-// its label above a full-width field.
+// its label above a full-width field, in a `SetBlock` of the same card.
 
 import type React from "react";
 import { useEffect, useState } from "react";
 import { numInput } from "./ui";
 import { Icon } from "./icons";
 import { t } from "./i18n";
+
+/** A group of settings: a small label, a sentence of help under it, and a card holding the rows (or
+ *  blocks, or a list) that follow. `action` sits at the label's far end (a button that adds one
+ *  more); `note` is a short grey word there. The data attributes land on the group, so a link to a
+ *  card (`data-setting`) and a search that keeps only the rows it found both reach it. */
+export function SetGroup({ title, note, action, help, children, className = "", ...data }: {
+  title?: React.ReactNode;
+  note?: React.ReactNode;
+  action?: React.ReactNode;
+  help?: React.ReactNode;
+  children?: React.ReactNode;
+  className?: string;
+  [data: `data-${string}`]: string | undefined;
+}) {
+  return (
+    <section className={`set-group ${className}`.trim()} aria-label={typeof title === "string" ? title : undefined} {...data}>
+      {(title || note || action) && (
+        <div className="set-label">
+          <span>{title}</span>
+          {note && <span className="set-label-note">{note}</span>}
+          {action}
+        </div>
+      )}
+      {help && <p className="set-help">{help}</p>}
+      <div className="set-card">{children}</div>
+    </section>
+  );
+}
+
+/** What a card holds that is not a row of one control: a list, a field that needs the width, a
+ *  paragraph. It has the card's own padding and a hairline above it. */
+export function SetBlock({ children, className = "", ...data }: { children?: React.ReactNode; className?: string; [data: `data-${string}`]: string | undefined }) {
+  return <div className={`set-block ${className}`.trim()} {...data}>{children}</div>;
+}
+
+/** The buttons under a card's rows: add one, refresh, reset. */
+export function SetFoot({ children, className = "", ...data }: { children?: React.ReactNode; className?: string; [data: `data-${string}`]: string | undefined }) {
+  return <div className={`set-foot ${className}`.trim()} {...data}>{children}</div>;
+}
 
 /** A setting: title and description left, the control right.
  *
@@ -122,9 +162,9 @@ export function NumRow({ title, desc, unit, setting, changed, defaultText, onRes
 export function TextBlock({ label, value, placeholder, onSave, hint, id, type, setting }: { label: string; value: string; placeholder?: string; onSave: (v: string) => void; hint?: string; id?: string; type?: string; setting?: string }) {
   return (
     <div className="settings-block" data-setting={setting}>
-      <label className="field" htmlFor={id}>{label}</label>
+      <label className="field-label" htmlFor={id}>{label}</label>
       <input id={id} className="field" type={type} defaultValue={value} placeholder={placeholder} onBlur={(e) => e.target.value.trim() !== value && onSave(e.target.value.trim())} />
-      {hint && <div className="sub">{hint}</div>}
+      {hint && <div className="set-hint">{hint}</div>}
     </div>
   );
 }

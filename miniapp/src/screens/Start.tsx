@@ -27,7 +27,8 @@ import { agentName, isProject, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
 import { ToolPicker, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
-import { Banner, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
 import { IconButton, MenuRow, Row } from "../ui/primitives";
 import { AccessSelect } from "../toggles";
 import { enterSends, errorText } from "../ui";
@@ -657,7 +658,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   }
 
   // A phone: one 48 px row at rest, the text above a toolbar once the field has the reader or holds
-  // something (ui/phone.css reads data-shape). The white circle is Send, greyed while the field is
+  // something (composer.css reads data-shape). The white circle is Send, greyed while the field is
   // empty; offline the draft waits here and Send waits with it. An agent's composer is always open:
   // its name sits above the field.
   const shape = agent || focused || !empty || progress !== null ? "open" : "idle";

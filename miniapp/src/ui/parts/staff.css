@@ -256,11 +256,6 @@
 .harness-step { min-height: 24px; }
 .harness-actions .harness-update-all { margin-left: auto; }
 
-/* On a phone the tab bar holds both modes, five tabs to a row; a long word ends in an ellipsis rather
-   than pushing the bar wider than the screen. */
-.tabbar.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.tabbar.five > a, .tabbar.five > button { min-width: 0; }
-.tabbar .tab-label { max-width: 100%; padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* ── the Questions tab (questions/QuestionsPanel.tsx) ───────────────────────────────────────
    A list to work through, not a feed: each card is a decision with its name, its text, its options
    as selectable rows and one field. What the operator has touched says so in the card's foot (a draft
@@ -411,4 +406,99 @@
   .q-field { font-size: 16px; }
   .q-chip:hover { background: transparent; }
   .q-chip.on:hover { background: var(--primary); }
+}
+
+/* On a phone: a command-line member's page and the Questions tab. */
+@media (max-width: 1023px) {
+  /* A command-line member's own page: the bar with the member, Feed | Terminal, the state line, the
+     feed, the request tray and a composer in the composer's shape. */
+  .ph-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .ph-who .staff-avatar { width: 36px; height: 36px; font-size: var(--fs-13); }
+  .ph-who-w { display: flex; flex-direction: column; min-width: 0; }
+  .ph-who-n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-who-s { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); }
+  .ph-member-mode { flex: none; padding: 0 var(--gutter) var(--space-2); }
+  .staff-head.compact { padding: 0 var(--gutter) var(--space-2); border: 0; background: var(--bg); }
+  .staff-head.compact .staff-head-row { flex-wrap: nowrap; gap: 8px; }
+  .staff-head-state { flex: 1; min-width: 0; font-size: var(--fs-13); color: var(--fg-2); }
+  .staff-head.compact .staff-head-actions { display: flex; gap: var(--space-2); flex: none; }
+  .staff-head.compact .staff-attention { margin-top: 6px; min-height: 32px; font-size: var(--fs-13); }
+  .staff-head.compact .staff-health { margin-top: 4px; font-size: var(--fs-13); }
+  .ph-member .staff-foot { padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom)); gap: var(--space-2); }
+  .ph-member .staff-compose { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-sm); }
+  .ph-member .staff-compose-field { grid-column: 1 / -1; min-height: 36px; padding: 7px 10px; border: 0; background: none; font-size: var(--fs-16); line-height: 22px; }
+  .ph-member .staff-compose .staff-when { justify-self: start; display: flex; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--surface-2); }
+  .ph-member .staff-compose .staff-when button { position: relative; min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font-size: var(--fs-14); }
+  .ph-member .staff-compose .staff-when button::after { content: ""; position: absolute; inset: -7px 0; }
+  .ph-member .staff-compose .staff-when button.on { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
+  .ph-member .staff-compose-send { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; background: var(--primary); color: var(--primary-ink); }
+  .ph-member .staff-compose-send::after { content: ""; position: absolute; inset: -4px; }
+  .ph-member .staff-compose-send:disabled { background: var(--surface-3); color: var(--fg-3); opacity: 1; }
+  /* Its details: the column's tabs as words with a filled tile under the current one, and the facts as rows
+     with hairlines inside the Details tab's cards. */
+  .ph-member-sheet .staff-panel { display: flex; flex-direction: column; min-height: 0; }
+  .ph-member-sheet .panel-tabs { padding: 0 var(--space-2); border: 0; }
+  .ph-member-sheet .panel-tab { position: relative; min-height: var(--tap); padding: 0 12px; border: 0; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
+  .ph-member-sheet .panel-tab.on { background: var(--surface-3); color: var(--fg); }
+  .ph-member-sheet .panel-body { padding: var(--space-2) var(--gutter); }
+  .ph-member-sheet .staff-details { gap: var(--space-3); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
+  .ph-member-sheet .staff-details .dt-section, .ph-member-sheet .staff-details .dt-section:first-child { border: 0; border-radius: var(--radius-md); }
+  .ph-member-sheet .staff-details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-content { gap: 0; padding: 0 var(--space-4) var(--space-3); }
+  .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px 0; border-top: 1px solid var(--line); color: var(--fg); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top: 0; }
+  .ph-member-sheet .staff-details .dt-key { flex: 1; color: var(--fg); }
+  .ph-member-sheet .staff-details .dt-row > .grow { flex: none; max-width: 60%; text-align: right; color: var(--fg-3); overflow-wrap: anywhere; }
+  /* The decision card is the one place on the Orchestrator tab; the chat's own line for the same list
+     would be the second. */
+  .chat.in-project.orchestrator .timeline > .questions-line { display: none; }
+  /* The decision sheet: the Questions tab, its cards as the design draws them. */
+  .ph-decisions .sheet-body { display: flex; flex-direction: column; }
+  .ph-decisions .questions-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .ph-decisions .questions-list { flex: 1; padding: 0 var(--gutter); }
+  .questions-section-head, .questions-group-head { font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); text-transform: none; letter-spacing: 0; }
+  .q-card { gap: 10px; padding: 14px; border-radius: var(--radius-md); border: 0; background: var(--surface-2); }
+  .q-card::before { display: none; }
+  /* An answered card is ringed in ink and one half answered in amber: a hairline each, since the card's
+     state line says the same in words. */
+  .q-kind .ic { width: 20px; height: 20px; }
+  .q-kind { width: var(--ctl-round); height: var(--ctl-round); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); }
+  .q-title { font-size: var(--fs-16); line-height: 1.3; }
+  .q-meta { font-size: var(--fs-14); color: var(--fg-3); }
+  .q-short { font-size: var(--fs-13); }
+  .q-flag { font-size: var(--fs-13); line-height: 22px; padding: 0 8px; border-radius: var(--radius-xs); }
+  .q-text { font-size: var(--fs-15); line-height: 1.45; }
+  .q-text code, .q-text pre { font-size: var(--fs-13); }
+  .q-text h1, .q-text h2, .q-text h3, .q-text h4 { font-size: var(--fs-15); }
+  .q-more, .q-suggestion, .q-foot, .q-clear { font-size: var(--fs-14); }
+  .q-more { position: relative; }
+  .q-more::after { content: ""; position: absolute; inset: -11px 0; }
+  .q-suggestion { padding: 0; background: none; }
+  .q-chip { min-height: var(--tap); padding: 8px 16px; border: 0; border-radius: 12px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-15); }
+  .q-chip.on, .q-chip.tone-ok.on, .q-chip.tone-bad.on { background: var(--surface-1); box-shadow: inset 0 0 0 1.5px var(--fg); }
+  /* A question's options are rows with a radio, read whole: the design's choice for answers that are
+     sentences or links. A permission's choices stay pills. */
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] { flex-direction: column; flex-wrap: nowrap; gap: var(--space-2); }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip { display: flex; width: 100%; max-width: none; min-height: var(--tap); padding: 10px 16px; border-radius: 12px; background: var(--surface-1); text-align: left; justify-content: flex-start; }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip::before { content: ""; flex: none; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip.on::before { box-shadow: inset 0 0 0 6px var(--fg); background: var(--surface-1); }
+  .q-card .q-field { min-height: var(--tap); padding: 10px 16px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-1); font-size: var(--fs-16); }
+  .q-state { font-size: var(--fs-14); }
+  .q-state i { display: none; }
+  .q-clear { min-height: var(--tap); padding: 0 4px; font-weight: 500; color: var(--fg-2); }
+  /* Round 44 px targets for the paperclip and "not needed", like every control a finger presses here.
+     A phone pastes from its own keyboard and drops nothing, so the hint about both is left out. */
+  .q-attach, .q-aside { width: var(--tap); height: var(--tap); background: var(--surface-1); -webkit-tap-highlight-color: transparent; }
+  .q-attach:hover { background: var(--surface-1); }
+  .q-aside { margin: -8px -6px 0 0; background: transparent; }
+  .q-files-hint { display: none; }
+  .questions-send { padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: none; }
+  .questions-send-info { font-size: var(--fs-14); }
+  .questions-send-btn { min-height: var(--tap); padding: 0 var(--space-5); border-radius: 12px; font-size: var(--fs-15); }
+  .questions-empty, .questions-empty b { font-size: var(--fs-14); }
+  /* The main chat's line for every project's questions: the tray's shape above the composer. */
+  .chat:not(.in-project) .questions-line { min-height: 52px; margin: var(--space-3) 0 var(--space-1); padding: 4px 4px 4px 14px; border: 0; border-radius: var(--radius-composer); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); font-size: var(--fs-15); }
+  .chat:not(.in-project) .questions-line-mark { width: 24px; height: 24px; background: none; }
+  .chat:not(.in-project) .questions-line-open { height: var(--tap); padding: 0 var(--space-4); border: 0; border-radius: calc(var(--radius-composer) - 4px); background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .chat:not(.in-project) .questions-line-open .ic { display: none; }
 }

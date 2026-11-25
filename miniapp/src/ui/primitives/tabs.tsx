@@ -7,7 +7,10 @@ import type { ReactNode } from "react";
 import { Icon, type IconName } from "../../icons";
 import { t } from "../../i18n";
 
-export type TabItem = { id: string; label: ReactNode; icon?: IconName; count?: ReactNode; onClose?: () => void };
+/** `onPress` runs on every press, the chosen tab's too: a tab that opens something over the page (the
+ *  project's More) has to answer when it is already the chosen one, which `onChange` never does.
+ *  `expanded` marks such a tab as the opener of a dialog and says whether it is open. */
+export type TabItem = { id: string; label: ReactNode; icon?: IconName; count?: ReactNode; onClose?: () => void; onPress?: () => void; expanded?: boolean };
 
 export function Tabs({ value, onChange, label, tabs, variant, className = "", children }: { value: string; onChange: (id: string) => void; label: string; tabs: TabItem[]; variant: "panel" | "page"; className?: string; children?: ReactNode }) {
   return (
@@ -15,6 +18,8 @@ export function Tabs({ value, onChange, label, tabs, variant, className = "", ch
       <Base.List className="tabs-list" aria-label={label}>
         {tabs.map((tab) => (
           <Base.Tab key={tab.id} value={tab.id} className={`tab ${tab.id === value ? "on" : ""}`} data-tab={tab.id}
+            onClick={tab.onPress}
+            aria-haspopup={tab.expanded === undefined ? undefined : "dialog"} aria-expanded={tab.expanded}
             onKeyDown={tab.onClose ? (e) => { if (e.key === "Delete") { e.preventDefault(); tab.onClose?.(); } } : undefined}>
             {tab.icon && <Icon name={tab.icon} size={16} />}
             <span className="tab-label">{tab.label}</span>

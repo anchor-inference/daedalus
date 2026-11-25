@@ -108,12 +108,12 @@ def run(width: int) -> list[str]:
         card = page.locator('[data-setting="keyproxy.upstreams"]')
         card.scroll_into_view_if_needed()
         for title in ("Model providers", "Web search", "Your own upstreams"):
-            expect(card.locator(".section-title", has_text=title)).to_be_visible()
-        expect(card.locator('[data-upstream="keenable"] .pill')).to_have_text("key stored")
-        card.locator('[data-upstream="tavily"] .mmain').click()
+            expect(page.locator(".set-label", has_text=title)).to_be_visible()
+        expect(card.locator('[data-upstream="keenable"] .badge')).to_have_text("key stored")
+        card.locator('[data-upstream="tavily"] .kp-open').click()
         expect(card.get_by_label("Tavily: Address")).to_have_attribute("placeholder", "https://api.tavily.com")
 
-        add = card.locator('[data-setting="keyproxy.add"]')
+        add = page.locator('[data-setting="keyproxy.add"]')
         add.get_by_label("Name").fill("myllm")
         add.get_by_label("Address").fill("https://llm.example/v1")
         add.get_by_label("Key").fill("my-key")

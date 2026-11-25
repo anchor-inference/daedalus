@@ -11,7 +11,6 @@ import { t } from "../i18n";
 import { applyMessageEvent, stripRows } from "../staff/model";
 import { invalidate, peek, prime, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
-import { Icon } from "../icons";
 import { Button } from "../ui/primitives";
 import { HARNESS_NAMES, type Staff } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
@@ -66,8 +65,8 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
           <span className="staff-head-state truncate" data-status={member.status} title={wait?.detail || live?.waiting_for || undefined}>{state}{facts && !wait && ` · ${facts}`}</span>
           {live && (
             <span className="staff-head-actions">
-              <button type="button" className="ph-btn sm" onClick={() => void act("pause")} disabled={live.pause_requested}><Icon name="pause" size={16} />{t("ph.member.pause")}</button>
-              <button type="button" className="ph-btn sm" onClick={() => void act("interrupt")}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
+              <Button size="sm" icon="pause" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("ph.member.pause")}</Button>
+              <Button size="sm" icon="stop" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</Button>
             </span>
           )}
         </div>

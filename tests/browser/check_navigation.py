@@ -1,4 +1,4 @@
-"""Settings → Navigation, and the sidebar's pinned rows, menu and drawer it rearranges, in a real browser.
+"""Settings → Navigation, and the sidebar's pinned rows and menu it rearranges (a phone's drawer is that sidebar), in a real browser.
 
 On a 1440 × 900 desktop and a 390 px phone, in English and Russian:
 
@@ -35,7 +35,7 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 
 SHIPPED = ["inbox", "board", "calendar", "changes", "terminals"]
-EMPTY = {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
+EMPTY = {"pinned": [], "more": [], "hidden": [], "icons": {}}
 WORDS = {
     "en": {"page": "Dosing calculator", "group": "Pages", "customise": "Customise…", "reset": "Reset to default", "pinned": "Pinned"},
     "ru": {"page": "Калькулятор дозировки", "group": "Страницы", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "pinned": "Закреплён"},
@@ -137,7 +137,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
         say(f"the Pinned list reads {order}")
 
     # Board dragged into Hidden.
-    page.locator("[data-nav-row='board']").drag_to(page.locator("[data-nav-list='hidden'] .nav-cfg-head"))
+    page.locator("[data-nav-row='board']").drag_to(page.locator("[data-nav-list='hidden'] .set-label"))
     until(page, lambda: "board" in host.settings["navigation"]["hidden"])
     if "board" not in host.settings["navigation"]["hidden"]:
         say(f"dragging Board into Hidden left {host.settings['navigation']}")
@@ -189,11 +189,9 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     def say(text: str) -> None:
         problems.append(f"[{lang}] phone: {text}")
 
-    # The drawer is the sidebar, so it holds what is pinned in the sidebar, in the same order. The
-    # phone's own drawer list is still kept for Settings → Navigation, which edits it below.
+    # The drawer is the sidebar, so it holds what is pinned in the sidebar, in the same order.
     host = Host()
     host.settings["navigation"]["pinned"] = ["page:dosing", "board", "inbox"]
-    host.settings["navigation"]["drawer"] = ["page:dosing", "board", "inbox"]
     host.settings["navigation"]["hidden"] = ["usage"]
     page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
@@ -215,20 +213,14 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
         say(f"the phone's More reads {more}")
     page.keyboard.press("Escape")
 
-    # The section itself fits the phone.
+    # The section itself fits the phone, and lists no separate drawer: the sidebar's rows are the one list.
     page.goto(f"{BASE}/settings/navigation?token=t&lang={lang}")
-    page.wait_for_selector("[data-drawer-row='board']", timeout=10000)
-    on = page.locator("[data-drawer-list='on'] [data-drawer-row]").evaluate_all("els => els.map(e => e.dataset.drawerRow)")
-    if on != ["page:dosing", "board", "inbox"]:
-        say(f"the drawer list in Settings reads {on}")
+    page.wait_for_selector("[data-nav-row='board']", timeout=10000)
     width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
     if width[0] > width[1]:
         say(f"Settings → Navigation scrolls sideways: {width}")
-    # Turning Terminals on puts it at the end of the drawer.
-    page.locator("[data-drawer-row='terminals'] [role='switch']").tap()
-    page.wait_for_timeout(600)
-    if host.settings["navigation"]["drawer"] != ["page:dosing", "board", "inbox", "terminals"]:
-        say(f"turning Terminals on saved {host.settings['navigation']['drawer']}")
+    if page.locator("[data-drawer-row], [data-drawer-list]").count():
+        say("Settings → Navigation still lists a phone drawer of its own")
     page.context.close()
 
 

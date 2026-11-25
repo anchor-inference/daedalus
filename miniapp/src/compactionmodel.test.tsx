@@ -40,21 +40,25 @@ describe("the picker", () => {
     host.remove();
   });
 
-  it("shows the effective value, offers the session's own model first, saves a new choice, and marks a missing one", () => {
+  const press = (el: Element) => act(async () => { (el as HTMLElement).click(); });
+
+  it("shows the effective value, offers the session's own model first, saves a new choice, and marks a missing one", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     const onSave = vi.fn();
-    act(() => root.render(<CompactionModelSelect catalogue={{ presets: PRESETS }} value="flash" onSave={onSave} onEffort={() => undefined} />));
-    expect(host.querySelector(".sel-current .sel-name")!.textContent).toBe("deepseek/deepseek-flash");
+    await act(async () => root.render(<CompactionModelSelect catalogue={{ presets: PRESETS }} value="flash" onSave={onSave} onEffort={() => undefined} />));
+    const trigger = host.querySelector<HTMLButtonElement>(".dropdown-btn")!;
+    expect(trigger.textContent).toBe("deepseek/deepseek-flash");
     expect(host.textContent).toContain("seconds instead of minutes");
-    act(() => host.querySelector<HTMLButtonElement>(".sel-current button")!.click());
-    const options = [...host.querySelectorAll<HTMLElement>("[role=option]")];
-    expect(options.map((o) => o.dataset.id)).toEqual(["", "strong", "flash"]);
+    await press(trigger);
+    const options = [...document.querySelectorAll<HTMLElement>("[role=option]")];
+    expect(options.map((o) => o.dataset.value)).toEqual(["", "strong", "flash"]);
     expect(options[0].textContent).toContain("The session's own model");
-    act(() => options[0].click());
+    await press(options[0]);
     expect(onSave).toHaveBeenCalledWith("");
 
-    act(() => root.render(<CompactionModelSelect catalogue={{ presets: PRESETS }} value="gone" onSave={onSave} onEffort={() => undefined} />));
-    expect(host.querySelector(".sel-current")!.classList.contains("missing")).toBe(true);
-    expect(host.querySelector(".sel-current")!.textContent).toContain("No longer configured");
+    await act(async () => root.render(<CompactionModelSelect catalogue={{ presets: PRESETS }} value="gone" onSave={onSave} onEffort={() => undefined} />));
+    expect(host.querySelector(".dropdown-btn")!.textContent).toContain("No longer configured");
     expect(host.textContent).toContain("uses the session's own model");
+    vi.unstubAllGlobals();
   });
 });

@@ -68,11 +68,11 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.goto(f"{BASE}/settings/keyproxy?token=t&lang={lang}")
     section = page.locator('[data-setting="keyproxy.clients"]')
     section.scroll_into_view_if_needed()
-    expect(section.locator(".section-title")).to_have_text(words["title"])
+    expect(section.locator(".set-label")).to_have_text(words["title"])
     claude = section.locator('[data-client="claude"]')
-    expect(claude.locator(".mtitle")).to_contain_text("2.1.296")
-    expect(claude.locator(".pill")).to_have_text(words["out"])
-    expect(section.locator('[data-client="codex"] .pill')).to_have_text(words["current"])
+    expect(claude.locator(".settings-row-title")).to_contain_text("2.1.296")
+    expect(claude.locator(".badge")).to_have_text(words["out"])
+    expect(section.locator('[data-client="codex"] .badge')).to_have_text(words["current"])
     if section.locator('[data-client="codex"] [data-action="update"]').count():
         problems.append(f"{lang} {width}: a client that is up to date offers Update")
     if phone and (outside := page.evaluate(OUTSIDE)):
@@ -80,9 +80,9 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
 
     claude.locator('[data-action="update"]').click()
     # Up to date, and on trial until its first request answers.
-    expect(claude.locator(".pill.idle")).to_have_text(words["current"])
-    expect(claude.locator(".pill.waiting")).to_have_text(words["pending"])
-    expect(claude.locator(".mtitle")).to_contain_text("2.1.310")
+    expect(claude.locator(".badge:not(.attention)")).to_have_text(words["current"])
+    expect(claude.locator(".badge.attention")).to_have_text(words["pending"])
+    expect(claude.locator(".settings-row-title")).to_contain_text("2.1.310")
     expect(claude.locator(".clients-said")).to_contain_text(words["kept"])
     expect(claude.locator('[data-action="revert"]')).to_have_text(words["revert"])
     if posted != ["keyproxy/clients/claude/update"]:

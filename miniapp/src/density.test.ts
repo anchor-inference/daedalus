@@ -30,7 +30,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
 import tokens from "./ui/tokens.css?raw";
-import phone from "./ui/phone.css?raw";
 import browserPhone from "./browser/phone.css?raw";
 import petHost from "./pethost.tsx?raw";
 import sidePanel from "./sidepanel/sidepanel.css?raw";
@@ -184,7 +183,7 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
 const BOX_ALLOWED = [
   ".screen", ".sheet", ".dialog", ".gate", ".login", ".login-widget", ".empty", ".empty.calm", ".sidebar .empty", ".toast",
   ".chat-scroll", ".chat-head", ".composer", ".composer-box", ".pagehead", ".panel-body", ".panel-tabs", ".panel-toolbar",
-  ".tabbar", ".thought", ".attachment-open", ".attachment.image .attachment-open", ".img-loading", ".preview-body",
+  ".project-tabs", ".thought", ".attachment-open", ".attachment.image .attachment-open", ".img-loading", ".preview-body",
   ".kanban-col", ".kanban-empty", ".voice-", ".addmodel", ".addmodel-foot", ".more-item",
   // The companion's canvas is a scene rather than a row or control; its measured height is the
   // viewport for a full 3D pose, and the phone version deliberately uses a smaller viewport.
@@ -687,7 +686,7 @@ describe("the phone", () => {
     expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--tap)");
     expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: 40px");
     expect(all.filter((r) => r.selector.includes('data-shape="idle"'))).toEqual([]);
-    expect(phoneRule(".tabbar.project-tabs > a")).toContain("height: var(--tabbar-h)");
+    expect(all.filter((r) => r.selector === ".project-tabs .tab" && !r.media).map((r) => r.body).join(" ")).toContain("height: var(--tabbar-h)");
     expect(phoneRule(".ph-drawer")).toContain("width: var(--drawer-w)");
     // The drawer is the sidebar: 330 px of it, its rows the phone's 44 px ones at 15 px.
     expect(declaredRoot()).toContain("--drawer-w: min(86vw, 330px)");
@@ -697,7 +696,9 @@ describe("the phone", () => {
   });
 
   it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
-    const outside = rules(phone + "\n" + browserPhone).filter((r) => !r.media.includes(PHONE)).map((r) => r.selector);
+    // The browser's phone sheet is drawn by a phone alone, so a rule of its file outside the query would
+    // be dead weight on a desktop.
+    const outside = rules(browserPhone).filter((r) => !r.media.includes(PHONE)).map((r) => r.selector);
     expect(outside).toEqual([]);
   });
 });
@@ -881,7 +882,7 @@ describe("rows and controls", () => {
     expect(decl(".term-phone")).toContain("height: var(--vh, 100dvh)");
     expect(decl(".ask-answers-row .btn")).toContain("min-height: var(--row-h-touch)");
     expect(decl(".phone-staff-row")).toContain("min-height: calc(var(--row-h-touch)");
-    expect(decl(".tabbar.project-tabs")).toContain("position: static");
+    expect(decl(".project-tabs")).toContain("flex: none");
   });
 
   it("gives the sidebar the first column alone, with no rail beside it", () => {
