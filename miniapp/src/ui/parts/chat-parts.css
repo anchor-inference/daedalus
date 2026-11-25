@@ -435,7 +435,7 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .iconbtn.small.ic-link, a.iconbtn { color: var(--fg-2); }
 @media (min-width: 1024px) {
   /* A picture, a PDF and a table want the room; a page of text reads best at the sheet's own width. */
-  .sheet.preview.image, .sheet.preview.pdf, .sheet.preview.sheet, .sheet.preview.csv { width: min(1400px, 96vw); }
+  .sheet.preview.kind-image, .sheet.preview.kind-pdf, .sheet.preview.kind-sheet, .sheet.preview.kind-csv { width: min(1400px, 96vw); }
 }
 
 /* ── sharing a service ─────────────────────────────────────────────────────────────────── */

@@ -340,8 +340,8 @@ export function FilePreview({ src, onClose }: { src: PreviewSource; onClose: () 
   const kind = info?.kind ?? previewKind(name);
   return (
     <Sheet
-      size="xl"
-      className={`preview ${kind}`}
+      size={kind === "other" ? "md" : "xl"}
+      className={`preview kind-${kind}`}
       ariaLabel={name}
       onClose={onClose}
       title={(
