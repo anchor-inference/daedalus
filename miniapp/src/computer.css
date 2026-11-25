@@ -28,8 +28,7 @@
   left: 2px;
   width: calc((100% - 4px) / 4);
   border-radius: var(--radius-xs);
-  background: var(--cu-raised);
-  box-shadow: var(--drop-xs);
+  background: var(--selected);
   transform: translateX(calc(var(--i, 0) * 100%));
   transition: transform 260ms var(--ease-out);
 }
@@ -95,7 +94,7 @@ button.cu-map-tile { cursor: pointer; }
   transition: box-shadow 200ms var(--ease-out), opacity 200ms ease;
 }
 button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
-.cu-map-tile.on .cu-thumb { box-shadow: 0 0 0 2px var(--fg); }
+.cu-map-tile.on .cu-thumb { box-shadow: 0 0 0 2px var(--accent); }
 .cu-map:has(button.cu-map-tile.on) button.cu-map-tile:not(.on) .cu-thumb { opacity: 0.6; }
 .cu-map-label {
   position: absolute;
@@ -140,9 +139,9 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
   animation-delay: calc(var(--n, 0) * 28ms);
 }
 .cu-card:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-2); }
-.cu-card.on { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
+.cu-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .cu-card.off { opacity: 0.55; cursor: not-allowed; }
-.cu-card.off .cu-card-sub { color: var(--warn); }
+.cu-card.off .cu-card-sub { color: var(--attention); }
 .cu-card.ghost { pointer-events: none; }
 .cu-card-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0 3px 2px; }
 .cu-card-text b { font-size: var(--fs-13); font-weight: 500; }
@@ -185,7 +184,7 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
 .cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
 
 .cu-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
-.cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); }
+.cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 10px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--attention) 12%, transparent); color: var(--attention); font-size: var(--fs-13); }
 .cu-warn svg { flex: none; margin-top: 1px; }
 
 /* How long: presets as pills, and a field of its own for any other number of minutes. */
@@ -205,7 +204,7 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 .cu-pill:hover { background: var(--cu-well); color: var(--fg); }
-.cu-pill.on { border-color: var(--fg); color: var(--fg); font-weight: 500; }
+.cu-pill.on { border-color: var(--accent); color: var(--fg); font-weight: 500; }
 .cu-custom { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-12); animation: cu-rise 200ms var(--ease-out); }
 .cu-custom input {
   width: 68px;
@@ -219,12 +218,12 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.cu-custom.invalid input { border-color: var(--bad); }
-.cu-bound { font-size: var(--fs-12); color: var(--bad); }
+.cu-custom.invalid input { border-color: var(--attention); }
+.cu-bound { font-size: var(--fs-12); color: var(--attention); }
 
 .cu-actions { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .cu-summary { flex: 1; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
-.cu-cta { flex: none; height: var(--ctl-h-lg); gap: 8px; padding: 0 18px; border-radius: var(--radius-sm); font-weight: 500; }
+.cu-cta { flex: none; height: var(--ctl-h); gap: 8px; padding: 0 16px; border-radius: var(--radius-sm); font-weight: 500; }
 
 /* Compact: Quick Chat's window is short, so no large picture and the cards scroll sideways. */
 .cu-picker.compact { gap: 8px; }
@@ -254,3 +253,12 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
   .cu-cta { justify-content: center; }
   .cu-summary { text-align: center; }
 }
+
+/* Where the grant stands, in the sheet and above the composer: a card of the family a request is, its
+   words first and what can be done about it at the end. It is the attention colour only while the
+   operator's own hand has paused the agent. */
+.setting-notice.computer-banner, .setting-notice.computer-status { border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); padding: 10px 12px; }
+.setting-notice.computer-banner.tone-warning, .setting-notice.computer-status.tone-warning { background: var(--card); }
+.setting-notice.computer-banner > svg, .setting-notice.computer-status > svg { color: var(--live); }
+.setting-notice.computer-banner[data-computer="paused"] > svg, .setting-notice.computer-status[data-computer="paused"] > svg { color: var(--attention); }
+.computer-banner .btn.danger.solid, .computer-status .btn.danger.solid { background: var(--card); color: var(--attention); box-shadow: inset 0 0 0 1px var(--attention); }

@@ -17,11 +17,13 @@ export type FullscreenLayerProps = {
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   /** The layer's own box, for a viewer that fades as it is pulled away. */
   style?: CSSProperties;
+  /** Written onto the layer as `data-*` attributes, for a layer whose state its own styles and checks read (the annotation editor's tool and mark count). */
+  data?: Record<string, string | number>;
   children: ReactNode;
 };
 
 /** STOP stops a key at the layer's root, so a viewer's own handler is called before it. */
-export function FullscreenLayer({ label, onClose, toolbar, className = "", onKeyDown, style, children }: FullscreenLayerProps) {
+export function FullscreenLayer({ label, onClose, toolbar, className = "", onKeyDown, style, data, children }: FullscreenLayerProps) {
   const isTop = useLayer(onClose);
   const opener = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   useFocusBack(() => opener.current);
@@ -29,6 +31,7 @@ export function FullscreenLayer({ label, onClose, toolbar, className = "", onKey
     <Dialog.Root open modal onOpenChange={closeHandler(isTop, onClose)}>
       <Dialog.Portal className="overlay-root">
         <Dialog.Popup className={`fullscreen-layer ${className}`.trim()} aria-label={label} aria-modal="true" data-overlay-root="" {...STOP}
+          {...Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, String(v)]))}
           style={style} finalFocus={false}
           onKeyDown={(event) => { onKeyDown?.(event); STOP.onKeyDown(event); }}>
           <div className="fullscreen-bar">

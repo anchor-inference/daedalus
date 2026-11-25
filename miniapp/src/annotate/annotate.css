@@ -1,13 +1,15 @@
 /* The annotated snapshot: a layer over the whole window, the picture as large as it fits, and one bar of
    tools over it. Above the panel's sheet and its popovers, as the media lightbox is: the picture is the
    only thing the operator is looking at while it is open. */
-.annotate { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--wash); color: var(--fg); }
+/* The layer is the shared full-window one; its body is a column of the picture's stage and the tools' strip, and the
+   snapshot's address, undo, redo, clear and Attach sit in its bar beside the name and the close button. */
+.annotate .fullscreen-body { display: flex; flex-direction: column; overflow: hidden; background: var(--wash); }
 /* Taps on the tools are taps, never half of a double-tap: a tool picked right after a stroke was taken by
    the phone's double-tap detection and its click never came. */
 .annotate-bar, .annotate-strip { touch-action: manipulation; }
 /* Cancel, where the picture is from, Undo, Redo and Done on top; the drawing tools on a strip at the
    bottom, under the thumbs on a phone and out of the way of the picture's top edge on a desktop. */
-.annotate-bar { display: flex; align-items: center; gap: var(--space-2); padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-3) var(--space-2); border-bottom: 1px solid var(--line); background: var(--bg); }
+.annotate-bar { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
 /* The strip floats over the picture's page like a menu does: a surface and a shadow, no border. */
 .annotate-strip { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-2) var(--space-3); align-self: center; max-width: calc(100% - 2 * var(--space-3)); margin: 0 auto max(var(--space-3), env(safe-area-inset-bottom)); padding: var(--space-1) var(--space-3); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-lg); }
 .annotate-group { display: flex; align-items: center; gap: var(--space-1); flex: none; }
@@ -15,7 +17,7 @@
 .annotate-tool.on { background: var(--surface-3); color: var(--fg); }
 .annotate-swatch { width: var(--chip-h-dense); height: var(--chip-h-dense); border-radius: 50%; border: 2px solid var(--surface-1); box-shadow: 0 0 0 1px var(--line-strong); padding: 0; cursor: pointer; flex: none; }
 .annotate-swatch.on { box-shadow: 0 0 0 2px var(--fg); }
-.annotate-where { flex: 1 1 120px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); text-align: center; }
+.annotate-where { flex: 1 1 120px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); text-align: right; }
 .annotate-attach { display: inline-flex; align-items: center; gap: var(--space-1); }
 .annotate-note { padding: var(--space-2) var(--space-3); font-size: var(--fs-13); color: var(--fg-2); background: var(--surface-2); }
 .annotate-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: var(--space-3); overflow: hidden; }
@@ -39,7 +41,12 @@
 .attachment-markup:hover { background: var(--fg); color: var(--bg); }
 .attachment-markup:disabled { opacity: .5; cursor: progress; }
 @media (max-width: 1023px) {
-  .annotate-bar { flex-wrap: wrap; padding-left: var(--gutter); padding-right: var(--gutter); }
+  /* The layer's bar grows to two rows: its name and close button, then undo, redo, clear and Attach, with the
+     snapshot's address on a line of its own under them. */
+  .annotate .fullscreen-bar { height: auto; min-height: 52px; flex-wrap: wrap; row-gap: var(--space-1); padding: max(var(--space-1), env(safe-area-inset-top)) var(--space-2) var(--space-2) var(--gutter); }
+  .annotate .fullscreen-title { order: 0; }
+  .annotate .fullscreen-bar > .iconbtn { order: 1; }
+  .annotate-bar { order: 2; flex: 1 1 100%; flex-wrap: wrap; }
   .annotate-where { order: 9; flex-basis: 100%; text-align: left; }
   .annotate-history { margin-left: auto; }
   .annotate-stage { margin: var(--space-2) 0; }

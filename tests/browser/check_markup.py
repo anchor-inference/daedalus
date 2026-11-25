@@ -238,7 +238,7 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     card(page, 0).locator(".attachment-markup").click()
     page.wait_for_selector(".annotate .annotate-canvas", timeout=5000)
     drag(page, page.locator(".annotate-sheet").bounding_box(), (0.1, 0.1), (0.4, 0.4))
-    page.locator(".annotate-cancel").click()
+    page.locator(".annotate .fullscreen-bar > .iconbtn").click()
     page.wait_for_selector(".annotate", state="detached", timeout=5000)
     page.wait_for_timeout(400)
     after = stored(page, count=3)[0]

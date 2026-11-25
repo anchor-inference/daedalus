@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
+import { Switch } from "../ui/primitives";
 import { ModelSelect, type ModelChoice } from "../modelselect";
 import { useQuery } from "../store";
 import type { Preset, Settings } from "../api";
@@ -211,10 +212,10 @@ export function PreviewPane({ flow, phone = false, home, onOpenChat }: { flow: I
           <div className="imp-dest-text"><b>{dest.title}</b><span className="imp-d">{dest.sub}</span></div>
         </div>
         {offersProject(preview) && (
-          <label className="imp-check">
-            <input type="checkbox" checked={flow.makeProject} onChange={(e) => flow.setMakeProject(e.target.checked)} />
+          <div className="imp-check">
             <span><b>{t("imp.makeproject")}</b><span className="imp-d">{t("imp.makeproject.sub")}</span></span>
-          </label>
+            <Switch checked={flow.makeProject} onChange={flow.setMakeProject} label={t("imp.makeproject")} />
+          </div>
         )}
       </div>
       {flow.jobFailure !== null && !flow.job && !flow.already && <div className="imp-errbox" role="alert"><Icon name="alert" size={14} /><span>{flow.jobFailure || t("imp.failed")}</span></div>}
