@@ -13,6 +13,8 @@ import { relTime, absTime } from "./format";
 import { useCopied } from "./ui/components";
 import { confirmAsync, errorText } from "./ui";
 import { Icon } from "./icons";
+import { Button, Select } from "./ui/primitives";
+import "./share.css";
 
 export type LiveLinkVisitor = { name: string; first_seen_at: string; last_seen_at: string };
 export type LiveLink = {
@@ -30,6 +32,9 @@ export type LiveLink = {
 export type LiveLinks = { links: LiveLink[]; reach: "outside" | "network" | "machine" | "none"; base: string };
 
 const EXPIRIES: (number | null)[] = [null, 1, 24, 24 * 7];
+/** The Select speaks in words; the host in hours, or null for a link that never expires. */
+const expiryId = (hours: number | null) => (hours === null ? "never" : String(hours));
+const EXPIRY_HOURS: Record<string, number | null> = { never: null, "1": 1, "24": 24, "168": 168 };
 
 export function liveLinksKey(sessionId: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/live-shares`;
@@ -101,10 +106,8 @@ export function LiveLinkSection({ sessionId, toast }: { sessionId: string; toast
         <div key={link.id} className="live-link" data-live-active>
           <div className="share-field">
             <input className="field mono" readOnly value={link.url} onFocus={(e) => e.target.select()} aria-label={t("live.url")} />
-            <button className="btn small" disabled={!link.url} onClick={async () => { if (!(await copyValue(link.url, link.id))) toast(t("svc.copyfail")); }}>
-              <Icon name={copied === link.id ? "check" : "copy"} size={13} /> {t("common.copy")}
-            </button>
-            <button className="btn small danger" disabled={busy} onClick={() => void revoke(link.id)}>{t("live.revoke")}</button>
+            <Button icon={copied === link.id ? "check" : "copy"} disabled={!link.url} onClick={async () => { if (!(await copyValue(link.url, link.id))) toast(t("svc.copyfail")); }}>{t("common.copy")}</Button>
+            <Button variant="danger" disabled={busy} onClick={() => void revoke(link.id)}>{t("live.revoke")}</Button>
           </div>
           <div className="sub live-facts">
             <span>{plural("live.visitors", link.visitors.length)}</span>
@@ -122,11 +125,10 @@ export function LiveLinkSection({ sessionId, toast }: { sessionId: string; toast
         </div>
       ))}
       <div className="live-create">
-        <label className="sub" htmlFor="live-expiry">{t("live.expiry")}</label>
-        <select id="live-expiry" className="field" value={expiry ?? ""} onChange={(e) => setExpiry(e.target.value ? Number(e.target.value) : null)}>
-          {EXPIRIES.map((hours) => <option key={hours ?? "never"} value={hours ?? ""}>{t(hours === null ? "live.expiry.never" : hours === 1 ? "live.expiry.hour" : hours === 24 ? "live.expiry.day" : "live.expiry.week")}</option>)}
-        </select>
-        <button className="btn small primary" disabled={busy} onClick={() => void create()}>{t(active.length ? "live.create.another" : "live.create")}</button>
+        <label className="link-label" htmlFor="live-expiry">{t("live.expiry")}</label>
+        <Select id="live-expiry" size="md" label={t("live.expiry")} value={expiryId(expiry)} onChange={(id) => setExpiry(EXPIRY_HOURS[id])}
+          options={EXPIRIES.map((hours) => ({ id: expiryId(hours), label: t(hours === null ? "live.expiry.never" : hours === 1 ? "live.expiry.hour" : hours === 24 ? "live.expiry.day" : "live.expiry.week") }))} />
+        <Button variant="primary" disabled={busy} onClick={() => void create()}>{t(active.length ? "live.create.another" : "live.create")}</Button>
       </div>
       {ended.length > 0 && (
         <div className="sub live-ended">

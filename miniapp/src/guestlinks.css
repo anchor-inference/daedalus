@@ -1,14 +1,15 @@
 /* The agent link's sheet (guestlinks.tsx) and the card a guest's message is drawn as in the chat.
    Everything a stranger wrote is text: it is laid out as pre-wrapped plain text and never given a
-   link, a picture or markdown, so these rules only decide where lines break. */
+   link, a picture or markdown, so these rules only decide where lines break. The sheet's own surfaces
+   are the settings cards' (hairline, 12 px corners, no drop) and its rows the settings rows'. */
 
 .guest-sheet { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .guest-sheet > .sub { margin: 0; }
 .guest-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .guest-list { display: flex; flex-direction: column; gap: var(--space-2); }
 
-.guest-link { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
-.guest-link[data-state="revoked"], .guest-link[data-state="expired"] { background: transparent; box-shadow: none; }
+.guest-link { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); min-width: 0; }
+.guest-link[data-state="revoked"], .guest-link[data-state="expired"] { background: transparent; }
 .guest-link[data-state="revoked"] .guest-name, .guest-link[data-state="expired"] .guest-name { color: var(--fg-2); }
 .guest-link-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
 .guest-name { min-width: 0; font-size: var(--fs-14); font-weight: 500; }
@@ -17,36 +18,43 @@
 
 /* What the guest first wrote, in a recessed well that says it is quoted. It scrolls rather than grows,
    so a long message cannot push the buttons that answer it out of the sheet. */
-.guest-quote { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); }
+.guest-quote { margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); }
 .guest-quote-text, .guest-msg-text, .guest-card-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: var(--fs-14); line-height: 1.45; }
 .guest-quote-text { max-height: 8lh; overflow-y: auto; }
 
 .guest-reader { display: flex; flex-direction: column; gap: var(--space-2); }
 /* Whose words a message is, its head says in words; a stripe down the guest's said it a second time. */
-.guest-msg { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
+.guest-msg { padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
 .guest-msg[data-role="guest"] .guest-msg-head > b { color: var(--warn); }
 .guest-msg[data-role="agent"] { background: var(--surface-2); }
 .guest-msg[data-role="door"] { background: transparent; border-style: dashed; color: var(--fg-2); }
 .guest-msg-head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); }
-.guest-briefing { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); max-height: 12lh; overflow-y: auto; }
+.guest-briefing { margin: 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-2); max-height: 12lh; overflow-y: auto; }
+.guest-guests { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .guest-form { display: flex; flex-direction: column; min-width: 0; }
+.guest-form .field-box { margin-bottom: 12px; }
 .guest-form textarea.field { resize: vertical; font-family: inherit; }
 /* A choice of a few long words wraps onto a second line rather than being clipped: the segments size to
    their words (a basis of zero, as the shared control has, makes three of them share a line whatever
    they say), and a word too long even for a line of its own breaks inside its button. */
-.guest-form .segmented { margin: 0; flex-wrap: wrap; gap: 2px; }
+.guest-form .segmented { margin: 0 0 16px; flex-wrap: wrap; gap: 2px; }
 .guest-form .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .guest-form .sub { margin: 4px 0 0; }
-.guest-form .sub.guest-warning { display: flex; align-items: flex-start; gap: 6px; color: var(--warn); }
-.guest-form .sub.guest-warning .ic { flex: none; margin-top: 2px; }
+.guest-form .sub.guest-warning { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); }
+.guest-form .sub.guest-warning .ic { flex: none; margin-top: 2px; color: var(--warn); }
 /* The choice of who answers comes first and decides which fields follow, so it is set apart from them. */
-.guest-levels { margin-top: var(--space-2); }
-/* A heading over the limits: the rows below it are all of one kind, and the eye looks for them there. */
-.guest-section { margin-top: var(--space-4); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.guest-levels { margin: 0 0 12px; }
+/* A heading over the limits, the settings' own: the rows below it are all of one kind. */
+.guest-section { margin-top: 12px; height: 28px; display: flex; align-items: center; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.guest-form .settings-row { min-height: var(--card-row-h); padding: 6px 0; }
+.guest-form .settings-row-title { font-size: var(--fs-14); font-weight: 400; }
 /* "No limit" sits beside the number it replaces, and the number goes while it is chosen: the choice is
-   visible as a word, never a 0 the operator would have to know means none. */
-.guest-nolimit { flex: none; min-width: 96px; justify-content: center; }
+   visible as a word, never a 0 the operator would have to know means none. Chosen, it is filled the way
+   a segmented choice is, not inverted to white. */
+.chip.select.guest-nolimit { flex: none; min-width: 96px; justify-content: center; min-height: var(--ctl-h-sm); font-size: var(--fs-13); font-weight: 400; }
+.chip.select.guest-nolimit[aria-pressed="true"] { background: var(--selected); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.chip.select.guest-nolimit[aria-pressed="true"]:hover { background: var(--selected); }
 .guest-limit[data-none] .settings-row-ctl { min-height: var(--ctl-h-sm); }
 /* On a phone the number spans the row as every number field does, and "No limit" stays on its line at the
    end rather than taking a line of its own under it: three limits were six rows tall. */
@@ -56,21 +64,29 @@
      it did by 12 to 29 px at 390 once Inter set the unit and the chip a little wider. */
   .guest-limit .settings-row-ctl > .settings-num, .guest-daily .settings-row-ctl > .settings-num { flex: 1 1 0; min-width: 0; }
 }
-.guest-daily .settings-row-ctl { flex-wrap: wrap; }
-.guest-draft { align-self: flex-start; margin-top: var(--space-2); }
+.guest-daily { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* The limit's name and what is spent have the width of the sheet; the number, Save and No limit take the line under them (beside them the name was squeezed to a column of two words in Russian). */
+.guest-sheet .guest-daily { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 600px) { .guest-sheet .guest-daily .settings-row-ctl { flex-wrap: wrap; justify-self: stretch; justify-content: flex-start; } }
+.guest-draft { align-self: flex-start; margin: -4px 0 12px; }
 .guest-toggle { align-self: flex-start; }
-.guest-form .toggle-row { margin-top: var(--space-2); }
-.guest-more { margin-top: var(--space-2); }
-.guest-more > summary { cursor: pointer; padding: var(--space-2) 0; color: var(--fg-2); font-size: var(--fs-13); }
+.guest-form .toggle-row { margin: 0 0 12px; }
+/* The further limits fold under one line, as the panel's Details groups do. */
+.guest-more-toggle { display: flex; align-items: center; gap: 6px; align-self: flex-start; height: var(--ctl-h-sm); margin-top: 8px; padding: 0 8px 0 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.guest-more-toggle:hover { color: var(--fg); }
+.guest-more-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
+.guest-more-toggle .ic { transition: transform var(--t-fast); }
+.guest-more-toggle[aria-expanded="true"] .ic { transform: rotate(90deg); }
+.guest-more { margin-top: 4px; }
 .guest-problem { margin-top: var(--space-2); color: var(--bad); }
 
 .guest-made { display: flex; flex-direction: column; gap: var(--space-2); }
-.guest-made textarea.field { resize: none; word-break: break-all; }
+.guest-made textarea.field { resize: none; overflow-wrap: anywhere; }
 .guest-copy { align-self: flex-start; }
 
 /* A guest's message in the chat: a framed card on the answer's side with the guest's mark on it, so it
    is never read as something the operator typed. */
 .msg-wrap.guest { align-items: stretch; }
-.guest-card { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
+.guest-card { padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); min-width: 0; }
 .guest-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 2px; font-size: var(--fs-12); color: var(--fg-2); }
 .guest-card-head b { color: var(--warn); font-weight: 500; }
