@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from daedalus.config import Settings
+from daedalus.extensions.board_history import task_history
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
 from daedalus.extensions.task_controls import TaskStopEffect
@@ -132,6 +133,10 @@ async def test_active_requirement_waits_for_exact_exit_then_new_attempt(
                                           intent_id=stage["intent_id"], client_operation_id="active-language:apply",
                                           expected_entity_revision=current))
         assert applied["contract_revision"] == 2
+        # The changed contract sends the card back to todo without a task event; its history has the line.
+        sent_back = [line for line in await task_history(db, task_id) if line["type"] == "task.moved"][-1]
+        assert (sent_back["from"], sent_back["to"], sent_back["operation"]) == ("doing", "todo", "contract.apply")
+        assert sent_back["actor"]["id"] == f"orchestrator:{sid}"
         with pytest.raises(PermissionError):
             await r.team.ingress.report(previous, "checkpoint", "old worker saw it", acknowledged=["R1"],
                                         call_id=f"fixture-report:{uuid.uuid4().hex}")

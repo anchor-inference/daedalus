@@ -1,8 +1,10 @@
 """A card's history is a table of its own, written with each change, whichever path made it.
 
-Each change a reader of the card cares about is pinned here from the line it leaves, with who acted.
-The migration gives the cards that already exist what can still be told truthfully, and says it was
-reconstructed.
+The paths that change a card without announcing it are the ones the history most needs: a member's
+report into review, the verdict that finishes it, the dependents a close or an acceptance moves, a
+CI or requirement change that sends a card back. Each is pinned here from the line it leaves, with
+who acted and, for a dependent, the card that moved it. The migration gives the cards that already
+exist what can still be told truthfully, and says it was reconstructed.
 """
 
 # ruff: noqa: F811 — the board fixtures are imported by name, and pytest hands them to the tests
@@ -15,10 +17,17 @@ from typing import Any
 
 import httpx
 
+from daedalus.config import Settings
 from daedalus.extensions.board_history import task_history
+from daedalus.extensions.ci_observations import set_required_checks
 from daedalus.stores.database import MIGRATIONS, Database
 from daedalus.stores.task_history import TRIGGERS
+from tests.support.authorized_results import accept_branchless_result
 from tests.unit.test_board_extras import HEADERS, app, client, create, day, edit  # noqa: F401 — fixtures by name
+from tests.unit.test_board_rounds import PLAN, assigned, hand_in
+from tests.unit.test_orchestrator import rig
+from tests.unit.test_orchestrator_team import fake, office
+from tests.unit.test_staff_runtime import BRIEF, close_team
 
 
 async def lines(client: httpx.AsyncClient, task_id: str) -> list[dict[str, Any]]:
@@ -60,6 +69,73 @@ async def test_every_change_a_reader_cares_about_is_a_line_with_who_made_it(clie
     assert {e["actor"]["kind"] for e in got} == {"operator"} and {e["actor"]["id"] for e in got} == {"operator:1"}
     assert not any(e["backfilled"] for e in got)
     assert [e["seq"] for e in got] == sorted(e["seq"] for e in got) and all(e["at"].endswith("Z") for e in got)
+
+
+async def test_a_dependent_moved_by_a_close_names_the_card_that_moved_it(client: httpx.AsyncClient) -> None:
+    first = await create(client, "Book the venue")
+    then = await create(client, "Print the tickets", depends_on=[first["id"]])
+    assert then["status"] == "blocked"
+    closed = await client.post(f"/api/board/{first['id']}/close", headers=HEADERS, json={
+        "client_operation_id": "close-venue", "expected_entity_revision": await revision_of(client, first["id"]),
+        "status": "done", "reason": "booked"})
+    assert closed.status_code == 200, closed.text
+
+    created, unblocked = await lines(client, then["id"])
+    assert created["to"] == "blocked"
+    assert (unblocked["type"], unblocked["from"], unblocked["to"]) == ("task.moved", "blocked", "todo")
+    assert unblocked["cause"] == {"task_id": first["id"], "title": "Book the venue"}
+    assert unblocked["operation"] == "board.task.close" and unblocked["actor"]["kind"] == "operator"
+    assert "cause" not in (await lines(client, first["id"]))[-1]
+
+
+async def test_a_members_report_its_acceptance_and_the_dependent_it_frees_are_lines(settings: Settings, db: Database,
+                                                                                    tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        ada = await r.manager.staff.hire(r.project.id, name="Ada", role="Planner", isolation="shared")
+        task_id, _ = await assigned(r, sid, staff="Ada", title="Tariff plan", **PLAN)
+        waiting = await r.board.add(title="Build the limits", session_id=sid, brief=BRIEF, depends_on=[task_id])
+        live = await r.team.live_of(ada)
+        assert live is not None
+        _folder, cwd = await r.team.cwd_of(live)
+        (Path(cwd) / "plan.md").write_text("Four limits and two open questions\n")
+        await hand_in(r, ada, artifacts=["plan.md"])
+        await accept_branchless_result(r.team, task_id)
+
+        got = await task_history(db, task_id)
+        moves = [(e["from"], e["to"]) for e in got if e["type"] == "task.moved"]
+        assert ("doing", "review") in moves and moves[-1] == ("review", "done"), moves
+        report = next(e for e in got if e["type"] == "task.moved" and e["to"] == "review")
+        # The report is the member's own word: its line names the member, not the system.
+        assert report["actor"] == {"kind": "agent", "id": f"staff:{ada.id}", "name": "Ada"}
+        accepted = next(e for e in got if e["type"] == "task.accepted")
+        assert accepted["actor"]["kind"] == "operator" and accepted["seq"] < got[-1]["seq"]
+        freed = [e for e in await task_history(db, waiting["id"]) if e["type"] == "task.moved"]
+        assert [(e["from"], e["to"], e["cause"]["task_id"]) for e in freed] == [("blocked", "todo", task_id)]
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_ci_requirement_that_returns_a_card_from_review_is_a_line(tmp_path: Path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        await db.execute("INSERT INTO board_tasks(id,title,status,priority,created_at,updated_at) VALUES"
+                         " ('task1','Review','review',3,'2026-01-01','2026-01-01')")
+        await db.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,"
+                         "snapshot_json,created_at) VALUES ('task1',1,'operator','','{}','2026-01-01')")
+        async with db.transaction() as conn:
+            revised = await set_required_checks(conn, task_id="task1", provider="github", repository_id="7",
+                                                check_names=["unit"], origin_ref="receipt")
+        assert revised["returned_from_review"] is True
+        moved = (await task_history(db, "task1"))[-1]
+        # Outside any command the change is the system's: nothing claimed it, and nothing pretends to know who.
+        assert (moved["from"], moved["to"], moved["actor"]) == ("review", "todo", {"kind": "system", "id": None, "name": None})
+    finally:
+        await db.close()
 
 
 async def test_a_card_deleted_by_the_legacy_board_takes_its_history_with_it(db: Database) -> None:
