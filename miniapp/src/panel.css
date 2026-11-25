@@ -17,7 +17,7 @@
 .panel .panel-tab .count, .panel-sheet .panel-tab .count { min-width: 0; padding: 0; background: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1; }
 .panel .panel-tab .count.attn, .panel-sheet .panel-tab .count.attn { color: var(--attention); font-weight: 500; }
 /* The open tool's × sits inside its pill; the pill keeps room for it, so the word never runs under it. */
-.panel-tabwrap.closable .panel-tab { padding-right: 28px; }
+.panel .panel-tablist .panel-tabwrap.closable .panel-tab, .panel-sheet .panel-tablist .panel-tabwrap.closable .panel-tab { padding-right: 28px; }
 .panel-tab-close { position: absolute; right: 6px; top: 50%; translate: 0 -50%; display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--fg-3); cursor: pointer; }
 .panel-tab-close:hover { background: var(--hover); color: var(--fg); }
 .panel-add { flex: none; }

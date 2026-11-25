@@ -28,6 +28,7 @@ import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
 import { MoveLive, useFolderMove } from "./project/moves";
 import { useLayer } from "./ui/dialogs";
+import { Select } from "./ui/primitives";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -102,7 +103,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
     setPage(next);
   };
 
-  const facts = launchFacts(detail, { effort, conductor, folder: role !== "orchestrator", onModel: on.openModel, onOpen: (page) => open(page) });
+  const facts = launchFacts(detail, { effort, conductor, folder: role !== "orchestrator", moving: !!folderMove, onModel: on.openModel, onOpen: (page) => open(page) });
   const state = stateFacts(detail, busy);
   const spend = spendFacts(detail, () => on.openTool("usage"));
   const groups: { key: string; props: Prop[] }[] = [
@@ -178,7 +179,6 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   ];
   // The folder's page opens from its fact in the launch group, not from a line of its own.
   const workspacePage: Prop = { id: "workspace", icon: "folder", label: t("session.workspace"), title: detail.project ? projectPath(detail.project) : detail.workspace,
-    value: <>{folderMove && <span className="badge attn">{t("details.prop.moving")}</span>}<span className="truncate">{workspaceWord(detail)}</span><HostMark env={detail.env} /></>,
     body: () => <WorkspaceBody detail={detail} conductor={conductor} folderMove={folderMove} onOpen={onOpen} on={on} /> };
   const all = [...groups.flatMap((g) => g.props), ...(role === "orchestrator" ? [] : [workspacePage])];
   const shown = page ? all.find((p) => p.id === page) ?? null : null;
@@ -261,7 +261,7 @@ function FactGroup({ ids, id, facts }: { ids: string; id: string; facts: Fact[] 
 /** How the session was launched: the model and its effort, what it may do without asking, the
  *  project, the folder and the branch it works on. */
 /** `folder`: a project's orchestrator has no folder of its own; it reads every folder of the project from Files. */
-function launchFacts(detail: SessionDetail, { effort, conductor, folder, onModel, onOpen }: { effort: string; conductor: boolean; folder: boolean; onModel?: (anchor: HTMLElement) => void; onOpen: (page: PageId) => void }): Fact[] {
+function launchFacts(detail: SessionDetail, { effort, conductor, folder, moving, onModel, onOpen }: { effort: string; conductor: boolean; folder: boolean; moving: boolean; onModel?: (anchor: HTMLElement) => void; onOpen: (page: PageId) => void }): Fact[] {
   const model = detail.fallback?.to ?? detail.model;
   const vendor = detail.effective_provider || detail.provider;
   return [
@@ -269,7 +269,7 @@ function launchFacts(detail: SessionDetail, { effort, conductor, folder, onModel
     ...(effort ? [{ key: "effort", label: t("details.fact.effort"), value: effort }] : []),
     { key: "access", label: t("details.fact.access"), value: t(detail.bypass ? "composer.bypass" : "details.fact.access.ask"), tone: detail.bypass ? "attn" as const : undefined },
     ...(!conductor && detail.project && !detail.project.system ? [{ key: "project", label: t("session.project"), value: <span className="truncate">{detail.project.name}</span> }] : []),
-    ...(!folder ? [] : [{ key: "workspace", label: t("details.fact.folder"), value: <span className="truncate mono">{shortPath(detail.workspace)}</span>, title: detail.workspace, prop: "workspace", onPress: () => onOpen("workspace") }]),
+    ...(!folder ? [] : [{ key: "workspace", label: t("details.fact.folder"), value: <>{moving && <span className="badge attn">{t("details.prop.moving")}</span>}<span className="truncate mono">{shortPath(detail.workspace)}</span><HostMark env={detail.env} /></>, title: detail.workspace, prop: "workspace", onPress: () => onOpen("workspace") }]),
     ...(detail.branch ? [{ key: "branch", label: t("details.fact.branch"), value: <span className="truncate mono">{detail.branch}</span> }] : []),
   ];
 }
@@ -628,10 +628,8 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
         <>
           <textarea className="field" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("session.loop.placeholder")} />
           <div className="composer-row">
-            <select className="field" value={mode} onChange={(e) => setMode(e.target.value as "interval" | "dynamic")}>
-              <option value="interval">{t("newagent.loop.interval")}</option>
-              <option value="dynamic">{t("loop.selfpaced")}</option>
-            </select>
+            <Select<"interval" | "dynamic"> size="md" label={t("session.loop")} value={mode} onChange={setMode}
+              options={[{ id: "interval", label: t("newagent.loop.interval") }, { id: "dynamic", label: t("loop.selfpaced") }]} />
             {mode === "interval" && <input className="field" type="number" min={1} style={{ maxWidth: 110 }} value={minutes} onChange={(e) => setMinutes(e.target.value)} aria-label={t("newagent.loop.minutes")} />}
             <input className="field" type="number" min={1} style={{ maxWidth: 130 }} placeholder={t("newagent.loop.max")} value={maxRuns} onChange={(e) => setMaxRuns(e.target.value)} aria-label={t("newagent.loop.max")} />
           </div>
