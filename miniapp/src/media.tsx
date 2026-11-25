@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { MediaItem, MediaPresentation } from "./api";
 import { api, inPanel } from "./api";
-import { Overlay, useLayer } from "./ui/dialogs";
+import { FullscreenLayer } from "./ui/primitives";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { downloadHref, openOrSave, saveFromPanel, useBlobUrl, type PreviewSource } from "./preview";
@@ -278,8 +278,6 @@ export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; st
   const item = items[index];
   const video = item.kind === "video";
   const name = item.name;
-  useLayer(onClose);
-  useEffect(() => { root.current?.focus(); }, []);
   useEffect(() => { setZoom(1); setOffset({ x: 0, y: 0 }); setPull(0); }, [index]);
   const changeZoom = (next: number) => {
     const bounded = Math.max(1, Math.min(4, next));
@@ -338,25 +336,29 @@ export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; st
   };
   const style: CSSProperties = { transform: `translate(${offset.x}px, ${offset.y + pull}px) scale(${zoom})` };
   const toPanel = item.onPanel;
-  return <Overlay>
-    <div ref={root} className="media-viewer lightbox" tabIndex={-1} role="dialog" aria-modal="true" aria-label={name} onKeyDown={onKey} style={pull ? { background: `rgba(0,0,0,${Math.max(0.35, 1 - pull / 400)})` } : undefined}>
+  return <FullscreenLayer
+    label={name}
+    className="media-viewer lightbox"
+    onClose={onClose}
+    onKeyDown={onKey}
+    style={pull ? { background: `rgba(0,0,0,${Math.max(0.35, 1 - pull / 400)})` } : undefined}
+    toolbar={<>
+      {items.length > 1 && <span className="lightbox-count">{index + 1}/{items.length}</span>}
+      {!video && zoom !== 1 && <button type="button" className="btn small lightbox-zoom-reset" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} aria-label={t("preview.fit")}><span className="lightbox-zoom">{Math.round(zoom * 100)}%</span></button>}
+      {toPanel && <button type="button" className="iconbtn lightbox-panel" onClick={() => { onClose(); toPanel(); }} aria-label={t("media.panel")} title={t("media.panel")}><Icon name="panel" /></button>}
+      <SaveLink save={{ href: item.download, filename: item.filename, outside: !!item.outside }} className="iconbtn lightbox-save" />
+    </>}
+  >
+    <div ref={root} className="media-viewer-body">
       <div className={`media-viewer-stage ${video ? "video" : ""}`} style={pull ? { background: "transparent" } : undefined} onPointerDown={video ? undefined : down} onPointerMove={video ? undefined : move} onPointerUp={video ? undefined : up} onPointerCancel={video ? undefined : up} onWheel={video ? undefined : wheel} onDoubleClick={video ? undefined : () => changeZoom(zoom === 1 ? 2 : 1)}>
         {video
           ? item.source && inPanel() ? <SourceClip key={item.key} source={item.source} name={name} /> : <VideoPlayer key={item.key} src={item.url ?? item.download} />
           : item.source ? <SourceStill key={item.key} source={item.source} name={name} style={style} /> : <img src={item.url} alt={name} draggable={false} style={style} />}
       </div>
-      <div className="lightbox-top">
-        <span className="lightbox-title">{name}</span>
-        {items.length > 1 && <span className="lightbox-count">{index + 1}/{items.length}</span>}
-        {!video && zoom !== 1 && <button type="button" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} aria-label={t("preview.fit")}><span className="lightbox-zoom">{Math.round(zoom * 100)}%</span></button>}
-        {toPanel && <button type="button" className="lightbox-panel" onClick={() => { onClose(); toPanel(); }} aria-label={t("media.panel")} title={t("media.panel")}><Icon name="panel" /></button>}
-        <SaveLink save={{ href: item.download, filename: item.filename, outside: !!item.outside }} className="lightbox-save" />
-        <button type="button" onClick={onClose} aria-label={t("common.close")}><Icon name="close" /></button>
-      </div>
       {index > 0 && <button type="button" className="lightbox-edge previous" onClick={() => setIndex((value) => value - 1)} aria-label={t("media.previous")}><Icon name="back" /></button>}
       {index < items.length - 1 && <button type="button" className="lightbox-edge next" onClick={() => setIndex((value) => value + 1)} aria-label={t("media.next")}><Icon name="forward" /></button>}
     </div>
-  </Overlay>;
+  </FullscreenLayer>;
 }
 
 /** The viewer over session files, each fetched as the files panel fetches it and one press from it. */

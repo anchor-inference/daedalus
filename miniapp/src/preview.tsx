@@ -3,14 +3,16 @@
 // auth header (an <img src> cannot carry one) and shown from a blob URL; the office formats are
 // converted in the browser by libraries loaded only when such a file is opened.
 
-import { Overlay, toast, useLayer } from "./ui/dialogs";
-import { useEffect, useState } from "react";
+import { Sheet, toast } from "./ui/dialogs";
+import { Segmented } from "./ui/primitives";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, inPanel } from "./api";
+import { FileTile, fileTileIcon } from "./filetile";
 import { Icon } from "./icons";
 import { renderMarkdown } from "./md";
 import { errorText, fmtBytes } from "./ui";
 import { t } from "./i18n";
-import { SourceView, JsonView, DiffView, ImageView } from "./previewparts";
+import { SourceView, JsonView, PatchView, ImageView } from "./previewparts";
 import { RawHtml } from "./rawhtml";
 import { HtmlPreview, HtmlNavigation } from "./htmlpreview";
 import { parseCsv } from "./csv";
@@ -52,28 +54,12 @@ export function canPreview(name: string): boolean {
   return previewKind(name) !== "other";
 }
 
-/** An emoji for a file row, by what the file is. */
-export function fileGlyph(name: string, dir = false): string {
-  if (dir) return "📁";
-  switch (previewKind(name)) {
-    case "image":
-      return "🖼";
-    case "pdf":
-      return "📕";
-    case "docx":
-      return "📝";
-    case "sheet":
-    case "csv":
-      return "📊";
-    case "audio":
-      return "🎵";
-    case "video":
-      return "🎬";
-    case "markdown":
-      return "📘";
-    default:
-      return "📄";
-  }
+/** What a file's row draws before its name: the glyph of its kind, or a folder's. */
+export function fileGlyph(name: string, dir = false): ReactNode {
+  if (dir) return <Icon name="folder" size={16} />;
+  const kind = previewKind(name);
+  const family = kind === "docx" ? "document" : kind === "csv" ? "sheet" : kind === "markdown" ? "text" : kind === "json" || kind === "diff" || kind === "html" ? "code" : kind === "other" ? "file" : kind;
+  return <Icon name={fileTileIcon(family)} size={16} />;
 }
 
 /** The address a browser tab can open the file at: the token travels in the query, since a tab carries no header. */
@@ -305,12 +291,15 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
   return (
     <div className={`viewer ${kind} ${className ?? ""}`}>
       {!onInfo && loading && <div className={`preview-progress ${progress === null ? "busy" : ""}`} role="progressbar" aria-label={t("common.loading")}><i style={progress === null ? undefined : { width: `${progress * 100}%` }} /></div>}
-      {["markdown", "html", "json", "diff"].includes(previewKind(name)) && <div className="source-tools segmented"><button className={!source ? "on" : ""} aria-pressed={!source} onClick={() => setSource(false)}>{t("preview.rendered")}</button><button className={source ? "on" : ""} aria-pressed={source} onClick={() => setSource(true)}>{t("preview.source")}</button></div>}
+      {["markdown", "html", "json", "diff"].includes(previewKind(name)) && (
+        <div className="source-tools">
+          <Segmented label={t("preview.view")} value={source ? "source" : "rendered"} onChange={(id) => setSource(id === "source")}
+            options={[{ id: "rendered", label: t("preview.rendered") }, { id: "source", label: t("preview.source") }]} />
+        </div>
+      )}
       {body?.sheets && body.sheets.length > 1 && (
-        <div className="segmented preview-tabs">
-          {body.sheets.map((s, i) => (
-            <button key={s.name} className={i === sheet ? "on" : ""} onClick={() => setSheet(i)}>{s.name}</button>
-          ))}
+        <div className="preview-tabs">
+          <Segmented label={t("preview.sheets")} value={String(sheet)} onChange={(id) => setSheet(Number(id))} options={body.sheets.map((s, i) => ({ id: String(i), label: s.name }))} />
         </div>
       )}
       <div className="preview-body">
@@ -325,15 +314,15 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
         {!failure && body?.text !== undefined && kind === "html" && <HtmlPreview text={body.text} base={"base" in src ? src.base : undefined} path={"path" in src ? src.path : name} onNavigation={onNavigation} />}
         {!failure && body?.text !== undefined && kind === "text" && <SourceView text={body.text} name={name} range={cited} />}
         {!failure && body?.text !== undefined && kind === "json" && <JsonView text={body.text} />}
-        {!failure && body?.text !== undefined && kind === "diff" && <DiffView text={body.text} />}
+        {!failure && body?.text !== undefined && kind === "diff" && <PatchView text={body.text} />}
         {!failure && body?.rows && <Grid rows={body.rows} note={body.error} />}
         {!failure && body?.sheets && <Grid rows={body.sheets[sheet]?.rows ?? []} note={(body.sheets[sheet]?.rows.length ?? 0) >= 2000 ? t("preview.rows") : undefined} />}
         {!failure && url && kind === "other" && (
-          <div className="empty">
-            {t("preview.none")}
-            <div style={{ marginTop: 10 }}>
-              <a className="btn small" href={url} download={name}>{t("preview.download")} {fmtBytes(blob?.size ?? 0)}</a>
-            </div>
+          <div className="preview-none">
+            <FileTile family="file" size="lg" />
+            <b>{name}</b>
+            <span>{t("preview.none")}</span>
+            <a className="btn" href={url} download={name}><Icon name="download" size={16} />{t("preview.download")} {fmtBytes(blob?.size ?? 0)}</a>
           </div>
         )}
       </div>
@@ -341,37 +330,36 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
   );
 }
 
-/** The viewer in a dialog: for a file waiting in the composer, and for phones without the panel. */
+/** The viewer in a sheet: for a file waiting in the composer, an attachment in the conversation, and
+ *  phones without the panel. The sheet is as wide as the file asks: a picture, a PDF or a table wants
+ *  the room, a page of text reads best at a column's width. */
 export function FilePreview({ src, onClose }: { src: PreviewSource; onClose: () => void }) {
   const name = sourceName(src);
   const cited = "path" in src && src.lines ? parseRange(src.lines) : null;
   const [info, setInfo] = useState<ViewerInfo | null>(null);
-  useLayer(onClose);
+  const kind = info?.kind ?? previewKind(name);
   return (
-    <Overlay>
-    <div className="sheet-backdrop preview-backdrop" onClick={onClose}>
-      <div className={`sheet preview ${info?.kind ?? previewKind(name)}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={name}>
-        <div className="sheet-head">
-          <h3 className="preview-name" title={"file" in src ? name : src.path}>
-            <span aria-hidden>{fileGlyph(name)}</span> {name}
-            {cited && <span className="sub">{t("preview.lines", { range: cited.from === cited.to ? cited.from : `${cited.from}–${cited.to}` })}</span>}
-            {info?.size != null && <span className="sub"> · {fmtBytes(info.size)}</span>}
-          </h3>
-          <div className="head-actions">
-            {info?.url && (
-              <a className="iconbtn small" href={info.url} download={name} title={t("common.download")} aria-label={t("common.download")}>
-                <Icon name="download" size={16} />
-              </a>
-            )}
-            <button className="iconbtn small" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}>
-              <Icon name="close" size={16} />
-            </button>
-          </div>
-        </div>
-        {info?.loading && <div className="preview-progress busy" role="progressbar" aria-label={t("common.loading")}><i /></div>}
-        <Viewer src={src} onInfo={setInfo} />
-      </div>
-    </div>
-    </Overlay>
+    <Sheet
+      size="xl"
+      className={`preview ${kind}`}
+      ariaLabel={name}
+      onClose={onClose}
+      title={(
+        <span className="preview-name" title={"file" in src ? name : src.path}>
+          <span className="preview-glyph" aria-hidden>{fileGlyph(name)}</span>
+          <span className="preview-file">{name}</span>
+          {cited && <span className="sub">{t("preview.lines", { range: cited.from === cited.to ? cited.from : `${cited.from}–${cited.to}` })}</span>}
+          {info?.size != null && <span className="sub"> · {fmtBytes(info.size)}</span>}
+        </span>
+      )}
+      head={info?.url ? (
+        <a className="iconbtn small preview-download" href={info.url} download={name} title={t("common.download")} aria-label={t("common.download")}>
+          <Icon name="download" size={16} />
+        </a>
+      ) : undefined}
+    >
+      {info?.loading && <div className="preview-progress busy" role="progressbar" aria-label={t("common.loading")}><i /></div>}
+      <Viewer src={src} onInfo={setInfo} />
+    </Sheet>
   );
 }

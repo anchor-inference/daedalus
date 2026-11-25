@@ -1870,7 +1870,7 @@ def workspace_shots(page: Page) -> None:
         ("session-preview-code", "src/main.py", ".source-view"),
         ("session-preview-html", "site/index.html", ".html-frame"),
         ("session-preview-json", "data/sample.json", ".json-tree"),
-        ("session-preview-diff", "change.diff", ".diff-view"),
+        ("session-preview-diff", "change.diff", ".patch-view"),
     ]:
         shot(page, name, f"agents/{S1}?panel=preview&path={quote(path)}", wait=selector, settle=500)
 
@@ -2759,7 +2759,7 @@ def run_notes() -> int:
         page.evaluate("document.querySelectorAll('.ne-read .note-img').forEach((el) => el.classList.add('loaded'))")
 
     def chat_tab(page: Page) -> None:
-        page.locator(".notes-subtab[data-scope='chat']").click()
+        page.locator(".notes-subtabs .tab[data-tab='chat']").click()
 
     def shelf(page: Page) -> None:
         page.locator(".notes-shelf-toggle").click()
@@ -2773,7 +2773,7 @@ def run_notes() -> int:
         page.locator(".ne-field").press("Control+End")
         page.keyboard.press("Enter")
         page.keyboard.type("Menu photos on the home page" if LANG != "ru" else "Фото меню на главной")
-        page.wait_for_selector(".ne-conflict", timeout=5000)
+        page.wait_for_selector(".dialog.wide .ne-diff", timeout=5000)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
