@@ -235,9 +235,13 @@ def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     page.wait_for_selector("[data-address]", timeout=15000)
 
     page.locator("#address-provider").click()
+    page.wait_for_selector(".dropdown-list [role=option]")
+    # The list takes its place on the key stack a moment after it draws; Escape sent before that closes the page.
+    page.wait_for_timeout(300)
     if page.locator(".dropdown-list [role=option]").count() != 4:
         say("the four providers are not offered")
     page.keyboard.press("Escape")
+    page.wait_for_selector(".dropdown-list", state="detached")
     if page.locator("[data-token], .settings-block").count():
         say("a quick tunnel asks for something")
 

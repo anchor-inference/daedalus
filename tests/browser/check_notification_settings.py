@@ -130,6 +130,8 @@ def desktop(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped
     browser = playwright.chromium.launch(executable_path=CHROMIUM)
     page = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
+    # The terminals' own bar: this check is about their cap, and the picture stub also reports a browser.
+    page.route("**/api/workloads/load", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"terminals": terminal_load(), "browsers": None, "together": None})))
     page.goto(f"{BASE}/settings/notifications?token=t&lang={LANG}")
     page.wait_for_selector(".nmatrix tbody tr", timeout=15000)
 

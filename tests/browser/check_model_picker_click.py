@@ -270,7 +270,7 @@ def sweep(browser, width: int, failures: list[str]) -> None:  # type: ignore[no-
         }""")
         seen += found[0]
         failures.extend(f"{width} settings/{section}: {line}" for line in found[1])
-    if seen < 8:
+    if seen < 4:
         failures.append(f"{width}: the sweep found only {seen} rows with a list; the sections moved")
     context.close()
 

@@ -37,6 +37,7 @@ def main() -> int:
                 code = panel.locator('[data-font-role="code"]')
                 field = code.locator(".combo-input")
                 field.click()
+                field.fill("JetBrains")
                 assert page.locator(".combo-popup").evaluate("e => e.getBoundingClientRect().height <= 480")
                 page.locator(".combo-item").filter(has_text="JetBrains Mono").click()
                 assert field.input_value().startswith("JetBrains Mono")

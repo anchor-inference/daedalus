@@ -175,6 +175,9 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 @media (max-width: 599px) {
   .set-card .settings-row.stack, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
   .set-card .settings-row.stack > .settings-row-ctl, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+  /* The field takes what the unit leaves, however narrow: its own width made a number run 16 px past the row's padding at 360. */
+  .set-card .settings-row-ctl > .settings-num { min-width: 0; max-width: 100%; }
+  .set-card .settings-row-ctl > .settings-num input.field { flex: 1 1 0; width: 0; }
 }
 /* What a face or a size looks like, in the card under the rows that choose it. */
 .set-specimen { gap: 8px; }
