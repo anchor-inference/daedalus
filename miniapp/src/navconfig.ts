@@ -166,18 +166,15 @@ function orderBy(items: NavItem[], ordered: string[]): NavItem[] {
   return [...listed, ...items.filter((it) => !at.has(it.id))];
 }
 
-export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[] | null; selfdev: SelfDevMode; counts?: Counts }): ResolvedNav {
-  const config = input.config ?? {};
-  const all = catalogue(input.pages, input.selfdev, config, input.counts ?? {});
+/** Where the desktop puts each item, from the configuration alone. Hidden wins, then pinned, then
+ *  More; an item mentioned nowhere keeps the place it ships with, which for a page is More — a new
+ *  page should not push the operator's pinned rows around. */
+export function placeDesktop(all: NavItem[], config: NavConfig): { pinned: NavItem[]; more: { key: string; items: NavItem[] }[]; hidden: Set<string>; shown: NavItem[] } {
   const hidden = new Set(list(config.hidden));
   const pinned = list(config.pinned);
   const more = list(config.more);
-  const drawer = list(config.drawer);
   const shown = all.filter((it) => !hidden.has(it.id));
   const byId = new Map(shown.map((it) => [it.id, it]));
-
-  // Desktop. Hidden wins, then pinned, then More; an item mentioned nowhere keeps the place it ships
-  // with, which for a page is More — a new page should not push the operator's pinned rows around.
   const isPinned = (it: NavItem) => pinned.includes(it.id) || (!more.includes(it.id) && it.screen !== null && PINNED.includes(it.screen));
   const pinnedItems = [
     ...pinned.map((id) => byId.get(id)).filter((it): it is NavItem => !!it),
@@ -187,6 +184,15 @@ export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[
   const sections = [...MENU_GROUPS.map((g) => g.key), PAGES_GROUP]
     .map((key) => ({ key, items: orderBy(inMore.filter((it) => it.group === key), more) }))
     .filter((g) => g.items.length > 0);
+  return { pinned: pinnedItems, more: sections, hidden, shown };
+}
+
+export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[] | null; selfdev: SelfDevMode; counts?: Counts }): ResolvedNav {
+  const config = input.config ?? {};
+  const all = catalogue(input.pages, input.selfdev, config, input.counts ?? {});
+  const drawer = list(config.drawer);
+  const { pinned: pinnedItems, more: sections, hidden, shown } = placeDesktop(all, config);
+  const byId = new Map(shown.map((it) => [it.id, it]));
 
   // Phone. A drawer list that was set is the whole drawer, for both modes; until then each mode
   // keeps the drawer it ships with, and orchestration's leaves the board and the companion page out.
@@ -211,20 +217,14 @@ export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[
   return { pinned: pinnedItems, more: sections, drawer: { agents, orchestration }, phoneMore, shown, catalogue: all, hidden };
 }
 
-/** What the More launcher draws for one surface: the sidebar's pinned rows above it, or a phone drawer.
- *
- *  `catalogue` is every shown item, those the surface already shows first and in its order, then the
- *  rest in the menu's order: the launcher lists everything, the pinned items included, so it is a
- *  table of contents rather than a list of leftovers, and `placed` is what its dot marks. `fallback`
- *  is what Frequent offers before it has learned anything: the items the surface does not show,
- *  which are the ones the operator needs the launcher for. */
-export function launcherLayout(nav: ResolvedNav, placedItems: NavItem[]): { catalogue: NavItem[]; placed: Set<string>; fallback: string[] } {
+/** What the More launcher needs to know about the surface beside it: which items that surface already
+ *  shows (the sidebar's pinned rows, or a phone drawer's list), which the pin on a row marks, and what
+ *  Frequent offers before it has learned anything: the items the surface does not show, which are the
+ *  ones the operator needs the launcher for. */
+export function launcherLayout(nav: ResolvedNav, placedItems: NavItem[]): { placed: Set<string>; fallback: string[] } {
   const placed = new Set(placedItems.map((it) => it.id));
-  const shown = new Set(nav.shown.map((it) => it.id));
-  const first = placedItems.filter((it) => shown.has(it.id));
-  const catalogue = [...first, ...nav.shown.filter((it) => !placed.has(it.id))];
   const unplaced = [...nav.more.flatMap((g) => g.items), ...nav.phoneMore, ...nav.shown].map((it) => it.id).filter((id) => !placed.has(id));
-  return { catalogue, placed, fallback: [...new Set(unplaced)] };
+  return { placed, fallback: [...new Set(unplaced)] };
 }
 
 /** The id of the item the route stands on: a screen's name, or `page:<slug>`. */

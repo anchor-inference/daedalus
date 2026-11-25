@@ -171,16 +171,17 @@ describe("what Settings writes", () => {
 describe("the More launcher", () => {
   const nav = resolveNav({ config: { hidden: ["health"] }, pages: [DOSING], selfdev: "server" });
 
-  it("lists everything shown, what is pinned first and marked, never what is hidden", () => {
+  it("marks what the surface already shows, and never offers what is hidden", () => {
     const desk = launcherLayout(nav, nav.pinned);
-    expect(ids(desk.catalogue)).toEqual(["inbox", "board", "calendar", "changes", "terminals", "companion", "canvas", "harnesses", "schedules", "services", "memory", "usage", "page:dosing"]);
     expect([...desk.placed]).toEqual(ids(nav.pinned));
+    expect(ids(nav.shown)).toEqual(["companion", "inbox", "board", "calendar", "canvas", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "page:dosing"]);
+    expect(desk.fallback).not.toContain("health");
   });
 
   it("offers what the surface does not show while Frequent has learned nothing", () => {
     expect(launcherLayout(nav, nav.pinned).fallback).toEqual(["companion", "canvas", "harnesses", "schedules", "services", "memory", "usage", "page:dosing"]);
     const phone = launcherLayout(nav, nav.drawer.agents);
-    expect(ids(phone.catalogue).slice(0, 5)).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
+    expect([...phone.placed]).toEqual(["inbox", "terminals", "board", "companion", "usage"]);
     expect(phone.fallback).not.toContain("inbox");
     expect(phone.fallback).not.toContain("health");
     expect(phone.fallback.slice(0, 3)).toEqual(["canvas", "harnesses", "schedules"]);

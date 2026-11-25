@@ -1,15 +1,16 @@
-// The application shell: a page header with the screen's name and its actions, the command palette
-// and the keyboard. On a desktop the sessions are the left column (sidebar.tsx) and the destinations
+// The application shell: a page header with the screen's name and its actions, what the command
+// palette (palette.tsx) is made of, and the keyboard. On a desktop the sessions are the left column (sidebar.tsx) and the destinations
 // are a menu over the content (navmenu.tsx); on a phone both are in the drawer (drawer.tsx), which
 // the header's hamburger opens.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Icon, IconName } from "./icons";
-import { Sheet } from "./ui/dialogs";
+import type { IconName } from "./icons";
+import type { SessionSummary } from "./api";
 import { IconButton } from "./ui/primitives";
-import { Screen, navigate, pathFor } from "./router";
+import { Screen, navigate, parse, pathFor, sessionPath } from "./router";
 import { SelfDevMode, visibleScreens } from "./capabilities";
 import { t } from "./i18n";
+import { relTime } from "./format";
 import { insideTerminal } from "./terminal/keys";
 import { latinKey } from "./navigation";
 import { MenuButton } from "./ui/phone";
@@ -72,69 +73,49 @@ export function PageHeader({ title, subtitle, filters, actions, ruled, back, lea
 
 // ── command palette ──────────────────────────────────────────────────────────────────────
 
-export type PaletteItem = { id: string; label: string; hint?: string; icon: IconName; iconPath?: string | null; run: () => void };
+/** The groups the palette draws, in order. */
+export type PaletteGroup = "chats" | "projects" | "actions" | "go" | "settings";
 
-/** The palette's search, shared with the More launcher's field so the two never find different
- *  things for the same words. */
+/** One thing the palette can do. `right` is the short word at the row's far end (a state, a key, "Section")
+ *  and `tone` colours it; `beside` is what Ctrl Enter does where opening in a second pane means something. */
+export type PaletteItem = { id: string; group: PaletteGroup; label: string; hint?: string; icon: IconName; iconPath?: string | null; right?: string; tone?: "live" | "attention"; run: () => void; beside?: () => void };
+
+/** The palette's search, over names and hints. A name that holds the words comes before one that only
+ *  has them in its hint, so "menu" finds the chat called Menu before the chat that mentions it. */
 export function matchPalette(items: PaletteItem[], query: string, limit = 12): PaletteItem[] {
   const needle = query.trim().toLowerCase();
-  return (needle ? items.filter((it) => `${it.label} ${it.hint ?? ""}`.toLowerCase().includes(needle)) : items).slice(0, limit);
+  if (!needle) return items.slice(0, limit);
+  const named: PaletteItem[] = [];
+  const hinted: PaletteItem[] = [];
+  for (const it of items) {
+    if (it.label.toLowerCase().includes(needle)) named.push(it);
+    else if (it.hint?.toLowerCase().includes(needle)) hinted.push(it);
+  }
+  return [...named, ...hinted].slice(0, limit);
 }
 
-/** Ctrl/⌘ K: go somewhere by name — a screen, a session, an action. */
-export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () => void }) {
-  const [q, setQ] = useState("");
-  const [cursor, setCursor] = useState(0);
-  const needle = q.trim().toLowerCase();
-  const shown = matchPalette(items, q);
-  useEffect(() => setCursor(0), [needle]);
-  const run = (it: PaletteItem) => {
-    onClose();
-    it.run();
-  };
-  return (
-    <Sheet ariaLabel={t("shell.search.label")} onClose={onClose} size="sm" className="palette-sheet">
-      <input
-        className="field"
-        autoFocus
-        placeholder={t("shell.search.placeholder")}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown") {
-            setCursor((c) => Math.min(shown.length - 1, c + 1));
-            e.preventDefault();
-          } else if (e.key === "ArrowUp") {
-            setCursor((c) => Math.max(0, c - 1));
-            e.preventDefault();
-          } else if (e.key === "Enter" && shown[cursor]) run(shown[cursor]);
-        }}
-        aria-label={t("shell.search.label")}
-      />
-      <div className="palette-list" role="listbox">
-        {shown.map((it, i) => (
-          <button key={it.id} role="option" aria-selected={i === cursor} className={`palette-row ${i === cursor ? "on" : ""}`} onMouseEnter={() => setCursor(i)} onClick={() => run(it)}>
-            <Icon name={it.icon} size={16} path={it.iconPath} />
-            <span className="truncate">{it.label}</span>
-            {it.hint && <PaletteHint hint={it.hint} />}
-          </button>
-        ))}
-        {shown.length === 0 && <div className="sub" style={{ padding: "10px 12px" }}>{t("shell.search.nomatch")}</div>}
-      </div>
-    </Sheet>
-  );
+/** A chat opened in a second pane beside the one on screen; with none open, it is simply opened. */
+export function besideSession(id: string, open: () => void): void {
+  const route = parse();
+  if (route.session && route.session !== id) navigate(sessionPath(route.session, id));
+  else open();
 }
 
-/** A folder is cut from its start, not its end: every project lives under the same home folder, so
- *  an end-cut left six rows of an identical "/home/o…" and lost the one part that told them apart.
- *  The marks on both sides keep the leading slash where it belongs inside the right-to-left box the
- *  start-cut relies on. The full value stays in the tooltip. */
-function PaletteHint({ hint }: { hint: string }) {
-  const path = hint.startsWith("/") || hint.startsWith("~");
-  return <span className={`sub truncate ${path ? "tail" : ""}`} title={hint}>{path ? `\u200e${hint}\u200e` : hint}</span>;
+/** What a chat says at the end of its palette row: working, waiting for you, failed, or how long ago. */
+export function chatStatus(s: Pick<SessionSummary, "status" | "last_message_at">): Pick<PaletteItem, "right" | "tone"> {
+  if (s.status === "waiting") return { right: t("side.state.waiting"), tone: "attention" };
+  if (s.status === "failed") return { right: t("side.state.failed"), tone: "attention" };
+  if (s.status === "running" || s.status === "compacting") return { right: t("side.state.running"), tone: "live" };
+  return { right: relTime(s.last_message_at) };
 }
 
 const GO_KEYS: Record<string, Screen> = { a: "agents", o: "orchestration", v: "companion", i: "inbox", b: "board", t: "terminals", c: "changes", m: "memory", u: "usage", s: "settings" };
+
+/** The two keys that go to a screen ("G C" for Changes), for the palette to say beside it; undefined where none does. */
+export function goKey(screen: Screen): string | undefined {
+  const letter = Object.keys(GO_KEYS).find((key) => GO_KEYS[key] === screen);
+  return letter ? `G ${letter.toUpperCase()}` : undefined;
+}
 
 /** Keyboard on a desktop: Ctrl/⌘ K opens the palette, `g` then a letter goes to a screen. Never inside a text field. */
 export function useShortcuts(onPalette: () => void, selfdev: SelfDevMode) {

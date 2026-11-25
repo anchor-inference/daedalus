@@ -19,7 +19,7 @@ import { screenTitle } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
 import { Launcher } from "./navmenu";
-import type { PaletteItem } from "./shell";
+import { placeInDrawer } from "./navplace";
 import { KindMark } from "./chatkind";
 import { PrivateMark, isPrivate } from "./privatechat";
 import { Drawer, NewChatPill, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
@@ -62,16 +62,17 @@ export type AppDrawerProps = {
   projects: Project[];
   /** The project switcher: every project, adding one, the archived ones. */
   onProjects: () => void;
-  /** The Ctrl K palette's items, which the More sheet's search field searches. */
-  search?: () => PaletteItem[];
+  /** Opens the command palette on what was typed in the More sheet's field, which finds chats and settings too. */
+  onSearchAll: (query: string) => void;
 };
 
-export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects, search }: AppDrawerProps) {
+export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects, onSearchAll }: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
   // The switch shows a mode's lists without leaving the page; a destination inside it goes there.
   const [shown, setShown] = useState<Mode>(mode);
   const [more, setMore] = useState(false);
+  const drawerItems = shown === "agents" ? layout.drawer.agents : layout.drawer.orchestration;
   useEffect(() => { if (open) setShown(mode); }, [open, mode]);
   const live = useStreamUp();
   const listing = useQuery<SessionList>("/api/sessions", { pollMs: live ? 60000 : 15000, staleMs: 5000 });
@@ -236,13 +237,13 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
         <Sheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-sheet ph-more-sheet launch-sheet">
           <Launcher
             nav={layout}
-            placed={shown === "agents" ? layout.drawer.agents : layout.drawer.orchestration}
+            placed={drawerItems}
             current={route.session ? "" : standing}
             selfdev={selfdev}
-            search={search}
             phone
             onGo={(path) => { setMore(false); navigateFromDrawer(path); }}
-            onRun={(run) => { setMore(false); closeDrawer(); run(); }}
+            onPlace={(id, on) => placeInDrawer(layout, drawerItems.map((it) => it.id), id, on)}
+            onEverywhere={(query) => { setMore(false); closeDrawer(); onSearchAll(query); }}
             onClose={() => setMore(false)}
           />
         </Sheet>
