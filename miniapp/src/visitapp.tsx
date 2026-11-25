@@ -11,6 +11,7 @@ import { applyAppearance } from "./appearance";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { VISIT_ENDED, setVisitorName, visitorName } from "./visit";
 import { Icon } from "./icons";
+import { Button } from "./ui/primitives";
 import "./visit.css";
 
 /** What the host says about the link the page was opened with. */
@@ -102,12 +103,12 @@ function VisitBar({ link }: { link: VisitLink }) {
       {editing ? (
         <form className="visit-name" onSubmit={(e) => { e.preventDefault(); save(String(new FormData(e.currentTarget).get("name") ?? "")); }}>
           <input className="field" name="name" autoFocus defaultValue={name} maxLength={60} placeholder={t("visit.name.placeholder")} aria-label={t("visit.name.label")} />
-          <button className="btn small primary" type="submit">{t("common.save")}</button>
+          <Button size="sm" variant="primary" type="submit">{t("common.save")}</Button>
         </form>
       ) : (
-        <button type="button" className="btn small ghost visit-name-btn" onClick={() => setEditing(true)} title={t("visit.name.label")}>
+        <Button size="sm" variant="quiet" className="visit-name-btn" onClick={() => setEditing(true)} title={t("visit.name.label")}>
           {name ? t("visit.as", { name }) : t("visit.name.set")}
-        </button>
+        </Button>
       )}
     </div>
   );

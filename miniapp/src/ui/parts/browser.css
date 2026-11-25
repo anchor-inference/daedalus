@@ -367,21 +367,25 @@
 /* A shared dialog is only the conversation. The column stays a readable width: in the app the
    conversation widens because it shares the window with a panel, and here there is no panel. */
 .chat-head button.chip { font: inherit; cursor: pointer; min-height: var(--ctl-h-sm); }
-.shared { min-height: 100dvh; display: flex; flex-direction: column; background: var(--wash, var(--bg)); color: var(--fg); }
-.shared-column { width: min(760px, 100%); margin: 0 auto; flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.shared-head { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.shared { min-height: 100dvh; display: flex; flex-direction: column; background: var(--wash); color: var(--fg); }
+.shared-column { width: min(var(--chat-w), 100%); margin: 0 auto; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* The header is the conversation's own: one 52 px line, no rule under it, the name at 15/600 and
+   under it, in the grey of a meta line, whose page this is and what a visitor can do on it. */
+.shared-head { display: flex; align-items: center; gap: 10px; min-height: var(--head-h); padding: 6px 24px; }
 .shared-titles { min-width: 0; }
-.shared-kicker { font-size: var(--fs-12); color: var(--fg-3); }
-.shared-head h1 { margin: 0; font-size: var(--fs-14); font-weight: 500; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shared-scroll { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 12px 16px 24px; }
+.shared-head h1 { margin: 0; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-meta { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: var(--fs-12); color: var(--fg-3); }
+.shared-kicker::after { content: "·"; margin-left: 8px; }
+.shared-scroll { flex: 1; display: flex; flex-direction: column; gap: 24px; padding: var(--space-3) var(--space-6) var(--space-8); }
 .shared-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 50dvh; padding: 16px 8px; text-align: center; }
 .shared-state .sub { margin: 0; max-width: 42ch; line-height: var(--lh-ui); }
 .shared-state .btn { margin-top: 6px; }
-.shared-state-icon { display: inline-grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
-.shared-time { display: block; margin-top: 4px; font-size: var(--fs-11); color: var(--fg-3); }
+.shared-state-icon { display: inline-grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; background: var(--selected); color: var(--fg-2); }
+.shared-time { display: block; margin-top: 4px; font-size: var(--fs-12); color: var(--fg-3); }
 .shared .msg.user .shared-time { text-align: right; }
 .shared-audio { display: block; width: 100%; margin: 6px 0; }
-.shared-file { display: flex; align-items: center; gap: 8px; max-width: 100%; margin: 6px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg); text-decoration: none; }
+.shared-file { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: var(--card-row-h-lg); margin: 6px 0; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg); text-decoration: none; }
+.shared-file:hover { background: var(--hover); }
 .shared-file .truncate { min-width: 0; }
 .shared-file-size { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
 .shared .inline-media-image video { display: block; width: 100%; height: auto; max-height: min(70dvh, 680px); background: var(--bg); }

@@ -1,14 +1,26 @@
-/* A live link's page: the session's screen alone, under a strip that says whose conversation it is. */
-.visit { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; background: var(--wash, var(--bg)); }
+/* A live link's page: the session's screen alone, under a strip that says whose conversation it is
+   and what a visitor sending here does. The strip is the frame's colour and one 36 px line; the
+   conversation under it is the app's own. */
+.visit { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; background: var(--wash); }
 .visit > .main { flex: 1; min-height: 0; }
-.visit-bar { flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-3); font-size: var(--fs-12); color: var(--fg-2); background: var(--bg); border-bottom: 1px solid var(--line); }
+.visit-bar { flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: 4px var(--space-3) 4px var(--space-4); font-size: var(--fs-12); color: var(--fg-2); background: var(--bg); border-bottom: 1px solid var(--line); }
+.visit-bar > .ic { flex: none; color: var(--fg-3); }
 .visit-bar-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .visit-bar-until { flex: none; color: var(--fg-3); }
 .visit-name { display: flex; align-items: center; gap: var(--space-1); }
-.visit-name .field { width: 12em; min-height: 0; padding: 2px 8px; }
+.visit-name .field { width: 12em; min-height: var(--ctl-h-sm); padding: 2px 8px; }
 .visit-name-btn { flex: none; }
-.visit-gone { margin: auto; display: grid; justify-items: center; gap: var(--space-2); max-width: 28em; padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-sm); text-align: center; color: var(--fg-2); font-size: var(--fs-13); }
-.visit-gone b { color: var(--fg); font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.visit-gone { margin: auto; display: grid; justify-items: center; gap: var(--space-2); width: min(100% - 32px, 380px); padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--card); text-align: center; color: var(--fg-2); font-size: var(--fs-14); }
+.visit-gone > .ic { color: var(--fg-3); }
+.visit-gone b { color: var(--fg); font-size: var(--fs-15); font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
 @media (max-width: 1023px) {
   .visit-bar-until { display: none; }
+}
+/* On a phone the line that says what sending here does is read whole, over two lines if it needs them. */
+@media (max-width: 599px) {
+  .visit-bar { align-items: flex-start; padding-block: var(--space-2); }
+  .visit-bar-text { flex: 1; white-space: normal; overflow: visible; }
+  .visit-bar > .ic { margin-top: 2px; }
+  .visit-bar > .grow { display: none; }
+  .visit-name-btn { margin-left: auto; }
 }

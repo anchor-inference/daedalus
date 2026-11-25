@@ -6,6 +6,7 @@ import { api } from "./api";
 import { errorText } from "./ui";
 import { useCopied } from "./ui/components";
 import { Icon } from "./icons";
+import { Button } from "./ui/primitives";
 import { shortDateTime } from "./format";
 import { t } from "./i18n";
 import { Row } from "./settingsrow";
@@ -62,8 +63,8 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
         {codes.map((code) => <li key={code}>{code}</li>)}
       </ol>
       <div className="totp-actions">
-        <button className="btn small" onClick={() => void copy(codes.join("\n"))}>{copied && <Icon name="check" size={13} />}{t("settings.totp.codes.copy")}</button>
-        <button className="btn primary small" onClick={onDone}>{t("settings.totp.codes.done")}</button>
+        <Button size="sm" icon={copied ? "check" : undefined} onClick={() => void copy(codes.join("\n"))}>{t("settings.totp.codes.copy")}</Button>
+        <Button size="sm" variant="primary" onClick={onDone}>{t("settings.totp.codes.done")}</Button>
       </div>
     </div>
   );
@@ -148,7 +149,7 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
           {codes && <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />}
           {status && !status.enabled && !setup && (
             <Row title={t("settings.totp.off")}>
-              <button className="btn primary small" disabled={busy} onClick={() => void begin()}>{t("settings.totp.setup")}</button>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void begin()}>{t("settings.totp.setup")}</Button>
             </Row>
           )}
           {setup && (
@@ -160,15 +161,15 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
               <label className="sub" htmlFor="totp-enable-code">{t("settings.totp.confirm")}</label>
               <div className="totp-actions">
                 <CodeField id="totp-enable-code" value={code} onChange={(v) => setCode(v.replace(/\D/g, ""))} label={t("settings.totp.code")} digitsOnly />
-                <button className="btn primary small" type="submit" disabled={busy || code.length !== 6}>{t("settings.totp.enable")}</button>
-                <button className="btn small" type="button" onClick={cancel}>{t("settings.totp.cancel")}</button>
+                <Button size="sm" variant="primary" type="submit" disabled={busy || code.length !== 6}>{t("settings.totp.enable")}</Button>
+                <Button size="sm" onClick={cancel}>{t("settings.totp.cancel")}</Button>
               </div>
             </form>
           )}
           {status?.enabled && !ask && (
             <Row title={t("settings.totp.on", { t: shortDateTime(status.enabled_at) })} desc={t("settings.totp.recoveryleft", { n: status.recovery_left })} stack={narrow}>
-              <button className="btn small" onClick={() => (setAsk("regenerate"), setCode(""), setError(null))}>{t("settings.totp.regenerate")}</button>
-              <button className="btn small" onClick={() => (setAsk("disable"), setCode(""), setError(null))}>{t("settings.totp.disable")}</button>
+              <Button size="sm" onClick={() => (setAsk("regenerate"), setCode(""), setError(null))}>{t("settings.totp.regenerate")}</Button>
+              <Button size="sm" onClick={() => (setAsk("disable"), setCode(""), setError(null))}>{t("settings.totp.disable")}</Button>
             </Row>
           )}
           {status?.enabled && ask && (
@@ -176,12 +177,12 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
               <label className="sub" htmlFor="totp-ask-code">{t(ask === "disable" ? "settings.totp.ask.disable" : "settings.totp.ask.regenerate")}</label>
               <div className="totp-actions">
                 <CodeField id="totp-ask-code" value={code} onChange={setCode} label={t("settings.totp.ask.code")} />
-                <button className="btn primary small" type="submit" disabled={busy || !code.trim()}>{t("settings.totp.ask.confirm")}</button>
-                <button className="btn small" type="button" onClick={cancel}>{t("settings.totp.cancel")}</button>
+                <Button size="sm" variant="primary" type="submit" disabled={busy || !code.trim()}>{t("settings.totp.ask.confirm")}</Button>
+                <Button size="sm" onClick={cancel}>{t("settings.totp.cancel")}</Button>
               </div>
             </form>
           )}
-          {error && <div className="login-error totp-error" role="alert">{error}</div>}
+          {error && <div className="login-error totp-error" role="alert"><Icon name="alert" size={14} />{error}</div>}
         </>
       )}
     </div>
