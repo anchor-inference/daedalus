@@ -179,8 +179,8 @@ def desktop_inbox(browser, route_api) -> list[str]:  # type: ignore[no-untyped-d
     if "Unread" in page.locator(".pagehead").inner_text():
         problems.append("the Inbox still offers an Unread view")
     groups = page.eval_on_selector_all(".inbox-group", "els => els.map(e => [e.dataset.group, e.querySelectorAll('.inbox-row').length])")
-    # The two requests and the stub's change proposal that waits for a decision.
-    if groups[:1] != [["waiting", 3]]:
+    # The two requests and the stub's two change proposals that wait for a decision.
+    if groups[:1] != [["waiting", 4]]:
         problems.append(f"the first group is not what waits for the operator: {groups}")
     # What waits is not read by opening it; what finished is.
     page.locator(".inbox-row[data-notice='22']").click()
@@ -381,19 +381,23 @@ def run() -> int:
             page.locator(".notice-toast[data-notice='6'] button[aria-label='Dismiss']").click()
             page.locator(".sidebar [data-nav='inbox']").click()
             page.wait_for_url("**/app/inbox**")
-            needs = page.locator(".needs-you .notice-row[data-notice='6']")
+            waiting = ".inbox-group[data-group='waiting'] .inbox-row[data-notice='6']"
+            needs = page.locator(waiting)
             try:
                 needs.wait_for(timeout=5000)
             except Exception:  # noqa: BLE001
-                problems.append("the Inbox does not show the permission under Needs you")
+                problems.append("the Inbox does not show the permission among what waits for the operator")
                 raise RuntimeError from None
-            if needs.locator("[data-action='allow']").count() != 1 or needs.locator("[data-action='deny']").count() != 1:
+            needs.click()
+            pane = page.locator(".inbox-pane[data-item='n6']")
+            pane.wait_for(timeout=5000)
+            if pane.locator("[data-action='allow']").count() != 1 or pane.locator("[data-action='deny']").count() != 1:
                 problems.append("the permission in the Inbox has no Allow and Deny")
-            needs.locator("[data-action='allow']").click()
+            pane.locator("[data-action='allow']").click()
             if not wait(page, lambda: Centre.acted == [(6, {"action": "allow"})], 3):
                 problems.append(f"Allow posted {Centre.acted}, not one allow for entry 6")
-            if not wait(page, lambda: page.locator(".needs-you .notice-row[data-notice='6']").count() == 0, 4):
-                problems.append("the answered permission is still under Needs you")
+            if not wait(page, lambda: page.locator(waiting).count() == 0, 4):
+                problems.append("the answered permission still waits for the operator")
 
             # The conversation on screen says it itself; another one still gets a toast.
             page.goto(f"{BASE}/agents/{S1}?token=t&lang=en", wait_until="commit")
