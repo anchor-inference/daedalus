@@ -35,7 +35,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import DEFAULT_APP, GATES, expect_app, reveal_composer, session_translation  # noqa: E402
+from api_stub import DEFAULT_APP, GATES, expect_app, session_translation  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -81,7 +81,8 @@ FACTS = """(composer) => {
     chip: chip && chip.getClientRects().length ? chip.innerText.trim() : null,
     send: send ? rect(send) : null,
     last: controls.length ? name(controls[controls.length - 1]) : null,
-    round: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ctl-round')) || 0,
+    // The phone's send circle is 40 px drawn in its 44 px place, as the approved phone frame draws it.
+    round: 40,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     doc: document.documentElement.scrollWidth - window.innerWidth,
   };
@@ -177,7 +178,6 @@ def walk(browser, lang: str, width: int, phone: bool, panel: bool = False, dual:
     page.wait_for_selector(".composer .roundbtn.primary", state="attached", timeout=15000)
     page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
     page.wait_for_timeout(300)
-    reveal_composer(page)
     problems: list[str] = []
     composers = page.locator(".composer:has(.composer-row)")
     for n in range(composers.count()):

@@ -1,8 +1,9 @@
 """The session's Details tab keeps every fact it has, at a desktop's 1440 px and a phone's 390 px.
 
-The tab was redrawn from a column of cards into an inspector — one line a section, a section opened in
-place of the list — with the context and the cost in a strip over every tab, and the risk of such a
-redraw is a datum that quietly drops out. This check feeds the richest session
+The tab was redrawn from a column of cards into an inspector — the facts as key and value in launch,
+state, spend and context groups, then one line a setting opened in place of the list — with the
+context's and the spend's pages as tools of their own, and the risk of such a redraw is a datum that
+quietly drops out. This check feeds the richest session
 the app can describe (imported from another program, a measured context with its breakdown and cache,
 spend today, a subscription with three windows, a loop-less session with MCP servers and disk use)
 and asserts, in both languages and at both widths, that each section is there and that each of its
@@ -116,24 +117,32 @@ def text_of(page: Page, scope: str) -> str:
 
 
 def check(page: Page, scope: str, language: str, where: str) -> None:
-    # The two numbers the operator watches are in the strip over the tabs, whatever the tab.
-    strip = text_of(page, f"{scope} [data-panel-strip]")
-    for fact in ("50%", "$41.70", "$6.12", "Claude Opus 5"):
-        assert fact in strip, f"{where}: the strip lacks {fact!r}: {strip}"
-    # Every section is one line of the list, and the list all but fits the panel without a scroll. This
-    # session has every optional section at once (an import, a provider, schedules, services), and since
-    # the vision model got a line of its own its eighteen lines run one line past a 900-pixel window; a
-    # session without all of those fits with room. More than one line below the fold is a regression.
+    # The facts lead the tab: the model, the spend in tokens and dollars, the context's fill.
+    facts = text_of(page, f"{scope} .details")
+    for fact in ("50%", "$41.70", "Claude Opus 5", "220.9"):
+        assert fact.replace(" ", " ") in facts.replace(" ", " "), f"{where}: the facts lack {fact!r}: {facts[:400]}"
+    for group in ("launch", "state", "spend", "context"):
+        expect(page.locator(f"{scope} [data-facts='{group}']"), f"{where}: the {group} group").to_have_count(1)
     rows = page.locator(f"{scope} [data-prop]")
     assert rows.count() >= 12, f"{where}: {rows.count()} lines in the inspector"
-    if scope == ".panel":
-        line = rows.first.evaluate("el => el.getBoundingClientRect().height")
-        past = page.locator(f"{scope} .panel-body").evaluate("el => el.scrollHeight - el.clientHeight")
-        assert past <= line + 1, f"{where}: the inspector's list runs {past}px past the panel, more than one line"
     for section, facts in FACTS[language].items():
         row = page.locator(f"{scope} [data-prop='{section}']")
         expect(row, f"{where}: the {section} line").to_have_count(1)
+        row.scroll_into_view_if_needed()
         row.click()
+        if section in ("context", "usage"):
+            # The context's and the spend's pages are tools of the panel: the line opens the tool's tab.
+            expect(page.locator(f"{scope} .panel-tab.on[data-tab='{section}']"), f"{where}: the {section} tool").to_have_count(1)
+            if section == "usage":
+                page.wait_for_selector(f"{scope} [data-usage-table] tbody tr:nth-child(5)")
+            words = text_of(page, f"{scope} [data-page='{section}']")
+            for fact in facts:
+                assert fact.replace(" ", " ") in words.replace(" ", " ").replace(" ", " "), f"{where}: {section} lacks {fact!r}: {words[:600]}"
+            if section == "context":
+                expect(page.locator(f"{scope} [data-context-segments] [data-segment]"), f"{where}: segments").to_have_count(5)
+            page.locator(f"{scope} .panel-tab[data-tab='details']").click()
+            expect(page.locator(f"{scope} [data-prop='{section}']"), f"{where}: back on Details from {section}").to_have_count(1)
+            continue
         drill = page.locator(f"{scope} .dt-drill[data-page='{section}']")
         expect(drill, f"{where}: the {section} page").to_have_count(1)
         if section == "mcp":
@@ -141,16 +150,10 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
         if section == "vision":
             # The models come from the settings, read when the page opens.
             page.wait_for_selector(f"{scope} [data-setting='session.vision'] .sel-current")
-        if section == "usage":
-            # The tools' time arrives on a request of its own, made when the page opens.
-            page.wait_for_selector(f"{scope} [data-usage-table] tbody tr:nth-child(5)")
         words = text_of(page, f"{scope} .dt-drill")
         for fact in facts:
             assert fact.replace(" ", " ") in words.replace(" ", " ").replace(" ", " "), f"{where}: {section} lacks {fact!r}: {words[:600]}"
         assert "188057562" not in words and "67108864" not in words, f"{where}: a raw byte count is on the {section} page"
-        if section == "context":
-            # The context's breakdown is one segmented bar with a legend entry per part.
-            expect(page.locator(f"{scope} [data-context-segments] [data-segment]"), f"{where}: segments").to_have_count(5)
         if section == "provider":
             # Every quota window is a labelled bar coloured by how full it is.
             bars = page.locator(f"{scope} [data-quota]")
@@ -168,6 +171,7 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
         page.locator(f"{scope} .dt-back").click()
         expect(page.locator(f"{scope} [data-prop='{section}']"), f"{where}: back to the list from {section}").to_be_focused()
     # The disk's page walks the disk only once it is opened.
+    page.locator(f"{scope} [data-prop='disk']").scroll_into_view_if_needed()
     page.locator(f"{scope} [data-prop='disk']").click()
     page.wait_for_selector(f"{scope} [data-disk-workspace]")
     page.keyboard.press("Escape")

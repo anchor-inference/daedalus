@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app, switch_mode  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -219,9 +219,10 @@ def desktop(page: Page, lang: str) -> None:
 
 
 def phone(page: Page, lang: str) -> None:
-    """A phone has no bottom bar and no sidebar: every top bar's hamburger opens the drawer, which holds
-    the switch between the two modes, the destinations of the old tabs and More, and the mode's own
-    lists. Escape, Back and the scrim close it, and focus goes back to the hamburger."""
+    """A phone has no bottom bar and no sidebar beside the screen: every top bar's hamburger opens the
+    drawer, which is the desktop's sidebar — the same head with the mode menu, the same pinned rows in
+    the same order, the same foot. Escape, Back and the scrim close it, focus goes back to the
+    hamburger, and a destination takes the drawer's history entry."""
     words = WORDS[lang]
     serve(page, lang)
     go(page, "/agents", lang)
@@ -233,32 +234,37 @@ def phone(page: Page, lang: str) -> None:
     menu.click()
     drawer = page.locator(".ph-drawer-root.open .ph-drawer")
     expect(drawer).to_be_visible()
-    # The mode is a visible switch now, and the other mode's waiting count rides on it.
-    seg = drawer.locator(".ph-seg button")
-    expect(seg).to_have_count(2)
-    expect(seg.nth(0)).to_have_attribute("aria-checked", "true")
-    expect(seg.nth(1).locator("[data-waiting]")).to_have_text(WAITING)
-    order = drawer.locator(".ph-nrow").evaluate_all("els => els.map(e => e.dataset.screen || e.dataset.nav)")
-    assert order == ["chats", "inbox", "terminals", "board", "companion", "usage", "more"], f"{lang} phone: the drawer lists {order}"
-    for label in drawer.locator(".ph-nrow-l").all():
+    side = drawer.locator("nav.sidebar")
+    expect(side.locator(".sidebar-head .sb-mode")).to_contain_text(words["agents"])
+    order = side.locator(".sb-pinned-nav [data-nav]").evaluate_all("els => els.map(e => e.dataset.nav)")
+    assert order == ORDER, f"{lang} phone: the drawer's pinned rows are {order}, not the desktop's {ORDER}"
+    heights = side.locator(".sb-pinned-nav .sb-nav").evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().height))")
+    assert set(heights) == {44}, f"{lang} phone: the drawer's rows are {heights}, not 44"
+    for label in side.locator(".sb-nav-t").all():
         assert label.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), f"{lang} phone: a destination's name does not fit: {label.inner_text()}"
-    inbox = drawer.locator("[data-screen='inbox']")
-    expect(inbox).to_contain_text(words["inbox"])
-    expect(inbox.locator(".ph-badge")).to_have_text(str(UNSEEN))
+    expect(side.locator("[data-nav='inbox']")).to_contain_text(words["inbox"])
+    expect(side.locator("[data-nav='inbox'] .sb-nav-n.urgent")).to_have_text(str(UNSEEN))
+    expect(side.locator(".sidebar-foot [data-nav='settings']")).to_be_visible()
     fits(page, f"{lang} phone drawer")
     # Escape closes it and gives focus back to the hamburger.
     page.keyboard.press("Escape")
     expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
     assert page.evaluate("() => document.activeElement && document.activeElement.classList.contains('ph-menu')"), f"{lang} phone: focus did not return to the hamburger"
-    # Back closes it without leaving the page.
+    # Back closes it without leaving the page, and so does its own close button.
     menu.click()
     expect(page.locator(".ph-drawer-root.open")).to_have_count(1)
     page.go_back()
     expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
     assert page.url.split("?")[0].endswith("/app/agents"), page.url
+    menu.click()
+    page.locator(".ph-drawer-root.open .sidebar-close").click()
+    expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
+    # Closing takes the drawer's history entry back, which lands a moment later.
+    page.wait_for_timeout(300)
+    assert page.url.split("?")[0].endswith("/app/agents"), page.url
     # A destination replaces the drawer's history entry: Back from it returns to the page under it.
     menu.click()
-    page.locator(".ph-drawer-root.open [data-screen='inbox']").click()
+    page.locator(".ph-drawer-root.open [data-nav='inbox']").click()
     page.wait_for_url("**/app/inbox")
     expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
     page.go_back()
@@ -266,16 +272,16 @@ def phone(page: Page, lang: str) -> None:
     expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
     # Terminals is two taps away from anywhere, and the drawer marks where the reader is.
     page.locator(".ph-menu:visible").first.click()
-    page.locator(".ph-drawer-root.open [data-screen='terminals']").click()
+    page.locator(".ph-drawer-root.open [data-nav='terminals']").click()
     page.wait_for_url("**/app/terminals")
     page.locator(".ph-menu:visible").first.click()
-    expect(page.locator(".ph-drawer-root.open [data-screen='terminals']")).to_have_class(re.compile(r"\bon\b"))
-    # Orchestration's lists: Main first, then the projects; its "See all" opens orchestration's list.
-    page.locator(".ph-drawer-root.open .ph-seg button").nth(1).click()
-    expect(page.locator(".ph-drawer-root.open [data-nav='main']")).to_be_visible()
-    page.locator(".ph-drawer-root.open [data-nav='orchestration-list']").click()
-    page.wait_for_url("**/app/orchestration/projects**")
-    expect(page.locator(".ph-orch [data-main-entry] .list-row")).to_be_visible()
+    expect(page.locator(".ph-drawer-root.open [data-nav='terminals']")).to_have_class(re.compile(r"\bon\b"))
+    # The mode menu goes to orchestration's home, and the drawer there lists Main and the projects.
+    switch_mode(page, "orchestration", scope=".ph-drawer-root.open")
+    page.wait_for_url("**/app/orchestration**")
+    expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
+    page.locator(".ph-menu:visible").first.click()
+    expect(page.locator(".ph-drawer-root.open .orch-sidebar .orch-main")).to_be_visible()
     fits(page, f"{lang} phone orchestration")
 
 

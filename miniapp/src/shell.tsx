@@ -39,10 +39,11 @@ export function Page({ width = "list", className = "", children }: { width?: Pag
  *
  *  One 52 px row on a desktop, with the title 24 px from the main area's left edge on every page,
  *  whatever the column below it is; `ruled` draws the line under it for the pages that scroll a
- *  list beneath. On a phone it is the top bar: a page without `back` is a top-level page and gets
- *  the hamburger that opens the drawer, since the drawer is the only way to the other destinations
- *  there; its title is centred unless a second line asks for the room, and the filters sit in a row
- *  under it, because a phone has no room beside a title for them.
+ *  list beneath. On a phone it is the top bar, the same 52 px row: a page without `back` is a
+ *  top-level page and gets the hamburger that opens the drawer, since the drawer is the only way to
+ *  the other destinations there; the title stands beside it, and the filters sit in a row under it,
+ *  because a phone has no room beside a title for them. A screen drawn for the phone alone heads
+ *  itself with TopBar (ui/phone.tsx), which draws this same markup.
  *
  *  `lead` stands between the back or menu button and the title, so a face beside a two-line title
  *  keeps both lines beside it instead of the subtitle wrapping under the face; with a `lead` the
@@ -50,7 +51,6 @@ export function Page({ width = "list", className = "", children }: { width?: Pag
  *  beside the title on a desktop and under it on a phone. */
 export function PageHeader({ title, subtitle, filters, actions, ruled, back, lead }: { title: ReactNode; subtitle?: ReactNode; filters?: ReactNode; actions?: ReactNode; ruled?: boolean; back?: string; lead?: ReactNode }) {
   const phone = useMedia("(max-width: 1023px)");
-  const centred = phone && !back && !subtitle;
   return (
     <header className={ruled ? "pagehead ruled" : "pagehead"}>
       <div className="pagehead-row">
@@ -58,12 +58,12 @@ export function PageHeader({ title, subtitle, filters, actions, ruled, back, lea
           <IconButton icon="back" label={t("shell.back")} href={back} />
         ) : phone && <MenuButton />}
         {lead}
-        <div className={["pagehead-title", centred && "center", lead && "stacked"].filter(Boolean).join(" ")}>
+        <div className={lead ? "pagehead-title stacked" : "pagehead-title"}>
           <h1>{title}</h1>
           {subtitle && <div className="sub">{subtitle}</div>}
         </div>
         {!phone && filters && <div className="pagehead-filters">{filters}</div>}
-        {actions ? <div className="pagehead-actions">{actions}</div> : centred && <span className="ph-top-spacer" aria-hidden />}
+        {actions && <div className="pagehead-actions">{actions}</div>}
       </div>
       {phone && filters}
     </header>

@@ -9,9 +9,10 @@ and rows at the three sizes the owner uses.
 The phone has its own claims since the redesign modelled on the chat apps of the operator's phone
 (check_phone): six type steps (12 / 13 / 14 / 15 / 16 / 17) on every drawn text of the home, the
 Chats page, the drawer and the composer's sheets; a 52 px top bar with no rule under it; 54 px list
-rows and 44 px destinations in the drawer; an idle composer of one 44 px row at the bottom of the
-screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
-::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
+rows; a drawer that is the sidebar, 330 px wide at 412 with 44 px rows; a composer card whose
+controls are one row of 44 px targets, at rest as while typing; no bottom bar outside a project; and a
+44 px target for every control, counting the invisible ::after that a 40 px circle or a 28 px chip
+carries. The numbers are a step under the first cut of the
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
 large next to Claude and ChatGPT on the same phone.
 
@@ -82,6 +83,8 @@ READ = """
     aside: box(one('.session-aside')),
     panel: box(one('.panel')),
     panelTabs: box(one('.panel-tabs')),
+    panelTop: one('.panel') ? Math.round(one('.panel').getBoundingClientRect().top) : null,
+    vh: window.innerHeight,
     headStatus: box(one('.chat-head .head-status')),
     headModel: box(one('.composer .model-select')),
     composerRow: box(one('.composer-row')),
@@ -364,9 +367,9 @@ READ_PHONE = """
     if (el.tagName === 'INPUT' && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     const r = el.getBoundingClientRect();
     let w = r.width, h = r.height;
-    // The composer's field is 34 px inside its 44 px pill, and a tap on the pill focuses the field.
-    const pill = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
-    if (pill) h = Math.max(h, pill.getBoundingClientRect().height);
+    // The composer's field is one line inside its card, and a tap on the card focuses the field.
+    const card = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
+    if (card) h = Math.max(h, card.getBoundingClientRect().height);
     const after = getComputedStyle(el, '::after');
     if (after.content !== 'none' && after.position === 'absolute') {
       const px = (v) => (v.endsWith('px') ? parseFloat(v) : 0);
@@ -383,12 +386,12 @@ READ_PHONE = """
     topBorder: top ? parseFloat(getComputedStyle(top).borderBottomWidth) : null,
     topBg: top ? getComputedStyle(top).backgroundColor : null,
     pageBg: getComputedStyle(document.body).backgroundColor,
-    idle: rect('.composer[data-shape="idle"] .composer-box'),
-    open: rect('.composer[data-shape="open"] .composer-box'),
+    card: rect('.composer[data-shape] .composer-box'),
+    composerRow: rect('.composer[data-shape] .composer-row'),
     circle: rect('.composer[data-shape] .roundbtn'),
     rows: [...document.querySelectorAll('.list-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     chips: [...document.querySelectorAll('.ph-chip')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
-    nav: [...document.querySelectorAll('.ph-drawer-root.open .ph-nrow')].map((r) => Math.round(r.getBoundingClientRect().height)),
+    nav: [...document.querySelectorAll('.ph-drawer-root.open .sb-pinned-nav .sb-nav')].map((r) => Math.round(r.getBoundingClientRect().height)),
     drawer: rect('.ph-drawer-root.open .ph-drawer'),
     tabbar: document.querySelectorAll('nav.tabbar').length,
     scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
@@ -435,12 +438,12 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
             problems.append(f"home {lang}: the top bar has a {m['topBorder']} px rule")
         if m["topBg"] != m["pageBg"]:
             problems.append(f"home {lang}: the top bar {m['topBg']} is not the page colour {m['pageBg']}")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"home {lang}: the idle composer is {m['idle']}, not one 44 px row")
-        elif m["idle"]["b"] > 24:
-            problems.append(f"home {lang}: the idle composer stands {m['idle']['b']} px above the bottom")
-        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (34, 34):
-            problems.append(f"home {lang}: the white circle is {m['circle']}, not 34 × 34")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"home {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        elif m["card"]["b"] > 24:
+            problems.append(f"home {lang}: the composer stands {m['card']['b']} px above the bottom")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"home {lang}: the send circle is {m['circle']}, not 40 × 40")
         if m["tabbar"]:
             problems.append(f"home {lang}: a bottom bar is still drawn")
         for h in m["rows"]:
@@ -449,9 +452,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
 
         page.locator(".ph-home .composer .composer-field").fill("Wire the order form to the sheet")
         page.wait_for_timeout(300)
-        m = read("composer-open", ".ph-home .composer")
-        if not m["open"]:
-            problems.append(f"composer {lang}: typing does not open the composer onto its toolbar")
+        read("composer-typed", ".ph-home .composer")
         # The mic stays beside Send once something is typed: hiding it left no way to dictate the rest.
         mic = page.locator(".ph-home .composer .composer-tools > .mic")
         if mic.count() and not mic.is_visible():
@@ -462,8 +463,10 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         page.wait_for_selector(".ph-drawer-root.open", timeout=5000)
         page.wait_for_timeout(400)
         m = read("drawer", ".ph-drawer-root.open")
-        if not m["drawer"] or m["drawer"]["w"] != 336:
-            problems.append(f"drawer {lang}: {m['drawer']}, not 336 wide at 412")
+        if not m["drawer"] or m["drawer"]["w"] != 330:
+            problems.append(f"drawer {lang}: {m['drawer']}, not 330 wide at 412")
+        if not m["nav"]:
+            problems.append(f"drawer {lang}: no pinned rows of the sidebar in it")
         if any(h != 44 for h in m["nav"]):
             problems.append(f"drawer {lang}: destination rows {m['nav']}, not 44")
         page.keyboard.press("Escape")
@@ -504,18 +507,30 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         # icon row in 44 px targets, the idle composer, and the ⋮ sheet with its tiles.
         go(f"agents/{S1}", ".ph-chat-top")
         m = read("session", ".chat")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"session {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"session {lang}: the send circle is {m['circle']}, not 40 × 40")
+        before = m["card"]
+        page.locator(".chat .composer .composer-field").first.click()
+        page.wait_for_timeout(200)
+        after = page.evaluate(READ_PHONE, ".chat")["card"]
+        if before and after and before["h"] != after["h"]:
+            problems.append(f"session {lang}: the composer is {before['h']} px at rest and {after['h']} px once the field has the reader")
+        page.keyboard.press("Escape")
         top = page.locator(".ph-chat-top").bounding_box()
         if not top or round(top["height"]) != 52:
             problems.append(f"session {lang}: the bar is {top}, not 52 tall")
         if page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top')).borderBottomWidth)"):
             problems.append(f"session {lang}: the bar has a rule under it")
-        glyphs = page.locator(".ph-chat-top .ph-top-actions > *").count()
+        glyphs = page.locator(".ph-chat-top .pagehead-actions > *").count()
         if glyphs > 2:
             problems.append(f"session {lang}: {glyphs} glyphs at the right of the bar, more than two")
-        if not page.locator(".ph-chat-top .ph-top-sub").count():
-            problems.append(f"session {lang}: the title has no second line")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 44 px row")
+        # The title is 15 px with the 12 px line of where the chat lives over it, when it lives
+        # somewhere of another name than its own.
+        title = page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top .pagehead-t')).fontSize)")
+        if title != 15:
+            problems.append(f"session {lang}: the title is {title} px, not 15")
         page.locator(".ph-chat-top button[aria-haspopup='menu']").click()
         page.wait_for_selector(".ph-session-menu .ph-tile", timeout=5000)
         page.wait_for_timeout(300)
@@ -697,10 +712,14 @@ def judge(m: dict) -> list[str]:
         if not m["panel"]:
             problems.append(f"{m['vw']}: the panel is not open beside the conversation")
         else:
-            if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
-                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            # 52, the header's height: the tabs draw their icon over their word, so six named tabs fit
-            # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
+            # 30 % of the window between 400 and 520 px until the operator drags it, and at the window's
+            # full height beside the chat: its top is the window's, its tab row level with the header.
+            want = min(520, max(400, round(0.3 * m["vw"])))
+            if abs(m["panel"]["w"] - want) > 1:
+                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, not {want} (30 % between 400 and 520)")
+            if m["panelTop"] != 0 or abs(m["panel"]["h"] - m["vh"]) > 1:
+                problems.append(f"{m['vw']}: the panel is not the window's full height ({m['panel']})")
+            # 52, the header's height, so the line under the tabs meets the line under the header.
             if not m["panelTabs"] or m["panelTabs"]["h"] != 52:
                 problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 52")
     elif m["panel"]:
@@ -736,11 +755,10 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 760")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 300 px
-        # sidebar is a 1140 px chat area, 58 % of it the conversation. The floor of 578 was set while a
-        # 52 px rail stood beside the sidebar as well; without it the column is wider still.
-        if m["vw"] == 1440 and m["timeline"]["w"] < 578:
-            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 578")
+        # Beside the 432 px panel a 1440 window keeps the conversation's whole stripe: 1440 less the
+        # 300 px sidebar and the panel leaves 708 px of chat, the stripe less its margins.
+        if m["vw"] == 1440 and m["timeline"]["w"] < 640:
+            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 640")
     return problems
 
 
@@ -780,40 +798,48 @@ START = """
     composer: box(document.querySelector('.start-composer .composer-box')),
     circle: box(circle),
     radius: circle ? getComputedStyle(circle).borderRadius : null,
-    chips: [...document.querySelectorAll('.start-where-chip')].map((el) => box(el).h),
-    live: [...document.querySelectorAll('.start-live-row')].map((el) => box(el).h),
-    projectRows: [...document.querySelectorAll('.projects-row:not(.head)')].map((el) => box(el).h),
+    chips: [...document.querySelectorAll('.start-composer .composer-row > button.composer-project, .start-composer .composer-row > button.composer-mode, .start-composer .composer-row > button.composer-access')].map((el) => box(el).h),
+    cards: [...document.querySelectorAll('.resume-card')].map((el) => box(el).h),
+    heading: (() => { const el = document.querySelector('h1.start-greeting'); return el ? { size: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight } : null; })(),
+    projectRows: [...document.querySelectorAll('.projects-row')].map((el) => box(el).h),
+    projectList: (() => { const el = document.querySelector('.projects-table'); return el ? Math.round(el.getBoundingClientRect().width) : 0; })(),
   };
 }
 """
 
 
 def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
-    """The desktop's start screen and projects page, at 1440: the composer in a 720 px column (the
-    mockup's, a step over the 680 it had when it stood alone, so the chips and the live rows under
-    it share its edges), the primary a 32 px circle, the project chips 28 px like every filter chip,
-    a live row two lines in at most 52 px, and a project row two lines in at most 64 px."""
+    """The desktop's start screen and projects page, at 1440: the question in 28 px over a composer in
+    the conversation's own 760 px column, the primary a 32 px circle, the chips of the composer's row
+    28 px like every small chip, the chats to continue and the project rows 56 px cards, in the page
+    chrome's 880 px list."""
     problems: list[str] = []
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    page = open_page(context, "agents", ".start-live-row")
+    page = open_page(context, "agents", ".resume-card")
     # An empty field shows the mic alone in the trailing slot; Send, the circle measured, joins it once
     # the field holds words. It was the voice circle on an empty field until that left ordinary chats.
     page.locator(".start-composer .composer-field").fill("Bake the menu")
     start = page.evaluate(START)
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
-    start["projectRows"] = page.evaluate(START)["projectRows"]
+    page.wait_for_selector(".projects-row", timeout=15000)
+    projects = page.evaluate(START)
+    start["projectRows"] = projects["projectRows"]
+    start["projectList"] = projects["projectList"]
     context.close()
-    if not start["composer"] or start["composer"]["w"] != 720:
-        problems.append(f"start: the composer is {start['composer']}, not 720 wide")
+    if not start["composer"] or start["composer"]["w"] != 760:
+        problems.append(f"start: the composer is {start['composer']}, not 760 wide")
+    if not start["heading"] or start["heading"]["size"] != "28px" or start["heading"]["weight"] != "500":
+        problems.append(f"start: the question is {start['heading']}, not 28/500")
     if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
         problems.append(f"start: the primary is {start['circle']} with radius {start['radius']}, not a 32 px circle")
     if not start["chips"] or any(h != 28 for h in start["chips"]):
-        problems.append(f"start: the project chips are {start['chips']}, not 28")
-    if not start["live"] or any(h > 52 for h in start["live"]):
-        problems.append(f"start: the live rows are {start['live']}")
-    if not start["projectRows"] or any(h > 64 for h in start["projectRows"]):
-        problems.append(f"projects: the rows are {start['projectRows']}")
+        problems.append(f"start: the chips of the row are {start['chips']}, not 28")
+    if not start["cards"] or any(h != 56 for h in start["cards"]):
+        problems.append(f"start: the cards to continue are {start['cards']}, not 56")
+    if not start["projectRows"] or any(h != 56 for h in start["projectRows"]):
+        problems.append(f"projects: the rows are {start['projectRows']}, not 56")
+    if start["projectList"] != 880:
+        problems.append(f"projects: the list is {start['projectList']} wide, not the page chrome's 880")
     return problems, start
 
 

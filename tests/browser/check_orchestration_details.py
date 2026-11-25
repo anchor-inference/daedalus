@@ -1,8 +1,9 @@
 """The Details of the orchestrators and of a command-line member, on a desktop and on a phone.
 
-A project's orchestrator has a Details tab after its Questions: its model, its context with the last
-compaction, its spend in total and today, its tool groups and its brief, and none of what would break
-it from there (a loop, the tool switches, moving or deleting the session). The main orchestrator's
+A project's orchestrator opens its Details as a tab after its Questions: its model, its context with the
+last compaction (the Context tool), its spend in total and today (the Usage tool), its tool groups and
+its brief, and none of what would break it from there (a loop, the tool switches, moving or deleting the
+session). The main orchestrator's
 Details are the same, keeping its workspace. A command-line member's column has a Details tab beside
 Session: the CLI and its version, the model and effort, the status and turn, how long it has run, and
 the spend its transcript reported; what the CLI does not report (Claude Code's window and limits, an
@@ -24,7 +25,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app  # noqa: E402
-from screenshots import IRA_SCREEN, S1, UNHANDLED, focus_stub, respond, stub  # noqa: E402
+from screenshots import IRA_SCREEN, S1, UNHANDLED, focus_stub, open_tool, respond, stub  # noqa: E402
 from terminal_stub import TerminalStub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -56,7 +57,7 @@ def sideways(page: Page) -> int:
 
 
 def sections(page: Page, scope: str) -> list[str]:
-    # The inspector: one line a section, named by `data-prop`.
+    # The inspector names by `data-prop` each fact that opens something and each settings line.
     return page.eval_on_selector_all(f"{scope} .details [data-prop]", "els => els.map(e => e.dataset.prop)")
 
 
@@ -85,11 +86,14 @@ def orchestrator(page: Page, lang: str, check: Check, scope: str, where: str) ->
     found = sections(page, scope)
     check.that({"context", "usage", "brief", "advanced"} <= set(found), f"{lang} {where}: the orchestrator's Details have {found}")
     check.that(not REMOVED & set(found) and "workspace" not in found, f"{lang} {where}: the orchestrator's Details still offer {sorted((REMOVED | {'workspace'}) & set(found))}")
-    page.locator(f"{scope} [data-prop='usage']").click()
+    # The spend and the context open as tools of their own, and the Details stay a tab to come back to.
+    page.locator(f"{scope} .details [data-prop='usage']").first.click()
+    page.wait_for_selector(f"{scope} .details[data-page='usage']", timeout=5000)
     today = page.locator(f"{scope} [data-usage-today]")
     check.that(today.count() == 1 and words["today"] in today.inner_text() and "$0.31" in today.inner_text(), f"{lang} {where}: today's spend reads {today.all_inner_texts()}")
-    page.locator(f"{scope} .dt-back").click()
-    page.locator(f"{scope} [data-prop='context']").click()
+    open_tool(page, "details", scope)
+    page.locator(f"{scope} .details [data-prop='context']").first.click()
+    page.wait_for_selector(f"{scope} .details[data-page='context']", timeout=5000)
     compacted = page.locator(f"{scope} [data-last-compaction]")
     check.that(compacted.count() == 1 and words["compacted"] in compacted.inner_text(), f"{lang} {where}: the last compaction reads {compacted.all_inner_texts()}")
     check.that(sideways(page) <= 0, f"{lang} {where}: the page scrolls sideways by {sideways(page)} px")
@@ -113,7 +117,8 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page = open_page(context, focus, term, f"{BASE}/project/{pid}?panel=details&token=t&lang={lang}")
     page.wait_for_selector(".chat.in-project .panel", timeout=15000)
     tabs = page.eval_on_selector_all(".panel .panel-tab", "els => els.map(e => e.dataset.tab)")
-    check.that(tabs[:2] == ["questions", "details"], f"{lang}: the orchestrator's tabs are {tabs}")
+    # The Overview leads, the Questions the orchestrator opens on follow, then the Details the link opened.
+    check.that(tabs[:3] == ["overview", "questions", "details"], f"{lang}: the orchestrator's tabs are {tabs}")
     orchestrator(page, lang, check, ".panel", "desktop orchestrator")
     page.close()
 

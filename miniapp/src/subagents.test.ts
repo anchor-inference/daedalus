@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionList, SubagentView } from "./api";
 import { t } from "./i18n";
-import { stripToday } from "./panelstrip";
+import { spendToday } from "./panelpanes";
 import { activityLine, contextPercent, effortLabel, listedLeaderOf, subagentGroups, subagentIdFor, subagentLine, subagentPath, subagentPhase, subagentState, subagentSummary, touchesSubagents } from "./subagents";
 import { systemNote } from "./turns";
 
@@ -154,10 +154,10 @@ describe("what a card says about the run", () => {
 describe("the strip's today", () => {
   it("says a day of calls that cost nothing was unmetered, not that it spent nothing", () => {
     // The session that raised it: $13.72 metered yesterday, 53 subscription calls today.
-    const unmetered = stripToday({ usd: 13.72, usd_today: 0, c_today: 53 });
+    const unmetered = spendToday({ usd: 13.72, usd_today: 0, c_today: 53 });
     expect(unmetered.short).toBe(t("strip.cost.today.unmetered"));
     expect(unmetered.title).toContain("53");
-    expect(stripToday({ usd: 13.72, usd_today: 1.5, c_today: 4 }).short).toBe(t("strip.cost.today", { sum: "$1.50" }));
-    expect(stripToday({ usd: 13.72, usd_today: 0, c_today: 0 }).short).toBe(t("strip.cost.today", { sum: "$0" }));
+    expect(spendToday({ usd: 13.72, usd_today: 1.5, c_today: 4 }).short).toBe(t("strip.cost.today", { sum: "$1.50" }));
+    expect(spendToday({ usd: 13.72, usd_today: 0, c_today: 0 }).short).toBe(t("strip.cost.today", { sum: "$0" }));
   });
 });

@@ -1,15 +1,17 @@
 """The model picker opens next to the control that opened it.
 
-The panel strip's model chip once opened the composer's picker where the composer keeps it, at the
-bottom left of the chat column, half a window away from the chip. Here the chip, the strip's own
-menu and the composer's pill each open the list, and the list must hang from the one that was
-pressed and stay inside the window. A phone opens the same list as a sheet from the strip in its
-drawer, a running turn included, when the composer has no pill of its own. The two Anthropic routes
-must read as two different names.
+A control in the panel once opened the composer's picker where the composer keeps it, at the bottom
+left of the chat column, half a window away from the control. Here the model on the panel's Overview,
+the model row of Details and the composer's pill each open the list, and the list must hang from the
+one that was pressed and stay inside the window; "Change the model" in the chat header's menu has no
+control of its own and hangs it from the pill. A phone opens the same list as a sheet from the
+Overview and the Details of its panel sheet, a running turn included, when the composer has no pill of
+its own. The two Anthropic routes must read as two different names.
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -17,7 +19,8 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import expect_app, reveal_composer  # noqa: E402
+from api_stub import expect_app  # noqa: E402
+from screenshots import open_tool  # noqa: E402
 
 SHOTS = os.environ.get("SHOTS", "")
 
@@ -53,50 +56,62 @@ def names(page: Page, language: str, where: str) -> None:
     expect(page.locator('.model-picker [role=tab][data-provider="anthropic"]'), where).to_have_attribute("aria-label", key)
 
 
-def desktop(page: Page, language: str, where: str) -> None:
-    chip = ".panel [data-panel-strip] .panel-strip-model"
+def anchored(page: Page, language: str, chip: str, where: str) -> None:
+    """The list hangs from ``chip``, which takes the keyboard back on Escape and closes it on a second press."""
     page.wait_for_selector(chip)
     page.locator(chip).click()
     expect(page.locator(".menu.model-picker"), where).to_be_visible()
     page.wait_for_selector(".model-picker [role=tab][data-provider]")
-    below(page, chip, f"{where} chip")
+    below(page, chip, where)
     names(page, language, where)
     # The composer's pill is not the one that is open.
     assert page.locator(".composer .model-select").get_attribute("aria-expanded") == "false", f"{where}: the composer's pill claims the list"
     if SHOTS:
-        page.screenshot(path=f"{SHOTS}/picker-strip-{where.replace(' ', '-')}.png")
+        page.screenshot(path=f"{SHOTS}/picker-{where.replace(' ', '-')}.png")
     page.keyboard.press("Escape")
     expect(page.locator(".menu.model-picker"), where).to_have_count(0)
-    expect(page.locator(chip), f"{where}: Escape gives the keyboard back to the chip").to_be_focused()
-    # A second press on the chip closes what the first opened.
+    expect(page.locator(chip), f"{where}: Escape gives the keyboard back to the control").to_be_focused()
+    # A second press on the control closes what the first opened.
     page.locator(chip).click()
     expect(page.locator(".menu.model-picker"), where).to_be_visible()
     page.locator(chip).click()
-    expect(page.locator(".menu.model-picker"), f"{where}: the chip toggles").to_have_count(0)
-    # "Change the model" in the strip's own menu hangs the list from the strip's chip too.
-    page.locator(".panel [data-panel-strip] button[aria-haspopup='menu']").last.click()
+    expect(page.locator(".menu.model-picker"), f"{where}: the control toggles").to_have_count(0)
+
+
+def above_pill(page: Page, where: str) -> None:
+    """The list where the composer keeps it: above the pill, their right edges together."""
+    trigger = box(page, ".composer .model-select")
+    menu = box(page, ".menu.model-picker")
+    inside(page, menu, where)
+    assert menu["bottom"] <= trigger["top"] and trigger["top"] - menu["bottom"] <= 12, f"{where}: the picker left the composer's pill (pill {trigger}, picker {menu})"
+    assert abs(menu["right"] - trigger["right"]) <= 1 or menu["left"] <= 8.5, f"{where}: the picker is not aligned to the composer's pill (pill {trigger}, picker {menu})"
+
+
+def desktop(page: Page, language: str, where: str) -> None:
+    open_tool(page, "overview")
+    anchored(page, language, ".panel .ov .ov-model", f"{where} overview")
+    open_tool(page, "details")
+    anchored(page, language, ".panel .details button.dt-kv[data-prop='model']", f"{where} details")
+    # "Change the model" in the chat header's menu is pressed on no control of the list's own, so the
+    # list opens where the composer keeps it.
+    page.get_by_role("button", name=re.compile("^(Session actions|Действия с сессией)$")).first.click()
     page.get_by_role("menuitem", name=NAMES[language][2]).click()
     expect(page.locator(".menu.model-picker"), where).to_be_visible()
-    below(page, chip, f"{where} strip menu")
+    above_pill(page, f"{where} session menu")
     page.keyboard.press("Escape")
     expect(page.locator(".menu.model-picker"), where).to_have_count(0)
-    # The composer's pill keeps its list where it always was: above the pill, its right edges together.
+    # The composer's pill keeps its list where it always was.
     pill = ".composer .model-select"
     page.locator(pill).click()
     expect(page.locator(".menu.model-picker"), where).to_be_visible()
-    trigger = box(page, pill)
-    menu = box(page, ".menu.model-picker")
-    inside(page, menu, f"{where} composer")
-    assert menu["bottom"] <= trigger["top"] and trigger["top"] - menu["bottom"] <= 12, f"{where}: the composer's picker left its pill (pill {trigger}, picker {menu})"
-    assert abs(menu["right"] - trigger["right"]) <= 1 or menu["left"] <= 8.5, f"{where}: the composer's picker is not aligned to its pill (pill {trigger}, picker {menu})"
+    above_pill(page, f"{where} composer")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/picker-composer-{where.replace(' ', '-')}.png")
     page.keyboard.press("Escape")
     expect(page.locator(pill), f"{where}: Escape gives the keyboard back to the pill").to_be_focused()
 
 
-def phone(page: Page, language: str, where: str) -> None:
-    chip = ".panel-sheet [data-panel-strip] .panel-strip-model"
+def phone_sheet(page: Page, language: str, chip: str, where: str) -> None:
     page.wait_for_selector(chip)
     page.locator(chip).click()
     sheet = page.locator(".sheet.model-picker")
@@ -110,6 +125,13 @@ def phone(page: Page, language: str, where: str) -> None:
         page.screenshot(path=f"{SHOTS}/picker-{where.replace(' ', '-')}.png")
     page.keyboard.press("Escape")
     expect(sheet, where).to_have_count(0)
+
+
+def phone(page: Page, language: str, where: str) -> None:
+    open_tool(page, "overview", ".panel-sheet")
+    phone_sheet(page, language, ".panel-sheet .ov .ov-model", f"{where} overview")
+    open_tool(page, "details", ".panel-sheet")
+    phone_sheet(page, language, ".panel-sheet .details button.dt-kv[data-prop='model']", f"{where} details")
 
 
 def main() -> int:
@@ -133,7 +155,6 @@ def main() -> int:
                     if mobile:
                         phone(page, language, where)
                     else:
-                        reveal_composer(page)
                         desktop(page, language, where)
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"{where}: the page scrolls sideways"
                     context.close()

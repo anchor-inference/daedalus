@@ -34,6 +34,10 @@ const SAME_IN_BOTH = [
   "address.provider.tailscale",
   // The kind under an attached file's name: a PDF is called a PDF in Russian too.
   "attach.kind.pdf",
+  // A card's move in its history is the two column names and an arrow; its priority's words end in
+  // the same P1..P5 mark in both languages, and the name before it is a hole.
+  "board.event.moved",
+  "board.priority.named",
   // The agent's name on its browser cursor is the product's name in both languages.
   "browser.agent",
   // Two calendar services whose names are the same brand in Russian.
@@ -209,7 +213,8 @@ describe("the keys the code asks for", () => {
       // The panel names its tabs from the union that defines them, and the voice screen names the
       // phase it is in from the reducer's own. A fifth tab or a seventh phase otherwise ships as a
       // bare `[panel.tab.x]` with every test here green.
-      ["panel.tab.", listed("./panel.ts", "PANEL_TABS")],
+      ["panel.tab.", listed("./panel.ts", "ALL_TABS")],
+      ["panel.group.", listed("./panel.ts", "TOOL_GROUPS")],
       ["voice.phase.", listed("./voice.ts", "VOICE_PHASES")],
       ["add.effort.", ["low", "medium", "high", "xhigh"]],
       ["lang.name.", [...LANGS]],
@@ -217,6 +222,10 @@ describe("the keys the code asks for", () => {
       ["fmt.dow.", ["0", "1", "2", "3", "4", "5", "6"]],
       ["fmt.dur.", ["s", "m", "h", "d"]],
       ["board.col.", ["todo", "doing", "review", "blocked", "done", "dropped"]],
+      ["board.needs.", ["question", "approval", "review", "assigned"]],
+      ["board.need.", ["question", "approval", "review", "assigned"]],
+      ["board.priority.", ["1", "2", "3", "4", "5"]],
+      ["board.due.", ["today", "tomorrow", "yesterday", "today.full", "tomorrow.full", "yesterday.full"]],
       ["sched.kind.", ["agent", "message", "lazy"]],
       ["sched.group.", ["approval", "active", "paused", "done"]],
       ["sched.cycle.", ["completed", "failed", "unknown", "skipped", "pending"]],
@@ -285,10 +294,9 @@ describe("the keys the code asks for", () => {
       ["pboard.need.kind.", ["question", "permission", "folder"]],
       // Why Merge is disabled comes from the host as a code; each code the app knows has its words.
       ["pboard.review.block.", listed("./board/board.ts", "BLOCKER_CODES")],
-      // A project's focus mode: the panel's project tabs, the orchestrator's steps, why a launch
+      // A project's focus mode: the orchestrator's steps, why a launch
       // waits, the pages, the colours of a member's dot, the brief's sections, the journal's kinds
       // and authors, and a message's receipt all name a word from a list.
-      ["panel.tab.", listed("./panel.ts", "PROJECT_TABS")],
       ["focus.step.", listed("./project/focus.ts", "STEP_KEYS")],
       ["focus.wait.", listed("./project/focus.ts", "WAIT_REASONS")],
       ["focus.page.", listed("./project/focus.ts", "FOCUS_PAGES")],

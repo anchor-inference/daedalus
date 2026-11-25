@@ -504,23 +504,57 @@ BOARD = [
     {"id": "51c8aa", "title": "Gallery: six square photos", "status": "done", "priority": 3, "acceptance": "Six photos in photos/gallery, 800×800.", "checklist": [{"text": "pick", "done": True}, {"text": "crop", "done": True}], "depends_on": [], "session_id": S2, "origin_session_id": S2, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=12)},
 ]
 
+BOARD += [
+    {"id": "a6f0d2", "title": "Seasonal items first on the menu page", "status": "doing", "priority": 3, "acceptance": "", "checklist": [{"text": "read the owner's sheet", "done": True}, {"text": "seasonal items on top", "done": True}, {"text": "prices from the sheet", "done": False}, {"text": "check on a phone", "done": False}], "depends_on": [], "session_id": S2, "origin_session_id": S2, "notes": "", "created_at": ago(hours=3), "updated_at": ago(minutes=4)},
+    {"id": "d17b90", "title": "Copy the build to the shop's server", "status": "doing", "priority": 3, "acceptance": "The form opens on the site and a test order reaches the sheet.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=6)},
+    {"id": "5e2c77", "title": "Taste the new rye loaf before it goes on the menu", "status": "todo", "priority": 3, "acceptance": "", "checklist": [], "depends_on": ["7f2a1c"], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(hours=6), "updated_at": ago(hours=6)},
+    {"id": "b48e13", "title": "Square crops for the gallery thumbnails", "status": "todo", "priority": 4, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S2, "notes": "", "created_at": ago(days=1), "updated_at": ago(hours=20)},
+    {"id": "0c93fa", "title": "Old holiday banner", "status": "dropped", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(days=2), "updated_at": ago(days=1)},
+]
+
+_PROJECT_OF = {S1: P1, S2: P1, S3: P3}
 for _card in BOARD:
-    # The host puts the date, whether it is late and who keeps the card on every listing; the cards of
-    # the pictures say nothing of them unless a picture needs it.
+    # The host puts the date, whether it is late, who keeps the card, its project and why it waits on
+    # the operator on every listing; the cards say nothing of them unless a picture needs it.
     _card.setdefault("due_at", None)
     _card.setdefault("overdue", False)
     _card.setdefault("assignee_operator", False)
+    _card.setdefault("assignee", None)
+    _card.setdefault("entity_revision", 3)
+    _card.setdefault("needs_you", "review" if _card["status"] == "review" else None)
+    _card["project_id"] = _PROJECT_OF.get(_card["origin_session_id"] or "")
+    _card["project_name"] = next((p["name"] for p in PROJECTS if p["id"] == _card["project_id"]), None)
 BOARD[0]["due_at"] = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+BOARD[0]["brief"] = {"objective": "The order form writes to a file today. Each order should become a row in the owner's sheet, and the buyer should see that it went through.", "deliverable": "The form's handler and a confirmation page", "boundaries": "The sheet's columns stay as the owner made them", "done_when": ""}
 BOARD[3]["due_at"] = (datetime.now(UTC) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
 BOARD[3]["overdue"] = True
+BOARD[3]["needs_you"] = "question"
+BOARD[3]["brief"] = {"objective": "Three customers asked what delivery costs next month. The answers wait for the courier's new rates, which only the operator can get.", "deliverable": "A reply to each of the three in the support inbox", "boundaries": "", "done_when": "Each customer has a reply"}
+BOARD[3]["checklist"] = [{"text": "draft the three replies", "done": True}, {"text": "put the new rates in", "done": False}, {"text": "send them", "done": False}]
+# The courier rates are the operator's own to find: nobody else will take the card.
+BOARD[4].update(assignee_operator=True, assignee={"kind": "operator"}, needs_you="assigned", due_at=(datetime.now(UTC) + timedelta(days=3)).strftime("%Y-%m-%dT23:59:59Z"))
+BOARD[5]["finished_by"] = {"session_id": S2, "title": "Bakery site: photos", "note": "Six photos cropped to 800×800 and saved in photos/gallery; the originals are kept beside them.", "at": ago(minutes=12)}
+BOARD[7]["needs_you"] = "approval"
+BOARD[8].update(assignee_operator=True, assignee={"kind": "operator"}, needs_you="assigned")
 
 # A card's stored events, oldest first, as ``GET /api/board/{id}/events`` lists them.
 BOARD_HISTORY = {
     "7f2a1c": [
-        {"seq": 1, "type": "task.created", "at": ago(hours=2), "actor": {"kind": "agent", "id": f"session:{S1}", "name": None}, "from": None, "to": None, "text": "Created in todo"},
-        {"seq": 2, "type": "task.moved", "at": ago(minutes=40), "actor": {"kind": "agent", "id": f"session:{S1}", "name": None}, "from": "todo", "to": "doing", "text": "todo → doing"},
+        {"seq": 1, "type": "task.created", "at": ago(hours=2), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": None, "to": None, "text": "Created in todo"},
+        {"seq": 2, "type": "task.changed", "at": ago(hours=2), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Due", "due_at": BOARD[0]["due_at"]},
+        {"seq": 3, "type": "task.moved", "at": ago(minutes=40), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": "todo", "to": "doing", "text": "todo → doing"},
+        {"seq": 4, "type": "task.changed", "at": ago(minutes=20), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": None, "to": None, "text": "Edited"},
     ],
+    "9d0b12": [
+        {"seq": 11, "type": "task.created", "at": ago(hours=5), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Created in todo"},
+        {"seq": 12, "type": "task.moved", "at": ago(hours=4), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": "todo", "to": "blocked", "text": "todo → blocked"},
+        {"seq": 13, "type": "task.changed", "at": ago(hours=1), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Edited"},
+    ],
+    # An old card: its creation is older than the week the host keeps, so the list starts later.
+    "51c8aa": [],
 }
+# A card created more than a week ago, so its pane says the earliest history is gone.
+BOARD[5]["created_at"] = ago(days=12)
 
 
 def notification(id: int, at: str, kind: str, category: str, level: str, tone: str, title: str, body: str, session_id: str | None, seen: bool, count: int = 1, *, project: str | None = None, actions: list | None = None, ref: str | None = None) -> dict:
@@ -1003,7 +1037,18 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if request.method == "GET" and rel.startswith("/api/board/") and rel.endswith("/events"):
         card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
         if card is not None:
-            return respond(route, BOARD_HISTORY.get(card["id"]) or [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": f"Created in {card['status']}"}])
+            kept = BOARD_HISTORY.get(card["id"])
+            return respond(route, kept if kept is not None else [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": f"Created in {card['status']}"}])
+    if request.method == "PUT" and rel.startswith("/api/board/"):
+        # The host's word on a move, nothing stored: a card the operator keeps cannot start while what it
+        # waits for is unfinished, which is the refusal the pictures show.
+        card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
+        if card is not None:
+            posted = json.loads(request.post_data or "{}")
+            waits = any(other["status"] not in ("done", "dropped") for other in BOARD if other["id"] in card["depends_on"])
+            if posted.get("status") == "doing" and waits:
+                return respond(route, {"detail": "this task still has unfinished dependencies"}, status=409)
+            return respond(route, {"command": {"task_id": card["id"], "entity_revision": card["entity_revision"]}, "task": card})
     whole_board = rel == "/api/board" and request.method == "GET"
     team = TEAM.answer(request.method, rel, urlsplit(url).query, None) or (None if whole_board else TEAM_BOARD.answer(request.method, rel, urlsplit(url).query, None))
     if team is not None:
@@ -1170,6 +1215,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, session_tool_groups())
         if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
+        # The chat's working-tree changes, the panel's Changes tool: the shared host's two files on order-form.
+        if (tail.startswith("changes") or tail == "commit") and fulfil_shared(route):
+            return None
         return respond(route, {})
     if rel == "/api/usage/speed" and fulfil_shared(route):
         return None
@@ -1187,9 +1235,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if answered is not None:
             return respond(route, answered[1], status=answered[0])
     if rel == "/api/board":
-        # ``session=`` is one chat's own board: the tasks that chat created.
+        # ``session=`` is one chat's own board: the tasks that chat created; ``project=`` one project's.
         chat = params.get("session", [""])[0]
-        return respond(route, [t for t in BOARD if t["origin_session_id"] == chat] if chat else BOARD)
+        project = params.get("project", [""])[0]
+        listed = [t for t in BOARD if (not chat or t["origin_session_id"] == chat) and (not project or t["project_id"] == project)]
+        if params.get("include_done", ["0"])[0] != "1":
+            listed = [t for t in listed if t["status"] not in ("done", "dropped")]
+        return respond(route, listed)
     if rel == "/api/notifications/summary":
         return respond(route, {"unseen": 0, "needs_you": 0} if getattr(stub, "inbox_empty", False) else INBOX_SUMMARY)
     if rel == "/api/notifications":
@@ -1460,9 +1512,20 @@ def expand_steps(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
+def open_tool(page: Page, tab: str, scope: str = ".panel") -> None:
+    """A tool of the panel on screen: its tab when it is open, else the "+" menu's row for it."""
+    tab_button = page.locator(f"{scope} .panel-tab[data-tab='{tab}']")
+    if tab_button.count():
+        tab_button.first.click()
+    else:
+        page.locator(f"{scope} .panel-add").first.click()
+        page.locator(f".panel-tools [data-tool='{tab}']").first.click()
+    page.wait_for_selector(f"{scope} .panel-tab.on[data-tab='{tab}']", timeout=5000)
+
+
 def open_panel_files(page: Page) -> None:
     """The panel on its Files tab: the workspace browser beside the conversation."""
-    page.locator(".panel-tab[data-tab='files']").click()
+    open_tool(page, "files")
     page.wait_for_selector(".panel-files .filerow", timeout=5000)
 
 
@@ -1480,17 +1543,16 @@ def phone_tool(page: Page, tile: str) -> None:
 
 
 def open_phone_panel(page: Page) -> None:
-    """On a phone the tabs open as a full sheet from the session's action menu."""
-    phone_tool(page, "details")
-    page.wait_for_selector(".panel-sheet .panel-tab", timeout=5000)
-    page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
+    """On a phone the tools open as a full sheet from the session's action menu."""
+    phone_tool(page, "files")
+    page.wait_for_selector(".panel-sheet .panel-tab.on[data-tab='files']", timeout=5000)
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
 
 
 def open_inspector(page: Page, section: str, scope: str = ".panel") -> None:
-    """Details is an inspector now: one line a section, and a press opens that section in place."""
-    page.locator(f"{scope} .panel-tab[data-tab='details']").first.click()
-    page.locator(f"{scope} [data-prop='{section}']").click()
+    """Details is an inspector: the facts, then one line a setting, and a press opens that setting in place."""
+    open_tool(page, "details", scope)
+    page.locator(f"{scope} [data-prop='{section}']").first.click()
 
 
 def open_tool_groups(page: Page) -> None:
@@ -1534,16 +1596,16 @@ def pick_a_model(page: Page) -> None:
 
 
 def open_drawer(page: Page) -> None:
-    """The phone's drawer: the two modes as a switch, the destinations, the projects and the recents."""
+    """The phone's drawer: the desktop's sidebar — its head, pinned rows, projects and chats, foot."""
     page.locator(".ph-menu:visible").first.click()
-    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=5000)
+    page.wait_for_selector(".ph-drawer-root.open .sidebar .sb-nav", timeout=5000)
     page.wait_for_timeout(400)
 
 
 def open_more(page: Page) -> None:
     """The drawer's More sheet on a phone: the same launcher as the desktop's, as a sheet."""
     open_drawer(page)
-    page.locator(".ph-drawer-root.open [data-nav='more']").click()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").click()
     page.wait_for_selector(".ph-more-sheet", timeout=5000)
     page.wait_for_timeout(300)
 
@@ -1597,7 +1659,7 @@ def open_projects(page: Page) -> None:
     if not page.locator("nav.sidebar").count():
         page.locator(".sidebar-unfold").click()
     page.locator(".sidebar [data-action='all-projects']").click()
-    page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
+    page.wait_for_selector(".projects-row", timeout=5000)
 
 
 def open_hire(page: Page) -> None:
@@ -1812,7 +1874,11 @@ def workspace_shots(page: Page) -> None:
         p.wait_for_selector(".panel-body.split .source-view")
 
     page.set_viewport_size({"width": 2560, "height": 1400})
+    # The tree stands beside the file only in a panel 720 px wide or more, which the default (at most
+    # 520) never is: the picture is of a panel the operator dragged wide.
+    page.evaluate("() => localStorage.setItem('daedalus.width.panel', '1100')")
     shot(page, "session-explorer-wide", f"agents/{S1}?panel=files", wait=".explorer-tree [data-path='src']", before=open_code_tree)
+    page.evaluate("() => localStorage.removeItem('daedalus.width.panel')")
     page.set_viewport_size(DESK)
 
 

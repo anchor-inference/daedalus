@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BrowserUserStatus, SessionSummary } from "./api";
 import type { ComputerState } from "./computer";
 import { setLang } from "./i18n";
-import { KindMark, KindTabs, byTab, defaultKind, kindIcon, kindOffers, kindPlate, kindTab, liveControls, parseTab, requestComputerSheet, sessionKind, setKindTab, shownKind, tabCounts, takeComputerSheet } from "./chatkind";
+import { KindMark, byTab, defaultKind, kindIcon, kindOffers, kindPlate, kindTab, liveControls, parseTab, requestComputerSheet, sessionKind, setKindTab, shownKind, tabCounts, takeComputerSheet } from "./chatkind";
 
 function row(id: string, extra: Partial<SessionSummary> = {}): SessionSummary {
   return { id, title: id, status: "idle", created_at: "2026-10-21T10:00:00Z", last_message_at: "2026-10-21T10:00:00Z", run_id: null, project_id: "p", project: "p", ...extra };
@@ -221,18 +221,5 @@ describe("the tabs and the mark", () => {
     const marks = [...host.querySelectorAll(".kind-mark")];
     expect(marks.map((m) => m.className)).toEqual(["kind-mark kind-chrome kind-live kind-borrowed"]);
     expect(marks[0].getAttribute("title")).toMatch(/сейчас управляет вашим chrome/i);
-  });
-
-  it("names the five tabs in Russian, marks the chosen one and walks them with the arrows", () => {
-    const chosen: string[] = [];
-    act(() => root.render(<KindTabs tab="computer" onChange={(t) => chosen.push(t)} counts={{ all: 6, chat: 3, computer: 1, chrome: 1, remote: 1 }} />));
-    const tabs = [...host.querySelectorAll<HTMLButtonElement>("[role=tab]")];
-    expect(tabs.map((b) => b.querySelector("span")?.textContent)).toEqual(["Все", "Обычные", "Компьютер", "Браузер", "Удалённо"]);
-    expect(tabs.map((b) => b.getAttribute("aria-selected"))).toEqual(["false", "false", "true", "false", "false"]);
-    // A count only on the kinds a list holds few of; All and Chats would be one more number to read.
-    expect(tabs.map((b) => b.querySelector("b")?.textContent ?? "")).toEqual(["", "", "1", "1", "1"]);
-    act(() => tabs[2].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
-    act(() => tabs[0].click());
-    expect(chosen).toEqual(["chrome", "all"]);
   });
 });

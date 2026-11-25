@@ -168,7 +168,11 @@ export function navigate(path: string, opts: { replace?: boolean; keepHash?: boo
   // away the message they were sent to.
   const current = window.location.pathname + window.location.search + (path.includes("#") ? window.location.hash : "");
   if (current === path) return;
-  if (opts.replace) window.history.replaceState({ d: depth }, "", path);
+  // A layer's entry (the phone's open drawer) is not a place: going somewhere from inside it takes
+  // its entry's place, so Back from the destination returns to the page under the layer instead of
+  // to the same page with the layer gone. Every row of the drawer is an ordinary link or button of
+  // the sidebar, so the rule lives here rather than in each of them.
+  if (opts.replace || inLayer()) window.history.replaceState({ d: depth }, "", path);
   else {
     depth += 1;
     window.history.pushState({ d: depth }, "", path);

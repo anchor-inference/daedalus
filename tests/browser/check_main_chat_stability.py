@@ -9,8 +9,9 @@ centre's loading fallbacks before the project itself.
 
 For each action, on both pages at 1440 px, the elements are marked beforehand and read afterwards:
 
-- the panel toggled closed and open, and every panel tab in turn: the sidebar's column, the sidebar and
-  the conversation are the very same elements, and the address never leaves the page's own;
+- the panel toggled closed and open, three tools opened from its "+" menu, and every tab in turn: the
+  sidebar's column, the sidebar and the conversation are the very same elements, and the address never
+  leaves the page's own;
 - a project opened from the main chat's column, and the main chat opened from a project's column:
   the sidebar's column and the centre's frame survive, and the new column and conversation arrive without a
   loading fallback drawn first;
@@ -38,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from check_orchestration_mode import PID, go, serve, stubs  # noqa: E402
 from main_thread import Watch, prepare, quiet  # noqa: E402
-from screenshots import UNHANDLED  # noqa: E402
+from screenshots import UNHANDLED, open_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -149,9 +150,13 @@ def panel_actions(page: Page, where: str, stay: re.Pattern[str]) -> None:
     expect(page.locator(".panel")).to_have_count(0)
     measured(page, f"{where}: panel opened", toggle.click, keep=everything, stay=stay)
     expect(page.locator(".panel")).to_have_count(1)
+    # The strip starts with the Overview and the questions; a tool the operator opens from the "+"
+    # menu becomes a tab, and opening one is an action of its own that must hold the page as still.
+    for tool in ("files", "notes", "details"):
+        measured(page, f"{where}: open {tool}", lambda tool=tool: open_tool(page, tool), keep=everything, stay=stay)
     tabs = page.locator(".panel .panel-tab")
     names = tabs.evaluate_all("(tabs) => tabs.map((t) => t.dataset.tab)")
-    assert len(names) >= 3, f"{where}: the panel offers {names}"
+    assert len(names) >= 5, f"{where}: the panel shows {names}"
     for name in [*names[1:], names[0]]:
         tab = page.locator(f".panel .panel-tab[data-tab='{name}']")
         measured(page, f"{where}: panel tab {name}", tab.click, keep=everything, stay=stay)

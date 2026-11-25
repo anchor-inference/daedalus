@@ -226,6 +226,12 @@ a.iconbtn { text-decoration: none; }
 .tab-close { display: inline-flex; color: var(--fg-3); border-radius: 4px; }
 .tab-close:hover { color: var(--fg); background: var(--hover); }
 .tabs-page .tab { height: var(--ctl-h-sm); }
+/* On a phone a page's tab is a finger's 44 px with a 14 px name, and the row scrolls sideways when the
+   names do not fit rather than cutting them. */
+@media (max-width: 1023px) {
+  .tabs-page .tab { min-width: var(--tap); height: var(--tap); padding: 0 var(--space-3); justify-content: center; border-radius: 10px; font-size: var(--fs-14); }
+  .tabs-page .tab-count { font-size: var(--fs-13); }
+}
 
 /* ── a list row (Row) ─────────────────────────────────────────────────────────────────────── */
 /* 32 for a line of its own, 44 for a title over a meta line, 56 for a large list. A phone's rows are

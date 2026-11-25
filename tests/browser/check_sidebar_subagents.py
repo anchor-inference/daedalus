@@ -122,7 +122,11 @@ def run() -> int:
         # Working first, with its task and model under its name.
         expect(rows.first).to_contain_text("link-check")
         expect(rows.first).to_contain_text("Check every link")
-        expect(page.locator('.panel-tab[data-tab="jobs"]')).to_be_visible()
+        # The helpers are a tool of their own: the background jobs are still offered beside them.
+        page.locator(".panel .panel-add").click()
+        expect(page.locator(".panel-tools [data-tool='jobs']")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(page.locator(".menu.panel-tools")).to_have_count(0)
         rows.first.locator(".subagent-card-head").click()
         opened = page.locator(".panel .subagent-open")
         expect(opened.locator(".subagent-head")).to_contain_text("link-check")

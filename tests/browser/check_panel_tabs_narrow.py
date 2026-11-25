@@ -3,8 +3,8 @@
 A narrow panel draws its tabs without their words, and a strip of more than four tabs (a session with
 subagents, a project's orchestrator) drew them without their icons as well, so at the minimum width
 the strip showed nothing but the Details tab's count and no tab could be switched to. Here the panel
-is set to its narrowest and every tab must be drawn with something to see, carry its name, lie inside
-the strip once scrolled to, and open when clicked.
+is set to its narrowest with eight tools open, and every tab must be drawn with something to see,
+carry its name, lie inside the strip once scrolled to, and open when clicked.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/miniapp/dist" /tmp/app-root/app
@@ -28,9 +28,11 @@ from screenshots import S1, UNHANDLED, focus_stub, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PHONE = {"width": 320, "height": 700}
-NARROWEST = "try { localStorage.setItem('daedalus.width.panel', '1'); } catch (e) {}"
-"""A share far under the floor: the grid clamps the column to ``--panel-w-min``, the narrowest the
-panel is ever drawn beside a conversation."""
+NARROWEST = ("try { localStorage.setItem('daedalus.width.panel', '400');"
+             " localStorage.setItem('daedalus.session.panel', 'details|subagents,changes,files,jobs,notes,context,usage,details');"
+             " localStorage.setItem('daedalus.session.panel.project', 'details|questions,files,notes,board,brief,wakeups,folders,details'); } catch (e) {}")
+"""The floor (``--panel-w-min``), the narrowest the panel is ever drawn beside a conversation, with
+the most tools an operator opens by hand: the session's and the orchestrator's."""
 
 DRAWN = """tab => {
   const box = tab.getBoundingClientRect();
@@ -107,6 +109,7 @@ def run() -> int:
 
             # A phone's sheet at the narrowest phone there is.
             context = browser.new_context(viewport=PHONE, device_scale_factor=2, color_scheme="dark", is_mobile=True, has_touch=True)
+            context.add_init_script(NARROWEST)
             page = context.new_page()
             page.route("**/api/**", stub)
             page.goto(f"{BASE}/agents/{S1}?panel=details&token=t&scheme=dark&lang={lang}")

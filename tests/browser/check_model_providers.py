@@ -13,7 +13,7 @@ from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import expect_app, reveal_composer  # noqa: E402
+from api_stub import expect_app  # noqa: E402
 
 
 def box(page):  # type: ignore[no-untyped-def]
@@ -31,7 +31,6 @@ def main() -> int:
             context = browser.new_context(viewport={"width": width, "height": 1000}, color_scheme=theme)
             page = composer.open_page(context)
             trigger = page.locator(".composer .model-select")
-            reveal_composer(page)
             trigger.click()
             phone = width < 1024
             tabs = page.locator(".model-picker [role=tab]")

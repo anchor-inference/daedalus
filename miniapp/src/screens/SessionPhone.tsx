@@ -17,24 +17,28 @@ export type SessionTile = { id: string; icon: IconName; label: string; count?: n
 export type SessionRow = { icon: IconName; label: string; value?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
 
 /**
- * The bar: hamburger (or back), a two-line title button and at most two glyphs. The title opens the
- * session's details, where the full title, the model and the context are; the second line is the
- * live state while something happens and the model with its effort otherwise.
+ * The bar: hamburger (or back), a two-line title button and at most two glyphs. Over the title stands
+ * where the chat lives (its project, or the chat it is a helper of), as the desktop's header leads with
+ * it; under it, only while something happens, the live state. The model is not repeated here: the
+ * composer's chip names it beside the field it applies to. The title opens the session's details;
+ * the glyphs are a chip that needs the operator (the browser, a question) or else the panel, then ⋮.
  */
-export function SessionTopBar({ title, sub, back, onTitle, chip, onMenu, editing, shared, secret, bare }: { title: string; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean; /** No drawer to open: a live link's page has no app around the chat. */ bare?: boolean }) {
+export function SessionTopBar({ title, over, sub, back, onTitle, chip, onPanel, onMenu, editing, shared, secret, bare }: { title: string; over?: ReactNode; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onPanel?: () => void; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean; /** No drawer to open: a live link's page has no app around the chat. */ bare?: boolean }) {
   // A chat anyone can open says so on the bar itself, not only inside the ⋮ sheet: the desktop's
-  // header chip has no room here, so it rides at the head of the second line.
+  // header chip has no room here, so it rides at the head of the line over the title.
   const share = shared ? <span className={`chip ph-share-tag ${shared === "public" ? "bad" : "attn"}`}>{t(shared === "public" ? "session.share.chip.public" : "session.share.chip.key")}</span> : null;
+  const marks = secret || share;
   return (
     <TopBar
       className="chat-head ph-chat-top"
       title={editing ?? <span className="chat-title">{title}</span>}
-      sub={editing ? undefined : <><PrivateBadge on={!!secret} />{share}{sub}</>}
+      over={editing || !(over || marks) ? undefined : <><PrivateBadge on={!!secret} />{share}{over}</>}
+      sub={editing ? undefined : sub}
       back={back}
       bare={bare}
       onTitle={editing ? undefined : onTitle}
       titleLabel={onTitle ? t("session.phone.title", { title }) : undefined}
-      actions={<>{chip}<IconButton icon="vdots" label={t("session.actions")} onClick={onMenu} popup="menu" className="ph-ib" /></>}
+      actions={<>{chip ?? (onPanel && <IconButton icon="panel" label={t("panel.toggle")} onClick={onPanel} className="ph-ib" />)}<IconButton icon="vdots" label={t("session.actions")} onClick={onMenu} popup="menu" className="ph-ib" /></>}
     />
   );
 }

@@ -5,7 +5,7 @@ import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Banner } from "./ui/phone";
-import { MenuRow, Popover, Sheet } from "./ui/primitives";
+import { MenuRow, Popover } from "./ui/primitives";
 import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -192,8 +192,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const replies = useQuoteReplies(sessionId);
   const [replyOpen, setReplyOpen] = useState<string | null>(null);
   const openReply = replies.find((reply) => reply.id === replyOpen) ?? null;
-  const focus = useComposerFocus(phone);
-  const focused = focus.focused;
   const offline = useOffline();
   const textarea = useRef<CodeFieldHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -544,21 +542,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const fieldWords = steers && status === "running" ? t("session.composer.running.steer") : t(placeholderKey(status, asking));
   const place = composerContext(props.place);
 
-  // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
-  // a toolbar once the field has the reader or holds anything. The white circle is Send, greyed while
-  // the field is empty, and Stop while a run is on. It used to open Voice mode while the field was
-  // empty; that is a beta with a chat of its own, and an ordinary chat offers only dictation.
-  const empty = !draft.trim() && files.length === 0 && secrets.length === 0 && replies.length === 0;
-  // A question or a permission request does not open the field: they sit in the tray above it, and
-  // the field stays the one 48 px row the reader can answer in with words of their own.
-  const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
+  // A phone draws the composer as the desktop's card at a finger's sizes (ui/parts/composer.css): the
+  // field over one row of 44 px controls, the same shape at rest and while typing. It used to rest as
+  // one row and grow a toolbar when the field took the reader, and the composer then changed height
+  // under the finger that had pressed it. The circle is Send, greyed while the field is empty, and
+  // Stop while a run is on.
+  const shape = phone ? "card" : undefined;
   const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
   const moved = draftChange(savedTarget, currentTarget);
 
   return (
-    <div ref={root} className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
-      onFocus={phone ? focus.onFocus : undefined}
-      onBlur={phone ? focus.onBlur : undefined}>
+    <div ref={root} className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}>
       {props.above}
       {phone && needsReview && (
         <Banner tone="warn" icon="alert" sub={moved} action={<button type="button" className="ph-btn sm" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button>}>
@@ -701,7 +695,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           <AccessSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass}
             translation={props.translation} translationDefault={props.translationDefault} onAgentLang={props.onAgentLang} compact={phone} />
           {props.beside}
-          {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
+          {phone && offline && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             {/* A running phone composer has no room for the chip, but the list still opens from the panel's
                 strip: without the component mounted that chip did nothing at all while a turn ran. */}
@@ -730,7 +724,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 });
 
 /**
- * Whether the phone's composer has the reader, for its open shape. Leaving it closes the shape only
+ * Whether the start page's composer on a phone has the reader, for its open shape. Leaving it closes the shape only
  * once the finger is up: closing on the blur that a press causes shrank the composer by a toolbar's
  * height under that finger, everything above it slid down, and the tap landed on whatever moved
  * into its place (the newest-message button was missed every time). And only the field opens it:
@@ -774,27 +768,6 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
   if (!saved || (saved.workspace === now.workspace && saved.project === now.project)) return "";
   const where = now.workspace.split("/").filter(Boolean).pop() || now.project || "—";
   return t("ph.draft.workspace", { name: where });
-}
-
-/**
- * The start page's "+" on a phone: three tiles for what is attached most (a photo now, a picture from
- * the gallery, a file) and the page's own rows. The chat's composer has one + menu at every size.
- */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onRecord, extra }: {
-  onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onRecord?: () => void; extra?: ReactNode;
-}) {
-  const run = (fn: () => void) => () => { onClose(); fn(); };
-  return (
-    <Sheet onClose={onClose} className="ph-sheet ph-plus-sheet" ariaLabel={t("composer.plus")}>
-      <div className="ph-tiles">
-        <button type="button" className="ph-tile" onClick={run(onPhoto)}><Icon name="camera" size={22} /><span>{t("composer.photo")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onPhotos ?? onFiles)}><Icon name="image" size={22} /><span>{t("ph.plus.photos")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onFiles)}><Icon name="attach" size={22} /><span>{t("session.attach")}</span></button>
-      </div>
-      {onRecord && <MenuRow icon="mic" label={t("session.mic")} onSelect={run(onRecord)} />}
-      {extra}
-    </Sheet>
-  );
 }
 
 /** `onReplace`, where the holder can take a file back, puts a pencil on a picture that opens the markup editor. */

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -121,14 +122,14 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     else:
         select = composer.locator(".runon-select")
         expect(select).to_be_visible()
-        expect(select.locator(".term-env.container")).to_be_visible()
+        expect(select).to_have_class(re.compile(r"\bcontainer\b"))
         select.click()
         option = page.locator(".runon-menu .runon-option").nth(1)
         expect(option).to_contain_text(words["host"])
         if option.is_disabled():
             say("the host is greyed out while the daemon answers")
         option.click()
-        expect(select.locator(".term-env.host")).to_be_visible()
+        expect(select).to_have_class(re.compile(r"\bhost\b"))
     composer.locator(".composer-field").fill("Check the disk")
     composer.locator(".roundbtn.primary").click()
     page.wait_for_timeout(600)

@@ -17,6 +17,7 @@ import { t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { errorText } from "../ui";
 import { pathProblem } from "../folders";
+import { Segmented } from "../ui/primitives";
 
 export type Env = "container" | "host";
 
@@ -301,15 +302,11 @@ export function FolderBrowser({ environments, choice, onChoice, onOpenProject, t
     <div className="fb" data-env={env}>
       <div className="fb-bar">
         {docker && (
-          <div className="fb-seg" role="radiogroup" aria-label={t("fb.where")}>
-            <button type="button" role="radio" aria-checked={env === "container"} className={env === "container" ? "on" : ""} onClick={() => env !== "container" && go(remembered("container"), "container")}>
-              <Icon name="bots" size={13} />{t("fb.container")}
-            </button>
-            <button type="button" role="radio" aria-checked={env === "host"} className={env === "host" ? "on" : ""} onClick={() => env !== "host" && go(remembered("host"), "host")}>
-              <Icon name="lock" size={13} />{t("fb.host")}
-              {env === "host" && hostDown && <i className="fb-down" aria-label={t("fb.host.down.short")} />}
-            </button>
-          </div>
+          <Segmented className="fb-seg" label={t("fb.where")} value={env} onChange={(next) => go(remembered(next), next)}
+            options={[
+              { id: "container", label: <><Icon name="bots" size={13} />{t("fb.container")}</> },
+              { id: "host", label: <><Icon name="lock" size={13} />{t("fb.host")}{env === "host" && hostDown && <i className="fb-down" aria-label={t("fb.host.down.short")} />}</> },
+            ]} />
         )}
         <button type="button" className="iconbtn small" onClick={back} disabled={!history.length} title={t("fb.back")} aria-label={t("fb.back")}><Icon name="back" size={15} /></button>
         <button type="button" className="iconbtn small" onClick={() => listing?.parent && go(listing.parent)} disabled={!listing?.parent} title={t("fb.up")} aria-label={t("fb.up")}><Icon name="up" size={15} /></button>

@@ -201,7 +201,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     page.locator(".ph-menu").first.wait_for(timeout=15000)
     page.locator(".ph-menu").first.tap()
-    page.locator(".ph-drawer-root.open [data-nav='more']").tap()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").tap()
     sheet = page.locator(".ph-more-sheet")
     sheet.locator(".launch").wait_for(timeout=5000)
     page.wait_for_timeout(300)
@@ -210,7 +210,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     row = sheet.locator(".launch-tiles [data-screen]").evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().top))")
     if len(row) != 4 or len(set(row)) != 1:
         say(f"the tiles are not one row of four: {row}")
-    drawer = page.locator(".ph-drawer-root [data-screen]").evaluate_all("els => els.map(e => e.dataset.screen)")
+    drawer = page.locator(".ph-drawer-root .sb-pinned-nav [data-nav]").evaluate_all("els => els.map(e => e.dataset.nav)")
     marked = sheet.locator(".launch-catalogue [data-placed]").evaluate_all("els => els.map(e => e.dataset.screen)")
     if not marked or any(m not in drawer for m in marked):
         say(f"the marked items {marked} are not the drawer's {drawer}")

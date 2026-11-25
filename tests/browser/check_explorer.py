@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from api_stub import DEFAULT_APP, expect_app
 from playwright.sync_api import expect, sync_playwright
-from screenshots import S1, UNHANDLED, detail, respond, stub
+from screenshots import S1, UNHANDLED, detail, open_tool, respond, stub
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -67,7 +67,7 @@ def folders(browser, width: int) -> None:  # type: ignore[no-untyped-def]
     assert any(r.startswith(f"/api/sessions/{S1}/folders/f-docs/download") for r in requests), requests
     overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
     assert overflow <= 0, f"the page scrolls sideways by {overflow}px at {width}px"
-    page.locator('[data-tab="files"]').click()
+    open_tool(page, "files", ".panel-sheet" if phone else ".panel")
     page.get_by_role("button", name="Folder", exact=True).click()
     # On a phone the menu is a sheet whose rows show each folder's path under its name, and the path
     # of "Docs" holds "bakery" too: the row is the one whose name starts with it.
@@ -137,7 +137,7 @@ def run() -> int:
         # The status line says what is selected; a folder in it reveals that folder.
         tree.locator('[data-path="src/main.py"]').click()
         expect(page.locator(".explorer-status-path")).to_have_text("src/main.py")
-        page.locator('[data-tab="files"]').click()
+        open_tool(page, "files")
         page.locator(".explorer-status-path button", has_text="src").click()
         expect(src).to_have_class(re.compile(r"\bselected\b"))
         # Collapse all closes every folder and keeps the listings: reopening reads nothing again.
@@ -166,7 +166,7 @@ def run() -> int:
         expect(tree.locator('[data-path="NOTES.md"]')).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator(".preview-doc")).to_be_visible()
-        page.locator('[data-tab="files"]').click()
+        open_tool(page, "files")
         # Showing hidden files is a switch in the tab's menu, which stays open while it is flipped.
         page.get_by_role("button", name="Folder options", exact=True).click()
         page.get_by_role("menuitemcheckbox", name="Show hidden and ignored").click()
@@ -189,7 +189,7 @@ def run() -> int:
         hit.click()
         expect(page.locator('.source-view .cited[data-line="5"]')).to_be_visible()
         assert "lines=5" in page.url
-        page.locator('[data-tab="files"]').click()
+        open_tool(page, "files")
         status["grep"] = 501
         search.fill("unavailable")
         expect(page.locator(".explorer-note")).to_contain_text("ripgrep")
@@ -218,7 +218,7 @@ def run() -> int:
         note.click(button="right")
         page.get_by_role("menuitem", name="preview", exact=True).click()
         expect(page.locator(".preview-doc")).to_be_visible()
-        page.locator('[data-tab="details"]').click()
+        open_tool(page, "details")
         # Details is an inspector: one line a section, a section's page opened in place of the list and left
         # with Back; the list is what a reload comes back to.
         provider = page.locator("[data-prop='provider']")
@@ -232,6 +232,9 @@ def run() -> int:
         print(f"tree row: {height}px; lazy reads, keyboard, search, fallbacks, context actions and the inspector: passed")
         context.close()
         context = browser.new_context(viewport={"width": 2560, "height": 1400})
+        # The tree stands beside the preview only in a panel 720 px wide or more, and the panel's own
+        # width stops at 520: the operator who wants both drags it wider, which the stored width stands for.
+        context.add_init_script("try { localStorage.setItem('daedalus.width.panel', '1100'); } catch (e) {}")
         page = context.new_page()
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&panel=preview&path=NOTES.md")

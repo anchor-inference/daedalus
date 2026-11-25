@@ -1,7 +1,9 @@
-/* The frame on a desktop: the sidebar as the first column and the screen beside it. The sidebar is the
-   whole of the navigation — there is no rail of icons beside it — and every mode draws the same frame
-   around its own list: a 52 px head, the pinned rows, the list, a 52 px foot. Every row in it is the
-   32 px one-line row with its text 12 px in, as the approved design draws it. */
+/* The sidebar: on a desktop the first column beside the screen, on a phone the drawer (drawer.tsx).
+   It is the whole of the navigation — there is no rail of icons beside it — and every mode draws the
+   same frame around its own list: a 52 px head, the pinned rows, the list, a foot. The rules below the
+   first block draw it at both sizes; a desktop makes every row the 32 px one-line row with its text
+   12 px in, as the approved design draws it, and a phone the 44 px row a finger needs, from the phone's
+   tokens (ui/tokens.css) and the block at the end of this file. */
 @media (min-width: 1024px) {
   /* Folded, --sidebar-w is 0 and the screen has the window. */
   .app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
@@ -15,7 +17,7 @@
   .desktop-column { position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w); z-index: var(--z-sidebar); }
   /* The drag's edge straddles the column's right-hand line, over the screen's first pixels. */
   .desktop-column > .pane-handle { position: absolute; top: 0; bottom: 0; right: -4px; margin: 0; z-index: 20; }
-  .sidebar { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); }
+  .sidebar { position: absolute; inset: 0; border-right: 1px solid var(--line); }
   .app[data-unfolding] .sidebar { animation: sidebar-in var(--t-base) var(--ease-out); }
 
   /* Folded, one button in the window's corner brings the column back, and the header under it moves
@@ -25,143 +27,12 @@
   .sidebar-unfold:hover { background: var(--hover); color: var(--fg); }
   .app.sidebar-folded .pagehead, .app.sidebar-folded .chat-head { padding-left: calc(var(--space-3) + var(--ctl-h) + var(--space-3)); }
 
-  /* The head: the mark, the mode menu, search, the fold. */
-  .sidebar-head { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--head-h); padding: 0 10px 0 14px; }
-  .sb-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-xs); background: var(--primary); color: var(--primary-ink); }
-  .sb-mark:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-  .sb-mode { position: relative; display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; height: var(--ctl-h); margin-left: -6px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; text-align: left; cursor: pointer; }
-  .sb-mode > .ic { flex: none; color: var(--fg-3); }
-  .sb-mode:hover, .sb-mode[aria-expanded="true"] { background: var(--hover); }
-  .sb-mode:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-  /* What waits in orchestration, seen from Agents: a dot by the mode's name, its count in the menu. */
-  .sb-mode-pip { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--attention); }
-  .sb-mode-wait { color: var(--attention); font-size: var(--fs-12); font-weight: 600; }
-  .sidebar-head .iconbtn, .sidebar-foot .iconbtn { flex: none; background: transparent; color: var(--fg-2); }
-  .sidebar-head .iconbtn:hover, .sidebar-foot .iconbtn:hover { background: var(--hover); color: var(--fg); }
-  .sidebar-head .iconbtn.on, .sidebar-foot .iconbtn.on { background: var(--selected); color: var(--fg); }
-
-  /* The pinned block: New chat, the operator's destinations, More. */
-  .sb-pinned-nav { display: flex; flex-direction: column; gap: 2px; flex: none; padding: 0 var(--space-2); }
-  .sb-nav { position: relative; display: flex; align-items: center; gap: 10px; height: var(--row-h); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; text-decoration: none; cursor: pointer; }
-  .sb-nav:hover { background: var(--hover); }
-  .sb-nav.on { background: var(--selected); }
-  .sb-nav:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-  .sb-nav > .ic, .sb-nav-main > .ic { flex: none; color: var(--fg); }
-  .sb-nav-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .sb-nav-n { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
-  .sb-nav-n.urgent { color: var(--attention); font-weight: 600; }
-  .sb-nav-kbd { flex: none; padding: 0; background: none; border: 0; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); font-weight: 400; white-space: nowrap; }
-  /* New chat is a link with its other ways to begin behind a chevron at the row's end, which takes the
-     shortcut's place under the pointer and the keyboard's focus. */
-  .sb-newchat { padding: 0; }
-  .sb-nav-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 100%; padding: 0 var(--space-3); border-radius: inherit; color: inherit; text-decoration: none; }
-  .sb-nav-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  /* New chat's other ways to begin wait behind a chevron that takes the shortcut's place under the
+     pointer and the keyboard's focus. */
   .sb-newchat .sb-new-more { position: absolute; right: 2px; top: 2px; width: 28px; height: 28px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); opacity: 0; }
   .sb-newchat:hover .sb-new-more, .sb-newchat:focus-within .sb-new-more, .sb-newchat .sb-new-more[aria-expanded="true"] { opacity: 1; }
   .sb-newchat:hover .sb-nav-kbd, .sb-newchat:focus-within .sb-nav-kbd, .sb-newchat:has([aria-expanded="true"]) .sb-nav-kbd { visibility: hidden; }
   .sb-newchat .sb-new-more:hover, .sb-newchat .sb-new-more[aria-expanded="true"] { background: var(--hover); color: var(--fg); }
-
-  /* The list: the mode's own, the one part of the column that scrolls. The windowed rows look for
-     this scroller. */
-  .sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
-  .sidebar .screen { flex: 1; padding: var(--space-4) var(--space-2) var(--space-3); }
-  .sidebar .sb-tools + .screen { padding-top: var(--space-2); }
-  .sidebar .sb-list { display: flex; flex-direction: column; gap: 2px; }
-  .sidebar .empty { padding: var(--space-4) 10px; font-size: var(--fs-13); text-align: left; align-items: flex-start; }
-  .sidebar .empty b { font-size: var(--fs-14); }
-  .sidebar .sk-row { grid-template-columns: 1fr; padding: 6px var(--space-2); }
-  .sidebar .sk-row .skeleton.avatar { display: none; }
-
-  /* The foot: the account and Settings, under a hairline. */
-  .sidebar-foot { display: flex; align-items: center; gap: var(--space-1); flex: none; height: var(--head-h); padding: 0 var(--space-2); border-top: 1px solid var(--line); }
-  .sb-account { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 36px; padding: 0 var(--space-3); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); text-decoration: none; }
-  .sb-account:hover { background: var(--hover); }
-  .sb-account.on { background: var(--selected); }
-  .sb-account:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-  .sb-avatar { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--fg); font-size: var(--fs-12); font-weight: 600; }
-  /* A new desktop release: the live colour, the one coloured thing in the foot, seen without reading as
-     the attention colour of something that went wrong. */
-  .sidebar-foot .iconbtn.sb-update { color: var(--live); }
-
-  /* The search over the list and the lens strip: what narrows the list stays above it while it
-     scrolls, so it is sticky rather than a pane of its own. */
-  .sb-tools { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-2) var(--space-1); background: var(--bg); }
-  .sb-search { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 2px 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--card); color: var(--fg-3); cursor: text; }
-  .sb-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); }
-  .sb-search input::placeholder { color: var(--fg-3); }
-  .sb-search input::-webkit-search-cancel-button { display: none; }
-  .sb-clear { display: grid; place-items: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); cursor: pointer; }
-  .sb-clear:hover { background: var(--hover); color: var(--fg); }
-  /* A lens on is a filled strip with a ringed edge: it changes what the whole column lists, so it says
-     the project's name and is lifted in one click. */
-  .sb-lens { display: flex; align-items: center; gap: 6px; height: var(--ctl-h); padding: 0 2px 0 10px; border-radius: var(--radius-sm); background: var(--selected); color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
-  .sb-lens > .ic { color: var(--fg-2); flex: none; }
-  .sb-lens > .truncate { flex: 1; min-width: 0; }
-  .sb-lens-clear { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; height: var(--ctl-h-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
-  .sb-lens-clear:hover { background: var(--hover); color: var(--fg); }
-  .sb-lens-clear:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-  .sb-notice { display: flex; align-items: flex-start; gap: 6px; margin: 0 2px 6px; padding: 6px var(--space-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); font-size: var(--fs-12); }
-  .sb-notice .ic { flex: none; margin-top: 2px; }
-
-  /* A section's label: 12/500 in the meta colour, 28 px, its text 10 px in. "Projects" leads to every
-     project and carries the +; "Chats" opens the filters. */
-  .sb-sec { display: flex; align-items: center; gap: var(--space-1); flex: none; height: var(--ctl-h-sm); padding: 0 var(--space-1) 0 10px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-  .sb-sec { margin-top: 14px; }
-  .sb-list > .sb-sec:first-child, .sb-list > .sb-notice:first-child + .sb-sec { margin-top: 0; }
-  .sb-sec > span:first-child { flex: 1; }
-  .sb-sec-link { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; height: 22px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; cursor: pointer; }
-  .sb-sec-link:hover, .sb-sec-link[aria-expanded="true"] { background: var(--hover); color: var(--fg); }
-  .sb-sec-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-  .sb-sec-link > .ic { flex: none; opacity: .75; }
-  .sb-sec-projects .sb-sec-link { margin-right: auto; }
-  .sb-sec-chats .sb-sec-link { max-width: 100%; }
-  .sb-chats-menu.on { color: var(--fg-2); }
-  .sb-sec-filter { color: var(--fg); font-weight: 500; }
-  .sb-sec-filter::before { content: "·"; margin-right: var(--space-1); color: var(--fg-3); }
-  .sb-sec .iconbtn.sb-sec-add { width: 24px; height: 24px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); }
-  .sb-sec .iconbtn.sb-sec-add:hover { background: var(--hover); color: var(--fg); }
-
-  /* A row: one line of 32 px, its text 12 px in. A chat is its title and, at its right edge, its state
-     in a word or when it last moved; a project is a folder icon, its name, its count or state. */
-  .sb-day, .sb-kids, .sb-pinned { display: flex; flex-direction: column; gap: 2px; }
-  .sb-row { position: relative; display: flex; align-items: center; gap: 10px; flex: none; height: var(--row-h); padding: 0 var(--space-3); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); cursor: pointer; outline: none; }
-  .sb-row:hover { background: var(--hover); }
-  .sb-row.current { background: var(--selected); }
-  .sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
-  .sb-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .sb-row.unread .sb-t { font-weight: 500; }
-  .sb-row .unread-dot { margin-left: -6px; }
-  .sb-tile { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
-  .sb-project.system .sb-tile { color: var(--fg); }
-  .sb-prow.open .sb-t, .sb-project.open > .sb-prow .sb-t { font-weight: 500; }
-  /* A project row a dragged chat would move into: a ring on the pressed fill, so the drop target is unmistakable. */
-  .sb-prow.drop, .sb-prow.drop:hover { background: var(--selected); box-shadow: inset 0 0 0 2px var(--ring); }
-  .sb-ptrail { flex: none; display: flex; align-items: center; gap: 6px; }
-  .sb-pcount { color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
-  .sb-chev { display: grid; color: var(--fg-3); }
-  /* A project's chats sit under it with their text where the project's name starts. */
-  .sb-kids > .sb-row { padding-left: 36px; }
-  .sb-word, .sb-time { flex: none; font-size: var(--fs-12); white-space: nowrap; }
-  .sb-time { color: var(--fg-3); font-variant-numeric: tabular-nums; }
-  .sb-word.waiting, .sb-word.failed { color: var(--attention); }
-  .sb-word.running { color: var(--live); }
-  /* The marks of a chat that is not an ordinary one, beside its state: its kind, a loop, a fork, the
-     machine it runs on, whether it is private, its terminals, the helpers it can fold out. */
-  .sb-marks { display: flex; align-items: center; gap: 6px; flex: none; color: var(--fg-3); }
-  .sb-marks:empty { display: none; }
-  .sb-kind { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--fg-3); }
-  /* An imported chat's harness letter, which sits on a plate's corner elsewhere, stands in the row. */
-  .sb-marks .imp-hmini { position: static; box-shadow: none; }
-  .sb-terms { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); }
-  .sb-subs { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
-  .sb-subs:hover, .sb-subs.open { background: var(--selected); color: var(--fg); }
-  .sb-subs:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-  .sb-subs > .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
-  .sb-subs.open > .ic { transform: none; }
-  /* A search hit shows the passage it was found by, under its title. */
-  .sb-row.match { height: auto; min-height: var(--row-h); padding-block: 6px; }
-  .sb-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-  .sb-snip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 0; color: var(--fg-3); font-size: var(--fs-12); }
   /* Hover or focus shows the row's actions over its right edge, on the row's own colour. Scoped to
      the column: `.session-row-menu`, which the row's menu also carries, would otherwise show them on
      every row from later in the sheet. */
@@ -170,23 +41,195 @@
   .sb-row.current { --sb-row-bg: color-mix(in srgb, var(--fg) 10%, var(--bg)); }
   .sidebar .sb-row:hover .sb-acts, .sidebar .sb-row:focus-within .sb-acts, .sidebar .sb-acts:has([aria-expanded="true"]) { display: flex; }
   .sb-row:hover .sb-time, .sb-row:focus-within .sb-time, .sb-row:hover .sb-ptrail, .sb-row:focus-within .sb-ptrail { visibility: hidden; }
-  .sb-acts .iconbtn.small { width: 28px; height: 28px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); }
-  .sb-acts .iconbtn.small:hover { background: var(--hover); color: var(--fg); }
-  /* A subagent under its unfolded leader: the dense row, quieter than a chat, a dot for its state. */
-  .sb-sub { height: var(--row-h-dense); gap: var(--space-2); padding-left: 24px; color: var(--fg-2); font-size: var(--fs-13); }
-  .sb-kids > .sb-row.sb-sub { padding-left: 48px; }
-  .sb-sub .sb-t { color: var(--fg-2); }
-  .sb-sub:hover .sb-t, .sb-sub.current .sb-t { color: var(--fg); }
-  .sb-empty { padding: 6px var(--space-3); font-size: var(--fs-12); }
-  .sb-more { display: flex; align-items: center; height: var(--row-h); width: 100%; padding: 0 var(--space-3) 0 36px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
-  .sb-more:hover { background: var(--hover); color: var(--fg); }
-  .sidebar .iconbtn.quiet { background: transparent; color: var(--fg-2); }
-  .sidebar .iconbtn.quiet:hover { background: var(--hover); color: var(--fg); }
-  .sidebar .iconbtn.quiet.on { background: var(--selected); color: var(--fg); }
 }
+
+.sidebar { display: flex; flex-direction: column; background: var(--bg); }
+/* The head: the mark, the mode menu, search, the fold. */
+.sidebar-head { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--head-h); padding: 0 10px 0 14px; }
+.sb-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-xs); background: var(--primary); color: var(--primary-ink); }
+.sb-mark:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.sb-mode { position: relative; display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; height: var(--ctl-h); margin-left: -6px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; text-align: left; cursor: pointer; }
+.sb-mode > .ic { flex: none; color: var(--fg-3); }
+.sb-mode:hover, .sb-mode[aria-expanded="true"] { background: var(--hover); }
+.sb-mode:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* What waits in orchestration, seen from Agents: a dot by the mode's name, its count in the menu. */
+.sb-mode-pip { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--attention); }
+.sb-mode-wait { color: var(--attention); font-size: var(--fs-12); font-weight: 600; }
+.sidebar-head .iconbtn, .sidebar-foot .iconbtn { flex: none; background: transparent; color: var(--fg-2); }
+.sidebar-head .iconbtn:hover, .sidebar-foot .iconbtn:hover { background: var(--hover); color: var(--fg); }
+.sidebar-head .iconbtn.on, .sidebar-foot .iconbtn.on { background: var(--selected); color: var(--fg); }
+
+/* The pinned block: New chat, the operator's destinations, More. */
+.sb-pinned-nav { display: flex; flex-direction: column; gap: 2px; flex: none; padding: 0 var(--space-2); }
+.sb-nav { position: relative; display: flex; align-items: center; gap: 10px; height: var(--row-h); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; text-decoration: none; cursor: pointer; }
+.sb-nav:hover { background: var(--hover); }
+.sb-nav.on { background: var(--selected); }
+.sb-nav:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.sb-nav > .ic, .sb-nav-main > .ic { flex: none; color: var(--fg); }
+.sb-nav-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sb-nav-n { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.sb-nav-n.urgent { color: var(--attention); font-weight: 600; }
+.sb-nav-kbd { flex: none; padding: 0; background: none; border: 0; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); font-weight: 400; white-space: nowrap; }
+/* New chat is a link with its other ways to begin behind a chevron at the row's end. */
+.sb-newchat { padding: 0; }
+.sb-nav-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 100%; padding: 0 var(--space-3); border-radius: inherit; color: inherit; text-decoration: none; }
+.sb-nav-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+/* The list: the mode's own, the one part of the column that scrolls. The windowed rows look for
+   this scroller. */
+.sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.sidebar .screen { flex: 1; padding: var(--space-4) var(--space-2) var(--space-3); }
+.sidebar .sb-tools + .screen { padding-top: var(--space-2); }
+.sidebar .sb-list { display: flex; flex-direction: column; gap: 2px; }
+.sidebar .empty { padding: var(--space-4) 10px; font-size: var(--fs-13); text-align: left; align-items: flex-start; }
+.sidebar .empty b { font-size: var(--fs-14); }
+.sidebar .sk-row { grid-template-columns: 1fr; padding: 6px var(--space-2); }
+.sidebar .sk-row .skeleton.avatar { display: none; }
+
+/* The foot: the account and Settings, under a hairline. */
+.sidebar-foot { display: flex; align-items: center; gap: var(--space-1); flex: none; height: var(--head-h); padding: 0 var(--space-2); border-top: 1px solid var(--line); }
+.sb-account { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 36px; padding: 0 var(--space-3); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); text-decoration: none; }
+.sb-account:hover { background: var(--hover); }
+.sb-account.on { background: var(--selected); }
+.sb-account:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.sb-avatar { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--fg); font-size: var(--fs-12); font-weight: 600; }
+/* A new desktop release: the live colour, the one coloured thing in the foot, seen without reading as
+   the attention colour of something that went wrong. */
+.sidebar-foot .iconbtn.sb-update { color: var(--live); }
+
+/* The search over the list and the lens strip: what narrows the list stays above it while it
+   scrolls, so it is sticky rather than a pane of its own. */
+.sb-tools { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-2) var(--space-1); background: var(--bg); }
+.sb-search { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 2px 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--card); color: var(--fg-3); cursor: text; }
+.sb-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.sb-search input::placeholder { color: var(--fg-3); }
+.sb-search input::-webkit-search-cancel-button { display: none; }
+.sb-clear { display: grid; place-items: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); cursor: pointer; }
+.sb-clear:hover { background: var(--hover); color: var(--fg); }
+/* A lens on is a filled strip with a ringed edge: it changes what the whole column lists, so it says
+   the project's name and is lifted in one click. */
+.sb-lens { display: flex; align-items: center; gap: 6px; height: var(--ctl-h); padding: 0 2px 0 10px; border-radius: var(--radius-sm); background: var(--selected); color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
+.sb-lens > .ic { color: var(--fg-2); flex: none; }
+.sb-lens > .truncate { flex: 1; min-width: 0; }
+.sb-lens-clear { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; height: var(--ctl-h-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+.sb-lens-clear:hover { background: var(--hover); color: var(--fg); }
+.sb-lens-clear:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sb-notice { display: flex; align-items: flex-start; gap: 6px; margin: 0 2px 6px; padding: 6px var(--space-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); font-size: var(--fs-12); }
+.sb-notice .ic { flex: none; margin-top: 2px; }
+
+/* A section's label: 12/500 in the meta colour, 28 px, its text 10 px in. "Projects" leads to every
+   project and carries the +; "Chats" opens the filters. */
+.sb-sec { display: flex; align-items: center; gap: var(--space-1); flex: none; height: var(--ctl-h-sm); padding: 0 var(--space-1) 0 10px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.sb-sec { margin-top: 14px; }
+.sb-list > .sb-sec:first-child, .sb-list > .sb-notice:first-child + .sb-sec { margin-top: 0; }
+.sb-sec > span:first-child { flex: 1; }
+.sb-sec-link { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; height: 22px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.sb-sec-link:hover, .sb-sec-link[aria-expanded="true"] { background: var(--hover); color: var(--fg); }
+.sb-sec-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+.sb-sec-link > .ic { flex: none; opacity: .75; }
+.sb-sec-projects .sb-sec-link { margin-right: auto; }
+.sb-sec-chats .sb-sec-link { max-width: 100%; }
+.sb-chats-menu.on { color: var(--fg-2); }
+.sb-sec-filter { color: var(--fg); font-weight: 500; }
+.sb-sec-filter::before { content: "·"; margin-right: var(--space-1); color: var(--fg-3); }
+.sb-sec .iconbtn.sb-sec-add { width: 24px; height: 24px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); }
+.sb-sec .iconbtn.sb-sec-add:hover { background: var(--hover); color: var(--fg); }
+
+/* A row: one line of 32 px, its text 12 px in. A chat is its title and, at its right edge, its state
+   in a word or when it last moved; a project is a folder icon, its name, its count or state. */
+.sb-day, .sb-kids, .sb-pinned { display: flex; flex-direction: column; gap: 2px; }
+.sb-row { position: relative; display: flex; align-items: center; gap: 10px; flex: none; height: var(--row-h); padding: 0 var(--space-3); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); cursor: pointer; outline: none; }
+.sb-row:hover { background: var(--hover); }
+.sb-row.current { background: var(--selected); }
+.sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.sb-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sb-row.unread .sb-t { font-weight: 500; }
+.sb-row .unread-dot { margin-left: -6px; }
+.sb-tile { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
+.sb-project.system .sb-tile { color: var(--fg); }
+.sb-prow.open .sb-t, .sb-project.open > .sb-prow .sb-t { font-weight: 500; }
+/* A project row a dragged chat would move into: a ring on the pressed fill, so the drop target is unmistakable. */
+.sb-prow.drop, .sb-prow.drop:hover { background: var(--selected); box-shadow: inset 0 0 0 2px var(--ring); }
+.sb-ptrail { flex: none; display: flex; align-items: center; gap: 6px; }
+.sb-pcount { color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.sb-chev { display: grid; color: var(--fg-3); }
+/* A project's chats sit under it with their text where the project's name starts. */
+.sb-kids > .sb-row { padding-left: 36px; }
+.sb-word, .sb-time { flex: none; font-size: var(--fs-12); white-space: nowrap; }
+.sb-time { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.sb-word.waiting, .sb-word.failed { color: var(--attention); }
+.sb-word.running { color: var(--live); }
+/* The marks of a chat that is not an ordinary one, beside its state: its kind, a loop, a fork, the
+   machine it runs on, whether it is private, its terminals, the helpers it can fold out. */
+.sb-marks { display: flex; align-items: center; gap: 6px; flex: none; color: var(--fg-3); }
+.sb-marks:empty { display: none; }
+.sb-kind { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--fg-3); }
+/* An imported chat's harness letter, which sits on a plate's corner elsewhere, stands in the row. */
+.sb-marks .imp-hmini { position: static; box-shadow: none; }
+.sb-terms { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); }
+.sb-subs { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.sb-subs:hover, .sb-subs.open { background: var(--selected); color: var(--fg); }
+.sb-subs:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sb-subs > .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
+.sb-subs.open > .ic { transform: none; }
+/* A search hit shows the passage it was found by, under its title. */
+.sb-row.match { height: auto; min-height: var(--row-h); padding-block: 6px; }
+.sb-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.sb-snip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 0; color: var(--fg-3); font-size: var(--fs-12); }
+.sb-acts .iconbtn.small { width: 28px; height: 28px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); }
+.sb-acts .iconbtn.small:hover { background: var(--hover); color: var(--fg); }
+/* A subagent under its unfolded leader: the dense row, quieter than a chat, a dot for its state. */
+.sb-sub { height: var(--row-h-dense); gap: var(--space-2); padding-left: 24px; color: var(--fg-2); font-size: var(--fs-13); }
+.sb-kids > .sb-row.sb-sub { padding-left: 48px; }
+.sb-sub .sb-t { color: var(--fg-2); }
+.sb-sub:hover .sb-t, .sb-sub.current .sb-t { color: var(--fg); }
+.sb-empty { padding: 6px var(--space-3); font-size: var(--fs-12); }
+.sb-more { display: flex; align-items: center; height: var(--row-h); width: 100%; padding: 0 var(--space-3) 0 36px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.sb-more:hover { background: var(--hover); color: var(--fg); }
+.sidebar .iconbtn.quiet { background: transparent; color: var(--fg-2); }
+.sidebar .iconbtn.quiet:hover { background: var(--hover); color: var(--fg); }
+.sidebar .iconbtn.quiet.on { background: var(--selected); color: var(--fg); }
 /* Orchestration mode's list and a project's column start where the Agents list does, 16 px under
    the pinned block. */
-@media (min-width: 1024px) {
-  .sidebar .orch-body, .sidebar .focus-body, .sidebar .sidebar-pinned { padding-top: var(--space-4); }
-  .sidebar .sidebar-pinned + .focus-body { padding-top: 0; }
+.sidebar .orch-body, .sidebar .focus-body, .sidebar .sidebar-pinned { padding-top: var(--space-4); }
+.sidebar .sidebar-pinned + .focus-body { padding-top: 0; }
+
+/* The drawer: the same column, 330 px over the page, at a finger's sizes. The phone's tokens already
+   make a row 44 px (--row-h is --row-h-touch there); this block sets the rest the approved phone frame
+   draws: rows read at 15 px with 20 px icons, the head's and foot's buttons and every label that is a
+   button a 44 px target, the section labels a row's height, a 56 px foot. A row's ⋮ waits for a
+   pointer's hover, which a finger never gives, so the drawer shows the state words instead and the
+   chat's own ⋮, the Chats page and a long press on a row there hold its commands. */
+@media (max-width: 1023px) {
+  .ph-drawer-nav { display: flex; flex: 1; min-height: 0; }
+  .ph-drawer-nav > .sidebar { flex: 1; min-width: 0; border-right: 1px solid var(--line); }
+  .sidebar-head { gap: var(--space-2); padding: 0 var(--space-1) 0 14px; }
+  .sb-mark { position: relative; }
+  .sb-mark::after { content: ""; position: absolute; inset: -11px; }
+  .sb-mode { height: var(--tap); font-size: var(--fs-16); }
+  .sidebar-head .iconbtn, .sidebar-foot .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .sidebar-head .iconbtn > .ic, .sidebar-foot .iconbtn > .ic { width: 20px; height: 20px; }
+  .sb-pinned-nav { gap: 0; }
+  .sb-nav, .sb-row, .sb-account { font-size: var(--fs-15); }
+  .sb-nav > .ic, .sb-nav-main > .ic, .sb-tile, .sb-tile > .ic { width: 20px; height: 20px; }
+  .sb-newchat .sb-new-more { display: none; }
+  .sidebar .screen { padding: var(--space-3) var(--space-2) var(--space-4); }
+  .sidebar .sb-acts { display: none; }
+  .sb-sec { height: var(--tap); padding: 0 0 0 var(--space-3); }
+  .sb-sec + .sb-sec, .sb-list > * + .sb-sec { margin-top: var(--space-2); }
+  .sb-sec-link { height: var(--tap); }
+  .sb-sec .iconbtn.sb-sec-add { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .sb-sec .iconbtn.sb-sec-add > .ic { width: 20px; height: 20px; }
+  .sb-kids > .sb-row { padding-left: 40px; }
+  .sb-sub, .sb-kids > .sb-row.sb-sub { height: var(--tap); }
+  .sb-subs { position: relative; }
+  .sb-subs::after { content: ""; position: absolute; inset: -12px -6px; }
+  .sb-tools { padding: var(--space-2) var(--space-2) var(--space-1); }
+  .sb-search, .sb-lens { height: var(--tap); }
+  .sb-search input { font-size: var(--fs-16); }
+  .sb-clear, .sb-lens-clear { height: var(--tap); }
+  .sb-clear { width: var(--tap); }
+  .sidebar-foot { height: calc(var(--tap) + var(--space-3)); }
+  .sb-account { height: var(--tap); }
+  .sb-avatar { width: 24px; height: 24px; }
 }

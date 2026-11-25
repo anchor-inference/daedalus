@@ -40,7 +40,8 @@ export function useRunOn(project: string): RunOn {
   return { docker: !!environments?.docker, offered, hostReady, env, pick: setPicked, body: env === "host" ? { env: "host" } : {} };
 }
 
-/** The desktop composer's control: the pill of where the chat will run, opening the two choices. */
+/** The desktop composer's control: where the chat will run, as a quiet chip beside the project, opening
+ *  the two choices. */
 export function RunOnSelect({ run }: { run: RunOn }) {
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -50,21 +51,15 @@ export function RunOnSelect({ run }: { run: RunOn }) {
     <>
       <button ref={button} type="button" className={`runon-select ${run.env}`} aria-haspopup="menu" aria-expanded={open}
         aria-label={`${t("runon.label")}: ${t(`term.env.${run.env}`)}`} title={t(`term.env.title.${run.env}`)} onClick={() => setOpen(!open)}>
-        <EnvPill env={run.env} tiny />
+        <Icon name={run.env === "host" ? "lock" : "terminal"} size={14} />
+        <span className="truncate">{t(`term.env.${run.env}`)}</span>
       </button>
       {open && (
         <Popover anchor={button.current} onClose={() => setOpen(false)} className="runon-menu" label={t("runon.label")}>
           {(["container", "host"] as const).map((env) => {
             const blocked = env === "host" && !run.hostReady;
-            return (
-              <button key={env} type="button" role="menuitemradio" aria-checked={run.env === env} disabled={blocked} className={`runon-option ${run.env === env ? "on" : ""}`} onClick={() => choose(env)}>
-                <span className="runon-option-main">
-                  <span className="runon-option-t">{t(`folder.env.${env}.long`)}</span>
-                  <span className="sub">{blocked ? t("runon.host.down") : t(`runon.${env}.hint`)}</span>
-                </span>
-                {run.env === env && <Icon name="check" size={16} />}
-              </button>
-            );
+            return <MenuRow key={env} icon={env === "host" ? "lock" : "terminal"} label={t(`folder.env.${env}.long`)} sub={blocked ? t("runon.host.down") : t(`runon.${env}.hint`)}
+              checked={run.env === env} disabled={blocked} className="runon-option" data={{ runon: env }} onSelect={() => choose(env)} />;
           })}
         </Popover>
       )}

@@ -7,8 +7,9 @@ column then holds only the project — the way back, the orchestrator, the team 
 for a launch that waits, why; the one-off helpers, the terminals and the project's pages. The
 orchestrator's chat shows the events it was woken with as a card, each of its steps once in its turn's
 worked group, and its question as a card answered right there, with one of its options or words of the operator's own. The panel
-beside it has the project's tabs; beside a staff member's session it has the session's tabs too, and a
-header with the member's controls and the messages sent to it. The journal pages back, and takes a
+beside it opens on the questions and offers the project's board, brief, wake-ups and folders under a
+group of their own in its "+" menu; beside a staff member's session it offers the session's tools too and
+keeps the project's that were opened, and a header carries the member's controls and the messages sent to it. The journal pages back, and takes a
 note. A project without an orchestrator offers to switch one on, and says what it costs. "All
 projects" goes back to orchestration's home, and Agents mode keeps its project lens as it was. Nothing scrolls sideways.
 """
@@ -27,7 +28,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app, switch_mode  # noqa: E402
-from screenshots import UNHANDLED  # noqa: E402
+from screenshots import UNHANDLED, open_tool  # noqa: E402
 from screenshots import stub as installation
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -41,7 +42,7 @@ WORDS = {
         "lev": "Write to Lev…", "folder": "Folder added", "created": "Task created", "assigned": "Assigned", "watch": "Watch set", "asked": "Asked you",
         "watch_queued": "Action queued", "watch_failed": "Action delivery failed", "watch_expired": "The watch reached its end time.", "watch_add": "Watch", "watch_set": "Add",
         "watch_blocked": "Approval is no longer current", "watch_approval": "Needs approval", "watch_approve": "Approve watch", "watch_capability": "no current orchestrator",
-        "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
+        "questions": "Questions", "project": "Project", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
         "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "total may be unknown", "pause": "Pause after the turn", "accepted": "accepted",
         "staff": "6 staff", "needs": "1 needs you", "autonomy": "autonomy: normal",
         "spent": "Known $2.05 today + unknown price", "levspend": "$1.20 today · 412k tokens", "iraspend": "380k tokens · subscription · window 23 %", "totals": "Today known $2.05 · 7 days known $10.90 · All known $33.80",
@@ -53,7 +54,7 @@ WORDS = {
         "lev": "Написать сотруднику Lev…", "folder": "Папка добавлена", "created": "Задача создана", "assigned": "Назначено", "watch": "Наблюдение поставлено", "asked": "Спросил вас",
         "watch_queued": "Действие в очереди", "watch_failed": "Не удалось доставить действие", "watch_expired": "Срок наблюдения истёк.", "watch_add": "Наблюдение", "watch_set": "Добавить",
         "watch_blocked": "Разрешение больше не действует", "watch_approval": "Требует подтверждения", "watch_approve": "Подтвердить наблюдение", "watch_capability": "нет оркестратора",
-        "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
+        "questions": "Вопросы", "project": "Проект", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
         "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "Итоговая сумма может быть неизвестна", "pause": "После хода — пауза", "accepted": "принято",
         "staff": "6 сотрудников", "needs": "1 ждёт вас", "autonomy": "самостоятельность: обычная",
         "spent": "Известно $2.05 сегодня + неизвестная цена", "levspend": "$1.20 сегодня · токенов: 412k", "iraspend": "токенов: 380k · подписка · окно 23 %", "totals": "Сегодня известно $2.05 · За 7 дней известно $10.90 · Всего известно $33.80",
@@ -180,25 +181,33 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(chat.locator(".questions-line")).to_have_count(0)
     fits(page, f"{lang} {width} orchestrator")
 
-    # The panel beside the orchestrator: the questions first, its own Details, the project's files,
-    # its notes, then the project's four tabs.
+    # The panel beside the orchestrator: the Overview, then the questions it opened on. Everything else
+    # is a tool of its "+" menu — its own Details, the project's files, its notes, and the project's
+    # four under a group of their own, so the project's pages are not lost among the chat's.
     tabs = page.locator(".panel .panel-tab")
-    expect(tabs).to_have_count(8)
-    expect(tabs.nth(0)).to_contain_text(words["questions"])
-    expect(tabs.nth(1)).to_have_attribute("data-tab", "details")
-    expect(tabs.nth(2)).to_have_attribute("data-tab", "files")
-    expect(tabs.nth(3)).to_have_attribute("data-tab", "notes")
-    expect(tabs.nth(4)).to_have_text(words["board"])
-    page.locator(".panel .panel-tab[data-tab='board']").click()
+    expect(tabs).to_have_count(2)
+    expect(tabs.nth(0)).to_have_attribute("data-tab", "overview")
+    expect(tabs.nth(1)).to_contain_text(words["questions"])
+    page.locator(".panel .panel-add").click()
+    for tool in ("details", "files", "notes"):
+        expect(page.locator(f".panel-tools [data-tool='{tool}']")).to_have_count(1)
+    project_group = page.locator(".panel-tools [role='group']", has=page.locator("[data-tool='board']"))
+    expect(project_group).to_have_attribute("aria-label", words["project"])
+    expect(project_group.locator("[data-tool]")).to_have_count(4)
+    for label in ("board", "brief", "wakeups", "folders"):
+        expect(project_group.locator(f"[data-tool='{label}']")).to_contain_text(words[label])
+    page.keyboard.press("Escape")
+    open_tool(page, "board")
+    expect(page.locator(".panel .panel-tab[data-tab='board']")).to_have_text(words["board"])
     expect(page.locator(".panel .pboard.embedded .pcard.need")).to_contain_text("q4r8tz")
-    page.locator(".panel .panel-tab[data-tab='brief']").click()
+    open_tool(page, "brief")
     expect(page.locator(".panel .brief-card")).to_have_count(6)
     # The badge says who edits the section: a bare "only you" beside "Allowed without you" read as
     # contradicting the heading.
     expect(page.locator(".panel .brief-card.allowed_without_operator")).to_contain_text(words["onlyyou"])
     expect(page.locator(".panel .brief-card.notes")).to_contain_text(words["byorch"])
     assert f"/app/orchestration/project/{PID}?" in page.url and "panel=brief" in page.url, page.url
-    page.locator(".panel .panel-tab[data-tab='wakeups']").click()
+    open_tool(page, "wakeups")
     expect(page.locator(".panel .wakeup-row").first).to_contain_text(invented["wake.note"])
     watches = page.locator(".panel .watch-row")
     expect(watches.first).to_contain_text(words["watch_queued"])
@@ -223,7 +232,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     hours = (datetime.fromisoformat(creates[0]["deadline_at"]) - datetime.now(UTC)).total_seconds() / 3600
     assert 23.9 < hours < 24.1, hours
     expect(watches.last).to_contain_text("Until" if lang == "en" else "До")
-    page.locator(".panel .panel-tab[data-tab='folders']").click()
+    open_tool(page, "folders")
     expect(page.locator(".panel .focus-folder")).to_have_count(3)
 
     # A staff member's session, inside the project: its header, its messages, both sets of tabs.
@@ -234,7 +243,14 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(head).to_contain_text("agent/lev/photos")
     expect(page.locator(".staff-message").first).to_contain_text(words["accepted"])
     expect(page.locator(".chat .composer-field")).to_have_attribute("placeholder", words["lev"])
-    expect(page.locator(".panel .panel-tab")).to_have_count(9)
+    # Its panel keeps the project's tools the operator opened beside the orchestrator, and its "+" menu
+    # offers both sets: the session's own (its terminal) and the project's.
+    member_tabs = page.locator(".panel .panel-tab").evaluate_all("(tabs) => tabs.map((t) => t.dataset.tab)")
+    assert member_tabs == ["overview", "board", "brief", "wakeups", "folders"], member_tabs
+    page.locator(".panel .panel-add").click()
+    expect(page.locator(".panel-tools [data-tool='jobs']")).to_have_count(1)
+    expect(page.locator(".panel-tools [role='group']", has=page.locator("[data-tool='board']"))).to_have_attribute("aria-label", words["project"])
+    page.keyboard.press("Escape")
     head.get_by_role("button", name=words["pause"]).click()
     page.wait_for_timeout(300)
     assert ("st-lev", "pause") in focus.controls, focus.controls

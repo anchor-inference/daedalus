@@ -1,7 +1,6 @@
 """The rendered conversation loses a deleted tail immediately and after reload."""
 from __future__ import annotations
 
-from api_stub import reveal_composer
 from check_composer import CHROMIUM, HOST, UNHANDLED, message, open_page
 from playwright.sync_api import expect, sync_playwright
 
@@ -31,21 +30,18 @@ def run() -> None:
             expect(page.locator(".msg.user")).to_have_count(0, timeout=3000)
             expect(page.locator(".answer")).to_have_count(0)
             # The reverted message comes back into the composer to be reworded and sent again.
-            reveal_composer(page)
             expect(page.locator(".composer .composer-field")).to_have_text("Original request")
             page.locator(".composer .composer-field").fill("")
             page.reload()
             page.wait_for_selector(".composer")
             expect(page.locator(".answer")).to_have_count(0)
             # Reasoning off is the first choice of the picker's reasoning row, at every size.
-            reveal_composer(page)
             page.locator(".composer .model-select").click()
             page.locator(".model-picker .model-effort-seg button[role='radio']").first.click()
             page.wait_for_timeout(200)
             assert HOST.thinking is False
             page.reload()
             page.wait_for_selector(".composer")
-            reveal_composer(page)
             page.locator(".composer .model-select").click()
             expect(page.locator(".model-picker .model-effort-seg button[role='radio']").first).to_have_attribute("aria-checked", "true")
             print(f"{width}: destructive retry/revert, reload, reasoning off passed")
