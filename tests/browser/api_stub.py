@@ -30,7 +30,7 @@ import urllib.request
 import zipfile
 import zlib
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
+from urllib.parse import parse_qs, quote, unquote, unquote_plus, urlsplit
 
 from calendar_stub import CalendarStub
 from companion_stub import CompanionStub
@@ -1971,6 +1971,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 404, "application/json", json.dumps({"detail": "no picture"})
         return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "attachments":
+        # What was attached in a chat; none here, and a harness that draws the list answers it itself.
+        return 200, "application/json", json.dumps({"attachments": []})
     if len(parts) == 4 and parts[2] == "link-files" and method.upper() == "GET":
         return link_file_bytes(parts[3])
     exported = link_export(method.upper(), parts)
@@ -3535,6 +3538,17 @@ def inbox_attachments(*names: str) -> list[dict]:
 def inbox_list(*names: str, root: str = "/home/you/work/inbox") -> str:
     """The list the host appends for the model, as a message written before the record carried it."""
     return "Attached files:\n" + "\n".join(f"- {root}/{name} ({INBOX_FILES[name][0]}, {len(INBOX_FILES[name][1])} bytes)" for name in names)
+
+
+def attachment_entry(session_id: str, name: str, *, source: str = "operator", seq: int = 1, size: int | None = None, mime: str = "", url: str = "", at: str = "2026-10-30T14:12:21Z") -> dict:
+    """One entry of ``GET /api/sessions/<id>/attachments``: the operator's inbox files serve from the
+    session's attachment route, and anything else is told its ``url`` by the caller."""
+    kept = INBOX_FILES.get(name)
+    return {
+        "id": f"{source}:{seq}:{name}", "source": source, "name": name,
+        "size": size if size is not None else (len(kept[1]) if kept else None), "mime": mime or (kept[0] if kept else "application/octet-stream"),
+        "message_seq": seq, "created_at": at, "url": url or f"/api/sessions/{session_id}/attachments/download?path={quote(name, safe='')}",
+    }
 
 
 def attachment_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] | None:

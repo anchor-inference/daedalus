@@ -38,6 +38,8 @@ from api_stub import (  # noqa: E402
     FILE_TEXT,
     FOCUS_WORDS,
     GATES,
+    INBOX_PDF,
+    INBOX_SHOT,
     VISION_DEFAULT,
     BoardStub,
     FocusStub,
@@ -49,6 +51,7 @@ from api_stub import (  # noqa: E402
     agent_usage,
     attached_media,
     attached_route,
+    attachment_entry,
     attachment_route,
     create_session,
     expect_app,
@@ -909,6 +912,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
     # otherwise take a worktree's search for the workspace's.
+    if request.method == "GET" and rel == f"/api/sessions/{S1}/attachments":
+        # The first chat's attachments: its operator's pictures and document, and a file the agent sent.
+        return respond(route, {"attachments": [
+            attachment_entry(S1, INBOX_SHOT, seq=2, at=ago(minutes=40)), attachment_entry(S1, INBOX_PDF, seq=2, at=ago(minutes=40)),
+            attachment_entry(S1, "weekly-report.csv", source="agent", seq=9, size=2048, mime="text/csv", at=ago(minutes=12), url=f"/api/sessions/{S1}/sent/toolu_send/download?path=weekly-report.csv"),
+        ]})
     served = worktree_route(rel, params) or attached_route(rel, params) or attachment_route(rel, params)
     if served is not None:
         return respond(route, served[1], content_type=served[0])

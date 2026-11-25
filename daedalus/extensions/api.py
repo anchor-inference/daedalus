@@ -178,6 +178,7 @@ from daedalus.host import (
     git_branch,
     launcher_bridge,
     quick_agent,
+    session_attachments,
     subagent_models,
     translation,
 )
@@ -3164,6 +3165,20 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    @api.get("/api/sessions/{session_id}/attachments")
+    async def session_attachments_list(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What was attached in this chat, oldest message first: the files the operator sent and the ones the
+        agent handed over (SendFile, and media placed in an answer), each with the address that serves it.
+
+        Read from the transcript on request, never on a poll: one scan of the session's stored text.
+        """
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        views = await manager.sessions.list_file_views(session_id)
+        sent = [str(call["id"]) for view in views for call in view.get("tool_calls") or [] if call.get("name") == "SendFile" and call.get("id")]
+        answers = await manager.sessions.tool_result_views(session_id, sent) if sent else []
+        return {"attachments": session_attachments.listing(session_id, views, answers)}
 
     @api.get("/api/sessions/{session_id}/attachments/download")
     async def attachment_file(session_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
