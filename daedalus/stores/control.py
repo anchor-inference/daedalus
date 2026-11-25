@@ -18,6 +18,7 @@ from typing import Any, Literal
 import aiosqlite
 
 from daedalus.stores.database import Database
+from daedalus.stores.task_history import attribute, last_seq
 
 
 def now() -> str:
@@ -215,9 +216,14 @@ class ControlStore:
                 raise ControlConflict("the entity has changed", current_revision=current)
             object_id = uuid.uuid5(uuid.NAMESPACE_URL, canonical(key)).hex
             mutation = Mutation(uuid.uuid4().hex, object_id, current + 1)
+            recorded = await last_seq(conn)
             response = await effect(conn, mutation)
             if not isinstance(response, dict) or set(response) & {"receipt_id", "entity_revision"}:
                 raise ValueError("the effect must return domain fields, without receipt metadata")
+            # The cards' history rows the effect's writes left are this command's: the triggers that
+            # write them cannot know who acted.
+            await attribute(conn, recorded, actor_kind=principal.origin_class, actor_id=principal.actor_id, operation=operation,
+                            task_id=entity.id if entity.kind == "task" else str(response.get("task_id") or "") or None)
             # Legacy writes advance revisions through triggers. BEGIN IMMEDIATE keeps those
             # intermediate values private; a compound command publishes one revision, matching
             # the mutation used by its immutable records and events.

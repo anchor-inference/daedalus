@@ -34,6 +34,12 @@ take only paths the list shows, exactly, are refused with **409** while a run of
 another chat in the same folder — is in progress or waits on a question, and publish a
 `session.changes` event. git runs where the chat's tools run, through that environment's terminal
 daemon, with the repository's hooks, external diffs, pager, signing program and prompts switched off.
+Whether to offer the tab at all needs no git: the session detail (`GET /api/sessions/{id}`) carries
+`repository` beside `branch`, read from the folder's `.git` and `HEAD` files on every poll — `true` in a
+repository (a detached `HEAD` included, with `branch` null), `false` outside one, `null` while it is not
+known. For a chat working in a host folder both come from git on the host through the terminal daemon,
+kept for fifteen seconds and asked again in the background, so they are `null` until the host first
+answers; a remote conversation's are always `null`.
 
 **The queue in front of a working agent.** A message sent to a session that is already running is a
 steer: it waits in a queue and is placed in front of the model's next call rather than starting a
@@ -192,14 +198,25 @@ agent adds is drawn on the board of the project it works in. `GET /api/projects/
 (`objective`, `deliverable`, `boundaries`, `done_when`) and its `assignee` with that staff member's
 live status; `needs_you` is the project's open requests routed to the operator, read from the
 requests themselves each time, so an answer from anywhere ends one. `POST` to the same address adds a
-task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority"}`; `PUT /api/board/{id}`
+task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority", "status"?}`; without
+`status` its dependencies decide (`todo`, or `blocked` while one is open), and with it the task is made
+in that column only where a move would take it: `todo` with nothing open before it, `blocked` always,
+`doing` for a task you keep for yourself (`assignee_operator`) with nothing open; `review`, `done` and
+`dropped` are refused (**409**, with the sentence the move gets). `PUT /api/board/{id}`
 also takes `assignee_staff_id` (`""` unassigns), `brief` (the parts sent) and `depends_on`; `POST
 /api/board/{id}/accept` moves a task from review to done, and on a task with a staff branch it is the
 merge below (**409** when it is not in review, or the merge is refused); `GET /api/board?project=<id>`
 is one project's tasks. A project's staff
 and orchestrator see its whole board, move only their own tasks and never to done; an ordinary agent
 keeps its own board, without the team's tasks. Each change is a `task.created`, `task.moved`,
-`task.assigned` or `task.accepted` event naming its `actor`.
+`task.assigned` or `task.accepted` event naming its `actor`. `GET /api/board/{id}/events?limit=` is a
+card's history, oldest first, from a table written with each change whichever path made it — a member's
+report into review, a verdict, a dependent a close freed and a CI or contract change that sent it back
+included, though those announce no event: one line per change of its status (`task.moved`), owner
+(`task.assigned`), accepted result, title, priority or due date (`task.changed` with `field`), and its
+removal, each with `actor` (`system` when no command made it), the command's `operation`, `cause` for a
+dependent moved by another card, and `backfilled` for a line reconstructed from what was left when the
+table was made, before which the card's history was not recorded.
 
 **A card's contract and its acceptance.** A project task also carries `requirements`: the conditions
 all of its work must meet, each numbered (`R1` …) with its `text`, `kind` (`quality`, `scope`,

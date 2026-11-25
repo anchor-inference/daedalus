@@ -170,6 +170,7 @@ from daedalus.extensions.services import (
     dial_address,
     unreachable_hint,
 )
+from daedalus.extensions.session_heads import HostHeads
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
@@ -247,7 +248,7 @@ from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
 from daedalus.terminals.gateway import Gateway, SocketGone, ticket_who
-from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec
+from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec, is_device_env
 from daedalus.terminals.model import Owner as TerminalOwner
 from daedalus.tools import TOOL_GROUPS, websearch
 from daedalus.transport.telegram.front import TelegramBusy, TelegramOutbox, TelegramRefused
@@ -1549,6 +1550,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             await prompt_change_planner.close()
 
     api = FastAPI(title="Daedalus", docs_url=None, redoc_url=None, lifespan=lifespan)
+    # The branch and the repository of chats working in a folder on the other side of the terminal
+    # bridge, served from memory to the session detail's poll and read again in the background.
+    host_heads = api.state.host_heads = HostHeads(lambda: app.extensions.get("terminals"))
     # A session page is JSON and compresses about fivefold; over a phone connection that is the
     # difference the operator feels. The event stream is excluded by content type, so a token
     # still leaves the process the moment it arrives.
@@ -2572,12 +2576,24 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         default = app.config.default_preset()
         return default[1].provider if default else ""
 
-    def _session_branch(state: Any) -> str | None:
-        """The branch the session's working folder is on. A session working in a folder of its own under
-        the workspaces root reads only inside it: the root may itself sit in some repository."""
+    def _session_head(state: Any) -> git_branch.Head:
+        """Whether the session's working folder is in a repository, and the branch it is on. A session
+        working in a folder of its own under the workspaces root reads only inside it: the root may
+        itself sit in some repository. A host folder seen from the container is read on the host by
+        git through the terminal daemon, as the chat's changes are, and served from what that last
+        said (``HostHeads``); a remote conversation's machine is out of every daemon's reach."""
+        env = manager.env_of(state.session.id, state.metadata, state.project)
+        if env != manager.projects.local_env:
+            if is_device_env(env):
+                return git_branch.UNKNOWN
+            try:
+                directory = manager.folder_workspace(state.session.id, state.metadata, state.project)
+            except RuntimeError:
+                return git_branch.UNKNOWN
+            return host_heads.peek(state.session.id, env, str(directory))
         folder = manager.work_dir(state)
         root = app.settings.workspaces_dir
-        return git_branch.branch_of(folder, stop=root if folder.is_relative_to(root) else None)
+        return git_branch.head_of(folder, stop=root if folder.is_relative_to(root) else None)
 
     def _session_folders(state: Any) -> list[dict[str, Any]]:
         """The folders of its project the session's file pane may open: the ones its walls let it read.
@@ -2660,6 +2676,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         context = await manager.context_status(state)
         leader = await manager.get_state(str(state.metadata["subagent_of"])) if state.metadata.get("subagent_of") else None
         subagents = await app.extensions["subagents"].views(session_id, describe=subagent_settings) if "subagents" in app.extensions else []
+        head = _session_head(state)
         return {
             "context": context,
             "id": session_id,
@@ -2677,10 +2694,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # When the run in flight began, on the wall clock; null between runs. A run that waited for the
             # operator's answer counts from the resume, as the run-time cap does.
             "run_started_at": since.isoformat() if (since := manager.run_since(session_id)) is not None else None,
-            # The branch the working folder is on, from the repository's HEAD file and not from git itself:
-            # this is read on every poll. Null outside a repository, on a detached HEAD, and for a session
-            # working in a folder on the host, which this process cannot see.
-            "branch": _session_branch(state),
+            # The branch the working folder is on and whether it is in a repository at all, from the
+            # repository's HEAD file and not from git itself: this is read on every poll, and the app offers
+            # the Changes tool by ``repository`` instead of asking git for the changes of every chat opened.
+            # Branch null outside a repository and on a detached HEAD; both null when not known, which for
+            # a host folder is until the host has first answered.
+            "branch": head.branch,
+            "repository": head.repository,
             # The operator's messages acknowledged and still with the translator: drawn as translating after
             # a reload too, not only by the window that sent them.
             "translating": manager.translating(session_id),

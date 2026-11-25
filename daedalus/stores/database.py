@@ -85,6 +85,8 @@ from daedalus.stores.schedule_file_pin_schema import MIGRATION as SCHEDULE_FILE_
 from daedalus.stores.schedule_proposal_schema import MIGRATION as SCHEDULE_PROPOSAL_MIGRATION
 from daedalus.stores.staff_context_schema import MIGRATION as STAFF_CONTEXT_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.task_history import SQL as TASK_HISTORY_SQL
+from daedalus.stores.task_history import backfill as backfill_task_history
 from daedalus.stores.update_drain_schema import MIGRATION as UPDATE_DRAIN_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
@@ -4182,6 +4184,12 @@ MIGRATIONS.append(DataMigration("SELECT 1;", _task_extras))
 # ones started later and the team's members among them, reads the same list, and it goes with the
 # project: the foreign key removes the rows when the project is removed.
 MIGRATIONS.append(PROJECT_APPROVAL_MIGRATION)
+
+# A card's own history, written by triggers in the transaction of each change (``task_history``),
+# instead of read back from the event ring, which keeps a week and never held the changes made
+# without an event. The cards that exist get what can still be told of them, marked backfilled; the
+# ring's index by task goes, since nothing reads the ring by task any more.
+MIGRATIONS.append(DataMigration(TASK_HISTORY_SQL, backfill_task_history))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
