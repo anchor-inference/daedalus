@@ -663,7 +663,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
             <PrivateChip on={secret} onClear={() => setSecret(false)} />
             {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} />{t("newagent.loop")}<Icon name="close" size={12} /></button>}
             <div className="composer-tools">
-              <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
+              <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose}
                 effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
               {asr?.configured && <MicButton note={note} />}
               {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
@@ -712,7 +712,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} /><Icon name="close" size={12} /></button>}
           {offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
-            <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
+            <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose}
               effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
             {asr?.configured && <MicButton note={note} />}
             <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || offline || idle || blocked} aria-label={sendLabel} title={sendLabel}><Icon name="up" /></button>

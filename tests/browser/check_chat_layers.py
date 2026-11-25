@@ -32,7 +32,7 @@ def main() -> None:
                 if collapsed:
                     page.locator(".sidebar button[aria-label^='Fold the sidebar']").click()
                 page.locator(".model-select").click()
-                menu = page.locator(".model-menu")
+                menu = page.locator(".menu.model-picker")
                 expect(menu).to_be_visible()
                 expect(menu.locator("button").first).to_be_visible()
                 page.wait_for_timeout(250)

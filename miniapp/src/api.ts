@@ -2435,6 +2435,8 @@ export type Preset = {
   openrouter_providers_gone?: string[];
   /** The subscription account the model's calls use; empty for the subscription's default account. */
   account?: string;
+  /** Starred by the operator: the model picker lists it under Favourites, ahead of the providers. */
+  favourite?: boolean;
 };
 
 /** The operator's levels for what the agent does in the world (`[action_rules]`). */

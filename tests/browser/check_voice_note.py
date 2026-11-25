@@ -154,7 +154,7 @@ def record(page: Page, seconds: float = 1.3) -> None:
         mic.click()
     else:
         page.locator(".composer .plus").click()
-        page.locator(".plus-menu [role=menuitem]").filter(has=page.locator(".ic-mic")).click()
+        page.locator(".attach-menu [data-action='record']").click()
     page.wait_for_selector(".voicebar[data-phase=recording]", timeout=5000)
     page.wait_for_timeout(int(seconds * 1000))
 

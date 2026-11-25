@@ -342,6 +342,23 @@ def blocked_turn() -> list[dict]:
     ]
 
 
+ASK_KEY = "a5c0ffee0042"
+
+
+def asked_turn() -> list[dict]:
+    """The bakery chat waiting on the operator's word: the agent wants to copy the built site onto the
+    shop's server, a command outside the project's folders, and the policy asks (the host's words for
+    the question, which the app reads its card from)."""
+    deploy = {"command": "rsync -az dist/ deploy@shop:/var/www/menu/"}
+    said = (f"Refused: needs the operator's approval: {word('ask.reason')} (rule egress.allowlist). Approval key: {ASK_KEY}. "
+            "End your turn now; the operator answers on the card.")
+    return [
+        {"role": "user", "seq": 413, "text": word("ask.ask"), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=2)},
+        {"role": "assistant", "seq": 414, "text": "", "thinking": "", "tool_calls": [{"id": "toolu_deploy", "name": "Exec", "arguments": deploy}], "tool_results": [], "created_at": ago(minutes=1, seconds=40)},
+        {"role": "tool", "seq": 415, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "toolu_deploy", "content": said, "is_error": True}], "created_at": ago(minutes=1, seconds=38)},
+    ]
+
+
 def detail(id_: str) -> dict:
     s = next(x for x in SESSIONS if x["id"] == id_)
     messages = MESSAGES if id_ == S1 else MESSAGES_S2 if id_ == S2 else MESSAGES_S3 if id_ == S3 else subagent_messages(id_) if s["metadata"].get("subagent_of") == S1 else [{"role": "user", "seq": 1, "text": "Start.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}, {"role": "assistant", "seq": 2, "text": "Started. Waiting for the sheet.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}]
@@ -359,6 +376,10 @@ def detail(id_: str) -> dict:
     blocked = id_ == S1 and getattr(stub, "blocked", False)
     if blocked:
         messages = [*messages, *blocked_turn()]
+    # The composer's approval card (``approval``): a deploy outside the project, waiting on the operator.
+    asked = id_ == S1 and getattr(stub, "approval", False) and not blocked
+    if asked:
+        messages = [*messages, *asked_turn()]
     helper = bool(s["metadata"].get("subagent_of"))
     running = (id_ == S1 and getattr(stub, "running", False)) or (helper and s["status"] == "running")
     status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
@@ -366,7 +387,7 @@ def detail(id_: str) -> dict:
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
         # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
         "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None,
-        "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [],
+        "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [ASK_KEY] if asked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
         "workspace_sessions": [{"id": S2, "title": "Bakery site: photos"}] if id_ == S1 else [{"id": S1, "title": "Bakery site"}] if id_ == S2 else [],
@@ -629,9 +650,9 @@ SETTINGS = {
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
     "presets": {
-        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
+        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "favourite": True, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
         "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
-        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
+        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "favourite": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
         "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "context_window_source": "provider", "max_output_tokens": 4096},
     },
     "on_demand_defaults": {"deepseek-flash": True, "claude-opus-5": True, "gpt-5.6-luna": True, "qwen-local": False},
@@ -936,6 +957,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
     # otherwise take a worktree's search for the workspace's.
+    if request.method == "GET" and rel == f"/api/sessions/{S1}/policy/similar/{ASK_KEY}":
+        # What the approval card offers for the deploy: calls like it, for the bakery project.
+        return respond(route, {"similar": {"tool": "Exec", "rule": "egress.allowlist", "kind": "prefix", "value": "rsync", "hosts": ["shop"], "label": "rsync* (shop)"}, "server": None,
+                               "project": {"available": True, "project": {"id": PROJECTS[0]["id"], "name": PROJECTS[0]["name"]}}})
     if request.method == "GET" and rel == f"/api/sessions/{S1}/attachments":
         # The first chat's attachments: its operator's pictures and document, and a file the agent sent.
         return respond(route, {"attachments": [
@@ -1308,7 +1333,8 @@ WORDS = {
            "agent.name": "Night watch", "agent.task": "Every morning, read the night's log of the shop and tell me about new errors. Count them like this:",
            "settings.find": "subagent", "markup.note": "bigger",
            "block.ask": "Check the menu at a phone's width as well.", "block.reason": "the operator asked to check the menu, not to publish it",
-           "block.said": "The auto-review stopped the push; the card under this has Allow anyway if you want it out."},
+           "block.said": "The auto-review stopped the push; the card under this has Allow anyway if you want it out.",
+           "ask.ask": "Put the new menu on the shop's site.", "ask.reason": "a host outside the allowlist: shop"},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
            "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
            "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены.",
@@ -1316,7 +1342,8 @@ WORDS = {
            "agent.name": "Ночной дозор", "agent.task": "Каждое утро читай ночной лог магазина и сообщай о новых ошибках. Считай их так:",
            "settings.find": "субагент", "markup.note": "крупнее",
            "block.ask": "Проверь меню ещё и на ширине телефона.", "block.reason": "оператор просил проверить меню, а не публиковать его",
-           "block.said": "Автопроверка остановила публикацию; на карточке ниже есть «Разрешить всё равно», если она всё-таки нужна."},
+           "block.said": "Автопроверка остановила публикацию; на карточке ниже есть «Разрешить всё равно», если она всё-таки нужна.",
+           "ask.ask": "Выложи новое меню на сайт магазина.", "ask.reason": "адрес вне разрешённого списка: shop"},
 }
 
 
@@ -2871,7 +2898,7 @@ def run_features() -> int:
         shot(page, "settings-mcp", "settings/mcp", wait=".settings-stage", before=mcp_settings, settle=700)
 
         def review_block(pg: Page) -> None:
-            pg.wait_for_selector('.composer .dock.approval[data-kind="blocked"]', timeout=10000)
+            pg.wait_for_selector('.composer .approval-card[data-kind="blocked"]', timeout=10000)
 
         stub.blocked = True  # type: ignore[attr-defined]
         try:
@@ -3107,17 +3134,17 @@ def run_browser() -> int:
 
 
 def open_toggles(page: Page) -> None:
-    """The composer's toggles chip, opened: the YAGNI and autopilot switches."""
-    if not page.locator(".composer .composer-mode").is_visible():
+    """The composer's access chip, opened: full access, YAGNI and autopilot, and the agent's language."""
+    if not page.locator(".composer .composer-access").is_visible():
         open_phone_composer(page)
-    page.locator(".composer .composer-mode").click()
-    page.wait_for_selector(".mode-menu .mode-row, .mode-sheet .mode-row", timeout=5000)
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".menu.access-menu .menu-row", timeout=5000)
 
 
 def open_phone_composer(page: Page) -> None:
     # The phone hides its toolbar until there is a draft, so an empty field makes an invisible chip.
     page.locator(".composer .composer-field").fill("Write the delivery page.")
-    page.wait_for_selector(".composer .composer-mode:visible")
+    page.wait_for_selector(".composer .composer-access:visible")
 
 
 def queued_messages() -> list[dict]:
@@ -3128,7 +3155,7 @@ def queued_messages() -> list[dict]:
 
 
 def run_modes() -> int:
-    """The toggles chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
+    """The access chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
     written during a run waits in (``ONLY=modes``)."""
     OUT.mkdir(parents=True, exist_ok=True)
     stub.yagni = True  # type: ignore[attr-defined]
@@ -3139,7 +3166,7 @@ def run_modes() -> int:
             desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
             page = desk.new_page()
             page.route("**/api/**", stub)
-            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_toggles)
+            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-access", before=open_toggles)
             desk.close()
             phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = phone.new_page()

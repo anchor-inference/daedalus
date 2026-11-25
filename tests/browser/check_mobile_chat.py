@@ -48,9 +48,9 @@ def run() -> None:
             page.locator(".composer .composer-field").fill("")
             assert page.locator(".composer-box").bounding_box()["height"] <= 130
             page.locator(".composer .model-select").click()
-            # Effort is one row of five choices in the phone's model sheet, each drawn 32 px tall and
-            # 44 px to the finger through its ::after.
-            choices = page.locator(".sheet .ph-model-effort button[role='radio']")
+            # Effort is one row of five choices in the picker's sheet, each drawn 32 px tall and 44 px to
+            # the finger through its ::after.
+            choices = page.locator(".sheet .model-effort-seg button[role='radio']")
             choices.first.wait_for(timeout=5000)
             assert choices.count() == 5
             for choice in choices.all():
@@ -63,7 +63,10 @@ def run() -> None:
             assert HOST.effort == target
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-settings-{width}.png")
-            assert page.locator(".model-list").count() == 0
+            # The pick leaves the sheet open on the choice it made; closing it gives the chip the focus back.
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            assert page.locator(".model-picker").count() == 0
             assert page.locator(".model-select").evaluate("el => el === document.activeElement")
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-chat-{width}.png")

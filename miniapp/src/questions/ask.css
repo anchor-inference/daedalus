@@ -6,7 +6,8 @@
 
 /* Twenty options with descriptions is what the schema allows: the card stops at most of the window
    and its question scrolls between the chips and the button, which both stay in sight. */
-.ask { display: flex; flex-direction: column; gap: var(--space-3); max-height: 72vh; padding: 14px 16px 12px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--drop-sm); border-radius: var(--radius-md); min-width: 0; }
+/* The composer's own corners and edge, so the question and the field under it read as one place to answer. */
+.ask { display: flex; flex-direction: column; gap: var(--space-3); max-height: 72vh; padding: 16px 18px 14px; background: var(--card); border: 1px solid var(--line-strong); box-shadow: none; border-radius: var(--radius-xl); min-width: 0; }
 .ask-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
 .ask-head .ic { flex: none; }
 .ask-eyebrow { font-weight: 500; color: var(--fg-2); }

@@ -1,4 +1,3 @@
-export { ControlTrigger } from "./control-trigger";
 export { ChipRow, LangPicker, Segmented, Select, Skeleton, Switch } from "./components";
 export { PageHeader, go, screenTitle, useMedia } from "../shell";
 export { Sheet, Popover, OverflowMenu, confirmDialog } from "./dialogs";

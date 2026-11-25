@@ -421,87 +421,9 @@ input.field[type="range"] {
 .run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
 .run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
-/* Composer card: the text owns its row; controls never compete with its width. */
-.composer { gap:var(--space-2); }
-.composer-box { gap:var(--space-2); padding:var(--space-2); border-radius:var(--radius-lg); transition:none; }
-.composer-box .composer-field { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); max-height:calc(8lh + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
-.composer-row { align-items:center; flex-wrap:nowrap; gap:var(--space-1); }
-/* The toolbar's controls are ghosts: a word, and a wash when the pointer is on it. As bordered and
-   filled pills beside the field's own edge they were four boxes in a box. A state (an armed mode, a
-   translation under way, a fallback model) is said by the ink of its word, never by a fill. */
-.composer-row > .iconbtn.plus { margin:0; }
-.composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); }
-/* The mode chip stays on every width, a running phone included: it is the one place that says the
-   session plans, or holds to YAGNI, and the model chip is the one that gives way when the row is short. */
-.composer-mode, .agentlang-chip { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.composer-mode:hover, .agentlang-chip:hover, .composer-mode.on, .agentlang-chip.on { color:var(--fg); }
-/* Only the ones that open something take the wash: a mode shown as a plain word is not a button. */
-button.composer-mode:hover, .composer-mode[aria-expanded="true"], .agentlang-chip:hover, .agentlang-chip[aria-expanded="true"] { background:var(--surface-2); }
-.composer-mode .ic { flex:none; color:var(--fg-3); }
-/* A mode that is on is said in ink; the accent is kept for what is running. */
-.composer-mode .mode-yagni, .composer-mode .mode-autopilot { flex:none; color:var(--fg); font-size:var(--fs-11); font-weight:600; }
-/* The longer word is the one that gives way when both switches are on in a narrow composer. */
-.composer-mode .mode-autopilot { flex:0 1 auto; min-width:0; }
-/* The agent's language: the pair it translates between in the accent, the operator's code alone muted. */
-.agentlang-chip { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
-.agentlang-chip.translating, .composer-row .agentlang-chip.translating { color:var(--live); }
-.agentlang-chip.off, .composer-row .agentlang-chip.off { color:var(--fg-3); }
-.mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
-.mode-list { display:flex; flex-direction:column; }
-/* The one heading of the composer's menus: model and effort open under the same small title. */
 .menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
-.model-heading { display:flex; align-items:center; gap:10px; }
-.model-legend { display:inline-flex; align-items:center; gap:3px; color:var(--fg-3); font-size:var(--fs-11); white-space:nowrap; }
-.model-legend .model-kind { width:auto; height:auto; min-width:0; font-size:var(--fs-11); }
-.mode-row .model-text .sub { white-space:normal; }
-.mode-switch { flex:none; position:relative; width:28px; height:16px; border-radius:8px; background:var(--surface-4); transition:background var(--t-fast); }
-.mode-switch i { position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--card); transition:transform var(--t-fast), background var(--t-fast); }
-/* On is ink, as every switch in the app is. */
-.mode-switch.on { background:var(--primary); }
-.mode-switch.on i { transform:translateX(12px); background:var(--primary-ink); }
-/* Bypass is drawn in the danger colour wherever it shows: the switch, the chip that wears it, the header's mark. */
-.mode-switch.danger.on { background:var(--bad); }
-.mode-switch.danger.on i { background:var(--card); }
-.composer-mode .mode-bypass { flex:0 1 auto; min-width:0; color:var(--bad); font-size:var(--fs-11); font-weight:600; }
+/* The mark of a session with every check bypassed, beside its title in the header. */
 .bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
-.composer-tools { margin-left:auto; gap:var(--space-1); }
-.composer-tools .roundbtn { margin-left:0; }
-.composer-tools .ctx-ring { display:inline-flex; flex:none; }
-.effort-menu .effort-options { margin:0; }
-.composer-place { display:flex; gap:var(--space-2); min-width:0; padding-inline:var(--space-2); }
-.composer-place-chip { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; color:var(--fg-3); font-size:var(--fs-11); }
-.composer-place-chip .ic { flex:none; }
-/* In a narrow composer the controls are pills with room inside them, in a smaller type than the
-   field, the way a phone's chat app draws them. The mode chip keeps its whole name (it was shrunk to
-   "Age…" and hugged its label); the model and its effort share one pill that takes what is left, and
-   the model name is what is cut, never the effort. These sit after the composer's own rules, which
-   they would otherwise lose to at equal specificity. */
-@container (max-width: 560px) {
-  .composer-row .composer-mode, .composer-row .agentlang-chip { flex:none; max-width:45%; padding-inline:12px; gap:6px; font-size:var(--fs-12); }
-  .composer-row .composer-mode .ic { display:none; }
-  .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
-  .composer-row .model-select > .ic:first-child { display:none; }
-  .composer-row .model-select .model-effort { flex:none; white-space:nowrap; }
-  /* A fallback in a narrow pill: both names at once do not fit on a line, so they stack, the
-     configured one smaller under the stand-in, and the effort gives up its place (it is in the sheet). */
-  .composer-row .model-select .model-label.model-fallback { flex-direction:column; align-items:flex-start; gap:0; line-height:1.15; }
-  .composer-row .model-select .model-to, .composer-row .model-select .model-from { max-width:100%; }
-  .composer-row .model-select .model-from { font-size:var(--fs-11); }
-  .composer-row .model-select.attn .model-effort { display:none; }
-  /* The effort stacks under the name, so the pill is as wide as the longer of the two rather than
-     both: side by side, "medium" took the width the name needed, and once the language chip joined
-     the row a phone read "clau…" with the effort lying on the microphone. */
-  .composer-row .model-select:not(.attn) { display:inline-grid; grid-template-columns:minmax(0, 1fr) auto; align-content:center; column-gap:4px; row-gap:0; line-height:1.15; }
-  .composer-row .model-select:not(.attn) > .model-label { grid-area:1 / 1; }
-  .composer-row .model-select:not(.attn) > .model-effort { grid-area:2 / 1; font-size:var(--fs-11); }
-  .composer-row .model-select:not(.attn) > .ic:last-child { grid-area:1 / 2 / 3 / 3; align-self:center; }
-  /* The language chip keeps the agent's code alone ("EN"), in the accent that says it translates;
-     the pair is in its title and its menu. A phone has no chip at all (the + sheet holds it). */
-  .composer-row .agentlang-chip .agentlang-to { display:none; }
-}
-@media (max-width: 1023px) {
-  .composer-box .composer-field { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
-}
 @media (min-width: 1024px) {
   .composer-box, .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
 }
@@ -518,12 +440,6 @@ button.composer-mode:hover, .composer-mode[aria-expanded="true"], .agentlang-chi
 .folder-add .ic, .pagehead-actions .iconbtn .ic { display:block; margin:auto; }
 @media (max-width:600px) { .folder-top .folder-add { min-width:44px; min-height:var(--row-h-touch); padding:8px; } }
 
-.effort-options { border:0; padding:0; margin:0 0 var(--space-3); min-width:0; }
-.effort-options legend { width:100%; }
-/* An effort row is a model row; its radio lies invisibly over it (effortselect.tsx says why). */
-.effort-option { position:relative; }
-.effort-option input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
-.effort-option:has(input:focus-visible) { background:var(--surface-3); }
 .turn-content { display:contents; }
 .turn-content[hidden] { display:none; }
 .loop-turn { border-top:1px solid var(--line-strong); padding-top:var(--space-3); }
@@ -551,9 +467,8 @@ button.composer-mode:hover, .composer-mode[aria-expanded="true"], .agentlang-chi
   .msg-actions .iconbtn.small, .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
   .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
   .msg-actions { opacity:1; }
-  .composer-row .model-select, .composer-row .composer-mode, .composer-row .agentlang-chip { min-height:var(--row-h-touch); }
+  .composer-row .model-select, .composer-row .composer-access { min-height:var(--row-h-touch); }
   .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
-  .composer-tools .ctx-pct { font-size:var(--fs-12); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }
   .artifact-open-panel { display:none; }
   .artifact-open-full { display:contents; }

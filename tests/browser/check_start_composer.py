@@ -31,7 +31,7 @@ from screenshots import S1, UNHANDLED, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 HEARD = "buy rye flour"
-WORDS = {"en": {"mic": "record a voice note", "low": "low", "high": "high"}, "ru": {"mic": "записать голосовую заметку", "low": "низкая", "high": "высокая"}}
+WORDS = {"en": {"mic": "record a voice note", "low": "Low", "high": "High"}, "ru": {"mic": "записать голосовую заметку", "low": "Низкое", "high": "Высокое"}}
 ASR = {"configured": True, "reason": "", "provider": "openrouter", "model": "asr", "max_seconds": 600, "autosend": False, "transcriber": "cloud", "fallback": ""}
 PRESET = {"provider": "openai", "model": "gpt-6-luna", "label": "gpt-6-luna", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 400000, "max_output_tokens": 32000}
 
@@ -99,16 +99,16 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     # The effort: the preset's own first, then a pick (from the title's sheet on a phone).
     model = composer.locator(".model-select")
     expect(model.locator(".model-effort")).to_contain_text(words["high"])
+    # The reasoning is a row of the picker, which stays open on a pick; Escape puts it away.
     if phone:
         page.locator(".ph-top .ph-top-tb").click()
-        page.locator(".sheet .ph-model-effort button[role='radio']").nth(1).click()
-        page.wait_for_timeout(200)
     else:
         model.click()
-        page.locator(".effort-entry").click()
-        page.locator(".effort-menu .effort-option input[value='low']").click()
+    page.locator(".model-picker .model-effort-seg button[role='radio']").nth(1).click()
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
     expect(model.locator(".model-effort")).to_contain_text(words["low"])
-    expect(page.locator(".model-list")).to_have_count(0)
+    expect(page.locator(".model-picker")).to_have_count(0)
 
     # Switching from an empty field to typed Send must reserve exactly the same toolbar geometry.
     field = composer.locator(".composer-field")

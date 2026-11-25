@@ -34,10 +34,10 @@ LONG_BRIEF = (
 WORDS = {
     "en": {"summary": ["3 running", "1 done", "1 failed"], "working": "working", "question": "has a question", "parked": "parked",
            "done": "done", "failed": "failed", "stopped": "stopped", "step": "step 14", "delivered": "Report delivered", "held": "report waiting",
-           "empty": "No subagents yet", "effort": "high"},
+           "empty": "No subagents yet", "effort": "High"},
     "ru": {"summary": ["работают: 3", "готово: 1", "сбоев: 1"], "working": "работает", "question": "задал вопрос", "parked": "на паузе",
            "done": "готово", "failed": "сбой", "stopped": "остановлен", "step": "шаг 14", "delivered": "Отчёт доставлен", "held": "отчёт ждёт",
-           "empty": "Субагентов пока нет", "effort": "высокая"},
+           "empty": "Субагентов пока нет", "effort": "Высокое"},
 }
 
 plain_subagents_of = screenshots.subagents_of

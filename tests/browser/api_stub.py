@@ -2095,6 +2095,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # Asking the sources again for a preset's window: the shared host finds what the settings
         # pictures already say, so the screen does not move under a check that presses it.
         return 200, "application/json", json.dumps({"window": 128000, "source": "default", "sources": {"provider": None, "catalog": None, "table": None, "error": None}})
+    if method.upper() == "PUT" and len(path.split("/")) == 4 and path.startswith("/api/presets/"):
+        # The model picker's star: the shared host takes it and the picker keeps what it drew; the
+        # settings pictures, which re-read the presets, answer this route with their own copy.
+        return 200, "application/json", json.dumps({"ok": True})
     if path.startswith("/api/recurring/card/"):
         # The card under an agent's ScheduleCreate; the shared host keeps none, and a harness that
         # draws one (check_schedule_card.py) answers it itself.
@@ -2559,9 +2563,9 @@ def field_text(locator) -> str:  # type: ignore[no-untyped-def]
 
 
 def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
-    """On a phone the composer rests as one row; the model, the mode and the context ring are in the
+    """On a phone the composer rests as one row; the model, the access chip and the context are in the
     toolbar it opens onto when its field has the reader. A no-op where they already show."""
-    if not page.locator(".composer .model-select, .composer .composer-mode").first.is_visible():
+    if not page.locator(".composer .model-select, .composer .composer-access").first.is_visible():
         page.locator(".composer .composer-field").first.click()
         page.wait_for_timeout(150)
 

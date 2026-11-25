@@ -1,4 +1,9 @@
-"""Nested effort keyboard navigation stays within the model menu and uses its existing API."""
+"""The reasoning is one row of choices inside the model picker, at every size, through its existing API.
+
+It was a child panel that floated beside the picker and was pushed against the foot of the window, away
+from its row. Now: Off and the four efforts in one segmented row, the arrows walk them, a pick reaches
+the host as the session's thinking and effort and leaves the box open and the same size.
+"""
 from __future__ import annotations
 
 import sys
@@ -22,40 +27,36 @@ def main() -> int:
             trigger = page.locator(".composer .model-select")
             reveal_composer(page)
             trigger.click()
-            if width < 1024:
-                # A phone's model sheet holds effort as one row of five choices, picked with a tap.
-                choices = page.locator(".ph-model-effort button[role='radio']")
-                expect(choices).to_have_count(5)
-                before = len(composer.posts("/model"))
-                choices.last.click()
-                expect(page.locator(".model-list")).to_have_count(0)
-                assert composer.reached(page, "/model", before, "phone effort selection", [])
-                assert composer.posts("/model")[-1][2] == {"thinking": True, "reasoning_effort": "xhigh"}
-                context.close()
-                print(f"unified effort {width}: ok")
-                continue
-            entry = page.locator(".effort-entry")
-            entry.wait_for()
-            entry.focus()
-            page.keyboard.press("ArrowRight")
-            expect(page.locator(".effort-submenu input:checked")).to_be_focused()
-            expect(page.locator(".effort-submenu")).to_be_visible()
-            page.wait_for_timeout(100)
-            bounds = page.locator(".effort-submenu").bounding_box()
-            assert bounds and bounds["y"] >= 8 and bounds["y"] + bounds["height"] <= page.viewport_size["height"] - 7, "Opening effort must reveal the options in a short window"
+            page.wait_for_selector(".model-picker [role=option]")
+            choices = page.locator(".model-picker .model-effort-seg [role='radio']")
+            expect(choices).to_have_count(5)
+            expect(choices).to_have_text(["Off", "Low", "Medium", "High", "Max"])
+            expect(choices.nth(3)).to_have_attribute("aria-checked", "true")
+            size = page.locator(".menu.model-picker").bounding_box() if width > 1024 else None
             before = len(composer.posts("/model"))
+            if width < 1024:
+                choices.last.click()
+            else:
+                # From the keyboard: Tab from the search reaches the chosen effort, the arrow moves on.
+                page.keyboard.press("Tab")
+                expect(choices.nth(3)).to_be_focused()
+                page.keyboard.press("ArrowRight")
+                expect(choices.nth(4)).to_be_focused()
+                page.keyboard.press("Enter")
+            assert composer.reached(page, "/model", before, f"{width} effort selection", [])
+            assert composer.posts("/model")[-1][2] == {"thinking": True, "reasoning_effort": "xhigh"}, composer.posts("/model")[-1]
+            # A pick leaves the box open, the same size, with the choice it made.
+            expect(page.locator(".menu.model-picker")).to_have_count(1)
+            expect(choices.nth(4)).to_have_attribute("aria-checked", "true")
+            if size:
+                after = page.locator(".menu.model-picker").bounding_box()
+                assert after and (round(after["width"]), round(after["height"])) == (round(size["width"]), round(size["height"])), f"the box changed size: {size} -> {after}"
+            choices.first.click()
+            assert composer.posts("/model")[-1][2] == {"thinking": False}, composer.posts("/model")[-1]
             page.keyboard.press("Escape")
-            expect(page.locator(".effort-submenu")).to_have_count(0)
-            expect(page.locator(".model-list")).to_have_count(1)
-            expect(entry).to_be_focused()
-            assert len(composer.posts("/model")) == before, "Opening and closing effort must not change it"
-            page.keyboard.press("ArrowRight")
-            page.keyboard.press("ArrowDown")
-            expect(page.locator(".model-list")).to_have_count(0)
-            assert composer.reached(page, "/model", before, "keyboard effort selection", [])
-            assert composer.posts("/model")[-1][2] == {"thinking": True, "reasoning_effort": "xhigh"}
+            expect(page.locator(".model-picker")).to_have_count(0)
             context.close()
-            print(f"unified effort keyboard {width}: ok")
+            print(f"unified effort {width}: ok")
         browser.close()
     return composer.UNHANDLED.report()
 

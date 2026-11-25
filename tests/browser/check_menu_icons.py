@@ -65,8 +65,8 @@ TABS = """
 """
 
 MENU_ROWS = ":scope > button, :scope > .menu-row"
-# The model picker's rows that lead with an icon of their own: Free, Effort, the account and Add model.
-PICKER_ROWS = ":scope .provider-row:not([data-provider]), :scope .effort-entry, :scope .model-add"
+# The access menu's rows: its switches and the agent's language under them, in one column of words.
+ACCESS_ROWS = ":scope > .menu-row, :scope .access-lang-row > .menu-row"
 
 problems: list[str] = []
 
@@ -123,9 +123,9 @@ def desktop(page: Page, scheme: str) -> None:
     page.wait_for_selector(".context-menu")
     judge(f"{scheme} text right click", rows(page, ".context-menu"), icons=4)
     page.keyboard.press("Escape")
-    page.get_by_role("button", name="Model for this session").click()
-    page.wait_for_selector(".model-list")
-    judge(f"{scheme} model picker", rows(page, ".model-list", PICKER_ROWS), icons=3)
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".menu.access-menu")
+    judge(f"{scheme} access menu", rows(page, ".menu.access-menu", ACCESS_ROWS), icons=0)
     page.keyboard.press("Escape")
     # A checkbox row has no icon of its own and has to stand in the column of the rows around it.
     page.locator(".panel-tab[data-tab='files']").click()
@@ -149,8 +149,8 @@ def phone(page: Page, scheme: str) -> None:
     judge(f"{scheme} phone text right click", rows(page, ".context-menu"), icons=4)
     page.keyboard.press("Escape")
     page.get_by_role("button", name="Add to the message").click()
-    page.wait_for_selector(".ph-sheet .menu-row")
-    judge(f"{scheme} phone + sheet", rows(page, ".ph-sheet .sheet-body"), icons=3)
+    page.wait_for_selector(".sheet .menu.attach-menu .menu-row")
+    judge(f"{scheme} phone + sheet", rows(page, ".sheet .menu.attach-menu"), icons=3)
 
 
 def run() -> None:

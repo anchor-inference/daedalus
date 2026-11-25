@@ -203,17 +203,17 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = open_page(context)
     page.locator(".composer .plus").click()
-    page.wait_for_selector(".plus-menu", timeout=5000)
-    item = page.locator(".plus-menu [role='menuitem']").last
+    page.wait_for_selector(".menu.attach-menu", timeout=5000)
+    item = page.locator(".attach-menu [data-action='secret']")
     if "Secret" not in item.inner_text() and LANG == "en":
-        problems.append(f"desktop: the + menu ends with {item.inner_text()!r}, not Secret")
+        problems.append(f"desktop: the + menu's secret row reads {item.inner_text()!r}, not Secret")
     shot(page, "menu-desktop")
     item.click()
     fill_form(page, "desktop", problems)
     send_and_read(page, "desktop", problems)
     # A secret attached by mistake goes again with its chip, and the host forgets it.
     page.locator(".composer .plus").click()
-    page.locator(".plus-menu [role='menuitem']").last.click()
+    page.locator(".attach-menu [data-action='secret']").click()
     page.locator(".secret-sheet").wait_for(timeout=5000)
     # With a secret already there the sheet opens on the list, and the form is one press away.
     page.locator(".secret-sheet .secrets-add-open").click()
@@ -235,11 +235,8 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
     page = open_page(context)
     page.locator(".composer .iconbtn.plus").click()
-    page.wait_for_selector(".ph-plus-sheet", timeout=5000)
-    tiles = page.locator(".ph-plus-sheet .ph-tile").count()
-    if tiles != 3:
-        problems.append(f"phone: the + sheet has {tiles} tiles; Secret is a row, not a tile")
-    row = page.locator(".ph-plus-sheet .menu-row", has=page.locator("svg")).filter(has_text="Secret" if LANG == "en" else "Секрет")
+    page.wait_for_selector(".sheet .menu.attach-menu", timeout=5000)
+    row = page.locator(".sheet .attach-menu [data-action='secret']").filter(has_text="Secret" if LANG == "en" else "Секрет")
     if row.count() != 1:
         problems.append("phone: the + sheet has no Secret row")
         context.close()

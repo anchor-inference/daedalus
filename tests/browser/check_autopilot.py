@@ -59,9 +59,9 @@ def main() -> None:
         expect(labels.nth(1)).to_have_text("Autopilot · your choice")
         expect(labels.nth(1)).to_have_attribute("title", "You chose: Changelog")
 
-        # The switch in the toggles menu, with the turns taken, and off at once; the chip names it while on.
-        chip = page.locator(".composer .composer-mode")
-        expect(chip).to_have_text("Autopilot")
+        # The switch in the access menu, with the turns taken, and off at once; the chip names it while on.
+        chip = page.locator(".composer .composer-access")
+        expect(chip.locator(".access-more")).to_have_text("Autopilot")
         chip.click()
         row = page.locator(".autopilot-row")
         expect(row).to_have_attribute("aria-checked", "true")
@@ -70,7 +70,7 @@ def main() -> None:
         expect(row).to_have_attribute("aria-checked", "false")
         assert SWITCHED == [{"on": False}], SWITCHED
         page.keyboard.press("Escape")
-        expect(chip).to_have_text("Agent")
+        expect(chip.locator(".access-more")).to_have_count(0)
 
         # Settings → Chat: autopilot's settings and today's numbers, and the profile with Forget.
         settings = browser.new_page(viewport={"width": 1440, "height": 900})
