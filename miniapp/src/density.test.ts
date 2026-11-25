@@ -160,6 +160,8 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".inbox-prose", ".inbox-pane-title",
   // A board card's pane is a pane: its title is a pane's heading (18/500) and its description prose.
   ".task-pane-title", ".task-prose",
+  // A Memory entry's pane opens on its title, a pane's heading (18/500).
+  ".memory-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
   ".ov-title"];
 
@@ -187,6 +189,10 @@ const BOX_ALLOWED = [
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
   ".board-filters", ".task-pane-head", ".task-pane-foot",
+  // Memory's pane is drawn as the card pane is: a 64 px foot for the field that changes an entry or the
+  // buttons that save a fact. The bar that takes the field's place while facts are picked is as tall,
+  // and an empty memory is an empty state like the others.
+  ".memory-pane-foot", ".memory-bulkbar", ".memory-empty",
   // The start page's canvas holds the question, the composer and the list; the room under it is what
   // lifts the group above the middle of the window.
   ".start-hero",
@@ -256,6 +262,10 @@ const CONTENT_BOXES = [
   // the Changes foot holds two buttons in the 56 px bar the design draws under the diff.
   { selector: ".ov-row", property: "height", max: 48 },
   { selector: ".tool-row", property: "min-height", max: 48 },
+  // Memory's rows: a fact is the chat panel's 48 px tool row, an entry the large 56 px list row (a title
+  // over its summary, and at the end its fact count over when it changed).
+  { selector: ".memory-card", property: "min-height", max: 48 },
+  { selector: ".memory-entry-row", property: "min-height", max: 56 },
   { selector: ".dt-grp", property: "height", max: 40 },
   { selector: ".ch-foot", property: "min-height", max: 56 },
 ];
