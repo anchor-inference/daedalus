@@ -182,6 +182,8 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .pmodel-tag { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--hover); color: var(--fg-2); font-size: var(--fs-12); line-height: 20px; }
 .pmodel-tag.accent { color: var(--accent); }
 .pmodel-tag.failed { color: var(--attention); }
+.pmodel-tag.warn { color: var(--warn); }
+.pmodel-health { padding: 0 0 6px; color: var(--attention); font-size: var(--fs-13); overflow-wrap: anywhere; }
 .pmodel-caps { flex: none; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
 .pmodel-context { flex: none; width: 56px; color: var(--fg-2); font-size: var(--fs-13); text-align: right; }
 .pmodel-star.iconbtn { width: 28px; min-width: 28px; height: 28px; color: var(--fg-3); }
@@ -194,6 +196,8 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .prov-note[data-tone="live"] { color: var(--live); }
 .prov-note[data-tone="attention"] { color: var(--attention); }
 .prov-connection { margin-top: 12px; }
+.models-check { border-top: 1px solid var(--line); }
+.models-check-note { color: var(--fg-3); font-size: var(--fs-13); }
 .prov-none { display: flex; flex-direction: column; gap: 4px; padding: 16px; }
 .add-provider { display: flex; flex-direction: column; gap: 16px; }
 .add-provider .opencode-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

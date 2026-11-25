@@ -48,6 +48,7 @@ from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.memory import MemoryRecord
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
+from daedalus.host import task_effort
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.prompts import split_headline, without_host_notes
 from daedalus.memory import tidy
@@ -1834,8 +1835,8 @@ class Synthesizer:
             if not self.costs_nothing(getattr(endpoint, "id", None), model) and await self.spent_today() >= config.memory.synthesis_usd_per_day:
                 raise BudgetReached
             request = LLMRequest(
-                model=model, messages=messages, max_tokens=MAX_TOKENS, temperature=TEMPERATURE,
-                extra={"enable_thinking": False, "json_object": True},
+                model=model, messages=messages, max_tokens=task_effort.helper_tokens(MAX_TOKENS, config.memory.synthesis_effort), temperature=TEMPERATURE,
+                extra={**task_effort.helper_extra(config.memory.synthesis_effort), "json_object": True},
                 observability=LLMObservabilityContext(tenant_id=TENANT, run_id=run_id, call_purpose=PURPOSE, call_category="memory"),
             )
             try:

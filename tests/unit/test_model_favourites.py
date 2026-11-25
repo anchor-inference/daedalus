@@ -24,8 +24,19 @@ class _Providers:
         return []
 
 
+class _Health:
+    """No model is marked: the star is what these routes are about, not the models' health."""
+
+    def broken(self, _config: Any, _preset_id: str) -> None:
+        return None
+
+    async def view(self, _config: Any) -> dict[str, Any]:
+        return {}
+
+
 class _Manager:
     providers = _Providers()
+    model_health = _Health()
 
     async def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
         return []

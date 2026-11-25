@@ -45,7 +45,7 @@ def reviewing(manager: Any, answer: str = "BLOCK the operator asked for a very s
     manager.config.action_rules = ActionRulesConfig(levels={"message": "auto"}, review=["message"])
     seen: list[str] = []
 
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def model(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         seen.append(prompt)
         return answer, "small"
 

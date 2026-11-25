@@ -86,8 +86,9 @@ RESULT_GRACE_SECONDS = 60
 SUMMARY_CHARS = 200
 """As much of the answer as a finished-run event carries, as the session manager's own summary does."""
 
-HEDGE_SECONDS = 20
-"""The least time a translation is waited for before it is asked for a second time (:func:`hedge_after`)."""
+HEDGE_SECONDS = 8
+"""The least time a translation is waited for before it is asked for a second time (:func:`hedge_after`).
+A healthy route answers in one to six seconds; past eight the first request is queued upstream."""
 
 TOKEN = "⟪{}⟫"
 _TOKEN_RE = re.compile(r"⟪(\d+)⟫")
@@ -216,6 +217,43 @@ def translator_preset(config: Any) -> str:
     return own if own in config.presets else (config.middle_preset() or "")
 
 
+def fallback_preset(config: Any, primary: str, *, ready: Any = None, health: Any = None) -> str:
+    """Where a translation is asked a second time when ``primary`` has not answered: the operator's
+    choice, else the same model on a different provider, else the helpers' cheap preset when it is on a
+    different route, else ``primary`` itself.
+
+    Asking the same route again was what the hedge did, and it did not help: OpenCode Go queued the
+    first request and the second alike for two minutes while OpenRouter served the same model in under a
+    second. ``ready`` (provider ids with a usable adapter) and ``health`` (:class:`~daedalus.host.model_health.ModelHealth`)
+    narrow the automatic choice to presets that can answer; an explicit choice is taken as it is."""
+    chosen = config.translation.fallback_preset
+    if chosen and chosen in config.presets:
+        return chosen
+    return automatic_fallback(config, primary, ready=ready, health=health)
+
+
+def automatic_fallback(config: Any, primary: str, *, ready: Any = None, health: Any = None) -> str:
+    """What an empty ``fallback_preset`` means for ``primary``, so Settings can name it too."""
+    from daedalus.host.model_health import same_model  # Lazy: kept out of the module's import cost
+
+    first = config.presets.get(primary)
+    if first is None:
+        return primary
+    have = set(ready) if ready is not None else None
+
+    def can(pid: str) -> bool:
+        preset = config.presets[pid]
+        return (have is None or preset.provider in have) and (health is None or health.broken(config, pid) is None)
+
+    for pid, preset in config.presets.items():
+        if pid != primary and preset.provider != first.provider and same_model(preset.model, first.model) and can(pid):
+            return pid
+    helper = config.assist.predict_preset if config.assist.predict_preset in config.presets else (config.middle_preset() or "")
+    if helper and helper != primary and config.presets[helper].provider != first.provider and can(helper):
+        return helper
+    return primary
+
+
 def output_tokens(text: str) -> int:
     """Room for the translation: a script with longer words, or one that tokenises worse, needs more than
     the source took. A ceiling keeps one answer from asking a cheap model for its whole window.
@@ -227,13 +265,13 @@ def output_tokens(text: str) -> int:
 
 
 def hedge_after(text: str) -> float:
-    """Seconds without an answer after which the same text goes to the translator a second time.
+    """Seconds without an answer after which the text goes to the fallback translator as well.
 
-    A cheap route answers in a few seconds, but now and then one request sits upstream for two minutes
-    while the next is served at once (OpenCode Go did this to DeepSeek: 4–8 s as a rule, 145 s twice in an
-    afternoon, each past the translator's whole limit). Asking again then, and taking whichever answers
-    first, costs one more cheap call on the rare slow one. A longer text is given longer before that."""
-    return HEDGE_SECONDS + len(text) / 120
+    A cheap route answers in a few seconds, but now and then one request sits upstream for minutes
+    (OpenCode Go did this to DeepSeek: twelve identical calls took 2.5 to 84 s, and a message once waited
+    120 s and went untranslated). Asking another route then, and taking whichever answers first, costs one
+    more cheap call on the slow one. A longer text is given longer before that, as its answer is longer."""
+    return HEDGE_SECONDS + len(text) / 200
 
 
 def view_of(metadata: dict[str, Any], role: MessageRole, body: str) -> tuple[str, dict[str, Any] | None]:
@@ -367,8 +405,15 @@ class Translations:
         if future is not None and not future.done():
             future.set_result(value)
 
-    async def translate(self, text: str, source: str, target: str, *, session_id: str) -> str:
-        """``text`` in ``target``, its protected parts intact; :class:`TranslationFailed` on any failure."""
+    async def translate(self, text: str, source: str, target: str, *, session_id: str, blocking: bool = False) -> str:
+        """``text`` in ``target``, its protected parts intact; :class:`TranslationFailed` on any failure.
+
+        ``blocking`` is the operator's own words on their way to the agent, which waits for them: those are
+        given ``blocking_timeout_seconds``, and everything translated for display the longer ``timeout_seconds``.
+
+        The first attempt goes to the translator with the operator's effort; one still out after
+        :func:`hedge_after` is joined by a second on :func:`fallback_preset` with no thinking, since it is
+        a rescue and must be quick, and the first good answer wins."""
         masked, kept = protect(text)
         if not has_words(masked):
             return text
@@ -377,12 +422,24 @@ class Translations:
         # An empty source is a text the operator asked about in a session that names no agent language: the
         # translator is left to recognise it, which a model does better than a guess made here would.
         instructions = PROMPT.format(source=LANGUAGES.get(source, source) if source else "the language it is written in", target=LANGUAGES.get(target, target))
-        preset = translator_preset(manager.config)
+        config = manager.config
+        health = getattr(manager, "model_health", None)
+        preset = translator_preset(config)
+        if health is not None:
+            preset = health.usable(config, preset, task="the translator")
+        providers = getattr(manager, "providers", None)
+        fallback = fallback_preset(config, preset, ready=providers.available() if providers is not None else None, health=health)
 
-        async def attempt() -> str:
+        async def attempt(chosen: str, effort: str) -> str:
+            started = asyncio.get_running_loop().time()
             try:
-                answer = await manager.small_model(masked, preset, purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions)
+                answer = await manager.small_model(masked, chosen, purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions, effort=effort)
             except asyncio.CancelledError:
+                # Abandoned for the other attempt, or for the limit: the wait is the slowness that never
+                # reaches Usage, since a cancelled call books nothing.
+                if health is not None and chosen in config.presets:
+                    found = config.presets[chosen]
+                    health.waited(found.provider, found.model, (asyncio.get_running_loop().time() - started) * 1000)
                 raise
             except Exception as exc:  # noqa: BLE001 — a refusal, an outage, a budget: the original goes instead
                 raise TranslationFailed(f"the translator failed: {type(exc).__name__}: {exc}"[:300]) from exc
@@ -391,16 +448,17 @@ class Translations:
                 raise TranslationFailed("the translator answered with nothing")
             return restore(translated, kept)
 
-        return await self._first_of(attempt, hedge_after(masked), settings.timeout_seconds)
+        limit = settings.blocking_timeout_seconds if blocking else settings.timeout_seconds
+        return await self._first_of(lambda: attempt(preset, settings.effort), lambda: attempt(fallback, ""), hedge_after(masked), limit)
 
     @staticmethod
-    async def _first_of(attempt: Any, hedge: float, limit: float) -> str:
-        """The first good answer of ``attempt``, run once and once more if the first is still out after
-        ``hedge`` seconds; :class:`TranslationFailed` when both fail or ``limit`` passes. A failure that
-        comes before the hedge is final: a refusal asked again is refused again."""
+    async def _first_of(first: Any, second: Any, hedge: float, limit: float) -> str:
+        """The first good answer of ``first``, joined by ``second`` if it is still out after ``hedge``
+        seconds; :class:`TranslationFailed` when both fail or ``limit`` passes. A failure that comes before
+        the hedge is final: a refusal asked again is refused again."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + limit
-        pending: set[asyncio.Task[str]] = {asyncio.ensure_future(attempt())}
+        pending: set[asyncio.Task[str]] = {asyncio.ensure_future(first())}
         hedged = False
         failure: TranslationFailed | None = None
         try:
@@ -420,7 +478,7 @@ class Translations:
                     break
                 if not done and not hedged:
                     hedged = True
-                    pending.add(asyncio.ensure_future(attempt()))
+                    pending.add(asyncio.ensure_future(second()))
             raise TranslationFailed(f"the translator did not answer within {limit:g} s")
         finally:
             for task in pending:
@@ -437,7 +495,7 @@ class Translations:
         operator, agent = languages
         mark: dict[str, Any] = {"direction": "out", "from": operator, "to": agent, "text": text}
         try:
-            translated = await self.translate(text, operator, agent, session_id=state.session.id)
+            translated = await self.translate(text, operator, agent, session_id=state.session.id, blocking=True)
         except TranslationFailed as exc:
             logger.warning("session %s: the operator's message goes untranslated: %s", state.session.id, exc)
             return Outgoing(text, {**mark, "state": "failed", "error": str(exc)})
@@ -615,7 +673,7 @@ class Translations:
             return words, ""
         operator, agent = languages
         try:
-            return await self.translate(words, operator, agent, session_id=state.session.id), ""
+            return await self.translate(words, operator, agent, session_id=state.session.id, blocking=True), ""
         except TranslationFailed as exc:
             logger.warning("session %s: an answer to a side question goes untranslated: %s", state.session.id, exc)
             return words, str(exc) or type(exc).__name__
@@ -680,7 +738,9 @@ __all__ = [
     "TranslationFailed",
     "Translations",
     "agent_language",
+    "automatic_fallback",
     "delivered_text",
+    "fallback_preset",
     "final_answer",
     "pair",
     "protect",

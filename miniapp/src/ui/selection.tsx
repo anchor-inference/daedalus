@@ -24,6 +24,8 @@ export type SelectionItem = {
   detail?: string;
   /** Short facts drawn as quiet tags: a context window, a price, "Vision". */
   facts?: string[];
+  /** A tag drawn ahead of the facts in the warning colour, and why in its tooltip: a model marked broken or slow. */
+  alert?: { word: string; tone: "bad" | "warn"; why?: string };
   /** The id of the group the item sits under; items without one sit together at the top. */
   group?: string;
   /** A leading glyph, such as the provider's mark. */
@@ -78,9 +80,14 @@ function grouped(items: SelectionItem[], groups: SelectionGroup[] | undefined): 
   return out;
 }
 
-function Facts({ facts }: { facts?: string[] }) {
-  if (!facts?.length) return null;
-  return <span className="sel-facts">{facts.map((fact) => <span key={fact} className="sel-fact">{fact}</span>)}</span>;
+function Facts({ facts, alert }: { facts?: string[]; alert?: SelectionItem["alert"] }) {
+  if (!facts?.length && !alert) return null;
+  return (
+    <span className="sel-facts">
+      {alert && <span className={`sel-fact alert ${alert.tone}`} title={alert.why}>{alert.word}</span>}
+      {(facts ?? []).map((fact) => <span key={fact} className="sel-fact">{fact}</span>)}
+    </span>
+  );
 }
 
 function RowText({ item, missing }: { item: SelectionItem; missing?: boolean }) {
@@ -307,7 +314,7 @@ export function SelectionList({ label, items, groups, value, onChange, ordered, 
                     <span className="sel-check" aria-hidden>{isOn && <Icon name="check" size={12} />}</span>
                     {item.mark}
                     <RowText item={item} />
-                    <Facts facts={item.facts} />
+                    <Facts facts={item.facts} alert={item.alert} />
                   </div>
                 );
               })}
@@ -426,7 +433,7 @@ export function SelectionSingle({ label, items, groups, value, onChange, default
       <div className={`sel-current ${shown && !current ? "missing" : ""}`}>
         {shown?.mark}
         {shown ? <RowText item={shown} missing={!current} /> : <span className="sel-text sub">{t("sel.single.none")}</span>}
-        <Facts facts={shown?.facts} />
+        <Facts facts={shown?.facts} alert={shown?.alert} />
         <button ref={changeButton} type="button" className="btn small" disabled={disabled} aria-expanded={open} aria-controls={open ? listId : undefined}
           onClick={() => (open ? close() : setOpen(true))}>
           {open ? t("sel.single.done") : t("sel.single.change")}
@@ -467,7 +474,7 @@ export function SelectionSingle({ label, items, groups, value, onChange, default
                       <span className="sel-check" aria-hidden>{isOn && <span className="sel-dot" />}</span>
                       {item.mark}
                       <RowText item={item} />
-                      <Facts facts={item.facts} />
+                      <Facts facts={item.facts} alert={item.alert} />
                     </div>
                   );
                 })}
