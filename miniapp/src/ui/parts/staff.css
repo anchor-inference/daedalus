@@ -395,12 +395,12 @@
      with hairlines inside the Details tab's cards. */
   .ph-member-sheet .staff-panel { display: flex; flex-direction: column; min-height: 0; }
   .ph-member-sheet .panel-tabs { padding: 0 var(--space-2); border: 0; }
-  .ph-member-sheet .panel-tab { position: relative; min-height: var(--tap); padding: 0 12px; border: 0; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
+  .ph-member-sheet .panel-tab { position: relative; min-height: var(--row-h-touch); padding: 0 12px; border: 0; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
   .ph-member-sheet .panel-tab.on { background: var(--surface-3); color: var(--fg); }
   .ph-member-sheet .panel-body { padding: var(--space-2) var(--gutter); }
   .ph-member-sheet .staff-details { gap: var(--space-3); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
   .ph-member-sheet .staff-details .dt-section, .ph-member-sheet .staff-details .dt-section:first-child { border: 0; border-radius: var(--radius-md); }
-  .ph-member-sheet .staff-details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details summary.dt-label { min-height: var(--row-h-touch); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
   .ph-member-sheet .staff-details .dt-content { gap: 0; padding: 0 var(--space-4) var(--space-3); }
   .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px 0; border-top: 1px solid var(--line); color: var(--fg); font-size: var(--fs-15); }
   .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top: 0; }
@@ -431,31 +431,31 @@
   .q-more { position: relative; }
   .q-more::after { content: ""; position: absolute; inset: -11px 0; }
   .q-suggestion { padding: 0; background: none; }
-  .q-chip { min-height: var(--tap); padding: 8px 16px; border: 0; border-radius: 12px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-15); }
+  .q-chip { min-height: var(--row-h-touch); padding: 8px 16px; border: 0; border-radius: 12px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-15); }
   .q-chip.on, .q-chip.tone-ok.on, .q-chip.tone-bad.on { background: var(--surface-1); box-shadow: inset 0 0 0 1.5px var(--fg); }
   /* A question's options are rows with a radio, read whole: the design's choice for answers that are
      sentences or links. A permission's choices stay pills. */
   .q-card:not(.k-permission) .q-chips[role="radiogroup"] { flex-direction: column; flex-wrap: nowrap; gap: var(--space-2); }
-  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip { display: flex; width: 100%; max-width: none; min-height: var(--tap); padding: 10px 16px; border-radius: 12px; background: var(--surface-1); text-align: left; justify-content: flex-start; }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip { display: flex; width: 100%; max-width: none; min-height: var(--row-h-touch); padding: 10px 16px; border-radius: 12px; background: var(--surface-1); text-align: left; justify-content: flex-start; }
   .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip::before { content: ""; flex: none; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); }
   .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip.on::before { box-shadow: inset 0 0 0 6px var(--fg); background: var(--surface-1); }
-  .q-card .q-field { min-height: var(--tap); padding: 10px 16px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-1); font-size: var(--fs-16); }
+  .q-card .q-field { min-height: var(--row-h-touch); padding: 10px 16px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-1); font-size: var(--fs-16); }
   .q-state { font-size: var(--fs-14); }
   .q-state i { display: none; }
-  .q-clear { min-height: var(--tap); padding: 0 4px; font-weight: 500; color: var(--fg-2); }
+  .q-clear { min-height: var(--row-h-touch); padding: 0 4px; font-weight: 500; color: var(--fg-2); }
   /* Round 44 px targets for the paperclip and "not needed", like every control a finger presses here.
      A phone pastes from its own keyboard and drops nothing, so the hint about both is left out. */
-  .q-attach, .q-aside { width: var(--tap); height: var(--tap); background: var(--surface-1); -webkit-tap-highlight-color: transparent; }
+  .q-attach, .q-aside { width: var(--row-h-touch); height: var(--row-h-touch); background: var(--surface-1); -webkit-tap-highlight-color: transparent; }
   .q-attach:hover { background: var(--surface-1); }
   .q-aside { margin: -8px -6px 0 0; background: transparent; }
   .q-files-hint { display: none; }
   .questions-send { padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: none; }
   .questions-send-info { font-size: var(--fs-14); }
-  .questions-send-btn { min-height: var(--tap); padding: 0 var(--space-5); border-radius: 12px; font-size: var(--fs-15); }
+  .questions-send-btn { min-height: var(--row-h-touch); padding: 0 var(--space-5); border-radius: 12px; font-size: var(--fs-15); }
   .questions-empty, .questions-empty b { font-size: var(--fs-14); }
   /* The main chat's line for every project's questions: the tray's shape above the composer. */
   .chat:not(.in-project) .questions-line { min-height: 52px; margin: var(--space-3) 0 var(--space-1); padding: 4px 4px 4px 14px; border: 0; border-radius: var(--radius-composer); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); font-size: var(--fs-15); }
   .chat:not(.in-project) .questions-line-mark { width: 24px; height: 24px; background: none; }
-  .chat:not(.in-project) .questions-line-open { height: var(--tap); padding: 0 var(--space-4); border: 0; border-radius: calc(var(--radius-composer) - 4px); background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .chat:not(.in-project) .questions-line-open { height: var(--row-h-touch); padding: 0 var(--space-4); border: 0; border-radius: calc(var(--radius-composer) - 4px); background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .chat:not(.in-project) .questions-line-open .ic { display: none; }
 }

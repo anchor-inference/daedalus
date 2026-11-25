@@ -111,11 +111,11 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 /* ── the stack (a phone) ─────────────────────────────────────────────────────────────────── */
 @media (max-width: 1023px) {
   .settings-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
-  .settings-phone-back { display: inline-flex; align-items: center; gap: 2px; min-height: var(--tap); margin-left: -6px; padding: 0 8px 0 2px; border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-16); cursor: pointer; }
+  .settings-phone-back { display: inline-flex; align-items: center; gap: 2px; min-height: var(--row-h-touch); margin-left: -6px; padding: 0 8px 0 2px; border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-16); cursor: pointer; }
   .settings-phone h1.settings-title { margin-top: 4px; font-size: var(--fs-22); }
   .settings-phone .settings-about { margin-bottom: var(--space-2); }
   .settings-phone .settings-search-box { margin: 4px 0 var(--space-2); }
-  .settings-phone .settings-search-box .settings-search { height: var(--tap); min-height: var(--tap); border: 0; border-radius: var(--radius-md); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
+  .settings-phone .settings-search-box .settings-search { height: var(--row-h-touch); min-height: var(--row-h-touch); border: 0; border-radius: var(--radius-md); background: var(--surface-2); padding-left: 36px; font-size: var(--fs-16); }
   .settings-phone .settings-search-box > .ic { left: 14px; }
   /* One card per group, as every grouped list on a phone is: a small label over it, the links its
      rows with a hairline between them, the first and the last carrying the card's corners. A matched
@@ -382,5 +382,5 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 /* Stacked under its words a number is a row's only control and the thing the finger lands on; the
    35 px the field takes from its padding is under the 44 px every target on a phone reaches. */
 @media (max-width: 599px) {
-  .set-card .settings-num input.field { min-height: var(--tap); }
+  .set-card .settings-num input.field { min-height: var(--row-h-touch); }
 }

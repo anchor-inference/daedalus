@@ -211,9 +211,9 @@
   .cv-row { min-height: var(--list-row-h); }
   .cv-row-acts { opacity: 1; }
   .cv-bar { gap: var(--space-1); padding-left: var(--space-1); padding-right: var(--space-1); }
-  .cv-bar .btn { width: var(--tap); min-height: var(--tap); padding: 0; }
-  .cv-bar .iconbtn { width: var(--tap); height: var(--tap); }
-  .cv-title { flex: 1 1 auto; field-sizing: fixed; min-width: 0; max-width: none; height: var(--tap); font-size: var(--fs-16); padding: 0 6px; }
+  .cv-bar .btn { width: var(--row-h-touch); min-height: var(--row-h-touch); padding: 0; }
+  .cv-bar .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); }
+  .cv-title { flex: 1 1 auto; field-sizing: fixed; min-width: 0; max-width: none; height: var(--row-h-touch); font-size: var(--fs-16); padding: 0 6px; }
   .cv-tool-word, .cv-status-word, .cv-scope-chip { display: none; }
   .cv-status { margin-right: 0; padding: 0 6px; }
   .cv-shared-made { display: none; }
@@ -222,6 +222,6 @@
   .cv-toolbar .iconbtn, .cv-zoom .iconbtn { width: var(--ctl-h); height: var(--ctl-h); }
   .cv-comment-to { display: none; }
   .cv-comment-row textarea { font-size: var(--fs-16); }
-  .cv-comment-send { width: var(--tap); min-height: var(--tap); }
+  .cv-comment-send { width: var(--row-h-touch); min-height: var(--row-h-touch); }
   .cv-mode.segmented button { height: var(--ctl-h); }
 }

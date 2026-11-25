@@ -5,7 +5,7 @@
    under it would have to prove its box drawing and powerline glyphs on that grid first. */
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
-:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--r-sm); }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* A scroll bar is a thin thumb with no track, on every scroller: the platform's wide grey one cut a
    lane out of every panel and popover it appeared in. */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -98,10 +98,10 @@ a { color: var(--accent); text-decoration: none; }
   .pagehead-t .ic { vertical-align: -2px; margin-left: 4px; color: var(--fg-2); }
   .pagehead-t .chat-title { display: inline; font: inherit; }
   .pagehead-over, .pagehead .sub { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1.25; }
-  .pagehead-tb { display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: var(--tap); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .pagehead-tb { display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: var(--row-h-touch); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .pagehead-tb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .pagehead-actions { gap: 0; }
-  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; }
+  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; background: none; }
   .pagehead > :not(.pagehead-row) { margin-left: var(--space-3); margin-right: var(--space-3); }
 }
 /* The page's own column: the list is a centred 880 px, reading prose 760, and a board, table or

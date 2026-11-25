@@ -249,7 +249,7 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
   .ph-member-tm { white-space: nowrap; }
   .ph-member-wait { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-13); line-height: 1.35; color: var(--warn); overflow-wrap: anywhere; }
   .ph-member-pv { display: inline-flex; align-items: center; gap: 10px; }
-  .ph-showmore { width: 100%; justify-content: space-between; min-height: var(--tap); }
+  .ph-showmore { width: 100%; justify-content: space-between; min-height: var(--row-h-touch); }
   .ph-team > .empty { min-height: 60vh; align-content: center; }
   /* The members are the team page's card of rows, a hairline between them; a row is the long-press
      row, so its own background gives way to the card's. */
@@ -260,12 +260,12 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
   /* Hiring and editing a member: labelled fields in the phone's field shape, choices as segmented
      tracks, and the decision as two wide buttons at the foot. */
   .staff-sheet:not(.ph-member-sheet) label.field, .staff-sheet:not(.ph-member-sheet) legend.field { margin: var(--space-3) 4px 6px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .staff-sheet:not(.ph-member-sheet) input.field, .staff-sheet:not(.ph-member-sheet) select.field, .staff-sheet:not(.ph-member-sheet) textarea.field { min-height: var(--tap); padding: 10px 14px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .staff-sheet:not(.ph-member-sheet) input.field, .staff-sheet:not(.ph-member-sheet) select.field, .staff-sheet:not(.ph-member-sheet) textarea.field { min-height: var(--row-h-touch); padding: 10px 14px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
   .staff-sheet:not(.ph-member-sheet) .segmented { gap: 2px; margin: 0; padding: 2px; border: 0; border-radius: 10px; background: var(--surface-2); }
   .staff-sheet:not(.ph-member-sheet) .segmented button { position: relative; min-height: 38px; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
   .staff-sheet:not(.ph-member-sheet) .segmented button::after { content: ""; position: absolute; inset: -3px 0; }
   .staff-sheet:not(.ph-member-sheet) .segmented button.on { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
   .staff-sheet:not(.ph-member-sheet) .sheet-foot { flex-wrap: nowrap; }
-  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--row-h-touch); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn.danger { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
 }

@@ -5,7 +5,7 @@
    that greys on hover: --hover under the pointer, --selected for what is on or chosen, --live and
    --attention for the cyan and orange states. */
 
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--drop-xs);
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--drop-xs);
   padding: 12px 14px; margin-bottom: 10px; }
 .card.pressable { cursor: pointer; transition: transform var(--t-fast) var(--ease-out), background var(--t-fast); }
 .card.pressable:active { transform: scale(0.99); background: var(--surface-2); }
@@ -135,7 +135,7 @@ a.iconbtn { text-decoration: none; }
 .bar.ok i { background: var(--ok); }
 /* avatar: simple shape + expressive eyes; the motion carries the status */
 .avatar { width: var(--avatar); height: var(--avatar); flex: none; }
-.avatar .body { fill: var(--card-2); stroke: var(--line); }
+.avatar .body { fill: var(--surface-2); stroke: var(--line); }
 .avatar .eye { fill: var(--fg); transform-origin: center; }
 .avatar.idle .eye { animation: blink 4s infinite; }
 .avatar.running .body { animation: pulse 1.2s ease-in-out infinite; }
@@ -222,7 +222,7 @@ a.iconbtn { text-decoration: none; }
 /* On a phone a page's tab is a finger's 44 px with a 14 px name, and the row scrolls sideways when the
    names do not fit rather than cutting them. */
 @media (max-width: 1023px) {
-  .tabs-page .tab { min-width: var(--tap); height: var(--tap); padding: 0 var(--space-3); justify-content: center; border-radius: 10px; font-size: var(--fs-14); }
+  .tabs-page .tab { min-width: var(--row-h-touch); height: var(--row-h-touch); padding: 0 var(--space-3); justify-content: center; border-radius: 10px; font-size: var(--fs-14); }
   .tabs-page .tab-count { font-size: var(--fs-13); }
 }
 

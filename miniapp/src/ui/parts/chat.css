@@ -444,9 +444,9 @@ pre.diff .hunk { color: var(--fg-3); }
 @media (max-width: 1023px) { pre.diff { white-space: pre-wrap; overflow-wrap: anywhere; } }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
 td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 500; }
+th { color: var(--fg-2); font-weight: 500; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-label.field { display: block; margin: 10px 0 4px; color: var(--muted); font-size: var(--fs-12); }
+label.field { display: block; margin: 10px 0 4px; color: var(--fg-2); font-size: var(--fs-12); }
 input.field, select.field, textarea.field { width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); padding: 6px 10px;
   transition: border-color var(--t-fast), box-shadow var(--t-fast); }
 /* A field in focus darkens its own edge and grows a soft halo: an outline two pixels off a box that
@@ -463,7 +463,7 @@ input.field[readonly] { text-overflow: ellipsis; }
 .rules-editor-field { display: block; }
 .rules-editor:has(> [data-more="below"])::after {
   content: ""; position: absolute; left: 1px; right: 16px; bottom: 1px; height: 32px; pointer-events: none;
-  border-radius: 0 0 0 var(--radius-sm); background: linear-gradient(to bottom, transparent, var(--card-2));
+  border-radius: 0 0 0 var(--radius-sm); background: linear-gradient(to bottom, transparent, var(--surface-2));
 }
 /* A choice longer than its box ends in an ellipsis. Clipped mid-letter, the voice model's
    "… vllm" read as "vllr", a different word rather than a shortened one. */
@@ -483,7 +483,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .radio { width:16px; height:16px; border-radius:50%; border:0; box-shadow:inset 0 0 0 1.5px var(--line-strong); background:none; flex:none; cursor:pointer; padding:0; }
 .radio.on { box-shadow:inset 0 0 0 5px var(--fg); }
 
-.badge { font-size:var(--fs-12); font-weight:500; padding:1px 6px; border-radius:var(--radius-xs); border:0; background:color-mix(in srgb, currentColor 12%, transparent); color:var(--muted); flex:none; }
+.badge { font-size:var(--fs-12); font-weight:500; padding:1px 6px; border-radius:var(--radius-xs); border:0; background:color-mix(in srgb, currentColor 12%, transparent); color:var(--fg-2); flex:none; }
 .badge.stream { color:var(--info); }
 .badge.structured { color:var(--warn); }
 .badge.text { color:var(--ok); }
@@ -587,12 +587,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .msg-file-kind { font-size: var(--fs-13); color: var(--fg-3); }
   .msg-more { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .msg-more::after { content: ""; position: absolute; inset: -6px -8px; }
-  .msg-actions { gap: 0; min-height: var(--tap); opacity: 1; }
-  .msg-actions .iconbtn.small { width: var(--tap); height: var(--tap); min-width: var(--tap); min-height: var(--tap); padding: 0; gap: 0; border-radius: 12px; color: var(--fg-3); }
+  .msg-actions { gap: 0; min-height: var(--row-h-touch); opacity: 1; }
+  .msg-actions .iconbtn.small { width: var(--row-h-touch); height: var(--row-h-touch); min-width: var(--row-h-touch); min-height: var(--row-h-touch); padding: 0; gap: 0; border-radius: 12px; color: var(--fg-3); }
   .msg-actions .iconbtn.small .ic { width: 18px; height: 18px; }
   .turn > .turn-content > .msg-actions { margin-left: -13px; }
   .msg-wrap .msg-actions { padding-right: 0; margin-right: -8px; }
-  .thinking-head { gap: 2px 8px; min-height: var(--tap); font-size: var(--fs-14); color: var(--fg-2); }
+  .thinking-head { gap: 2px 8px; min-height: var(--row-h-touch); font-size: var(--fs-14); color: var(--fg-2); }
   .thinking-head .steps { font-size: var(--fs-14); color: var(--fg-2); }
   .thinking-head .families { font-size: var(--fs-13); color: var(--fg-3); padding-left: 0; }
   .thinking-head .chev { margin-left: auto; }

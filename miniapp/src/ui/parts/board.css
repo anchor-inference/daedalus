@@ -268,7 +268,7 @@
   .ph-bar { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
   .ph-bar i { display: block; height: 100%; width: calc(var(--v, 0) * 1%); background: var(--fg-2); border-radius: 2px; }
   .ph-bar.ok i { background: var(--ok); }
-  .ph-board-more { display: block; width: 100%; min-height: var(--tap); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; text-align: left; cursor: pointer; }
+  .ph-board-more { display: block; width: 100%; min-height: var(--row-h-touch); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; text-align: left; cursor: pointer; }
   .ph-board-none { padding: 0 var(--gutter) var(--space-2); font-size: var(--fs-14); color: var(--fg-3); }
   .ph-board-sk { padding-top: var(--space-4); }
   .ph-board-sk-sec { display: block; height: 14px; margin: var(--space-4) var(--gutter) var(--space-3); }
@@ -301,7 +301,7 @@
   .ph-taskpage-body { flex: 1; padding: var(--space-2) var(--gutter) var(--space-6); }
   .ph-taskpage-body[hidden] { display: none; }
   .ph-taskpage label.field { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .ph-taskpage input.field, .ph-taskpage select.field { height: var(--tap); border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
+  .ph-taskpage input.field, .ph-taskpage select.field { height: var(--row-h-touch); border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
   .ph-taskpage textarea.field { border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
   .ph-taskpage .pboard-brief legend, .ph-taskpage .pboard-contract-title { font-size: var(--fs-13); text-transform: none; letter-spacing: 0; }
   .ph-taskpage .sheet-foot { position: static; margin-top: var(--space-4); }
@@ -318,7 +318,7 @@
   .ph-result-sk { display: flex; flex-direction: column; gap: 10px; padding: var(--space-2) 0; }
   .ph-result-sk-card { height: 60px; border-radius: var(--radius-md); margin-top: var(--space-2); }
   .ph-taskpage .result-flow .ph-empty { padding: 48px 16px; }
-  .ph-taskpage .result-details > summary { min-height: var(--tap); display: flex; align-items: center; font-size: var(--fs-14); }
+  .ph-taskpage .result-details > summary { min-height: var(--row-h-touch); display: flex; align-items: center; font-size: var(--fs-14); }
   /* The decision footer, at the bottom of every tab. */
   .ph-decide { position: sticky; bottom: 0; z-index: 3; background: var(--bg); }
   .ph-decide:empty { display: none; }

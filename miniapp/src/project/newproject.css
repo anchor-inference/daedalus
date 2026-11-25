@@ -142,7 +142,7 @@
   .sheet.np-sheet.ph-sheet .sheet-body { padding-bottom: 0; }
   .sheet.np-sheet .np-foot { flex-wrap: wrap; }
   .sheet.np-sheet .np-hint { flex-basis: 100%; }
-  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--tap); border-radius: 12px; }
+  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--row-h-touch); border-radius: 12px; }
   .np-choice, .np-two, .np-extras-body { grid-template-columns: 1fr; }
   .np-extras-body { padding-left: 0; }
   .np-card { padding: var(--space-3); }

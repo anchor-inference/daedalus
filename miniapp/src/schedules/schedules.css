@@ -151,6 +151,6 @@
   .sched-kv-row { min-height: var(--row-h-touch); }
   .sched-kv dt { width: 96px; }
   .schedform-pair { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .schedform-days button { height: var(--tap); }
+  .schedform-days button { height: var(--row-h-touch); }
   .sched-sheet .sched-pane-head { padding: 0 0 var(--space-2); }
 }

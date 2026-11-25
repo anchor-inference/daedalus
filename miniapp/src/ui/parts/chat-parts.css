@@ -91,7 +91,7 @@ button.secret-chip:hover { background: var(--surface-3); }
 @media (pointer: coarse) { .secret-chip-x::after { content: ""; position: absolute; inset: -11px; } }
 .attachments .secret-chip { align-self: center; }
 .msg-secrets { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
-.secret-form .secret-heading { margin: 10px 0 4px; color: var(--muted); font-size: var(--fs-12); }
+.secret-form .secret-heading { margin: 10px 0 4px; color: var(--fg-2); font-size: var(--fs-12); }
 .secret-form .secret-why { margin: 0 0 4px; }
 .secret-value-row { position: relative; display: flex; }
 .secret-value { flex: 1; margin: 0; resize: vertical; padding-right: 40px; font-family: var(--mono); -webkit-text-security: disc; }
@@ -107,13 +107,13 @@ button.secret-chip:hover { background: var(--surface-3); }
 .secrets-manager .secret-why { margin: 0; }
 .secrets-toolbar { display: flex; gap: var(--space-2); align-items: center; }
 .secrets-search { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
-.secrets-search .ic { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
+.secrets-search .ic { position: absolute; left: 10px; color: var(--fg-2); pointer-events: none; }
 .secrets-search input.field { width: 100%; margin: 0; padding-left: 30px; }
 .secrets-add-open { flex: none; margin-left: auto; }
 .secret-sheet .secret-add { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); animation: secret-in .14s ease-out; }
 .secret-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .secrets-group { display: flex; flex-direction: column; gap: 4px; }
-.secrets-group > .secret-heading { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-12); }
+.secrets-group > .secret-heading { margin: var(--space-2) 0 0; color: var(--fg-2); font-size: var(--fs-12); }
 .secrets-others-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
 .secrets-others-toggle .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
 .secrets-others-toggle[aria-expanded="true"] .ic { transform: none; }
@@ -450,15 +450,15 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
   .secret-sheet .field-label, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
   .secret-sheet .secret-form { padding: 0 var(--gutter); }
   .secret-sheet input.field, .secret-sheet textarea.field { font-size: var(--fs-16); }
-  .secret-sheet input.field { height: var(--tap); }
+  .secret-sheet input.field { height: var(--row-h-touch); }
   .secret-sheet .secret-form .sub { font-size: var(--fs-13); }
   .secret-sheet .secret-chip, .msg-secrets .secret-chip { font-size: var(--fs-13); }
   .secret-sheet .secrets-manager { padding: 0 var(--gutter) var(--space-4); }
   .secret-sheet .secret-add { padding: var(--space-3); }
   .secret-sheet .secret-edit { padding: 0; }
-  .secrets-search input.field { font-size: var(--fs-16); height: var(--tap); }
+  .secrets-search input.field { font-size: var(--fs-16); height: var(--row-h-touch); }
   .secret-row-dots { font-size: var(--fs-14); }
   .secret-row-scope, .secret-row-meta, .secret-row-attached, .secrets-group > .secret-heading { font-size: var(--fs-13); }
-  .secret-row-tools .iconbtn { width: var(--tap); height: var(--tap); }
+  .secret-row-tools .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); }
   .secret-row-tools { gap: 0; }
 }

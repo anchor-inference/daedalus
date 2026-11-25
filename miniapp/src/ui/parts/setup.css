@@ -370,20 +370,20 @@ input.field[type="range"] {
 .run-outcome { display:flex; align-items:flex-start; gap:var(--space-2); margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border:0; border-radius:var(--radius-sm); background:color-mix(in srgb, var(--bad) 12%, var(--card)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .run-outcome svg { flex:none; margin-top:2px; color:var(--bad); }
 .run-outcome.cause-cancelled { background:var(--surface-2); }
-.run-outcome.cause-cancelled svg { color:var(--muted); }
-.run-outcome-detail { margin-top:2px; color:var(--muted); }
+.run-outcome.cause-cancelled svg { color:var(--fg-2); }
+.run-outcome-detail { margin-top:2px; color:var(--fg-2); }
 .run-outcome-more { margin-top:2px; }
-.run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--muted); cursor:pointer; }
+.run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--fg-2); cursor:pointer; }
 .run-outcome-more summary:hover { color:var(--fg); }
-.run-outcome-count { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.run-outcome-count { color:var(--fg-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .run-outcome-failures { margin:2px 0 0; padding:0; list-style:none; }
 /* Recovered: a later turn answered, so the stop is history. One neutral line in the run's quiet grey
    that opens onto its details; the red card is kept for a stop nothing has answered yet. */
-.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--muted); }
+.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--fg-2); }
 .run-outcome.recovered .run-outcome-line { display:flex; align-items:center; gap:var(--space-2); width:fit-content; max-width:100%; min-height:var(--row-h-dense); cursor:pointer; list-style:none; }
 .run-outcome.recovered .run-outcome-line::-webkit-details-marker { display:none; }
 .run-outcome.recovered .run-outcome-line:hover { color:var(--fg); }
-.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--muted); }
+.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--fg-2); }
 .run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
 .run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
@@ -400,7 +400,7 @@ input.field[type="range"] {
 @media (max-width: 1023px) { .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); } .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; } }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
-.search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
+.search-passage { font-size: var(--fs-12); color: var(--fg-2); margin-top: var(--space-1); }
 .search-notice { padding: var(--space-2) var(--space-3); }
 .folder-add { width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:var(--space-1); padding:0; flex-shrink:0; display:grid; place-items:center; line-height:0; color:var(--fg-2); border-color:transparent; background:transparent; box-shadow:none; }
 .folder-add:hover { background: var(--hover); color:var(--fg); }

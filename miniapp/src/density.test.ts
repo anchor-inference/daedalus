@@ -687,8 +687,8 @@ describe("the phone", () => {
     expect(phoneRule(".pagehead")).not.toMatch(/border/);
     expect(all.filter((r) => selectors(r).some((selector) => selector.startsWith(".ph-top")))).toEqual([]);
     expect(phoneRule(".pagehead")).toContain("backdrop-filter: none");
-    expect(phoneRule(".ph-ib")).toContain("width: var(--tap)");
-    expect(phoneRule(".ph-ib")).toContain("height: var(--tap)");
+    expect(phoneRule(".ph-ib")).toContain("width: var(--row-h-touch)");
+    expect(phoneRule(".ph-ib")).toContain("height: var(--row-h-touch)");
     expect(phoneRule(".list-row")).toContain("min-height: var(--list-row-h)");
     expect(phoneRule(".list-row.one")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".list-row")).not.toMatch(/border/);
@@ -699,8 +699,8 @@ describe("the phone", () => {
     expect(phoneRule(".sheet-head")).toContain("flex: none");
     expect(phoneRule(".menu-row")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");
-    expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--tap)");
-    expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--tap)");
+    expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--row-h-touch)");
+    expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--row-h-touch)");
     expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: 40px");
     expect(all.filter((r) => r.selector.includes('data-shape="idle"'))).toEqual([]);
     expect(all.filter((r) => r.selector === ".project-tabs .tab" && !r.media).map((r) => r.body).join(" ")).toContain("height: var(--tabbar-h)");
@@ -708,8 +708,8 @@ describe("the phone", () => {
     // The drawer is the sidebar: 330 px of it, its rows the phone's 44 px ones at 15 px.
     expect(declaredRoot()).toContain("--drawer-w: min(86vw, 330px)");
     expect(phoneRule(".sb-nav")).toContain("font-size: var(--fs-15)");
-    expect(phoneRule(".sb-sec")).toContain("height: var(--tap)");
-    expect(phoneRule(".sidebar-foot")).toContain("height: calc(var(--tap) + var(--space-3))");
+    expect(phoneRule(".sb-sec")).toContain("height: var(--row-h-touch)");
+    expect(phoneRule(".sidebar-foot")).toContain("height: calc(var(--row-h-touch) + var(--space-3))");
   });
 
   it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
@@ -761,7 +761,7 @@ describe("the sidebar", () => {
     // The desktop's kind tabs became the Show part of the Chats label's menu; the phone's Chats page
     // keeps them as the shared page tabs, each the 44 px a finger needs there.
     const phone = (selector: string) => all.filter((r) => r.media.includes(PHONE) && selectors(r).includes(selector)).map((r) => r.body).join(";");
-    expect(phone(".tabs-page .tab")).toContain("height: var(--tap)");
+    expect(phone(".tabs-page .tab")).toContain("height: var(--row-h-touch)");
     expect(all.filter((r) => selectors(r).some((selector) => selector.includes("kind-tab")))).toEqual([]);
   });
 

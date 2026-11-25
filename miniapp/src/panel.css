@@ -250,20 +250,20 @@
      step up from it: on the sheet's own colour a tile, a field and a button had no edge at all. */
   .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: transparent; --dt-tile: var(--surface-2); }
   .panel-sheet .details .dt-section, .panel-sheet .details .dt-section:first-child { margin: 0; border: 0; border-radius: var(--radius-md); }
-  .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
+  .panel-sheet .details summary.dt-label { min-height: var(--row-h-touch); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
   .panel-sheet .details .dt-content { padding: 0 var(--space-4) var(--space-4); font-size: var(--fs-15); }
   .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub, .panel-sheet .dt-content .dt-hint, .panel-sheet .dt-note { font-size: var(--fs-13); }
   .panel-sheet .dt-stat-value, .panel-sheet .dt-today b { font-size: var(--fs-15); }
   .panel-sheet .dt-row, .panel-sheet .dt-control { min-height: 40px; }
-  .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-16); }
+  .panel-sheet .details .field { min-height: var(--row-h-touch); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-16); }
   .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
   .panel-sheet .dt-legend { grid-template-columns: minmax(0, 1fr); }
   /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */
-  .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--tap); font-size: var(--fs-15); }
+  .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--row-h-touch); font-size: var(--fs-15); }
   .panel-sheet .files .explorer-actions { opacity: 1; }
   .panel-sheet .files .explorer-actions .iconbtn { color: var(--fg-2); }
-  .panel-sheet .files .field { min-height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .panel-sheet .files .field { min-height: var(--row-h-touch); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
 }
 /* A phone narrower than 400 px: the quota windows keep their figures and drop their bars, which pushed
    the second window's percent past the edge of the line. */

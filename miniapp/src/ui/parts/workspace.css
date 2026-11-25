@@ -219,7 +219,7 @@
 .jobs .task-flag { color: var(--warn); }
 .jobs .task-flag.overdue { color: var(--bad); }
 .jobs .task-where { color: var(--fg-3); }
-.jobs .task-row > .ic { color: var(--muted); }
+.jobs .task-row > .ic { color: var(--fg-2); }
 /* One job, opened in the Jobs tab: a head that stays, its output in a box that scrolls by itself (so the
    head and the line saying how it ended never scroll away), and how it ended under them. */
 .panel-body.tab-jobs:has(> .job-view) { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -295,7 +295,7 @@
 /* tool picker */
 .toolpicker { margin: 8px 0; }
 .toolpicker-head { background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); padding: 6px 12px; font: inherit; font-size: var(--fs-14); cursor: pointer; width: 100%; text-align: left; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); }
-.toolpicker-head .chev { color: var(--muted); display: inline-block; transition: transform var(--t-fast); }
+.toolpicker-head .chev { color: var(--fg-2); display: inline-block; transition: transform var(--t-fast); }
 .toolpicker-head .chev.down { transform: rotate(90deg); }
 .toolpicker-body { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); padding: 8px 12px 4px; max-height: 46vh; overflow-y: auto; }
 .toolgroup { margin-bottom: 8px; }
@@ -384,7 +384,7 @@
 .service-row { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
 .service-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .service-row:first-of-type { border-top: 0; }
-.service-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.service-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-2); flex: none; }
 .service-row .dot.running { background: var(--ok); }
 .service-row .dot.dead { background: var(--bad); }
 .service-row .dot.unknown { background: var(--warn); }

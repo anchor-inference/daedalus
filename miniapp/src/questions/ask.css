@@ -139,24 +139,24 @@
   .ask.phone .ask-step[data-state="current"], .ask.phone .ask-step.review { padding: 0 10px 0 4px; }
   .ask.phone .ask-step.review { padding: 0 10px; }
   .ask.phone .ask-step.review .ask-step-label { display: inline; }
-  .ask.phone .ask-opt { min-height: var(--tap); padding: 10px 12px; border-radius: var(--radius-sm); }
+  .ask.phone .ask-opt { min-height: var(--row-h-touch); padding: 10px 12px; border-radius: var(--radius-sm); }
   .ask.phone .ask-mark { width: 20px; height: 20px; margin-top: 0; }
   .ask.phone .ask-options[role="group"] .ask-opt.on .ask-mark::after { left: 6px; top: 2px; width: 5px; height: 10px; }
   .ask.phone .ask-opt-label { font-size: var(--fs-15); }
   .ask.phone .ask-opt-desc { font-size: var(--fs-13); }
   .ask.phone .ask-rec { font-size: var(--fs-12); }
-  .ask.phone .ask-options[data-layout="pair"] .ask-opt { min-height: var(--tap); }
+  .ask.phone .ask-options[data-layout="pair"] .ask-opt { min-height: var(--row-h-touch); }
   .ask.phone .ask-field { font-size: var(--fs-16); border-radius: var(--radius-md); }
   .ask.phone .ask-split { grid-template-columns: minmax(0, 1fr); }
   .ask.phone .ask-preview { max-height: 200px; }
   .ask.phone .ask-review-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; row-gap: 2px; padding: 8px 12px; min-height: var(--list-row-h); }
   .ask.phone .ask-review-q { grid-column: 1; grid-row: 1; }
   .ask.phone .ask-review-a { grid-column: 1; grid-row: 2; font-size: var(--fs-14); }
-  .ask.phone .ask-review-edit { grid-column: 2; grid-row: 1 / 3; min-height: var(--tap); padding: 0 8px; font-size: var(--fs-14); }
+  .ask.phone .ask-review-edit { grid-column: 2; grid-row: 1 / 3; min-height: var(--row-h-touch); padding: 0 8px; font-size: var(--fs-14); }
   .ask.phone .ask-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -14px; padding: 10px 14px 12px; background: var(--card); }
   .ask.phone .ask-hint { text-align: left; white-space: normal; font-size: var(--fs-13); line-height: 1.3; }
-  .ask.phone .ask-foot .btn { min-height: var(--tap); border-radius: var(--radius-sm); font-size: var(--fs-15); }
+  .ask.phone .ask-foot .btn { min-height: var(--row-h-touch); border-radius: var(--radius-sm); font-size: var(--fs-15); }
   .ask.phone .ask-go { padding: 0 20px; }
-  .ask.phone .ask-back { min-width: var(--tap); justify-content: center; padding: 0; }
+  .ask.phone .ask-back { min-width: var(--row-h-touch); justify-content: center; padding: 0; }
   .ask-record-body { font-size: var(--fs-14); }
 }

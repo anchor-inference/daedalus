@@ -6,7 +6,7 @@
    `.ph-hero .runon-chip`), and a rule of the same weight in an earlier part must not outrank them. */
 @media (max-width: 1023px) {
   /* A phone screen's icon button: a 20 px glyph in its 44 px target, where the shared one draws 16 in 32. */
-  .ph-ib { position: relative; width: var(--tap); height: var(--tap); flex: none; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--fg); text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--t-fast); }
+  .ph-ib { position: relative; width: var(--row-h-touch); height: var(--row-h-touch); flex: none; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--fg); text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--t-fast); }
   .ph-ib:active { background: var(--surface-2); }
   .ph-ib:disabled { opacity: .4; }
   .ph-ib:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -27,7 +27,7 @@
   .ph-sec-act { margin-left: auto; display: inline-flex; align-items: center; margin-right: -12px; }
   .ph-sec.warn { color: var(--warn); }
   .ph-sec.bad { color: var(--bad); }
-  .ph-link { min-width: var(--tap); min-height: var(--tap); display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
+  .ph-link { min-width: var(--row-h-touch); min-height: var(--row-h-touch); display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .ph-sec .ph-ib { color: var(--fg-2); }
   .ph-skrow { display: flex; align-items: center; gap: var(--space-3); height: var(--list-row-h); padding: 0 var(--gutter); }
   .ph-sk { display: block; background: var(--surface-2); border-radius: 6px; position: relative; overflow: hidden; }
@@ -41,7 +41,7 @@
   .ph-chips { flex: none; display: flex; gap: 6px; overflow-x: auto; padding: 8px var(--gutter); scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
   .ph-chips::-webkit-scrollbar { display: none; }
   /* A chip is a small filled control with 8 px corners, not a pill; the chosen one is ink. */
-  .ph-chip { position: relative; flex: none; height: var(--chip-h); min-width: var(--tap); display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-weight: 500; font: inherit; font-size: var(--fs-14); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
+  .ph-chip { position: relative; flex: none; height: var(--chip-h); min-width: var(--row-h-touch); display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-weight: 500; font: inherit; font-size: var(--fs-14); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
   .ph-chip::after { content: ""; position: absolute; inset: -8px 0; }
   .ph-chip-n { color: var(--fg-3); font-weight: 400; }
   .ph-chip.on { background: var(--primary); color: var(--primary-ink); }
@@ -79,10 +79,10 @@
   .ph-note-m { margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); }
   .ph-note-act { margin-top: var(--space-2); display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .ph-note-act .ph-btn { background: color-mix(in srgb, var(--fg) 10%, transparent); }
-  .ph-note-act .btn { min-height: var(--tap); }
+  .ph-note-act .btn { min-height: var(--row-h-touch); }
   /* A group's label over a list: words in the design's grey, not tracked capitals. */
   .ph-gl { padding: var(--space-5) calc(var(--gutter) + 4px) var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .ph-field { width: 100%; min-height: var(--tap); padding: 8px 12px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-16); outline: none; }
+  .ph-field { width: 100%; min-height: var(--row-h-touch); padding: 8px 12px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-16); outline: none; }
   .ph-field.area { resize: vertical; line-height: 1.4; }
   .ph-field:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
   .ph-field:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
@@ -96,16 +96,16 @@
   .ph-btn.ghost.danger { background: none; }
   .ph-btn.chosen { box-shadow: inset 0 0 0 1.5px var(--fg); }
   .ph-answers .ph-btn { flex: none; max-width: 100%; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; }
-  .ph-answers.grid .ph-btn { max-width: none; height: var(--tap); }
+  .ph-answers.grid .ph-btn { max-width: none; height: var(--row-h-touch); }
   .ph-answers.grid .ph-btn::after { display: none; }
   .ph-dot[data-level="ok"] { background: var(--ok); } .ph-dot[data-level="warn"] { background: var(--warn); } .ph-dot[data-level="bad"] { background: var(--bad); }
   .ph-dot[data-level="idle"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
   .ph-foot-row > .ph-field { flex: 1; min-width: 0; }
   .ph-btn.block { width: 100%; }
   .ph-ask-row > :is(.ph-btn, .btn) { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .ph-team .ph-sec .ph-ib { width: var(--tap); height: var(--tap); }
+  .ph-team .ph-sec .ph-ib { width: var(--row-h-touch); height: var(--row-h-touch); }
   .staff-head.compact .ph-btn { padding: 0 12px; gap: 6px; }
-  .ph-newchat { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-1); box-shadow: var(--shadow-lg); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast); }
+  .ph-newchat { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; height: var(--row-h-touch); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-1); box-shadow: var(--shadow-lg); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast); }
   .ph-newchat:active { background: var(--surface-3); }
   /* home: a new chat, and only what is live above its composer */
   .ph-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }

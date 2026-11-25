@@ -218,7 +218,7 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
 .notice-toasts.banner .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
 .notice-toasts.banner .notice-actions .btn.danger { color: var(--bad); }
 .notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; box-shadow: none; }
-.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
+.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--row-h-touch); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
 
 /* On a phone: sheets, their rows and contents, and the confirmation dialog. */
 @media (max-width: 1023px) {
@@ -231,9 +231,9 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
   .sheet .grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line-strong); margin: 8px auto 4px; flex: none; }
   /* flex: none because the sheet is a column with a max height: a long body made the head shrink to its
      min-height, and the model sheet's subtitle, wrapped onto a second line, slid under the search field. */
-  .sheet-head { flex: none; min-height: var(--tap); margin: 0 -8px 0 0; padding: 0 0 var(--space-1); gap: var(--space-2); }
+  .sheet-head { flex: none; min-height: var(--row-h-touch); margin: 0 -8px 0 0; padding: 0 0 var(--space-1); gap: var(--space-2); }
   .sheet-head h3, .sheet h3 { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; }
-  .sheet-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; color: var(--fg-2); }
+  .sheet-head .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; background: none; color: var(--fg-2); }
   .sheet.full { border-radius: 0; }
   :is(.sheet.ph-sheet, .sheet.menu-sheet) { padding-left: 0; padding-right: 0; }
   :is(.sheet.ph-sheet, .sheet.menu-sheet) .sheet-head { margin: 0; padding: 0 var(--space-2) var(--space-1) var(--gutter); }
@@ -300,7 +300,7 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
   .dialog { border-radius: var(--radius-lg); padding: 20px 20px 16px; }
   .dialog h3 { font-size: var(--fs-17); font-weight: 600; }
   .dialog-body { font-size: var(--fs-14); }
-  .dialog-actions .btn { min-height: var(--tap); padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .dialog-actions .btn { min-height: var(--row-h-touch); padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .dialog-actions .btn:not(.primary):not(.danger) { background: none; color: var(--fg-2); }
   .dialog-actions .btn.danger.solid { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 }
