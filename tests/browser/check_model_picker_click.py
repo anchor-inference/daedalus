@@ -175,6 +175,8 @@ def inside(page: Page, container: str, inner: str, where: str, failures: list[st
         for (const el of document.querySelectorAll(inner)) {
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
+            // A list's form input is clipped to nothing and pinned to the window's corner: nothing to see.
+            if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
             if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5)
                 out.push(`${el.className || el.tagName} [${Math.round(r.left)}, ${Math.round(r.right)}] in [${Math.round(outer.left)}, ${Math.round(outer.right)}]`);
         }
@@ -266,6 +268,7 @@ def sweep(browser, width: int, failures: list[str]) -> None:  # type: ignore[no-
                 for (const el of row.querySelectorAll('*')) {
                     const r = el.getBoundingClientRect();
                     if (!r.width && !r.height) continue;
+                    if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
                     if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5) { out.push(`${name}: ${String(el.className)} [${Math.round(r.left)}, ${Math.round(r.right)}] past [${Math.round(outer.left)}, ${Math.round(outer.right)}]`); break; }
                 }
             }
