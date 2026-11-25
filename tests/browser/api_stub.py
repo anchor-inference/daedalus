@@ -2830,9 +2830,24 @@ class BoardStub:
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
             "acceptance_state": "", "requirements": [], "entity_revision": 1,
+            "due_at": None, "overdue": False,
         }
         row.update(fields)
         return row
+
+    @staticmethod
+    def due(value: str | None) -> str | None:
+        """What the host stores for a due date: UTC to the second, a bare date meaning the end of its day, nothing for empty."""
+        if not value or not value.strip():
+            return None
+        text = value.strip()
+        return f"{text}T23:59:59Z" if len(text) == 10 else text
+
+    @staticmethod
+    def fresh(row: dict) -> dict:
+        """The card as read now: ``overdue`` is derived from the date and the status, never stored."""
+        late = bool(row.get("due_at")) and row["status"] not in ("done", "dropped") and row["due_at"] < "2026-10-16T12:00:00Z"
+        return {**row, "overdue": late}
 
     @staticmethod
     def assignee(id_: str, name: str, *, harness: str = "daedalus", color: str = "blue", status: str = "off", on_task: bool = False, **fields: object) -> dict:
@@ -2870,7 +2885,7 @@ class BoardStub:
         return self.reviews.get(row["id"]) or self.review(row)
 
     def listing(self, include_done: bool) -> dict:
-        rows = [t for t in self.tasks if not t.get("removed_at") and (include_done or t["status"] not in ("done", "dropped"))]
+        rows = [self.fresh(t) for t in self.tasks if not t.get("removed_at") and (include_done or t["status"] not in ("done", "dropped"))]
         rows.sort(key=lambda t: (self.ORDER.get(t["status"], 9), t["priority"], t["created_at"]))
         counts = {s: sum(1 for t in self.tasks if t["status"] == s) for s in self.ORDER}
         counts["needs_you"] = len(self.needs_you)
@@ -3088,18 +3103,19 @@ class BoardStub:
             brief = {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}
             brief.update(payload.get("brief") or {})
             row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
-                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"))
+                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"), due_at=self.due(payload.get("due_at")))
             self._assign(row, payload.get("assignee_staff_id"))
             self.tasks.append(row)
-            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "POST":
             payload = dict(body or {})
             self.created.append(payload)
             row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
-                            acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []])
+                            acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []],
+                            due_at=self.due(payload.get("due_at")))
             self.tasks.append(row)
-            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
             listed = [t for t in self.tasks if not t.get("removed_at") and ("include_done=1" in query or t["status"] not in ("done", "dropped"))]
@@ -3118,7 +3134,7 @@ class BoardStub:
             for need in self.needs_you:
                 if need.get("task_id") and waiting.get(need["task_id"]) != "question":
                     waiting[need["task_id"]] = "question" if need.get("kind") == "question" else "approval"
-            return 200, [{**t, "project_name": self.project["name"] if t.get("project_id") else None,
+            return 200, [{**self.fresh(t), "project_name": self.project["name"] if t.get("project_id") else None,
                           "needs_you": waiting.get(t["id"]) or ("review" if t["status"] == "review" else None)} for t in listed]
         if path.startswith("/api/board/"):
             parts = path.split("/")
@@ -3305,6 +3321,8 @@ class BoardStub:
                 self.updated.append((row["id"], payload))
                 if "assignee_staff_id" in payload:
                     self._assign(row, payload["assignee_staff_id"] or None)
+                if payload.get("due_at") is not None:
+                    row["due_at"] = self.due(payload["due_at"])
                 if "brief" in payload:
                     row["brief"] = {**row["brief"], **payload["brief"]}
                 # The operator reopening a card its own chat finished, as the host records it: the
@@ -3321,7 +3339,7 @@ class BoardStub:
                 if payload.get("note"):
                     row["notes"] = (row["notes"] + "\n" if row["notes"] else "") + payload["note"]
                 row["entity_revision"] += 1
-                return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+                return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
             if method == "DELETE":
                 row["status"] = "dropped"
                 row["removed_at"] = "2026-10-16T12:00:00Z"

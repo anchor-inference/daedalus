@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 import aiosqlite
@@ -42,6 +43,29 @@ def _canonical(value: Any) -> str:
 async def _one(conn: aiosqlite.Connection, sql: str, args: tuple[Any, ...]) -> aiosqlite.Row | None:
     async with conn.execute(sql, args) as cursor:
         return await cursor.fetchone()
+
+
+def normalize_due(value: str | None) -> str | None:
+    """A due date as the instant it is stored in: UTC, to the second, ``None`` for "no date".
+
+    ``None`` and ``""`` both mean no date (the update routes read ``""`` as "clear it" and ``None`` as
+    "leave it"; this is the stored side). A bare date is the end of that day in UTC, which is what
+    an agent writing ``2026-12-03`` means; a client that knows the operator's zone sends the instant
+    instead. A time without a zone is UTC, not the host's, so one stored value reads the same
+    wherever it is read.
+    """
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        if len(text) == 10:
+            moment = datetime.combine(date.fromisoformat(text), time(23, 59, 59), tzinfo=UTC)
+        else:
+            moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            moment = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+    except ValueError:
+        raise ValueError("a due date is an ISO date (2026-12-03) or an ISO timestamp") from None
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def _dependencies(conn: aiosqlite.Connection, task_id: str | None, project_id: str | None,
@@ -129,6 +153,7 @@ async def insert_task(
     origin_kind: str, assignee_staff_id: str | None = None,
     folder_id: str | None = None, file_ids: list[str] | None = None,
     requirements: list[dict[str, str]] | None = None,
+    due_at: str | None = None,
 ) -> dict[str, Any]:
     """Insert the card, its first contract and dependency gates inside the caller's receipt."""
     if not title.strip() or len(title) > 200 or len(acceptance) > 2000 or len(notes) > 4000:
@@ -149,12 +174,13 @@ async def insert_task(
     status = "todo" if ready else "blocked"
     checks = [{"id": f"C{index}", "text": item.strip()} for index, item in enumerate(checklist, 1)]
     await conn.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
-                       " session_id,origin_session_id,notes,created_at,updated_at,project_id,brief_json,assignee_staff_id)"
-                       " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       " session_id,origin_session_id,notes,created_at,updated_at,project_id,brief_json,assignee_staff_id,"
+                       " due_at)"
+                       " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (task_id, title.strip(), status, priority, acceptance.strip(),
                         _canonical([{**item, "done": False} for item in checks]), _canonical(dependencies),
                         source_session_id, source_session_id, notes, now(), now(), project_id,
-                        _canonical(brief), assignee_staff_id))
+                        _canonical(brief), assignee_staff_id, normalize_due(due_at)))
     for dependency in dependencies:
         await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,kind,"
                            " resolution_state,created_at) VALUES (?,?,?,'required','awaiting_result',?)",
@@ -247,13 +273,16 @@ class BoardCommands:
         events: list[AppEvent] = []
 
         async def commit(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
-            prior = await _one(conn, "SELECT status,assignee_staff_id FROM board_tasks WHERE id = ?", (entity.id,)) if entity.kind == "task" else None
+            prior = await _one(conn, "SELECT status,assignee_staff_id,due_at FROM board_tasks WHERE id = ?", (entity.id,)) if entity.kind == "task" else None
             response = await effect(conn, mutation)
-            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id,origin_session_id FROM board_tasks WHERE id = ?",
+            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id,due_at,origin_session_id FROM board_tasks WHERE id = ?",
                               (response["task_id"],))
             assert task is not None
             payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class,
                        "actor_id": principal.actor_id}
+            if (prior["due_at"] if prior is not None else None) != task["due_at"]:
+                # The history says a date was set, moved or cleared ("" is cleared), not only that the card changed.
+                payload["due_at"] = task["due_at"] or ""
             announced = [(event_type, payload)]
             if prior is not None and prior["status"] != task["status"]:
                 announced.append(("task.moved", {**payload, "from": prior["status"], "to": task["status"]}))
@@ -280,12 +309,14 @@ class BoardCommands:
                      source_session_id: str | None = None,
                      assignee_staff_id: str | None = None,
                      folder_id: str | None = None, file_ids: list[str] | None = None,
-                     requirements: list[dict[str, str]] | None = None) -> dict[str, Any]:
+                     requirements: list[dict[str, str]] | None = None,
+                     due_at: str | None = None) -> dict[str, Any]:
         payload = {"title": title, "acceptance": acceptance, "checklist": checklist or [],
                    "depends_on": depends_on or [], "priority": priority, "brief": brief or {},
                    "notes": notes, "source_session_id": source_session_id,
                    "assignee_staff_id": assignee_staff_id, "folder_id": folder_id,
-                   "file_ids": file_ids or [], "requirements": requirements or []}
+                   "file_ids": file_ids or [], "requirements": requirements or [],
+                   "due_at": normalize_due(due_at)}
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             return await insert_task(conn, mutation, scope=scope, title=title, acceptance=acceptance,
@@ -293,7 +324,7 @@ class BoardCommands:
                                      brief=brief or {}, notes=notes, source_session_id=source_session_id,
                                      origin_kind=principal.origin_class,
                                      assignee_staff_id=assignee_staff_id, folder_id=folder_id,
-                                     file_ids=file_ids, requirements=requirements)
+                                     file_ids=file_ids, requirements=requirements, due_at=due_at)
 
         return await self._mutate(principal, scope, "board.task.create", client_operation_id,
                                   expected_collection_revision, Entity("collection", scope.id), payload, effect, "task.created")
@@ -333,6 +364,7 @@ class BoardCommands:
                      folder_id: str | None = None, file_ids: list[str] | None = None,
                      requirements: list[dict[str, str]] | None = None,
                      reassignment_reason: str | None = None,
+                     due_at: str | None = None,
                      chat: ChatTurn | None = None) -> dict[str, Any]:
         """Edit a card. ``chat`` is set only for a chat moving a task on its own board, which may then
         take it to ``doing`` (the chat's claim) and ``done`` (the chat's result, see
@@ -343,7 +375,10 @@ class BoardCommands:
                    "note": note, "status": status, "check_ids": check_ids,
                    "uncheck_ids": uncheck_ids, "assignee_staff_id": assignee_staff_id,
                    "folder_id": folder_id, "file_ids": file_ids or [],
-                   "requirements": requirements or [], "reassignment_reason": reassignment_reason}
+                   "requirements": requirements or [], "reassignment_reason": reassignment_reason,
+                   "due_at": due_at}
+        if due_at:
+            normalize_due(due_at)
         if chat is not None:
             # The turn stays out of the request: a call replayed after a restart runs in a new turn,
             # and a different request under the same call id would be refused as reused.
@@ -482,12 +517,14 @@ class BoardCommands:
             if note:
                 notes = (notes + "\n" if notes else "") + f"[{now()[:16]}] {note}"
             await conn.execute("UPDATE board_tasks SET title = ?,acceptance = ?,checklist = ?,depends_on = ?,"
-                               " priority = ?,brief_json = ?,notes = ?,status = ?,assignee_staff_id = ?,updated_at = ? WHERE id = ?",
+                               " priority = ?,brief_json = ?,notes = ?,status = ?,assignee_staff_id = ?,due_at = ?,"
+                               " updated_at = ? WHERE id = ?",
                                (title.strip() if title is not None else row["title"],
                                 acceptance.strip() if acceptance is not None else row["acceptance"],
                                 _canonical(checks), _canonical(dependencies), priority or row["priority"],
                                 _canonical(current_brief), notes[-8000:], next_status,
                                 (assignee_staff_id or None) if assignee_staff_id is not None else row["assignee_staff_id"],
+                                normalize_due(due_at) if due_at is not None else row["due_at"],
                                 now(), task_id))
             await _handoff(conn, task_id, row["project_id"], folder_id=folder_id,
                            file_ids=file_ids or [], requirements=requirements or [])
@@ -568,4 +605,4 @@ class BoardCommands:
                                   expected_entity_revision, Entity("task", task_id),
                                   {"reason": reason}, effect, "task.changed")
 
-__all__ = ["BoardCommands", "ChatTurn", "insert_task"]
+__all__ = ["BoardCommands", "ChatTurn", "insert_task", "normalize_due"]

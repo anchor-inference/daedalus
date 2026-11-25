@@ -58,6 +58,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _overdue(due_at: str | None, status: str | None) -> bool:
+    """Whether a card's date has passed with the work still open. Read at the moment of asking and never
+    stored, so it cannot be stale: a finished or dropped card is never late, whatever its date says."""
+    if not due_at or status in ("done", "dropped"):
+        return False
+    try:
+        due = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return due < datetime.now(UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class Actor:
     """Who is acting on the board, as the events and the rules need to know it.
@@ -268,6 +280,7 @@ class Board:
         row["checklist"] = json.loads(row.get("checklist") or "[]")
         row["depends_on"] = json.loads(row.get("depends_on") or "[]")
         row["brief"] = _brief(row.pop("brief_json", None))
+        row["overdue"] = _overdue(row.get("due_at"), row.get("status"))
         return row
 
     async def list(self, status: str | None = None, *, include_done: bool = True, actor: str | None = None, project_id: str | None = None, session_id: str | None = None) -> list[dict[str, Any]]:

@@ -5390,7 +5390,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
         A project's task carries its project's and its assignee's names: the screen's card is the only
         place it is read there, and a card that names neither the work's project nor who did it read as
-        an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter."""
+        an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter.
+
+        ``due_at`` is the card's due instant (UTC) or ``null``, and ``overdue`` whether it has passed with
+        the work open."""
         tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None, session_id=session or None)
         await _board().mark_needs_you(tasks)
         await _board().mark_chat_finishes(tasks)
