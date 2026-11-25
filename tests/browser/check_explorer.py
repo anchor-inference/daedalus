@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from api_stub import DEFAULT_APP, expect_app
 from playwright.sync_api import expect, sync_playwright
 from screenshots import S1, UNHANDLED, detail, open_tool, respond, stub
+from waiting import until
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -123,7 +124,7 @@ def run() -> int:
         assert sum("files?path=src" in r for r in requests) == 1, "cached folder was downloaded again"
         before_refresh = sum("files?path=src" in r for r in requests)
         page.evaluate("window.settleRun()")
-        page.wait_for_timeout(500)
+        until(page, lambda: sum("files?path=src" in r for r in requests) > before_refresh)
         assert sum("files?path=src" in r for r in requests) > before_refresh, "settling did not refresh an open folder"
         tree.locator('[data-path="data"]').click()
         expect(tree.locator('[data-path="data/menu.json"] .written-badge')).to_be_visible()

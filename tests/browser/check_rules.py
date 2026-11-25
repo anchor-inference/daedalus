@@ -23,6 +23,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import ACTION_RULES, DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -91,7 +92,7 @@ def check(page: Page, width: int, lang: str, saved: list[dict], problems: list[s
         problems.append(f"{where}: past the screen's edge: {item}")
     before = len(saved)
     page.locator('.ar-row[data-category="external_write"] .ar-cell[data-level="on_command"]').click()
-    page.wait_for_timeout(500)
+    until(page, lambda: len(saved) > before)
     if len(saved) != before + 1:
         problems.append(f"{where}: picking a level did not save")
     else:

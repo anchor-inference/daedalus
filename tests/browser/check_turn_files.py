@@ -30,6 +30,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import CAPABILITIES, S1, UNHANDLED, ago, detail, respond, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -181,7 +182,7 @@ def desktop(browser, native: bool) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"{'native' if native else 'server'}: the session menu {'lacks' if native else 'offers'} the workspace in the file manager")
     if native and item.count():
         item.click()
-        page.wait_for_timeout(400)
+        until(page, lambda: bool(reveals))
         if not reveals or reveals[-1] != {"session_id": S1, "run": True}:
             problems.append(f"the session menu did not ask the host for the workspace ({reveals[-1:]})")
     else:

@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, MainStub, expect_app, open_drawer, switch_mode  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED  # noqa: E402
 from screenshots import stub as installation
+from waiting import until
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -148,7 +149,7 @@ def desktop(page: Page, lang: str) -> None:
     if not any(p[0] == "/api/dispatches/d7k2m9/cancel" for p in main.posts):
         # The danger button is the first when the safe one takes focus last.
         page.locator(".sheet-backdrop.confirm .dialog button", has_text=words["cancel"]).click()
-    page.wait_for_timeout(300)
+    until(page, lambda: any(p[0] == "/api/dispatches/d7k2m9/cancel" for p in main.posts))
     assert any(p[0] == "/api/dispatches/d7k2m9/cancel" for p in main.posts), main.posts
 
     # Settings → Models for tasks: the main orchestrator's own choice, preselected with the mid-tier preset.

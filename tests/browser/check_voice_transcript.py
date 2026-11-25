@@ -26,6 +26,7 @@ from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = shots.BASE
 
@@ -211,7 +212,7 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
     check(composer.count() == 1 and composer.is_visible(), "an agent's own composer is there, because typing to it is the point")
     composer.fill("redo the two with the wrong VAT line, please")
     composer.press("Control+Enter")
-    page.wait_for_timeout(700)
+    until(page, lambda: any(p.endswith("/messages") for p in wire.posted))
     sent = [p for p in wire.posted if p.endswith("/messages")]
     check(len(sent) == 1, f"what was typed went to that agent's session ({sent})")
 

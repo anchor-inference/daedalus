@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from memory_stub import MemoryStub  # noqa: E402
 from screenshots import S1, SETTINGS, UNHANDLED, memory_stub, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -228,7 +229,7 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
         if not page.locator(f'[data-setting="{anchor}"]').count():
             problems.append(f"{where}: no {anchor} row")
     page.locator('[data-setting="memory.generate"] [role=switch]').click()
-    page.wait_for_timeout(500)
+    until(page, lambda: bool(saved) and (saved[-1].get("memory") or {}).get("generate") is False)
     sent = (saved[-1].get("memory") or {}) if saved else {}
     if sent.get("generate") is not False or sent.get("search_chats") is not True:
         problems.append(f"{where}: switching Generate memory off saved {sent}")
