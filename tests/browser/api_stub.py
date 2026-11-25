@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
 
 from calendar_stub import CalendarStub
+from changes_stub import DEFAULT as CHANGES
 from companion_stub import CompanionStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
@@ -2100,6 +2101,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return answered[0], "application/json", json.dumps(answered[1])
     if "/notes" in path and (path.startswith("/api/notes/") or (parts[2:3] == ["sessions"] and parts[4:5] == ["notes"])):
         answered = NOTES.answer(method, path, query, body)
+        if answered is not None:
+            return answered
+    if parts[2:3] == ["sessions"] and parts[4:5] in (["changes"], ["commit"]):
+        # A chat's Changes tab: every chat has the same two changed files until it reverts or commits
+        # them; a check reads its writes back from CHANGES.writes.
+        answered = CHANGES.answer(method, path, query, body)
         if answered is not None:
             return answered
     if path == "/api/memory/export.zip":
