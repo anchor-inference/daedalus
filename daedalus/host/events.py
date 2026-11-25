@@ -679,6 +679,11 @@ class NotifySeen(TypedDict):
     summary: NotifySummary
 
 
+class NotifyUnseen(TypedDict):
+    ids: list[int]
+    summary: NotifySummary
+
+
 class NotifyResolved(TypedDict):
     id: int
     request_ref: str
@@ -851,6 +856,7 @@ REGISTRY: dict[str, EventSpec] = {
     "dispatch.stalled": EventSpec(DispatchStalled),
     "notify": EventSpec(Notify),
     "notify.seen": EventSpec(NotifySeen),
+    "notify.unseen": EventSpec(NotifyUnseen),
     "notify.resolved": EventSpec(NotifyResolved),
     # What each window shows is the host's business alone: it decides whether to notify, and a
     # client has no use for another client's focus.

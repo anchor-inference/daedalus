@@ -168,6 +168,43 @@ async def test_mark_seen_by_ids_by_session_and_all_announces_each_change(service
     assert (await service.get(c["id"]))["seen"] is True  # type: ignore[index]
 
 
+async def test_mark_unseen_takes_seen_entries_back_and_announces_the_change(service: NotificationService, manager: SessionManager) -> None:
+    a = await service.post(Draft("system", "a"))
+    b = await service.post(Draft("system", "b"))
+    quiet = await service.post(Draft("system", "quiet", level="quiet"))
+    await service.mark_seen(everything=True)
+    assert await service.summary() == {"unseen": 0, "needs_you": 0}
+    # Duplicates and unknown ids change nothing; an entry already unseen is not counted.
+    assert await service.mark_unseen([a["id"], a["id"], 9999]) == 1
+    assert await service.mark_unseen([a["id"]]) == 0
+    assert await service.mark_unseen([]) == 0
+    assert (await service.get(a["id"]))["seen"] is False  # type: ignore[index]
+    assert (await service.get(b["id"]))["seen"] is True  # type: ignore[index]
+    assert [e["title"] for e in (await service.list("unseen"))["entries"]] == ["a"]
+    # A quiet entry reads as unread, and still never badges.
+    assert await service.mark_unseen([quiet["id"]]) == 1
+    assert (await service.get(quiet["id"]))["seen"] is False  # type: ignore[index]
+    assert await service.summary() == {"unseen": 1, "needs_you": 0}
+    events = await announced(manager, "notify.unseen")
+    assert [e.payload["ids"] for e in events] == [[a["id"]], [quiet["id"]]]
+    assert events[0].payload["summary"] == {"unseen": 1, "needs_you": 0}
+
+
+async def test_the_done_view_lists_finished_runs_and_nothing_else(service: NotificationService) -> None:
+    await service.post(Draft("run_finished", "Finished one", session_id="s1", project_id="p1"))
+    await service.post(Draft("run_failed", "Failed", tone="error"))
+    await service.post(Draft("question", "Asks", request_ref="ask:1"))
+    await service.post(Draft("run_finished", "Finished two", session_id="s2", level="quiet"))
+    await service.post(Draft("run_finished", "Finished three", session_id="s3"))
+    done = await service.list("done")
+    assert [e["title"] for e in done["entries"]] == ["Finished three", "Finished two", "Finished one"]
+    assert {e["category"] for e in done["entries"]} == {"run_finished"}
+    assert [e["title"] for e in (await service.list("done", project_id="p1"))["entries"]] == ["Finished one"]
+    # The other views are what they were: a finished run is in "all" and "unseen" as before.
+    assert "Finished one" in [e["title"] for e in (await service.list("all"))["entries"]]
+    assert "Failed" not in [e["title"] for e in done["entries"]]
+
+
 async def test_delete_and_prune_keep_what_is_unseen_or_still_open(service: NotificationService) -> None:
     unseen = await service.post(Draft("system", "unseen"))
     seen = await service.post(Draft("system", "seen"))
@@ -263,12 +300,20 @@ async def test_the_routes(settings: Settings, db: Database, manager: SessionMana
         assert (await client.get("/api/notifications?view=bogus", headers=HEAD)).status_code == 422
         assert (await client.get("/api/notifications?limit=0", headers=HEAD)).status_code == 422
         assert (await client.get("/api/notifications/summary", headers=HEAD)).json() == {"unseen": 2, "needs_you": 1}
+        assert (await client.get("/api/notifications?view=done", headers=HEAD)).json()["entries"] == []
         assert (await client.post("/api/notifications/seen", json={}, headers=HEAD)).status_code == 422
         assert (await client.post("/api/notifications/seen", json={"ids": [1], "all": True}, headers=HEAD)).status_code == 422
         marked = (await client.post("/api/notifications/seen", json={"session_id": "s1"}, headers=HEAD)).json()
         assert marked == {"marked": 1, "summary": {"unseen": 1, "needs_you": 1}}
         marked = (await client.post("/api/notifications/seen", json={"all": True}, headers=HEAD)).json()
         assert marked["marked"] == 1 and marked["summary"]["unseen"] == 0
+        # Mark unread: the entry is unseen again, and the badge says so.
+        assert (await client.post("/api/notifications/unseen", json={}, headers=HEAD)).status_code == 422
+        assert (await client.post("/api/notifications/unseen", json={"ids": []}, headers=HEAD)).status_code == 422
+        assert (await client.post("/api/notifications/unseen", json={"ids": [first["id"]], "all": True}, headers=HEAD)).status_code == 422
+        back = (await client.post("/api/notifications/unseen", json={"ids": [first["id"], 9999]}, headers=HEAD)).json()
+        assert back == {"marked": 1, "summary": {"unseen": 1, "needs_you": 1}}
+        assert [e["title"] for e in (await client.get("/api/notifications?view=unseen", headers=HEAD)).json()["entries"]] == ["Run failed"]
         gone = (await client.delete(f"/api/notifications/{first['id']}", headers=HEAD)).json()
         assert gone["deleted"] == first["id"]
         assert (await client.delete(f"/api/notifications/{first['id']}", headers=HEAD)).status_code == 404

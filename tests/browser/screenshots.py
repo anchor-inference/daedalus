@@ -519,6 +519,8 @@ def notifications_view(view: str) -> list[dict]:
         return [e for e in INBOX if not e["seen"] and e["level"] != "quiet"]
     if view == "problems":
         return [e for e in INBOX if e["tone"] in ("warning", "error")]
+    if view == "done":
+        return [e for e in INBOX if e["category"] == "run_finished"]
     return INBOX
 
 
@@ -924,6 +926,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         resolution = "answered" if action.startswith("answer") else action
         return respond(route, {"resolution": resolution, "notification": entry and {**entry, "resolved": resolution, "needs_you": False, "seen": True}})
     if request.method == "POST" and rel == "/api/notifications/seen":
+        return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
+    if request.method == "POST" and rel == "/api/notifications/unseen":
         return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
     if request.method == "POST" and rel.startswith("/api/sessions/") and rel.endswith("/command"):
         # A slash command answers with the chat's text, or — when a scene sets one — refuses as the

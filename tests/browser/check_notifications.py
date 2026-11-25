@@ -104,6 +104,8 @@ class Centre:
             return [e for e in rows if e["needs_you"]]
         if name == "unseen":
             return [e for e in rows if not e["seen"] and e["level"] != "quiet"]
+        if name == "done":
+            return [e for e in rows if e["category"] == "run_finished"]
         return rows
 
 
@@ -178,6 +180,12 @@ def run() -> int:
                 if body.get("all") or e["id"] in (body.get("ids") or []):
                     e["seen"] = True
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"marked": 1, "summary": Centre.summary()}))
+        if rel == "/api/notifications/unseen" and request.method == "POST":
+            body = json.loads(request.post_data or "{}")
+            back = [e for e in Centre.entries if e["id"] in (body.get("ids") or []) and e["seen"]]
+            for e in back:
+                e["seen"] = False
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"marked": len(back), "summary": Centre.summary()}))
         if rel.startswith("/api/notifications/") and rel.endswith("/act") and request.method == "POST":
             id_ = int(rel.split("/")[3])
             body = json.loads(request.post_data or "{}")

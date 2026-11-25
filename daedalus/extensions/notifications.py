@@ -85,7 +85,7 @@ Category = Literal[
 ]
 Level = Literal["quiet", "normal", "urgent"]
 Tone = Literal["ok", "info", "warning", "error"]
-View = Literal["all", "unseen", "problems", "needs_you"]
+View = Literal["all", "unseen", "problems", "needs_you", "done"]
 ActionStyle = Literal["primary", "default", "danger", "ghost"]
 
 CATEGORIES: tuple[str, ...] = get_args(Category)
@@ -336,6 +336,7 @@ _VIEW_WHERE: dict[str, str] = {
     "unseen": _UNSEEN,
     "problems": f"tone IN ('warning', 'error') AND {_NOT_HELD}",
     "needs_you": _NEEDS_YOU,
+    "done": f"category = 'run_finished' AND {_NOT_HELD}",
 }
 
 
@@ -853,6 +854,29 @@ class NotificationService:
                 await self.bus.publish("notify.seen", {"ids": announced or changed, "summary": await self.summary()}, session_id=session_id)
             except Exception:  # noqa: BLE001
                 logger.warning("notify.seen was not announced", exc_info=True)
+        return len(changed)
+
+    async def mark_unseen(self, ids: Sequence[int]) -> int:
+        """Take the listed entries back to unseen, so they badge and list as unread again. Returns how many changed.
+
+        A quiet entry changes too, and still never badges: ``seen`` on its row says unread, the count
+        goes on leaving quiet rows out, as it does for one that arrived quiet.
+        """
+        wanted = sorted({int(i) for i in ids})
+        if not wanted:
+            return 0
+        where = f"seen_at IS NOT NULL AND id IN ({','.join('?' for _ in wanted)})"
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(f"SELECT id FROM notifications WHERE {where}", wanted)
+            changed = [int(r["id"]) for r in await cursor.fetchall()]
+            await cursor.close()
+            if changed:
+                await conn.execute(f"UPDATE notifications SET seen_at = NULL WHERE {where}", wanted)
+        if changed and self.bus is not None:
+            try:
+                await self.bus.publish("notify.unseen", {"ids": changed, "summary": await self.summary()})
+            except Exception:  # noqa: BLE001
+                logger.warning("notify.unseen was not announced", exc_info=True)
         return len(changed)
 
     async def delete(self, entry_id: int) -> bool:

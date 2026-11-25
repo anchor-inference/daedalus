@@ -720,6 +720,13 @@ class NotificationsSeenBody(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class NotificationsUnseenBody(BaseModel):
+    """Which notifications the operator wants back as unread: the listed ids."""
+
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    model_config = {"extra": "forbid"}
+
+
 class NotificationActBody(BaseModel):
     """One of a notification's actions: ``allow``, ``deny``, ``answer:<i>``, ``open``, or ``answer`` with the words.
 
@@ -6461,7 +6468,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/notifications")
     async def notifications_list(
-        view: Literal["all", "unseen", "problems", "needs_you"] = "all",
+        view: Literal["all", "unseen", "problems", "needs_you", "done"] = "all",
         project: str | None = Query(default=None, max_length=64),
         before: int | None = Query(default=None, ge=1),
         limit: int = Query(default=100, ge=1, le=500),
@@ -6479,6 +6486,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if sum((body.ids is not None, body.all, body.session_id is not None)) != 1:
             raise HTTPException(422, "name exactly one of ids, all or session_id")
         marked = await service.mark_seen(body.ids, everything=body.all, session_id=body.session_id)
+        return {"marked": marked, "summary": await service.summary()}
+
+    @api.post("/api/notifications/unseen")
+    async def notifications_unseen(body: NotificationsUnseenBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        service = notifications_service()
+        marked = await service.mark_unseen(body.ids)
         return {"marked": marked, "summary": await service.summary()}
 
     @api.delete("/api/notifications/{entry_id}")
