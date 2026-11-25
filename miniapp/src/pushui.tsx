@@ -12,7 +12,7 @@ import { Button } from "./ui/primitives";
 export function PushCard() {
   const { state, busy, error, enable, disable } = usePush();
   return (
-    <SetGroup title={t("push.device")} data-push-state={state ?? "loading"} data-setting="notifications.push">
+    <SetGroup title={t("push.device")} className="push-card" data-push-state={state ?? "loading"} data-setting="notifications.push">
       <Row title={t("push.title")} desc={state === null ? t("common.loading") : t(`push.state.${state}`)}>
         {state === "off" && <Button variant="primary" size="sm" busy={busy} onClick={() => void enable()}>{t("push.enable")}</Button>}
         {state === "on" && <Button size="sm" busy={busy} onClick={() => void disable()}>{t("push.disable")}</Button>}
