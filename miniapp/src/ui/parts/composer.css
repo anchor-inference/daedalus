@@ -253,14 +253,18 @@
 .model-picker-effort { flex:none; display:flex; flex-direction:column; gap:6px; padding:8px 4px 2px; border-top:1px solid var(--line); }
 .model-picker-label { height:20px; display:flex; align-items:center; gap:6px; padding:0 6px; font-size:var(--fs-12); font-weight:500; color:var(--fg-3); }
 .model-picker .segmented.model-effort-seg { display:flex; width:100%; margin:0; padding:0; gap:2px; background:none; }
-/* Each choice as wide as its word and the rest shared out: equal fifths cut "Максимум" to "Макси…". */
-.model-picker .segmented.model-effort-seg button { flex:1 1 auto; width:auto; min-width:0; min-height:28px; height:28px; padding:0 6px; border-radius:7px; }
+/* Each choice as wide as its word and the rest shared out, in the meta size: in fifths at 13 px the
+   Russian words (Среднее, Высокое, Максимум) did not fit 336 px and were cut to "Макси…". */
+.model-picker .segmented.model-effort-seg button { flex:1 1 auto; width:auto; min-width:0; min-height:28px; height:28px; padding:0 4px; border-radius:7px; font-size:var(--fs-12); }
 .model-effort-none { height:28px; display:flex; align-items:center; padding:0 6px; font-size:var(--fs-13); }
 .model-account { display:inline-flex; min-width:0; }
 .model-picker .model-account-chip { height:20px; min-height:20px; width:auto; max-width:180px; padding:0 4px; gap:4px; border-radius:var(--radius-xs); font-size:var(--fs-12); color:var(--fg-2); }
 .model-picker .model-account-chip .ic { color:var(--fg-3); }
 .model-picker .model-picker-foot { flex:none; height:var(--row-h); min-height:var(--row-h); margin-top:2px; padding:0 10px; border-top:1px solid var(--line); border-radius:0 0 var(--radius-sm) var(--radius-sm); color:var(--fg-2); font-size:var(--fs-13); }
 .model-picker-foot .kbd { border:0; background:none; padding:0; }
+/* In a sheet (a phone, or a column narrower than the box) the boxes take the sheet's width; their
+   fixed widths are a popover's. */
+.sheet .menu.in-sheet.model-picker, .sheet .menu.in-sheet.attach-menu, .sheet .menu.in-sheet.access-menu, .sheet .menu.in-sheet.agentlang-menu, .sheet .menu.in-sheet.account-menu { width:auto; max-width:none; }
 /* On a phone the same box is a bottom sheet: the rows take a finger's height and the list six of them. */
 @media (max-width: 1023px) {
   .sheet .model-picker-body { padding:0 4px; }
