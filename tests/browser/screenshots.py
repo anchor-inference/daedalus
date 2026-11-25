@@ -387,7 +387,8 @@ def detail(id_: str) -> dict:
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
         # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
-        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None,
+        # Every chat's folder is a repository: the changes stub answers each with the same listing.
+        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None, "repository": True,
         "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [ASK_KEY] if asked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,

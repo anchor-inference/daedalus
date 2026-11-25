@@ -1,4 +1,5 @@
-"""The branch a session's folder is on is read from ``HEAD``, never by running git."""
+"""The branch a session's folder is on, and whether it is in a repository at all, are read from
+``HEAD``, never by running git."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import pytest
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
-from daedalus.host.git_branch import branch_of
+from daedalus.host.git_branch import UNKNOWN, Head, branch_of, head_of
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 
@@ -98,6 +99,30 @@ def test_a_broken_git_marker_reads_as_none_and_does_not_raise(tmp_path: Path) ->
     assert branch_of(repo) is None
 
 
+def test_the_head_says_whether_the_folder_is_in_a_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert head_of(_repository(tmp_path / "repo")) == Head(True, "main")
+    assert head_of(_repository(tmp_path / "detached", "0123456789abcdef0123456789abcdef01234567\n")) == Head(True, None)
+    (tmp_path / "plain").mkdir()
+    assert head_of(tmp_path / "plain") == Head(False, None)
+    # A .git with no HEAD in it is no repository to git; a .git file that points nowhere neither.
+    (tmp_path / "headless" / ".git").mkdir(parents=True)
+    assert head_of(tmp_path / "headless") == Head(False, None)
+    (tmp_path / "pointer").mkdir()
+    (tmp_path / "pointer" / ".git").write_text("gitdir: ../nowhere\n", encoding="utf-8")
+    assert head_of(tmp_path / "pointer") == Head(False, None)
+    # A HEAD that cannot be read for another reason is not known, which is not "no".
+    unreadable = _repository(tmp_path / "unreadable")
+    real_open = Path.open
+
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == unreadable / ".git" / "HEAD":
+            raise PermissionError(13, "denied")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse)
+    assert head_of(unreadable) == UNKNOWN
+
+
 def test_reading_the_branch_runs_no_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*_: Any, **__: Any) -> Any:
         raise AssertionError("the branch is read from a file, not by a subprocess")
@@ -105,6 +130,7 @@ def test_reading_the_branch_runs_no_process(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(subprocess, "Popen", refuse)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse)
     assert branch_of(_repository(tmp_path / "repo")) == "main"
+    assert head_of(tmp_path / "repo") == Head(True, "main")
 
 
 @pytest.fixture
@@ -126,15 +152,30 @@ async def test_an_idle_session_outside_a_repository_has_neither(client: httpx.As
     state = await manager.create_session("plain")
     body = (await client.get(f"/api/sessions/{state.session.id}", headers=H)).json()
     assert body["run_started_at"] is None and body["branch"] is None and body["status"] == "idle"
+    assert body["repository"] is False
 
 
 async def test_the_detail_names_the_branch_of_the_working_folder(client: httpx.AsyncClient, manager: SessionManager) -> None:
     state = await manager.create_session("repo")
     _repository(state.workspace)
     body = (await client.get(f"/api/sessions/{state.session.id}", headers=H)).json()
-    assert body["branch"] == "main"
+    assert body["branch"] == "main" and body["repository"] is True
     (state.workspace / ".git" / "HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
     assert (await client.get(f"/api/sessions/{state.session.id}", headers=H)).json()["branch"] == "other"  # read afresh, nothing cached
+    (state.workspace / ".git" / "HEAD").write_text("0123456789abcdef0123456789abcdef01234567\n", encoding="utf-8")
+    detached = (await client.get(f"/api/sessions/{state.session.id}", headers=H)).json()
+    assert detached["branch"] is None and detached["repository"] is True
+
+
+async def test_a_folder_in_another_environment_is_not_known_here(client: httpx.AsyncClient, manager: SessionManager,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    # A remote conversation's folder is on the operator's machine: whatever this process could read
+    # at the same path is not it.
+    state = await manager.create_session("remote")
+    _repository(state.workspace)
+    monkeypatch.setattr(manager, "env_of", lambda *_: "device:laptop")
+    body = (await client.get(f"/api/sessions/{state.session.id}", headers=H)).json()
+    assert body["repository"] is None and body["branch"] is None
 
 
 async def test_a_running_session_says_when_its_run_began_and_an_idle_one_says_nothing(client: httpx.AsyncClient, manager: SessionManager) -> None:
