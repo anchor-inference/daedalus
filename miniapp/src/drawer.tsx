@@ -69,8 +69,10 @@ export function AppDrawer(p: AppDrawerProps) {
   // drawer's own history entry (router.ts, navigate), so Back from there returns to the page under it.
   const at = window.location.pathname + window.location.search;
   useEffect(() => { closeDrawer(); }, [at]);
-  // A link to where the reader already is changes no address, so it closes the drawer itself.
-  const onClickCapture = (e: MouseEvent) => {
+  // A link to where the reader already is changes no address, so the drawer closes itself once the
+  // link has had its click. Not before it: closing first took the drawer's history entry back while
+  // the link's own move was still to come, and Back's late arrival undid that move.
+  const onClick = (e: MouseEvent) => {
     const link = (e.target as Element).closest?.("a[href]");
     if (link && !(e.metaKey || e.ctrlKey || e.shiftKey)) closeDrawer();
   };
@@ -82,7 +84,7 @@ export function AppDrawer(p: AppDrawerProps) {
   return (
     <SidebarFrame value={frame}>
       <Drawer open={open} onClose={closeDrawer} label={t("nav.menu")}>
-        <div className="ph-drawer-nav" onClickCapture={onClickCapture}>
+        <div className="ph-drawer-nav" onClick={onClick}>
           {p.mode === "orchestration" ? <OrchestrationSidebar onMain={p.mainOpen} /> : (
             <Sidebar session={p.session} projects={p.projects} project={p.project} onProjects={() => { closeDrawer(); p.onProjects(); }}
               onClearProject={p.onClearProject} onOpen={p.onOpen} toast={p.toast} />

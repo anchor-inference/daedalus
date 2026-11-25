@@ -1011,11 +1011,6 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                 page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang={language}")
                 page.wait_for_selector(".composer .composer-field")
                 page.wait_for_timeout(150)
-                # A phone's composer rests as one row and opens onto its toolbar under the finger;
-                # the rows measured here are the open shape's (phone() measures the resting one).
-                if width < 1024:
-                    field(page).focus()
-                    page.wait_for_timeout(100)
                 measure = page.evaluate("""() => {
                   const one = s => document.querySelector(s);
                   const rect = el => { const r = el.getBoundingClientRect(); return {x:r.x, y:r.y, w:r.width, h:r.height, bottom:r.bottom, right:r.right}; };
@@ -1035,10 +1030,10 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                     problems.append(f"{prefix}: an empty field reserves more than two lines")
                 if measure["scroll"] > measure["client"] + 1:
                     problems.append(f"{prefix}: placeholder is clipped")
-                # On a desktop the row of controls is pulled 8 px out to the left, so the + button's glyph
-                # and the field's words share one edge; a phone's card has no room for that. Both end at
-                # the card's padding on the right.
-                pulled = 8 if width >= 1024 else 0
+                # The row of controls is pulled 8 px out to the left, so the + button's glyph and the
+                # field's words share one edge, on a phone's card as on a desktop's. Both end at the
+                # card's padding on the right.
+                pulled = 8
                 if f["bottom"] > row["y"] or abs(f["right"] - row["right"]) > 1 or abs(f["x"] - row["x"] - pulled) > 1:
                     problems.append(f"{prefix}: text does not own a full row")
                 if any(abs(c["y"] + c["h"] / 2 - row["y"] - row["h"] / 2) > 1 or c["right"] > row["right"] + 1 for c in measure["controls"]):

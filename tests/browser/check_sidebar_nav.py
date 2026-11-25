@@ -258,6 +258,8 @@ def phone(page: Page, lang: str) -> None:
     menu.click()
     page.locator(".ph-drawer-root.open .sidebar-close").click()
     expect(page.locator(".ph-drawer-root.open")).to_have_count(0)
+    # Closing takes the drawer's history entry back, which lands a moment later.
+    page.wait_for_timeout(300)
     assert page.url.split("?")[0].endswith("/app/agents"), page.url
     # A destination replaces the drawer's history entry: Back from it returns to the page under it.
     menu.click()

@@ -223,7 +223,7 @@
   .sb-kids > .sb-row { padding-left: 40px; }
   .sb-sub, .sb-kids > .sb-row.sb-sub { height: var(--tap); }
   .sb-subs { position: relative; }
-  .sb-subs::after { content: ""; position: absolute; inset: -12px -4px; }
+  .sb-subs::after { content: ""; position: absolute; inset: -12px -6px; }
   .sb-tools { padding: var(--space-2) var(--space-2) var(--space-1); }
   .sb-search, .sb-lens { height: var(--tap); }
   .sb-search input { font-size: var(--fs-16); }

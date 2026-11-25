@@ -36,10 +36,6 @@
 .composer-field .cf-close { padding:2px 14px 6px; border-top:1px solid var(--line); font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; color:var(--fg-3); }
 /* The tools give up width before they leave the card: the model chip inside them is what is cut. */
 .composer-tools { display:flex; align-items:center; justify-content:flex-end; gap:4px; flex:0 1 auto; margin-left:auto; min-width:0; }
-/* A phone's card has no room to pull the row out to the left: its + would stand on the edge. */
-@media (max-width: 1023px) {
-  .composer-row { margin-left:0; }
-}
 .composer-row > .iconbtn.plus, .composer-tools > .iconbtn { width:var(--ctl-h); height:var(--ctl-h); border-radius:var(--radius-sm); }
 .iconbtn.flat { background:transparent; color:var(--fg-2); }
 .iconbtn.flat:hover { background:var(--hover); color:var(--fg); }
@@ -316,7 +312,7 @@
   .composer[data-shape] .model-select .model-effort { color: var(--fg-3); }
   .composer[data-shape] .model-select > .ic:last-child { flex: none; color: var(--fg-3); }
   .composer[data-shape] .model-select .model-from { font-size: var(--fs-12); }
-  .composer[data-shape] .ctx-ring { position: relative; height: var(--tap); padding: 0 4px; }
+  .composer[data-shape] .ctx-ring { position: relative; justify-content: center; min-width: var(--tap); height: var(--tap); padding: 0 4px; }
   .composer[data-shape] .upload-progress, .composer[data-shape] .ph-hint { padding: 2px 10px 0; font-size: var(--fs-13); color: var(--fg-3); }
   .composer[data-shape] .attachments { margin: 4px 4px 2px; gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .composer[data-shape] .attachment-open { min-height: 64px; border: 0; border-radius: 12px; background: var(--surface-2); }

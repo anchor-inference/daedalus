@@ -83,14 +83,16 @@ export function FoldButton({ onToggle }: { onToggle: () => void }) {
  *  palette, which finds a screen, a project or a chat by name. */
 export function SidebarHead({ onSearch, searching = false }: { onSearch?: () => void; searching?: boolean }) {
   const f = useFrame();
-  const home = modeHome(f.mode);
+  // A phone's orchestration home is its list of projects, a page there, where a desktop holds the list
+  // in this column and opens the main chat beside it.
+  const home = modeHome(f.mode, !f.drawer);
   const modes: MenuItem[] = (["agents", "orchestration"] as Mode[]).map((m) => ({
     label: t(`mode.${m}`),
     icon: m === "agents" ? "bots" : "compass",
     // The current mode carries the check; the other says how much waits in it. A checkbox item would
     // keep the menu open, and choosing a mode is a move, not a setting.
     aside: m === f.mode ? <Icon name="check" size={16} /> : m === "orchestration" && f.waiting > 0 ? <span className="sb-mode-wait num" aria-label={plural("mode.waiting", f.waiting)}>{f.waiting}</span> : undefined,
-    onSelect: () => navigate(modeHome(m)),
+    onSelect: () => navigate(modeHome(m, !f.drawer)),
   }));
   const search = onSearch ?? f.onPalette;
   return (

@@ -192,26 +192,8 @@
   .main > :not(.pagehead):not(.offline-strip) { order: 2; }
   .offline-strip { min-height: 32px; display: flex; align-items: center; justify-content: center; padding: 6px var(--gutter); font-size: var(--fs-13); font-weight: 500; color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); border-bottom: 0; }
 
-  /* ── grouped cards ───────────────────────────────────────────────────────────────────────── */
-  /* A group is one card on the page: its rows share the surface and the ring and are told apart by a
-     hairline, the way a settings list is drawn everywhere else. It was a run of separate tiles with
-     2 px of page between them, which read as a stack of buttons rather than one list. */
+  /* A group's label over a list: words in the design's grey, not tracked capitals. */
   .ph-gl { padding: var(--space-5) calc(var(--gutter) + 4px) var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .ph-group { margin: 0 var(--gutter); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--drop-xs); }
-  .ph-group > * { border-radius: 0; background: none; }
-  .ph-group > :first-child { border-top-left-radius: calc(var(--radius-xl) - 1px); border-top-right-radius: calc(var(--radius-xl) - 1px); }
-  .ph-group > :last-child { border-bottom-left-radius: calc(var(--radius-xl) - 1px); border-bottom-right-radius: calc(var(--radius-xl) - 1px); }
-  /* :not() rather than a sibling selector, so the hairline outranks a row's own `border: 0`. */
-  .ph-group > :not(:first-child) { border-top: 1px solid var(--line); }
-  .ph-srow { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--set-row-h); padding: 6px 14px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; text-decoration: none; cursor: pointer; transition: background var(--t-fast); }
-  .ph-srow > .ic { flex: none; color: var(--fg-2); }
-  .ph-srow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .ph-srow-t { line-height: 1.3; overflow-wrap: anywhere; }
-  .ph-srow-v { margin-top: 1px; font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-srow-val { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-14); color: var(--fg-3); }
-  .ph-srow-chev { color: var(--fg-3); display: inline-flex; }
-  .ph-srow.danger, .ph-srow.danger > .ic { color: var(--bad); }
-  .ph-srow:active { background: var(--surface-2); }
 
   /* ── sheet contents shared by the slice pages: a padded body, facts, code, fields, footers ── */
   .ph-sheet-pad { padding: var(--space-1) var(--gutter) var(--space-2); display: flex; flex-direction: column; gap: var(--space-3); }

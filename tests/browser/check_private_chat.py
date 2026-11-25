@@ -100,10 +100,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     if item.get_attribute("aria-checked") != "false":
         say("the private choice starts switched on")
     item.click()
-    if phone:
-        # The idle pill shares its one row with the field and leaves the chip for the open toolbar.
-        expect(composer.locator(".private-chip")).to_be_hidden()
-        composer.locator(".composer-field").click()
+    # The phone's composer is the same card at rest as while typing: the chip is in its row at once.
     chip = composer.locator(".private-chip")
     expect(chip).to_be_visible()
     expect(chip).to_contain_text(words["badge"])

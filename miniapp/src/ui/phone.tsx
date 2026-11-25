@@ -12,7 +12,6 @@
 //   EmptyState      a title, the hint and one action, centred, for empty, error and filtered-empty
 //   RowSkeleton     a list's placeholder rows at the real row height while it loads
 //   Banner          a 32 px strip under the top bar (offline) or a tinted note with an action
-//   Group, GroupRow a grouped card of 56 px settings rows with 2 px gaps and 20/6 px corners
 //   NewChatPill     the one accent creation pill, floating over a list
 //
 // The pieces both sizes share live in ui/primitives: the sheet, the menu and its rows, the list row,
@@ -22,7 +21,7 @@
 
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Icon, type IconName } from "../icons";
-import { inLayer, navigate, pushLayer } from "../router";
+import { inLayer, pushLayer } from "../router";
 import { t } from "../i18n";
 import { IconButton } from "./primitives/controls";
 import { trapDialogTab, useLayer } from "./primitives/layers";
@@ -275,36 +274,6 @@ export function Banner({ tone, icon, children, sub, action, strip, className = "
       </div>
     </div>
   );
-}
-
-// ── grouped cards ───────────────────────────────────────────────────────────────────────────────
-
-export function Group({ label, children }: { label?: ReactNode; children: ReactNode }) {
-  return (
-    <>
-      {label && <div className="ph-gl">{label}</div>}
-      <div className="ph-group">{children}</div>
-    </>
-  );
-}
-
-export function GroupRow({ icon, title, sub, value, href, onClick, danger, chevron, children }: { icon?: IconName; title: ReactNode; sub?: ReactNode; value?: ReactNode; href?: string; onClick?: () => void; danger?: boolean; chevron?: boolean; children?: ReactNode }) {
-  const body = (
-    <>
-      {icon && <Icon name={icon} size={20} />}
-      <span className="ph-srow-main">
-        <span className="ph-srow-t">{title}</span>
-        {sub && <span className="ph-srow-v">{sub}</span>}
-      </span>
-      {value !== undefined && <span className="ph-srow-val">{value}</span>}
-      {children}
-      {chevron && <span className="ph-srow-chev"><Icon name="forward" size={18} /></span>}
-    </>
-  );
-  const cls = `ph-srow ${sub ? "two" : ""} ${danger ? "danger" : ""}`;
-  if (href) return <a className={cls} href={href} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onClick ? onClick() : navigate(href); }}>{body}</a>;
-  if (onClick) return <button type="button" className={cls} onClick={onClick}>{body}</button>;
-  return <div className={cls}>{body}</div>;
 }
 
 export function NewChatPill({ label, icon = "compose", onClick }: { label: string; icon?: IconName; onClick: () => void }) {

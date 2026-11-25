@@ -523,7 +523,6 @@ describe("the phone", () => {
     // model sheet's search field.
     expect(phoneRule(".sheet-head")).toContain("flex: none");
     expect(phoneRule(".menu-row")).toContain("min-height: var(--list-row-h-1)");
-    expect(phoneRule(".ph-srow")).toContain("min-height: var(--set-row-h)");
     expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");
     expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--tap)");
     expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--tap)");

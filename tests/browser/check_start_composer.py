@@ -82,14 +82,15 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     page.wait_for_timeout(800)
 
     if phone:
-        # A phone's home is a new chat: the composer rests as one 44 px row at the bottom, the
-        # question above it, and the model is the top bar's title.
+        # A phone's home is a new chat: the composer is the chat's card at the bottom, its controls
+        # one 44 px row under the field, the question above it, and the model is the top bar's title.
         box = composer.locator(".composer-box").bounding_box()
+        row = composer.locator(".composer-row").bounding_box()
         greeting = page.locator(".ph-hero h1").bounding_box()
         vh = size["height"]
         assert box and greeting
-        if round(box["height"]) != 44 or vh - (box["y"] + box["height"]) > 24:
-            say(f"the composer {box} is not one 44 px row at the bottom")
+        if not row or round(row["height"]) != 44 or vh - (box["y"] + box["height"]) > 24:
+            say(f"the composer {box} is not a card over one 44 px row at the bottom ({row})")
         if greeting["y"] + greeting["height"] > box["y"]:
             say("the question is not above the composer")
         expect(page.locator(".ph-top .pagehead-tb")).to_contain_text("gpt-6-luna")
