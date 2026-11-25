@@ -616,7 +616,9 @@ export type BrowserSettings = {
   watch_domains: string[];
   injection_monitor: boolean;
   injection_monitor_preset: string;
+  injection_monitor_effort?: string;
   extract_preset: string;
+  extract_effort?: string;
   point_clicks: boolean;
   /** Which WebGL the agent may turn on in its browser without asking; turning it off never asks. */
   webgl_allow: "ask" | "software" | "gpu";
@@ -1603,6 +1605,9 @@ export type SessionDetail = {
   vision_label?: string;
   vision_default?: string;
   vision_default_label?: string;
+  /** How hard this session's vision model thinks, "" while it follows `vision.effort`, which is beside it. */
+  vision_effort?: string;
+  vision_default_effort?: string;
   /** The model name the session is set to answer with, and the one really answering; they differ during a fallback. */
   configured_model?: string;
   effective_model?: string;
@@ -1840,6 +1845,7 @@ export type OrchestratorSettings = {
   enabled: boolean;
   session_id: string;
   model: string;
+  effort?: string;
   autonomy: "ask" | "normal" | "full";
   concurrency: number;
   concurrency_cap: number;
@@ -2305,6 +2311,8 @@ export type HeartbeatStatus = {
   interval_minutes: number;
   active_hours: string;
   preset: string;
+  /** How hard a heartbeat run thinks: "" the model's own, "none", or an effort. */
+  effort?: string;
   max_runs_per_day: number;
   last_run: string | null;
   runs_today: number;
@@ -2366,7 +2374,7 @@ export type PriceView = Rates & {
 };
 
 export type SubagentModelsMode = "all" | "session" | "chosen";
-export type SubagentModelsChoice = { mode: SubagentModelsMode; presets: string[] };
+export type SubagentModelsChoice = { mode: SubagentModelsMode; presets: string[]; effort?: string };
 
 /** A session's list of models its helpers may run on (`/api/sessions/{id}/subagent-models`). */
 export type SubagentModelsView = SubagentModelsChoice & {
@@ -2426,9 +2434,11 @@ export type ActionRulesSettings = {
   levels: Record<string, string>;
   review: string[];
   review_preset: string;
+  review_effort?: string;
   review_timeout_seconds: number;
   injection_model: boolean;
   injection_preset: string;
+  injection_effort?: string;
 };
 
 export type Settings = {
@@ -2446,10 +2456,10 @@ export type Settings = {
   providers: Record<string, ProviderConf>;
   provider_kinds?: string[];
   prompt: { rules: string; default_rules?: string };
-  vision: { preset: string; max_output_tokens: number };
+  vision: { preset: string; effort?: string; max_output_tokens: number };
   /** A project orchestrator's defaults. `strongest` is what an empty `preset` means, sent by the host. */
-  orchestrator?: { preset: string; strongest?: string };
-  dispatcher?: { preset: string; middle?: string; stalled_minutes?: number };
+  orchestrator?: { preset: string; effort?: string; strongest?: string };
+  dispatcher?: { preset: string; effort?: string; middle?: string; stalled_minutes?: number };
   asr: { provider: string; url: string; api_key: string; api_key_set?: boolean; model: string; language: string; timeout_seconds: number; max_seconds: number; autosend: boolean; transcriber?: string; fallback?: string; chunk_seconds?: number };
   tools: {
     web: { fetch_timeout_seconds: number; proxy: string; user_agent: string; fetch_max_chars: number; search: WebSearchConf };
@@ -2457,14 +2467,14 @@ export type Settings = {
   };
   self_change: { approval: string; auto_rebuild: boolean };
   limits: { max_iterations: number; tool_timeout_seconds: number; usd_per_day?: number; usd_per_run: number; usd_total: number; usd_total_per_provider: Record<string, number>; total_since: string };
-  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice; quick_models?: string[]; quick_wait_minutes?: number };
+  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice; quick_models?: string[]; quick_effort?: string; quick_wait_minutes?: number };
   /** The disk guard: `workspace_soft_limit_gb` is the size past which a workspace is flagged, 0 for none. */
   disk?: { workspace_soft_limit_gb: number };
   usd_per_day?: number;
   balance: { enabled: boolean; poll_seconds: number; thresholds_usd: number[] };
   scheduler: { topic_mode: string; catch_up_missed: boolean; require_approval?: boolean };
-  compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
-  memory?: { classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
+  compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string; effort?: string };
+  memory?: { classify_preset: string; classify_effort?: string; synthesis_effort?: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
   /** `host_memory_cap`: what every program run on the host may use together: "60%", "24G" or "none". */
   terminals?: { running_cap: number; host_memory_cap?: string };
   browser?: BrowserSettings;
@@ -2472,12 +2482,12 @@ export type Settings = {
   /** The rail, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
-  assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number };
+  assist?: { predict: boolean; predict_preset?: string; predict_effort?: string; predict_usd_per_day?: number };
   /** Autopilot: the master switch, the judge's model, the turns after one message, the daily allowance. */
-  autopilot?: { enabled: boolean; preset?: string; max_continuations: number; usd_per_day: number };
+  autopilot?: { enabled: boolean; preset?: string; effort?: string; max_continuations: number; usd_per_day: number };
   /** Talking to the agent in another language: the operator's own, the default for the agent, the
    *  translator's model ("" automatic, `suggested` naming what that resolves to) and its time limit. */
-  translation?: { operator_language: string; agent_language: string; preset: string; timeout_seconds: number; suggested?: string };
+  translation?: { operator_language: string; agent_language: string; preset: string; effort?: string; timeout_seconds: number; suggested?: string };
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;

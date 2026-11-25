@@ -106,3 +106,9 @@
 .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) { grid-template-columns: minmax(0, 1fr); }
 .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
 .settings-row-ctl > :has(.sel) { flex: 1 1 100%; min-width: 0; }
+
+/* A task's model and how hard that model thinks, as one control of its row: the effort under the
+   model, both as wide as the row, so a phone and a desktop read them in the same order and the
+   effort's list opens under it rather than in a column too narrow for its hints. */
+.task-model { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.task-effort-title { margin: 2px 0 4px; }

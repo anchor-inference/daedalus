@@ -284,6 +284,21 @@ class Dispatcher:
         await self._sync_model()
         return True
 
+    async def effort_chosen(self, session_id: str, effort: str) -> bool:
+        """The composer's effort on the main chat writes the Settings choice, as its model chip does."""
+        state = await self.manager.get_state(session_id)
+        if state is None or not state.metadata.get("dispatcher"):
+            return False
+        config = getattr(self.app, "config", None) or self.manager.config
+        raw = config.model_dump(mode="json")
+        raw["dispatcher"]["effort"] = effort
+        save = getattr(self.app, "save_config", None)
+        if save is not None:
+            await save(type(config).model_validate(raw))
+        else:
+            self.manager.config.dispatcher.effort = effort
+        return True
+
     # -- what it sees ----------------------------------------------------------------------------
 
     async def turn_notes(self, state: SessionState) -> str | None:

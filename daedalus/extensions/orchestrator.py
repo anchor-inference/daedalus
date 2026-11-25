@@ -763,6 +763,23 @@ class Orchestrators:
                                       concurrency=None, concurrency_cap=None, by="operator")
         return True
 
+    async def effort_chosen(self, session_id: str, effort: str) -> bool:
+        """The composer's effort on an orchestrator's chat: the choice is the project's, as the model's is.
+
+        Kept on the session alone it would be overruled at the next turn by the project's effort, which
+        the run is built from, and the chip would go back to a value the operator had just changed."""
+        try:
+            project, _ = await self.current(session_id)
+        except NotCurrent:
+            return False
+        async with self.lock(project.id):
+            try:
+                current, _ = await self.current(session_id)
+            except NotCurrent:
+                return False
+            await self._update_locked(current, model=None, effort=effort, autonomy=None, concurrency=None, concurrency_cap=None, by="operator")
+        return True
+
     # -- what it sees ---------------------------------------------------------------------------------
 
     async def turn_notes(self, state: SessionState) -> str | None:

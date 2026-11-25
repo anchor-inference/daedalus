@@ -327,3 +327,25 @@ async def test_a_subagent_and_a_quick_agent_take_the_settings_effort_unless_the_
     await subagents_extension.set_effort(manager, "c", subagents_extension.settings_effort("none") or "")
     await subagents_extension.set_effort(manager, "c", subagents_extension.settings_effort("high") or "")
     assert calls == [{"thinking": False}, {"thinking": True, "reasoning_effort": "high"}]
+
+
+async def test_the_effort_chosen_on_the_main_chat_is_the_settings_choice() -> None:
+    """Kept on the session alone, the effort hook would overrule it at the next turn and the chip go back."""
+    config = model_config()
+    state = SimpleNamespace(metadata={"dispatcher": True})
+
+    async def get_state(_session_id: str) -> Any:
+        return state
+
+    saved: list[RuntimeConfig] = []
+
+    async def save_config(new: RuntimeConfig) -> None:
+        saved.append(new)
+
+    dispatcher = dispatcher_extension.Dispatcher.__new__(dispatcher_extension.Dispatcher)
+    dispatcher.manager = SimpleNamespace(config=config, get_state=get_state)  # type: ignore[assignment]
+    dispatcher.app = SimpleNamespace(config=config, save_config=save_config)  # type: ignore[assignment]
+    assert await dispatcher.effort_chosen("main", "high") is True
+    assert saved[-1].dispatcher.effort == "high"
+    state.metadata = {}
+    assert await dispatcher.effort_chosen("other", "low") is False and len(saved) == 1

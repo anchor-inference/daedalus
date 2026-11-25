@@ -5,6 +5,7 @@ import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
 import { SelectionSingle } from "../ui/index";
+import { WithEffort } from "../taskeffort";
 import { Row } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
@@ -27,6 +28,7 @@ export function DependenciesTab() {
   const [offline, setOffline] = useState(false);
   const [request, setRequest] = useState("");
   const [preset, setPreset] = useState("");
+  const [effort, setEffort] = useState("");
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(false);
   const [accepted, setAccepted] = useState(false);
@@ -132,11 +134,13 @@ export function DependenciesTab() {
           actions follow on their own line. */}
       <Row title={t("deps.model")} stack data-setting="dependencies.model">
         {view.models.length
-          ? <SelectionSingle id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} items={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+          ? <WithEffort id="dependency-effort" value={effort} onChange={setEffort} fallback="off" disabled={blocked}>
+              <SelectionSingle id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} items={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+            </WithEffort>
           : <span className="sub">{t("deps.noModels")}</span>}
       </Row>
       <div className="deps-request-actions"><div className="btnrow">
-        <button className="btn primary" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}><Icon name="bolt" size={15} /> {t(planning ? "deps.planning" : "deps.prepare")}</button>
+        <button className="btn primary" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset, effort })}><Icon name="bolt" size={15} /> {t(planning ? "deps.planning" : "deps.prepare")}</button>
         {proposal && ["planning", "validating", "ready"].includes(proposal.state) && <button className="btn" disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</button>}
         {proposal?.state === "ready" && <button className="btn" onClick={() => { setAccepted(false); setReview(true); }}>{t("deps.review")}</button>}
       </div></div>

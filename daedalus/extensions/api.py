@@ -5735,6 +5735,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if dispatcher is not None and (body.get("preset") or body.get("clear")):
             # The chip on the main chat chooses the main orchestrator's model in Settings.
             await dispatcher.model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
+        if body.get("thinking") is False or body.get("reasoning_effort"):
+            # The effort on the orchestrators' chats is their Settings' too; written only on the session,
+            # the effort hook those runs are built from would overrule it at the next turn.
+            effort = "none" if body.get("thinking") is False else str(body["reasoning_effort"])
+            if orchestrators is not None:
+                await orchestrators.effort_chosen(session_id, effort)
+            if dispatcher is not None:
+                await dispatcher.effort_chosen(session_id, effort)
         return {"ok": True, "model": await session_model_label(state), **(await session_thinking(state))}
 
     @api.post("/api/sessions/{session_id}/vision")
