@@ -238,6 +238,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "canvas.link.copy.failed": { en: "Could not copy; select the link and copy it", ru: "Не удалось скопировать; выделите ссылку и скопируйте её" },
   "canvas.search": { en: "Search canvases", ru: "Поиск холстов" },
   "canvas.search.none": { en: "No canvas matches the search", ru: "Ни один холст не подходит" },
+  "canvas.error": { en: "Could not load the canvases", ru: "Не удалось загрузить холсты" },
   "canvas.sort": { en: "Sort", ru: "Сортировка" },
   "canvas.sort.recent": { en: "Recent", ru: "Недавние" },
   "canvas.sort.name": { en: "Name", ru: "По имени" },

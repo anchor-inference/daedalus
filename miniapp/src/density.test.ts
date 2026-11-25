@@ -39,6 +39,8 @@ import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
 import app from "./App.tsx?raw";
+import canvasList from "./canvas/CanvasList.tsx?raw";
+import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
 // Every stylesheet of the app, found rather than listed: a hand list was a line to add for each new
 // sheet, and a sheet left off it answered to nothing. The tokens come first, since the claims read
 // the first :root block as the scale; the Chrome side panel redefines the scale for its own subtree
@@ -46,9 +48,11 @@ import app from "./App.tsx?raw";
 // are dropped; the guard reads rules one at a time, so the order they are joined in does not matter.
 const sheets = import.meta.glob(["./**/*.css", "!./ui/tokens.css", "!./sidepanel/sidepanel.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 // The sheets that were written before they were read here and break its claims (the calendar, the
-// canvas, the agent link's cards, the rules editor and a few strips): each comes off this list when
-// the screen it draws is redrawn on the new scale, and nothing is ever added to it.
-const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./calendar/blocks.css", "./calendar/calendar.css", "./canvas/canvas.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
+// canvas's plane, the agent link's cards, the rules editor and a few strips): each comes off this list
+// when the screen it draws is redrawn on the new scale, and nothing is ever added to it. The plane stays
+// on it for what it is: a drawing, whose words and frames are sized in the board's own units and scaled
+// with its zoom; the interface around the board (canvas.css) is held.
+const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./calendar/blocks.css", "./calendar/calendar.css", "./canvas/plane.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
 const css = tokens + "\n" + Object.keys(sheets).filter((name) => !NOT_YET_HELD.includes(name)).sort().map((name) => sheets[name].replace(/@import[^;]+;/g, "")).join("\n");
 
 type Rule = { selector: string; media: string; body: string };
@@ -248,6 +252,8 @@ const CONTENT_BOXES = [
   { selector: ".resume-card", property: "height", max: 56 },
   { selector: ".start-import .si-row", property: "height", max: 56 },
   { selector: ".projects-row", property: "height", max: 56 },
+  // A canvas is a row of the same size: a sketch of the board, its name over who touched it last.
+  { selector: ".cv-row", property: "height", max: 56 },
   { selector: ".tp-row-open", property: "height", max: 56 },
   { selector: ".tp-mem", property: "height", max: 56 },
   { selector: ".tp-pane-head", property: "height", max: 40 },
@@ -501,6 +507,33 @@ describe("the inbox", () => {
     expect(rule(".inbox-row-mark.attention")).toContain("var(--attention)");
     expect(rule(".inbox-row-mark.live")).toContain("var(--live)");
     expect(rule(".inbox-group-head.waiting")).toContain("var(--attention)");
+  });
+});
+
+describe("the canvas", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists its boards as 56 px rows in the 880 column, under scope heads 36 px tall", () => {
+    expect(canvasList).toContain('<Page width="list"');
+    expect(rule(".cv-row")).toContain("height: 56px");
+    expect(rule(".cv-section-head")).toContain("height: 36px");
+    expect(rule(".cv-row .cv-thumb")).toContain("height: 36px");
+  });
+
+  it("shows a row's commands on hover or focus, so the keyboard still reaches them", () => {
+    expect(rule(".cv-row-acts")).toContain("opacity: 0");
+    expect(all.some((r) => !r.media && selectors(r).includes(".cv-row:focus-within .cv-row-acts") && r.body.includes("opacity: 1"))).toBe(true);
+  });
+
+  it("draws the bar of an open canvas at the page header's height, and moves it over for the unfold button", () => {
+    expect(rule(".cv-bar")).toContain("min-height: var(--head-h)");
+    expect(rule(".app.sidebar-folded .cv-bar")).toContain("padding-left: calc(var(--space-3) + var(--ctl-h) + var(--space-3))");
+  });
+
+  it("draws the board's tools, the history and the sharing panel on the primitives, with no hand-made overlay", () => {
+    expect(canvasEditor).toContain("<Popover");
+    expect(canvasEditor).not.toContain("cv-pick-note");
+    expect(all.some((r) => selectors(r).some((sel) => sel.includes(".cv-pick-note") || sel === ".cv-tool" || sel.startsWith(".cv-tool-btn")))).toBe(false);
   });
 });
 

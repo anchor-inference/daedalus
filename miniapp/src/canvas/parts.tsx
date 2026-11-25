@@ -4,6 +4,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
+import { t } from "../i18n";
+import { relTimeLong } from "../format";
+import { OverflowMenu } from "../ui/index";
+import type { MenuItem } from "../ui/dialogs";
+import type { CanvasItem } from "./model";
+import "./canvas.css";
 
 const previews = new Map<string, string>();
 
@@ -85,4 +91,43 @@ export function pickCanvasFile(): Promise<{ name: string; text: string } | null>
     };
     input.click();
   });
+}
+
+/** One canvas as a row: a sketch of the board, its name over who touched it last and when, and its
+ *  commands. The chat's Canvas tool draws this row too, so a canvas looks the same in both places; a row
+ *  with no menu has no commands but opening. */
+export function CanvasRow({ item, menu, renaming = false, onOpen, onRename, onCancelRename }: { item: CanvasItem; menu?: MenuItem[]; renaming?: boolean; onOpen: () => void; onRename?: (title: string) => void; onCancelRename?: () => void }) {
+  return (
+    // The whole row opens the canvas; the buttons and the rename field inside it answer for themselves.
+    <div className="cv-row" role="listitem" data-canvas={item.id} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, input")) onOpen(); }}>
+      <button type="button" className="cv-row-open" onClick={onOpen} tabIndex={-1} aria-hidden="true">
+        <CanvasThumb path={`/api/canvases/${item.id}/preview`} version={item.version} />
+      </button>
+      <div className="cv-row-text">
+        {renaming ? (
+          <input
+            className="field cv-rename"
+            autoFocus
+            defaultValue={item.title}
+            maxLength={160}
+            aria-label={t("canvas.title")}
+            onFocus={(event) => event.target.select()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onRename?.(event.currentTarget.value);
+              if (event.key === "Escape") { event.stopPropagation(); onCancelRename?.(); }
+            }}
+            onBlur={(event) => onRename?.(event.currentTarget.value)}
+          />
+        ) : (
+          <button type="button" className="cv-row-title" onClick={onOpen}>{item.title}</button>
+        )}
+        <span className="cv-row-meta">
+          {item.updated_by === "agent" && <Icon name="bots" size={12} />}
+          <time dateTime={item.updated_at}>{t(item.updated_by === "agent" ? "canvas.meta.agent" : "canvas.meta.you", { time: relTimeLong(item.updated_at) })}</time>
+          {item.shared && <span className="cv-row-shared" title={t("canvas.share.on")} aria-label={t("canvas.share.on")}><Icon name="link" size={12} /></span>}
+        </span>
+      </div>
+      {menu && <div className="cv-row-acts"><OverflowMenu small items={menu} label={t("canvas.actions", { title: item.title })} /></div>}
+    </div>
+  );
 }

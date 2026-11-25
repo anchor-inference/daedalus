@@ -18,6 +18,8 @@ import { Button, confirmDialog } from "./ui/primitives";
 import { errorText } from "./ui";
 import { fmtUsd } from "./ui/components";
 import { navigate, pathFor } from "./router";
+import { CanvasRow } from "./canvas/parts";
+import type { CanvasItem } from "./canvas/model";
 import { ContextBody, ProviderUsageBody, UsageBody, providerLabel } from "./details";
 
 // ── the chat's changes ───────────────────────────────────────────────────────────────────────
@@ -212,22 +214,13 @@ export function AttachmentsPane({ sessionId, onJump }: { sessionId: string; onJu
 
 // ── canvases ─────────────────────────────────────────────────────────────────────────────────
 
-export type CanvasRow = { id: string; title?: string; updated_at?: string };
-
 /** The canvases this chat made or was given, each opening on the canvas page, and the way to all of them. */
-export function CanvasPane({ sessionId, canvases }: { sessionId: string; canvases: CanvasRow[] | undefined }) {
+export function CanvasPane({ sessionId, canvases }: { sessionId: string; canvases: CanvasItem[] | undefined }) {
   const all = pathFor("canvas", null, { session: sessionId });
   return (
     <div className="tool-list" data-tool-page="canvas">
       {canvases === undefined ? <div className="tool-empty">…</div> : canvases.length === 0 ? <div className="tool-empty">{t("panel.canvas.none")}</div> : canvases.map((canvas) => (
-        <button key={canvas.id} type="button" className="tool-row press" onClick={() => navigate(pathFor("canvas", canvas.id, { session: sessionId }))}>
-          <Icon name="pen" size={16} />
-          <span className="tool-row-main">
-            <span className="tool-row-name truncate">{canvas.title || t("panel.canvas.untitled")}</span>
-            {canvas.updated_at && <span className="tool-row-meta">{shortDateTime(canvas.updated_at)}</span>}
-          </span>
-          <Icon name="forward" size={14} />
-        </button>
+        <CanvasRow key={canvas.id} item={canvas} onOpen={() => navigate(pathFor("canvas", canvas.id, { session: sessionId }))} />
       ))}
       <div className="tool-foot"><a className="btn" href={all} onClick={(e) => { e.preventDefault(); navigate(all); }}>{t("panel.canvas.open")}</a></div>
     </div>
