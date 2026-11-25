@@ -51,6 +51,8 @@
 .settings-hit-body [data-search-off] { display: none !important; }
 .settings-hit-body > .section-title:first-child, .settings-hit-body .card > .section-title:first-child { margin-top: 0; }
 .settings-hit-body .section-title { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+/* A found row keeps the label of its group above it, as it does on its page; the group's help does not come along. */
+.settings-hit-body .set-group + .set-group { margin-top: 12px; }
 .settings-hit-links { display: flex; flex-direction: column; padding: 0; }
 .settings-hit-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; color: var(--fg); text-decoration: none; }
 .settings-hit-link + .settings-hit-link { border-top: 1px solid var(--line); }
