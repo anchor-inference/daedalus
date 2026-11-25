@@ -262,9 +262,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     setSourcesOf(turnKey);
     panel.open("sources");
   }, [panel.open]);
-  // The chat's working-tree changes: whether it has a Changes tool at all, and the Overview's row.
-  const chatChanges = useChatChanges(id && !visit && !bare && !embedded ? id : null, detail?.status);
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { changes: !!chatChanges.data?.repository, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
+  // Whether the chat has a Changes tool at all is the detail's `repository`, read from the folder's
+  // HEAD file; the changes themselves (git, through the folder's terminal daemon) are read only once the
+  // tool is open, and then also feed the Overview's row.
+  const hasChanges = detail?.repository === true;
+  const chatChanges = useChatChanges(id && !visit && !bare && !embedded && hasChanges && panel.state.open.includes("changes") ? id : null, detail?.status);
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { changes: hasChanges, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
   // A conversation with another agent that starts, a reply that comes, a message that waits for the operator:
   // the Agents tab opens on that change, once. A phone opens no sheet over the chat for it, as it opens none
   // for a subagent; the approval sits over the composer there and the tab is a tile.
@@ -2246,7 +2249,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           pages={{
             overview: <Overview sessionId={id} family={[id, ...(detail.subagents ?? []).map((child) => child.session_id)]} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
               onBoard={() => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
-            ...(chatChanges.data?.repository ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
+            ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
             context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
             usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,
             memory: <MemoryPane sessionId={id} />,

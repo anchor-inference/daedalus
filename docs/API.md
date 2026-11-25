@@ -34,6 +34,10 @@ take only paths the list shows, exactly, are refused with **409** while a run of
 another chat in the same folder — is in progress or waits on a question, and publish a
 `session.changes` event. git runs where the chat's tools run, through that environment's terminal
 daemon, with the repository's hooks, external diffs, pager, signing program and prompts switched off.
+Whether to offer the tab at all needs no git: the session detail (`GET /api/sessions/{id}`) carries
+`repository` beside `branch`, read from the folder's `.git` and `HEAD` files on every poll — `true` in a
+repository (a detached `HEAD` included, with `branch` null), `false` outside one, `null` while it is not
+known, as for a remote conversation's folder or a host folder seen from the container.
 
 **The queue in front of a working agent.** A message sent to a session that is already running is a
 steer: it waits in a queue and is placed in front of the model's next call rather than starting a
