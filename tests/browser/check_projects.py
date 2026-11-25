@@ -252,7 +252,7 @@ def run() -> int:
 
         page.reload()
         page.locator("[data-action='all-projects']").click()
-        expect(page.locator(".projects-row:not(.head)")).to_have_count(1)
+        expect(page.locator(".projects-row")).to_have_count(1)
         page.locator(".projects-new").click()
         page.locator("#project-name").fill("Existing")
         page.locator(".np-card", has_text="Existing folder").click()

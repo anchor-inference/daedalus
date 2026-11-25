@@ -40,9 +40,9 @@ def main() -> int:
             page.goto(f"{BASE}/agents?token=t&lang=en")
             page.wait_for_selector(".start-composer")
             page.locator(".start-composer .plus").click()
-            # The desktop's + is a menu; a phone's is a sheet whose third tile attaches files.
+            # The + is one menu at every size (a sheet on a phone); its first row attaches files.
             with page.expect_file_chooser() as chooser:
-                page.locator(".plus-menu [role=menuitem], .ph-plus-sheet .ph-tile:nth-child(3)").first.click()
+                page.locator(".attach-menu [data-action='files']").click()
             chooser.value.set_files([str(note), str(picture)])
             cards = page.locator(".start-composer .attachment")
             try:

@@ -77,7 +77,7 @@ def start(browser, phone: bool):  # type: ignore[no-untyped-def]
 
 def choose_private(page: Page, composer, phone: bool) -> None:  # type: ignore[no-untyped-def]
     composer.locator(".plus").click()
-    item = page.locator(".ph-plus-sheet [data-private]" if phone else ".plus-menu [data-private]")
+    item = page.locator(".attach-menu [data-private]")
     expect(item).to_be_visible()
     item.click()
     if phone:
@@ -95,7 +95,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     composer = page.locator(".start-composer")
     expect(composer).to_be_visible(timeout=15000)
     composer.locator(".plus").click()
-    item = page.locator(".ph-plus-sheet [data-private]" if phone else ".plus-menu [data-private]")
+    item = page.locator(".attach-menu [data-private]")
     expect(item).to_contain_text(words["menu"])
     if item.get_attribute("aria-checked") != "false":
         say("the private choice starts switched on")

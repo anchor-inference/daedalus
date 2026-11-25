@@ -83,7 +83,7 @@ export function ApprovalChip({ sessionId, value, onPick, toast }: { sessionId: s
         <span className="approvals-word">{t(current.label)}</span>
       </button>
       {open && (
-        <Popover anchor={button.current} onClose={() => setOpen(false)} className="plus-menu approvals-menu" label={t("approvals.title")}>
+        <Popover anchor={button.current} onClose={() => setOpen(false)} className="approvals-menu" label={t("approvals.title")}>
           {APPROVAL_MODES.map((m) => (
             <button key={m.id} type="button" role="menuitemradio" aria-checked={m.id === mode} data-mode={m.id} className={m.id === "skip" ? "danger" : undefined} onClick={() => void choose(m.id)}>
               <Icon name={m.icon} size={16} />

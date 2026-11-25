@@ -1624,7 +1624,7 @@ def open_projects(page: Page) -> None:
     if not page.locator("nav.sidebar").count():
         page.locator(".sidebar-unfold").click()
     page.locator(".sidebar [data-action='all-projects']").click()
-    page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
+    page.wait_for_selector(".projects-row", timeout=5000)
 
 
 def open_hire(page: Page) -> None:

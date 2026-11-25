@@ -786,40 +786,48 @@ START = """
     composer: box(document.querySelector('.start-composer .composer-box')),
     circle: box(circle),
     radius: circle ? getComputedStyle(circle).borderRadius : null,
-    chips: [...document.querySelectorAll('.start-where-chip')].map((el) => box(el).h),
-    live: [...document.querySelectorAll('.start-live-row')].map((el) => box(el).h),
-    projectRows: [...document.querySelectorAll('.projects-row:not(.head)')].map((el) => box(el).h),
+    chips: [...document.querySelectorAll('.start-composer .composer-row > button.composer-project, .start-composer .composer-row > button.composer-mode, .start-composer .composer-row > button.composer-access')].map((el) => box(el).h),
+    cards: [...document.querySelectorAll('.resume-card')].map((el) => box(el).h),
+    heading: (() => { const el = document.querySelector('h1.start-greeting'); return el ? { size: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight } : null; })(),
+    projectRows: [...document.querySelectorAll('.projects-row')].map((el) => box(el).h),
+    projectList: (() => { const el = document.querySelector('.projects-table'); return el ? Math.round(el.getBoundingClientRect().width) : 0; })(),
   };
 }
 """
 
 
 def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
-    """The desktop's start screen and projects page, at 1440: the composer in a 720 px column (the
-    mockup's, a step over the 680 it had when it stood alone, so the chips and the live rows under
-    it share its edges), the primary a 32 px circle, the project chips 28 px like every filter chip,
-    a live row two lines in at most 52 px, and a project row two lines in at most 64 px."""
+    """The desktop's start screen and projects page, at 1440: the question in 28 px over a composer in
+    the conversation's own 760 px column, the primary a 32 px circle, the chips of the composer's row
+    28 px like every small chip, the chats to continue and the project rows 56 px cards, in the page
+    chrome's 880 px list."""
     problems: list[str] = []
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    page = open_page(context, "agents", ".start-live-row")
+    page = open_page(context, "agents", ".resume-card")
     # An empty field shows the mic alone in the trailing slot; Send, the circle measured, joins it once
     # the field holds words. It was the voice circle on an empty field until that left ordinary chats.
     page.locator(".start-composer .composer-field").fill("Bake the menu")
     start = page.evaluate(START)
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
-    start["projectRows"] = page.evaluate(START)["projectRows"]
+    page.wait_for_selector(".projects-row", timeout=15000)
+    projects = page.evaluate(START)
+    start["projectRows"] = projects["projectRows"]
+    start["projectList"] = projects["projectList"]
     context.close()
-    if not start["composer"] or start["composer"]["w"] != 720:
-        problems.append(f"start: the composer is {start['composer']}, not 720 wide")
+    if not start["composer"] or start["composer"]["w"] != 760:
+        problems.append(f"start: the composer is {start['composer']}, not 760 wide")
+    if not start["heading"] or start["heading"]["size"] != "28px" or start["heading"]["weight"] != "500":
+        problems.append(f"start: the question is {start['heading']}, not 28/500")
     if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
         problems.append(f"start: the primary is {start['circle']} with radius {start['radius']}, not a 32 px circle")
     if not start["chips"] or any(h != 28 for h in start["chips"]):
-        problems.append(f"start: the project chips are {start['chips']}, not 28")
-    if not start["live"] or any(h > 52 for h in start["live"]):
-        problems.append(f"start: the live rows are {start['live']}")
-    if not start["projectRows"] or any(h > 64 for h in start["projectRows"]):
-        problems.append(f"projects: the rows are {start['projectRows']}")
+        problems.append(f"start: the chips of the row are {start['chips']}, not 28")
+    if not start["cards"] or any(h != 56 for h in start["cards"]):
+        problems.append(f"start: the cards to continue are {start['cards']}, not 56")
+    if not start["projectRows"] or any(h != 56 for h in start["projectRows"]):
+        problems.append(f"projects: the rows are {start['projectRows']}, not 56")
+    if start["projectList"] != 880:
+        problems.append(f"projects: the list is {start['projectList']} wide, not the page chrome's 880")
     return problems, start
 
 

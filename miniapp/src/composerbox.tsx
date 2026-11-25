@@ -5,7 +5,7 @@ import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Banner } from "./ui/phone";
-import { MenuRow, Popover, Sheet } from "./ui/primitives";
+import { MenuRow, Popover } from "./ui/primitives";
 import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -768,27 +768,6 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
   if (!saved || (saved.workspace === now.workspace && saved.project === now.project)) return "";
   const where = now.workspace.split("/").filter(Boolean).pop() || now.project || "—";
   return t("ph.draft.workspace", { name: where });
-}
-
-/**
- * The start page's "+" on a phone: three tiles for what is attached most (a photo now, a picture from
- * the gallery, a file) and the page's own rows. The chat's composer has one + menu at every size.
- */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onRecord, extra }: {
-  onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onRecord?: () => void; extra?: ReactNode;
-}) {
-  const run = (fn: () => void) => () => { onClose(); fn(); };
-  return (
-    <Sheet onClose={onClose} className="ph-sheet ph-plus-sheet" ariaLabel={t("composer.plus")}>
-      <div className="ph-tiles">
-        <button type="button" className="ph-tile" onClick={run(onPhoto)}><Icon name="camera" size={22} /><span>{t("composer.photo")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onPhotos ?? onFiles)}><Icon name="image" size={22} /><span>{t("ph.plus.photos")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onFiles)}><Icon name="attach" size={22} /><span>{t("session.attach")}</span></button>
-      </div>
-      {onRecord && <MenuRow icon="mic" label={t("session.mic")} onSelect={run(onRecord)} />}
-      {extra}
-    </Sheet>
-  );
 }
 
 /** `onReplace`, where the holder can take a file back, puts a pencil on a picture that opens the markup editor. */

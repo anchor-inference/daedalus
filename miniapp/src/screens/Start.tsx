@@ -6,9 +6,9 @@
 // On a phone it is the home of the redesign: the composer at the bottom, the model in the title and
 // only the live chats above it; the full list is the Chats page (Chats.tsx), at ?view=chats.
 
-import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
-import { AttachmentCard, PlusSheet, useComposerFocus } from "../composerbox";
+import { AttachmentCard, useComposerFocus } from "../composerbox";
 import { layerOpen, Popover, Sheet } from "../ui/dialogs";
 import { effortBody, effortOf, presetEffort, startUpstream, type Effort } from "../starteffort";
 import { AccountChoice, ModelChoice, ModelSelect } from "../modelselect";
@@ -25,20 +25,22 @@ import { useSummary } from "../notifications";
 import { agentsListingOf } from "../mode";
 import { agentName, isProject, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
-import { Dot, ToolPicker, fmtInterval, statusWord } from "../ui/components";
+import { ToolPicker, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
 import { Banner, SectionHeader, TopBar } from "../ui/phone";
 import { IconButton, MenuRow, Row } from "../ui/primitives";
+import { AccessSelect } from "../toggles";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 import { HostMark, RunOn, RunOnChip, RunOnSelect, useRunOn } from "../runon";
 import { PrivateChip, PrivateMark, isPrivate, privateBody } from "../privatechat";
-import { agentFolders, folderName, offersFolderChoice, projectReachable } from "../folders";
+import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
 import { ProjectSettingsSheet, useProjects } from "../projects";
 import { ProjectsPage } from "./Projects";
+import { resumeNote, resumeOrder } from "./resume";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
 import { ProjectPickList } from "../projectpick";
-import { type ChatKind, type KindOffers, KindSelect, kindIcon, kindPlate, requestComputerSheet, useKindOffers, useNewChatKind } from "../chatkind";
+import { type ChatKind, type KindOffers, KindMark, KindSelect, kindIcon, kindPlate, requestComputerSheet, useKindOffers, useNewChatKind } from "../chatkind";
 import { USER_STATUS } from "../browser/yourchrome";
 import { confirmAsync } from "../ui";
 import { CodeField, type CodeFieldHandle } from "../codefield";
@@ -83,10 +85,11 @@ function useAgentMode(): [boolean, (on: boolean) => void] {
 }
 
 /**
- * A desktop's new chat: the mark and the question, the composer in the middle of the window where the
- * eye already is, the projects it can start in under it, and what is live under those. The phone's
- * home holds the same three things in a column ending at the composer; a desktop keeps the composer
- * under the question, because the field at the bottom of a large window is where nobody looks.
+ * A desktop's new chat: the question, the composer in the middle of the window where the eye already
+ * is, and under it the chats to pick up again. Where the chat starts is a chip in the composer's own
+ * row, beside what it will be, rather than a second row of chips under the field. The phone's home
+ * holds the same things in a column ending at the composer; a desktop keeps the composer under the
+ * question, because the field at the bottom of a large window is where nobody looks.
  */
 function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel }) {
   const route = useRoute();
@@ -108,111 +111,81 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
   return (
     <div className="start">
       <div className="start-hero">
-        <div className="start-mark">
-          <Icon name="logo" size={34} />
-          <h1 className="start-greeting">{t(agent ? "start.greeting.agent" : "start.greeting")}</h1>
-        </div>
-        <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} kind={kind} onKind={setKind} offers={offers} agent={agent} onAgent={setAgent} />
-        {startable.length > 0 && <StartWhere projects={startable} all={choosable} target={known ? target : ""} onPick={setTarget} />}
-        <LiveNow listing={listing} project={project} onOpen={onOpen} />
+        <h1 className="start-greeting">{t(agent ? "start.greeting.agent" : "start.greeting")}</h1>
+        <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} kind={kind} onKind={setKind} offers={offers} agent={agent} onAgent={setAgent}
+          where={choosable.length > 0 ? { projects: choosable, onPick: setTarget } : undefined} />
+        <ResumeList listing={listing} project={project} onOpen={onOpen} />
         <StartImportCard />
       </div>
     </div>
   );
 }
 
-/** How many projects the start screen names under its composer before the rest go behind "N more". */
-const WHERE = 3;
-
-/** "Start in …": a chat of its own, or one of the projects, so a chat (or an agent) starts in a project
- *  with no form to fill. The chips are the recent few; "Choose a project" searches them all. The project
- *  picked stays in the row even when it was not one of the chips. */
-function StartWhere({ projects, all, target, onPick }: { projects: Project[]; all: Project[]; target: string; onPick: (id: string) => void }) {
-  const more = useRef<HTMLButtonElement>(null);
+/** The project the new chat starts in: a chip in the composer's row that opens every project, searchable,
+ *  with "No project" (a chat of its own) first. */
+function ProjectChip({ projects, target, onPick }: { projects: Project[]; target: string; onPick: (id: string) => void }) {
+  const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  let shown = projects.slice(0, WHERE);
   const picked = projects.find((p) => p.id === target);
-  if (picked && !shown.includes(picked)) shown = [...shown.slice(0, WHERE - 1), picked];
-  const hidden = projects.filter((p) => !shown.includes(p));
-  const chip = (id: string, name: string, icon: "bots" | "folder" | "mic") => (
-    <button key={id || "chat"} type="button" className={`start-where-chip ${target === id ? "on" : ""}`} aria-pressed={target === id} data-project={id || undefined} onClick={() => onPick(id)}>
-      <span className="start-where-tile"><Icon name={icon} size={12} /></span>
-      <span className="truncate">{name}</span>
-    </button>
-  );
+  const name = picked ? picked.name : t("start.pick.none");
   return (
-    <div className="start-where" role="group" aria-label={t("start.where.label")}>
-      <span className="start-where-word">{t("start.where")}</span>
-      {chip("", t("start.where.chat"), "bots")}
-      {shown.map((p) => chip(p.id, p.name, p.system === "companion" ? "mic" : "folder"))}
-      <button ref={more} type="button" className="start-where-chip more start-where-pick" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
-        title={hidden.length ? t("start.where.more", { n: hidden.length }) : undefined}>
-        <Icon name="search" size={12} />{t("start.pick")}{hidden.length > 0 && <span className="start-where-n num">{hidden.length}</span>}<Icon name="chevron" size={12} />
+    <>
+      <button ref={button} type="button" className="composer-project" data-project={target || undefined} aria-haspopup="dialog" aria-expanded={open}
+        aria-label={`${t("start.where.label")}: ${name}`} title={picked ? projectPath(picked) : t("start.where.label")} onClick={() => setOpen(!open)}>
+        <Icon name="folder" size={14} />
+        <span className="truncate">{name}</span>
+        <Icon name="chevron" size={14} />
       </button>
       {open && (
-        <Popover anchor={more.current} onClose={() => setOpen(false)} className="start-where-menu" label={t("start.where.label")}>
-          <ProjectPickList projects={all} target={target} onPick={(id) => { setOpen(false); onPick(id); }} />
+        <Popover anchor={button.current} onClose={() => setOpen(false)} className="project-menu" label={t("start.where.label")}>
+          <ProjectPickList projects={projects} target={target} onPick={(id) => { setOpen(false); onPick(id); }} />
         </Popover>
       )}
-    </div>
+    </>
   );
 }
 
+/** How many chats the home offers to pick up again before the rest go behind "Show all". */
+const RESUME = 3;
+/** The most it lists when opened out: the sidebar holds the whole list. */
+const RESUME_MORE = 12;
+
 /**
- * "Active now" on a desktop: the phone home's rows, wider, with the project in the meta — the chats
- * that need the operator first, then the ones at work, then the loops; three, and the rest a click
- * away in place. A waiting chat's Reply is neutral, not the white primary: the question is out of its
- * context here, and the white button stays the composer's.
+ * "Continue" on a desktop: the chats to pick up again, 56 px cards, the ones that need the operator
+ * first, then the failed and the working, then what finished unread, the loops, and the rest by how
+ * lately they were used. Three, and the rest a click away in place. The card is the whole link: the
+ * question a waiting chat asks is answered in the chat, not out of its context here.
  */
-function LiveNow({ listing, project, onOpen }: { listing: SessionList | null; project: string; onOpen: (id: string) => void }) {
+function ResumeList({ listing, project, onOpen }: { listing: SessionList | null; project: string; onOpen: (id: string) => void }) {
   const [all, setAll] = useState(false);
-  const rows = useMemo(() => {
-    const rank = (s: SessionSummary) => ({ waiting: 0, working: 1, loop: 2, idle: 3 })[kindOf(s, false)];
-    return (listing?.sessions ?? [])
-      .filter((s) => !s.metadata?.subagent_of && !s.archived && (!project || s.project_id === project) && rank(s) < 3)
-      .sort((a, b) => rank(a) - rank(b) || Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
-  }, [listing, project]);
+  const rows = useMemo(() => resumeOrder(listing?.sessions ?? [], project, RESUME_MORE), [listing, project]);
   if (!rows.length) return null;
   const folders = new Map((listing?.projects ?? []).map((folder) => [folder.id, folder]));
-  const shown = all ? rows : rows.slice(0, LIVE);
+  const shown = all ? rows : rows.slice(0, RESUME);
   return (
-    <section className="start-live" aria-label={t("start.live")}>
-      <div className="start-live-head">
-        <span>{t("start.live")}</span>
-        <span className="num">{rows.length}</span>
-        <span className="grow" />
-        {rows.length > LIVE && <button type="button" className="start-live-more" onClick={() => setAll(!all)}>{all ? t("start.live.fewer") : t("start.live.all", { n: rows.length })}</button>}
+    <section className="start-resume" aria-label={t("start.resume")}>
+      <div className="start-resume-head">
+        <span className="grow">{t("start.resume")}</span>
+        {rows.length > RESUME && <button type="button" className="start-resume-more" onClick={() => setAll(!all)}>{all ? t("start.resume.fewer") : t("start.resume.all", { n: rows.length })}</button>}
       </div>
-      {shown.map((s) => {
+      {shown.map(({ s, state }) => {
         const folder = folders.get(s.project_id);
         const where = folder && isProject(folder) && folder.name !== agentName(s) ? folder.name : "";
-        const plate = kindPlate(s);
+        const note = resumeNote(s, state);
         return (
-          <div key={s.id} data-session={s.id} className={`start-live-row ${s.status}`} role="link" tabIndex={0} onClick={() => onOpen(s.id)}
-            onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.id); } }}>
-            <span className={`start-live-plate ${plate.className}`} title={plate.title}><Icon name={s.metadata?.loop ? "loop" : kindIcon(plate.kind) ?? "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
-            <span className="start-live-main">
-              <span className="start-live-title truncate">{agentName(s)}</span>
-              <span className="start-live-meta"><DesktopLiveMeta s={s} where={where} /></span>
+          <button key={s.id} type="button" data-session={s.id} data-state={state} className="resume-card" onClick={() => onOpen(s.id)}>
+            <span className="resume-dot" aria-hidden="true" />
+            <span className="resume-main">
+              <span className="resume-title"><span className="truncate">{where ? `${where} · ${agentName(s)}` : agentName(s)}</span><KindMark s={s} /><HostMark env={s.env} /><PrivateMark on={isPrivate(s)} size={11} /></span>
+              {note && <span className="resume-note truncate">{note}</span>}
             </span>
-            <span className="start-live-time num">{relTime(s.last_message_at)}</span>
-            {s.status === "waiting" && <button type="button" className="btn small start-live-reply" onClick={(e) => { e.stopPropagation(); onOpen(s.id); }}>{t("start.live.reply")}</button>}
-          </div>
+            <span className="resume-when num">{relTime(s.last_message_at)}</span>
+            <Icon name="forward" size={14} />
+          </button>
         );
       })}
     </section>
   );
-}
-
-function DesktopLiveMeta({ s, where }: { s: SessionSummary; where: string }) {
-  const loop = s.metadata?.loop;
-  const parts: ReactNode[] = [];
-  if (s.status === "waiting" || s.status === "running" || s.status === "failed") parts.push(<span key="state" className={`start-live-state ${s.status}`}>{statusWord(s.status)}</span>);
-  else if (loop) parts.push(<span key="loop">{[loop.mode === "interval" ? t("loop.every", { t: fmtInterval(loop.interval_seconds) }) : t("loop.selfpaced"), loop.next_run_at ? t("ph.loop.next", { t: untilShort(loop.next_run_at) }) : ""].filter(Boolean).join(" · ")}</span>);
-  const mark = <Fragment key="marks"><HostMark env={s.env} /><PrivateMark on={isPrivate(s)} size={11} /></Fragment>;
-  if (where) parts.push(<span key="where" className="start-live-where truncate">{where}</span>);
-  if (s.model) parts.push(<span key="model" className="truncate">{shortModel(s.model, 28)}</span>);
-  return <>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="sep">·</span>}{part}{i === 0 && mark}</Fragment>)}</>;
 }
 
 /** How many live chats the home shows above its composer; the rest are one tap away in Chats. */
@@ -274,7 +247,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
             </button>
             {/* The new chat's mode stands beside where it starts: at rest the phone's composer is one
                 row with no room for it, and a computer chat begun unawares as a plain one is a wasted turn. */}
-            <KindSelect kind={kind} offers={offers} onChoose={setKind} sheet className="ph-btn sm ph-kind" agent={agent} onAgent={setAgent} />
+            <KindSelect kind={kind} offers={offers} onChoose={setKind} className="ph-btn sm ph-kind" agent={agent} onAgent={setAgent} />
             <RunOnChip run={run} project={picked} onSettings={() => setSettingsOf(picked ?? null)} />
           </div>
         </div>
@@ -367,7 +340,7 @@ type AgentDraft = {
 
 const NO_AGENT: AgentDraft = { name: "", ownDirectory: false, folder: "", loop: { on: false, text: "", mode: "interval", minutes: "10", max: "" }, toolsOff: [] };
 
-function StartComposer({ phone, project, toast, model, run, kind, onKind, offers, agent, onAgent }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn; kind: ChatKind; onKind: (kind: ChatKind) => void; offers: KindOffers; agent: boolean; onAgent: (on: boolean) => void }) {
+function StartComposer({ phone, project, toast, model, run, kind, onKind, offers, agent, onAgent, where }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn; kind: ChatKind; onKind: (kind: ChatKind) => void; offers: KindOffers; agent: boolean; onAgent: (on: boolean) => void; where?: { projects: Project[]; onPick: (id: string) => void } }) {
   const { chosen, effort, setEffort, shownEffort, choose } = model;
   const account = model.account;
   const setAccount = model.setAccount;
@@ -386,12 +359,16 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   const nameField = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
+  const photosInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [foldersOpen, setFoldersOpen] = useState(false);
   // Asked here, before the first message, because the host fixes it when the chat is made.
   const [secret, setSecret] = useState(false);
+  // "Full access" is the chat's own switch, which the host takes only once the chat exists: it is
+  // set right after the chat is made, before the first message is read.
+  const [bypass, setBypass] = useState(false);
   const [extra, setExtra] = useState<AgentDraft>(NO_AGENT);
   const edit = (patch: Partial<AgentDraft>) => setExtra((now) => ({ ...now, ...patch }));
   const editLoop = (patch: Partial<AgentDraft["loop"]>) => setExtra((now) => ({ ...now, loop: { ...now.loop, ...patch } }));
@@ -451,6 +428,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       if (model || effort || chosenAccount) {
         await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}), ...chosenAccount });
       }
+      if (bypass) await api.post(`/api/sessions/${created.id}/bypass`, { on: true });
       // The consent the operator just gave, recorded on the chat as its own switch records it.
       if (kind === "chrome") await api.put(`${USER_STATUS}/sessions/${encodeURIComponent(created.id)}`, { env: "user", consent: true });
       if (!text && files.length === 0) {
@@ -470,6 +448,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       setEffort(null);
       setAccount("");
       setSecret(false);
+      setBypass(false);
       setExtra(NO_AGENT);
     } catch (e) {
       toast(errorText(e));
@@ -597,33 +576,30 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   const idle = empty && kind === "chat" && !(agent && extra.name.trim());
   const blocked = agent && extra.loop.on && !extra.loop.text.trim();
   const sendLabel = agent ? t("start.agent.create") : t("session.send");
-  const check = (on: boolean) => on ? <Icon name="check" size={16} /> : null;
-  const agentItems = agent && (
-    <>
-      <div className="menu-heading sub">{t("kind.mode.agent")}</div>
-      {project && <button type="button" role="menuitemcheckbox" aria-checked={extra.ownDirectory} data-option="own-directory" title={t("newagent.directory.own.hint")} onClick={() => edit({ ownDirectory: !extra.ownDirectory })}>
-        <Icon name="folderplus" size={16} /><span className="grow">{t("newagent.directory.own")}</span>{check(extra.ownDirectory)}
-      </button>}
-      {folderChoice.length > 0 && <button type="button" role="menuitem" data-option="folder" onClick={() => { setPlusOpen(false); setFoldersOpen(true); }}>
-        <Icon name="folder" size={16} /><span className="grow">{t("newagent.folder")}</span><span className="sub truncate">{folderWord}</span>
-      </button>}
-      <button type="button" role="menuitemcheckbox" aria-checked={extra.loop.on} data-option="loop" title={t("newagent.loop.hint")} onClick={() => { setPlusOpen(false); editLoop({ on: !extra.loop.on }); }}>
-        <Icon name="loop" size={16} /><span className="grow">{t("newagent.loop")}</span>{check(extra.loop.on)}
-      </button>
-      <button type="button" role="menuitem" data-option="tools" onClick={() => { setPlusOpen(false); setToolsOpen(true); }}>
-        <Icon name="wrench" size={16} /><span className="grow">{t("tools.title")}</span><span className="sub">{extra.toolsOff.length ? t("start.agent.tools.off", { n: extra.toolsOff.length }) : t("start.agent.tools.all")}</span>
-      </button>
-    </>
+  const folderRow = folderChoice.length > 0 && <MenuRow role="menuitem" icon="folder" label={t("newagent.folder")} aside={folderWord} chevron data={{ option: "folder" }} onSelect={() => { setPlusOpen(false); setFoldersOpen(true); }} />;
+  // One menu at every size (a sheet on a phone), as the chat's own composer has: what goes into the
+  // message, then what the new chat will be. The phone has no kind chip to say "agent" with, so its
+  // menu holds the way in.
+  const plusMenu = plusOpen && (
+    <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="attach-menu start-menu" label={t("composer.plus")}>
+      <MenuRow role="menuitem" icon="attach" label={t("session.attach")} data={{ action: "files" }} onSelect={() => { setPlusOpen(false); fileInput.current?.click(); }} />
+      {phone && <MenuRow role="menuitem" icon="camera" label={t("composer.photo")} data={{ action: "photo" }} onSelect={() => { setPlusOpen(false); photoInput.current?.click(); }} />}
+      {phone && <MenuRow role="menuitem" icon="image" label={t("ph.plus.photos")} data={{ action: "photos" }} onSelect={() => { setPlusOpen(false); photosInput.current?.click(); }} />}
+      {asr?.configured && <MenuRow role="menuitem" icon="mic" label={t("session.mic.menu")} disabled={!note.supported || note.state.phase !== "idle"} data={{ action: "record" }} onSelect={() => { setPlusOpen(false); void note.start(); }} />}
+      <MenuRow icon="eyeoff" label={t("private.menu")} sub={`${t("private.menu.hint")}. ${t("private.newagent.hint")}`} data={{ private: "" }}
+        toggle={{ checked: secret, onChange: (next) => { setPlusOpen(false); setSecret(next); } }} />
+      {phone && !agent && <MenuRow role="menuitem" icon={AGENT_ICON} label={t("start.agent.switch")} sub={t("kind.mode.agent.hint")} chevron data={{ option: "agent" }} onSelect={() => { setPlusOpen(false); onAgent(true); }} />}
+      {agent && <div className="menu-group" role="presentation">{t("kind.mode.agent")}</div>}
+      {agent && project && <MenuRow icon="folderplus" label={t("newagent.directory.own")} sub={t("newagent.directory.own.hint")} data={{ option: "own-directory" }}
+        toggle={{ checked: extra.ownDirectory, onChange: (next) => edit({ ownDirectory: next }) }} />}
+      {agent && folderRow}
+      {agent && <MenuRow icon="loop" label={t("newagent.loop")} sub={t("newagent.loop.hint")} data={{ option: "loop" }}
+        toggle={{ checked: extra.loop.on, onChange: (next) => { setPlusOpen(false); editLoop({ on: next }); } }} />}
+      {agent && <MenuRow role="menuitem" icon="wrench" label={t("tools.title")} aside={extra.toolsOff.length ? t("start.agent.tools.off", { n: extra.toolsOff.length }) : t("start.agent.tools.all")} chevron data={{ option: "tools" }} onSelect={() => { setPlusOpen(false); setToolsOpen(true); }} />}
+    </Popover>
   );
-  const plusItems = (
-    <>
-      <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
-      {asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
-      <button type="button" role="menuitemcheckbox" aria-checked={secret} data-private="" className={`private-item ${secret ? "on" : ""}`} title={`${t("private.menu.hint")}. ${t("private.newagent.hint")}`} onClick={() => { setPlusOpen(false); setSecret(!secret); }}>
-        <Icon name="eyeoff" size={16} /><span className="grow">{t("private.menu")}</span>{secret && <Icon name="check" size={16} />}
-      </button>
-      {agentItems}
-    </>
+  const plusButtonNode = (
+    <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
   );
   // What the agent will be, said once under its field: the choices made under + that show nowhere else.
   const chosenWords = agent ? [
@@ -653,12 +629,14 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           {chosenLine}
           <div className="composer-row" hidden={voiceBar}>
             <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
-            <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
-            {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>{plusItems}</Popover>}
-            {/* What the chat will be and where it runs read together on the left, as the chat's own
-                composer has its mode there; the model and the circle keep the right. */}
-            <KindSelect kind={kind} offers={offers} onChoose={onKind} sheet={false} agent={agent} onAgent={onAgent} />
+            {plusButtonNode}
+            {plusMenu}
+            {/* What the chat will be, where it starts and where it runs read together on the left, as
+                the chat's own composer has its access there; the model and the circle keep the right. */}
+            {where && <ProjectChip projects={where.projects} target={project} onPick={where.onPick} />}
+            <KindSelect kind={kind} offers={offers} onChoose={onKind} agent={agent} onAgent={onAgent} />
             <RunOnSelect run={run} />
+            <AccessSelect bypass={bypass} onBypass={setBypass} />
             <PrivateChip on={secret} onClear={() => setSecret(false)} />
             {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} />{t("newagent.loop")}<Icon name="close" size={12} /></button>}
             <div className="composer-tools">
@@ -706,7 +684,9 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
-          <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="dialog" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
+          {plusButtonNode}
+          {plusMenu}
+          <input ref={photosInput} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <PrivateChip on={secret} onClear={() => setSecret(false)} />
           {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} /><Icon name="close" size={12} /></button>}
           {offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
@@ -718,20 +698,6 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           </div>
         </div>
       </div>
-      {plusOpen && (
-        <PlusSheet onClose={() => setPlusOpen(false)}
-          onPhoto={() => photoInput.current?.click()}
-          onFiles={() => fileInput.current?.click()}
-          onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
-          extra={<>
-            <MenuRow icon="eyeoff" label={t("private.menu")} sub={`${t("private.menu.hint")}. ${t("private.newagent.hint")}`} checked={secret} data={{ private: "" }} onSelect={() => { setSecret(!secret); setPlusOpen(false); }} />
-            {!agent && <MenuRow icon={AGENT_ICON} label={t("start.agent.switch")} sub={t("kind.mode.agent.hint")} chevron data={{ option: "agent" }} onSelect={() => { setPlusOpen(false); onAgent(true); }} />}
-            {agent && project && <MenuRow icon="folderplus" label={t("newagent.directory.own")} sub={t("newagent.directory.own.hint")} checked={extra.ownDirectory} data={{ option: "own-directory" }} onSelect={() => edit({ ownDirectory: !extra.ownDirectory })} />}
-            {agent && folderChoice.length > 0 && <MenuRow icon="folder" label={t("newagent.folder")} aside={folderWord} chevron data={{ option: "folder" }} onSelect={() => { setPlusOpen(false); setFoldersOpen(true); }} />}
-            {agent && <MenuRow icon="loop" label={t("newagent.loop")} sub={t("newagent.loop.hint")} checked={extra.loop.on} data={{ option: "loop" }} onSelect={() => { setPlusOpen(false); editLoop({ on: !extra.loop.on }); }} />}
-            {agent && <MenuRow icon="wrench" label={t("tools.title")} aside={extra.toolsOff.length ? t("start.agent.tools.off", { n: extra.toolsOff.length }) : t("start.agent.tools.all")} chevron data={{ option: "tools" }} onSelect={() => { setPlusOpen(false); setToolsOpen(true); }} />}
-          </>} />
-      )}
       {toolsSheet}
       {foldersSheet}
     </div>

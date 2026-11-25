@@ -19,6 +19,8 @@ import { navigate, pathFor, projectPagePath } from "../router";
 import { invalidate, useOffline, useQuery } from "../store";
 import { useStreamUp } from "../events";
 import { OverflowMenu, type MenuItem } from "../ui/dialogs";
+import { Button, IconButton, Segmented, type SegmentedOption } from "../ui/primitives";
+import { Page, PageHeader, useMedia } from "../shell";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 
@@ -37,6 +39,8 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
   const [editing, setEditing] = useState<Project | null>(null);
   const [restoring, setRestoring] = useState("");
   const offline = useOffline();
+  // A phone's bar has room for one action: the search moves into the page under it.
+  const phone = useMedia("(max-width: 1023px)");
 
   const all = projects.data ?? [];
   // Agents mode's projects: kept on purpose, not orchestrated, not the main orchestrator's own.
@@ -90,82 +94,74 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
     finally { setRestoring(""); }
   }
 
-  const chip = (id: Filter, label: string, n: number, tone = "") => (
-    <button type="button" className={`projects-chip ${tone} ${filter === id ? "on" : ""}`} aria-pressed={filter === id} onClick={() => setFilter(id)}>
-      {label}<span className="num">{n}</span>
-    </button>
+  const filters: SegmentedOption<Filter>[] = [
+    { id: "all", label: t("agents.filter.all"), badge: <span className="num">{listed.length}</span> },
+    { id: "waiting", label: t("projects.filter.waiting"), badge: <span className="num">{counts.waiting}</span> },
+    { id: "working", label: t("status.running"), badge: <span className="num">{counts.working}</span> },
+  ];
+
+  const search = (
+    <label className="projects-search">
+      <Icon name="search" size={14} />
+      <input type="search" value={query} placeholder={t("projects.search")} aria-label={t("projects.search")} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }} />
+    </label>
   );
 
   return (
     <div className="projects-page">
-      <header className="projects-head"><h1>{t("shell.projects")}</h1></header>
-      <div className="projects-body">
-        <div className="projects-col">
-          <div className="projects-tools">
-            <label className="projects-search">
-              <Icon name="search" size={15} />
-              <input type="search" value={query} placeholder={t("projects.search")} aria-label={t("projects.search")} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }} />
-            </label>
-            <div className="projects-chips" role="group" aria-label={t("projects.filter")}>
-              {chip("all", t("agents.filter.all"), listed.length)}
-              {chip("waiting", t("projects.filter.waiting"), counts.waiting, "warn")}
-              {chip("working", t("status.running"), counts.working)}
-            </div>
-            <span className="grow" />
-            <button type="button" className="btn projects-new" onClick={() => openNewProject("agents")}><Icon name="plus" size={16} />{t("ph.newproject")}</button>
-          </div>
-          <div className="projects-table" role="table" aria-label={t("shell.projects")}>
-            <div className="projects-row head" role="row">
-              <span role="columnheader">{t("projects.col.project")}</span>
-              <span role="columnheader">{t("start.chats")}</span>
-              <span role="columnheader">{t("projects.col.now")}</span>
-              <span role="columnheader">{t("projects.col.where")}</span>
-              <span role="columnheader">{t("projects.col.activity")}</span>
-              <span role="columnheader" aria-label={t("projects.col.actions")} />
-            </div>
-            {rows.map((p) => (
-              <ProjectRow key={p.id} project={p} folder={folders.get(p.id)} live={liveOf(p.id)} onStart={() => startIn(p)} onSettings={() => setEditing(p)}
-                menu={[
-                  { label: t("ph.newchat.in", { name: p.name }), icon: "compose", onSelect: () => startIn(p) },
-                  ...(onPickProject ? [{ label: t("projects.lens", { name: p.name }), icon: "folder" as const, onSelect: () => { onPickProject(p.id); navigate(pathFor("agents")); } }] : []),
-                  ...(!p.system ? [
-                    { label: t("project.team.for", { name: p.name }), icon: "bots" as const, onSelect: () => navigate(projectPagePath(p.id, "team")) },
-                    { label: t("project.board.for", { name: p.name }), icon: "board" as const, onSelect: () => navigate(projectPagePath(p.id, "board")) },
-                  ] : []),
-                  "-",
-                  { label: t("project.settings.for", { name: p.name }), icon: "settings", onSelect: () => setEditing(p) },
-                ]} />
-            ))}
-            {projects.data && rows.length === 0 && (
-              <div className="projects-empty" role="row">{listed.length ? t("projects.none.match") : t("projects.none")}</div>
-            )}
-          </div>
-          {archived.length > 0 && (
-            <details className="projects-archived">
-              <summary><span>{t("projects.archived")}</span><span className="num">{archived.length}</span><span className="grow" /><Icon name="chevron" size={14} /></summary>
-              {archived.map((p) => (
-                <div key={p.id} className="projects-archived-row" data-project={p.id}>
-                  <span className="grow projects-name">
-                    <b className="truncate">{p.name}</b>
-                    <span className="mono truncate">{projectPath(p)}</span>
-                  </span>
-                  <button type="button" className="btn ghost small" disabled={!!restoring || offline} onClick={() => void restore(p)}>{t("project.restore")}</button>
-                  <button type="button" className="iconbtn small" onClick={() => setEditing(p)} title={t("project.settings.for", { name: p.name })} aria-label={t("project.settings.for", { name: p.name })}>
-                    <Icon name="settings" size={15} />
-                  </button>
-                </div>
-              ))}
-            </details>
-          )}
-          {elsewhere.length > 0 && (
-            <div className="projects-note">
-              <Icon name="compass" size={16} />
-              <span className="grow">{t("projects.orchestrated", { names: elsewhere.length === 1 ? elsewhere[0].name : t("projects.orchestrated.names", { name: elsewhere[0].name, n: elsewhere.length - 1 }) })}</span>
-              <a href={modeHome("orchestration")} onClick={(e) => { e.preventDefault(); navigate(modeHome("orchestration")); }}>{t("projects.orchestrated.open")}</a>
-            </div>
+      <PageHeader title={t("shell.projects")}
+        filters={<Segmented value={filter} options={filters} onChange={setFilter} label={t("projects.filter")} className="projects-filter" />}
+        actions={phone
+          ? <IconButton icon="plus" label={t("ph.newproject")} className="projects-new" onClick={() => openNewProject("agents")} />
+          : (
+            <>
+              {search}
+              <Button variant="primary" icon="plus" className="projects-new" onClick={() => openNewProject("agents")}>{t("ph.newproject")}</Button>
+            </>
+          )} />
+      <Page width="list" className="projects-body">
+        {phone && search}
+        <div className="projects-table" role="table" aria-label={t("shell.projects")}>
+          {rows.map((p) => (
+            <ProjectRow key={p.id} project={p} folder={folders.get(p.id)} live={liveOf(p.id)} onStart={() => startIn(p)} onSettings={() => setEditing(p)}
+              menu={[
+                { label: t("ph.newchat.in", { name: p.name }), icon: "compose", onSelect: () => startIn(p) },
+                ...(onPickProject ? [{ label: t("projects.lens", { name: p.name }), icon: "folder" as const, onSelect: () => { onPickProject(p.id); navigate(pathFor("agents")); } }] : []),
+                ...(!p.system ? [
+                  { label: t("project.team.for", { name: p.name }), icon: "bots" as const, onSelect: () => navigate(projectPagePath(p.id, "team")) },
+                  { label: t("project.board.for", { name: p.name }), icon: "board" as const, onSelect: () => navigate(projectPagePath(p.id, "board")) },
+                ] : []),
+                "-",
+                { label: t("project.settings.for", { name: p.name }), icon: "settings", onSelect: () => setEditing(p) },
+              ]} />
+          ))}
+          {projects.data && rows.length === 0 && (
+            <div className="projects-empty" role="row">{listed.length ? t("projects.none.match") : t("projects.none")}</div>
           )}
         </div>
-      </div>
+        {archived.length > 0 && (
+          <details className="projects-archived">
+            <summary><span>{t("projects.archived")}</span><span className="num">{archived.length}</span><span className="grow" /><Icon name="chevron" size={14} /></summary>
+            {archived.map((p) => (
+              <div key={p.id} className="projects-archived-row" data-project={p.id}>
+                <span className="grow projects-name">
+                  <b className="truncate">{p.name}</b>
+                  <span className="mono truncate">{projectPath(p)}</span>
+                </span>
+                <Button variant="quiet" size="sm" disabled={!!restoring || offline} onClick={() => void restore(p)}>{t("project.restore")}</Button>
+                <IconButton icon="settings" size={28} label={t("project.settings.for", { name: p.name })} onClick={() => setEditing(p)} />
+              </div>
+            ))}
+          </details>
+        )}
+        {elsewhere.length > 0 && (
+          <div className="projects-note">
+            <Icon name="compass" size={16} />
+            <span className="grow">{t("projects.orchestrated", { names: elsewhere.length === 1 ? elsewhere[0].name : t("projects.orchestrated.names", { name: elsewhere[0].name, n: elsewhere.length - 1 }) })}</span>
+            <a href={modeHome("orchestration")} onClick={(e) => { e.preventDefault(); navigate(modeHome("orchestration")); }}>{t("projects.orchestrated.open")}</a>
+          </div>
+        )}
+      </Page>
       {editing && <ProjectSettingsSheet project={editing} onClose={() => setEditing(null)} onRemoved={() => setEditing(null)} toast={toast} />}
     </div>
   );
@@ -195,13 +191,13 @@ function ProjectRow({ project: p, folder, live, onStart, onSettings, menu }: { p
           <span className="mono truncate">{p.system ? t("project.system.badge") : projectPath(p)}</span>
         </span>
       </span>
-      <span className="num" role="cell">{plural("ph.chats.count", chats)}</span>
       <span className="projects-state" role="cell">{state.length ? state : <span className="projects-none">—</span>}</span>
-      <span role="cell"><EnvPill env={env} tiny /></span>
+      <span className="num projects-count" role="cell">{plural("ph.chats.count", chats)}</span>
+      <span className="projects-env" role="cell"><EnvPill env={env} tiny /></span>
       <span className="num projects-when" role="cell">{folder?.last_message_at ? relTime(folder.last_message_at) : "—"}</span>
       <span className="projects-acts" role="cell" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="iconbtn small" onClick={onStart} title={t("ph.newchat.in", { name: p.name })} aria-label={t("ph.newchat.in", { name: p.name })}><Icon name="compose" size={15} /></button>
-        <button type="button" className="iconbtn small" onClick={onSettings} title={t("project.settings.for", { name: p.name })} aria-label={t("project.settings.for", { name: p.name })}><Icon name="settings" size={15} /></button>
+        <IconButton icon="compose" size={28} label={t("ph.newchat.in", { name: p.name })} onClick={onStart} />
+        <IconButton icon="settings" size={28} label={t("project.settings.for", { name: p.name })} onClick={onSettings} />
         <OverflowMenu small items={menu} label={t("projects.actions", { name: p.name })} />
       </span>
     </div>
