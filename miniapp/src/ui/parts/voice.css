@@ -161,7 +161,9 @@
 @keyframes orb-ripple { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
 
 .voice-hint { max-width: 46ch; min-height: 1.4em; text-align: center; color: var(--fg-3); font-size: var(--fs-13); }
-.voice-captions { width: min(100%, var(--reading-w)); display: grid; gap: 10px; text-align: center; padding: 6px 0; }
+/* A long answer scrolls in its own box: it took the field with it off the bottom of the stage, and the
+   field is how the call is ended. */
+.voice-captions { width: min(100%, var(--reading-w)); flex: 0 1 auto; min-height: 0; max-height: 36vh; overflow-y: auto; display: grid; gap: 10px; text-align: center; padding: 6px 0; }
 /* The diagnostic line: a measurement of the last answer, deliberately the quietest thing on the page.
    It is read when something feels slow and ignored the rest of the time, so it sits below the words
    at the smallest size the page uses. The hint's grey, not the fainter one: at this size on the
