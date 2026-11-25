@@ -1148,6 +1148,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, session_tool_groups())
         if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
+        # The chat's working-tree changes, the panel's Changes tool: the shared host's two files on order-form.
+        if (tail.startswith("changes") or tail == "commit") and fulfil_shared(route):
+            return None
         return respond(route, {})
     if rel == "/api/usage/speed" and fulfil_shared(route):
         return None
@@ -1438,9 +1441,20 @@ def expand_steps(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
+def open_tool(page: Page, tab: str, scope: str = ".panel") -> None:
+    """A tool of the panel on screen: its tab when it is open, else the "+" menu's row for it."""
+    tab_button = page.locator(f"{scope} .panel-tab[data-tab='{tab}']")
+    if tab_button.count():
+        tab_button.first.click()
+    else:
+        page.locator(f"{scope} .panel-add").first.click()
+        page.locator(f".panel-tools [data-tool='{tab}']").first.click()
+    page.wait_for_selector(f"{scope} .panel-tab.on[data-tab='{tab}']", timeout=5000)
+
+
 def open_panel_files(page: Page) -> None:
     """The panel on its Files tab: the workspace browser beside the conversation."""
-    page.locator(".panel-tab[data-tab='files']").click()
+    open_tool(page, "files")
     page.wait_for_selector(".panel-files .filerow", timeout=5000)
 
 
@@ -1458,17 +1472,16 @@ def phone_tool(page: Page, tile: str) -> None:
 
 
 def open_phone_panel(page: Page) -> None:
-    """On a phone the tabs open as a full sheet from the session's action menu."""
-    phone_tool(page, "details")
-    page.wait_for_selector(".panel-sheet .panel-tab", timeout=5000)
-    page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
+    """On a phone the tools open as a full sheet from the session's action menu."""
+    phone_tool(page, "files")
+    page.wait_for_selector(".panel-sheet .panel-tab.on[data-tab='files']", timeout=5000)
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
 
 
 def open_inspector(page: Page, section: str, scope: str = ".panel") -> None:
-    """Details is an inspector now: one line a section, and a press opens that section in place."""
-    page.locator(f"{scope} .panel-tab[data-tab='details']").first.click()
-    page.locator(f"{scope} [data-prop='{section}']").click()
+    """Details is an inspector: the facts, then one line a setting, and a press opens that setting in place."""
+    open_tool(page, "details", scope)
+    page.locator(f"{scope} [data-prop='{section}']").first.click()
 
 
 def open_tool_groups(page: Page) -> None:

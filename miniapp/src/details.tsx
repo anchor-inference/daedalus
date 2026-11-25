@@ -1,19 +1,18 @@
-// The Details tab: what the session is and what it is set to, as an inspector. Each section is one
-// line — its name on the left, its state in a few words on the right — so all of them fit on one screen
-// and the list reads as a table of contents; a press opens the section in place of the list, with a way
-// back. The tab used to be a column of cards of equal weight, and the two numbers that matter (the
-// context and the cost) sank among a folder's path and a disk's size; those two now live in the strip
-// over every tab (panelstrip.tsx) and lead the list here. What one does to the session — rename it, move
-// it, clear it, delete it — is in its menu (the strip's ⋯ and the chat header's ⋯ are one list), not in a
-// card at the foot of the tab. The parts a page is built from are in detailsparts.tsx; the right panel
-// hosts the tab on a desktop and a full sheet on a phone.
+// The Details tab: what the session is and what it is set to, as key and value in four groups — how it
+// was launched, where it stands, what it spent, how full its context is — then the chat's own settings,
+// one line each, which open in place of the list with a way back. It used to be seventeen identical
+// rows with a chevron each, the name at one edge and its state at the other; the facts now read as a
+// table, and only a line that opens something looks like it does. The context and the spend have
+// tools of their own in the panel (their pages are here, exported); what one does to the session —
+// rename it, move it, clear it, delete it — is in the session's menu. The parts a page is built from
+// are in detailsparts.tsx; the right panel hosts the tab on a desktop and a full sheet on a phone.
 
 import { OriginSection } from "./imports/ImportedChat";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, LoopView, ProviderUsage, Schedule, SessionDetail } from "./api";
 import { projectPath } from "./folders";
 import { ServiceRow, Switch, ToolPicker, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./ui/components";
-import { absTime, clock, duration, planName, relTimeLong, shortDateTime, untilShort } from "./format";
+import { absTime, clock, duration, planName, relTimeLong, shortDateTime, shortModel, untilShort } from "./format";
 import { Icon, type IconName } from "./icons";
 import { CopyValue, Fact, Facts, Headline, Meter, Note, Stat, Stats, Until } from "./detailsparts";
 import { contextSegments, contextTone, quotaTone } from "./detailsmodel";
@@ -42,6 +41,10 @@ export type DetailsActions = {
   move: () => void;
   showLog: (line: string, text: string) => void;
   openFiles: () => void;
+  /** Another tool of the panel: the context's and the spend's pages are tools, not sections here. */
+  openTool: (tool: "context" | "usage") => void;
+  /** The model picker, under the line that names the model. */
+  openModel?: (anchor: HTMLElement) => void;
 };
 
 export type SessionDetailsProps = {
@@ -65,14 +68,21 @@ export type SessionDetailsProps = {
   focus?: string | null;
   /** Changes with every request to open `focus`, so asking for the same section twice opens it twice. */
   focusKey?: number;
+  /** The reasoning effort as a word, "" for a model without one. */
+  effort?: string;
 };
 
-type PageId = "origin" | "context" | "usage" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "grants" | "helpers" | "vision" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
+type PageId = "origin" | "provider" | "workspace" | "disk" | "loop" | "cron" | "services" | "mcp" | "grants" | "helpers" | "vision" | "toolgroups" | "tools" | "brief" | "spend" | "advanced";
 
-/** One line of the inspector: what it opens, its icon and name, and its state in a few words. */
+/** One line of the inspector that opens a page: what it opens, its icon and name, and its state in a few words. */
 type Prop = { id: PageId; icon: IconName; label: string; value?: ReactNode; title?: string; attn?: boolean; body: () => ReactNode };
 
-export function SessionDetails({ ids, id, role = "session", detail, busy, schedules, provider, providerUsage, onOpen, toast, reload, on, focus, focusKey }: SessionDetailsProps) {
+/** One fact: a name and its value. With `onPress` it is a control (the model opens the picker, the
+ *  cost opens the spend), drawn as the same line with a hover; with `prop` it is named for the checks
+ *  and the keyboard like a section's line. */
+type Fact = { key: string; label: string; value: ReactNode; title?: string; prop?: string; onPress?: (anchor: HTMLElement) => void; tone?: "attn" | "live" };
+
+export function SessionDetails({ ids, id, role = "session", detail, busy, schedules, provider, providerUsage, onOpen, toast, reload, on, focus, focusKey, effort = "" }: SessionDetailsProps) {
   const container = useRef<HTMLDivElement>(null);
   const conductor = role !== "session";
   const sessionFolder = detail.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail.project?.folders?.[0] ?? null;
@@ -92,21 +102,15 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
     setPage(next);
   };
 
+  const facts = launchFacts(detail, { effort, conductor, folder: role !== "orchestrator", onModel: on.openModel, onOpen: (page) => open(page) });
+  const state = stateFacts(detail, busy);
+  const spend = spendFacts(detail, () => on.openTool("usage"));
   const groups: { key: string; props: Prop[] }[] = [
     { key: "now", props: [
       ...(detail.imported ? [{ id: "origin" as const, icon: "fork" as IconName, label: t("imp.origin"), value: detail.imported.harness_name ?? detail.imported.harness, body: () => <OriginSection sessionId={id} origin={detail.imported!} toast={toast} onPulled={() => reload(true)} /> }] : []),
-      ...(detail.context ? [{
-        id: "context" as const, icon: "braces" as IconName, label: t("session.context"), attn: !!detail.context.prefix_changed?.length,
-        value: <>{ctxPct !== null && <Mini percent={ctxPct} kind="context" tone={contextTone(ctxPct)} />}{ctxPct !== null ? `${ctxPct}%` : fmtTok(detail.context.tokens)}{detail.context.recent_cache && <span className="quiet">{t("details.prop.cache", { n: detail.context.recent_cache.hit_percent ?? 0 })}</span>}</>,
-        body: () => <ContextBody context={detail.context!} percent={ctxPct} busy={busy} onCompact={on.compact} />,
-      }] : []),
-      { id: "usage", icon: "chart", label: t("session.usage"), value: <>{fmtUsd(detail.usage.usd)}<span className="quiet">· {plural("usage.calls", detail.usage.c ?? 0)}</span></>, body: () => <UsageBody sessionId={id} usage={detail.usage} /> },
       ...(provider ? [{ id: "provider" as const, icon: "bolt" as IconName, label: providerLabel(provider), value: <ProviderSummary usage={providerUsage} />, body: () => <ProviderUsageBody usage={providerUsage} /> }] : []),
     ] },
     { key: "where", props: role === "orchestrator" ? [] : [
-      { id: "workspace", icon: "folder", label: t("session.workspace"), title: detail.project ? projectPath(detail.project) : detail.workspace,
-        value: <>{folderMove && <span className="badge attn">{t("details.prop.moving")}</span>}<span className="truncate">{workspaceWord(detail)}</span><HostMark env={detail.env} /></>,
-        body: () => <WorkspaceBody detail={detail} conductor={conductor} folderMove={folderMove} onOpen={onOpen} on={on} /> },
       { id: "disk", icon: "archive", label: t("disk.title"), body: () => <DiskUsage kind="session" id={id} toast={toast} /> },
     ] },
     { key: "own", props: [
@@ -172,7 +176,11 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
         </> },
     ] },
   ];
-  const all = groups.flatMap((g) => g.props);
+  // The folder's page opens from its fact in the launch group, not from a line of its own.
+  const workspacePage: Prop = { id: "workspace", icon: "folder", label: t("session.workspace"), title: detail.project ? projectPath(detail.project) : detail.workspace,
+    value: <>{folderMove && <span className="badge attn">{t("details.prop.moving")}</span>}<span className="truncate">{workspaceWord(detail)}</span><HostMark env={detail.env} /></>,
+    body: () => <WorkspaceBody detail={detail} conductor={conductor} folderMove={folderMove} onOpen={onOpen} on={on} /> };
+  const all = [...groups.flatMap((g) => g.props), ...(role === "orchestrator" ? [] : [workspacePage])];
   const shown = page ? all.find((p) => p.id === page) ?? null : null;
 
   // A chip, the strip or a menu item asked for a section: open it; "session" asks for the list.
@@ -213,13 +221,16 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   };
   return (
     <div ref={container} className="details inspector" onKeyDown={onKey}>
+      <FactGroup ids={ids} id="launch" facts={facts} />
+      <FactGroup ids={ids} id="state" facts={state} />
+      <FactGroup ids={ids} id="spend" facts={spend} />
+      {detail.context && <ContextLine ids={ids} context={detail.context} percent={ctxPct} busy={busy} onCompact={on.compact} onMore={() => on.openTool("context")} />}
       {groups.filter((g) => g.props.length > 0).map((g) => (
         <section key={g.key} className="dt-props" aria-labelledby={`${ids}-grp-${g.key}`}>
           <h3 className="dt-grp" id={`${ids}-grp-${g.key}`}>{t(`details.group.${g.key}`)}</h3>
           {g.props.map((p) => (
             <button key={p.id} type="button" className="dt-prop" id={`${ids}-info-${p.id}`} data-prop={p.id} title={p.title} onClick={() => open(p.id)}>
-              <Icon name={p.icon} size={16} />
-              <span className="dt-prop-k">{p.label}</span>
+              <span className="dt-prop-k"><Icon name={p.icon} size={16} /><span className="dt-prop-name">{p.label}</span></span>
               {p.attn && <span className="dt-prop-attn" title={t("details.prop.attn")} aria-label={t("details.prop.attn")}><Icon name="alert" size={12} /></span>}
               <span className="dt-prop-v">{p.value}</span>
               <Icon name="forward" size={14} />
@@ -229,6 +240,105 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
       ))}
     </div>
   );
+}
+
+/** A group of facts under its label: a 150 px column of names, the values beside them. */
+function FactGroup({ ids, id, facts }: { ids: string; id: string; facts: Fact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <section className="dt-facts" aria-labelledby={`${ids}-grp-${id}`} data-facts={id}>
+      <h3 className="dt-grp" id={`${ids}-grp-${id}`}>{t(`details.group.${id}`)}</h3>
+      {facts.map((f) => {
+        const body = <><span className="dt-kv-k">{f.label}</span><span className={`dt-kv-v ${f.tone ?? ""}`}>{f.value}</span></>;
+        return f.onPress
+          ? <button key={f.key} type="button" className="dt-kv press" data-prop={f.prop} data-fact={f.key} title={f.title} onClick={(e) => f.onPress!(e.currentTarget)}>{body}</button>
+          : <div key={f.key} className="dt-kv" data-fact={f.key} title={f.title}>{body}</div>;
+      })}
+    </section>
+  );
+}
+
+/** How the session was launched: the model and its effort, what it may do without asking, the
+ *  project, the folder and the branch it works on. */
+/** `folder`: a project's orchestrator has no folder of its own; it reads every folder of the project from Files. */
+function launchFacts(detail: SessionDetail, { effort, conductor, folder, onModel, onOpen }: { effort: string; conductor: boolean; folder: boolean; onModel?: (anchor: HTMLElement) => void; onOpen: (page: PageId) => void }): Fact[] {
+  const model = detail.fallback?.to ?? detail.model;
+  const vendor = detail.effective_provider || detail.provider;
+  return [
+    { key: "model", label: t("details.fact.model"), value: <span className="truncate">{model ? [shortModel(model, 40), vendor ? providerLabel(vendor) : ""].filter(Boolean).join(" · ") : t("session.model.global")}</span>, title: model, prop: "model", onPress: onModel },
+    ...(effort ? [{ key: "effort", label: t("details.fact.effort"), value: effort }] : []),
+    { key: "access", label: t("details.fact.access"), value: t(detail.bypass ? "composer.bypass" : "details.fact.access.ask"), tone: detail.bypass ? "attn" as const : undefined },
+    ...(!conductor && detail.project && !detail.project.system ? [{ key: "project", label: t("session.project"), value: <span className="truncate">{detail.project.name}</span> }] : []),
+    ...(!folder ? [] : [{ key: "workspace", label: t("details.fact.folder"), value: <span className="truncate mono">{shortPath(detail.workspace)}</span>, title: detail.workspace, prop: "workspace", onPress: () => onOpen("workspace") }]),
+    ...(detail.branch ? [{ key: "branch", label: t("details.fact.branch"), value: <span className="truncate mono">{detail.branch}</span> }] : []),
+  ];
+}
+
+/** Where the session stands: its status, when the run on it began and for how long. */
+function stateFacts(detail: SessionDetail, busy: boolean): Fact[] {
+  const since = detail.run_started_at;
+  return [
+    { key: "status", label: t("details.fact.status"), value: statusWord(detail.status), tone: busy ? "live" : undefined },
+    ...(since ? [{ key: "started", label: t("details.fact.started"), value: shortDateTime(since), title: absTime(since) }, { key: "running", label: t("details.fact.running"), value: <Elapsed since={since} /> }] : []),
+    ...(detail.context ? [{ key: "messages", label: t("details.context.messages"), value: fmtInt(detail.context.messages) }] : []),
+  ];
+}
+
+/** What it spent: tokens in and out, how much of what went in the cache served, and the sum, which
+ *  opens the spend's own page. */
+function spendFacts(detail: SessionDetail, openUsage: () => void): Fact[] {
+  const usage = detail.usage;
+  const cached = usage.i && usage.ch ? Math.round((100 * usage.ch) / usage.i) : null;
+  return [
+    { key: "in", label: t("details.usage.in"), value: t("details.fact.tokens", { n: fmtTok(usage.i) }) },
+    { key: "out", label: t("details.usage.out"), value: t("details.fact.tokens", { n: fmtTok(usage.o) }) },
+    ...(cached !== null ? [{ key: "cache", label: t("details.fact.cache"), value: `${cached}%` }] : []),
+    { key: "cost", label: t("details.fact.cost"), value: <>{fmtUsd(usage.usd)}<span className="quiet">{plural("usage.calls", usage.c ?? 0)}</span></>, prop: "usage", onPress: openUsage },
+  ];
+}
+
+/** The context as a bar under its group's label, its figures, and the compaction beside them. The page
+ *  with what fills it is the Context tool. */
+function ContextLine({ ids, context, percent, busy, onCompact, onMore }: { ids: string; context: ContextView; percent: number | null; busy: boolean; onCompact: () => void; onMore: () => void }) {
+  const tone = percent !== null ? contextTone(percent) : null;
+  return (
+    <section className="dt-facts dt-context" aria-labelledby={`${ids}-grp-context`} data-facts="context">
+      <h3 className="dt-grp" id={`${ids}-grp-context`}>{t("session.context")}</h3>
+      {percent !== null && <div className={`dt-context-bar ${tone ?? ""}`} aria-hidden><i style={{ width: `${Math.min(100, percent)}%` }} /></div>}
+      <div className="dt-context-line">
+        <button type="button" className="dt-context-more" data-prop="context" onClick={onMore} title={context.window > 0 ? t("session.ctx.title", { used: fmtInt(context.tokens), window: fmtInt(context.window) }) : undefined}>
+          {context.window > 0 ? t("details.context.line", { used: fmtTok(context.tokens), window: fmtTok(context.window), n: percent ?? 0 }) : t("details.context.used", { used: fmtTok(context.tokens) })}
+        </button>
+        <button type="button" className="dt-context-compact" onClick={onCompact} disabled={busy}>{t("details.context.compact")}</button>
+      </div>
+    </section>
+  );
+}
+
+/** A run's length, drawn again every quarter minute; nothing is fetched for it. */
+export function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <>{elapsedWord(now - Date.parse(since))}</>;
+}
+
+/** "6 мин", "1 ч 12 мин": a run's length to the minute, seconds only in its first minute. */
+export function elapsedWord(ms: number): string {
+  if (!Number.isFinite(ms)) return "";
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return t("fmt.dur.s", { n: s });
+  const m = Math.floor(s / 60);
+  if (m < 60) return t("fmt.dur.m", { n: m });
+  return `${t("fmt.dur.h", { n: Math.floor(m / 60) })}${m % 60 ? ` ${t("fmt.dur.m", { n: m % 60 })}` : ""}`;
+}
+
+/** A folder as its last two parts: the start of a long path says nothing the end does not. */
+function shortPath(path: string): string {
+  const parts = (path || "").split("/").filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
 }
 
 /** A section opened in place of the list: the way back, where it is, and the section itself. Escape goes
@@ -362,7 +472,7 @@ type ContextView = NonNullable<SessionDetail["context"]>;
 
 /** The context: how full the window is, what fills it, what the cache reused, and when it was last
  *  compacted beside the button that compacts it. Each was a sentence of its own before. */
-function ContextBody({ context, percent, busy, onCompact }: { context: ContextView; percent: number | null; busy: boolean; onCompact: () => void }) {
+export function ContextBody({ context, percent, busy, onCompact }: { context: ContextView; percent: number | null; busy: boolean; onCompact: () => void }) {
   const tone = percent !== null ? contextTone(percent) : null;
   const segments = context.breakdown ? contextSegments(context.breakdown, context.window) : null;
   const measured = t(context.estimated ? "session.context.estimated" : "session.context.measured");
@@ -417,7 +527,7 @@ function ContextBody({ context, percent, busy, onCompact }: { context: ContextVi
 /** What the session spent, as one table: in, of it from the cache, out, calls and the tools' time, in
  *  total and today. It used to be the sum as a headline, today's sum beside it, and four tiles, each
  *  with today's share under it — three places for the same few numbers. */
-function UsageBody({ sessionId, usage }: { sessionId: string; usage: SessionDetail["usage"] }) {
+export function UsageBody({ sessionId, usage }: { sessionId: string; usage: SessionDetail["usage"] }) {
   const today = usage.c_today != null;
   const timing = useToolTiming(sessionId);
   const total = timing.reduce((sum, row) => sum + row.total_ms, 0);
@@ -542,12 +652,12 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
 // Claude one then said its plan twice.
 const PROVIDER_LABEL: Record<string, string> = { codex: "Codex", claude: "Claude", grok: "Grok", antigravity: "Google (Antigravity)", opencode: "OpenCode Go", openrouter: "OpenRouter", deepseek: "DeepSeek" };
 
-function providerLabel(id: string): string {
+export function providerLabel(id: string): string {
   return PROVIDER_LABEL[id] ?? (id ? id[0].toUpperCase() + id.slice(1) : id);
 }
 
 /** The provider's busiest windows as two short bars, or the day's metered spend, in a line of the list. */
-function ProviderSummary({ usage }: { usage: ProviderUsage | null }) {
+export function ProviderSummary({ usage }: { usage: ProviderUsage | null }) {
   const sub = usage?.subscription;
   if (!usage) return null;
   if (sub?.limit_reached) return <span className="badge bad">{t("usage.limitreached")}</span>;
@@ -558,7 +668,7 @@ function ProviderSummary({ usage }: { usage: ProviderUsage | null }) {
 }
 
 /** What the session's provider has left: a subscription's windows, or the day's metered spend and balance. */
-function ProviderUsageBody({ usage }: { usage: ProviderUsage | null }) {
+export function ProviderUsageBody({ usage }: { usage: ProviderUsage | null }) {
   const sub = usage?.subscription;
   const today = usage?.today ?? {};
   return <>
