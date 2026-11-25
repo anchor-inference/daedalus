@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { t } from "./i18n";
 import { confirmAsync, errorText } from "./ui";
+import { Select } from "./ui/primitives";
 
 export const SERVER_HOURS = [1, 2, 6, 12, 0] as const;
 export const SERVER_DEFAULT_HOURS = 6;
@@ -31,11 +32,8 @@ export function ServerGrantButton({ server, onGrant, phone = false }: { server: 
         onClick={() => void confirmSpan(server, hours).then((yes) => yes && onGrant(hours))}>
         <span className="truncate">{t("grant.server", { server })}</span>
       </button>
-      <select className="srv-grant-span" value={hours} aria-label={t("grant.span")} data-forever={hours === 0 ? "" : undefined}
-        onKeyDown={(e) => e.stopPropagation()}
-        onChange={(e) => setHours(Number(e.target.value))}>
-        {SERVER_HOURS.map((h) => <option key={h} value={h}>{spanLabel(h)}{h === 0 ? " ⚠" : ""}</option>)}
-      </select>
+      <Select size="sm" className={`srv-grant-span ${hours === 0 ? "forever" : ""}`.trim()} label={t("grant.span")} value={String(hours)} onChange={(id) => setHours(Number(id))}
+        options={SERVER_HOURS.map((h) => ({ id: String(h), label: `${spanLabel(h)}${h === 0 ? " ⚠" : ""}` }))} />
     </span>
   );
 }

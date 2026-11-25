@@ -130,9 +130,9 @@ export function FreeModels({ onSaved, toast }: { onSaved: (id: string, settings:
     {catalog && <>
       <div className="section-title" style={{ marginTop: 20 }}>{t("free.providers")}</div>
       <div className="pickgrid">
-        {catalog.providers.map((p) => <button key={p.id} className={`pick ${selected === p.id ? "on" : ""}`} aria-pressed={selected === p.id} onClick={() => { setSelected(p.id); setQuery(""); setKey(""); }}>
-          <span className="pick-top"><b>{p.name}</b><span className="pill">{p.models.length}</span></span>
-          <span className="sub">{p.key_required ? t("free.key.needed") : t("free.key.none")}</span>
+        {catalog.providers.map((p) => <button key={p.id} type="button" className={`pick ${selected === p.id ? "on" : ""}`} aria-pressed={selected === p.id} onClick={() => { setSelected(p.id); setQuery(""); setKey(""); }}>
+          <span className="pick-main"><b className="truncate">{p.name}</b><span className="pick-line">{p.key_required ? t("free.key.needed") : t("free.key.none")}</span></span>
+          <span className="pick-state" data-tone="idle">{p.models.length}</span>
         </button>)}
       </div>
       {provider && <>

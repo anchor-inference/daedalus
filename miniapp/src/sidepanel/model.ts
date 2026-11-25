@@ -20,17 +20,6 @@ export function pickSession(input: { show?: string | null; current: Current | nu
   return input.sessions[0]?.id ?? null;
 }
 
-export type CardKey = "allow" | "similar" | "deny" | null;
-
-/** A key on the approval card, which takes the focus when it appears: Enter allows once,
- *  Ctrl+Enter (Cmd+Enter) allows the like for the conversation, Esc refuses. */
-export function cardKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; isComposing?: boolean }): CardKey {
-  if (e.isComposing) return null;
-  if (e.key === "Escape") return "deny";
-  if (e.key !== "Enter") return null;
-  return e.ctrlKey || e.metaKey ? "similar" : "allow";
-}
-
 /** How long a stop has to show in the stream before the panel says it did not get through. */
 export const STOP_CONFIRM_MS = 3000;
 

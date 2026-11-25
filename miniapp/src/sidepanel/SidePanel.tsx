@@ -30,9 +30,9 @@ import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type 
 import { followSession } from "../sessionstream";
 import { errorText } from "../ui";
 import { ToastHost, toast } from "../ui/dialogs";
+import { Button, IconButton, Menu, Sheet, type MenuItem } from "../ui/primitives";
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
-import { cardKey, cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
-import { ServerGrantButton } from "../servergrant";
+import { cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
 import "./sidepanel.css";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
@@ -53,7 +53,6 @@ export function SidePanel() {
   const [shown, setShown] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [menu, setMenu] = useState(false);
   const show = useRef<string | null>(null);
   // The refused calls answered here, per conversation, for as long as the panel is open: the refusal
   // stays in the transcript after the answer, and coming back to the conversation must not offer it
@@ -148,36 +147,29 @@ export function SidePanel() {
   return (
     <div className="sidepanel">
       <header className="sp-head">
-        <button type="button" className="sp-title" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((open) => !open)} disabled={!sessions.length}>
-          {session && !newView ? <Dot status={session.status} needsYou={session.needs_you} /> : null}
-          <span className="truncate">{newView ? t("sidepanel.new.title") : session.title}</span>
-          {sessions.length > 0 && <Icon name="chevron" size={14} />}
-        </button>
-        <span className="grow" />
-        {!newView && (
-          <button type="button" className={`iconbtn small ${pinned ? "on" : ""}`} title={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-label={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-pressed={pinned} onClick={() => setPinned((p) => !p)}>
-            <Icon name="pushpin" size={16} />
-          </button>
-        )}
-        <button type="button" className="iconbtn small" title={t("sidepanel.new")} aria-label={t("sidepanel.new")} onClick={() => { setCreating(true); setMenu(false); }}>
-          <Icon name="compose" size={16} />
-        </button>
-        <button type="button" className="iconbtn small" title={t("sidepanel.open_app")} aria-label={t("sidepanel.open_app")} onClick={() => void shell.request("open.app", { path: session && !newView ? sessionPath(session.id) : "/app/" }).catch((e) => toast(errorText(e)))}>
-          <Icon name="external" size={16} />
-        </button>
-      </header>
-      {menu && (
-        <div className="sp-menu" role="menu">
-          {sessions.map((s) => (
-            <button key={s.id} type="button" role="menuitem" className={`sp-menu-row ${s.id === shown && !newView ? "on" : ""}`}
-              onClick={() => { setShown(s.id); setCreating(false); setMenu(false); setPinned(true); }}>
-              <Dot status={s.status} needsYou={s.needs_you} />
-              <span className="truncate grow">{s.title}</span>
-              {s.needs_you && <span className="sp-badge">{t("sidepanel.needs_you")}</span>}
+        <Menu
+          sheetBelow={0}
+          align="start"
+          label={t("sidepanel.switch")}
+          items={sessions.map((s): MenuItem => ({
+            label: s.title,
+            // The one on screen carries a tick; a checkbox would keep the menu open after the choice.
+            aside: <>{s.needs_you && <span className="sp-badge">{t("sidepanel.needs_you")}</span>}<Dot status={s.status} needsYou={s.needs_you} />{s.id === shown && !newView ? <Icon name="check" size={14} /> : <span className="sp-tick" aria-hidden />}</>,
+            onSelect: () => { setShown(s.id); setCreating(false); setPinned(true); },
+          }))}
+          trigger={
+            <button type="button" className="sp-title" disabled={!sessions.length}>
+              {session && !newView ? <Dot status={session.status} needsYou={session.needs_you} /> : null}
+              <span className="truncate">{newView ? t("sidepanel.new.title") : session.title}</span>
+              {sessions.length > 0 && <Icon name="chevron" size={14} />}
             </button>
-          ))}
-        </div>
-      )}
+          }
+        />
+        <span className="grow" />
+        {!newView && <IconButton icon="pushpin" size={28} label={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} pressed={pinned} onClick={() => setPinned((p) => !p)} />}
+        <IconButton icon="compose" size={28} label={t("sidepanel.new")} onClick={() => setCreating(true)} />
+        <IconButton icon="external" size={28} label={t("sidepanel.open_app")} onClick={() => void shell.request("open.app", { path: session && !newView ? sessionPath(session.id) : "/app/" }).catch((e) => toast(errorText(e)))} />
+      </header>
       {!listing.chrome.connected && <div className="sp-banner warn">{t("sidepanel.chrome.offline")}</div>}
       {newView ? (
         <NewConversation shell={shell} current={current} listing={listing} toast={toast}
@@ -681,7 +673,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       {/* The agent's side questions in this conversation. The panel never fetched them, so a question
           asked here waited unseen while only the app showed it. */}
       {sideAsked > 0 && asksOpen && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
-      {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} server={grantServer} onDecide={(how) => void decide(approval, how)} onServer={(hours) => void decide(approval, "server", hours)} />}
       {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
       {previewing && <FilePreview src={previewing} onClose={() => setPreviewing(null)} />}
       {detail?.id === id && (
@@ -726,7 +717,13 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
               void load();
             }
           }}
-          approval={null}
+          approval={approval}
+          similar={similar}
+          server={grantServer}
+          onApprove={(a) => void decide(a, "allow")}
+          onApproveSimilar={(a) => void decide(a, "similar")}
+          onApproveServer={(a, hours) => void decide(a, "server", hours)}
+          onDeny={(a) => void decide(a, "deny")}
           asr={asr}
           phone={false}
           toast={toast}
@@ -779,42 +776,6 @@ function ActivityLine({ detail, live, status, paused, stopUnconfirmed: unconfirm
   );
 }
 
-// ── the approval card ──────────────────────────────────────────────────────────────────────
-
-/** A pending action of the agent's, answered here: it takes the focus, so Enter allows once,
- *  Ctrl+Enter allows the like for this conversation and Esc refuses, without the composer hearing. */
-function ApprovalCard({ approval, similar, server, onDecide, onServer }: { approval: Approval; similar: string | null; server: string | null; onDecide: (how: "allow" | "similar" | "deny") => void; onServer: (hours: number) => void }) {
-  const card = useRef<HTMLDivElement>(null);
-  const [acked, setAcked] = useState<string | null>(null);
-  useEffect(() => card.current?.focus(), []);
-  const choose = (how: "allow" | "similar" | "deny") => {
-    if (acked) return;
-    // A moment's acknowledgement before it goes, so a key pressed by habit is seen to have done something.
-    setAcked(how);
-    window.setTimeout(() => onDecide(how), 150);
-  };
-  return (
-    <div ref={card} className="sp-card" role="alertdialog" tabIndex={0} aria-label={t("composer.approval.title", { tool: approval.tool || "tool" })}
-      onKeyDown={(e) => {
-        const how = cardKey(e);
-        if (!how) return;
-        e.preventDefault();
-        e.stopPropagation();
-        choose(how === "similar" && !similar ? "allow" : how);
-      }}>
-      <div className="sp-card-title">{t("composer.approval.title", { tool: approval.tool || "tool" })}</div>
-      {approval.detail && <div className="sp-card-detail mono">{approval.detail}</div>}
-      <div className="sp-card-actions">
-        <button type="button" className={`btn small primary ${acked === "allow" ? "acked" : ""}`} onClick={() => choose("allow")}>{t("composer.approve")} <kbd>Enter</kbd></button>
-        {similar && <button type="button" className={`btn small ${acked === "similar" ? "acked" : ""}`} onClick={() => choose("similar")}>{t("composer.approve.similar", { label: similar })} <kbd>Ctrl+Enter</kbd></button>}
-        {server && <ServerGrantButton server={server} onGrant={onServer} />}
-        <button type="button" className={`btn small ${acked === "deny" ? "acked" : ""}`} onClick={() => choose("deny")}>{t("composer.deny")} <kbd>Esc</kbd></button>
-      </div>
-      <div className="sp-card-foot sub">{t("sidepanel.card.foot")}</div>
-    </div>
-  );
-}
-
 // ── a screenshot, whole or a dragged part ──────────────────────────────────────────────────
 
 function ShotCrop({ shot, onCancel, onAttach }: { shot: PageInfo & { image: string }; onCancel: () => void; onAttach: (file: File) => void }) {
@@ -838,8 +799,11 @@ function ShotCrop({ shot, onCancel, onAttach }: { shot: PageInfo & { image: stri
   }
   const box = drag ? { left: Math.min(drag.x, drag.x + drag.w), top: Math.min(drag.y, drag.y + drag.h), width: Math.abs(drag.w), height: Math.abs(drag.h) } : null;
   return (
-    <div className="sp-shot" role="dialog" aria-label={t("sidepanel.shot.title")}
-      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+    <Sheet title={t("sidepanel.shot.title")} size="md" className="sp-shot" onClose={onCancel}
+      footer={<>
+        <Button onClick={onCancel}>{t("sidepanel.cancel")}</Button>
+        <Button variant="primary" onClick={() => void attachPart()}>{drag && Math.abs(drag.w) >= 4 ? t("sidepanel.shot.part") : t("sidepanel.shot.whole")}</Button>
+      </>}>
       <div className="sp-shot-hint sub">{t("sidepanel.shot.hint")}</div>
       <div className="sp-shot-frame"
         onPointerDown={(e) => { const p = at(e); start.current = p; setDrag({ x: p.x, y: p.y, w: 0, h: 0 }); (e.target as Element).setPointerCapture?.(e.pointerId); }}
@@ -848,10 +812,6 @@ function ShotCrop({ shot, onCancel, onAttach }: { shot: PageInfo & { image: stri
         <img ref={img} src={shot.image} alt={t("sidepanel.shot.title")} draggable={false} />
         {box && <div className="sp-shot-box" style={box} />}
       </div>
-      <div className="sp-card-actions">
-        <button type="button" className="btn small" onClick={onCancel}>{t("sidepanel.cancel")}</button>
-        <button type="button" className="btn small primary" onClick={() => void attachPart()}>{drag && Math.abs(drag.w) >= 4 ? t("sidepanel.shot.part") : t("sidepanel.shot.whole")}</button>
-      </div>
-    </div>
+    </Sheet>
   );
 }

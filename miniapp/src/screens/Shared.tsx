@@ -166,10 +166,13 @@ export function SharedDialog({ slug }: { slug: string }) {
       <div className="shared-column">
         <header className="shared-head">
           <div className="shared-titles">
-            {/* The kicker says what kind of page this is above the dialog's own name; with no name
-                to show it would only repeat the heading under it. */}
-            {page?.title && <div className="shared-kicker">{t("share.page.kicker")}</div>}
             <h1>{title}</h1>
+            {/* Whose page this is and what the visitor may do on it, under the name: a page with no
+                name of its own would only repeat the kind of page it is, so it says the one word. */}
+            <div className="shared-meta">
+              {page?.title && <span className="shared-kicker">{t("share.page.kicker")}</span>}
+              <span className="shared-readonly">{t("share.page.readonly")}</span>
+            </div>
           </div>
         </header>
         <div className="shared-scroll">

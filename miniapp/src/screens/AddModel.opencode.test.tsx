@@ -34,13 +34,10 @@ const card = (id: string, billing: "metered" | "subscription", base: string) => 
 
 let host: HTMLDivElement;
 let root: Root;
-/** The window's width class: a desktop by default; the phone's rows are a test of their own. */
-let desktop = true;
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  desktop = true;
-  window.matchMedia = ((query: string) => ({ matches: desktop && query.includes("min-width: 1024px"), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  window.matchMedia = ((query: string) => ({ matches: query.includes("min-width: 1024px"), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
   setLang("en");
   calls.put = [];
   host = document.createElement("div");
@@ -65,8 +62,8 @@ describe("the two OpenCode plans", () => {
     await render();
     const go = button("OpenCode Go");
     const zen = button("OpenCode Zen");
-    expect(go.textContent).toContain("OpenCode Go — subscription, not charged per token");
-    expect(zen.textContent).toContain("OpenCode Zen — pay per token through OpenCode's gateway");
+    expect(go.textContent).toContain("Subscription, not charged per token");
+    expect(zen.textContent).toContain("Pay per token through OpenCode's gateway");
     // Nothing is offered to add: both plans already have their endpoint.
     expect(host.querySelectorAll("button.pick.dashed")).toHaveLength(2);
 
@@ -79,8 +76,7 @@ describe("the two OpenCode plans", () => {
     expect(host.querySelector("details.addmodel-pricing")).not.toBeNull();
   });
 
-  it("on a phone, list the plans as rows with the line about paying and without an address", async () => {
-    desktop = false;
+  it("list the plans as rows with the line about paying and without an address; the picked one's is under its test", async () => {
     calls.onboarding = { has_model: false, presets: 0, default_preset: "", needs: ["model"], message: "", keyproxy_base: "http://127.0.0.1:3200",
       providers: [card("opencode", "subscription", "http://127.0.0.1:3200/opencode"), card("deepseek", "metered", "http://127.0.0.1:3200/deepseek")] };
     await render();
@@ -88,10 +84,10 @@ describe("the two OpenCode plans", () => {
     expect(go.textContent).toContain("Subscription, not charged per token");
     // The plan with no endpoint yet is a row of its own, marked new.
     expect(button("OpenCode Zen").textContent).toContain("Pay per token through OpenCode's gateway");
-    // No internal address on any row; the picked one's is under Advanced.
-    for (const row of host.querySelectorAll(".ph-pickrow")) expect(row.textContent).not.toContain("http://");
+    // No internal address on any row; the picked one's is beside its connection test.
+    for (const row of host.querySelectorAll(".pick")) expect(row.textContent).not.toContain("http://");
     await act(async () => go.click());
-    expect(host.querySelector("details.ph-advanced")?.textContent).toContain("http://127.0.0.1:3200/opencode");
+    expect(host.querySelector(".pick-test-addr")?.textContent).toContain("http://127.0.0.1:3200/opencode");
   });
 
   it("add the missing plan on its key proxy route, with its billing", async () => {

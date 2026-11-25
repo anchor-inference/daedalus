@@ -3,6 +3,7 @@ import { api } from "../api";
 import { twoFactor } from "../twofactor";
 import { ApiError } from "../api";
 import { Icon } from "../icons";
+import { Button, Field } from "../ui/primitives";
 import { errorText } from "../ui";
 import { t, useLang } from "../i18n";
 import { LangPicker } from "../ui/index";
@@ -154,31 +155,26 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const methods = bot ? 1 : 0;
   return (
     <div className="gate">
+      <div className="gate-lang"><LangPicker /></div>
       <div className="login" role="main" aria-labelledby="login-title">
-        <LangPicker />
-        <img className="login-logo" src="/app/icons/icon-192.png" alt="" width={72} height={72} />
+        <img className="login-logo" src="/app/icons/icon-192.png" alt="" width={40} height={40} />
         <h1 id="login-title">{t("login.title")}</h1>
         <p className="sub">{t("login.sub")}</p>
         {conf === null && !error && <div className="sub">{t("common.loading")}</div>}
         {desktop && (
           <div className="login-methods">
-            <button className="btn primary big" disabled={busy} onClick={viaLauncher}>
-              <Icon name="key" size={16} /> {t("login.desktop")}
-            </button>
+            <Button variant="primary" icon="key" className="login-wide" disabled={busy} onClick={viaLauncher}>{t("login.desktop")}</Button>
             <p className="sub small">{t("login.desktop.hint")}</p>
           </div>
         )}
         {conf !== null && !desktop && owesCode && (
           <form className="login-pair login-code" onSubmit={(e) => void withCode(e)}>
-            <div className="settings-row-title">{t("login.code.title")}</div>
+            <div className="login-step">{t("login.code.title")}</div>
             <p className="sub small">{t("login.code.sub")}</p>
-            <label className="field" htmlFor="login-code">{t("login.code.label")}</label>
-            <div className="share-field">
-              <input id="login-code" className="field mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("login.code.placeholder")}
-                autoComplete="one-time-code" inputMode="text" maxLength={20} spellCheck={false} autoFocus />
-              <button className="btn primary" type="submit" disabled={!code.trim() || busy}>{t("login.code.submit")}</button>
-            </div>
-            <button className="linkbtn" type="button" onClick={() => void startOver()}>{t("login.code.restart")}</button>
+            <Field id="login-code" label={t("login.code.label")} mono value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("login.code.placeholder")}
+              autoComplete="one-time-code" inputMode="text" maxLength={20} spellCheck={false} autoFocus />
+            <Button variant="primary" type="submit" className="login-wide" disabled={!code.trim() || busy}>{t("login.code.submit")}</Button>
+            <Button variant="quiet" className="login-wide" onClick={() => void startOver()}>{t("login.code.restart")}</Button>
           </form>
         )}
         {conf !== null && !desktop && !owesCode && (
@@ -186,17 +182,14 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
             {bot && <div ref={slot} className="login-widget" />}
             {methods > 0 && <div className="login-or">{t("login.or")}</div>}
             <form className="login-pair" onSubmit={withPairing}>
-              <label className="field" htmlFor="pairing">{t("login.pairing.label")}</label>
-              <div className="share-field">
-                <input id="pairing" className="field mono" value={pairing} onChange={(e) => setPairing(e.target.value)} placeholder={t("login.pairing.placeholder")} autoComplete="off" spellCheck={false} />
-                <button className="btn" type="submit" disabled={!pairing.trim() || busy}>{t("common.continue")}</button>
-              </div>
-              <p className="sub small">{t("login.pairing.hint")}</p>
+              <Field id="pairing" label={t("login.pairing.label")} mono value={pairing} onChange={(e) => setPairing(e.target.value)} placeholder={t("login.pairing.placeholder")} autoComplete="off" spellCheck={false}
+                hint={t("login.pairing.hint")} />
+              <Button variant="primary" type="submit" className="login-wide" disabled={!pairing.trim() || busy}>{t("common.continue")}</Button>
             </form>
           </div>
         )}
         {busy && <div className="sub">{t("login.busy")}</div>}
-        {error && <div className="login-error">{error}</div>}
+        {error && <div className="login-error" role="alert"><Icon name="alert" size={14} />{error}</div>}
         {!desktop && <p className="sub small login-foot">{t("login.install")}</p>}
       </div>
     </div>
