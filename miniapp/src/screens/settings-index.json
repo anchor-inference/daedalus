@@ -579,6 +579,12 @@
       "synonyms": ["add model", "new model", "connect model", "OpenRouter", "DeepSeek", "добавить модель", "новая модель", "подключить модель"]
     },
     {
+      "section": "models", "anchor": "models.check", "config": null,
+      "title": { "en": "Check models", "ru": "Проверить модели" },
+      "about": { "en": "Send one tiny request to each model and mark the ones that are broken or slow; nothing is checked unless you press it.", "ru": "Отправить каждой модели один крошечный запрос и отметить неработающие и медленные; без нажатия ничего не проверяется." },
+      "synonyms": ["check models", "model health", "broken model", "slow model", "test models", "проверить модели", "здоровье моделей", "не работает", "медленная модель"]
+    },
+    {
       "section": "tasks", "anchor": "vision.preset", "config": "vision.preset",
       "title": { "en": "Image understanding model", "ru": "Модель для понимания изображений" },
       "about": { "en": "The model that looks at pictures and screenshots for sessions whose own model cannot.", "ru": "Модель, которая смотрит на картинки и скриншоты за сессии, чья модель этого не умеет." },
@@ -645,9 +651,21 @@
       "synonyms": ["translator", "translation model", "translator model", "translate", "translation", "language", "переводчик", "модель перевода", "модель-переводчик", "перевод", "язык"]
     },
     {
+      "section": "translation", "anchor": "translation.fallback_preset", "config": "translation.fallback_preset",
+      "title": { "en": "Fallback translator", "ru": "Запасной переводчик" },
+      "about": { "en": "The model asked as well, without thinking, when the translator is slow; Automatic picks the same model on another provider.", "ru": "Модель, которую спрашивают вдобавок, без размышлений, если переводчик медлит; «Автоматически» выбирает ту же модель у другого провайдера." },
+      "synonyms": ["backup model", "hedge", "translate", "translation", "language", "резервная модель", "язык"]
+    },
+    {
+      "section": "translation", "anchor": "translation.blocking_timeout_seconds", "config": "translation.blocking_timeout_seconds",
+      "title": { "en": "Time limit for your messages", "ru": "Лимит времени на перевод ваших сообщений" },
+      "about": { "en": "How long the agent waits for your message's translation before it gets your words as written.", "ru": "Сколько агент ждёт перевода вашего сообщения, прежде чем получить ваши слова как есть." },
+      "synonyms": ["translation timeout", "time limit", "wait", "translate", "translation", "translator", "language", "таймаут перевода", "лимит времени", "ожидание", "перевод", "переводчик", "язык"]
+    },
+    {
       "section": "translation", "anchor": "translation.timeout_seconds", "config": "translation.timeout_seconds",
-      "title": { "en": "Translation time limit", "ru": "Лимит времени на перевод" },
-      "about": { "en": "How long one translation may take before the original is used instead, marked as untranslated.", "ru": "Сколько может длиться один перевод, прежде чем вместо него будет использован оригинал с пометкой «не переведено»." },
+      "title": { "en": "Time limit for answers", "ru": "Лимит времени на перевод ответов" },
+      "about": { "en": "How long translating the agent's answers and questions may take before the original is shown, marked as untranslated.", "ru": "Сколько может длиться перевод ответов и вопросов агента, прежде чем будет показан оригинал с пометкой «не переведено»." },
       "synonyms": ["translation timeout", "time limit", "translate", "translation", "translator", "language", "таймаут перевода", "лимит времени", "перевод", "переводчик", "язык"]
     },
     {

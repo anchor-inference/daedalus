@@ -1605,8 +1605,17 @@ class TranslationConfig(BaseModel):
     """The translator's model preset; empty = the helper preset the next-message guess uses, a middle one."""
     effort: TaskEffort = ""
     """How hard the translator thinks. Empty is no thinking, as a short helper call wants."""
+    fallback_preset: str = ""
+    """Where a translation still unanswered after the hedge time is asked a second time, with no thinking.
+    Empty is automatic: the same model on another provider, else the helpers' cheap preset when it is on
+    another route, else the translator's own (:func:`daedalus.host.translation.fallback_preset`)."""
+    blocking_timeout_seconds: int = Field(default=30, ge=5, le=300)
+    """How long the operator's message waits for its translation before it goes to the agent as written.
+    The agent waits on it, so this is short: an agent reads the operator's language anyway, and a route that
+    queued one translation for two minutes once held a message back for all of them."""
     timeout_seconds: int = Field(default=120, ge=5, le=900)
-    """How long one translation may take before the original is used instead. The turn never waits on it."""
+    """How long a translation made for display may take — an answer, a question, a text translated on
+    request — before the original is shown instead. Nothing waits on these, so they keep the longer limit."""
 
 
 class AutopilotConfig(BaseModel):

@@ -177,6 +177,7 @@ from daedalus.host import (
     capabilities,
     component_install,
     launcher_bridge,
+    model_health,
     quick_agent,
     subagent_models,
     task_effort,
@@ -6724,6 +6725,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
         # What an empty translator preset means: the helpers' cheap one.
         data["translation"]["suggested"] = translation.translator_preset(app.config)
+        # And what an empty fallback translator means for it: another route serving the same model, if any.
+        data["translation"]["fallback_suggested"] = translation.automatic_fallback(
+            app.config, data["translation"]["suggested"], ready=manager.providers.available(), health=manager.model_health)
+        # Which models are broken or slow, so Settings → Models and every model picker can mark them.
+        data["model_health"] = await manager.model_health.view(app.config)
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
         # What each preset costs and where that comes from, so its settings can say which source wins.
@@ -7024,6 +7030,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 # Why it is unknown, so the screen can say "refused" rather than "not reachable".
                 entry["proxy"] = upstreams_cache["state"]
         return view
+
+    @api.post("/api/models/check")
+    async def check_models(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """One tiny request to every preset, sent only when the operator presses Check models: each probe
+        is spent from someone's plan, so nothing here runs on a timer. Answers with each result and the
+        marks as Settings draws them."""
+        health = manager.model_health
+
+        async def call(preset_id: str) -> str:
+            return await manager.small_model(model_health.CHECK_PROMPT, preset_id, purpose=model_health.CHECK_PURPOSE, max_tokens=16, exact=True)
+
+        result = await health.check(app.config, call)
+        return {**result, "health": await health.view(app.config)}
 
     @api.get("/api/navigation")
     async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

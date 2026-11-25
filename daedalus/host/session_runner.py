@@ -129,6 +129,7 @@ from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.job_log import task_state
+from daedalus.host.model_health import HealthUsageSink, ModelHealth
 from daedalus.host.policy import (
     ASK,
     SERVER_GRANT_HOURS,
@@ -951,12 +952,15 @@ class SessionManager:
         self.vision_efforts: dict[str, str] = {}
         """Each session's own vision preset, by session id, read once at start and written through after
         (``live_control.vision_preset``). Held here because an image tool asks for its route synchronously."""
+        self.model_health = ModelHealth(db)
+        """Which models are broken or slow, from the calls made (:mod:`daedalus.host.model_health`)."""
         self.providers = ProviderRegistry(
-            settings, config, usage_sink=self.usage, image_loader=self._load_image,
+            settings, config, usage_sink=HealthUsageSink(self.usage, self.model_health), image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
             accounts=self.subscription_accounts,
         )
         self.providers.on_unreachable = self._provider_unreachable
+        self.providers.on_model_refusal = self.model_health.refused
         if self.providers.accounts is not None:
             self.providers.accounts.on_switch = self._account_switched
         # In Docker a stdio server starts inside this container, which is not the machine a session
@@ -1086,6 +1090,7 @@ class SessionManager:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
         await self.subscription_accounts.load()
+        await self.model_health.load()
         self.vision_choices = await self.live.vision_choices()
         self.vision_efforts = await self.live.vision_efforts()
         await self.memory_entries.file_unfiled()
@@ -5058,7 +5063,7 @@ class SessionManager:
                    "to_label": router.label(endpoint, to_account) if router is not None else ""}
         await self._notify_sinks(state.session.id, HostEvent(HostEventType.ACCOUNT_SWITCH, state.run_id or "", payload))
 
-    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "", effort: str = "") -> str:
+    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "", effort: str = "", exact: bool = False) -> str:
         """One short request to a preset for a helper around the operator's messages.
 
         ``purpose`` is the label the call's cost is booked under in Usage (``call_category="assist"``
@@ -5070,7 +5075,12 @@ class SessionManager:
         (the conversation's tail, the operator's style profile) rides in the message after it.
 
         ``effort`` is the task's own (:mod:`daedalus.host.task_effort`): empty does not think.
+
+        A preset marked broken (:mod:`daedalus.host.model_health`) is replaced by a stand-in and the log
+        says so; ``exact`` asks that one preset and no other, which only the model check wants.
         """
+        if not exact:
+            preset = self.model_health.usable(self.config, preset, task=purpose)
         provider, model = self.providers.rungs_for(self.config, preset or None)[0]
         if self.budget_exceeded() and not self.provider_costs_nothing(provider.endpoint.id, model):
             raise RuntimeError("daily inference budget exceeded")

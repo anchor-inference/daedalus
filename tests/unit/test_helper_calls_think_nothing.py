@@ -112,7 +112,7 @@ async def test_a_slow_translation_is_asked_again_and_the_first_answer_wins() -> 
             await asyncio.sleep(30)  # the request that sits upstream
         return f"answer {len(calls)}"
 
-    assert await translation.Translations._first_of(attempt, 0.05, 5) == "answer 2"
+    assert await translation.Translations._first_of(attempt, attempt, 0.05, 5) == "answer 2"
     assert len(calls) == 2
 
 
@@ -124,7 +124,7 @@ async def test_a_quick_failure_is_not_asked_again_and_a_late_one_waits_for_the_o
         raise translation.TranslationFailed("the translator failed: refused")
 
     with pytest.raises(translation.TranslationFailed, match="refused"):
-        await translation.Translations._first_of(refused, 1, 5)
+        await translation.Translations._first_of(refused, refused, 1, 5)
     assert calls == [1]
 
     order: list[int] = []
@@ -137,7 +137,7 @@ async def test_a_quick_failure_is_not_asked_again_and_a_late_one_waits_for_the_o
         await asyncio.sleep(0.2)
         return "second"
 
-    assert await translation.Translations._first_of(first_fails_late, 0.05, 5) == "second"
+    assert await translation.Translations._first_of(first_fails_late, first_fails_late, 0.05, 5) == "second"
 
 
 async def test_no_answer_at_all_is_a_timeout() -> None:
@@ -146,4 +146,26 @@ async def test_no_answer_at_all_is_a_timeout() -> None:
         return ""
 
     with pytest.raises(translation.TranslationFailed, match="did not answer within 0.2 s"):
-        await translation.Translations._first_of(silent, 0.05, 0.2)
+        await translation.Translations._first_of(silent, silent, 0.05, 0.2)
+
+
+async def test_the_second_attempt_is_the_fallbacks_own() -> None:
+    """The hedge is a different call, not the first one again: another route, asked with no thinking."""
+    asked: list[str] = []
+
+    async def stalled() -> str:
+        asked.append("primary")
+        await asyncio.sleep(30)
+        return "late"
+
+    async def rescue() -> str:
+        asked.append("fallback")
+        return "rescued"
+
+    assert await translation.Translations._first_of(stalled, rescue, 0.05, 5) == "rescued"
+    assert asked == ["primary", "fallback"]
+
+
+def test_the_hedge_comes_sooner_and_later_for_a_longer_text() -> None:
+    assert translation.hedge_after("short") < 9
+    assert translation.hedge_after("x" * 2000) > translation.hedge_after("x" * 200)
