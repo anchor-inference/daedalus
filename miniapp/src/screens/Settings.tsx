@@ -24,7 +24,9 @@ import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { Select, Segmented, SelectionList, Switch } from "../ui/index";
-import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
+import { Button } from "../ui/primitives";
+import { type Changed, NumInput, NumRow, Row, SetBlock, SetFoot, SetGroup, TextBlock } from "../settingsrow";
+import { ModelChoice } from "../modelchoice";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
 import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
@@ -65,23 +67,23 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
     setDirty(false);
   }, [rules, fallback]);
   return (
-    <div className="card" data-setting="prompt.rules">
-      <div className="section-title">{t("settings.rules.title")}</div>
-      <div className="sub">{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</div>
+    <SetGroup title={t("settings.rules.title")} help={<>{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</>} data-setting="prompt.rules">
       {/* The eleventh line shows through the field's bottom padding sliced in half; the fade over
           it (while more waits below) makes that read as "scroll for more" rather than broken text. */}
-      <div className="rules-editor">
-        <textarea ref={field} className="field rules-editor-field" rows={10} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} style={{ fontFamily: "var(--mono)", fontSize: 12.5 }} />
-      </div>
-      <div className="btnrow">
-        <button className="btn primary" disabled={!dirty} onClick={() => (onSave(text.trim() === fallback.trim() ? "" : text), setDirty(false))}>
+      <SetBlock>
+        <div className="rules-editor">
+          <textarea ref={field} className="field rules-editor-field" rows={10} aria-label={t("settings.rules.title")} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} />
+        </div>
+      </SetBlock>
+      <SetFoot>
+        <Button variant="primary" disabled={!dirty} onClick={() => (onSave(text.trim() === fallback.trim() ? "" : text), setDirty(false))}>
           {t("common.save")}
-        </button>
-        <button className="btn" onClick={() => (setText(fallback), setDirty(true))}>
+        </Button>
+        <Button onClick={() => (setText(fallback), setDirty(true))}>
           {t("settings.rules.reset")}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </SetFoot>
+    </SetGroup>
   );
 }
 
@@ -377,14 +379,11 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
     }
   }
 
-  const presets = Object.keys(s.presets ?? {});
   return (
     <>
-      <div className="card">
-        <div className="section-title">{t("settings.heartbeat.title")}</div>
-        <div className="sub">{t("settings.heartbeat.sub")}</div>
-        {/* The switch and Run now share the row, and the state is the row's description: apart,
-            an "on" chip, a Run now and a status line made three rows that read as three actions. */}
+      <SetGroup title={t("settings.heartbeat.title")} help={t("settings.heartbeat.sub")}>
+        {/* The state is the row's description: apart, an "on" chip, a Run now and a status line made
+            three rows that read as three actions. Run now is under the card, with the other buttons. */}
         <Row
           data-setting="heartbeat.enabled"
           title={t("settings.heartbeat.enabled")}
@@ -396,9 +395,6 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
             </>
           }
         >
-          <button className="btn small" onClick={runNow} disabled={!text.trim() || hb.running}>
-            {t("common.runnow")}
-          </button>
           <Switch checked={hb.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.heartbeat.enabled")} />
         </Row>
         <NumRow id="heartbeat-interval" setting="heartbeat.interval_minutes" title={t("settings.heartbeat.interval")} unit={t("settings.unit.minutes")} value={hb.interval_minutes} min={1} onSave={(v) => put({ interval_minutes: v })} />
@@ -407,36 +403,39 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         </Row>
         <NumRow id="heartbeat-max" setting="heartbeat.max_runs_per_day" title={t("settings.heartbeat.max")} value={hb.max_runs_per_day} min={0} onSave={(v) => put({ max_runs_per_day: v })} />
         <Row title={t("settings.heartbeat.preset")} stack data-setting="heartbeat.preset">
-          <ModelPicker id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
+          <ModelChoice id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
         </Row>
-      </div>
-      <div className="card" data-setting="heartbeat.text">
-        <div className="section-title">
-          HEARTBEAT.md
-        </div>
-        <textarea
-          className="field"
-          rows={12}
-          value={text}
-          placeholder={hb.template}
-          onChange={(e) => {
-            setText(e.target.value);
-            setDirty(true);
-            dirtyRef.current = true;
-          }}
-        />
-        <div className="btnrow">
-          <button className="btn primary" disabled={!dirty} onClick={() => put({ text })}>
+        <SetFoot>
+          <Button onClick={runNow} disabled={!text.trim() || hb.running}>{t("common.runnow")}</Button>
+        </SetFoot>
+      </SetGroup>
+      <SetGroup title="HEARTBEAT.md" data-setting="heartbeat.text">
+        <SetBlock>
+          <textarea
+            className="field"
+            rows={12}
+            aria-label="HEARTBEAT.md"
+            value={text}
+            placeholder={hb.template}
+            onChange={(e) => {
+              setText(e.target.value);
+              setDirty(true);
+              dirtyRef.current = true;
+            }}
+          />
+        </SetBlock>
+        <SetFoot>
+          <Button variant="primary" disabled={!dirty} onClick={() => put({ text })}>
             {t("common.save")}
-          </button>
-          <button className="btn small" onClick={() => { setText(hb.template ?? ""); setDirty(true); }}>
+          </Button>
+          <Button size="sm" onClick={() => { setText(hb.template ?? ""); setDirty(true); }}>
             {t("settings.heartbeat.template")}
-          </button>
-          <button className="btn small" onClick={() => { setText(""); setDirty(true); }}>
+          </Button>
+          <Button size="sm" onClick={() => { setText(""); setDirty(true); }}>
             {t("settings.heartbeat.clear")}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </SetFoot>
+      </SetGroup>
     </>
   );
 }
@@ -868,18 +867,16 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           <>
             {/* The two rules about the agent's own code first: the action grid's review log grows as it
                 loads, and a link to a row below it landed on a row the log had just pushed away. */}
-            <div className="card">
-              <div className="section-title">{t("settings.selfchange")}</div>
-              <div className="sub">{t("settings.selfchange.sub")}</div>
-              {/* Two separate rules, each a segmented pick like every other choice in Settings. They
-                  were three loose buttons once, the third a toggle that looked like a third mode. */}
+            {/* Two separate rules, each a segmented pick like every other choice in Settings. They
+                were three loose buttons once, the third a toggle that looked like a third mode. */}
+            <SetGroup title={t("settings.selfchange")} help={t("settings.selfchange.sub")}>
               <Row title={t("settings.selfchange.approval")} data-setting="self_change.approval">
                 <Segmented label={t("settings.selfchange.approval")} value={s.self_change.approval} onChange={(approval) => save({ self_change: { ...s.self_change, approval } })} options={["manual", "auto"].map((id) => ({ id, label: t(`settings.selfchange.${id}`) }))} />
               </Row>
               <Row title={t("settings.selfchange.rebuild")} data-setting="self_change.auto_rebuild">
                 <Segmented label={t("settings.selfchange.rebuild")} value={s.self_change.auto_rebuild ? "on" : "off"} onChange={(state) => save({ self_change: { ...s.self_change, auto_rebuild: state === "on" } })} options={(["off", "on"] as const).map((id) => ({ id, label: t(`settings.selfchange.rebuild.${id}`) }))} />
               </Row>
-            </div>
+            </SetGroup>
             <ActionRules s={s} save={save} />
             <ProjectApprovals toast={toast} />
           </>
@@ -904,26 +901,23 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         );
       case "limits":
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.limits.title")}</div>
+          <SetGroup title={t("settings.limits.title")}>
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <NumRow id="limits-disk" setting="disk.workspace_soft_limit_gb" title={t("settings.limits.disk")} desc={t("settings.limits.disk.sub")} unit={t("disk.limit.unit")} step="1" value={s.disk?.workspace_soft_limit_gb ?? 20} min={0} onSave={(v) => save({ disk: { workspace_soft_limit_gb: v } })} {...shipped(s.disk?.workspace_soft_limit_gb ?? 20, 20, () => save({ disk: { workspace_soft_limit_gb: 20 } }), `20 ${t("disk.limit.unit")}`)} />
             <HostMemoryRow s={s} save={save} />
-          </div>
+          </SetGroup>
         );
       case "context":
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.compaction")}</div>
-            <div className="sub">{t("settings.compaction.sub")}</div>
+          <SetGroup title={t("settings.compaction")} help={t("settings.compaction.sub")}>
             <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} {...shipped(s.compaction?.auto_ratio ?? 0.8, 0.8, () => save({ compaction: { ...s.compaction, auto_ratio: 0.8 } }))} />
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
             <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} {...shipped(s.compaction?.max_words ?? 1200, 1200, () => save({ compaction: { ...s.compaction, max_words: 1200 } }), `1200 ${t("settings.unit.words")}`)} />
             <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} {...shipped(s.compaction?.core_trigger_ratio ?? 0.85, 0.85, () => save({ compaction: { ...s.compaction, core_trigger_ratio: 0.85 } }))} />
             <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
             <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
-          </div>
+          </SetGroup>
         );
       case "memory":
         return <MemorySettings s={s} save={save} part="memory" />;
@@ -962,12 +956,11 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "chat":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.chat.app")}</div>
+            <SetGroup title={t("settings.chat.app")}>
               <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict" {...shipped(s.assist?.predict ?? true, true, () => save({ assist: { ...s.assist, predict: true } }), t("common.on"))}>
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
-            </div>
+            </SetGroup>
             <AutopilotSettings s={s} save={save} />
             <UserStyleCard toast={toast} />
           </>
@@ -1005,15 +998,14 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "schedules":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.chat.scheduler")}</div>
+            <SetGroup title={t("settings.chat.scheduler")}>
               <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack data-setting="scheduler.topic_mode">
                 <Segmented label={t("settings.chat.scheduled")} value={s.scheduler.topic_mode} onChange={(topic_mode) => save({ scheduler: { ...s.scheduler, topic_mode } })} options={["per_task", "per_run"].map((m) => ({ id: m, label: t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun") }))} />
               </Row>
               <Row title={t("settings.chat.schedapproval")} desc={t("settings.chat.schedapproval.sub")} data-setting="scheduler.require_approval">
                 <Switch checked={!!s.scheduler.require_approval} onChange={(require_approval) => save({ scheduler: { ...s.scheduler, require_approval } })} label={t("settings.chat.schedapproval")} />
               </Row>
-            </div>
+            </SetGroup>
             <HeartbeatTab s={s} toast={toast} />
           </>
         );

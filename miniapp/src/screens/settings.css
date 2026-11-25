@@ -263,7 +263,9 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .fallback-n { color: var(--fg-3); font-size: var(--fs-12); }
 .fallback-warn { flex: 1; color: var(--attention); font-size: var(--fs-12); text-align: right; }
 
-.project-approvals-none { margin: 8px 0 0; }
+/* ── Approvals: what a project holds, a project at a time ─────────────────────────────────── */
+.project-approvals-name { padding: 6px 16px; background: var(--bg); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.project-approvals-group > * + * { border-top: 1px solid var(--line); }
 
 @media (max-width: 1023px) {
   /* A phone keeps the name and the state: kind and count leave the line rather than squeeze it. */
@@ -277,4 +279,11 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .set-card .set-value, .set-card .set-value .dropdown-btn { max-width: 60vw; }
   .fallback-warn { flex-basis: 100%; text-align: left; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
+}
+
+/* ── A phone: a number field is a finger's height ───────────────────────────────────────────── */
+/* Stacked under its words a number is a row's only control and the thing the finger lands on; the
+   35 px the field takes from its padding is under the 44 px every target on a phone reaches. */
+@media (max-width: 599px) {
+  .set-card .settings-num input.field { min-height: var(--tap); }
 }

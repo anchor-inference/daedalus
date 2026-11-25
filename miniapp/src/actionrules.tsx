@@ -6,17 +6,19 @@
 // the rest of the settings; the categories, the levels and the review's log come from
 // `GET /api/action-rules`, so a category the host adds appears here without a new build.
 //
-// On a wide screen the categories and levels are a grid of radio buttons, which reads as the table it
-// is. On a phone four columns of words do not fit beside a name, so each category becomes a name with
-// its four choices under it; the markup is the same and only the layout changes.
+// Each category is a row of the card: its name and what it covers on the left, its level as a list
+// that opens at the right and the review's switch beside it. A grid of four radio buttons a row read
+// as a table but did not fit a phone, where each category had to be re-laid as a name over four
+// buttons; a row of two controls is the same on both.
 
 import "./actionrules.css";
 import type { ActionRulesSettings, Settings } from "./api";
 import { DICT, t } from "./i18n";
 import { useQuery } from "./store";
-import { Row } from "./settingsrow";
-import { ModelPicker } from "./modelitems";
-import { Switch, timeAgo } from "./ui/components";
+import { Row, SetBlock, SetGroup } from "./settingsrow";
+import { ModelChoice } from "./modelchoice";
+import { Select, Switch } from "./ui/primitives";
+import { timeAgo } from "./ui/components";
 import { go } from "./ui/index";
 
 export type ActionRulesInfo = {
@@ -76,66 +78,32 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
   const setReview = (category: string, on: boolean) => void put({ review: on ? [...new Set([...current.review, category])] : current.review.filter((c) => c !== category) });
   return (
     <>
-      <div className="card action-rules" data-testid="action-rules" data-setting="action_rules">
-        <div className="section-title">{t("rules.actions.title")}</div>
-        <div className="sub">{t("rules.actions.sub")}</div>
-        <div className="ar-grid" role="table" aria-label={t("rules.actions.title")}>
-          <div className="ar-row ar-head" role="row">
-            <span role="columnheader" className="ar-name">{t("rules.actions.category")}</span>
-            <span className="ar-levels">
-              {levels.map((level) => (
-                <span key={level} role="columnheader" className="ar-level-head" title={word(`rules.level.${level}.hint`, "")}>{word(`rules.level.${level}`, level)}</span>
-              ))}
-            </span>
-            <span role="columnheader" className="ar-review-head">{t("rules.review")}</span>
-          </div>
-          {categories.map((category) => {
-            const level = current.levels[category] ?? info.data?.defaults?.[category] ?? "auto";
-            const review = reviewState(level, current.review.includes(category));
-            const name = word(`rules.cat.${category}`, category);
-            return (
-              <div key={category} className="ar-row" role="row" data-category={category} data-level={level}>
-                <span role="rowheader" className="ar-name">
-                  <b>{name}</b>
-                  <span className="sub">{word(`rules.cat.${category}.hint`, "")}</span>
-                </span>
-                <div className="ar-levels" role="radiogroup" aria-label={name}>
-                  {levels.map((choice) => (
-                    <button
-                      key={choice}
-                      type="button"
-                      role="radio"
-                      aria-checked={level === choice}
-                      data-level={choice}
-                      className={`ar-cell ${level === choice ? "on" : ""}`}
-                      title={word(`rules.level.${choice}.hint`, "")}
-                      onClick={() => level !== choice && setLevel(category, choice)}
-                    >
-                      <span className="ar-dot" aria-hidden />
-                      <span className="ar-cell-label">{word(`rules.level.${choice}`, choice)}</span>
-                    </button>
-                  ))}
-                </div>
-                <span className="ar-review" data-review={review}>
-                  <Switch checked={review === "on" || review === "always"} disabled={review === "always" || review === "none"} onChange={(on) => setReview(category, on)} label={t("rules.review.of", { category: name })} />
-                  <span className="ar-review-label sub">{t(`rules.review.${review}`)}</span>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="sub ar-legend">{t("rules.actions.legend")}</div>
-      </div>
-      <div className="card">
-        <div className="section-title">{t("rules.review.title")}</div>
-        <div className="sub">{t("rules.review.sub")}</div>
+      <SetGroup title={t("rules.actions.title")} help={t("rules.actions.sub")} className="action-rules" data-testid="action-rules" data-setting="action_rules">
+        {categories.map((category) => {
+          const level = current.levels[category] ?? info.data?.defaults?.[category] ?? "auto";
+          const review = reviewState(level, current.review.includes(category));
+          const name = word(`rules.cat.${category}`, category);
+          return (
+            <Row key={category} className="ar-row" title={name} desc={word(`rules.cat.${category}.hint`, "")} data-category={category} data-level={level}>
+              <Select<string> className="set-value ar-level" label={name} value={level} onChange={(choice) => choice !== level && setLevel(category, choice)}
+                options={levels.map((choice) => ({ id: choice, label: word(`rules.level.${choice}`, choice), hint: word(`rules.level.${choice}.hint`, "") || undefined }))} />
+              <span className="ar-review" data-review={review}>
+                <span className="ar-review-label">{t(`rules.review.${review}`)}</span>
+                <Switch checked={review === "on" || review === "always"} disabled={review === "always" || review === "none"} onChange={(on) => setReview(category, on)} label={t("rules.review.of", { category: name })} />
+              </span>
+            </Row>
+          );
+        })}
+        <SetBlock><span className="set-hint">{t("rules.actions.legend")}</span></SetBlock>
+      </SetGroup>
+      <SetGroup title={t("rules.review.title")} help={t("rules.review.sub")}>
         <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
-          <ModelPicker id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
+          <ModelChoice id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
         </Row>
         <Row title={t("rules.injection")} desc={t("rules.injection.sub")}>
           <Switch checked={current.injection_model} onChange={(injection_model) => void put({ injection_model })} label={t("rules.injection")} />
         </Row>
-      </div>
+      </SetGroup>
       <ReviewLog entries={info.data?.log ?? null} />
     </>
   );
@@ -143,35 +111,31 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
 
 function ReviewLog({ entries }: { entries: ReviewEntry[] | null }) {
   return (
-    <div className="card ar-log" data-testid="review-log">
-      <div className="section-title">{t("rules.log.title")}</div>
-      <div className="sub">{t("rules.log.sub")}</div>
+    <SetGroup title={t("rules.log.title")} help={t("rules.log.sub")} data-testid="review-log">
       {entries === null ? (
-        <div className="empty">{t("common.loading")}</div>
+        <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>
       ) : entries.length === 0 ? (
-        <div className="empty">{t("rules.log.empty")}</div>
+        <SetBlock><span className="set-hint">{t("rules.log.empty")}</span></SetBlock>
       ) : (
-        <ul className="ar-log-list">
-          {entries.map((e) => (
-            <li key={e.id} className="ar-log-entry" data-verdict={e.verdict}>
-              <div className="ar-log-head">
-                <span className={`ar-verdict ${e.verdict}`}>{t(`rules.verdict.${e.verdict}`)}</span>
-                <b className="ar-log-what">{word(`rules.cat.${e.category}`, e.category)}</b>
-                <span className="mono ar-log-tool">{e.tool}</span>
-                <time className="sub" dateTime={e.at}>{timeAgo(e.at)}</time>
-              </div>
-              {e.summary && <div className="mono ar-log-summary">{e.summary}</div>}
-              <div className="ar-log-reason">
-                {e.failed && <span className="attn">{t("rules.verdict.failed")} </span>}
-                {e.reason}
-              </div>
-              {e.session_id && (
-                <a className="ar-log-link sub" href={`/app/agents/${e.session_id}`} onClick={(ev) => go(ev, `/app/agents/${e.session_id}`)}>{t("rules.log.open")}</a>
-              )}
-            </li>
-          ))}
-        </ul>
+        entries.map((e) => (
+          <div key={e.id} className="set-block ar-log-entry" data-verdict={e.verdict}>
+            <div className="ar-log-head">
+              <span className={`ar-verdict ${e.verdict}`}>{t(`rules.verdict.${e.verdict}`)}</span>
+              <b className="ar-log-what">{word(`rules.cat.${e.category}`, e.category)}</b>
+              <span className="mono ar-log-tool">{e.tool}</span>
+              <time className="sub" dateTime={e.at}>{timeAgo(e.at)}</time>
+            </div>
+            {e.summary && <div className="mono ar-log-summary">{e.summary}</div>}
+            <div className="ar-log-reason">
+              {e.failed && <span className="attn">{t("rules.verdict.failed")} </span>}
+              {e.reason}
+            </div>
+            {e.session_id && (
+              <a className="ar-log-link sub" href={`/app/agents/${e.session_id}`} onClick={(ev) => go(ev, `/app/agents/${e.session_id}`)}>{t("rules.log.open")}</a>
+            )}
+          </div>
+        ))
       )}
-    </div>
+    </SetGroup>
   );
 }

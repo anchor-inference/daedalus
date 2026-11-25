@@ -83,13 +83,13 @@ def main() -> None:
         style = settings.locator("[data-section='user-style']")
         expect(style.locator("[data-style-profile]")).to_contain_text("Writes short, direct requests")
         style.get_by_role("button", name="Forget").click()
-        settings.get_by_role("button", name="Confirm").click()
+        settings.locator(".dialog-actions").get_by_role("button", name="Forget").click()
         expect(style.locator("[data-style-empty]")).to_be_visible()
 
         # The same page in Russian names them in Russian.
         settings.goto(f"{BASE}/settings/chat?token=t&lang=ru&scheme=dark")
-        expect(settings.locator("[data-section='autopilot'] .section-title")).to_have_text("Автопилот")
-        expect(settings.locator("[data-section='user-style'] .section-title")).to_have_text("Как вы пишете")
+        expect(settings.locator("[data-section='autopilot'] .set-label")).to_have_text("Автопилот")
+        expect(settings.locator("[data-section='user-style'] .set-label")).to_have_text("Как вы пишете")
         browser.close()
     assert not UNHANDLED.report()
     print("autopilot: labels, the switch and the settings hold")

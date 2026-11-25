@@ -323,10 +323,8 @@ a.memory-source:hover { color: var(--fg); }
 .settings-num { display: inline-flex; align-items: center; gap: 8px; }
 .settings-num input.field { width: 104px; margin: 0; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .settings-num input.field[aria-invalid="true"] { border-color: var(--bad); }
-/* Settings → Chat: the learned style as the host wrote it, and what autopilot did today. */
-.style-profile { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-13); color: var(--fg-2); background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); max-height: 240px; overflow: auto; }
-.style-empty, .style-learned { margin-top: var(--space-2); }
-.autopilot-today { margin-top: var(--space-2); }
+/* Settings → Chat: the learned style, as the host wrote it. */
+.style-profile { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); max-height: 240px; overflow: auto; }
 .prose-stepper { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0; }
 .prose-stepper-ctl { display: inline-flex; align-items: center; gap: 6px; }
 .prose-stepper-value { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }

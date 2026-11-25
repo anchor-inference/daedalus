@@ -1,39 +1,16 @@
-/* Settings → Rules: the categories × levels grid. A grid of radio buttons on a wide screen, a name with
-   its four choices under it on a phone; the review's switch sits at the end of each row either way. */
-.ar-grid { display:grid; margin-top:var(--space-3); border-top:1px solid var(--line); }
-.ar-row { display:grid; grid-template-columns:minmax(150px, 1.3fr) minmax(0, 4fr) minmax(120px, 0.9fr); align-items:center; gap:var(--space-3); padding:10px 0; border-bottom:1px solid var(--line); min-width:0; }
-.ar-row.ar-head { padding:6px 0; color:var(--fg-3); font-size:var(--fs-12); }
-.ar-head .ar-level-head, .ar-head .ar-name, .ar-head .ar-review-head { min-width:0; }
-/* The level headings sit in the same four-column grid as the cells, so each heads its column. */
-.ar-head .ar-level-head { text-align:center; }
-.ar-name { display:grid; gap:2px; min-width:0; }
-.ar-name b { font-size:var(--fs-14); font-weight:500; }
-.ar-levels { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:var(--space-1); min-width:0; }
-.ar-cell { display:flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 6px; border:1px solid transparent; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; font:inherit; min-width:0; }
-.ar-cell:hover { background:var(--surface-2); }
-.ar-cell:focus-visible { outline: 2px solid var(--ring); outline-offset:1px; }
-/* The chosen level is the filled cell with the ink dot, as a chosen row is everywhere: tinted and
-   edged in the accent, six of them made the grid the most coloured thing in Settings. */
-.ar-cell.on { background:var(--surface-3); color:var(--fg); }
-.ar-dot { flex:none; width:14px; height:14px; border-radius:50%; border:1.5px solid var(--fg-3); }
-.ar-cell.on .ar-dot { border-color:var(--fg); background:radial-gradient(circle, var(--fg) 0 3.5px, transparent 4px); }
-/* On a wide screen the column heading names the level; the cell says it again only on a phone. */
-.ar-cell-label { display:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-13); }
+/* Settings → Approvals: a category is a row of the card; its level and the review's switch sit together at the end. */
+.ar-row .settings-row-ctl { gap:var(--space-3); }
 .ar-review { display:flex; align-items:center; gap:var(--space-2); min-width:0; }
-.ar-review-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ar-legend { margin-top:var(--space-2); }
-@media (max-width: 720px) {
-  .ar-head { display:none; }
-  .ar-row { grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"name review" "levels levels"; row-gap:var(--space-2); }
-  .ar-row .ar-name { grid-area:name; }
-  .ar-row .ar-levels { grid-area:levels; grid-template-columns:repeat(2, minmax(0, 1fr)); }
-  .ar-row .ar-review { grid-area:review; }
-  .ar-review-label { display:none; }
-  .ar-cell { justify-content:flex-start; min-height:40px; border-color:var(--line); }
-  .ar-cell-label { display:inline; }
+/* One width for every state's words, so the switches stand in a column down the card. */
+.ar-review-label { flex:none; width:128px; overflow:hidden; color:var(--fg-3); font-size:var(--fs-13); text-align:right; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 599px) {
+  /* The words take a line and the level and the switch the one under it, the list taking what the switch leaves. */
+  .set-card .settings-row.ar-row { flex-direction:column; align-items:stretch; gap:8px; }
+  .set-card .settings-row.ar-row > .settings-row-ctl { max-width:100%; flex-wrap:nowrap; }
+  .ar-row .settings-row-ctl > .dropdown { flex:1 1 0; min-width:0; }
+  .ar-review-label { width:auto; max-width:112px; }
 }
-.ar-log-list { list-style:none; margin:var(--space-2) 0 0; padding:0; display:grid; }
-.ar-log-entry { display:grid; gap:4px; padding:10px 0; border-top:1px solid var(--line); min-width:0; }
+.set-block.ar-log-entry { gap:4px; min-width:0; }
 .ar-log-head { display:flex; align-items:baseline; gap:var(--space-2); flex-wrap:wrap; min-width:0; }
 .ar-log-head time { margin-left:auto; }
 .ar-log-tool { color:var(--fg-3); font-size:var(--fs-12); overflow-wrap:anywhere; }
@@ -44,4 +21,4 @@
 .ar-verdict.block { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
 .ar-verdict.ask { color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent); }
 .ar-verdict.override { color:var(--info); background:color-mix(in srgb, var(--info) 12%, transparent); }
-.ar-log-link { justify-self:start; }
+.ar-log-link { align-self:start; }

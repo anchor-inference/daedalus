@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Sheet } from "../ui/dialogs";
-import { SelectionSingle } from "../ui/selection";
-import { Icon } from "../icons";
+import { Button, Select } from "../ui/primitives";
+import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { t } from "../i18n";
 import { duration } from "../format";
 import { DiffView } from "../previewparts";
@@ -118,25 +118,25 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
   const ready = proposal?.state === "ready";
   void clock;
   return <>
-    <div className="card prompt-change" data-setting="prompt.change">
-      <div className="prompt-change-head">
-        <span className="prompt-change-icon"><Icon name="bulb" size={18} /></span>
-        <span><b>{t("settings.rules.assistant.title")}</b><span className="sub">{t("settings.rules.assistant.sub")}</span></span>
-      </div>
-      <label htmlFor="prompt-change-request">{t("settings.rules.assistant.request")}</label>
-      <textarea id="prompt-change-request" className="field" rows={3} maxLength={2000} value={instruction} disabled={planning || busy} onChange={(event) => setInstruction(event.target.value)} placeholder={t("settings.rules.assistant.placeholder")} />
-      <SelectionSingle label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
-        items={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
-      <div className="prompt-change-actions">
-        <button className="btn primary" disabled={planning || busy || !instruction.trim() || !preset} onClick={() => void request()}>
-          <Icon name="bolt" size={15} /> {t("settings.rules.assistant.prepare")}
-        </button>
-      </div>
-      {planning && <div className="prompt-change-status" role="status"><span className="live-dot" /><span><b>{t("settings.rules.assistant.working")}</b><span className="sub">{t("settings.rules.assistant.elapsed", { time: elapsed(proposal.started_at) })}</span></span><button className="btn small" disabled={busy} onClick={() => void cancel()}>{t("common.cancel")}</button></div>}
-      {ready && <div className="prompt-change-ready"><span><b>{t("settings.rules.assistant.ready")}</b><span className="sub clamp-2">{proposal.summary}</span></span><button className="btn small" onClick={() => setReview(true)}>{t("settings.rules.assistant.review")}</button></div>}
-      {proposal?.state === "failed" && <div className="sub attn" role="alert">{sentence(proposal.error ?? "")}</div>}
-      {problem && <div className="sub attn" role="alert">{problem}</div>}
-    </div>
+    <SetGroup title={t("settings.rules.assistant.title")} help={t("settings.rules.assistant.sub")} className="prompt-change" data-setting="prompt.change">
+      <SetBlock>
+        <label className="field-label" htmlFor="prompt-change-request">{t("settings.rules.assistant.request")}</label>
+        <textarea id="prompt-change-request" className="field" rows={3} maxLength={2000} value={instruction} disabled={planning || busy} onChange={(event) => setInstruction(event.target.value)} placeholder={t("settings.rules.assistant.placeholder")} />
+      </SetBlock>
+      <Row title={t("settings.rules.assistant.model")} stack>
+        <Select<string> className="set-value" label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
+          options={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
+      </Row>
+      {planning && <SetBlock className="prompt-change-status"><span className="live-dot" /><span className="prompt-change-text" role="status"><b>{t("settings.rules.assistant.working")}</b><span className="sub">{t("settings.rules.assistant.elapsed", { time: elapsed(proposal.started_at) })}</span></span><Button size="sm" disabled={busy} onClick={() => void cancel()}>{t("common.cancel")}</Button></SetBlock>}
+      {ready && <SetBlock className="prompt-change-ready"><span className="prompt-change-text"><b>{t("settings.rules.assistant.ready")}</b><span className="sub clamp-2">{proposal.summary}</span></span><Button size="sm" onClick={() => setReview(true)}>{t("settings.rules.assistant.review")}</Button></SetBlock>}
+      {proposal?.state === "failed" && <SetBlock><span className="sub attn" role="alert">{sentence(proposal.error ?? "")}</span></SetBlock>}
+      {problem && <SetBlock><span className="sub attn" role="alert">{problem}</span></SetBlock>}
+      <SetFoot>
+        <Button variant="primary" icon="bolt" disabled={planning || busy || !instruction.trim() || !preset} onClick={() => void request()}>
+          {t("settings.rules.assistant.prepare")}
+        </Button>
+      </SetFoot>
+    </SetGroup>
     {review && ready && proposal.diff && <Sheet title={t("settings.rules.review.title")} size="xl" className="prompt-review-sheet" onClose={() => !busy && setReview(false)}>
       <div className="prompt-review">
         <p>{proposal.summary}</p>
@@ -144,8 +144,8 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
         <p className="sub">{t("settings.rules.review.hint")}</p>
         {problem && <div className="sub attn" role="alert">{problem}</div>}
         <div className="sheet-foot">
-          <button className="btn" disabled={busy} onClick={() => void cancel()}>{t("settings.rules.review.reject")}</button>
-          <button className="btn primary" disabled={busy} onClick={() => void apply()}><Icon name="check" size={15} /> {t("settings.rules.review.apply")}</button>
+          <Button disabled={busy} onClick={() => void cancel()}>{t("settings.rules.review.reject")}</Button>
+          <Button variant="primary" icon="check" disabled={busy} onClick={() => void apply()}>{t("settings.rules.review.apply")}</Button>
         </div>
       </div>
     </Sheet>}
