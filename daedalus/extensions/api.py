@@ -6790,7 +6790,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # And what an empty fallback translator means for it: another route serving the same model, if any.
         data["translation"]["fallback_suggested"] = translation.automatic_fallback(
             app.config, data["translation"]["suggested"], ready=manager.providers.available(), health=manager.model_health)
-        # Which models are broken or slow, so Settings → Models and every model picker can mark them.
+        # Which models are broken or slow, so Settings → Models and providers and every model picker can mark them.
         data["model_health"] = await manager.model_health.view(app.config)
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}

@@ -440,7 +440,7 @@ class Subagents:
                     thinking_enabled=overrides.get("thinking_enabled"),
                     reasoning_effort=overrides.get("reasoning_effort"),
                 )
-        # The leader's word first, then Settings → Subagents; neither leaves the model's own (or the leader's).
+        # The leader's word first, then Settings → Models for tasks; neither leaves the model's own (or the leader's).
         effort = effort if effort is not None else settings_effort(manager.config.subagents.models.effort)
         if effort is not None:
             await set_effort(manager, cid, effort)

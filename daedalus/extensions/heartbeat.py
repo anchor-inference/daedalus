@@ -222,7 +222,7 @@ class Heartbeat:
 
 
 def effort_for(app: Any, state: Any) -> str | None:
-    """The manager's effort hook: a heartbeat run thinks as Settings → Heartbeat say."""
+    """The manager's effort hook: a heartbeat run thinks as Settings → Scheduled runs says."""
     return app.config.heartbeat.effort if state.metadata.get("heartbeat") else None
 
 
