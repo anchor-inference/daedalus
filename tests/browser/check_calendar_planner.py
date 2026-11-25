@@ -189,8 +189,9 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     drag(page, slot_y(page, day, 8 * 60 + 3), slot_y(page, day, 9 * 60 + 27))
     card = page.locator(".cal-quick")
     expect(card).to_be_visible()
-    expect(card.get_by_label("Start time")).to_have_value(str(8 * 60))
-    expect(card.get_by_label("End time")).to_have_value(str(9 * 60 + 30))
+    # A choice is a button that carries its value; the list behind it holds the other times.
+    expect(card.locator("button[aria-label^='Start time']")).to_have_attribute("data-value", str(8 * 60))
+    expect(card.locator("button[aria-label^='End time']")).to_have_attribute("data-value", str(9 * 60 + 30))
     card.get_by_label("Title").fill("Planning poker")
     card.get_by_label("Title").press("Enter")
     expect(card).to_be_hidden()
@@ -267,7 +268,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(page.locator(".cal-search-item").first).to_contain_text("Dentist")
     search.press("Enter")
     # A found event opens to be read; its editor is the pencil in the view's head.
-    view = page.locator(".sheet.cal-view")
+    view = page.locator(".cal-view")
     expect(view.locator(".cal-view-title")).to_have_text("Dentist")
     view.get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
@@ -286,16 +287,17 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     page.keyboard.press("d")
     scroll_hours(page, 9)
     page.locator(".cal-block", has_text="Focus time").click()
-    page.locator(".sheet.cal-view").get_by_role("button", name="Edit event").click()
+    page.locator(".cal-view").get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
-    editor.get_by_label("Repeat").select_option("weekdays")
+    editor.get_by_label("Repeat").click()
+    page.get_by_role("option", name="Every weekday").click()
     editor.get_by_role("button", name="Save").click()
     saved = wait_for("the focus block saved", lambda: writes(stub, "PUT", "/api/calendar/events/ev-focus"))[0]
     assert saved["recurrence"] == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" and saved["scope"] == "all", saved
 
     # The conflicted event says so in its editor and offers both versions.
     page.goto(f"{BASE}/calendar?token=t&lang=en&event=ev-planning")
-    view = page.locator(".sheet.cal-view")
+    view = page.locator(".cal-view")
     expect(view.locator(".cal-view-title")).to_have_text("Quarterly planning")
     expect(view.get_by_role("alert")).to_contain_text("Changed in two places")
     expect(view.get_by_role("button", name="Use theirs")).to_be_visible()
@@ -304,7 +306,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
 
     # Deep links: an occurrence of a series, and a task.
     page.goto(f"{BASE}/calendar?token=t&lang=en&event=ev-sync:{occurrence}")
-    expect(page.locator(".sheet.cal-view .cal-view-title")).to_have_text("Weekly team sync")
+    expect(page.locator(".cal-view .cal-view-title")).to_have_text("Weekly team sync")
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
     page.goto(f"{BASE}/calendar?token=t&lang=en&task=task-grandma")
@@ -385,8 +387,7 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
 
     # The views, each readable: words on screen, not only coloured marks.
     def pick(view: str) -> None:
-        page.locator(".cal-view-pick").click()
-        page.get_by_role("menuitem", name=view, exact=True).click()
+        page.get_by_role("radio", name=view, exact=True).click()
 
     # The phone opens on the agenda; a week does not fit, so three days stand where a desktop's week
     # does, with the week strip above.
@@ -399,14 +400,13 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
         button = page.get_by_role("button", name={"search": "Search events" if en else "Поиск событий", "today": "Today" if en else "Сегодня"}[name], exact=True)
         box = button.bounding_box()
         assert box and box["width"] >= 44 and box["height"] >= 44, f"{lang} phone: the {name} button is {box}"
-    fab = page.locator(".cal-fab")
+    fab = page.locator(".cal-new")
     box = fab.bounding_box()
-    assert box and box["width"] >= 44, f"the add button is {box}"
-    # No bottom bar on a phone outside a project: the add button sits above the screen's edge, and the
-    # app's drawer is one tap away from the planner's header.
+    assert box and box["width"] >= 44 and box["height"] >= 44, f"the add button is {box}"
+    # No bottom bar on a phone outside a project: the add button stands in the page header, beside the
+    # app's drawer, which is one tap away.
     expect(page.locator("nav.tabbar")).to_have_count(0)
-    assert box["y"] + box["height"] <= page.viewport_size["height"] - 8, f"the add button runs off the screen: {box}"
-    expect(page.locator(".cal-head .ph-menu")).to_be_visible()
+    expect(page.locator(".pagehead .ph-menu")).to_be_visible()
     shot(page, f"{tag}-3day")
 
     pick("Day" if en else "День")
@@ -439,7 +439,7 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
 
     # The add button: a bottom sheet, then the full editor, also from the bottom.
     fab.click()
-    sheet = page.locator(".sheet.cal-quick-sheet")
+    sheet = page.locator(".sheet.cal-quick")
     expect(sheet).to_be_visible()
     sheet.get_by_label("Title" if en else "Название").fill("Pick up the bike" if en else "Забрать велосипед")
     sheet.get_by_role("button", name="More options" if en else "Подробнее").click()
