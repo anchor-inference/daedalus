@@ -39,7 +39,7 @@ function documented(): string[] {
 describe("the published tokens", () => {
   it("declares every token the page guide promises", () => {
     // A page written against the guide breaks silently when one of these goes: its rule falls back
-    // to nothing. Values may change (the redesign changed most of them); the names may not.
+    // to nothing. Values may change; the names may not.
     const names = documented();
     expect(names.length).toBeGreaterThan(30);
     for (const name of ["--bg", "--fg", "--accent", "--primary", "--ok", "--bad", "--font", "--mono", "--fs-11", "--fs-22", "--space-8", "--radius-pill", "--row-h", "--head-h"]) expect(names).toContain(name);
