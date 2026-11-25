@@ -32,9 +32,12 @@
    tabs fit in the panel's 360–420 px where a row of "icon word" pairs needed about 600 and fell back
    to icons alone. The measured fits (panelhost.tsx, useTabFit) still step down to the words, the word on
    the open tab, and the icons when even this does not fit. */
-.panel .panel-tabs { height: 48px; }
+/* The header's height, so the line under the tabs meets the line under the conversation's header. */
+.panel .panel-tabs { height: var(--head-h); }
 .panel .panel-tab { font-size: var(--fs-12); }
-.panel .panel-tablist.fit-full .panel-tab { flex-direction: column; justify-content: center; gap: 3px; padding: 0 9px; line-height: 1.2; }
+/* 7 px a side: in Inter the six labels needed a 447 px panel to stand whole at 9, more than the 426
+   a 1366 window gives it, and the strip fell back to icons there. */
+.panel .panel-tablist.fit-full .panel-tab { flex-direction: column; justify-content: center; gap: 3px; padding: 0 7px; line-height: 1.2; }
 .panel .panel-tablist.fit-full .panel-tab .count { position: absolute; top: 4px; left: calc(50% + 4px); line-height: 14px; min-width: 14px; padding: 0 3px; box-shadow: 0 0 0 2px var(--panel-bg, var(--surface-1)); }
 .panel .panel-tablist.fit-full .panel-tab .tab-mark { position: absolute; top: 5px; left: calc(50% + 6px); }
 .panel .panel-tab.on::after { bottom: 0; }

@@ -119,7 +119,7 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
       skipTaskbar: true,
       show: false,
       title: 'Daedalus',
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#101114' : '#f6f6f4',
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#111111' : '#f5f5f4',
       webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
     // Over a full-screen program and on every desktop, the way a launcher box is expected to be.

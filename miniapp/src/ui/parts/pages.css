@@ -51,7 +51,7 @@
 .memory-pill-dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--ok); flex: none; }
 .memory-pill.paused .memory-pill-dot, .memory-pill.budget .memory-pill-dot { background: var(--warn); }
 .memory-pill.off .memory-pill-dot { background: var(--fg-3); }
-.memory-pill.busy .memory-pill-dot { background: var(--accent); animation: memory-pulse 1.4s ease-in-out infinite; }
+.memory-pill.busy .memory-pill-dot { background: var(--live); animation: memory-pulse 1.4s ease-in-out infinite; }
 @keyframes memory-pulse { 50% { opacity: 0.35; } }
 .memory-section + .memory-section { margin-top: var(--space-4); }
 .memory-section-head { padding: 0 2px 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
@@ -126,7 +126,7 @@ a.memory-source:hover { color: var(--fg); }
 .memory-composer-pill { display: flex; align-items: flex-end; gap: var(--space-2); width: min(100%, 760px); margin-inline: auto; padding: 6px 6px 6px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--drop-sm); transition: border-color var(--t-fast); }
 .memory-composer-pill:focus-within { border-color: var(--line-strong); }
 .memory-composer textarea { flex: 1; min-height: var(--ctl-h); max-height: 160px; padding: 6px 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: 1.45; }
-.memory-composer[data-busy] .memory-composer-pill { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 10%, transparent), transparent); background-size: 200% 100%; animation: memory-shimmer 1.2s linear infinite; }
+.memory-composer[data-busy] .memory-composer-pill { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--live) 10%, transparent), transparent); background-size: 200% 100%; animation: memory-shimmer 1.2s linear infinite; }
 @keyframes memory-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .memory-composer-space { height: var(--space-2); }
 .screen.memory-entries, .screen.memory-entry { padding-bottom: var(--space-4); }
@@ -162,7 +162,7 @@ a.memory-source:hover { color: var(--fg); }
 .memory-sensitive-sub { margin: 4px 0 2px; }
 .memory-learning-lines { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; padding: 0; list-style: none; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); overflow-wrap: anywhere; }
 .memory-learning-lines [data-tone="warn"] { color: var(--warn); }
-.memory-learning-lines [data-tone="busy"] { color: var(--accent); }
+.memory-learning-lines [data-tone="busy"] { color: var(--live); }
 .memory-suggestion-proposed { margin-top: var(--space-2); }
 .memory-saved-chip { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: var(--chip-h-dense); margin: 4px 0; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); text-decoration: none; }
 .memory-saved-chip:hover { color: var(--fg); }
@@ -291,12 +291,13 @@ a.memory-source:hover { color: var(--fg); }
 .catalogue > .stt-list, .catalogue > .comp-grid { margin: 0 0 16px; }
 .catalogue > .sub.attn { margin: 0 2px 12px; }
 .catalogue > .card:last-child, .catalogue > :is(.stt-list, .comp-grid):last-child { margin-bottom: 0; }
-.settings-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; margin: 8px 0 12px; }
+/* Six themes, three to a row: at any width a fill of 148 px columns left the sixth alone on a row. */
+.settings-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
 .settings-themes button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: var(--row-h); padding: 8px 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; text-align: left; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
 .settings-themes button:hover { border-color: var(--line-strong); color: var(--fg); }
 .settings-themes button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* The chosen theme is the one with the ink edge: a fill as well made it the only tile of another colour. */
-.settings-themes button.on { border-color: var(--fg); color: var(--fg); }
+.settings-themes button.on { border-color: var(--accent); color: var(--fg); }
 .settings-swatch { display: block; width: 100%; height: 36px; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--line); }
 /* One setting, one row (settingsrow.tsx): the words left, one control in a right-hand lane that lines
    up down the page, a hairline to the next. The description is held to a reading measure: the column

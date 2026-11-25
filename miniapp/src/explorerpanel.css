@@ -48,7 +48,7 @@ button.explorer-where:hover { background:var(--surface-2); }
 .tree-chevron { display:inline-flex; justify-content:center; width:14px; flex:none; color:var(--fg-3); }
 .tree-chevron .ic { transform:rotate(-90deg); transition:transform var(--t-fast) var(--ease-out); }
 .tree-chevron.open .ic { transform:none; }
-.written-badge { width:6px; height:6px; flex:none; border-radius:50%; background:var(--accent); }
+.written-badge { width:6px; height:6px; flex:none; border-radius:50%; background:var(--live); }
 .file-size { flex:none; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; visibility:hidden; }
 .explorer-actions { display:inline-flex; flex:none; visibility:hidden; }
 .explorer-actions .iconbtn { width:22px; height:22px; min-width:22px; min-height:22px; }
@@ -73,7 +73,7 @@ button.explorer-where:hover { background:var(--surface-2); }
 .explorer-status-path b { color:var(--fg-2); font-weight:500; }
 .explorer-status-size { flex:none; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .explorer-status-written { display:inline-flex; align-items:center; gap:5px; flex:none; white-space:nowrap; }
-.explorer-status-written::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.explorer-status-written::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--live); }
 
 /* A folder's badges at the end of its row in the folder list. */
 .menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }

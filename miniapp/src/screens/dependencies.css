@@ -46,7 +46,7 @@
 .deps-progress-heading > span { display:flex; align-items:center; gap:9px; min-width:0; }
 .deps-progress-heading time, .deps-events time { font-variant-numeric:tabular-nums; color:var(--fg-3); }
 .deps-progress-rail { height:4px; overflow:hidden; border-radius:2px; background:var(--surface-3); }
-.deps-progress-rail i { display:block; width:38%; height:100%; border-radius:inherit; background:var(--accent); animation:deps-travel 1.8s ease-in-out infinite; }
+.deps-progress-rail i { display:block; width:38%; height:100%; border-radius:inherit; background:var(--live); animation:deps-travel 1.8s ease-in-out infinite; }
 @keyframes deps-travel { 0% { transform:translateX(-100%); } 100% { transform:translateX(365%); } }
 .deps-progress-meta { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; color:var(--fg-3); font-size:var(--fs-12); }
 .deps-progress-disclosures { display:flex; flex-wrap:wrap; gap:8px; }

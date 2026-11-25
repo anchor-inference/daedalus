@@ -2,8 +2,8 @@
    Drawn by ui/primitives (Button, IconButton, Segmented, Switch, Select) and by every screen that
    writes the classes by hand. The look is the approved one: a 32 px button with a 1 px strong edge
    and no drop, the primary action filled violet, an icon button a bare 16 px glyph in a 32 px square
-   that greys on hover. Tokens this file reads that the token stylesheet adds: --hover, --selected
-   (the solid surface steps stand in until then), --live and --attention (--ok and --warn). */
+   that greys on hover: --hover under the pointer, --selected for what is on or chosen, --live and
+   --attention for the cyan and orange states. */
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--drop-xs);
   padding: 12px 14px; margin-bottom: 10px; }
@@ -18,7 +18,7 @@
 
 /* one status vocabulary: idle is not a colour, so waiting and running stand out */
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); flex: none; display: inline-block; }
-.dot.running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.dot.running { background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
 .dot.waiting { background: var(--warn); }
 .dot.compacting { background: var(--info); animation: pulse 1.4s ease-in-out infinite; }
 .dot.done, .dot.merged, .dot.ok { background: var(--ok); }
@@ -26,15 +26,15 @@
 .dot.paused { background: var(--fg-2); }
 .dot.scheduled, .dot.info, .dot.notice { background: var(--info); }
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-2); white-space: nowrap; }
-.status.running { color: var(--accent); }
+.status.running { color: var(--live); }
 .status.waiting { color: var(--warn); font-weight: 600; }
 .status.failed { color: var(--bad); font-weight: 600; }
 .status.done { color: var(--ok); }
 .status .dot { background: currentColor; }
-.status.running .dot { background: var(--accent); }
+.status.running .dot { background: var(--live); }
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--radius-xs); border: 0; font-size: var(--fs-11); font-weight: 500; white-space: nowrap;
   background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); }
-.pill.running { color: var(--accent); }
+.pill.running { color: var(--live); }
 .pill.waiting, .pill.pending { color: var(--warn); }
 .pill.failed { color: var(--bad); }
 .pill.done, .pill.merged, .pill.approved { color: var(--ok); }
@@ -50,13 +50,13 @@
 /* A link drawn as a button is a button: the link's blue made it the one coloured control on a page.
    Written before the variants, which outweigh it and keep their own ink. */
 a.btn { color: var(--fg); text-decoration: none; }
-.btn:hover { background: var(--hover, var(--surface-2)); }
+.btn:hover { background: var(--hover); }
 /* A press is felt: the control gives a little under the pointer and comes back. */
 .btn:active:not(:disabled) { scale: var(--press-scale); transition-duration: 100ms; }
 .btn.primary { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); box-shadow: none; }
 .btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--fg-2); }
-.btn.ghost:hover { background: var(--hover, var(--surface-2)); color: var(--fg); }
+.btn.ghost:hover { background: var(--hover); color: var(--fg); }
 .btn.danger { color: var(--bad); background: transparent; border-color: color-mix(in srgb, var(--bad) 40%, var(--line-strong)); }
 .btn.danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
 /* The ink is the primary button's: white on the dark theme's coral read at 3.2:1, below what a label
@@ -98,16 +98,16 @@ a.btn { color: var(--fg); text-decoration: none; }
 .sk-row .skeleton.avatar { width: var(--avatar); height: var(--avatar); border-radius: var(--radius-xs); }
 .sk-row .skeleton.line { height: 10px; margin: 4px 0; }
 .iconbtn { width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--fg-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; transition: background var(--t-fast), color var(--t-fast), scale var(--t-fast); }
-.iconbtn:hover { background: var(--hover, var(--surface-2)); color: var(--fg); }
-.iconbtn:active { background: var(--selected, var(--surface-3)); scale: var(--press-scale-icon); }
-.iconbtn.on, .iconbtn[aria-pressed="true"] { background: var(--selected, var(--surface-3)); color: var(--fg); }
+.iconbtn:hover { background: var(--hover); color: var(--fg); }
+.iconbtn:active { background: var(--selected); scale: var(--press-scale-icon); }
+.iconbtn.on, .iconbtn[aria-pressed="true"] { background: var(--selected); color: var(--fg); }
 .iconbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .iconbtn:disabled { opacity: .4; cursor: default; }
 a.iconbtn { text-decoration: none; }
 /* A count or a dot on an icon button's corner: what waits behind it. */
 .iconbtn { position: relative; }
-.iconbtn-badge { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--attention, var(--warn)); color: var(--bg); font-size: var(--fs-12); font-weight: 600; line-height: 16px; text-align: center; box-sizing: border-box; }
-.iconbtn-pip { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--attention, var(--warn)); box-shadow: 0 0 0 2px var(--bg); }
+.iconbtn-badge { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--attention); color: var(--bg); font-size: var(--fs-12); font-weight: 600; line-height: 16px; text-align: center; box-sizing: border-box; }
+.iconbtn-pip { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--attention); box-shadow: 0 0 0 2px var(--bg); }
 .iconbtn.small { width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-sm); }
 .iconbtn.danger { color: var(--bad); }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--radius-xs); border: 0; background: color-mix(in srgb, currentColor 12%, transparent); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); white-space: nowrap; }
@@ -161,7 +161,7 @@ a.iconbtn { text-decoration: none; }
 .segmented.inline { display:inline-flex; }
 /* A segment is a small control: by its padding alone it came to 27.5 px, under the 28 a finger is promised. */
 .segmented button { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:var(--ctl-h-sm); border:0; background:none; color:var(--fg-2); padding:0 10px; border-radius:var(--radius-xs); font:inherit; font-size:var(--fs-13); font-weight:400; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.segmented button.on { background:var(--selected, var(--card)); color:var(--fg); font-weight:500; box-shadow:none; }
+.segmented button.on { background:var(--selected); color:var(--fg); font-weight:500; box-shadow:none; }
 .segmented button:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
 .segmented button:disabled { opacity:.45; cursor:default; }
 .segmented.md button { min-height:var(--ctl-h); font-size:var(--fs-14); }
@@ -186,8 +186,8 @@ a.iconbtn { text-decoration: none; }
 .dropdown-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(340px, 100%); min-height: var(--ctl-h-sm); padding: 4px 8px 4px 10px; border: 1px solid var(--line-strong); box-shadow: none; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; transition: background var(--t-fast); }
 .dropdown-btn:hover:not(:disabled) { background: var(--surface-2); }
 .dropdown-btn:disabled { opacity: .55; cursor: not-allowed; }
-.dropdown-btn[aria-invalid="true"] { border-color: var(--attention, var(--warn)); }
-.dropdown-btn[data-popup-open] { background: var(--selected, var(--surface-2)); }
+.dropdown-btn[aria-invalid="true"] { border-color: var(--attention); }
+.dropdown-btn[data-popup-open] { background: var(--selected); }
 .dropdown-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .dropdown.md .dropdown-btn { min-height: var(--ctl-h); font-size: var(--fs-14); }
 .dropdown-caret { display: inline-flex; flex: none; }
@@ -197,20 +197,20 @@ a.iconbtn { text-decoration: none; }
 /* ── small pieces ─────────────────────────────────────────────────────────────────────────── */
 .kbd { display: inline-flex; align-items: center; min-height: 18px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg-3); font: inherit; font-size: var(--fs-12); font-weight: 400; white-space: nowrap; }
 .badge { display: inline-flex; align-items: center; min-height: 18px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
-.badge.live { color: var(--live, var(--ok)); background: color-mix(in srgb, var(--live, var(--ok)) 14%, transparent); }
-.badge.attention { color: var(--attention, var(--warn)); background: color-mix(in srgb, var(--attention, var(--warn)) 14%, transparent); }
+.badge.live { color: var(--live); background: color-mix(in srgb, var(--live) 14%, transparent); }
+.badge.attention { color: var(--attention); background: color-mix(in srgb, var(--attention) 14%, transparent); }
 .badge.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 /* The three tones a dot has: live, needing the operator, idle. The status words below map onto them. */
-.dot.live { background: var(--live, var(--ok)); }
-.dot.attention { background: var(--attention, var(--warn)); }
+.dot.live { background: var(--live); }
+.dot.attention { background: var(--attention); }
 .dot.idle { background: var(--fg-3); }
 
 /* A text field with its label (Field): the label over the field, the hint or the error under it. */
 .field-box { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0 0 12px; }
 .field-label { font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
 .field-box > .field { margin: 0; }
-.field-box > .field[aria-invalid="true"] { border-color: var(--attention, var(--warn)); }
-.field-error { font-size: var(--fs-13); color: var(--attention, var(--warn)); }
+.field-box > .field[aria-invalid="true"] { border-color: var(--attention); }
+.field-error { font-size: var(--fs-13); color: var(--attention); }
 .field-hint { font-size: var(--fs-12); }
 
 /* ── tabs ─────────────────────────────────────────────────────────────────────────────────── */
@@ -219,12 +219,12 @@ a.iconbtn { text-decoration: none; }
 .tabs-list { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tabs-list::-webkit-scrollbar { display: none; }
 .tabs .tab { flex: none; display: inline-flex; align-items: center; gap: 7px; height: var(--ctl-h); padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
-.tabs .tab:hover { background: var(--hover, var(--surface-2)); color: var(--fg); }
-.tabs .tab[data-active], .tabs .tab.on { background: var(--selected, var(--surface-3)); color: var(--fg); font-weight: 500; }
+.tabs .tab:hover { background: var(--hover); color: var(--fg); }
+.tabs .tab[data-active], .tabs .tab.on { background: var(--selected); color: var(--fg); font-weight: 500; }
 .tabs .tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .tab-count { font-size: var(--fs-12); color: var(--fg-3); font-weight: 400; }
 .tab-close { display: inline-flex; color: var(--fg-3); border-radius: 4px; }
-.tab-close:hover { color: var(--fg); background: var(--hover, var(--surface-3)); }
+.tab-close:hover { color: var(--fg); background: var(--hover); }
 .tabs-page .tab { height: var(--ctl-h-sm); }
 
 /* ── a list row (Row) ─────────────────────────────────────────────────────────────────────── */
@@ -238,8 +238,8 @@ a.iconbtn { text-decoration: none; }
   .list-row.h44 { min-height: var(--row-h-2); }
   .list-row.h56 { min-height: 56px; }
 }
-.list-row:hover { background: var(--hover, var(--surface-2)); }
-.list-row.current { background: var(--selected, var(--surface-3)); }
+.list-row:hover { background: var(--hover); }
+.list-row.current { background: var(--selected); }
 .list-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .list-row-lead { flex: none; display: inline-flex; }
 .list-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -248,4 +248,4 @@ a.iconbtn { text-decoration: none; }
 .list-row-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--fg-3); }
 .list-row-trail { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
 .list-row-more { flex: none; width: var(--ctl-h-sm); height: var(--ctl-h-sm); display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); cursor: pointer; }
-.list-row-more:hover { background: var(--hover, var(--surface-3)); color: var(--fg); }
+.list-row-more:hover { background: var(--hover); color: var(--fg); }

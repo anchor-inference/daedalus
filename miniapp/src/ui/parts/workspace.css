@@ -214,7 +214,7 @@
 /* A task is two lines — what it is, how it stands — so the row grows past the dense height; the
    state dot is set here because .aside-row .dot paints every dot green. */
 .jobs .task-row { padding: 4px 0; }
-.jobs .task-row .dot.running { background: var(--accent); }
+.jobs .task-row .dot.running { background: var(--live); }
 .jobs .task-row .dot.failed { background: var(--bad); }
 .jobs .task-row .dot.cancelled, .jobs .task-row .dot.lost { background: var(--fg-3); animation: none; }
 .jobs .task-open { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -236,8 +236,8 @@
 .job-head-copy b { font-size: var(--fs-mono); font-weight: 500; }
 .job-head-copy small { color: var(--fg-3); font-size: var(--fs-11); }
 .job-head .task-flag { color: var(--warn); }
-.job-live { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--accent); font-size: var(--fs-11); font-weight: 500; }
-.job-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.job-live { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--live); font-size: var(--fs-11); font-weight: 500; }
+.job-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pulse 1.2s ease-in-out infinite; }
 .job-log-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
 .job-log { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 12px; background: var(--inset); }
 .job-log:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -349,7 +349,9 @@
   .sb-dayhead { display: flex; align-items: flex-end; height: 24px; padding: 0 var(--space-2) 3px; font-size: var(--fs-12); color: var(--fg-3); }
   /* A row: the phone's plate at a desktop's height. A chat is two lines at 44 px, a project one
      line at 36, a chat hung from a project 40 with a smaller plate. */
-  .sb-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: var(--row-h-2); padding: 4px var(--space-2); border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; outline: none; transition: background var(--t-fast) var(--ease-out); }
+  /* The two-line row keeps the tighter leading it was measured with: at the UI's 1.45 its title and
+     its line of state no longer fit 44 (nor a nested chat 40) and every row grew a pixel. */
+  .sb-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: var(--row-h-2); padding: 4px var(--space-2); border-radius: var(--radius-sm); color: var(--fg); line-height: 1.35; cursor: pointer; outline: none; transition: background var(--t-fast) var(--ease-out); }
   .sb-row:hover { background: var(--surface-2); }
   .sb-row.current { background: var(--surface-3); }
   .sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
@@ -364,7 +366,7 @@
   .sb-row:hover .sb-st { box-shadow: 0 0 0 2px var(--surface-2); }
   .sb-row.current .sb-st { box-shadow: 0 0 0 2px var(--surface-3); }
   .sb-st.waiting { background: var(--warn); }
-  .sb-st.running { background: var(--accent); }
+  .sb-st.running { background: var(--live); }
   .sb-st.failed { background: var(--bad); }
   .sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .sb-l1, .sb-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -380,7 +382,7 @@
   .sb-m.paused .sb-ell { color: var(--warn); }
   .sb-word { font-weight: 500; }
   .sb-word.waiting { color: var(--warn); }
-  .sb-word.running { color: var(--accent); }
+  .sb-word.running { color: var(--live); }
   .sb-word.failed { color: var(--bad); }
   .sb-terms { display: inline-flex; align-items: center; gap: 2px; }
   .sb-time { flex: none; font-size: var(--fs-11); color: var(--fg-3); font-variant-numeric: tabular-nums; }
@@ -415,7 +417,7 @@
   .sb-subs.open .sb-subs-chev { transform: none; }
   .sb-subs:hover .sb-subs-icon, .sb-subs.open .sb-subs-icon, .sb-subs:focus-visible .sb-subs-icon { display: none; }
   .sb-subs:hover .sb-subs-chev, .sb-subs.open .sb-subs-chev, .sb-subs:focus-visible .sb-subs-chev { display: grid; }
-  .sb-subs-n { position: absolute; left: -4px; top: -4px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--surface-4); color: var(--fg); box-shadow: 0 0 0 2px var(--bg); font-size: 10px; font-weight: 500; line-height: 1; }
+  .sb-subs-n { position: absolute; left: -4px; top: -4px; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--surface-4); color: var(--fg); box-shadow: 0 0 0 2px var(--bg); font-size: var(--fs-12); font-weight: 500; line-height: 1; }
   .sb-row:hover .sb-subs-n { box-shadow: 0 0 0 2px var(--surface-2); }
   .sb-row.current .sb-subs-n { box-shadow: 0 0 0 2px var(--surface-3); }
   .sb-kids .sb-subs-n { min-width: 12px; height: 12px; }
@@ -463,7 +465,8 @@
   .rail-home.folded { width: calc(var(--rail-w) - 6px); height: auto; min-height: var(--row-h); padding: 6px 0 4px; gap: 2px; align-content: center; border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); }
   .rail-home.folded:hover, .rail-home.folded:focus-visible { background: var(--surface-2); }
   .rail-unfold { display: grid; place-items: center; }
-  .rail-unfold-word { max-width: calc(var(--rail-w) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); font-weight: 500; line-height: 1.1; letter-spacing: -.01em; }
+  /* The rail's whole width and a tighter set: at the 12 px floor "Проекты" no longer fit 48 px. */
+  .rail-unfold-word { max-width: var(--rail-w); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); font-weight: 500; line-height: 1.1; letter-spacing: -.03em; }
   .rail-badge { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-11); font-weight: 600; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--bg); font-variant-numeric: tabular-nums; }
   /* What waits in orchestration, seen from Agents: a neutral pill, not the red of an unread badge. */
   .rail-badge.quiet { background: var(--surface-3); color: var(--fg-2); }
@@ -473,7 +476,9 @@
      filled circle read as the rail's primary button, which a release is not. */
   .rail-item.rail-update { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
   .rail-item.rail-update:hover, .rail-item.rail-update:focus-visible { background: color-mix(in srgb, var(--info) 22%, transparent); color: var(--info); }
-  .rail-tip { position: absolute; left: calc(100% + 10px); top: 50%; translate: 0 -50%; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-xs); background: var(--fg); color: var(--bg); font-size: var(--fs-12); font-weight: 500; line-height: 16px; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; z-index: 40; box-shadow: var(--drop-sm); }
+  /* 14 px past a 32 px item is 4 px past the 52 px rail: at 10 px the tip overlapped the rail's edge
+     once the item shrank from 36 to the 32 px row. */
+  .rail-tip { position: absolute; left: calc(100% + 14px); top: 50%; translate: 0 -50%; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-xs); background: var(--fg); color: var(--bg); font-size: var(--fs-12); font-weight: 500; line-height: 16px; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; z-index: 40; box-shadow: var(--drop-sm); }
   .rail-tip kbd { font: var(--fs-11) var(--font); opacity: .6; }
   .rail-item:hover .rail-tip, .rail-item:focus-visible .rail-tip { opacity: 1; visibility: visible; }
   /* A landscape tablet keeps the desktop's rows but is pressed with a finger: its rail icons were the

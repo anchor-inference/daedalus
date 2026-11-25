@@ -129,3 +129,6 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .settings-phone .settings-link .chev { display: inline-flex; }
   .settings-phone .settings-field-hit { margin: 6px 0; padding: 10px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-15); }
 }
+/* A check of one search engine names it, and a long name in Russian ("Проверить только SearXNG
+   (self-hosted)") ran 17 px past a 360 px phone in Inter: the label wraps inside its button instead. */
+.search-check .btn { max-width: 100%; white-space: normal; text-align: center; }

@@ -65,8 +65,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print(f"panel {w0}px, conversation {chat0}px")
     if w0 < 360 or chat0 < 600:
         problems.append(f"panel {w0}px / conversation {chat0}px at 1440")
-    if page.locator(".chat-head").evaluate("(el) => Math.round(el.getBoundingClientRect().height)") != 48:
-        problems.append("the header is not 48px")
+    # --head-h, the 52 px every header shares (48 before the design set it).
+    if page.locator(".chat-head").evaluate("(el) => Math.round(el.getBoundingClientRect().height)") != 52:
+        problems.append("the header is not 52px")
 
     # Files → a file → Preview, with the breadcrumb and the route.
     page.locator(".panel-tab[data-tab='files']").click()

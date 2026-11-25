@@ -7,6 +7,11 @@ import { SidePanel } from "./sidepanel/SidePanel";
 import { VisitApp } from "./visitapp";
 import { installShareTransport, shareToken } from "./visit";
 import { installFileDrop } from "./filedrop";
+// The app's two faces, bundled into hashed assets: the service worker keeps them after the first
+// open, and no font host is ever asked. Each sheet declares one variable face per script with its
+// unicode range, so a browser fetches only the files for the letters it draws (Latin, Cyrillic).
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./ui/styles.css";
 import "./ui/desktop.css";
 import "./ui/phone.css";

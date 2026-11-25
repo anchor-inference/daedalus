@@ -17,12 +17,12 @@ const ANSI_NAMES = [
 
 /** The dark palette from `ui/tokens.css`, used for any token that cannot be read. */
 export const FALLBACK = {
-  background: "#060606",
-  foreground: "#f5f5f5",
-  cursor: "#5ba5f6",
+  background: "#101010",
+  foreground: "#ededed",
+  cursor: "#a998ff",
   ansi: [
-    "#1c1c1c", "#f86a6b", "#5bcc80", "#f3af49", "#5ba5f6", "#bf93f1", "#5cc9c2", "#a4a4a4",
-    "#636363", "#ff8f8e", "#86e3a4", "#f8c877", "#8cc0fa", "#d4b5f6", "#8adcd6", "#f5f5f5",
+    "#262626", "#f86a6b", "#5bcc80", "#f3af49", "#5ba5f6", "#bf93f1", "#5cc9c2", "#a8a8a8",
+    "#636363", "#ff8f8e", "#86e3a4", "#f8c877", "#8cc0fa", "#d4b5f6", "#8adcd6", "#ededed",
   ],
 };
 

@@ -202,7 +202,7 @@
 .proposal-sheet .erow-meta > span { overflow: visible; overflow-wrap: anywhere; }
 .erow-meta .sep { color: var(--fg-3); flex: none; }
 .erow-meta .word { font-weight: 500; flex: none; }
-.erow-meta.running .word { color: var(--accent); }
+.erow-meta.running .word { color: var(--live); }
 .erow-meta.waiting .word, .erow-meta.waiting { color: var(--warn); }
 .erow-meta.failed .word { color: var(--bad); }
 .disclosure { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 12px; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--line); color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; text-align: left; }

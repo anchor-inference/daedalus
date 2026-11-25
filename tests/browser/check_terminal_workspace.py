@@ -84,6 +84,12 @@ def visible(page: Page) -> list[str]:
     return page.eval_on_selector_all(".tp-pane:not(.hidden)", "(p) => p.map((e) => e.dataset.pane)")
 
 
+def hex_rgb(value: str) -> str:
+    """`#rrggbb` as the `rgb(r, g, b)` a computed colour comes back as."""
+    v = value.lstrip("#")
+    return f"rgb({int(v[0:2], 16)}, {int(v[2:4], 16)}, {int(v[4:6], 16)})"
+
+
 def box(page: Page, selector: str) -> dict:
     return page.eval_on_selector(selector, "(e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }")
 
@@ -136,8 +142,11 @@ def grid_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(page.locator(".tp-top .tp-waiting").count() == 1, "the bar does not say something is waiting")
     c.that(page.locator(f".tp-pane[data-pane='{IDS[2]}'] .tp-attn").count() == 1, "the waiting pane has no attention marker")
     c.that(page.locator(".tp-tab[data-slot='2']").get_attribute("data-state") == "waiting", "the waiting pane's tab does not say so")
-    glow = page.eval_on_selector(f".tp-pane[data-pane='{IDS[2]}'] .tp-pane-head .tp-dot", "(e) => getComputedStyle(e).boxShadow")
-    c.that("px" in glow and "inset" not in glow, f"the waiting dot does not glow: {glow}")
+    # The waiting dot is the orange of "needs you", flat: a lit dot once carried a halo, and the
+    # design has no glows.
+    dot = page.eval_on_selector(f".tp-pane[data-pane='{IDS[2]}'] .tp-pane-head .tp-dot", "(e) => { const s = getComputedStyle(e); return { shadow: s.boxShadow, bg: s.backgroundColor, attention: getComputedStyle(document.documentElement).getPropertyValue('--attention').trim() }; }")
+    c.that(dot["shadow"] == "none" or all("inset" in part for part in dot["shadow"].split("), ")), f"the waiting dot still glows: {dot['shadow']}")
+    c.that(dot["bg"] == hex_rgb(dot["attention"]), f"the waiting dot is {dot['bg']}, not the attention colour {dot['attention']}")
     c.that(page.locator(".tp-tab[data-slot='1']").get_attribute("data-state") == "working", "the busy dev server's tab does not say working")
 
     # 4 → 1 → 4 keeps every pane, its element and its scrollback.

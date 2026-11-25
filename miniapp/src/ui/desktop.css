@@ -194,7 +194,7 @@
   .start-live-meta { display:flex; align-items:center; gap:5px; min-width:0; color:var(--fg-3); font-size:var(--fs-12); white-space:nowrap; }
   .start-live-meta .host-mark { margin-left:2px; }
   .start-live-state.waiting { color:var(--warn); }
-  .start-live-state.running { color:var(--accent); }
+  .start-live-state.running { color:var(--live); }
   .start-live-state.failed { color:var(--bad); }
   .start-live-where { color:var(--fg-2); flex:0 1 auto; min-width:0; }
   .start-live-time { flex:none; align-self:flex-start; padding-top:4px; color:var(--fg-3); font-size:var(--fs-12); }

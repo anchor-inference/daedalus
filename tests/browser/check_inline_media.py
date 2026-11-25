@@ -151,7 +151,7 @@ def run() -> int:
                 if saving.value.suggested_filename != "walkthrough.mp4" or page.url != before:
                     problems.append(f"{name}: the clip saved as {saving.value.suggested_filename!r} or the page moved to {page.url}")
 
-            # Near the tile's corner, clear of its actions in the other one: with the column at 288 px
+            # Near the tile's corner, clear of its actions in the other one: with the column at 300 px
             # a 1440 window's album tiles are small enough that the centre falls on those buttons.
             page.locator(".inline-media.album .inline-media-surface").first.click(position={"x": 12, "y": 12})
             page.wait_for_selector(".media-viewer")

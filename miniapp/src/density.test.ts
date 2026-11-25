@@ -2,11 +2,15 @@
 // of words. The app once grew to 15 px body text, 44 px round buttons and 64 px session rows one
 // rule at a time, each of them reasonable on its own; this is what stops the next one.
 //
-// Four claims for the desktop, and Settings' own column and row. Every size comes from the scale in
-// :root. Nothing outside the answer, the headings and the prose is drawn above 14 px on a desktop, in
-// whatever unit it is written. No box that is not a surface of its own is given a height a row or a
-// control would not have. Rows and controls take their height from the row and control tokens, so a
-// phone gets its 44 px from one media rule and not from forty.
+// The claims for the desktop, and Settings' own column and row. Every size comes from the scale in
+// :root. The approved design sets the type: 14 for controls, lists and the body, 15 for reading text
+// and a page's title, 13 for secondary text, 12 for meta and labels and never smaller, 18 for a pane's
+// title and 28 for a page's hero. So nothing outside the answer, the headings and the prose is drawn
+// above 15 px on a desktop, and nothing at all under 12, in whatever unit it is written (14 was the
+// cap until the page title moved to 15 and 11 the smallest step until the design set 12 as the floor).
+// No box that is not a surface of its own is given a height a row or a control would not have. Rows
+// and controls take their height from the row and control tokens, so a phone gets its 44 px from one
+// media rule and not from forty.
 //
 // The phone has its own scale since the redesign that took the chat apps on the operator's phone as
 // its reference: six steps, 12 / 13 / 14 / 15 / 16 / 17, and nothing else below 1024 px. A 14 px cap
@@ -25,41 +29,27 @@
 
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-// The shared stylesheet is a list of imports now; its rules are in ui/parts, read here in name order
-// (the guard reads rules one at a time, so the order they are joined in does not matter to it).
-const legacy = Object.values(import.meta.glob("./ui/parts/*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>).join("\n");
 import tokens from "./ui/tokens.css?raw";
-import desktop from "./ui/desktop.css?raw";
 import phone from "./ui/phone.css?raw";
 import browserPhone from "./browser/phone.css?raw";
-import newProject from "./project/newproject.css?raw";
-import imports from "./imports/imports.css?raw";
-import ask from "./questions/ask.css?raw";
-import quick from "./quick/quick.css?raw";
-import widget from "./widget.css?raw";
-import annotate from "./annotate/annotate.css?raw";
 import petHost from "./pethost.tsx?raw";
 import sidePanel from "./sidepanel/sidepanel.css?raw";
-import computer from "./computer.css?raw";
-import schedules from "./schedules/schedules.css?raw";
 import terminals from "./terminal/workspace.css?raw";
 import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
-import taskDialog from "./board/taskdialog.css?raw";
-import notes from "./notes/notes.css?raw";
-import guests from "./guestlinks.css?raw";
-import settingsDialog from "./screens/settings.css?raw";
-import explorerPanel from "./explorerpanel.css?raw";
-import launcher from "./navlauncher.css?raw";
-import selection from "./ui/selection.css?raw";
-import primitivesPage from "./screens/primitives.css?raw";
-// The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
-// Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
-// Terminals page, the task dialog, the agent link, the Files tab, the More launcher, the in-place
-// selection list and the primitives page keep their looks beside their components; they answer to
-// the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher + "\n" + selection + "\n" + primitivesPage;
+import app from "./App.tsx?raw";
+// Every stylesheet of the app, found rather than listed: a hand list was a line to add for each new
+// sheet, and a sheet left off it answered to nothing. The tokens come first, since the claims read
+// the first :root block as the scale; the Chrome side panel redefines the scale for its own subtree
+// and is held to that below, not to the desktop's. The shared stylesheet is a list of imports, which
+// are dropped; the guard reads rules one at a time, so the order they are joined in does not matter.
+const sheets = import.meta.glob(["./**/*.css", "!./ui/tokens.css", "!./sidepanel/sidepanel.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+// The sheets that were written before they were read here and break its claims (the calendar, the
+// canvas, the agent link's cards, the rules editor and a few strips): each comes off this list when
+// the screen it draws is redrawn on the new scale, and nothing is ever added to it.
+const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./calendar/blocks.css", "./calendar/calendar.css", "./canvas/canvas.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
+const css = tokens + "\n" + Object.keys(sheets).filter((name) => !NOT_YET_HELD.includes(name)).sort().map((name) => sheets[name].replace(/@import[^;]+;/g, "")).join("\n");
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -98,7 +88,11 @@ function rules(source: string): Rule[] {
   return out;
 }
 
-const TOKENS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-17": 17, "--fs-18": 18, "--fs-20": 20, "--fs-22": 22, "--fs-mono": 12.5, "--fs-prose": 15 };
+const TOKENS: Record<string, number> = { "--fs-11": 12, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-17": 17, "--fs-18": 18, "--fs-20": 20, "--fs-22": 22, "--fs-28": 28, "--fs-mono": 13, "--fs-prose": 15 };
+
+/** The largest size a desktop rule may state outside prose and headings, and the smallest anywhere. */
+const DESKTOP_CAP = 15;
+const FLOOR = 12;
 
 /** The phone's six steps. */
 const PHONE_STEPS = [12, 13, 14, 15, 16, 17];
@@ -249,7 +243,7 @@ function oversizeFonts(all: Rule[]): string[] {
     if (r.media.includes(PHONE)) continue;
     for (const m of r.body.matchAll(/(?:^|;)\s*font(?:-size)?\s*:\s*([^;]+)/g)) {
       const size = pixels(m[1]);
-      if (size === null || size <= 14) continue;
+      if (size === null || size <= DESKTOP_CAP) continue;
       for (const selector of selectors(r)) {
         if (covered(selector, LARGE_ALLOWED)) continue;
         large.push(`${selector} { font-size: ${m[1].trim()} }`);
@@ -257,6 +251,22 @@ function oversizeFonts(all: Rule[]): string[] {
     }
   }
   return large;
+}
+
+/** Every size under the 12 px floor, on any screen. A size relative to its parent (em, %) is left to
+ *  check_density.py, which reads the drawn page: here an em is read against the 14 px body, and the
+ *  small print of a large number would be read as small when it is not. */
+function undersizeFonts(all: Rule[], tokens: Record<string, number> = TOKENS): string[] {
+  const small: string[] = [];
+  for (const r of all) {
+    for (const m of r.body.matchAll(/(?:^|;)\s*font(?:-size)?\s*:\s*([^;]+)/g)) {
+      if (/^\s*[\d.]+(em|%)/.test(m[1])) continue;
+      const size = pixels(m[1], tokens);
+      if (size === null || size >= FLOOR) continue;
+      for (const selector of selectors(r)) small.push(`${selector} { font-size: ${m[1].trim()} }`);
+    }
+  }
+  return small;
 }
 
 /** The token table a phone resolves: the desktop's, with the phone's :root block laid over it. */
@@ -291,13 +301,13 @@ function offScale(all: Rule[]): string[] {
 }
 
 function numericFonts(all: Rule[]): string[] {
-  // A size written as a number is a size the scale cannot move. Two are allowed: the phone's
-  // 16 px field, and the 10 px beta tag, which sits below the scale on purpose.
+  // A size written as a number is a size the scale cannot move. One is allowed: the phone's 16 px
+  // field (a touch screen's rule, skipped below). The 10 px beta tag that once sat below the scale
+  // went with the 12 px floor.
   const numeric: string[] = [];
   for (const r of all) {
     if (r.media.includes("hover: none")) continue;
     for (const m of r.body.matchAll(/(?:^|;)\s*font-size\s*:\s*([\d.]+px)/g)) {
-      if (m[1] === "10px") continue;
       for (const selector of selectors(r)) {
         if (covered(selector, LARGE_ALLOWED)) continue;
         numeric.push(`${selector} { font-size: ${m[1]} }`);
@@ -336,7 +346,7 @@ describe("the scale", () => {
   it("is declared once, in :root", () => {
     const root = all.find((r) => r.selector === ":root" && !r.media);
     expect(root).toBeDefined();
-    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--row-h", "--row-h-2", "--row-h-kid", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--chip-h-dense", "--ctl-h-lg", "--avatar", "--plate", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
+    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--radius-bubble", "--row-h", "--row-h-2", "--row-h-kid", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--chip-h-dense", "--ctl-h-lg", "--avatar", "--plate", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
       "--top-h", "--list-row-h", "--list-row-h-1", "--nav-row-h", "--set-row-h", "--tabbar-h", "--ctl-round", "--chip-h", "--drawer-w", "--gutter", "--radius-xl", "--radius-composer"]) {
       expect(root!.body, name).toContain(`${name}:`);
     }
@@ -352,6 +362,18 @@ describe("the scale", () => {
     const body = all.find((r) => r.selector === "body" && !r.media);
     expect(body?.body).toContain("font-size: var(--fs-14)");
   });
+
+  it("draws rows at 32, dense rows at 28, popovers at 14 px corners and code at 13", () => {
+    // The approved design's rhythm: 32 px one-line rows on a 34 px pitch (sidebar, menus, settings'
+    // sections), 28 for a dense row, 8 / 12 / 14 / 20 px corners for a control, a card, what floats and
+    // the composer. They were 36, 32, and 16 for a popover; code was 12.5.
+    const root = all.find((r) => r.selector === ":root" && !r.media)!.body;
+    for (const decl of ["--row-h: 32px", "--row-h-dense: 28px", "--ctl-h: 32px", "--ctl-h-sm: 28px", "--radius-sm: 8px", "--radius-md: 12px", "--radius-lg: 14px", "--radius-xl: 20px", "--radius-bubble: 18px", "--fs-mono: 13px", "--icon: 16px"]) {
+      expect(root, decl).toContain(decl);
+    }
+    expect(root).toContain("--lh-ui: 1.45");
+    expect(root).toContain("--lh-prose: 1.6");
+  });
 });
 
 describe("a page's header", () => {
@@ -359,7 +381,10 @@ describe("a page's header", () => {
   const desktopRule = (selector: string) => all.filter((r) => r.media.includes(DESKTOP) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
   it("is one 52 px row with its title 24 px in, on every page, whatever the column under it", () => {
-    expect(desktopRule(".pagehead-row")).toContain("min-height: 52px");
+    // --head-h is every header's height: a page's, the conversation's, the panel's tabs. It was 48
+    // until the design set 52 for all of them.
+    expect(all.find((r) => r.selector === ":root" && !r.media)!.body).toContain("--head-h: 52px");
+    expect(desktopRule(".pagehead-row")).toContain("min-height: var(--head-h)");
     expect(desktopRule(".pagehead")).toContain("padding: 0 12px 0 24px");
     // The header once followed the page's column (padding in to the 1120 or 1680 px column's edge), so
     // the titles stood at six different x positions. No rule may pad it by the column again.
@@ -381,8 +406,13 @@ describe("a page's header", () => {
 });
 
 describe("every size", () => {
-  it("is at or under 14 px on a desktop outside prose, headings and glyphs", () => {
+  it("is at or under 15 px on a desktop outside prose, headings, titles and glyphs", () => {
     expect(oversizeFonts(all)).toEqual([]);
+  });
+
+  it("is never under 12 px, on a desktop or a phone", () => {
+    expect(undersizeFonts(all)).toEqual([]);
+    expect(undersizeFonts(all, phoneTokens(all))).toEqual([]);
   });
 
   it("is one of the six phone steps in every phone rule", () => {
@@ -463,11 +493,22 @@ describe("the sidebar", () => {
   const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
   const declared = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
 
-  it("is 288 px wide, with a chat's two lines at 44 px, a project's one at 36 and a nested chat at 40", () => {
-    // 288 rather than 272 since the rows went to two lines: a Russian title was cut at eighteen
-    // characters in the narrower column. The conversation still keeps its stripe at 1440 (see
-    // check_density.py), and the column stays a drag between the same two bounds.
-    expect(declared()).toContain("--sidebar-w: 288px");
+  it("opens 300 px wide and stays a drag, with a chat's two lines at 44 px, a project's one at 32 and a nested chat at 40", () => {
+    // 300 is the approved design's column (it was 288, and 272 before the rows went to two lines).
+    // The design drew it fixed; the operator kept the drag, so what is pinned is the default the
+    // stylesheet and the drag start from, and that it sits inside the bounds the drag is held to,
+    // never the drawn width. A project row is the 32 px one-line row every list now shares.
+    const px = (name: string) => Number(new RegExp(`${name}: (\\d+)px`).exec(declared())?.[1]);
+    expect(declared()).toContain("--sidebar-w: 300px");
+    expect(app).toMatch(/const SIDEBAR_W = 300;/);
+    const [min, max] = [Number(/const SIDEBAR_W_MIN = (\d+);/.exec(app)?.[1]), Number(/const SIDEBAR_W_MAX = (\d+);/.exec(app)?.[1])];
+    expect(min).toBe(px("--sidebar-w-min"));
+    expect(max).toBe(px("--sidebar-w-max"));
+    expect(min).toBeGreaterThanOrEqual(220);
+    expect(min).toBeLessThan(300);
+    expect(max).toBeGreaterThan(300);
+    expect(max).toBeLessThanOrEqual(420);
+    expect(declared()).toContain("--row-h: 32px");
     expect(declared()).toContain("--row-h-2: 44px");
     expect(declared()).toContain("--row-h-kid: 40px");
     expect(declared()).toContain("--chip-h-dense: 24px");
@@ -714,6 +755,13 @@ describe("the side panel", () => {
 });
 
 describe("the guard itself", () => {
+  it("reads every stylesheet but the few still waiting to be held, and those exist", () => {
+    for (const name of NOT_YET_HELD) expect(Object.keys(sheets), name).toContain(name);
+    expect(NOT_YET_HELD.length).toBeLessThanOrEqual(9);
+    expect(Object.keys(sheets).length).toBeGreaterThan(40);
+  });
+
+
   it("allows content at its own height but still catches growth and oversized neighbours", () => {
     for (const { selector, property, max } of CONTENT_BOXES) {
       expect(oversizeBoxes(rules(`${selector} { ${property}: ${max}px; }`))).toEqual([]);
@@ -756,6 +804,12 @@ describe("the guard itself", () => {
     expect(oversizeFonts(planted)).toEqual([]);
     const tall = rules("@media (max-width: 1023px) { .probe-phone-row { min-height: 72px; } .ph-tile { height: 72px; } }");
     expect(oversizeBoxes(tall)).toEqual([".probe-phone-row { min-height: 72px }"]);
+  });
+
+  it("refuses a size under the floor, written as a step, a number or a rem", () => {
+    const small = rules(".probe-11 { font-size: 11px; } .probe-step { font-size: var(--fs-12); } .probe-rem { font-size: .6rem; } .probe-em { font-size: .8em; }");
+    expect(undersizeFonts(small)).toEqual([".probe-11 { font-size: 11px }", ".probe-rem { font-size: .6rem }"]);
+    expect(undersizeFonts(small, { ...TOKENS, "--fs-12": 11 })).toContain(".probe-step { font-size: var(--fs-12) }");
   });
 
   it("reads a size it does not understand as a finding rather than as nothing", () => {

@@ -15,7 +15,10 @@ screen; no bottom bar outside a project; and a 44 px target for every control, c
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
 large next to Claude and ChatGPT on the same phone.
 
-The desktop's session header is two lines inside its 48 px since the desktop redesign, the title and
+On every window nothing is drawn under 12 px, the floor the approved design sets for meta and
+labels (the session, the agents list and the phone's Chats page are read for it).
+
+The desktop's session header is two lines inside its 52 px (48 until every header took 52), the title and
 then the project, the model and the live state; the start screen and the projects page that came with
 it have their own claims (check_start).
 
@@ -102,7 +105,24 @@ READ = """
     phoneRows,
     menuBtn: box(one('.rail [data-rail="menu"]', '.sidebar-menu')),
     rail: box(one('.rail')),
+    small: smallText(),
   };
+  // Every drawn text under the 12 px floor: an element that holds words of its own, is on the
+  // screen and is not hidden. The smallest size drawn, and up to eight offenders by class and words.
+  function smallText() {
+    const out = [];
+    let min = Infinity;
+    for (const el of document.querySelectorAll('body *')) {
+      if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      if (r.width === 0 || r.height === 0 || s.visibility === 'hidden' || s.display === 'none' || el.closest('[aria-hidden="true"], .xterm')) continue;
+      const size = parseFloat(s.fontSize);
+      min = Math.min(min, size);
+      if (size < 12 && out.length < 8) out.push(`${size}px ${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${el.textContent.trim().slice(0, 24)}"`);
+    }
+    return { min: Number.isFinite(min) ? min : null, under: out };
+  }
 }
 """
 
@@ -612,12 +632,17 @@ def judge(m: dict) -> list[str]:
     # took 14 in.
     if m["body"] != 14:
         problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
+    # Nothing drawn under 12 px, the design's floor for meta and labels: 11 px was the smallest step
+    # until then, and a fifth of the drawn text used it.
+    if m["small"]["under"]:
+        problems.append(f"{m['vw']}: text under the 12 px floor: {m['small']['under']}")
     if not phone:
-        # 52 px of rail and the 288 px column: 272 until the rows went to two lines, where a Russian
-        # title was cut at eighteen characters.
-        if not m["left"] or m["left"]["w"] != 340:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 340 wide")
-        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 36)):
+        # 52 px of rail and the 300 px column the design opens the sidebar at (288 before it, and 272
+        # until the rows went to two lines). The operator's drag still moves it; this is the default.
+        if not m["left"] or m["left"]["w"] != 352:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 352 wide")
+        # A project row is the 32 px one-line row every list shares now (36 before).
+        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 32)):
             for h in rows:
                 if h != want:
                     problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not {want}")
@@ -630,19 +655,20 @@ def judge(m: dict) -> list[str]:
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
-        if h > (44 if phone else 36):
+        if h > (44 if phone else 32):
             problems.append(f"{m['vw']}: a one-line row is {h}px")
     for h in m["rowDouble"]:
         if h > (54 if phone else 52):
             problems.append(f"{m['vw']}: a two-line row is {h}px")
     if m["avatar"] and m["avatar"]["w"] > 24:
         problems.append(f"{m['vw']}: an avatar in a row is {m['avatar']['w']}px")
-    # A phone's top bar is 52 px, one row of 44 px targets with room around them; a desktop's 48.
-    if m["head"] and m["head"]["h"] > (52 if phone else 48):
+    # A phone's top bar is 52 px, one row of 44 px targets with room around them, and so is a
+    # desktop's header since every header took --head-h's 52 (it was 48).
+    if m["head"] and m["head"]["h"] > 52:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
-    # The desktop header is two lines inside the same 48 px: the title, then the project, the model
+    # The desktop header is two lines inside the same 52 px: the title, then the project, the model
     # and the live state in the meta size — the phone's title button, not a second row of chips.
     if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
         problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
@@ -654,10 +680,10 @@ def judge(m: dict) -> list[str]:
         else:
             if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
                 problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            # 48, the header's height: the tabs draw their icon over their word, so six named tabs fit
+            # 52, the header's height: the tabs draw their icon over their word, so six named tabs fit
             # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
-            if not m["panelTabs"] or m["panelTabs"]["h"] != 48:
-                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 48")
+            if not m["panelTabs"] or m["panelTabs"]["h"] != 52:
+                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 52")
     elif m["panel"]:
         problems.append(f"{m['vw']}: a phone shows the panel as a column")
     # Running phones reserve the composer for steering; idle settings use a full touch target.
@@ -687,12 +713,12 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a 638 px conversation column: 1440 less the 52 px
-        # rail and the 288 px sidebar is a 1100 px chat area, 58 % of it the conversation, and the
-        # timeline is that less the gutters. The rail took 52 px the old 677 px figure did not count
-        # (the sidebar's strip then stood only where the column was folded), so the floor is 590.
-        if m["vw"] == 1440 and m["timeline"]["w"] < 590:
-            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 590")
+        # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 52 px rail
+        # and the 300 px sidebar is a 1088 px chat area, 58 % of it the conversation, and the
+        # timeline is that less the gutters, 583 px. The floor was 590 while the sidebar was 288; the
+        # 12 px the design's wider column takes come out of it, so the floor is 578.
+        if m["vw"] == 1440 and m["timeline"]["w"] < 578:
+            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 578")
     return problems
 
 
@@ -700,8 +726,8 @@ def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
     # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
     # Folding retains a 52 px icon column; the conversation starts at its edge.
-    # The column is 288 wide since its rows went to two lines (272 before).
-    want = {"open": (340, 287, 340), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (340, 287, 340)}
+    # The column opens 300 wide, the design's default (288 before, 272 before that).
+    want = {"open": (352, 299, 352), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (352, 299, 352)}
     for key, (rail, sidebar, main) in want.items():
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
@@ -797,6 +823,9 @@ def run() -> int:
         for name, m in measured.items():
             if name.startswith("session-"):
                 problems += judge(m)
+        for name in ("agents-1440", "agents-390"):
+            if measured[name]["small"]["under"]:
+                problems.append(f"{name}: text under the 12 px floor: {measured[name]['small']['under']}")
         for h in measured["agents-390"]["phoneRows"]:
             if h != 54:
                 problems.append(f"390: a row of Chats is {h}px, not 54")

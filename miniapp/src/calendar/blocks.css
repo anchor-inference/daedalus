@@ -56,7 +56,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-chipbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--c) 12%, transparent); color: var(--fg); font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
 .cal-chipbtn:hover { background: color-mix(in srgb, var(--c) 20%, transparent); }
 .cal-view-pending { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--warn); }
-.cal-view-loading { height: 2px; border-radius: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: cal-view-load 1.1s linear infinite; }
+.cal-view-loading { height: 2px; border-radius: 1px; background: linear-gradient(90deg, transparent, var(--live), transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: cal-view-load 1.1s linear infinite; }
 @keyframes cal-view-load { from { background-position: -50% 0; } to { background-position: 150% 0; } }
 .cal-md { font-size: var(--fs-14); line-height: var(--lh-prose); color: var(--fg); overflow-wrap: anywhere; }
 .cal-md > :last-child { margin-bottom: 0; }
@@ -146,7 +146,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-timer { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font-size: var(--fs-13); font-weight: 500; cursor: pointer; font-variant-numeric: tabular-nums; }
 .cal-timer::before { content: ""; position: absolute; inset: -7px 0; }
 .cal-timer:hover { background: var(--surface-2); }
-.cal-timer.running { border-color: transparent; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.cal-timer.running { border-color: transparent; background: color-mix(in srgb, var(--live) 12%, transparent); color: var(--live); }
 .cal-timer-clock { min-width: 38px; }
 
 /* Links, buttons and references. */

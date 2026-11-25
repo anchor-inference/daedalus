@@ -87,7 +87,7 @@
   .ph-drow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .ph-drow-m { font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; background: var(--fg-3); }
-  .ph-dot.waiting { background: var(--warn); } .ph-dot.running { background: var(--accent); animation: ph-pulse 1.4s ease-in-out infinite; }
+  .ph-dot.waiting { background: var(--warn); } .ph-dot.running { background: var(--live); animation: ph-pulse 1.4s ease-in-out infinite; }
   .ph-dot.failed { background: var(--bad); } .ph-dot.done { background: var(--ok); }
   /* The dot is 6 px in an icon's 18 px of room, so a recent chat starts its words where a project,
      led by an icon, does. */
@@ -157,7 +157,7 @@
   .list-row-m { display: flex; align-items: center; gap: 6px; margin-top: 1px; font-size: var(--fs-13); color: var(--fg-3); white-space: nowrap; overflow: hidden; }
   .list-row-m > * { flex: none; }
   .list-row-m > .ph-ell { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .list-row-m .waiting { color: var(--warn); } .list-row-m .running { color: var(--accent); } .list-row-m .failed { color: var(--bad); }
+  .list-row-m .waiting { color: var(--warn); } .list-row-m .running { color: var(--live); } .list-row-m .failed { color: var(--bad); }
   .ph-sep::before { content: "·"; color: var(--fg-3); }
   .list-row-trail { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--fs-13); color: var(--fg-3); }
   .list-row-more { position: relative; flex: none; align-self: stretch; width: 32px; margin-left: -6px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--fg-3); cursor: pointer; }
@@ -167,7 +167,7 @@
   .ph-udot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--accent); display: inline-block; }
   .ph-sicon { position: relative; width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
   .ph-sicon .ph-st { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--bg); background: var(--fg-3); }
-  .ph-st.waiting { background: var(--warn); } .ph-st.running { background: var(--accent); } .ph-st.failed { background: var(--bad); }
+  .ph-st.waiting { background: var(--warn); } .ph-st.running { background: var(--live); } .ph-st.failed { background: var(--bad); }
   .list-row-swipe { position: absolute; top: 0; bottom: 0; display: flex; }
   .list-row-swipe.end { right: 0; } .list-row-swipe.start { left: 0; }
   /* What a swipe uncovers is a wash of its tone under the row, not a block of solid colour: the
@@ -447,7 +447,7 @@
   .ph-member-av { position: relative; display: inline-grid; }
   .ph-member-av .staff-avatar { width: 40px; height: 40px; font-size: var(--fs-13); }
   .ph-member-av .ph-st { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--bg); background: var(--fg-3); }
-  .ph-st[data-tone="working"] { background: var(--accent); } .ph-st[data-tone="review"], .ph-st[data-tone="free"] { background: var(--ok); }
+  .ph-st[data-tone="working"] { background: var(--live); } .ph-st[data-tone="review"], .ph-st[data-tone="free"] { background: var(--ok); }
   .ph-st[data-tone="waiting"] { background: var(--warn); } .ph-st[data-tone="error"] { background: var(--bad); }
   .ph-st[data-tone="off"] { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fg-3); }
   .ph-srow-member { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
@@ -459,7 +459,7 @@
   .ph-member-t .harness-badge { flex: none; }
   .ph-host { flex: none; gap: 3px; height: 22px; padding: 0 6px; font-size: var(--fs-12); }
   .ph-member-st { flex: none; }
-  .ph-member-st[data-tone="working"] { color: var(--accent); } .ph-member-st[data-tone="review"] { color: var(--ok); }
+  .ph-member-st[data-tone="working"] { color: var(--live); } .ph-member-st[data-tone="review"] { color: var(--ok); }
   .ph-member-st[data-tone="waiting"], .ph-member-st[data-tone="queued"] { color: var(--warn); } .ph-member-st[data-tone="error"] { color: var(--bad); }
   .list-row-m .ph-ell.waiting { color: var(--warn); }
   .ph-member-spend { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -715,7 +715,9 @@
   .composer[data-shape] .roundbtn.primary.queue, .composer[data-shape] .roundbtn.primary.reply { background: var(--primary); color: var(--primary-ink); }
   /* Nothing to send yet: the circle is a filled neutral with a faint glyph, not a dimmed ink one. */
   .composer[data-shape] .roundbtn.primary:disabled { background: var(--surface-3); color: var(--fg-3); opacity: 1; }
-  .composer[data-shape] .composer-mode, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 12px; gap: 4px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); }
+  /* 10 px insets, not 12: Inter sets a model's name a little wider than the system face did, and at
+     360 px the pill showed one letter fewer than the ten that tell one model from another. */
+  .composer[data-shape] .composer-mode, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 10px; gap: 4px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); }
   .composer[data-shape] .composer-mode::after, .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
   .composer[data-shape] .composer-mode { flex: none; max-width: 40%; }
   .composer[data-shape] .composer-mode .mode-yagni, .composer[data-shape] .composer-mode .mode-autopilot { font-size: var(--fs-12); }
@@ -782,7 +784,9 @@
   .tabbar.project-tabs > .active { color: var(--fg); }
   .tabbar.project-tabs .glyph { width: 52px; height: 30px; border-radius: 10px; }
   .tabbar.project-tabs .glyph .ic { width: 22px; height: 22px; }
-  .tabbar.project-tabs .tab-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  /* No side padding and a hair tighter: in Inter "Оркестратор" is a few pixels wider than the 78 px a
+     fifth of a 390 px phone leaves, and it lost its last letter to an ellipsis. */
+  .tabbar.project-tabs .tab-label { max-width: 100%; padding: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -0.02em; }
   .tabbar.project-tabs .tab-badge { top: -3px; left: 32px; right: auto; min-width: 18px; height: 18px; line-height: 18px; font-size: var(--fs-12); font-weight: 600; }
   .tab-badge, .bell-badge, .beta-tag { font-size: var(--fs-12); }
 
@@ -1110,7 +1114,7 @@
   .ph-chat-state { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
   .ph-chat-state > span:last-child { overflow: hidden; text-overflow: ellipsis; }
   .ph-chat-state .dot { width: var(--dot); height: var(--dot); flex: none; }
-  .ph-chat-state.running, .ph-chat-state.compacting { color: var(--accent); }
+  .ph-chat-state.running, .ph-chat-state.compacting { color: var(--live); }
   .ph-chat-state.waiting, .ph-chat-state.offline { color: var(--warn); }
   .ph-chat-state.failed { color: var(--bad); }
   .ph-chat-fallback { color: var(--warn); }

@@ -160,7 +160,10 @@ collides with a page's own styles or a framework; the classes are added to, neve
 The tokens are usable directly: `var(--bg)`, `var(--surface-1)`, `var(--fg)`, `var(--fg-2)`,
 `var(--accent)`, `var(--line)`, `var(--ok)`, `var(--bad)`, `var(--font)`, `var(--mono)`, the type steps
 `var(--fs-12)` … `var(--fs-22)`, the spacing `var(--space-1)` … `var(--space-8)`, the radii, and the
-row and control sizes. Below 1024 px they switch to the phone's sizes, the same as the app.
+row and control sizes. Below 1024 px they switch to the phone's sizes, the same as the app. The colours
+are neutral greys and three accents with one meaning each: violet (`--accent`, `--primary`) for what is
+chosen and the primary action, cyan (`--ok`, `--info`) for running, done or added, orange (`--warn`,
+`--bad`) for what needs the reader or failed. Nothing is drawn under 12 px; `--fs-11` is 12 px too.
 
 ## The bridge
 

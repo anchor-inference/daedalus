@@ -6,67 +6,58 @@
 // scheme blocks and stay hex. Nothing here is stored on the host: a font address is fetched by
 // this browser alone.
 
-export const THEME_IDS = ["paper", "ink", "serebro", "zakat", "malibu", "baltika", "claude", "sazha", "grafit", "slanets", "pepel", "oranzhereya", "med", "glub", "laim"] as const;
+// Six neutral frames. A theme recolours the frame (the greys and the text) and nothing else: violet,
+// cyan and orange keep one meaning on every theme (selection and the primary action, running and
+// added, needs-you and removed), so no theme writes them, and none paints a gradient. The tinted and
+// colour themes went for that reason; a stored id that is no longer here falls back to Dark.
+export const THEME_IDS = ["ink", "paper", "sazha", "grafit", "slanets", "pepel"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
-export const THEME_GROUPS = ["light", "gray", "color"] as const;
-export type ThemeGroup = (typeof THEME_GROUPS)[number];
 export const FONT_ROLES = ["ui", "prose", "code"] as const;
 export type FontRole = (typeof FONT_ROLES)[number];
 
 export type Theme = {
   id: ThemeId;
-  group: ThemeGroup;
-  /** Light themes paint dark text. The rest paint light text, grey ones included. */
+  /** Light themes paint dark text. The rest paint light text. */
   light: boolean;
-  bg: string;
+  /** The frame: the sidebar, settings and the drawer (`--bg`). */
   side: string;
+  /** The page under the conversation and the lists (`--wash`). */
+  wash: string;
+  /** A card or the composer lying on the page. */
+  card: string;
+  /** What floats: a popover, a menu, a dialog. */
   surface: string;
+  /** A solid fill and its two steps. */
   surface2: string;
+  surface3: string;
+  surface4: string;
+  /** Code, terminals and diffs; the terminal's background. */
+  inset: string;
   fg: string;
   fg2: string;
   fg3: string;
-  accent: string;
-  send: string;
-  sendInk: string;
-  wash: string;
-  termBg: string;
-  /** A card lying on the page, where the theme draws it apart from what floats; the surface otherwise. */
-  card?: string;
-  /** The fill's hover and pressed steps, where the theme names them; mixed from the fill otherwise. */
-  surface3?: string;
-  surface4?: string;
 };
 
-/** The status colours are one vocabulary on every theme (the chatcn theme's): a theme recolors the frame, never a state. */
-const DARK_STATUS = { ok: "#5bcc80", warn: "#f3af49", bad: "#f86a6b", info: "#5ba5f6" };
-const LIGHT_STATUS = { ok: "#218041", warn: "#a75e0f", bad: "#d02c2a", info: "#1f6dd8" };
+/** The three accents and the status colours, one set per scheme (ui/tokens.css declares the same
+ *  values and says why the light ones sit a step under the drawn ones). Hex, for the terminal. */
+type Accents = { accent: string; accentInk: string; primary: string; primaryInk: string; primaryHover: string; live: string; attention: string };
+export const DARK_ACCENTS: Accents = { accent: "#a998ff", accentInk: "#141414", primary: "#765eee", primaryInk: "#ffffff", primaryHover: "#6a51e6", live: "#4fcbe0", attention: "#f59e4c" };
+export const LIGHT_ACCENTS: Accents = { accent: "#5a41d8", accentInk: "#ffffff", primary: "#6a52e8", primaryInk: "#ffffff", primaryHover: "#5b42dc", live: "#0a778c", attention: "#ae530a" };
 
-/** The sixteen ANSI colours of the dark scheme, in order. A theme recolors the frame and keeps these. */
-const DARK_ANSI = ["#1c1c1c", "#f86a6b", "#5bcc80", "#f3af49", "#5ba5f6", "#bf93f1", "#5cc9c2", "#a4a4a4", "#636363", "#ff8f8e", "#86e3a4", "#f8c877", "#8cc0fa", "#d4b5f6", "#8adcd6", "#f5f5f5"];
-const LIGHT_ANSI = ["#0a0a0a", "#d02c2a", "#218041", "#a75e0f", "#1f6dd8", "#7f47c7", "#007f80", "#868686", "#525252", "#e0524d", "#25b865", "#c98a26", "#4a84f0", "#b066dd", "#13b3a0", "#bebebe"];
-
-function theme(partial: Theme): Theme {
-  return partial;
-}
+/** The sixteen ANSI colours of each scheme, in order. A theme puts black, white and bright white on its
+ *  own ramp and keeps the rest: they are what programs choose, content rather than chrome. */
+const DARK_ANSI = ["#262626", "#f86a6b", "#5bcc80", "#f3af49", "#5ba5f6", "#bf93f1", "#5cc9c2", "#a8a8a8", "#636363", "#ff8f8e", "#86e3a4", "#f8c877", "#8cc0fa", "#d4b5f6", "#8adcd6", "#ededed"];
+const LIGHT_ANSI = ["#1b1b1b", "#d02c2a", "#218041", "#a75e0f", "#1f6dd8", "#7f47c7", "#007f80", "#6b6b6b", "#595959", "#e0524d", "#25b865", "#c98a26", "#4a84f0", "#b066dd", "#13b3a0", "#bebebe"];
 
 export const THEMES: Theme[] = [
-  // The two the app opens in: the chatcn theme's neutral ramp, light and dark, in the hex its OKLCH
-  // steps compute to (ui/tokens.css names the role each one plays).
-  theme({ id: "paper", group: "light", light: true, bg: "#ffffff", side: "#fafafa", surface: "#ffffff", surface2: "#f5f5f5", surface3: "#eeeeee", surface4: "#e8e8e8", fg: "#0a0a0a", fg2: "#525252", fg3: "#6a6a6a", accent: "#1f6dd8", send: "#0a0a0a", sendInk: "#ffffff", wash: "#ffffff", termBg: "#fafafa" }),
-  theme({ id: "ink", group: "gray", light: false, bg: "#0a0a0a", side: "#111111", surface: "#171717", card: "#101010", surface2: "#1c1c1c", surface3: "#232323", surface4: "#2a2a2a", fg: "#f5f5f5", fg2: "#a4a4a4", fg3: "#868686", accent: "#5ba5f6", send: "#f5f5f5", sendInk: "#0a0a0a", wash: "#0a0a0a", termBg: "#060606" }),
-  theme({ id: "serebro", group: "light", light: true, bg: "#E7EEF2", side: "#D9E3EA", surface: "#F7F4EF", surface2: "#EFE8DF", fg: "#1C242B", fg2: "#3E4C57", fg3: "#5C6B76", accent: "#1F5E73", send: "#1F5E73", sendInk: "#F4FBFD", wash: "linear-gradient(165deg,#E6EEF2 0%,#E8E4DC 58%,#D8CFC4 100%)", termBg: "#F7F4EF" }),
-  theme({ id: "zakat", group: "light", light: true, bg: "#F7F1E8", side: "#EFE4D6", surface: "#FFFCF8", surface2: "#F4E7DA", fg: "#2A221C", fg2: "#5C4A3E", fg3: "#6F5C4E", accent: "#9A4E22", send: "#9A4E22", sendInk: "#FFF8F3", wash: "linear-gradient(145deg,#F8E7D6 0%,#F6F1EA 46%,#E3EEF5 100%)", termBg: "#FFFCF8" }),
-  theme({ id: "malibu", group: "light", light: true, bg: "#F3F7F2", side: "#E3F0F2", surface: "#FFFEFB", surface2: "#E5F4E4", fg: "#14323A", fg2: "#3E5960", fg3: "#4E6A70", accent: "#0C6E84", send: "#0C6E84", sendInk: "#F3FBFC", wash: "linear-gradient(160deg,#D7F3FA 0%,#F3F7F2 48%,#E7F0D4 100%)", termBg: "#FFFEFB" }),
-  theme({ id: "baltika", group: "light", light: true, bg: "#E6EBEF", side: "#D7E0E6", surface: "#F4F7F8", surface2: "#E7EEF1", fg: "#1B2832", fg2: "#3E4E59", fg3: "#52616B", accent: "#8A5314", send: "#8A5314", sendInk: "#FFF8EF", wash: "linear-gradient(180deg,#E7EEF2 0%,#E6EBEF 55%,#E4E2DA 100%)", termBg: "#F4F7F8" }),
-  theme({ id: "claude", group: "gray", light: false, bg: "#151515", side: "#111111", surface: "#1c1c1c", surface2: "#303030", fg: "#eceae6", fg2: "#a9a69f", fg3: "#8c8982", accent: "#8aa0c8", send: "#e8e6e0", sendInk: "#1a1917", wash: "#151515", termBg: "#101010" }),
-  theme({ id: "sazha", group: "gray", light: false, bg: "#070708", side: "#050506", surface: "#141416", surface2: "#1c1c1f", fg: "#f5f5f6", fg2: "#b4b4b8", fg3: "#8e8e93", accent: "#f5f5f6", send: "#ffffff", sendInk: "#111113", wash: "#070708", termBg: "#050506" }),
-  theme({ id: "grafit", group: "gray", light: false, bg: "#1c1c20", side: "#18181c", surface: "#26262b", surface2: "#2e2e34", fg: "#ececee", fg2: "#b7b7be", fg3: "#8e8e98", accent: "#c6c8d0", send: "#e4e4e8", sendInk: "#1a1a1e", wash: "#1c1c20", termBg: "#141418" }),
-  theme({ id: "slanets", group: "gray", light: false, bg: "#12171e", side: "#10151b", surface: "#1c2430", surface2: "#243040", fg: "#e7edf4", fg2: "#a9b6c6", fg3: "#8494a6", accent: "#9eb0c4", send: "#c5d4e4", sendInk: "#12171e", wash: "#12171e", termBg: "#0e1318" }),
-  theme({ id: "pepel", group: "gray", light: false, bg: "#2a2a2e", side: "#242428", surface: "#34343a", surface2: "#3e3e44", fg: "#f4f4f6", fg2: "#c8c8ce", fg3: "#a0a0a8", accent: "#f4f4f6", send: "#f4f4f6", sendInk: "#242428", wash: "#2a2a2e", termBg: "#1e1e22" }),
-  theme({ id: "oranzhereya", group: "color", light: false, bg: "#101916", side: "#0C1411", surface: "#18241F", surface2: "#21302A", fg: "#E7F3EC", fg2: "#A9C4B6", fg3: "#8EAEA0", accent: "#7EE0C3", send: "#E4F26A", sendInk: "#1A1C10", wash: "radial-gradient(900px 520px at 88% -8%, #1A3330 0%, #101916 58%)", termBg: "#0C1411" }),
-  theme({ id: "med", group: "color", light: false, bg: "#1A1210", side: "#140E0C", surface: "#261A16", surface2: "#32241E", fg: "#F6EDE6", fg2: "#D4B5A6", fg3: "#B89A8C", accent: "#E2A36B", send: "#E2A36B", sendInk: "#2A160E", wash: "radial-gradient(880px 520px at 0% -10%, #3A241C 0%, #1A1210 62%)", termBg: "#140E0C" }),
-  theme({ id: "glub", group: "color", light: false, bg: "#14122A", side: "#100E22", surface: "#1E1B38", surface2: "#282450", fg: "#ECEAF6", fg2: "#B7B3D0", fg3: "#9C98B8", accent: "#7EE0D0", send: "#7EE0D0", sendInk: "#10211E", wash: "linear-gradient(165deg,#1A1440 0%,#14122A 42%,#0E2438 100%)", termBg: "#100E22" }),
-  theme({ id: "laim", group: "color", light: false, bg: "#14160F", side: "#10120C", surface: "#1E2218", surface2: "#292E20", fg: "#F4F1E6", fg2: "#C9C6B4", fg3: "#A8A594", accent: "#D2EE6A", send: "linear-gradient(90deg,#D6F25A,#FF8A4A)", sendInk: "#1A1C10", wash: "radial-gradient(840px 480px at 100% 0%, #2A2E16 0%, #14160F 52%)", termBg: "#10120C" }),
+  // Dark and Light, the pair the app opens in (ui/tokens.css names the role of each step).
+  { id: "ink", light: false, side: "#111111", wash: "#161616", card: "#1f1f1f", surface: "#262626", surface2: "#1f1f1f", surface3: "#262626", surface4: "#2e2e2e", inset: "#101010", fg: "#ededed", fg2: "#a8a8a8", fg3: "#8e8e8e" },
+  { id: "paper", light: true, side: "#f5f5f4", wash: "#ffffff", card: "#ffffff", surface: "#ffffff", surface2: "#f5f5f4", surface3: "#efefee", surface4: "#e7e7e6", inset: "#f6f6f5", fg: "#1b1b1b", fg2: "#595959", fg3: "#6b6b6b" },
+  // The grey family, as frames: a blacker one, two lighter ones (one a little cool) and a slate.
+  { id: "sazha", light: false, side: "#0a0a0a", wash: "#0e0e0e", card: "#171717", surface: "#1e1e1e", surface2: "#171717", surface3: "#1e1e1e", surface4: "#262626", inset: "#080808", fg: "#ededed", fg2: "#a8a8a8", fg3: "#8e8e8e" },
+  { id: "grafit", light: false, side: "#1a1a1d", wash: "#1f1f22", card: "#28282c", surface: "#2f2f33", surface2: "#28282c", surface3: "#2f2f33", surface4: "#37373c", inset: "#18181b", fg: "#ececee", fg2: "#b4b4ba", fg3: "#9a9aa1" },
+  { id: "slanets", light: false, side: "#11161c", wash: "#151b22", card: "#1c242d", surface: "#232c37", surface2: "#1c242d", surface3: "#232c37", surface4: "#2b3541", inset: "#0f1419", fg: "#e7edf4", fg2: "#a9b6c6", fg3: "#909eaf" },
+  { id: "pepel", light: false, side: "#232326", wash: "#29292c", card: "#313135", surface: "#38383c", surface2: "#313135", surface3: "#38383c", surface4: "#424247", inset: "#1f1f22", fg: "#f4f4f6", fg2: "#c8c8ce", fg3: "#adadb4" },
 ];
 
 const BY_ID = new Map(THEMES.map((item) => [item.id, item]));
@@ -102,7 +93,9 @@ export const PROSE_MIN = 12;
 export const PROSE_MAX = 22;
 export type ProseSize = number | null;
 
-export type ColorKey = "bg" | "surface" | "fg" | "fg2" | "accent" | "send";
+/** What the reader may recolour: the frame and the text, never an accent. */
+export type ColorKey = "bg" | "surface" | "fg" | "fg2";
+export const COLOR_KEYS: readonly ColorKey[] = ["bg", "surface", "fg", "fg2"];
 
 export type Prefs = {
   follow: boolean;
@@ -157,11 +150,6 @@ export const DEFAULT_PREFS: Prefs = {
 };
 
 const KEY = "daedalus.appearance";
-/** Stamped into what is saved. Preferences saved before the neutral pair became the app's look carry
- *  no stamp, and what they hold of the old default pair is moved onto the new one once, keeping every
- *  other choice: a browser that had ever touched a setting had the old pair written into it, and
- *  would otherwise never see the look the app now opens in. A theme chosen by name stays chosen. */
-const LOOK = 2;
 const SCHEME = "daedalus.scheme";
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -215,11 +203,6 @@ function luminance(value: string): number {
   return 0.2126 * lin(channel(value, 0)) + 0.7152 * lin(channel(value, 1)) + 0.0722 * lin(channel(value, 2));
 }
 
-export function inkFor(value: string): string {
-  if (!HEX.test(value)) return "#1a1a1a";
-  return luminance(value) > 0.55 ? "#1a1a1a" : "#f6f6f4";
-}
-
 export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
@@ -250,13 +233,8 @@ function readJson(): Partial<Prefs> | null {
 export function readPrefs(): Prefs {
   const stored = readJson();
   if (!stored) return { ...DEFAULT_PREFS, colors: {} };
-  if ((stored as { look?: number }).look !== LOOK) {
-    if (stored.theme === "claude") stored.theme = DEFAULT_PREFS.theme;
-    if (stored.dark === "claude") stored.dark = DEFAULT_PREFS.dark;
-    if (stored.light === "serebro") stored.light = DEFAULT_PREFS.light;
-  }
   const colors: Prefs["colors"] = {};
-  for (const key of ["bg", "surface", "fg", "fg2", "accent", "send"] as const) {
+  for (const key of COLOR_KEYS) {
     const value = stored.colors?.[key];
     if (value && HEX.test(value)) colors[key] = value;
   }
@@ -266,8 +244,8 @@ export function readPrefs(): Prefs {
     follow: typeof stored.follow === "boolean" ? stored.follow : DEFAULT_PREFS.follow,
     wash: typeof stored.wash === "boolean" ? stored.wash : DEFAULT_PREFS.wash,
     theme: isThemeId(stored.theme ?? "") ? stored.theme! : DEFAULT_PREFS.theme,
-    dark: isThemeId(stored.dark ?? "") ? stored.dark! : DEFAULT_PREFS.dark,
-    light: isThemeId(stored.light ?? "") ? stored.light! : DEFAULT_PREFS.light,
+    dark: isThemeId(stored.dark ?? "") && !themeById(stored.dark).light ? stored.dark! : DEFAULT_PREFS.dark,
+    light: isThemeId(stored.light ?? "") && themeById(stored.light).light ? stored.light! : DEFAULT_PREFS.light,
     scale: oneOf(stored.scale, ["sm", "md", "lg", "xl"] as const, DEFAULT_PREFS.scale),
     prose: proseFromStored(stored.prose),
     leading: oneOf(stored.leading, ["tight", "normal", "open"] as const, DEFAULT_PREFS.leading),
@@ -293,18 +271,17 @@ export function resolvedTheme(prefs: Prefs, env: AppearanceEnv): Theme {
   return themeById(mode === "dark" ? prefs.dark : prefs.light);
 }
 
-const FS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-18": 18, "--fs-mono": 12.5 };
+const FS: Record<string, number> = { "--fs-11": 12, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-18": 18, "--fs-mono": 13 };
 const SCALE: Record<Scale, number> = { sm: 0.92, md: 1, lg: 1.1, xl: 1.18 };
+/** The terminal a light theme keeps dark when asked to: Dark's inset and text. */
+const DARK_TERMINAL = { bg: "#101010", fg: "#ededed" };
 
 function ansiFor(base: Theme, forceDark: boolean): string[] {
   const ansi = (base.light && !forceDark ? LIGHT_ANSI : DARK_ANSI).slice();
-  if (!base.light || forceDark) {
+  if (!base.light) {
     ansi[0] = base.surface;
-    ansi[6] = HEX.test(base.accent) ? base.accent : ansi[6];
     ansi[7] = base.fg2;
     ansi[15] = base.fg;
-  } else if (HEX.test(base.accent)) {
-    ansi[6] = base.accent;
   }
   return ansi;
 }
@@ -312,47 +289,45 @@ function ansiFor(base: Theme, forceDark: boolean): string[] {
 /** Every custom property the theme owns. Absent keys are removed, so a step back to "usual" restores the stylesheet. */
 export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<string, string> {
   const base = resolvedTheme(prefs, env);
-  const status = base.light ? LIGHT_STATUS : DARK_STATUS;
+  const accents = base.light ? LIGHT_ACCENTS : DARK_ACCENTS;
   const bg = hex(prefs.colors.bg, base.side);
   const surface = hex(prefs.colors.surface, base.surface);
   const fg = hex(prefs.colors.fg, base.fg);
   const fg2 = prefs.contrast === "high" ? mixHex(hex(prefs.colors.fg2, base.fg2), fg, 0.55) : hex(prefs.colors.fg2, base.fg2);
   const fg3 = prefs.contrast === "high" ? mixHex(base.fg3, fg, 0.4) : base.fg3;
-  const accent = hex(prefs.colors.accent, base.accent);
-  const send = prefs.colors.send && HEX.test(prefs.colors.send) ? prefs.colors.send : base.send;
-  const sendInk = HEX.test(send) ? inkFor(send) : base.sendInk;
   const forceDark = prefs.code === "dark" && base.light;
-  const ansi = ansiFor({ ...base, accent, fg, fg2, surface }, forceDark);
-  const line = base.light ? "rgba(28,36,43,.10)" : "rgba(255,255,255,.09)";
-  const lineStrong = prefs.contrast === "high" ? (base.light ? "rgba(28,36,43,.28)" : "rgba(255,255,255,.28)") : base.light ? "rgba(28,36,43,.18)" : "rgba(255,255,255,.16)";
+  const ansi = ansiFor({ ...base, fg, fg2, surface }, forceDark);
+  const line = base.light ? "rgba(0,0,0,.09)" : "rgba(255,255,255,.08)";
+  const lineStrong = prefs.contrast === "high" ? (base.light ? "rgba(0,0,0,.30)" : "rgba(255,255,255,.28)") : base.light ? "rgba(0,0,0,.17)" : "rgba(255,255,255,.15)";
   const out: Record<string, string> = {
     "--bg": bg,
     "--wash": prefs.wash ? base.wash : bg,
     "--surface-1": surface,
     "--surface-2": base.surface2,
-    "--card": prefs.colors.surface ? surface : base.card ?? surface,
-    "--inset": mixHex(base.bg, base.light ? "#000000" : "#ffffff", base.light ? 0.03 : 0.015),
-    "--surface-3": base.surface3 ?? mixHex(base.surface2, fg, base.light ? 0.06 : 0.08),
-    "--surface-4": base.surface4 ?? mixHex(base.surface2, fg, base.light ? 0.12 : 0.14),
+    "--card": prefs.colors.surface ? surface : base.card,
+    "--inset": base.inset,
+    "--surface-3": base.surface3,
+    "--surface-4": base.surface4,
     "--line": line,
     "--line-strong": lineStrong,
     "--fg": fg,
     "--fg-2": fg2,
     "--fg-3": fg3,
-    "--accent": accent,
-    "--accent-ink": inkFor(accent),
-    "--primary": send,
-    "--primary-ink": sendInk,
-    "--primary-hover": HEX.test(send) ? mixHex(send, sendInk, 0.28) : send,
-    "--ok": status.ok,
-    "--warn": status.warn,
-    "--bad": status.bad,
-    "--info": status.info,
-    "--code": base.light ? "#7c3f00" : "#f5b56e",
+    "--accent": accents.accent,
+    "--accent-ink": accents.accentInk,
+    "--primary": accents.primary,
+    "--primary-ink": accents.primaryInk,
+    "--primary-hover": accents.primaryHover,
+    "--live": accents.live,
+    "--attention": accents.attention,
+    "--ok": accents.live,
+    "--warn": accents.attention,
+    "--bad": accents.attention,
+    "--info": accents.live,
     // Code is ink a step under the text, on every theme: tinted amber, a block of it read as a warning.
-    "--code-block": mixHex(fg, base.bg, 0.14),
-    "--term-bg": forceDark ? "#060606" : base.termBg,
-    "--term-fg": forceDark ? "#f5f5f5" : fg,
+    "--code-block": mixHex(fg, base.side, 0.14),
+    "--term-bg": forceDark ? DARK_TERMINAL.bg : base.inset,
+    "--term-fg": forceDark ? DARK_TERMINAL.fg : fg,
   };
   ansi.forEach((color, i) => {
     out[`--ansi-${i}`] = color;
@@ -361,21 +336,25 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
     for (const [name, size] of Object.entries(FS)) out[name] = `${Math.round(size * SCALE[prefs.scale] * 10) / 10}px`;
   }
   if (prefs.prose !== null) out["--fs-prose"] = `${prefs.prose}px`;
-  if (prefs.leading === "tight") out["--lh-prose"] = "1.4";
-  if (prefs.leading === "open") out["--lh-prose"] = "1.75";
-  if (prefs.column === "narrow") out["--chat-w"] = "760px";
-  if (prefs.column === "wide") out["--chat-w"] = "1200px";
+  if (prefs.leading === "tight") out["--lh-prose"] = "1.45";
+  if (prefs.leading === "open") out["--lh-prose"] = "1.8";
+  if (prefs.column === "narrow") out["--chat-w"] = "680px";
+  if (prefs.column === "wide") out["--chat-w"] = "920px";
   if (prefs.radius === "sharp") {
     out["--radius-xs"] = "2px";
     out["--radius-sm"] = "4px";
     out["--radius-md"] = "6px";
-    out["--radius-lg"] = "10px";
+    out["--radius-lg"] = "8px";
+    out["--radius-xl"] = "12px";
+    out["--radius-bubble"] = "10px";
   }
   if (prefs.radius === "round") {
-    out["--radius-xs"] = "10px";
-    out["--radius-sm"] = "14px";
-    out["--radius-md"] = "18px";
-    out["--radius-lg"] = "24px";
+    out["--radius-xs"] = "8px";
+    out["--radius-sm"] = "12px";
+    out["--radius-md"] = "16px";
+    out["--radius-lg"] = "20px";
+    out["--radius-xl"] = "26px";
+    out["--radius-bubble"] = "24px";
   }
   const stack = (family: string) => (family ? `"${family.replace(/"/g, "")}", var(--font)` : "");
   if (prefs.fontUi && !isWoff(prefs.fontUiUrl)) out["--font"] = `"${prefs.fontUi.replace(/"/g, "")}", -apple-system, "Segoe UI", sans-serif`;
@@ -459,7 +438,7 @@ export function applyAppearance(prefs: Prefs = readPrefs(), env: AppearanceEnv =
 
 export function writePrefs(prefs: Prefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ...prefs, look: LOOK }));
+    localStorage.setItem(KEY, JSON.stringify(prefs));
   } catch {
     /* private mode: the choice lasts for the visit */
   }

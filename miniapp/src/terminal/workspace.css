@@ -11,12 +11,12 @@
 
 /* ── the dots ───────────────────────────────────────────────────────────────────────────── */
 .tp-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1px var(--fg-3); }
-.tp-dot[data-state="working"] { background: var(--state-working); box-shadow: var(--state-glow) var(--state-working); animation: tp-pulse 1.6s var(--ease-out) infinite; }
-.tp-dot[data-state="waiting"] { background: var(--state-waiting); box-shadow: var(--state-glow) var(--state-waiting); }
-.tp-dot[data-state="done"] { background: var(--state-done); box-shadow: var(--state-glow) var(--state-done); }
-.tp-dot[data-state="failed"] { background: var(--state-failed); box-shadow: var(--state-glow) var(--state-failed); }
+.tp-dot[data-state="working"] { background: var(--state-working); animation: tp-pulse 1.6s var(--ease-out) infinite; }
+.tp-dot[data-state="waiting"] { background: var(--state-waiting); }
+.tp-dot[data-state="done"] { background: var(--state-done); }
+.tp-dot[data-state="failed"] { background: var(--state-failed); }
 .tp-dot[data-state="ended"] { background: var(--fg-3); box-shadow: none; opacity: .7; }
-.tp-dot[data-state="message"] { background: var(--state-message); box-shadow: var(--state-glow) var(--state-message); }
+.tp-dot[data-state="message"] { background: var(--state-message); }
 .tp-dot.none { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); animation: none; }
 @keyframes tp-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .tp-dot[data-state="working"] { animation: none; } }
@@ -160,7 +160,7 @@ button.tp-attn:hover { background: color-mix(in srgb, var(--data-wait) 20%, tran
 .tsl-seg { flex: none; display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .tsl-seg:not(:first-child)::before { content: ""; flex: none; width: 1px; height: 10px; margin: 0 4px; background: var(--line-strong); }
 .tsl-wait { color: var(--data-wait); }
-.tsl-wait-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--state-waiting); box-shadow: var(--state-glow) var(--state-waiting); }
+.tsl-wait-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--state-waiting); }
 .tsl-wait-why { flex: 0 8 auto; min-width: 3ch; max-width: 28ch; color: var(--fg-3); }
 .tsl-wait { flex: 0 8 auto; }
 .tsl-agent { flex: none; }
