@@ -2680,7 +2680,7 @@ def run() -> int:
         # Settings is a popup over the screen it was opened from, on its first section; it has no
         # `.screen` of its own to wait for.
         shot(page, "settings", "settings", wait=".settings-page")
-        shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
+        shot(page, "components", "settings/components", wait=".comp-item .comp-row", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)

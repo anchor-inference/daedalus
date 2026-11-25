@@ -68,7 +68,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "deps.environment.available": { en: "{n} tool available|{n} tools available", ru: "доступен {n} инструмент|доступно {n} инструмента|доступно {n} инструментов" },
   "deps.environment.missing": { en: "{n} missing", ru: "отсутствует: {n}" },
   "deps.environment.python": { en: "{n} Python package|{n} Python packages", ru: "{n} Python-пакет|{n} Python-пакета|{n} Python-пакетов" },
-  "deps.environment.details": { en: "Tool inventory", ru: "Список инструментов" },
   "deps.current": { en: "Current", ru: "Актуально" },
   "deps.placeholder": { en: "For example: add Pillow for image processing", ru: "Например: добавь Pillow для обработки изображений" },
   "deps.overview": { en: "How tools are added", ru: "Как добавляются инструменты" },
@@ -4829,10 +4828,11 @@ export const DICT: Record<string, Record<Lang, string>> = {
   // Settings -> Components. The optional pieces of an installation, each with what it unlocks and
   // what it would take to get it. A portable build leaves most of them out on purpose; what was
   // missing was anywhere that said so, which is why every word of this section exists.
-  "comp.title": { en: "Components", ru: "Компоненты" },
+  "comp.group.installation": { en: "Installation", ru: "Установка" },
+  "comp.group.list": { en: "Available components", ru: "Доступные компоненты" },
   "comp.intro": {
-    en: "The parts an installation does not have to carry. Each one is left out because most sessions never need it, and each one can be added here — what it unlocks is written on its card, and nothing is downloaded until you ask.",
-    ru: "Части, которые установка может и не нести. Каждая вынесена наружу потому, что большинству сессий она не нужна, и каждую можно добавить прямо здесь: что она открывает, написано на её карточке, и ничего не скачивается, пока вы не попросите.",
+    en: "The parts an installation does not have to carry. Each one is left out because most sessions never need it, and each one can be added here — what it unlocks is written on its row, and nothing is downloaded until you ask.",
+    ru: "Части, которые установка может и не нести. Каждая вынесена наружу потому, что большинству сессий она не нужна, и каждую можно добавить прямо здесь: что она открывает, написано в её строке, и ничего не скачивается, пока вы не попросите.",
   },
   "comp.mode.native": { en: "This installation runs as processes on this machine.", ru: "Эта установка работает процессами на этой машине." },
   "comp.mode.docker": { en: "This installation runs in a container, so what it has was decided by the image it runs.", ru: "Эта установка работает в контейнере, и её состав определён образом, из которого она запущена." },

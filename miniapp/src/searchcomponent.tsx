@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Switch } from "./ui/components";
+import { Badge, Button, Switch } from "./ui/primitives";
 import { Row } from "./settingsrow";
 import { api } from "./api";
 import { modelSize } from "./format";
@@ -29,32 +29,37 @@ export function SearchComponent() {
   }
   const progress = state?.progress;
   const downloading = progress && ["queued", "downloading", "verifying", "unpacking"].includes(progress.state);
-  return <div className="comp-card search-component">
-    <div className="comp-head"><b>{t("search.component")}</b></div>
-    <p className="sub">{t("search.local.hint")}</p>
-    {problem && <p className="sub attn">{problem}</p>}
+  return <div className="comp-item search-component" data-component="conversation-search">
+    <Row
+      className="comp-row"
+      title={<><span className="comp-name">{t("search.component")}</span>{state && <span className="comp-state"><Badge tone={state.installed ? "live" : undefined}>{t(state.installed ? "comp.state.installed" : "comp.state.missing")}</Badge></span>}</>}
+      desc={<>
+        <span className="comp-note">{t("search.local.hint")}</span>
+        {state && <span className="comp-note">{state.label} · {state.licence} · {modelSize(state.size_bytes)}</span>}
+      </>}
+    >
+      {state && !state.installed && !downloading && <Button size="sm" variant="primary" onClick={() => void action("/api/conversation-search/model", "post")}>{t("search.download")}</Button>}
+      {downloading && <Button size="sm" onClick={() => void action("/api/conversation-search/model/cancel", "post")}>{t("common.cancel")}</Button>}
+      {state?.installed && <Button size="sm" onClick={() => void action("/api/conversation-search/model", "delete")}>{t("search.remove")}</Button>}
+    </Row>
     {state && <>
-      <div className="sub">{state.label} · {state.licence} · {modelSize(state.size_bytes)}</div>
       {/* Switches like every other on/off in Settings; a bare checkbox here was the one of its kind. */}
-      <Row title={t("search.local")}>
+      <Row title={t("search.local")} desc={<span role="status">{t(`search.reason.${state.reason}`)}</span>}>
         <Switch checked={state.mode === "local"} onChange={(on) => void action("/api/conversation-search/settings", "put", { mode: on ? "local" : "off", paused: state.paused })} label={t("search.local")} />
       </Row>
-      <div className="sub" role="status">{t(`search.reason.${state.reason}`)}</div>
-      {state.reason === "no_runtime" && <code className="mono">{"uv sync --frozen --inexact --extra speech"}</code>}
-      {state.mode === "local" && <>
-        <div className="sub">{t("search.progress", { n: state.indexed, pending: state.pending })}</div>
-        {state.busy && <div className="sub">{t("search.waiting")}</div>}
-        <Row title={t("search.pause")}>
+      {state.mode === "local" && (
+        <Row title={t("search.pause")} desc={<>{t("search.progress", { n: state.indexed, pending: state.pending })}{state.busy && <> · {t("search.waiting")}</>}</>}>
           <Switch checked={state.paused} onChange={(paused) => void action("/api/conversation-search/settings", "put", { mode: state.mode, paused })} label={t("search.pause")} />
         </Row>
-      </>}
-      {downloading && <><progress max={progress.total_bytes || 1} value={progress.done_bytes} aria-label={t("search.download")} /><div className="sub">{modelSize(progress.done_bytes)} / {modelSize(progress.total_bytes)}</div></>}
-      {progress?.state === "failed" && <div className="sub attn">{t("search.download.failed")}</div>}
-      <div className="btnrow">
-        {!state.installed && !downloading && <button className="btn small primary" onClick={() => void action("/api/conversation-search/model", "post")}>{t("search.download")}</button>}
-        {downloading && <button className="btn small" onClick={() => void action("/api/conversation-search/model/cancel", "post")}>{t("common.cancel")}</button>}
-        {state.installed && <button className="btn small" onClick={() => void action("/api/conversation-search/model", "delete")}>{t("search.remove")}</button>}
-      </div>
+      )}
     </>}
+    {(problem || state?.reason === "no_runtime" || downloading || progress?.state === "failed") && (
+      <div className="comp-extra">
+        {problem && <div className="sub attn comp-line">{problem}</div>}
+        {state?.reason === "no_runtime" && <code className="mono comp-fix">{"uv sync --frozen --inexact --extra speech"}</code>}
+        {downloading && progress && <><progress max={progress.total_bytes || 1} value={progress.done_bytes} aria-label={t("search.download")} /><div className="sub">{modelSize(progress.done_bytes)} / {modelSize(progress.total_bytes)}</div></>}
+        {progress?.state === "failed" && <div className="sub attn comp-line">{t("search.download.failed")}</div>}
+      </div>
+    )}
   </div>;
 }

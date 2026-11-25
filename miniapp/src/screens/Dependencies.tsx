@@ -4,8 +4,8 @@ import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
-import { SelectionSingle } from "../ui/index";
-import { Row } from "../settingsrow";
+import { Badge, Button, Field, Select, Switch } from "../ui/primitives";
+import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
 
@@ -96,83 +96,91 @@ export function DependenciesTab() {
   const blocked = busy || planning || installing || offline;
   const available = view?.tools.filter((tool) => tool.available) ?? [];
   const missing = view?.tools.filter((tool) => !tool.available) ?? [];
-  return <div className="dependencies">
-    <div className="card deps-overview">
-    <div><div className="section-title">{t("deps.overview")}</div>
-    <p className="sub">{t("deps.intro")}</p></div>
-    {problem && <div className="sub attn" role="alert">{problem}</div>}
-    {!view && !offline && <p className="sub">{t("common.loading")}</p>}
-    {view && <>
-      <Row className="deps-mode" title={t(view.capability.mode === "native" ? "deps.mode.native" : "deps.mode.docker")} desc={t(view.capability.mode === "native" ? "deps.native" : "deps.docker")} />
-      {!view.capability.python && <p className="sub attn">{view.capability.reason}</p>}
-      {!view.capability.system && view.capability.mode === "native" && <p className="sub">{t("deps.noSystem")}</p>}
-    </>}
-    </div>
+  const openReview = () => { setAccepted(false); setReview(true); };
+  return <>
+    <SetGroup title={t("deps.overview")} help={t("deps.intro")}>
+      {problem && <SetBlock><div className="sub attn" role="alert">{problem}</div></SetBlock>}
+      {!view && !offline && <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>}
+      {view && <>
+        <Row title={t(view.capability.mode === "native" ? "deps.mode.native" : "deps.mode.docker")} desc={t(view.capability.mode === "native" ? "deps.native" : "deps.docker")} />
+        {!view.capability.python && <SetBlock><span className="sub attn">{view.capability.reason}</span></SetBlock>}
+        {!view.capability.system && view.capability.mode === "native" && <SetBlock><span className="set-hint">{t("deps.noSystem")}</span></SetBlock>}
+      </>}
+    </SetGroup>
     {/* Losing the host is a failure of the same feature as a failed install, so it takes the same
-        card, icon first, rather than a line of coloured text inside the description. */}
-    {offline && <section className="card deps-job offline" role="status">
-        <div className="deps-job-title"><span className="deps-job-icon"><Icon name="alert" size={18} /></span><span><b>{t("deps.offline.title")}</b><span className="sub">{t("deps.offline")}</span></span></div>
-        {/* The poll retries on its own every few seconds; the button is for the reader who has just
-            fixed the host and wants the answer now, and it gives the card something to do. */}
-        <div className="btnrow"><button className="btn small" onClick={() => void load()}><Icon name="reload" size={14} /> {t("common.retry")}</button></div>
-      </section>}
-    {view && view.job && (installing || view.job.state === "failed") && <section className={`card deps-job ${view.job.state}`} aria-label={t("deps.installProgress")}>
+        group, icon first, rather than a line of coloured text inside the description. */}
+    {offline && <SetGroup className="deps-job offline">
+      <SetBlock>
+        <div className="deps-job-title" role="status"><span className="deps-job-icon"><Icon name="alert" size={18} /></span><span><b>{t("deps.offline.title")}</b><span className="sub">{t("deps.offline")}</span></span></div>
+      </SetBlock>
+      {/* The poll retries on its own every few seconds; the button is for the reader who has just
+          fixed the host and wants the answer now, and it gives the group something to do. */}
+      <SetFoot><Button size="sm" icon="reload" onClick={() => void load()}>{t("common.retry")}</Button></SetFoot>
+    </SetGroup>}
+    {view && view.job && (installing || view.job.state === "failed") && <SetGroup title={t("deps.installProgress")} className={`deps-job ${view.job.state}`}>
+      <SetBlock>
         <div className="deps-job-title"><span className="deps-job-icon"><Icon name={view.job.state === "failed" ? "close" : "download"} size={18} /></span><span><b>{t(`deps.job.${view.job.state}`)}</b><span className="sub">{installing ? t("deps.installingHint") : view.job.error}</span></span></div>
         <DependencyProgress value={view.job} active={installing} installation />
-        {/* The host hands a failed installation's patch back for review, since the recipe was
-            restored; without this the card reported the failure and offered nothing to do. */}
-        {view.job.state === "failed" && proposal?.state === "ready" && proposal.id === view.job.id && <div className="btnrow"><button className="btn small" disabled={busy || offline} onClick={() => { setAccepted(false); setReview(true); }}><Icon name="reload" size={14} /> {t("deps.retry")}</button></div>}
-      </section>}
+      </SetBlock>
+      {/* The host hands a failed installation's patch back for review, since the recipe was
+          restored; without this the group reported the failure and offered nothing to do. */}
+      {view.job.state === "failed" && proposal?.state === "ready" && proposal.id === view.job.id && <SetFoot><Button size="sm" icon="reload" disabled={busy || offline} onClick={openReview}>{t("deps.retry")}</Button></SetFoot>}
+    </SetGroup>}
     {view && <>
-      {!installing && <div className="card deps-request-card" data-setting="dependencies.request">
-      <div className="section-title">{t("deps.add.title")}</div><p className="sub">{t("deps.add.sub")}</p>
-      <label className="deps-label" htmlFor="dependency-request">{t("deps.request")}</label>
-      <textarea id="dependency-request" className="field" rows={3} maxLength={2000} value={request} disabled={blocked} onChange={(event) => setRequest(event.target.value)} placeholder={t("deps.placeholder")} />
-      {/* The planner's model is a setting of the request, so it is a row like every other choice; the
-          actions follow on their own line. */}
-      <Row title={t("deps.model")} stack data-setting="dependencies.model">
-        {view.models.length
-          ? <SelectionSingle id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} items={view.models.map((model) => ({ id: model.id, label: model.label }))} />
-          : <span className="sub">{t("deps.noModels")}</span>}
-      </Row>
-      <div className="deps-request-actions"><div className="btnrow">
-        <button className="btn primary" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}><Icon name="bolt" size={15} /> {t(planning ? "deps.planning" : "deps.prepare")}</button>
-        {proposal && ["planning", "validating", "ready"].includes(proposal.state) && <button className="btn" disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</button>}
-        {proposal?.state === "ready" && <button className="btn" onClick={() => { setAccepted(false); setReview(true); }}>{t("deps.review")}</button>}
-      </div></div>
-      {proposal?.state === "failed" && <p className="sub attn" role="alert">{proposal.error}</p>}
-      {proposal && <DependencyProgress value={proposal} active={planning} />}
-      </div>}
-      <div className="card deps-environment" data-setting="dependencies.environment">
-        <div className="deps-environment-head"><span><b>{t("deps.environment")}</b><span className="sub">{[plural("deps.environment.available", available.length), t("deps.environment.missing", { n: String(missing.length) }), plural("deps.environment.python", view.packages.length)].join(" · ")}</span></span>{view.job?.state === "completed" && <span className="chip"><Icon name="check" size={13} />{t("deps.current")}</span>}</div>
-        {/* The missing ones are named beside the present ones: the summary counted them and nothing on
-            the card said which they were. */}
-        <div className="deps-tool-chips">
-          {available.map((tool) => <span className="chip" key={tool.name}><code>{tool.name}</code></span>)}
-          {missing.map((tool) => <span className="chip missing" key={tool.name} title={t("deps.missing")}><code>{tool.name}</code><span>{t("deps.missing")}</span></span>)}
-        </div>
-        <details><summary>{t("deps.environment.details")}</summary><div className="deps-tools">
-          {view.tools.map((tool) => <div className="kv" key={tool.name}><code>{tool.name}</code><span className={tool.available ? "sub" : "sub faint"}>{tool.available ? tool.version : t("deps.missing")}</span></div>)}
-        </div></details>
-        <details><summary>{t("deps.pythonPackages", { n: String(view.packages.length) })}</summary>
-          {view.packages.length ? view.packages.map(([name, version]) => <div className="kv" key={name}><code>{name}</code><span className="sub">{version}</span></div>) : <p className="sub">{t("deps.pythonEmpty")}</p>}
+      {!installing && <SetGroup title={t("deps.add.title")} help={t("deps.add.sub")} className="deps-request-card" data-setting="dependencies.request">
+        <SetBlock>
+          <Field multiline id="dependency-request" label={t("deps.request")} rows={3} maxLength={2000} value={request} disabled={blocked} onChange={(event) => setRequest(event.target.value)} placeholder={t("deps.placeholder")} />
+        </SetBlock>
+        {/* The planner's model is a setting of the request, so it is a row like every other choice. */}
+        <Row title={t("deps.model")} data-setting="dependencies.model">
+          {view.models.length
+            ? <Select id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} options={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+            : <span className="sub">{t("deps.noModels")}</span>}
+        </Row>
+        {proposal?.state === "failed" && <SetBlock><p className="sub attn" role="alert">{proposal.error}</p></SetBlock>}
+        {proposal && <SetBlock><DependencyProgress value={proposal} active={planning} /></SetBlock>}
+        <SetFoot>
+          <Button variant="primary" icon="bolt" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}>{t(planning ? "deps.planning" : "deps.prepare")}</Button>
+          {proposal && ["planning", "validating", "ready"].includes(proposal.state) && <Button disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</Button>}
+          {proposal?.state === "ready" && <Button onClick={openReview}>{t("deps.review")}</Button>}
+        </SetFoot>
+      </SetGroup>}
+      {/* The missing tools are named beside the present ones: the summary counts them and a count
+          alone does not say which they are. */}
+      <SetGroup
+        title={t("deps.environment")}
+        note={[plural("deps.environment.available", available.length), t("deps.environment.missing", { n: String(missing.length) }), plural("deps.environment.python", view.packages.length)].join(" · ")}
+        action={view.job?.state === "completed" && <Badge tone="live"><Icon name="check" size={13} />{t("deps.current")}</Badge>}
+        className="deps-environment"
+        data-setting="dependencies.environment"
+      >
+        {view.tools.map((tool) => (
+          <Row key={tool.name} title={<code>{tool.name}</code>}>
+            {tool.available ? <span className="settings-value">{tool.version}</span> : <Badge>{t("deps.missing")}</Badge>}
+          </Row>
+        ))}
+        <details className="deps-more"><summary>{t("deps.pythonPackages", { n: String(view.packages.length) })}</summary>
+          {view.packages.length ? view.packages.map(([name, version]) => <div className="deps-package" key={name}><code>{name}</code><span className="sub">{version}</span></div>) : <p className="sub">{t("deps.pythonEmpty")}</p>}
         </details>
-        <details><summary>{t("deps.recipe")}</summary><pre>{JSON.stringify(view.recipe, null, 2)}</pre></details>
-      </div>
+        <details className="deps-more"><summary>{t("deps.recipe")}</summary><pre>{JSON.stringify(view.recipe, null, 2)}</pre></details>
+      </SetGroup>
     </>}
     {review && proposal?.state === "ready" && proposal.proposal && <Sheet title={t("deps.review")} onClose={() => !busy && setReview(false)}>
-      <div className="dependencies">
+      <div className="deps-review">
         <p className="deps-explanation">{proposal.explanation}</p>
         <pre className="deps-patch">{proposal.proposal.patch}</pre>
         <p className="sub attn">{t("deps.warning")}</p>
         {view?.capability.mode === "native" && <p className="sub">{t("deps.nativeWarning")}</p>}
         {problem && <p className="sub attn" role="alert">{problem}</p>}
-        <label className="deps-consent"><input type="checkbox" checked={accepted} disabled={busy} onChange={(event) => setAccepted(event.target.checked)} />{t("deps.consent")}</label>
+        {/* The one gate before a restart is a row with a switch: the whole sentence is what is agreed to. */}
+        <Row className="deps-consent" title={t("deps.consent")}>
+          <Switch checked={accepted} disabled={busy} onChange={setAccepted} label={t("deps.consent")} />
+        </Row>
         <div className="btnrow">
-          <button className="btn primary" disabled={!accepted || busy || offline || installing} onClick={() => void act(`/api/dependencies/${proposal.id}/approve`, {}, true)}>{t("deps.install")}</button>
-          <button className="btn" disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</button>
+          <Button variant="primary" disabled={!accepted || busy || offline || installing} onClick={() => void act(`/api/dependencies/${proposal.id}/approve`, {}, true)}>{t("deps.install")}</Button>
+          <Button disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</Button>
         </div>
       </div>
     </Sheet>}
-  </div>;
+  </>;
 }

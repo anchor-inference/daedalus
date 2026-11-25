@@ -233,47 +233,26 @@ input.field[type="range"] {
   accent-color: var(--fg);
 }
 
-/* Settings -> Components. The optional pieces of an installation, one card each.
-   Dark elevation: the page's card is --card, a component sits on --surface-2 above it, and the one
-   that is already installed sits on --surface-3 — lighter to come forward, never a darker slab, with
-   a hairline for the seam. The grid is the same auto-fill the two speech pickers use, so the three
-   sections of Settings that are lists of things read as one thing. */
-.comp-restart { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
-.comp-restart > b { font-size: var(--fs-14); font-weight: 500; }
-/* The minimum is capped at the column's width and a card may shrink below its content: a card's fix
-   command is `white-space: pre`, and with the default `auto` minimum it widened the one phone column
-   past the screen, cutting every card's text at the right edge. */
-/* Match catalogue tile sizes so status and capabilities can be compared down the columns. */
-.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 12px; }
+/* Settings -> Components. The optional pieces of an installation, one row each in a settings card:
+   the name and its state, grey lines under it for what it is and what it unlocks, one action at the
+   end. What an install is doing, or the command that does it by hand, takes the lines under the row. */
+.comp-name { margin-right: 8px; }
+.comp-state { display: inline-flex; vertical-align: 1px; }
+.comp-note { display: block; }
+.comp-extra { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
+.comp-extra progress { width: 100%; accent-color: var(--accent); }
 @media (max-width: 599px) {
   /* A single column does not need matching heights across separate rows. */
-  .comp-grid, .stt-list { grid-auto-rows: auto; }
+  .stt-list { grid-auto-rows: auto; }
 }
-/* Each component is a card on the page; an installed one is marked by its tag, not by a brighter
-   fill or a stronger edge that made the grid a patchwork. */
-.comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.comp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.comp-head b { font-size: var(--fs-14); font-weight: 600; flex: 1 1 auto; }
-.comp-what { margin: 0; }
-/* The state is a tag: a wash of its own colour and no edge. */
-.comp-chip { flex: none; padding: 2px 7px; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); background: color-mix(in srgb, currentColor 12%, transparent); }
-.comp-chip.comp-installed, .comp-chip.comp-svc-running { color: var(--ok); }
-.comp-chip.comp-installing, .comp-chip.comp-svc-starting { color: var(--live); }
-.comp-chip.comp-unavailable { color: var(--fg-3); }
-.comp-chip.comp-svc-failed { color: var(--bad); }
-.comp-enables { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-.comp-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.comp-tag { padding: 2px 7px; border-radius: var(--radius-xs); background: var(--surface-2); font-size: var(--fs-12); color: var(--fg-2); }
 .comp-line { margin-top: 2px; }
 .comp-running { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .comp-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
 .comp-bar-fill { display: block; height: 100%; width: 40%; border-radius: 2px; background: var(--live); animation: comp-slide 1.5s ease-in-out infinite; }
 @keyframes comp-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
 .comp-step { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.comp-actions { margin-top: 4px; }
 .comp-byhand { margin-top: 4px; }
 .comp-fix { display: block; margin-top: 4px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-mono); overflow-x: auto; white-space: pre; }
-.comp-detail { margin-top: 2px; font-size: var(--fs-12); }
 .voice-needs { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
 
 
@@ -496,7 +475,6 @@ input.field[type="range"] {
   .folder.single .folder-expand { display:none; }
   .folder.single .folder-top > .erow { padding-right:0; }
 }
-.search-component progress { width: 100%; accent-color: var(--accent); }
 
 /* Subagents are peers of files and jobs, but opening one is navigation rather than panel content.
    Keep the roster at the session edge where it is visible without occupying the Details tab. */
