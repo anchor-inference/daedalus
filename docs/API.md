@@ -199,7 +199,14 @@ merge below (**409** when it is not in review, or the merge is refused); `GET /a
 is one project's tasks. A project's staff
 and orchestrator see its whole board, move only their own tasks and never to done; an ordinary agent
 keeps its own board, without the team's tasks. Each change is a `task.created`, `task.moved`,
-`task.assigned` or `task.accepted` event naming its `actor`.
+`task.assigned` or `task.accepted` event naming its `actor`. `GET /api/board/{id}/events?limit=` is a
+card's history, oldest first, from a table written with each change whichever path made it — a member's
+report into review, a verdict, a dependent a close freed and a CI or contract change that sent it back
+included, though those announce no event: one line per change of its status (`task.moved`), owner
+(`task.assigned`), accepted result, title, priority or due date (`task.changed` with `field`), and its
+removal, each with `actor` (`system` when no command made it), the command's `operation`, `cause` for a
+dependent moved by another card, and `backfilled` for a line reconstructed from what was left when the
+table was made, before which the card's history was not recorded.
 
 **A card's contract and its acceptance.** A project task also carries `requirements`: the conditions
 all of its work must meet, each numbered (`R1` …) with its `text`, `kind` (`quality`, `scope`,

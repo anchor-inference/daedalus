@@ -172,13 +172,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/board/{task_id}/events")
     async def history(task_id: str, limit: int = Query(default=200, ge=1, le=1000),
                       _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
-        """What happened to one card, oldest first, from the stored ``task.*`` events.
+        """What happened to one card, oldest first, from the card's own history table.
 
-        Read for a removed card too: its history stays readable. The events are the bus's own table, so
-        the list reaches back as far as that table's retention does, and no further; nothing is
-        written for a change made without an event. An edit is announced as ``task.changed`` and,
-        when it also moved or reassigned the card, as ``task.moved`` or ``task.assigned`` in the same
-        step; the bare ``task.changed`` of such a step is left out, since it says nothing the other does not.
+        Read for a removed card too: its history stays readable. Every change of its status, owner,
+        priority, due date or title, its accepted result and its removal is a line, written with the
+        change itself whichever path made it; a line marked ``backfilled`` was reconstructed when the
+        table was made, and what happened before it was not recorded.
         """
         if await app.db.fetchone("SELECT 1 FROM board_tasks WHERE id = ?", (task_id,)) is None:
             raise HTTPException(404, "no such task")

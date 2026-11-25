@@ -2,7 +2,7 @@
 
 Each is pinned from the side that could break something else: a date is an instant read the same
 everywhere, a card the operator keeps is never launched or handed back by the machinery that works
-unassigned cards, and the history is read from the bus's own table without scanning it.
+unassigned cards, and the history is the card's own table, read by an index without a scan.
 """
 
 from __future__ import annotations
@@ -298,14 +298,16 @@ async def test_a_removed_cards_history_stays_readable(client: httpx.AsyncClient)
     assert task["id"] not in {t["id"] for t in await board(client)}
     events = (await client.get(f"/api/board/{task['id']}/events", headers=HEADERS)).json()
     assert events[0]["type"] == "task.created" and "task.moved" in {e["type"] for e in events}
-    assert events[-1]["to"] == "dropped"
+    # Removing an open card drops it first: the drop and the removal are a line each, in that order.
+    dropped, removed = events[-2:]
+    assert (dropped["type"], dropped["to"]) == ("task.moved", "dropped")
+    assert removed["type"] == "task.removed" and removed["operation"] == "board.task.remove"
 
 
 async def test_the_history_is_found_by_an_index_not_a_scan(app: Any) -> None:
     plan = " ".join(str(r["detail"]) for r in await app.db.fetchall(
-        "EXPLAIN QUERY PLAN SELECT seq FROM app_events WHERE json_extract(payload_json, '$.task_id') = ? AND type LIKE 'task.%' ORDER BY seq DESC LIMIT 5",
-        ("abc",)))
-    assert "app_events_by_task" in plan and "SCAN" not in plan
+        "EXPLAIN QUERY PLAN SELECT seq FROM board_task_history WHERE task_id = ? ORDER BY seq DESC LIMIT 5", ("abc",)))
+    assert "board_task_history_by_task" in plan and "SCAN" not in plan
 
 
 # -- the migration -------------------------------------------------------------------------------
@@ -321,7 +323,10 @@ async def test_the_migration_adds_the_columns_and_the_index_and_keeps_every_row(
             (f"t{n}", f"task {n}"))
         await db.execute("INSERT INTO app_events(at, type, payload_json) VALUES ('2026-01-01T00:00:00.000Z', 'task.created', ?)",
                          (f'{{"task_id": "t{n}", "title": "task {n}"}}',))
-    await db.execute("DROP INDEX app_events_by_task")
+    # The shape before these columns: no history triggers yet (they read the columns), and the index
+    # a later migration removes again is already gone in a fully migrated database.
+    await db.execute("DROP TRIGGER board_task_history_created")
+    await db.execute("DROP TRIGGER board_task_history_changed")
     await db.execute("ALTER TABLE board_tasks DROP COLUMN assignee_operator")
     await db.execute("ALTER TABLE board_tasks DROP COLUMN due_at")
     # Found by the step it runs, since later migrations follow it.
@@ -339,6 +344,7 @@ async def test_the_migration_adds_the_columns_and_the_index_and_keeps_every_row(
             assert (await again.fetchone("SELECT count(*) AS n FROM app_events"))["n"] == 3
             assert [r[0] for r in await again.fetchall("PRAGMA integrity_check")] == ["ok"]
             assert await again.fetchall("PRAGMA foreign_key_check") == []
-            assert len(await again.fetchall("SELECT 1 FROM sqlite_master WHERE name = 'app_events_by_task'")) == 1
+            # The index the ring-read history used is gone again: the card's history has its own table.
+            assert await again.fetchall("SELECT 1 FROM sqlite_master WHERE name = 'app_events_by_task'") == []
         finally:
             await again.close()
