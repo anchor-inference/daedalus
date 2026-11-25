@@ -260,8 +260,8 @@ class SettingsChanges:
                 # Reject may be pressed on a lock screen; Apply opens the app, as a host-level permission
                 # does: a lock-screen token is not someone who should change how the agent is run.
                 actions=(
-                    Action("apply", render("settings.apply", lang), "primary"),
-                    Action("reject", render("settings.reject", lang), "default", quick=True),
+                    Action("apply", render("settings.apply", lang), "primary", description=render("settings.apply.about", lang)),
+                    Action("reject", render("settings.reject", lang), "default", quick=True, description=render("settings.reject.about", lang)),
                     Action("open", render("open", lang), "ghost"),
                 ),
                 request_ref=ref, dedupe_key=ref, source="settings",

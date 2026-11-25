@@ -97,6 +97,8 @@ async def test_anything_else_waits_for_apply_and_the_agent_hears_the_outcome(db:
     assert "Waiting for the operator" in rules.result_text(record)
     shown = await entry(app, record)
     assert shown["needs_you"] and [a["id"] for a in shown["actions"]] == ["apply", "reject", "open"]
+    said = {a["id"]: a.get("description") for a in shown["actions"]}
+    assert said["apply"].startswith("Saves the change shown here") and said["reject"].startswith("Leaves the settings as they are") and said["open"] is None
     assert "limits.max_iterations: 0 → 300 (next step)" in shown["body"] and "the operator asked for it" in shown["body"]
     # The same change proposed twice is the same card, not a second one.
     assert (await propose(service, {"limits": {"max_iterations": 300}}, call="c2"))["id"] == record["id"]

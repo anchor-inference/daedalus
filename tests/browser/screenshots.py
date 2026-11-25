@@ -482,9 +482,17 @@ def notification(id: int, at: str, kind: str, category: str, level: str, tone: s
 
 
 def buttons(*pairs: tuple[str, str, str]) -> list[dict]:
-    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick."""
-    return [{"id": i, "label": label, "style": style, "quick": i != "open"} for i, label, style in pairs]
+    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick.
 
+    An answer says what it does, as the host's own producers write it; Open says nothing and has no key.
+    """
+    return [{"id": i, "label": label, "style": style, "quick": i != "open", **({"description": ABOUT[i.split(":")[0]]} if i.split(":")[0] in ABOUT else {})} for i, label, style in pairs]
+
+
+ABOUT = {
+    "en": {"allow": "Allows this one action, once, and the agent carries on.", "deny": "Keeps it refused; nothing runs.", "answer": "Answers the question with this option, and the run goes on."},
+    "ru": {"allow": "Разрешает это одно действие, один раз, и агент продолжает работу.", "deny": "Оставляет отказ в силе, ничего не выполняется.", "answer": "Отвечает на вопрос этим вариантом, и запуск продолжается."},
+}[LANG]
 
 # The host writes these in the operator's language; the Russian run gets the Russian words it would.
 NOTICE_WORDS = {

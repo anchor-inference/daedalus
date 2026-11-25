@@ -114,15 +114,24 @@ ASK_BUTTONS_MAX = 4
 
 @dataclass(frozen=True)
 class Action:
-    """A button on a notification. ``quick`` actions may be taken without opening the app."""
+    """A button on a notification. ``quick`` actions may be taken without opening the app.
+
+    ``description`` says what pressing it does, in the operator's language, and is set only by a producer
+    that knows: a button whose effect the host cannot state truthfully carries none, and the key is then
+    absent from :meth:`as_dict` rather than empty.
+    """
 
     id: str
     label: str
     style: ActionStyle = "default"
     quick: bool = False
+    description: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "label": self.label, "style": self.style, "quick": self.quick}
+        shown: dict[str, Any] = {"id": self.id, "label": self.label, "style": self.style, "quick": self.quick}
+        if self.description:
+            shown["description"] = self.description
+        return shown
 
 
 @dataclass(frozen=True)
@@ -1065,7 +1074,8 @@ class NotificationRouter:
         actions: list[Action] = []
         only = questions[0] if len(questions) == 1 else None
         if only is not None and not only.get("multi") and 0 < len(only.get("options") or []) <= ASK_BUTTONS_MAX:
-            actions = [Action(f"answer:{i}", str(o.get("label") or "")[:60], "primary" if i == 0 else "default", quick=True) for i, o in enumerate(only["options"])]
+            about = render("ask.answer.about", self._lang())
+            actions = [Action(f"answer:{i}", str(o.get("label") or "")[:60], "primary" if i == 0 else "default", quick=True, description=about) for i, o in enumerate(only["options"])]
         actions.append(Action("open", render("open", self._lang()), "ghost"))
         ref = str(p["request_ref"])
         await self.service.post(Draft(
@@ -1091,8 +1101,8 @@ class NotificationRouter:
             await self._blocked_pending(event)
             return
         actions = (
-            Action("allow", render("allow", lang), "primary", quick=quick),
-            Action("deny", render("deny", lang), "default", quick=quick),
+            Action("allow", render("allow", lang), "primary", quick=quick, description=render("allow.about", lang)),
+            Action("deny", render("deny", lang), "default", quick=quick, description=render("deny.about", lang)),
             Action("open", render("open", lang), "ghost"),
         )
         ref = str(p["request_ref"])
@@ -1124,8 +1134,8 @@ class NotificationRouter:
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)),
             actions=(
-                Action("allow", render("allow.anyway", lang), "primary"),
-                Action("deny", render("rules.keep", lang), "default"),
+                Action("allow", render("allow.anyway", lang), "primary", description=render("allow.anyway.about", lang)),
+                Action("deny", render("rules.keep", lang), "default", description=render("rules.keep.about", lang)),
                 Action("open", render("open", lang), "ghost"),
             ),
             request_ref=ref, dedupe_key=ref, source="rules", handled=self._telegram_handled(p),
@@ -1144,7 +1154,7 @@ class NotificationRouter:
             kind="handoff", tone="warning", level="urgent",
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)),
-            actions=(Action("done", render("handoff.done", lang), "primary", quick=True), Action("open", render("open", lang), "ghost")),
+            actions=(Action("done", render("handoff.done", lang), "primary", quick=True, description=render("handoff.done.about", lang)), Action("open", render("open", lang), "ghost")),
             request_ref=ref, dedupe_key=ref, source="handoff", handled=self._telegram_handled(p),
         ))
 

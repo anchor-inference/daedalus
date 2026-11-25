@@ -114,7 +114,7 @@ def now_iso() -> str:
 
 
 def notification(id_: int, title: str, *, session: str | None, category: str = "run_finished", level: str = "normal", tone: str = "ok", project: str | None = None, request: str | None = None) -> dict:
-    actions = [{"id": "allow", "label": "Allow", "style": "primary", "quick": True}, {"id": "deny", "label": "Deny", "style": "default", "quick": True}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}] if request else []
+    actions = [{"id": "allow", "label": "Allow", "style": "primary", "quick": True, "description": "Allows this one action, once, and the agent carries on."}, {"id": "deny", "label": "Deny", "style": "default", "quick": True, "description": "Keeps it refused; nothing runs."}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}] if request else []
     return {
         "id": id_, "at": now_iso(), "updated_at": now_iso(), "category": category, "kind": category, "level": level, "tone": tone, "title": title,
         "body": "Exec: npm install sharp" if request else "", "link": f"/app/agents/{session}" if session else "", "session_id": session, "run_id": None,

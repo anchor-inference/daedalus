@@ -205,6 +205,13 @@ async def test_the_done_view_lists_finished_runs_and_nothing_else(service: Notif
     assert "Failed" not in [e["title"] for e in done["entries"]]
 
 
+async def test_an_action_describes_itself_only_when_its_producer_said_what_it_does() -> None:
+    plain = Action("open", "Open", "ghost")
+    assert plain.as_dict() == {"id": "open", "label": "Open", "style": "ghost", "quick": False}
+    described = Action("allow", "Allow", "primary", quick=True, description="Allows this one action.")
+    assert described.as_dict() == {"id": "allow", "label": "Allow", "style": "primary", "quick": True, "description": "Allows this one action."}
+
+
 async def test_delete_and_prune_keep_what_is_unseen_or_still_open(service: NotificationService) -> None:
     unseen = await service.post(Draft("system", "unseen"))
     seen = await service.post(Draft("system", "seen"))
