@@ -223,3 +223,46 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-phone-end { color: var(--bad); }
 
 .pagehead .loadbar { margin: 6px 0 2px; }
+
+/* On a phone: the team page and the hire sheet. */
+@media (max-width: 1023px) {
+  /* the team: a member's row, its long-press sheet, a big team's groups */
+  .ph-member-av { position: relative; display: inline-grid; }
+  .ph-member-av .staff-avatar { width: 40px; height: 40px; font-size: var(--fs-13); }
+  .ph-member-av .ph-st { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--bg); background: var(--fg-3); }
+  .ph-st[data-tone="working"] { background: var(--live); } .ph-st[data-tone="review"], .ph-st[data-tone="free"] { background: var(--ok); }
+  .ph-st[data-tone="waiting"] { background: var(--warn); } .ph-st[data-tone="error"] { background: var(--bad); }
+  .ph-st[data-tone="off"] { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+  .ph-srow-member { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+  .ph-srow-member .list-row-lead { margin-top: 2px; }
+  .ph-srow-member .list-row-trail { padding-top: 3px; }
+  .ph-member-t { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ph-member-t b { flex: none; font-weight: 600; }
+  .ph-member-role { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
+  .ph-member-t .harness-badge { flex: none; }
+  .ph-host { flex: none; gap: 3px; height: 22px; padding: 0 6px; font-size: var(--fs-12); }
+  .ph-member-st { flex: none; }
+  .ph-member-st[data-tone="working"] { color: var(--live); } .ph-member-st[data-tone="review"] { color: var(--ok); }
+  .ph-member-st[data-tone="waiting"], .ph-member-st[data-tone="queued"] { color: var(--warn); } .ph-member-st[data-tone="error"] { color: var(--bad); }
+  .list-row-m .ph-ell.waiting { color: var(--warn); }
+  .ph-member-spend { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-member-tm { white-space: nowrap; }
+  .ph-member-wait { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-13); line-height: 1.35; color: var(--warn); overflow-wrap: anywhere; }
+  .ph-member-pv { display: inline-flex; align-items: center; gap: 10px; }
+  .ph-showmore { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--nav-row-h); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-14); cursor: pointer; }
+  .ph-team > .ph-empty { min-height: 60vh; }
+  /* The rows run edge to edge as every phone list does; the request card keeps the page's margin. */
+  .screen.ph-team { padding-left: 0; padding-right: 0; }
+  .screen.ph-team > .needs-banner, .screen.ph-team > .loading, .screen.ph-team > .team-setups { margin-left: var(--gutter); margin-right: var(--gutter); }
+  /* Hiring and editing a member: labelled fields in the phone's field shape, choices as segmented
+     tracks, and the decision as two wide buttons at the foot. */
+  .staff-sheet:not(.ph-member-sheet) label.field, .staff-sheet:not(.ph-member-sheet) legend.field { margin: var(--space-3) 4px 6px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .staff-sheet:not(.ph-member-sheet) input.field, .staff-sheet:not(.ph-member-sheet) select.field, .staff-sheet:not(.ph-member-sheet) textarea.field { min-height: var(--tap); padding: 10px 14px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .staff-sheet:not(.ph-member-sheet) .segmented { gap: 2px; margin: 0; padding: 2px; border: 0; border-radius: 10px; background: var(--surface-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button { position: relative; min-height: 38px; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button::after { content: ""; position: absolute; inset: -3px 0; }
+  .staff-sheet:not(.ph-member-sheet) .segmented button.on { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot { flex-wrap: nowrap; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn.danger { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+}

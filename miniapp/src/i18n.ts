@@ -8164,7 +8164,6 @@ Object.assign(DICT, {
   "pmore.settings.hint": { en: "Budget, environment, remove project", ru: "Бюджет, окружение, удаление проекта" },
   "pmore.created": { en: "created {date}", ru: "создан {date}" },
   "orch.error": { en: "Could not load the projects", ru: "Не удалось загрузить проекты" },
-  "orch.empty.title": { en: "No orchestrated project yet", ru: "Пока нет проектов с оркестратором" },
   "pattn.checked": { en: "last checked {time}", ru: "проверено в {time}" },
   "pattn.waiting": { en: "{n} waiting|{n} waiting", ru: "{n} ждёт|{n} ждут|{n} ждут" },
   "pattn.refresh": { en: "Check again", ru: "Проверить снова" },

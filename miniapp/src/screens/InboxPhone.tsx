@@ -25,7 +25,8 @@ import { MovesInProgress } from "../project/moves";
 import { errorText } from "../ui";
 import { deleteWithUndo, toast as statusLine, type MenuItem } from "../ui/dialogs";
 import { PendingSchedules, usePendingSchedules } from "../schedulecard";
-import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
 import { IconButton, Menu, Row, Sheet } from "../ui/primitives";
 
 type Open = { kind: "entry"; id: number } | { kind: "proposal"; id: string } | { kind: "menu" } | { kind: "project" } | { kind: "bulk" } | null;

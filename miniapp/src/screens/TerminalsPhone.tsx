@@ -14,7 +14,8 @@ import { navigate, pathFor } from "../router";
 import { peek, useQuery } from "../store";
 import { FILTERS, groupTerminals, headerCounts, matches, type TerminalFilter } from "../terminal/preview";
 import { TerminalCard } from "../terminal/phonecard";
-import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
 import { IconButton, Sheet } from "../ui/primitives";
 import { FreeTerminalPicker, LIST_KEY } from "./Terminals";
 

@@ -7,9 +7,9 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError, type Ask } from "../api";
 import { t } from "../i18n";
-import { Icon } from "../icons";
 import { invalidate, useOffline } from "../store";
 import { errorText } from "../ui";
+import { Button } from "../ui/primitives";
 import { answeredBy } from "./model";
 
 const enc = encodeURIComponent;
@@ -48,12 +48,12 @@ export function PhoneAskAnswers({ ask, projectId, toast, always = false, server 
   if (writing) {
     return (
       <form className="ph-ask-own" onSubmit={submit}>
-        <input className="ph-field" autoFocus value={text} maxLength={4000} enterKeyHint="send"
+        <input className="field" autoFocus value={text} maxLength={4000} enterKeyHint="send"
           placeholder={t(ask.kind === "permission" ? "phone.ask.why" : "focus.ask.placeholder")} aria-label={t(ask.kind === "permission" ? "phone.ask.why" : "focus.ask.placeholder")}
           onChange={(e) => setText(e.target.value)} />
         <div className="ph-foot-row even">
-          <button type="button" className="ph-btn" onClick={() => setWriting(false)}>{t("common.cancel")}</button>
-          <button type="submit" className={`ph-btn ${ask.kind === "permission" ? "danger" : ""}`} disabled={busy || offline || (ask.kind !== "permission" && !text.trim())}>{t("focus.ask.send")}</button>
+          <Button onClick={() => setWriting(false)}>{t("common.cancel")}</Button>
+          <Button variant={ask.kind === "permission" ? "danger" : "default"} type="submit" disabled={busy || offline || (ask.kind !== "permission" && !text.trim())}>{t("focus.ask.send")}</Button>
         </div>
       </form>
     );
@@ -64,19 +64,19 @@ export function PhoneAskAnswers({ ask, projectId, toast, always = false, server 
       <div className="ph-ask-row">
         {permission ? (
           <>
-            <button type="button" className="ph-btn" data-answer="allow" disabled={busy || offline} onClick={() => void send({ allow: true })}>{t(ask.kind === "folder" ? "focus.ask.yes" : "ph.ask.once")}</button>
-            {always && ask.kind === "permission" && <button type="button" className="ph-btn" data-answer="always" disabled={busy || offline} onClick={() => void send({ allow: true, always: true })}>{t("perm.always")}</button>}
-            <button type="button" className="ph-btn danger" data-answer="deny" disabled={busy || offline} onClick={() => void send({ allow: false })}>{t(ask.kind === "folder" ? "focus.ask.no" : "ph.ask.reject")}</button>
+            <Button data-answer="allow" disabled={busy || offline} onClick={() => void send({ allow: true })}>{t(ask.kind === "folder" ? "focus.ask.yes" : "ph.ask.once")}</Button>
+            {always && ask.kind === "permission" && <Button data-answer="always" disabled={busy || offline} onClick={() => void send({ allow: true, always: true })}>{t("perm.always")}</Button>}
+            <Button variant="danger" data-answer="deny" disabled={busy || offline} onClick={() => void send({ allow: false })}>{t(ask.kind === "folder" ? "focus.ask.no" : "ph.ask.reject")}</Button>
           </>
         ) : (
-          options.map((option) => <button key={option} type="button" className="ph-btn" disabled={busy || offline} onClick={() => void send({ selected: [option] })}>{option}</button>)
+          options.map((option) => <Button key={option} disabled={busy || offline} onClick={() => void send({ selected: [option] })}>{option}</Button>)
         )}
       </div>
       {always && server && ask.kind === "permission" && (
-        <button type="button" className="ph-btn ghost ph-ask-wide" data-answer="always-server" disabled={busy || offline} onClick={() => void send({ allow: true, always: true, server: true })}>{t("perm.always.server", { server })}</button>
+        <Button variant="quiet" className="ph-ask-wide" data-answer="always-server" disabled={busy || offline} onClick={() => void send({ allow: true, always: true, server: true })}>{t("perm.always.server", { server })}</Button>
       )}
       {ask.kind !== "folder" && (
-        <button type="button" className="ph-btn ghost ph-ask-wide" disabled={busy || offline} onClick={() => setWriting(true)}><Icon name="pen" size={16} />{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
+        <Button variant="quiet" icon="pen" className="ph-ask-wide" disabled={busy || offline} onClick={() => setWriting(true)}>{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</Button>
       )}
     </div>
   );
