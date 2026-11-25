@@ -69,6 +69,7 @@ from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
 from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
 from daedalus.stores.phase_clock_schema import MIGRATION as PHASE_CLOCK_MIGRATION
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
+from daedalus.stores.project_approval_schema import MIGRATION as PROJECT_APPROVAL_MIGRATION
 from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
 from daedalus.stores.recurring_schema import MIGRATION as RECURRING_MIGRATION
@@ -4175,6 +4176,12 @@ async def _task_extras(conn: aiosqlite.Connection) -> None:
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _task_extras))
+
+# "Allow similar calls in this project". A standing approval used to live in one session's
+# metadata and end with it; a project's own is a row of its own, so every chat of the project, the
+# ones started later and the team's members among them, reads the same list, and it goes with the
+# project: the foreign key removes the rows when the project is removed.
+MIGRATIONS.append(PROJECT_APPROVAL_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

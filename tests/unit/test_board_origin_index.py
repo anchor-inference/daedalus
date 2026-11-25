@@ -6,6 +6,9 @@ from pathlib import Path
 
 from daedalus.stores.database import MIGRATIONS, Database
 
+BEFORE_THE_INDEX = next(i for i, step in enumerate(MIGRATIONS) if isinstance(step, str) and "board_tasks_by_origin" in step)
+"""The schema just before the migration under test: found by what it makes, since later migrations follow it."""
+
 PLAN_SQL = "EXPLAIN QUERY PLAN SELECT * FROM board_tasks WHERE origin_session_id IN (?, ?) AND removed_at IS NULL"
 
 
@@ -18,10 +21,9 @@ async def test_the_origin_index_is_made_once_and_the_rows_survive(tmp_path: Path
             "INSERT INTO board_tasks(id, title, status, priority, origin_session_id, created_at, updated_at) VALUES (?, ?, 'todo', 3, ?, 't', 't')",
             (f"t{n}", f"task {n}", None if n == 0 else f"s{n}"),
         )
-    # Put the file back where the previous release left it: no index, one migration behind.
+    # Put the file back where the previous release left it: no index, the migration still to run.
     await db.execute("DROP INDEX board_tasks_by_origin")
-    origin = next(n for n, step in enumerate(MIGRATIONS, 1) if isinstance(step, str) and "board_tasks_by_origin" in step)
-    await db.execute(f"UPDATE schema_version SET version = {origin - 1}")
+    await db.execute(f"UPDATE schema_version SET version = {BEFORE_THE_INDEX}")
     await db.close()
 
     db = Database(path, local_env="container")

@@ -109,6 +109,7 @@ from daedalus.extensions import (
     api_pages,
     api_panel,
     api_plugins,
+    api_project_approvals,
     api_project_environment,
     api_project_start,
     api_projects,
@@ -207,7 +208,7 @@ from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.memory import privacy
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
-from daedalus.providers import openrouter_routes
+from daedalus.providers import connection_probe, openrouter_routes
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
@@ -1816,6 +1817,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
+    api_project_approvals.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
     # Moving a folder between the container and the host, as a background job.
     api_folder_move.register(api, app, auth)
@@ -5659,7 +5661,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # ``server``: the MCP server "Allow all from <server>" would allow, with the spans offered.
             server = manager.server_of(session_id, key)
             return {"similar": manager.similar_of(session_id, key),
-                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None}
+                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None,
+                    # Whether "Allow similar in this project" is offered, and the reason when it is not.
+                    "project": manager.project_scope_of(session_id, key)}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -5678,11 +5682,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/sessions/{session_id}/policy/standing")
     async def policy_standing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left."""
+        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left,
+        and beside them, as ``project``, the rules its project holds for every chat (taken back from the project)."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        return {"standing": manager.standing(state)}
+        return {"standing": manager.standing(state), "project": manager.project_approvals(state)}
 
     @api.delete("/api/sessions/{session_id}/policy/standing/{grant_id}")
     async def policy_revoke_standing(session_id: str, grant_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -7248,6 +7253,29 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if passed:
             free_catalog.mark_probed(body.provider, body.model)
         return {"agent_ready": passed}
+
+    @api.post("/api/providers/{provider_id}/test")
+    async def test_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Whether a configured endpoint answers: ``{"ok", "latency_ms", "status", "detail", "models"?}``.
+
+        Reads the endpoint's model list through the adapter real requests use, within a few seconds. A
+        failure of any kind, an endpoint that is down or refuses the key included, is the answer with
+        ``ok`` false and a sentence, not an error; only an id that names nothing is a 404."""
+        if provider_id not in app.config.providers:
+            raise HTTPException(404, "no such provider")
+        try:
+            provider = manager.providers.get(provider_id)
+        except KeyError:
+            return {"ok": False, "latency_ms": None, "status": None, "detail": "the endpoint has no address, or is a hosted vendor with no key set; fill them in first"}
+        problem = ""
+        if is_keyproxy_url(provider.endpoint.base_url):
+            # The proxy knows whether anything behind it can sign the request; asking it first gives the
+            # sentence that names what is missing, where the request would only come back as a 401.
+            keys = await keyproxy_keys()
+            row = (keys or {}).get(keyproxy_upstream(provider.endpoint.base_url))
+            if keys is not None and not (row and row["configured"]):
+                problem = no_credential(str(row["kind"]) if row else "api_key", provider_id)
+        return await connection_probe.probe(provider, redact=manager.redactor.redact, problem=problem)
 
     @api.post("/api/providers/lookup-models")
     async def lookup_provider_models(body: ModelsLookupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

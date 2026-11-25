@@ -324,7 +324,9 @@ async def test_the_migration_adds_the_columns_and_the_index_and_keeps_every_row(
     await db.execute("DROP INDEX app_events_by_task")
     await db.execute("ALTER TABLE board_tasks DROP COLUMN assignee_operator")
     await db.execute("ALTER TABLE board_tasks DROP COLUMN due_at")
-    await db.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    # Found by the step it runs, since later migrations follow it.
+    before = next(i for i, step in enumerate(MIGRATIONS) if getattr(getattr(step, "step", None), "__name__", "") == "_task_extras")
+    await db.execute(f"UPDATE schema_version SET version = {before}")
     await db.close()
 
     for _ in range(2):  # the second start runs nothing and breaks nothing
