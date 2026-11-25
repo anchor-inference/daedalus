@@ -131,7 +131,7 @@ export function BoardScreen({ toast, onOpen, selected, project, projects = [], q
             {search === null
               ? <IconButton icon="search" label={t("board.search")} onClick={() => setSearch("")} />
               : <SearchField value={search} onChange={setSearch} onClose={() => setSearch(null)} />}
-            <Button variant="primary" icon="plus" onClick={() => setCreating({})}>{t("board.new")}</Button>
+            <Button variant="primary" icon="plus" className="board-new-btn" aria-label={t("board.new")} title={t("board.new")} onClick={() => setCreating({})}><span className="board-new-label">{t("board.new")}</span></Button>
           </>}
         />
         <div className="board-filters" role="group" aria-label={t("pboard.filter")}>

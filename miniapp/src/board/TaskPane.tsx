@@ -5,7 +5,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { copyText } from "../ui/components";
-import { absTime, relTime } from "../format";
+import { absTime, relTimeLong } from "../format";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { navigate, projectPagePath } from "../router";
@@ -142,7 +142,7 @@ function TaskBody(props: TaskPaneProps) {
         <Kv label={t("board.kv.due")} refusal={refused("due")}>
           <DuePick task={task} writes={writes} disabled={blocked || finished} />
         </Kv>
-        <Kv label={t("board.kv.changed")}><span className="task-kv-quiet" title={absTime(task.updated_at)}>{relTime(task.updated_at)}</span></Kv>
+        <Kv label={t("board.kv.changed")}><span className="task-kv-quiet" title={absTime(task.updated_at)}>{relTimeLong(task.updated_at)}</span></Kv>
       </div>
 
       <Block title={t("board.description")}>

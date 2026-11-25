@@ -25,6 +25,16 @@
 .board-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); }
 .board-search:focus-within { border-color: var(--accent); }
 .pagehead-actions:has(.board-group-btn) { gap: 8px; }
+/* Beside an open pane the board is narrow (646 px at 1366): the title keeps its word, the picker gives
+   up its width first, and the new-task button keeps only its plus, named for a screen reader. */
+.board-area { container-type: inline-size; container-name: board; }
+.board-area .pagehead-title { flex: none; }
+.pagehead .pagehead-filters > .board-scope-pick { flex: 0 1 auto; min-width: 96px; }
+@container board (max-width: 760px) {
+  .board-new-btn .board-new-label { display: none; }
+  .board-new-btn.btn { padding: 4px 8px; }
+  .board-search { width: 160px; }
+}
 
 .board-filters { flex: none; height: 44px; padding: 0 24px; display: flex; align-items: center; gap: 8px; }
 .board-filter { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; cursor: pointer; }
@@ -128,8 +138,10 @@
 .task-link > .ic:last-child { color: var(--fg-3); }
 .task-link-hint { font-size: var(--fs-12); color: var(--fg-3); flex: none; }
 /* A pane's choice reads as its value, framed only under the pointer, as the mock rows read. */
-.task-kv-value > .task-select { flex: none; max-width: 100%; }
-.task-select .dropdown-btn { max-width: 100%; border-color: transparent; background: none; margin-left: -10px; min-height: 28px; font-size: var(--fs-14); color: var(--fg); }
+/* The shift left is the wrapper's, not the button's: on the button it made the wrapper, which sizes to
+   the button's margin box, ten pixels short of the words, and every value ended in an ellipsis. */
+.task-kv-value > .task-select { flex: none; max-width: calc(100% + 10px); margin-left: -10px; }
+.task-select .dropdown-btn { max-width: 100%; border-color: transparent; background: none; min-height: 28px; font-size: var(--fs-14); color: var(--fg); }
 .task-select .dropdown-btn:hover:not(:disabled) { background: var(--hover); }
 .task-select .dropdown-btn:disabled { opacity: 1; cursor: default; }
 .task-select .dropdown-btn:disabled .dropdown-caret { visibility: hidden; }
