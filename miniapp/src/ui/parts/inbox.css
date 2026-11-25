@@ -1,0 +1,81 @@
+/* ── the Inbox: what happened at the left, the open entry at the right ───────────────────────
+   One screen under a ruled 52 px header. The list is a 480 px column that scrolls by itself, in groups
+   (what waits for the operator, then the days); the open entry is a 760 px reading column centred in
+   what is left, and narrows with the window rather than overflowing it. A request's colour is one of
+   the three accents: orange for what waits or went wrong, cyan for finished work, grey for the rest. */
+.inbox-split { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.inbox-list { width: 480px; flex: none; box-sizing: border-box; border-right: 1px solid var(--line); overflow-y: auto; padding: 4px 8px 16px; }
+.inbox-list .moves-now { margin: 8px 4px 4px; }
+.inbox-group-head { height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.inbox-group-head.waiting { color: var(--attention); }
+.inbox-group-head .n { font-weight: 400; color: var(--fg-3); }
+
+.inbox-row { display: flex; align-items: center; gap: 12px; width: 100%; height: 64px; padding: 0 12px; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.inbox-row:hover { background: var(--hover); }
+.inbox-row.on { background: var(--selected); }
+.inbox-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.inbox-row-mark { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: flex-start; margin-top: 15px; background: var(--fg-3); }
+.inbox-row-mark.attention { background: var(--attention); }
+.inbox-row-mark.live { background: var(--live); }
+.inbox-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.inbox-row-top { display: flex; align-items: center; gap: 8px; line-height: 18px; }
+.inbox-row-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-14); font-weight: 500; }
+.inbox-row.unread .inbox-row-title { font-weight: 600; }
+.inbox-row.quiet .inbox-row-title { color: var(--fg-2); font-weight: 400; }
+.inbox-row-count { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
+/* Always drawn and shown by opacity, so a row that is read does not shift its title by the dot's width. */
+.inbox-row-unread { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--accent); flex: none; opacity: 0; }
+.inbox-row.unread .inbox-row-unread { opacity: 1; }
+.inbox-row-preview { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); line-height: 17px; color: var(--fg-2); }
+.inbox-row-foot { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); line-height: 16px; color: var(--fg-3); }
+.inbox-row-where { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.inbox-row-time { flex: none; }
+
+.inbox-detail { flex: 1; min-width: 0; overflow-y: auto; }
+.inbox-pane { width: min(var(--reading-w), calc(100% - 48px)); margin: 0 auto; padding: 28px 0 40px; display: flex; flex-direction: column; gap: 18px; }
+/* As tall as the icon buttons it carries, so an entry without them (a proposal) opens at the same height. */
+.inbox-pane-head { display: flex; align-items: center; gap: 8px; min-height: var(--ctl-h); }
+.inbox-tint.attention, .inbox-kind.attention { color: var(--attention); }
+.inbox-tint.live, .inbox-kind.live { color: var(--live); }
+.inbox-tint.quiet, .inbox-kind.quiet { color: var(--fg-3); }
+.inbox-tint { display: inline-flex; }
+.inbox-kind { font-size: var(--fs-13); font-weight: 500; }
+.inbox-when { font-size: var(--fs-12); color: var(--fg-3); }
+.inbox-pane-head .grow { flex: 1; }
+.inbox-pane-title { margin: -6px 0 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.inbox-prose { display: flex; flex-direction: column; gap: 12px; font-size: var(--fs-15); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.inbox-block { display: flex; flex-direction: column; gap: 6px; }
+.inbox-label { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.inbox-code { margin: 0; padding: 10px 12px; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+.inbox-kv { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--card); }
+.inbox-kv-row { display: flex; align-items: center; height: 38px; padding: 0 14px; border-top: 1px solid var(--line); font-size: var(--fs-14); }
+.inbox-kv-row:first-child { border-top: 0; }
+.inbox-kv-key { width: 180px; flex: none; font-size: var(--fs-13); color: var(--fg-2); }
+/* What each button will do, as the host words it: a row per button, only where the host says. */
+.inbox-outcomes { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.inbox-outcomes-row { display: flex; gap: 16px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.inbox-outcomes-row:first-child { border-top: 0; }
+.inbox-outcomes-name { width: 210px; flex: none; font-size: var(--fs-14); font-weight: 500; }
+.inbox-outcomes-text { flex: 1; min-width: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--fg-2); }
+.inbox-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inbox-outcome { display: flex; align-items: center; gap: 8px; color: var(--fg-3); }
+.inbox-outcome .notice-outcome { font-size: var(--fs-14); }
+.inbox-reply-label { font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
+.inbox-reply { display: flex; align-items: center; gap: 8px; height: 48px; box-sizing: border-box; padding: 0 8px 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); }
+.inbox-reply:focus-within { border-color: var(--accent); }
+.inbox-reply-input { flex: 1; min-width: 0; height: 32px; padding: 0; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.inbox-reply-input::placeholder { color: var(--fg-3); }
+.inbox-send { background: var(--primary); color: var(--primary-ink); }
+.inbox-send:hover:not(:disabled) { background: var(--primary-hover); color: var(--primary-ink); }
+.inbox-send:disabled { background: var(--hover); color: var(--fg-3); }
+.inbox-foot { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.inbox-open { display: flex; align-items: center; gap: 10px; width: 220px; height: var(--row-h); margin-left: -12px; padding: 0 12px; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.inbox-open:hover { background: var(--hover); color: var(--fg); }
+.inbox-open .grow { flex: 1; }
+.inbox-open .ic:last-child { color: var(--fg-3); }
+.inbox-activity { font-size: var(--fs-13); color: var(--fg-2); }
+.inbox-empty { flex: 1; align-content: center; }
+
+/* The header's views are 32 px tabs; the project filter and the mark-all button sit at the right edge. */
+.pagehead .inbox-tabs .tab { height: var(--ctl-h); }
+.pagehead .inbox-project .dropdown-btn { max-width: 200px; }

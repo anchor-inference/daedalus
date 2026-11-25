@@ -155,7 +155,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   // A note's title is edited where it reads as the note's heading, and its words are prose written at
   // the size the answers are read at (the composer's field is allowed the same for the same reason);
   // the tinted copy under the field must match it letter for letter.
-  ".ne-title", ".ne-field", ".ne-tint"];
+  ".ne-title", ".ne-field", ".ne-tint",
+  // The open Inbox entry reads as prose at the answer's size, and its title is a pane's heading.
+  ".inbox-prose", ".inbox-pane-title"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -176,6 +178,9 @@ const BOX_ALLOWED = [
   ".fullscreen-",
   // The page header's one row is 52 px on a desktop, as tall as the surface it heads.
   ".pagehead-row",
+  // The open Inbox entry is a page of its own beside the list: the room above its first line and
+  // below its last is the room a page has.
+  ".inbox-pane",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -210,6 +215,10 @@ const CONTENT_BOXES = [
   // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
   // large row the approved designs draw for a list of providers or entries. The 56 is that one.
   { selector: ".list-row.h56", property: "min-height", max: 56 },
+  // An Inbox row is a title over a preview over where it came from: three lines, 64 px, as drawn. The
+  // line under an open question is the 48 px field the composer's answer line shares.
+  { selector: ".inbox-row", property: "height", max: 64 },
+  { selector: ".inbox-reply", property: "height", max: 48 },
 ];
 
 /** Top and bottom padding of a shorthand, in px; a component that is not a plain length counts as its first literal. */
@@ -402,6 +411,31 @@ describe("a page's header", () => {
     expect(column("reading")).toContain("calc(760px + 48px)");
     expect(column("full")).toContain("padding-inline: 24px");
     expect(column("full")).not.toContain("width:");
+  });
+});
+
+describe("the inbox", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("is a 480 px list of 64 px rows beside a 760 px reading column that narrows with the window", () => {
+    expect(rule(".inbox-list")).toContain("width: 480px");
+    expect(rule(".inbox-list")).toContain("padding: 4px 8px 16px");
+    expect(rule(".inbox-row")).toContain("height: 64px");
+    expect(rule(".inbox-group-head")).toContain("height: 36px");
+    expect(rule(".inbox-pane")).toContain("width: min(var(--reading-w), calc(100% - 48px))");
+    expect(all.find((r) => r.selector === ":root" && !r.media)!.body).toContain("--reading-w: 760px");
+  });
+
+  it("marks an unread row by a 6 px dot that is always there, so reading it moves nothing", () => {
+    expect(rule(".inbox-row-unread")).toContain("opacity: 0");
+    expect(rule(".inbox-row-unread")).toContain("width: var(--dot)");
+    expect(rule(".inbox-row.unread .inbox-row-unread")).toContain("opacity: 1");
+  });
+
+  it("colours a row by one of the three accents: orange for what waits or failed, cyan for finished work", () => {
+    expect(rule(".inbox-row-mark.attention")).toContain("var(--attention)");
+    expect(rule(".inbox-row-mark.live")).toContain("var(--live)");
+    expect(rule(".inbox-group-head.waiting")).toContain("var(--attention)");
   });
 });
 

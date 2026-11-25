@@ -197,6 +197,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.route("**/api/**", make_route(host, []))
     page.goto(f"{BASE}/inbox?token=t&scheme=dark&lang={LANG}")
     try:
+        page.locator(f".inbox-row[data-schedule='{WAITING}']").click(timeout=10000)
         page.wait_for_selector(f".inbox-schedules .schedcard[data-schedule='{WAITING}'] button[data-action='accept']", timeout=10000)
     except Exception:  # noqa: BLE001 — said as a problem below, with a picture
         problems.append("the Inbox does not list the waiting schedule with Accept")

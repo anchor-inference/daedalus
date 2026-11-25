@@ -35,15 +35,6 @@
   .composer-row .control-trigger { gap:var(--space-1); padding-inline:var(--space-2); }
   .composer-row .control-trigger > .ic:last-child { margin-left:0; }
 }
-.inbox-layout { min-height:0; flex:1; }
-.inbox-layout.split { display:grid; grid-template-columns:minmax(320px, 44%) minmax(0,1fr); overflow:hidden; }
-.inbox-layout.split .inbox-list { width:100%; max-width:none; margin:0; overflow:auto; padding-top:var(--space-3); }
-.inbox-detail { min-width:0; overflow:auto; padding:var(--space-4) var(--space-6); border-left:1px solid var(--line); }
-.inbox-detail-head { display:flex; align-items:flex-start; gap:var(--space-3); margin-bottom:var(--space-4); }
-.inbox-detail-head h2 { flex:1; min-width:0; margin:0; font-size:var(--fs-18); font-weight:600; letter-spacing:-0.015em; text-wrap:balance; overflow-wrap:anywhere; }
-.inbox-detail .inbox-text { white-space:pre-wrap; overflow-wrap:anywhere; }
-.inbox-detail .inbox-body { padding:0; }
-.inbox-list .erow[aria-expanded="true"] { background:var(--surface-3); }
 .desktop-column > .pane-handle { z-index:20; }
 @media (min-width:1024px) {
   .desktop-column.folded .rail-home { height:var(--row-h-touch); flex-direction:column; gap:2px; }

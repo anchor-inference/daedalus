@@ -120,7 +120,7 @@ def in_inbox(browser, scenes, lang: str) -> None:  # type: ignore[no-untyped-def
     bs.install(page)
     page.route("**/api/notifications**", notices)
     page.goto(f"{BASE}/inbox?token=t&scheme=dark&lang={lang}")
-    card = page.locator(".needs-you .login-card")
+    card = page.locator(".inbox-pane .login-card")
     expect(card).to_be_visible(timeout=15000)
     expect(card).to_contain_text(words["title"])
     card.locator("input.field").nth(0).fill("someone@example.com")

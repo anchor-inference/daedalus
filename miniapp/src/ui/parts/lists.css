@@ -219,13 +219,7 @@
 .kv-part { display: inline-block; }
 .kv .linkbtn { text-align:right; min-width:0; max-width:60%; font-size:var(--fs-13); }
 
-/* ── inbox, changes, board rows: a task's priority is its tag's to say, so the card carries no
-   coloured stripe down its side ─────────────────────────────────────────────────────────── */
-.erow.inbox, .erow.action { grid-template-columns: 32px minmax(0, 1fr); }
-.erow.inbox .erow-title { font-weight: 500; }
-.erow.inbox.unread .erow-title { font-weight: 600; }
-.erow.action { cursor: default; }
-.erow.action:hover { background: var(--card); }
+/* ── the kind square ─────────────────────────────────────────────────────────────────────── */
 /* The square that says what kind of thing a row is: a wash of its tone under the glyph, which reads
    on a card, a popover and a toast alike. */
 .kind { width: 32px; height: 32px; border-radius: var(--radius-sm); background: color-mix(in srgb, currentColor 10%, transparent); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-2); flex: none; }
@@ -236,19 +230,11 @@
 .kind.quiet { color: var(--fg-3); }
 
 /* ── notifications: the rows, the bell's popover, the toasts ───────────────────────────────
-   On the Inbox screen the rows of a group are one card, parted by hairlines: each row carries the
-   card's surface and side edges, and the first and last of a run close it with 12 px corners. In
-   the popover and a toast a row is a flat line; the parts are the same. An unread row is a heavier
-   title and a 6 px dot after its time; one that needs an answer says so with its buttons, not with
-   an amber outline. Every size here is a token: the density guard reads this block like any other. */
+   In the popover and a toast a row is a flat line. An unread row is a heavier title and a 6 px dot
+   after its time; one that needs an answer says so with its buttons, not with an amber outline. Every size here is a token: the density guard reads this block like any other. */
 .notice-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); cursor: pointer; color: var(--fg); }
-.notice-row.card { margin: 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-bottom-width: 0; border-radius: 0; box-shadow: none; transition: background var(--t-fast); }
-.notice-row.card:not(.notice-row.card + .notice-row.card) { border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md); }
-.notice-row.card:not(:has(+ .notice-row.card)) { margin-bottom: 6px; border-bottom-width: 1px; border-bottom-left-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); box-shadow: var(--drop-xs); }
-.notice-row.card:hover { background: var(--surface-2); }
 .notice-row.flat { padding: 8px; border-radius: var(--radius-sm); transition: background var(--t-fast); }
 .notice-row.flat:hover, .notice-row.flat:focus-visible { background: var(--surface-3); outline: none; }
-.notice-row.card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .notice-row.flat .kind { width: var(--ctl-h-sm); height: var(--ctl-h-sm); }
 .notice-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .notice-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -316,9 +302,6 @@
 @keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
-.inbox-body { margin-top: 6px; cursor: default; }
-.inbox-entry + .inbox-entry { margin-top: 8px; }
-.inbox-entry-title { font-weight: 500; font-size: var(--fs-13); margin-bottom: 4px; }
 .inbox-text { margin: 0; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-mono); white-space: pre-wrap; word-break: break-word; line-height: 1.45; max-height: 50vh; overflow: auto; color: var(--fg-2); }
 .erow.proposal { grid-template-columns: minmax(0, 1fr); }
 .erow.proposal .pill { flex: none; }
