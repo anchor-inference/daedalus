@@ -240,7 +240,7 @@ def run() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         name = page.locator("#project-name")
         expect(name).to_be_visible()
         name.fill("Plain")
@@ -251,7 +251,7 @@ def run() -> int:
         assert created[0] == {"name": "Plain", "snapshots": True, "folder_name": "plain"}, created[0]
 
         page.reload()
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         expect(page.locator(".projects-row:not(.head)")).to_have_count(1)
         page.locator(".projects-new").click()
         page.locator("#project-name").fill("Existing")
@@ -264,7 +264,7 @@ def run() -> int:
         # for the first project. Read at once, it raced the request on a loaded machine.
         expect(page.locator(".sheet")).to_have_count(0)
         assert created[1] == {"name": "Existing", "snapshots": False, "folders": [{"path": "/srv/projects/esp32-door"}]}, created[1]
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         page.locator(".projects-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         resources = page.locator("details.project-resources")
         expect(resources).to_be_visible()

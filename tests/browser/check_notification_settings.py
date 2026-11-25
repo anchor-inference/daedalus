@@ -197,15 +197,6 @@ def desktop(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped
     if LANG == "en" and lines != ["In app: shown here", "Push: Chrome · Linux, sent", "Desktop: no desktop launcher is listening", "Telegram: sent"]:
         problems.append(f"the test lists {lines}")
 
-    # The popover's settings button leads here.
-    page.goto(f"{BASE}/agents?token=t&lang={LANG}")
-    page.locator(".sidebar .bell").click()
-    page.locator(".bell-pop .iconbtn[aria-label]").first.click()
-    try:
-        page.wait_for_url("**/settings/notifications**", timeout=5000)
-    except Exception:  # noqa: BLE001
-        problems.append(f"the bell's settings button opened {page.url}")
-
     # The terminal cap and its load bar.
     page.goto(f"{BASE}/settings/terminals?token=t&lang={LANG}")
     page.wait_for_selector(".loadbar-track", timeout=15000)

@@ -9,10 +9,10 @@ centre's loading fallbacks before the project itself.
 
 For each action, on both pages at 1440 px, the elements are marked beforehand and read afterwards:
 
-- the panel toggled closed and open, and every panel tab in turn: the rail, the left column and the
-  conversation are the very same elements, and the address never leaves the page's own;
+- the panel toggled closed and open, and every panel tab in turn: the sidebar's column, the sidebar and
+  the conversation are the very same elements, and the address never leaves the page's own;
 - a project opened from the main chat's column, and the main chat opened from a project's column:
-  the rail and the centre's frame survive, and the new column and conversation arrive without a
+  the sidebar's column and the centre's frame survive, and the new column and conversation arrive without a
   loading fallback drawn first;
 - all of them: no layout shift above 0.01 and no task longer than 50 ms.
 
@@ -66,7 +66,7 @@ WATCH = """
 """
 
 # The parts that must survive, and a record of every fallback drawn while the action runs.
-PARTS = {"rail": "nav.rail", "sidebar": "nav.sidebar", "centre": ".app > .main", "chat": ".chat"}
+PARTS = {"column": ".desktop-column", "sidebar": "nav.sidebar", "centre": ".app > .main", "chat": ".chat"}
 BEGIN = """
 (parts) => {
   window.__shifts = []; window.__moved = []; window.__paths = []; window.__fallbacks = [];
@@ -135,7 +135,7 @@ def chunks_ready(page: Page, *names: str) -> None:
 
 
 def panel_actions(page: Page, where: str, stay: re.Pattern[str]) -> None:
-    everything = ("rail", "sidebar", "centre", "chat")
+    everything = ("column", "sidebar", "centre", "chat")
     toggle = page.locator(".chat .head-actions button[aria-label='Panel']")
     # Whether the panel is open is read from the toggle, which says what the page decided, not from the
     # panel itself: on a loaded machine the panel is drawn a moment after the conversation, and a click
@@ -171,7 +171,7 @@ def main_chat(page: Page) -> None:
         page.locator("nav.orch-sidebar .orch-row").first.click()
         expect(page.locator(".chat.in-project.orchestrator")).to_be_visible()
 
-    measured(page, "main chat: open a project", open_project, keep=("rail", "centre"), stay=re.compile(rf"^/app/orchestration/project/{PID}/?$"))
+    measured(page, "main chat: open a project", open_project, keep=("column", "centre"), stay=re.compile(rf"^/app/orchestration/project/{PID}/?$"))
     expect(page.locator("nav.project-sidebar")).to_be_visible()
 
 
@@ -189,7 +189,7 @@ def project_focus(page: Page) -> None:
         page.locator("nav.project-sidebar .main-entry").first.click()
         expect(page.locator(".main-flow")).to_be_visible()
 
-    measured(page, "project focus: open the main chat", open_main, keep=("rail", "centre"), stay=re.compile(r"^/app/orchestration/?$"))
+    measured(page, "project focus: open the main chat", open_main, keep=("column", "centre"), stay=re.compile(r"^/app/orchestration/?$"))
     expect(page.locator("nav.orch-sidebar")).to_be_visible()
 
 

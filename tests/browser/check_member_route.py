@@ -80,7 +80,7 @@ def run() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         page.locator(".projects-row", has_text="Bakery").get_by_role("button", name="Settings for Bakery").click()
 
         section = page.locator("details[data-member-route]")

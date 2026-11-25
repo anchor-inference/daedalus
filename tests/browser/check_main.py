@@ -1,7 +1,7 @@
 """The main orchestrator in the app, at 1440 px and on a 390 px phone, in both languages.
 
 What is checked is what the operator relies on. On a desktop its chat is orchestration mode's home,
-reached by the rail's Orchestration item; in that mode its entry comes first in the column, with a
+reached by the sidebar's mode menu; in that mode its entry comes first in the column, with a
 pill that counts the questions waiting. On a phone the Orchestration tab opens the list, Main its
 first row, and the chat is a detail of it with a back and no tab bar. The questions the projects put
 to the operator wait in the panel's Questions tab, grouped by project, and the chat's flow carries
@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, MainStub, expect_app, open_drawer  # noqa: E402
+from api_stub import DEFAULT_APP, MainStub, expect_app, open_drawer, switch_mode  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -73,9 +73,9 @@ def desktop(page: Page, lang: str) -> None:
     serve(page, main)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
 
-    # Agents mode has no entry of its own for the main chat: the rail's Orchestration item leads there.
+    # Agents mode has no entry of its own for the main chat: the mode menu's Orchestration leads there.
     expect(page.locator(".sidebar .main-entry")).to_have_count(0)
-    page.locator(".rail [data-rail='orchestration']").click()
+    switch_mode(page, "orchestration")
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator(".chat .chat-title")).to_have_text("Main")
     assert ("/api/main", {}) in main.posts, "the first visit opens the main chat's session"

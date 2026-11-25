@@ -1,4 +1,4 @@
-"""The ``[navigation]`` section: where the rail, its More launcher and the phone drawer put each destination."""
+"""The ``[navigation]`` section: where the sidebar's pinned rows, its More launcher and the phone drawer put each destination."""
 
 from __future__ import annotations
 
@@ -15,20 +15,20 @@ from tests.unit.test_components import HEAD, FakeApp
 def test_an_empty_section_is_the_shipped_layout_and_survives_the_file(tmp_path) -> None:
     config = RuntimeConfig()
     assert config.navigation == NavigationConfig()
-    assert config.navigation.model_dump() == {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
+    assert config.navigation.model_dump() == {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
     path = tmp_path / "config.toml"
-    laid_out = config.model_copy(update={"navigation": NavigationConfig(rail=["board", "page:dosing"], hidden=["harnesses"], icons={"board": "flag"})})
+    laid_out = config.model_copy(update={"navigation": NavigationConfig(pinned=["board", "page:dosing"], hidden=["harnesses"], icons={"board": "flag"})})
     laid_out.save(path)
     assert RuntimeConfig.load(path).navigation == laid_out.navigation
 
 
 def test_ids_are_screens_or_pages_and_a_repeat_is_dropped() -> None:
-    nav = NavigationConfig(rail=[" inbox ", "page:dosing", "inbox", "screen-of-a-later-build"])
+    nav = NavigationConfig(pinned=[" inbox ", "page:dosing", "inbox", "screen-of-a-later-build"])
     # An id nobody knows yet is kept: the app ignores it where it draws, and a page that comes back
     # finds its place again.
-    assert nav.rail == ["inbox", "page:dosing", "screen-of-a-later-build"]
+    assert nav.pinned == ["inbox", "page:dosing", "screen-of-a-later-build"]
     with pytest.raises(ValidationError):
-        NavigationConfig(rail=["<script>"])
+        NavigationConfig(pinned=["<script>"])
     with pytest.raises(ValidationError):
         NavigationConfig(hidden=["page:"])
     with pytest.raises(ValidationError):
@@ -38,25 +38,25 @@ def test_ids_are_screens_or_pages_and_a_repeat_is_dropped() -> None:
 def test_a_change_applies_at_the_next_step() -> None:
     current = RuntimeConfig()
     raw = current.model_dump(mode="json")
-    raw["navigation"]["rail"] = ["terminals", "inbox"]
+    raw["navigation"]["pinned"] = ["terminals", "inbox"]
     report, candidate = validate_candidate(current, raw, base_revision=config_revision(current))
     assert report.valid and candidate is not None
-    assert [(change.path, change.apply_at) for change in report.changes] == [("navigation.rail", "next_step")]
+    assert [(change.path, change.apply_at) for change in report.changes] == [("navigation.pinned", "next_step")]
 
 
 def test_settings_save_the_section_and_a_field_sent_replaces_it_whole(tmp_path) -> None:
     app = FakeApp(tmp_path, native=True)
     with TestClient(build_app(app, "tok")) as client:
         view = client.get("/api/settings", headers=HEAD).json()
-        assert view["navigation"] == {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
+        assert view["navigation"] == {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
         assert client.get("/api/navigation", headers=HEAD).json() == view["navigation"]
 
         saved = client.put("/api/settings", headers=HEAD, json={
             "base_revision": view["revision"],
-            "navigation": {"rail": ["terminals", "inbox"], "hidden": ["harnesses"], "icons": {"terminals": "bolt", "inbox": "bell"}},
+            "navigation": {"pinned": ["terminals", "inbox"], "hidden": ["harnesses"], "icons": {"terminals": "bolt", "inbox": "bell"}},
         })
         assert saved.status_code == 200, saved.text
-        assert app.config.navigation.rail == ["terminals", "inbox"]
+        assert app.config.navigation.pinned == ["terminals", "inbox"]
         assert client.get("/api/navigation", headers=HEAD).json()["icons"] == {"terminals": "bolt", "inbox": "bell"}
 
         # Merged key by key, taking an icon away was impossible: the old copy put it back.
@@ -64,8 +64,21 @@ def test_settings_save_the_section_and_a_field_sent_replaces_it_whole(tmp_path) 
         assert again.status_code == 200, again.text
         assert app.config.navigation.icons == {"inbox": "bell"}
         # A field left out is kept.
-        assert app.config.navigation.rail == ["terminals", "inbox"] and app.config.navigation.hidden == ["harnesses"]
+        assert app.config.navigation.pinned == ["terminals", "inbox"] and app.config.navigation.hidden == ["harnesses"]
 
-        refused = client.put("/api/settings", headers=HEAD, json={"base_revision": again.json()["revision"], "navigation": {"rail": ["no spaces allowed"]}})
+        refused = client.put("/api/settings", headers=HEAD, json={"base_revision": again.json()["revision"], "navigation": {"pinned": ["no spaces allowed"]}})
         assert refused.status_code == 400
-        assert app.config.navigation.rail == ["terminals", "inbox"]
+        assert app.config.navigation.pinned == ["terminals", "inbox"]
+
+
+def test_a_file_written_with_the_rail_keeps_its_places_as_pinned(tmp_path) -> None:
+    # The rail of icons became the sidebar's pinned rows: what the operator put on it carries over.
+    path = tmp_path / "config.toml"
+    path.write_text('[navigation]\nrail = ["terminals", "page:dosing", "inbox"]\nhidden = ["harnesses"]\n', encoding="utf-8")
+    config = RuntimeConfig.load(path)
+    assert config.navigation.pinned == ["terminals", "page:dosing", "inbox"]
+    assert config.navigation.hidden == ["harnesses"]
+    written = path.read_text(encoding="utf-8")
+    assert "rail" not in written and "pinned" in written
+    # Loading the rewritten file changes nothing more.
+    assert RuntimeConfig.load(path) == config

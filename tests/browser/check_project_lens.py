@@ -92,6 +92,7 @@ def main() -> int:
             shown = side.locator("[data-project]").evaluate_all("els => els.map((e) => e.dataset.project)")
             check(set(shown) <= {shots.P1}, f"{lang}: only the lens's project is listed ({shown})")
             box = strip.bounding_box()
+            side.locator(".sidebar-head .sb-search-btn").click()
             search = side.locator(".sb-search").bounding_box()
             check(bool(box and search and box["y"] < search["y"]), f"{lang}: the strip stands above the search and the lists")
             clipped = strip.evaluate("el => { const b = el.querySelector('.sb-lens-clear'); return b.scrollWidth > b.clientWidth + 1 }")

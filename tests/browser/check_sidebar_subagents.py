@@ -73,7 +73,7 @@ def run() -> int:
             problems.append(f"the first message was not sent: {posted[1:]}")
 
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark&panel=details", wait_until="networkidle")
-        expect(page.locator(".sidebar .sb-new")).to_be_visible()
+        expect(page.locator(".sidebar .sb-pinned-nav [data-nav='new']")).to_be_visible()
         project = page.locator('.sidebar [data-project="9f3c2a1b7d40"]')
         # The project of the open chat opens itself: its three chats on the guide line.
         expect(project.locator("[data-session]")).to_have_count(3)

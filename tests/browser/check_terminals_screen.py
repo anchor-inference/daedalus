@@ -327,9 +327,9 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
     except Exception:  # noqa: BLE001
         problems.append(f"g t went to {page.url}")
     page.goto(f"{BASE}/inbox?token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=10000)
-    # A daily destination has one place: the rail; the secondary menu must not duplicate it.
-    page.locator(".rail [data-rail='terminals']").click()
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=10000)
+    # A daily destination has one place: pinned in the sidebar; the secondary menu must not duplicate it.
+    page.locator(".sb-pinned-nav [data-nav='terminals']").click()
     page.wait_for_url("**/app/terminals", timeout=5000)
     # The palette offers the running terminals and a new one; they are read from the listing already made.
     page.wait_for_selector(".term-card", timeout=10000)

@@ -219,7 +219,7 @@ export function iconSvg(name: IconName, size = 16): string {
 }
 
 /** `path` is a page's own glyph, a `d` string already checked by `iconPath` in navconfig.ts: drawn
- *  in the same stroke as the set, so a page's icon on the rail does not look pasted in. */
+ *  in the same stroke as the set, so a page's icon in the sidebar does not look pasted in. */
 export function Icon({ name, size = 16, path }: { name: IconName; size?: number; path?: string | null }) {
   const px = snapIconSize(size);
   return (

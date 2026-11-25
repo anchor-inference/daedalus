@@ -1,7 +1,7 @@
 // The More launcher: one search field over every destination, the ones used most as tiles, and the
-// whole catalogue below them, every screen and page whether or not the rail already shows it, so the
+// whole catalogue below them, every screen and page whether or not the sidebar already pins it, so the
 // operator never has to remember which of the two places a screen was put in. The desktop opens it
-// beside the rail's More button (NavMenu); the phone's drawer opens the same body as a sheet.
+// beside the sidebar's More row (NavMenu); the phone's drawer opens the same body as a sheet.
 //
 // A dialog, not a menu. ARIA's menu may hold menu items and nothing else, and a screen reader in a
 // menu takes the letter keys for itself, so the search field on top could not be typed into; a
@@ -19,7 +19,7 @@ import { frequent, isPinned, pin, useFrequentState } from "./navfrequent";
 import { Screen, navigate, pathFor } from "./router";
 import { SelfDevMode, screenTag } from "./capabilities";
 import { type PaletteItem, go, matchPalette, screenTitle } from "./shell";
-import { KEYS } from "./rail";
+import { KEYS } from "./sidebar";
 
 const BETA: Screen[] = [];
 const TILES = 4;
@@ -30,7 +30,7 @@ type SettingsIndex = typeof import("./screens/settingsindex");
 
 export type LauncherProps = {
   nav: ResolvedNav;
-  /** What the surface beside the launcher already shows: the rail, or the phone drawer's list. */
+  /** What the surface beside the launcher already shows: the sidebar's pinned rows, or the phone drawer's list. */
   placed: NavItem[];
   /** The id of the item the route stands on (navconfig's `currentId`). */
   current: string;
@@ -243,10 +243,10 @@ function Cell({ it, tile = false, phone, on, placed, pinned, selfdev, open, onGo
   const tone = it.screen === "services" ? "ok" : it.screen === "changes" ? "attn" : "";
   const items = useMemo<MenuItem[]>(() => [
     { label: t("common.open"), icon: "open", onSelect: () => onGo(it.path) },
-    { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(it.path, location.href).href, "_blank", "noopener") },
+    { label: t("nav.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(it.path, location.href).href, "_blank", "noopener") },
     "-",
     { label: t(pinned ? "nav.launch.unpin" : "nav.launch.pin"), icon: "pushpin", onSelect: () => pin(it.id) },
-    { label: t("rail.ctx.customise"), icon: "sliders", onSelect: () => onGo(pathFor("settings", "navigation")) },
+    { label: t("nav.ctx.customise"), icon: "sliders", onSelect: () => onGo(pathFor("settings", "navigation")) },
   ], [it.id, it.path, pinned, onGo]);
   useContextActions(link, items);
   const label = [it.title, n > 0 ? String(n) : "", pinned ? t("nav.launch.pinned") : "", placed ? t("nav.launch.placed") : ""].filter(Boolean).join(" · ");
@@ -279,7 +279,7 @@ function Cell({ it, tile = false, phone, on, placed, pinned, selfdev, open, onGo
   );
 }
 
-/** The desktop's launcher, beside the rail's More button. */
+/** The desktop's launcher, beside the sidebar's More row. */
 export function NavMenu({ current, nav, selfdev, onClose, opener, search }: { current: string; nav: ResolvedNav; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null; search?: () => PaletteItem[] }) {
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left:8, top:8 });
@@ -307,7 +307,7 @@ export function NavMenu({ current, nav, selfdev, onClose, opener, search }: { cu
       from?.focus?.();
     };
   }, []);
-  const placed = nav.rail;
+  const placed = nav.pinned;
   return (
     <Overlay>
       <div className="navmenu-backdrop" onClick={onClose} />

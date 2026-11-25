@@ -2,18 +2,17 @@
 // project, the project and how it is set up, its orchestrator, the team with each member's state and
 // why a launch waits, the one-off helpers, the project's terminals and its pages. It takes the place of
 // the sessions column (App.tsx decides which one is drawn, in one place), and keeps that column's
-// frame — the brand row with the bell and the fold, the drag handle — so the shell around it does not
-// move when a project is entered. Folded, it is gone like the other columns, and the rail is left.
+// frame — the head, the pinned block, the foot and the drag handle — so the shell around it does not
+// move when a project is entered. Folded, it is gone like the other columns.
 
 import { useState, type ReactNode, type RefObject } from "react";
 import type { Ask } from "../api";
 import type { ProjectBoardData } from "../board/board";
 import { useStreamUp } from "../events";
-import { Bell } from "../bell";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
-import { FoldButton } from "../sidebar";
+import { SidebarFoot, SidebarHead, SidebarPinned } from "../sidebar";
 import { relTime } from "../format";
 import { ORCHESTRATION, navigate, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
 import { go } from "../shell";
@@ -39,7 +38,6 @@ export type ProjectSidebarProps = {
   view: FocusView;
   /** The terminal the Terminals page shows, from its route. */
   terminal: string | null;
-  onToggle: () => void;
   toast: (text: string) => void;
   /** Room at the top for the entry pinned above every project: the main orchestrator's. */
   pinned?: ReactNode;
@@ -77,13 +75,8 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
 
   return (
     <nav className="sidebar project-sidebar" aria-label={t("focus.label", { name: project?.name ?? "" })}>
-      <div className="sidebar-brand">
-        <a className="brand" href={allProjects} onClick={(e) => go(e, allProjects)} title="Daedalus">
-          <span className="sidebar-text">Daedalus</span>
-        </a>
-        <Bell />
-        <FoldButton onToggle={p.onToggle} />
-      </div>
+      <SidebarHead />
+      <SidebarPinned />
       {p.pinned && <div className="sidebar-pinned" aria-label={t("focus.pinned")}>{p.pinned}</div>}
       <div className="sidebar-body focus-body">
         <a className="focus-back" href={allProjects} onClick={(e) => go(e, allProjects)}>
@@ -164,6 +157,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
         <FocusRow icon="folder" label={t("focus.page.folders")} href={projectPagePath(p.projectId, "folders")} current={here("folders")} meta={project ? String(project.folders.length) : ""} />
         </details>
       </div>
+      <SidebarFoot />
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={() => invalidate(staffKey(p.projectId).split("?")[0])} toast={p.toast} />}
     </nav>
   );

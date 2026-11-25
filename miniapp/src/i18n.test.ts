@@ -12,7 +12,7 @@ import SETTINGS_INDEX from "./screens/settings-index.json";
 // has no Node types, and importing the modules themselves would run code that wants a browser.
 const SOURCES = import.meta.glob("./**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
-/** The rail's destinations, read out of the router rather than imported. */
+/** The app's destinations, read out of the router rather than imported. */
 function screens(): string[] {
   const found = SOURCES["./router.ts"].match(/export const SCREENS: Screen\[\] = \[([^\]]+)\]/);
   if (!found) throw new Error("the router no longer lists its screens where this test looks");
@@ -86,7 +86,6 @@ const SAME_IN_BOTH = [
   "side.key.open",
   "side.key.pin",
   "side.key.rename",
-  "side.newchat.keys",
   // Lines changed and the files they are in.
   "staff.changes.summary",
   // The key before a member's CLI and its version: the acronym is read as is in either language.
@@ -202,7 +201,7 @@ describe("the keys the code asks for", () => {
     expect([...asPlain].filter((k) => k in DICT && isPlural(k))).toEqual([]);
   });
 
-  // The keys built from a value rather than written out. A screen added to the rail without a name,
+  // The keys built from a value rather than written out. A screen added to the app without a name,
   // a state the app has no word for, or a tool nobody named shows its own key on the page.
   it("includes every key built from a name", () => {
     const families: [string, string[]][] = [

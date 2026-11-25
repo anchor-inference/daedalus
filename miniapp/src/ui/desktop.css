@@ -1,21 +1,3 @@
-/* One desktop column owns navigation and its contextual list. Lists retain their scroll containers. */
-@media (min-width:1024px) {
-  .app { grid-template-columns:calc(var(--rail-w) + var(--sidebar-w)) minmax(0,1fr); }
-  .desktop-column { position:fixed; inset:0 auto 0 0; width:calc(var(--rail-w) + var(--sidebar-w)); display:flex; background:var(--bg); z-index:var(--z-sidebar); }
-  .desktop-column .rail { position:relative; inset:auto; width:var(--rail-w); flex:none; border-right:1px solid var(--line); padding:var(--space-2) var(--space-1); gap:var(--space-1); }
-  .desktop-column .rail-item { width:var(--row-h); height:var(--row-h); flex:none; justify-content:center; padding:0; }
-  .desktop-column .rail-label { display:none; }
-  .desktop-column .rail-modes, .desktop-column .rail-places { display:flex; flex-direction:column; gap:var(--space-1); }
-  .desktop-column .rail-modes .rail-item.mode { background:var(--surface-3); color:var(--fg); }
-  .desktop-column .rail-rule { margin:var(--space-1) 0; }
-  .desktop-column .rail-foot { margin-top:auto; display:flex; flex-direction:column; gap:var(--space-1); }
-  .desktop-column .rail-tip { display:flex; }
-  .desktop-context { flex:1; min-width:0; position:relative; overflow:hidden; }
-  .desktop-context .sidebar { position:absolute; inset:0; width:100%; border:0; border-right:1px solid var(--line); }
-  .desktop-column.folded .desktop-context { display:none; }
-  .desktop-column .rail-item:focus-visible { outline: 2px solid var(--ring); outline-offset:1px; }
-  .bulkbar { left:calc(var(--rail-w) + var(--sidebar-w)); }
-}
 /* Value buttons keep an explicit boundary in both themes, the hairline and drop of every control in
    the page's flow; a caret never flows as text. */
 .control-trigger { display:inline-flex; align-items:center; gap:var(--space-2); min-width:0; border:1px solid var(--line); background:var(--card); box-shadow:var(--drop-xs); border-radius:var(--radius-sm); height:var(--ctl-h); padding:0 var(--space-2) 0 10px; font:inherit; font-size:var(--fs-13); color:var(--fg); cursor:pointer; transition:background var(--t-fast) var(--ease-out); }
@@ -34,11 +16,6 @@
 @container (max-width:560px) {
   .composer-row .control-trigger { gap:var(--space-1); padding-inline:var(--space-2); }
   .composer-row .control-trigger > .ic:last-child { margin-left:0; }
-}
-.desktop-column > .pane-handle { z-index:20; }
-@media (min-width:1024px) {
-  .desktop-column.folded .rail-home { height:var(--row-h-touch); flex-direction:column; gap:2px; }
-  .desktop-column.folded .rail-unfold-word { display:block; }
 }
 .control-trigger:disabled { opacity:.45; cursor:default; }
 .control-trigger[aria-invalid="true"] { border-color:var(--bad); }

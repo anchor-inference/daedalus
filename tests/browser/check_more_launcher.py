@@ -2,7 +2,7 @@
 
 On a 1440 × 900 desktop:
 
-- it opens beside the rail's More button, 600 wide, whole inside the window, without moving the
+- it opens beside the sidebar's More row, 600 wide, whole inside the window, without moving the
   composer; at 1024 × 600 it shrinks and slides to stay whole;
 - focus starts in the search field; Down enters the tiles, Down again lands in the catalogue under the
   tile, Up from the top row returns to the field; Tab never leaves it; Esc empties a typed search
@@ -41,7 +41,7 @@ WORDS = {
 
 
 def open_launcher(page: Page) -> None:
-    page.locator(".rail [data-rail='menu']").click()
+    page.locator(".sb-pinned-nav [data-nav='menu']").click()
     page.wait_for_selector(".navmenu[role='dialog'] .launch-field", timeout=5000)
 
 
@@ -65,14 +65,14 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     page.wait_for_selector(".start-composer", timeout=15000)
     page.wait_for_timeout(500)
     composer_before = page.locator(".start-composer").bounding_box()
     open_launcher(page)
 
     box = page.locator(".navmenu").bounding_box()
-    trigger = page.locator(".rail [data-rail='menu']").bounding_box()
+    trigger = page.locator(".sb-pinned-nav [data-nav='menu']").bounding_box()
     assert box and trigger
     if abs(box["x"] - trigger["x"] - trigger["width"] - 6) > 1 or round(box["width"]) != 600:
         say(f"the launcher is not 600 wide beside its button: {box}")
@@ -129,7 +129,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 
     # A pin from the catalogue goes to the first tile and stays after a reload.
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     open_launcher(page)
     row = page.locator(".navmenu .launch-catalogue .launch-cell", has=page.locator("[data-nav-item='health']"))
     row.hover()
@@ -138,7 +138,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if tiles(page)[:1] != ["health"]:
         say(f"pinned Health is not the first tile: {tiles(page)}")
     page.reload()
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     open_launcher(page)
     if tiles(page)[:1] != ["health"]:
         say(f"after a reload the tiles are {tiles(page)}")
@@ -150,12 +150,12 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.keyboard.press("Escape")
 
     # Learned from use: Board and Inbox opened three times each become the first tiles, though both
-    # are on the rail.
+    # are pinned in the sidebar.
     for _ in range(3):
         page.goto(f"{BASE}/inbox?token=t&lang={lang}")
-        page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+        page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
         page.goto(f"{BASE}/board?token=t&lang={lang}")
-        page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+        page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     open_launcher(page)
     if sorted(tiles(page)[:2]) != ["board", "inbox"]:
         say(f"after opening Board and Inbox three times each the tiles are {tiles(page)}")
@@ -164,7 +164,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.locator(".navmenu [data-nav='customise']").click()
     page.wait_for_url("**/settings/navigation**", timeout=5000)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     open_launcher(page)
     page.locator(".navmenu [data-nav='about']").click()
     page.wait_for_url("**/settings/about**", timeout=5000)
@@ -172,7 +172,11 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     # A small window: the launcher shrinks and stays whole.
     page.set_viewport_size({"width": 1024, "height": 600})
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    page.wait_for_selector(".rail [data-rail='menu']", timeout=15000)
+    # Below 1100 px the sidebar starts folded; the corner's button brings it back with More in it.
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu'], .sidebar-unfold", timeout=15000)
+    if page.locator(".sidebar-unfold").count():
+        page.locator(".sidebar-unfold").click()
+    page.wait_for_selector(".sb-pinned-nav [data-nav='menu']", timeout=15000)
     open_launcher(page)
     box = page.locator(".navmenu").bounding_box()
     assert box
@@ -180,7 +184,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
         say(f"at 1024 x 600 the launcher leaves the window: {box}")
     page.keyboard.press("Escape")
     page.wait_for_timeout(150)
-    if not page.evaluate("() => document.activeElement === document.querySelector('.rail [data-rail=\"menu\"]')"):
+    if not page.evaluate("() => document.activeElement === document.querySelector('.sb-pinned-nav [data-nav=\"menu\"]')"):
         say("focus did not go back to the More button")
     if errors:
         say(f"errors: {errors}")

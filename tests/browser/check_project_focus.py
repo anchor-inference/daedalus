@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app, switch_mode  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -93,8 +93,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     # Agents mode lists nothing of the project; orchestration mode lists it as one entry.
     expect(page.locator(f".sidebar [data-project='{PID}']")).to_have_count(0)
     expect(page.locator(".sidebar [data-session]", has_text="Orchestrator · Bakery 2.0")).to_have_count(0)
-    chip_before = page.locator(".sidebar .project-chip").inner_text()
-    page.locator(".rail [data-rail='orchestration']").click()
+    lens_before = page.locator(".sidebar .sb-lens").count()
+    switch_mode(page, "orchestration")
     entry = page.locator("nav.orch-sidebar .orch-row", has_text="Bakery 2.0")
     expect(entry).to_be_visible()
     expect(entry.locator(".orch-row-meta")).to_contain_text(words["staff"])
@@ -261,9 +261,9 @@ def desktop(page: Page, lang: str, width: int) -> None:
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator("nav.project-sidebar")).to_have_count(0)
     expect(page.locator("nav.orch-sidebar")).to_be_visible()
-    page.locator(".rail [data-rail='agents']").click()
+    switch_mode(page, "agents")
     page.wait_for_url("**/app/agents")
-    assert page.locator(".sidebar .project-chip").inner_text() == chip_before
+    assert page.locator(".sidebar .sb-lens").count() == lens_before
 
     # A project without an orchestrator: what one is, what it costs, and the switch.
     page.goto(f"{BASE}/project/{GARDEN}?token=t&lang={lang}")

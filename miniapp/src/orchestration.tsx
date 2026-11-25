@@ -1,13 +1,12 @@
 import { useRef } from "react";
 import { useContextActions } from "./ui/context-menu";
 import { copyText } from "./ui/components";
-// Orchestration mode's own parts: the left column that lists the main orchestrator and the projects
-// with an orchestrator, and the same list as a page on a phone, where there is no left column. The
-// rules — what belongs to which mode, what the rail's Orchestration item counts — are in mode.ts;
-// this file draws them. The rail (rail.tsx) is where the operator switches between the modes.
+// Orchestration mode's own parts: the list in the sidebar of the main orchestrator and the projects
+// with an orchestrator, and the same list as a page on a phone, where there is no sidebar. The rules —
+// what belongs to which mode, what the mode menu's Orchestration item counts — are in mode.ts; this
+// file draws them. The mode menu at the top of the sidebar (sidebar.tsx) switches between the modes.
 
 import type { ProjectFolder, SessionList, SessionSummary } from "./api";
-import { Bell } from "./bell";
 import { Dot } from "./ui/components";
 import { relTime } from "./format";
 import { plural, t } from "./i18n";
@@ -19,21 +18,21 @@ import { EmptyState, NewChatPill, SectionHeader, TopBar } from "./ui/phone";
 import { Row } from "./ui/primitives";
 import { useMain } from "./main/data";
 import { orchestratedProjects, waitingInOrchestration } from "./mode";
-import { ORCHESTRATION, navigate, projectHome } from "./router";
-import { FoldButton } from "./sidebar";
+import { navigate, projectHome } from "./router";
+import { SidebarFoot, SidebarHead, SidebarPinned } from "./sidebar";
 import { go, useMedia } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
 import { openNewProject } from "./project/NewProject";
 
 /** The listing both modes read: the Agents list filters it, orchestration mode picks its projects out
- *  of it. One key, so the sidebar and the rail's count share one request. */
+ *  of it. One key, so the sidebar and the mode menu's count share one request. */
 function useListing() {
   const live = useStreamUp();
   return useQuery<SessionList>("/api/sessions", { pollMs: live ? 60000 : 5000, staleMs: 3000 });
 }
 
-/** How many requests wait for the operator in orchestration mode; the rail shows it from Agents. */
+/** How many requests wait for the operator in orchestration mode; the mode menu shows it from Agents. */
 export function useOrchestrationWaiting(): number {
   const { data } = useListing();
   const { data: main } = useMain();
@@ -97,24 +96,19 @@ function OrchestrationRows({ onMain, onProjects }: { onMain: boolean; onProjects
 export type OrchestrationSidebarProps = {
   /** The main chat is open. */
   onMain: boolean;
-  onToggle: () => void;
 };
 
-/** The left column in orchestration mode. It keeps the Agents column's frame — the brand row with the
- *  bell and the fold, the drag handle — so switching modes changes the list and nothing around it. */
+/** The sidebar in orchestration mode: the Agents column's frame — head, pinned block, foot, the drag
+ *  handle — around this mode's list, so switching modes changes the list and nothing around it. */
 export function OrchestrationSidebar(p: OrchestrationSidebarProps) {
   return (
     <nav className="sidebar orch-sidebar" aria-label={t("orch.label")}>
-      <div className="sidebar-brand">
-        <a className="brand" href={ORCHESTRATION} onClick={(e) => go(e, ORCHESTRATION)} title="Daedalus">
-          <span className="sidebar-text">Daedalus</span>
-        </a>
-        <Bell />
-        <FoldButton onToggle={p.onToggle} />
-      </div>
+      <SidebarHead />
+      <SidebarPinned />
       <div className="sidebar-body orch-body">
         <OrchestrationRows onMain={p.onMain} />
       </div>
+      <SidebarFoot />
     </nav>
   );
 }

@@ -227,9 +227,10 @@
 .kind.ok { color: var(--ok); }
 .kind.quiet { color: var(--fg-3); }
 
-/* ── notifications: the rows, the bell's popover, the toasts ───────────────────────────────
-   In the popover and a toast a row is a flat line. An unread row is a heavier title and a 6 px dot
-   after its time; one that needs an answer says so with its buttons, not with an amber outline. Every size here is a token: the density guard reads this block like any other. */
+/* ── notifications: the rows and the toasts ───────────────────────────────
+   In a toast a row is a flat line. An unread row is a heavier title and a 6 px dot after its time;
+   one that needs an answer says so with its buttons, not with an amber outline. Every size here is
+   a token: the density guard reads this block like any other. */
 .notice-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); cursor: pointer; color: var(--fg); }
 .notice-row.flat { padding: 8px; border-radius: var(--radius-sm); transition: background var(--t-fast); }
 .notice-row.flat:hover, .notice-row.flat:focus-visible { background: var(--surface-3); outline: none; }
@@ -253,20 +254,8 @@
 .linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
 .linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
 .linkbtn.board-task-open { display: inline-flex; align-items: center; gap: 3px; font-size: inherit; }
-/* The bell's popover is a floating surface: the raised colour, a ring and drop in a border's place,
-   12 px corners, and rows that hover a step lighter than the surface. */
-.bell { position: relative; }
-.bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 15px; text-align: center; pointer-events: none; }
-.bell-badge.urgent { background: var(--bad); color: var(--bg); }
-.bell-pop { position: fixed; z-index: 38; width: min(400px, calc(100vw - 16px)); display: flex; flex-direction: column; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-md); overflow: hidden; outline: none; }
-.bell-head { display: flex; align-items: center; gap: 10px; padding: 10px 8px 4px 12px; font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.01em; }
-.bell-chips { padding: 0 12px; margin: 4px 0 4px; }
-.bell-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 4px; }
-.bell-body .section-title { margin: 10px 8px 2px; }
-.bell-empty { padding: 16px 8px; color: var(--fg-3); font-size: var(--fs-13); text-align: center; }
-.notice-toasts .iconbtn.quiet, .bell-pop .iconbtn.quiet { background: transparent; color: var(--fg-2); }
-.notice-toasts .iconbtn.quiet:hover, .bell-pop .iconbtn.quiet:hover { background: var(--surface-3); color: var(--fg); }
-.bell-foot { display: flex; justify-content: center; border-top: 1px solid var(--line); padding: 4px; }
+.notice-toasts .iconbtn.quiet { background: transparent; color: var(--fg-2); }
+.notice-toasts .iconbtn.quiet:hover { background: var(--surface-3); color: var(--fg); }
 .notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .notice-toasts > * { pointer-events: auto; }
 .notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }

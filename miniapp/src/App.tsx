@@ -9,7 +9,7 @@ import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECT
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
-import { Sidebar, useSidebar } from "./sidebar";
+import { Sidebar, SidebarFrame, UnfoldButton, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { useRecordVisit } from "./navfrequent";
 import { shortcutFor } from "./navigation";
@@ -40,7 +40,6 @@ import { MainEntry } from "./main/MainEntry";
 import { Mode, modeHome, modeOf, rememberMode, storedMode } from "./mode";
 import { applyAppearance } from "./appearance";
 import { OrchestrationList, OrchestrationSidebar, useOrchestrationWaiting } from "./orchestration";
-import { Rail } from "./rail";
 import { useNav } from "./usenav";
 import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
@@ -234,7 +233,7 @@ export function App() {
     setProject(id);
   }, []);
   const clearProject = useCallback(() => pickProject(""), [pickProject]);
-  // The sidebar: the current mode's column beside the rail, or folded away with the rail alone left.
+  // The sidebar: the current mode's column, or folded away with a button in the corner to bring it back.
   const [folded, flipSidebar] = useSidebar(readSidebar, rememberSidebar);
   const [sidebarWidth, setSidebarWidth] = usePaneWidth("sidebar", SIDEBAR_W, SIDEBAR_W_MIN, SIDEBAR_W_MAX);
   const shell = useRef<HTMLDivElement>(null);
@@ -251,9 +250,9 @@ export function App() {
     }
     flipSidebar();
   }, [folded, flipSidebar]);
-  // An open canvas is a focus mode. The editor needs the width, and the column beside the rail was a
-  // second left menu next to the canvas's own tools. The rail stays; its fold button shows the column
-  // for this visit only, so the folding the operator chose for every other page is left alone.
+  // An open canvas is a focus mode. The editor needs the width, and the column beside it was a second
+  // left menu next to the canvas's own tools. The corner's unfold button shows the column for this
+  // visit only, so the folding the operator chose for every other page is left alone.
   const canvasOpen = route.screen === "canvas" && !!route.detail;
   const [columnShown, setColumnShown] = useState(false);
   useEffect(() => {
@@ -622,7 +621,7 @@ export function App() {
 
   if (authed === null) return <div className="app"><div className="empty">{t("common.loading")}</div></div>;
   if (authed === false) {
-    // Outside the shell on purpose: the shell's wide layout reserves the rail's column, and a login page has no rail.
+    // Outside the shell on purpose: the shell's wide layout reserves the sidebar's column, and a login page has no sidebar.
     return (
       <Suspense fallback={<div className="gate"><div className="empty">{t("common.loading")}</div></div>}>
         <LoginScreen onDone={() => setAuthed(true)} />
@@ -632,7 +631,7 @@ export function App() {
   if (onboarding === null) return <div className="app"><div className="empty">{t("common.loading")}</div></div>;
   if (!onboarding.has_model) {
     // Outside the shell, like the login page: the wide shell is a grid whose first column belongs
-    // to the rail, and a screen drawn in it without one sits beside the rail's width of nothing.
+    // to the sidebar, and a screen drawn in it without one sits beside the sidebar's width of nothing.
     return (
       <>
         <Suspense fallback={<div className="gate"><div className="empty">{t("common.loading")}</div></div>}>
@@ -720,44 +719,30 @@ export function App() {
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
   return (
     <HeldRoute.Provider value={overlay ? route : null}>
-    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${canvasOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
+    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${canvasOpen ? "focus-mode" : ""} ${wide && columnFolded ? "sidebar-folded" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
         // Under the Settings dialog the shell is out of reach — for the pointer (the backdrop), for Tab
         // (the dialog's own trap) and for a screen reader, which otherwise read the chat beneath it.
-        <div className={`desktop-column ${columnFolded ? "folded" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}><Rail
-          screen={live.screen}
-          detail={live.detail}
-          mode={mode}
-          collapsed={columnFolded}
-          onToggle={sidebarToggle}
-          counts={counts}
-          waiting={waiting}
-          selfdev={selfdev}
-          nav={nav}
-          menuOpen={menu}
-          onMenu={() => setMenu((m) => !m)}
-          menuButton={menuButton}
-        />
-        <div className="desktop-context">
-      {wide && !columnFolded && focusProject && (
+        <SidebarFrame value={{ mode, screen: live.screen, detail: live.detail, waiting, nav, menuOpen: menu, onMenu: () => setMenu((m) => !m), menuButton, onToggle: sidebarToggle, onPalette: openPalette }}>
+        {columnFolded ? <div className="sidebar-corner" inert={overlay || undefined}><UnfoldButton onToggle={sidebarToggle} /></div> : (
+        <div className="desktop-column" inert={overlay || undefined} aria-hidden={overlay || undefined}>
+      {focusProject && (
         <ErrorBoundary key={focusProject}>
         <Suspense fallback={<nav className="sidebar project-sidebar" />}>
           <ProjectSidebar
             projectId={focusProject}
             view={focusView(route.page, route.inner)}
             terminal={route.page === "terminals" ? route.query.get("t") : null}
-            onToggle={toggleSidebar}
-              toast={showToast}
+            toast={showToast}
             pinned={pinned}
           />
         </Suspense>
         </ErrorBoundary>
       )}
-      {wide && !columnFolded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={sidebarToggle} />}
-      {wide && !columnFolded && !focusProject && mode === "agents" && (
+      {!focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} />}
+      {!focusProject && mode === "agents" && (
         <Sidebar
           session={sessionId}
-          onToggle={sidebarToggle}
           projects={agentProjects}
           project={project}
           onProjects={openProjects}
@@ -766,7 +751,10 @@ export function App() {
           toast={showToast}
         />
       )}
-        </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
+        <PaneHandle side="right" drag={sidebarDrag} />
+        </div>
+        )}
+        </SidebarFrame>
       )}
       {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} search={paletteItems} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}>
@@ -826,7 +814,7 @@ function useAppBadge(unseen: number): void {
   }, [unseen]);
 }
 
-/** Whether the layout is the wide one (the rail and the sidebar beside the screen): the same breakpoint as the stylesheet. */
+/** Whether the layout is the wide one (the sidebar beside the screen): the same breakpoint as the stylesheet. */
 function useWide(): boolean {
   return useMedia("(min-width: 1024px)");
 }

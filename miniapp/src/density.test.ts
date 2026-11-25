@@ -355,7 +355,7 @@ describe("the scale", () => {
   it("is declared once, in :root", () => {
     const root = all.find((r) => r.selector === ":root" && !r.media);
     expect(root).toBeDefined();
-    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--radius-bubble", "--row-h", "--row-h-2", "--row-h-kid", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--chip-h-dense", "--ctl-h-lg", "--avatar", "--plate", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
+    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--radius-bubble", "--row-h", "--row-h-2", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--chip-h-dense", "--ctl-h-lg", "--avatar", "--plate", "--sidebar-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
       "--top-h", "--list-row-h", "--list-row-h-1", "--nav-row-h", "--set-row-h", "--tabbar-h", "--ctl-round", "--chip-h", "--drawer-w", "--gutter", "--radius-xl", "--radius-composer"]) {
       expect(root!.body, name).toContain(`${name}:`);
     }
@@ -527,11 +527,13 @@ describe("the sidebar", () => {
   const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
   const declared = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
 
-  it("opens 300 px wide and stays a drag, with a chat's two lines at 44 px, a project's one at 32 and a nested chat at 40", () => {
+  it("opens 300 px wide and stays a drag, with a 52 px head and foot and every row one 32 px line", () => {
     // 300 is the approved design's column (it was 288, and 272 before the rows went to two lines).
     // The design drew it fixed; the operator kept the drag, so what is pinned is the default the
     // stylesheet and the drag start from, and that it sits inside the bounds the drag is held to,
-    // never the drawn width. A project row is the 32 px one-line row every list now shares.
+    // never the drawn width. Every row — a pinned destination, a project, a chat, a chat inside a
+    // project — is the 32 px one-line row of every list: a chat was two lines of 44 px, its model and
+    // host on the second, and the design moved those into the tooltip and the state to the row's end.
     const px = (name: string) => Number(new RegExp(`${name}: (\\d+)px`).exec(declared())?.[1]);
     expect(declared()).toContain("--sidebar-w: 300px");
     expect(app).toMatch(/const SIDEBAR_W = 300;/);
@@ -543,31 +545,22 @@ describe("the sidebar", () => {
     expect(max).toBeGreaterThan(300);
     expect(max).toBeLessThanOrEqual(420);
     expect(declared()).toContain("--row-h: 32px");
-    expect(declared()).toContain("--row-h-2: 44px");
-    expect(declared()).toContain("--row-h-kid: 40px");
-    expect(declared()).toContain("--chip-h-dense: 24px");
-    expect(declared()).toContain("--plate: 24px");
-    expect(wide(".sb-row")).toContain("min-height: var(--row-h-2)");
-    expect(wide(".sb-prow")).toContain("min-height: var(--row-h)");
-    expect(wide(".sb-kids > .sb-row")).toContain("min-height: var(--row-h-kid)");
+    expect(wide(".sidebar-head")).toContain("height: var(--head-h)");
+    expect(wide(".sidebar-foot")).toContain("height: var(--head-h)");
+    expect(wide(".sb-nav")).toContain("height: var(--row-h)");
+    expect(wide(".sb-row")).toContain("height: var(--row-h)");
+    // Inside a project a chat's text starts where the project's name does: 12 + 16 + 8 of the row.
+    expect(wide(".sb-kids > .sb-row")).toContain("padding-left: 36px");
     // A subagent under its unfolded leader is one short line, quieter than a chat: the dense row.
-    expect(wide(".sb-sub")).toContain("min-height: var(--row-h-dense)");
-    expect(wide(".sb-kids > .sb-row.sb-sub")).toContain("min-height: var(--row-h-dense)");
-    expect(wide(".sb-plate")).toContain("width: var(--plate)");
-    expect(wide(".sb-plate")).toContain("border-radius: 50%");
-    expect(wide(".sb-tile")).toContain("border-radius: var(--radius-xs)");
+    expect(wide(".sb-sub")).toContain("height: var(--row-h-dense)");
+    // No second line and no plate is left to pin a two-line height on.
+    expect(declared()).not.toContain("--row-h-kid");
+    expect(wide(".sb-plate")).toBe("");
   });
 
-  it("gives the two project buttons a small control's height and its chips the dense one", () => {
-    expect(wide(".sb-pbtn")).toContain("height: var(--ctl-h-sm)");
-    expect(wide(".sb-new")).toContain("height: var(--ctl-h)");
-    expect(wide(".sb-chip")).toContain("height: var(--chip-h-dense)");
-  });
-
-  it("gives the kind tabs over the lists a small control's height, and a finger's on a phone", () => {
-    // A tab bar above the chips, not a fifth chip: the small control's 28 px with an underline, which
-    // keeps the column's tools one row taller than before and no more. The phone's Chats page gives
-    // each tab the 44 px a finger needs.
+  it("gives the phone's kind tabs a finger's height", () => {
+    // The desktop's kind tabs became the Show part of the Chats label's menu; the phone's Chats page
+    // keeps them as tabs, each the 44 px a finger needs.
     const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
     expect(rule(".kind-tab")).toContain("height: var(--ctl-h-sm)");
     expect(rule(".ph-kinds .kind-tab")).toContain("height: var(--row-h-touch)");
@@ -683,18 +676,18 @@ describe("rows and controls", () => {
     expect(decl(".tabbar.project-tabs")).toContain("position: static");
   });
 
-  it("gives the rail and the sidebar the first column together, and the rail's icons a row's size", () => {
-    // The rail replaced the sidebar's folded strip, so the column math changed: the first column is
-    // the rail plus the sidebar, and folding sets the sidebar's share to 0 rather than to a strip's
-    // 48 px. The conversation's stripe is untouched; the rail takes 4 px more than the strip did.
+  it("gives the sidebar the first column alone, with no rail beside it", () => {
+    // The rail of icons is gone: the sidebar's labelled rows hold the destinations, and folding sets
+    // its share to 0, with a button in the window's corner to bring it back.
     const wide = all.filter((r) => r.media.includes("min-width: 1024px"));
     const body = (sel: string) => wide.filter((r) => selectors(r).includes(sel)).map((r) => r.body).join(";");
-    expect(body(".app")).toContain("grid-template-columns: calc(var(--rail-w) + var(--sidebar-w)) minmax(0, 1fr)");
-    expect(body(".sidebar")).toContain("left: var(--rail-w)");
-    expect(body(".rail")).toContain("width: var(--rail-w)");
-    expect(body(".rail-item")).toContain("height: var(--row-h)");
+    expect(body(".app")).toContain("grid-template-columns: var(--sidebar-w) minmax(0, 1fr)");
+    expect(body(".desktop-column")).toContain("width: var(--sidebar-w)");
+    expect(all.filter((r) => /\.rail\b|\.rail-/.test(r.selector))).toEqual([]);
+    expect(all.find((r) => r.selector === ":root" && !r.media)!.body).not.toContain("--rail-w");
     // A drag writes the width once a frame; a transition on it is what made the edge lag and glide.
     expect(body(".sidebar")).not.toMatch(/transition/);
+    expect(body(".desktop-column")).not.toMatch(/transition/);
   });
 
   it("put the browser's corner preview inside the conversation's column, at its token width", () => {

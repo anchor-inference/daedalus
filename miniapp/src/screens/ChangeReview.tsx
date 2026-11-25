@@ -148,7 +148,7 @@ export function ChangeReview({ p, items, toast, onDecided }: { p: Proposal; item
       </div>
       {phone && decision && <div className="review-decide">{decision}</div>}
       {rejecting && (
-        <Sheet title={t("inbox.reject.title")} size="sm" onClose={() => !busy && setRejecting(false)}
+        <Sheet title={t("changes.reject.title")} size="sm" onClose={() => !busy && setRejecting(false)}
           footer={<>
             <Button variant="quiet" onClick={() => setRejecting(false)}>{t("common.cancel")}</Button>
             <Button variant="danger" busy={busy} onClick={() => void decide("reject")}>{t("inbox.reject.do")}</Button>
