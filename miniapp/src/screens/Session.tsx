@@ -2,7 +2,7 @@ import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation, type TranslatingMessage } from "../api";
-import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
+import { Chevron, Dot, Status, copyText, fmtInt, fmtUsd, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Sheet, confirmDialog, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
 import { useMinute } from "../minute";
@@ -11,7 +11,7 @@ import { PrivateBadge, isPrivate } from "../privatechat";
 import { isProject } from "../grouping";
 import { readPrefs, type Prefs } from "../appearance";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
-import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
+import { confirmAsync, errorText, fmtBytes, fmtTok, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
@@ -110,7 +110,9 @@ import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/c
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
-import { PanelStrip } from "../panelstrip";
+import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatChanges } from "../panelpanes";
+import { Overview, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
@@ -204,7 +206,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const sessionCanvases = useQuery<{ items: { id: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
+  const sessionCanvases = useQuery<{ items: { id: string; title?: string; updated_at?: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
   // `translating` is the agent's language while the words are with the translator, "" once they are not;
   // `acked` once the host said it has them, after which only its own list keeps them "translating".
   const [sendingMessages, setSendingMessages] = useState<SendingMessage[]>([]);
@@ -260,7 +262,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     setSourcesOf(turnKey);
     panel.open("sources");
   }, [panel.open]);
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
+  // The chat's working-tree changes: whether it has a Changes tool at all, and the Overview's row.
+  const chatChanges = useChatChanges(id && !visit && !bare && !embedded ? id : null, detail?.status);
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { changes: !!chatChanges.data?.repository, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
   // A conversation with another agent that starts, a reply that comes, a message that waits for the operator:
   // the Agents tab opens on that change, once. A phone opens no sheet over the chat for it, as it opens none
   // for a subagent; the approval sits over the composer there and the tab is a tile.
@@ -329,7 +333,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     reply: orchestrating ? (target) => { setReply(id, target); composer.current?.focus(); } : undefined,
   } : null), [focus?.projectId, orchestrating, toast, id]);
   const body = useRef<HTMLDivElement>(null);
-  const [panelPct, dragPanel] = usePanelWidth(body);
+  // The panel stands beside the whole chat, its header included, so its width is the chat's to hold.
+  const chatBox = useRef<HTMLDivElement>(null);
+  const [panelPx, dragPanel] = usePanelWidth(chatBox);
   // The session's terminals: the dock under the conversation on a desktop, a sheet and a full-screen
   // view on a phone. Listed here because the header's button, the dock and the delete dialog all count them.
   const sessionTerminals = useSessionTerminals(id);
@@ -1497,10 +1503,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
-  // The picker hangs from the control that opened it. The panel strip's chip used to call this bare, and
-  // the list opened beside the composer's pill at the far side of the window from the chip.
+  // The picker hangs from the control that opened it: the panel's model line opens it under itself, not
+  // beside the composer's pill at the far side of the window.
   const openPicker = (anchor?: HTMLElement | null) => composer.current?.openModel(anchor);
-  const stripModel = useRef<HTMLButtonElement>(null);
 
   async function chooseModel(body: ModelChoice) {
     try {
@@ -1790,13 +1795,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (!ok) toast(id);
     return ok;
   };
-  // The session's menu: one list for the chat header's ⋯ and the panel strip's ⋯, so what one does to the
-  // session is found in the same place from either side. The rare things the Details tab used to carry
-  // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
-  // The strip's copy differs in one thing: its "Change model" opens the picker under the strip's own chip,
-  // not under the composer's pill on the other side of the window.
-  const sessionMenuFrom = (modelAnchor?: { current: HTMLElement | null }): MenuItem[] => visit ? [
-    ...(hasDetails ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
+  // The session's menu, the chat header's ⋯. The rare things the Details tab used to carry as buttons in
+  // its cards — change the model, move the folder, copy the id, clear, delete — are here.
+  const sessionMenu: MenuItem[] = visit ? [
+    ...(hasDetails ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker() }] : []),
     ...(hasDetails
       ? [
           "-" as const,
@@ -1811,7 +1813,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
   ] : [
     { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
-    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
+    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker() }] : []),
     // A session in a project's focus mode stays in its project; the orchestrator's chat has no
     // files or jobs of its own to show.
     ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
@@ -1843,8 +1845,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
     { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
   ];
-  const sessionMenu = sessionMenuFrom();
-  const stripMenu = sessionMenuFrom(stripModel);
   // A visitor's menus keep what stays inside the session; the host refuses the rest whatever is pressed.
   const phoneRows: SessionRow[] = phone && !pane && visit ? [
     { icon: "copy", label: t("session.copyid"), onSelect: () => void copySessionId() },
@@ -1875,6 +1875,42 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The folder the chat works in, while it is being carried between the container and the host.
   const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
   const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
+  // The panel's Overview: the chat's state in one line, what it runs on, and a row a tool with what is
+  // behind it; the "+" menu says the same figures beside the tools that are not open.
+  const changedFiles = chatChanges.data?.repository ? chatChanges.data.files : [];
+  const overviewStatus: OverviewStatus = compacting ? { tone: "live", word: t("status.compacting") }
+    : status === "running" ? { tone: "live", word: t("status.running"), since: detail?.run_started_at }
+    : status === "waiting" || (questionsShown && waiting > 0) ? { tone: "attn", word: t("status.waiting"), since: status === "waiting" ? detail?.run_started_at : null }
+    : status === "failed" ? { tone: "bad", word: t("status.failed") }
+    : { tone: "idle", word: waitingLine || t(detail?.messages.length ? "panel.ov.idle" : "panel.ov.fresh") };
+  const overviewMeta = detail ? <>
+    {orchestrating ? <span>{shortModel(detail.fallback?.to ?? detail.model, 32)}</span>
+      : <button type="button" className="ov-model" onClick={(e) => openPicker(e.currentTarget)} aria-haspopup="menu" title={t("strip.model.title", { model: detail.fallback?.to ?? detail.model })}>{shortModel(detail.fallback?.to ?? detail.model, 32)}</button>}
+    {effortText && <span>{effortText}</span>}
+    <span className={detail.bypass ? "attn" : undefined}>{t(detail.bypass ? "panel.ov.bypass" : "panel.ov.asks")}</span>
+    {detail.branch && <span>{t("panel.ov.branch", { branch: detail.branch })}</span>}
+  </> : null;
+  const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
+  const overviewRows: OverviewRow[] = !detail ? [] : [
+    ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
+    ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
+    ...(panelTabs.includes("subagents") && detail.subagents?.length ? [{ tab: "subagents" as PanelTab, name: t("panel.tab.subagents"), text: (runningHelpers[0] ?? detail.subagents[0]).name ?? plural("panel.ov.helpers", detail.subagents.length), tag: runningHelpers.length ? t("panel.ov.running", { n: runningHelpers.length }) : String(detail.subagents.length), tone: runningHelpers.length ? "live" as const : undefined }] : []),
+    ...(panelTabs.includes("browser") && browserShown ? [{ tab: "browser" as PanelTab, name: t("panel.tab.browser"), text: t(browserShown.needs_you ? "panel.ov.browser.you" : browserShown.acting ? "panel.ov.browser.acting" : "panel.ov.browser.idle"), tone: browserShown.needs_you ? "attn" as const : undefined }] : []),
+    ...(panel.state.stack.length > 0 ? [{ tab: "preview" as PanelTab, name: t("panel.tab.preview"), text: panel.state.stack[panel.state.at]?.path ?? "" }] : []),
+    ...(panelTabs.includes("files") ? [{ tab: "files" as PanelTab, name: t("panel.tab.files"), text: detail.workspace_name || detail.project?.name || detail.workspace }] : []),
+    ...(panelTabs.includes("notes") ? [{ tab: "notes" as PanelTab, name: t("panel.tab.notes"), text: notesCount ? plural("panel.ov.notes", notesCount) : t("panel.ov.notes.none"), tag: notesCount ? String(notesCount) : undefined }] : []),
+    ...(sessionCanvases?.length ? [{ tab: "canvas" as PanelTab, name: t("panel.tab.canvas"), text: sessionCanvases[0].title || t("panel.canvas.untitled"), tag: String(sessionCanvases.length) }] : []),
+    ...(detail.context ? [{ tab: "context" as PanelTab, name: t("panel.tab.context"), text: detail.context.window > 0 ? t("strip.context.of", { used: fmtTok(detail.context.tokens), window: fmtTok(detail.context.window) }) : fmtTok(detail.context.tokens), tag: contextPct !== null ? `${contextPct}%` : undefined, tone: contextPct !== null && contextPct >= 80 ? "attn" as const : undefined }] : []),
+    { tab: "usage" as PanelTab, name: t("panel.tab.usage"), text: detail.usage.usd_today != null ? `${fmtUsd(detail.usage.usd)} · ${spendToday(detail.usage).short}` : fmtUsd(detail.usage.usd) },
+  ].filter((row) => panelTabs.includes(row.tab));
+  const panelFigures: Partial<Record<PanelTab, string>> = {
+    ...(changedFiles.length ? { changes: String(changedFiles.length) } : {}),
+    ...(detail?.subagents?.length ? { subagents: String(runningHelpers.length || detail.subagents.length) } : {}),
+    ...(contextPct !== null ? { context: `${contextPct}%` } : {}),
+    ...(notesCount ? { notes: String(notesCount) } : {}),
+    ...(sessionCanvases?.length ? { canvas: String(sessionCanvases.length) } : {}),
+    ...(questionsShown && waiting ? { questions: String(waiting) } : {}),
+  };
   // A remote chat names its computer and folder, and says when the computer is not there; a turn held
   // for it is a pause, not work, so the live bar steps aside for the banner that says what to do.
   const remote = remoteOf(detail);
@@ -1904,7 +1940,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   return (
     <FocusChatContext.Provider value={focusChat}>
     <ComposeTarget.Provider value={id}>
-    <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`}>
+    <div ref={chatBox} className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""} ${panel.state.tab && !phone ? "with-panel" : ""} ${panel.state.expanded && !phone ? "panel-full" : ""}`} style={panelPx ? { ["--panel-w" as string]: `${panelPx}px` } : undefined}>
       {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
@@ -2016,7 +2052,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {!bare && !(phone && !pane) && remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
       {banner}
 
-      <div ref={body} className={`chat-body ${panel.state.tab && !phone ? "with-panel" : ""} ${panel.state.expanded && !phone ? "panel-full" : ""}`} style={{ ["--panel-w" as string]: `${panelPct}%` }}>
+      <div ref={body} className="chat-body">
         <div className="chat-main">
           {!phone && panel.state.tab !== "browser" && !(panel.state.expanded && panel.state.tab) && <BrowserPip groups={browsers.groups} onOpen={openBrowser} />}
           <div className="chat-scroll" ref={scroller} onScroll={onScroll}>
@@ -2162,7 +2198,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             targetWorkspace={detail?.workspace}
             idlePlaceholder={remotePaused ? t("remote.composer.paused") : focusPlaceholder}
             context={detail?.context ?? null}
-            onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
+            onContext={hasDetails ? () => panel.open("context") : undefined}
             asr={asr}
             queued={queuedInput}
             onWithdraw={withdraw}
@@ -2185,95 +2221,97 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           />}
           {!phone && !bare && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
         </div>
-        {detail && (
-          <Panel
-            state={panel.state}
-            onTab={panel.open}
-            onClose={panel.close}
-            onExpand={panel.expand}
-            onBack={panel.back}
-            onForward={panel.forward}
-            root={detail.project?.name ?? t("session.files.crumb")}
-            downloadUrl={(e) => downloadHref(e.base, e.path)}
-            sheet={phone}
-            sheetTitle={detail.title}
-            sheetSub={[detail.project?.name, detail.context?.messages ? plural("session.phone.messages", detail.context.messages) : null].filter(Boolean).join(" · ")}
-            drag={dragPanel}
-            tabs={panelTabs}
-            pinned={panel.pinned}
-            onPin={phone ? undefined : panel.togglePin}
-            onShowEntry={panel.showEntry}
-            onCloseEntry={panel.closeEntry}
-            strip={hasDetails ? <PanelStrip
-              model={detail.fallback?.to ?? detail.model}
-              effort={effortText}
-              context={detail.context ?? null}
-              usage={detail.usage}
-              menu={stripMenu}
-              modelRef={stripModel}
-              onModel={orchestrating ? undefined : openPicker}
-              onContext={detail.context ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
-              onUsage={() => { setDetailsFocus("usage"); panel.open("details"); }}
-            /> : undefined}
-            pages={{
-              ...(focus ? {
-                board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
-                brief: <BriefPage projectId={focus.projectId} compact toast={toast} />,
-                wakeups: <WakeupsPage projectId={focus.projectId} compact toast={toast} />,
-                folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
-              } : {}),
-              ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
-              sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
-              notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
-              browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
-              agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} loaded={talksLoaded} toast={toast} />,
-              subagents: <SubagentsTab
-                leaderId={id}
-                selected={panel.state.sub}
-                onSelect={panel.openSubagent}
-                onOpenFull={(child) => navigate(sessionPath(child))}
-                toast={toast}
-                chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
-              />,
-            }}
-            // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
-            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
-            marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
-            details={hasDetails ? (ids) =>
-              <SessionDetails
-                ids={ids}
-                id={id}
-                role={orchestrating ? "orchestrator" : main ? "main" : "session"}
-                detail={detail}
-                busy={busy}
-                schedules={schedules}
-                provider={provider}
-                providerUsage={providerUsage}
-                onOpen={onOpen}
-                toast={toast}
-                reload={load}
-                focus={detailsFocus?.page}
-                focusKey={detailsFocus?.n}
-                on={{
-                  rename,
-                  openPicker,
-                  compact,
-                  clearHistory,
-                  remove,
-                  exportMarkdown,
-                  loopAction,
-                  scheduleAction,
-                  move: () => setMoving(true),
-                  showLog: (line, text) => setCommandResult({ line, text }),
-                  openFiles: () => panel.open("files"),
-                }}
-              />
-            : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
-            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} openJob={jobOpen} onOpenJob={setJobOpen} /> : undefined}
-          />
-        )}
       </div>
+      {detail && (
+        <Panel
+          state={panel.state}
+          onTab={panel.open}
+          onClose={panel.close}
+          onExpand={panel.expand}
+          onBack={panel.back}
+          onForward={panel.forward}
+          root={detail.project?.name ?? t("session.files.crumb")}
+          downloadUrl={(e) => downloadHref(e.base, e.path)}
+          sheet={phone}
+          drag={dragPanel}
+          tabs={panelTabs}
+          pinned={panel.pinned}
+          onPin={phone ? undefined : panel.togglePin}
+          onShowEntry={panel.showEntry}
+          onCloseEntry={panel.closeEntry}
+          onCloseTool={panel.closeTool}
+          attention={questionsShown && waiting > 0 ? ["questions"] : undefined}
+          context={panelContext}
+          figures={panelFigures}
+          pages={{
+            overview: <Overview sessionId={id} family={[id, ...(detail.subagents ?? []).map((child) => child.session_id)]} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
+              onBoard={() => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
+            ...(chatChanges.data?.repository ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
+            context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
+            usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,
+            memory: <MemoryPane sessionId={id} />,
+            canvas: <CanvasPane sessionId={id} canvases={sessionCanvases} />,
+            attachments: <AttachmentsPane sessionId={id} onJump={openMessage} />,
+            ...(focus ? {
+              board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
+              brief: <BriefPage projectId={focus.projectId} compact toast={toast} />,
+              wakeups: <WakeupsPage projectId={focus.projectId} compact toast={toast} />,
+              folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
+            } : {}),
+            ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
+            sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
+            notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
+            browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
+            agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} loaded={talksLoaded} toast={toast} />,
+            subagents: <SubagentsTab
+              leaderId={id}
+              selected={panel.state.sub}
+              onSelect={panel.openSubagent}
+              onOpenFull={(child) => navigate(sessionPath(child))}
+              toast={toast}
+              chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
+            />,
+          }}
+          // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
+          badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
+          marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
+          details={hasDetails ? (ids) =>
+            <SessionDetails
+              ids={ids}
+              id={id}
+              role={orchestrating ? "orchestrator" : main ? "main" : "session"}
+              detail={detail}
+              busy={busy}
+              schedules={schedules}
+              provider={provider}
+              providerUsage={providerUsage}
+              onOpen={onOpen}
+              toast={toast}
+              reload={load}
+              focus={detailsFocus?.page}
+              focusKey={detailsFocus?.n}
+              on={{
+                rename,
+                openPicker,
+                compact,
+                clearHistory,
+                remove,
+                exportMarkdown,
+                loopAction,
+                scheduleAction,
+                move: () => setMoving(true),
+                showLog: (line, text) => setCommandResult({ line, text }),
+                openFiles: () => panel.open("files"),
+                openTool: panel.open,
+                openModel: orchestrating ? undefined : openPicker,
+              }}
+              effort={effortText}
+            />
+          : undefined}
+          files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
+          jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} openJob={jobOpen} onOpenJob={setJobOpen} /> : undefined}
+        />
+      )}
 
       <TerminalFull dock={terminalDock} phone={phone} workspace={detail?.workspace} fileOpener={openTerminalFile} />
       <TerminalSheet dock={terminalDock} workspace={detail?.workspace} />

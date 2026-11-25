@@ -47,27 +47,29 @@ describe("a project's route", () => {
 });
 
 describe("the right panel in focus mode", () => {
-  it("offers the questions and the project's tabs beside the orchestrator, and both sets beside a session of the project", () => {
-    expect(tabsFor("session")).toEqual(["details", "files", "preview", "jobs", "notes"]);
-    // The orchestrator's own Details follow its questions: what it costs and how full it is.
-    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "notes", "board", "brief", "wakeups", "folders"]);
-    expect(tabsFor("member")).toEqual([...PANEL_TABS, ...PROJECT_TABS]);
-    // The main chat leads with every project's questions and keeps a session's own tabs behind them.
-    expect(tabsFor("main")).toEqual(["questions", ...PANEL_TABS]);
+  it("offers the questions and the project's tools beside the orchestrator, and both sets beside a session of the project", () => {
+    expect(tabsFor("session")).toEqual(PANEL_TABS);
+    // The orchestrator's questions come first, its own Details and Usage last: what it costs and how full it is.
+    expect(tabsFor("orchestrator")).toEqual(["overview", "questions", "files", "context", "notes", ...PROJECT_TABS, "details", "usage"]);
+    expect(tabsFor("member")).toEqual([...PANEL_TABS.slice(0, -2), ...PROJECT_TABS, "details", "usage"]);
+    // The main chat leads with every project's questions and keeps a session's own tools behind them.
+    expect(tabsFor("main")).toEqual(["overview", "questions", ...PANEL_TABS.slice(1)]);
   });
 
-  it("reads only the tabs the context has from a link", () => {
+  it("reads only the tools the context has from a link", () => {
     const q = new URLSearchParams("panel=jobs");
     expect(readPanelQuery(q, tabsFor("orchestrator"))).toBeNull();
     expect(readPanelQuery(new URLSearchParams("panel=files"), tabsFor("orchestrator"))?.tab).toBe("files");
     expect(readPanelQuery(new URLSearchParams("panel=details"), tabsFor("orchestrator"))?.tab).toBe("details");
     expect(readPanelQuery(new URLSearchParams("panel=brief"), tabsFor("orchestrator"))?.tab).toBe("brief");
-    expect(readPanelQuery(new URLSearchParams("panel=brief"))).toBeNull();
+    expect(readPanelQuery(new URLSearchParams("panel=brief"), tabsFor("session"))).toBeNull();
   });
 
   it("opens on the context's first tab, and remembers the project's tab apart from a session's", () => {
-    expect(defaultPanelTab(null, 1440, tabsFor("orchestrator"))).toBe("questions");
-    expect(defaultPanelTab("jobs", 1440, tabsFor("orchestrator"))).toBe("questions");
+    const empty = { getItem: () => null };
+    expect(readPanelTab(1440, empty, "orchestrator")).toBe("questions");
+    expect(readPanelTab(1440, empty, "main")).toBe("questions");
+    expect(readPanelTab(1440, empty, "session")).toBe("overview");
     const kept = new Map<string, string>([["daedalus.session.panel", "files"], ["daedalus.session.panel.project", "brief"], ["daedalus.session.panel.main", "jobs"]]);
     const storage = { getItem: (k: string) => kept.get(k) ?? null };
     expect(readPanelTab(1440, storage, "session")).toBe("files");
@@ -75,7 +77,7 @@ describe("the right panel in focus mode", () => {
     expect(readPanelTab(1440, storage, "main")).toBe("jobs");
     expect(readPanelTab(900, storage, "orchestrator")).toBeNull();
     // A member's panel never opens on the questions it does not have.
-    expect(defaultPanelTab("questions", 1440, tabsFor("member"))).toBe("details");
+    expect(defaultPanelTab("questions", 1440, tabsFor("member"))).toBe("overview");
   });
 });
 

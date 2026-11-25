@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -280,7 +281,10 @@ def files_tab(page: Page, name: str) -> list[str]:
     page.wait_for_timeout(300)
     if name != "desktop":
         return problems
-    page.locator(".panel").get_by_role("button", name="Expand over the conversation (Ctrl/⌘ ⇧ .)", exact=True).click()
+    # Expanding is an item of the panel's ⋯ menu: the way an operator without the chord finds it.
+    page.locator(".panel .panel-menu").first.click()
+    # The item carries its chord beside the words, so its name is matched by how it begins.
+    page.get_by_role("menuitem", name=re.compile(r"^Expand over the conversation")).click()
     page.wait_for_timeout(300)
     row.click()
     page.wait_for_timeout(600)

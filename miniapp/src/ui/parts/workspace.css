@@ -41,14 +41,9 @@
 .panel.phone-width .panel-viewer { width: 390px; max-width: 100%; margin: 0 auto; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 .panel-files .files .crumbs { margin-top: 2px; }
 /* How much of each tab the strip draws is measured (panelhost.tsx, useTabFit): the icon and the word,
-   the word alone, the word on the open tab only, or the icons alone; the first that fits wins. A phone's
-   sheet starts at the word alone. Every tab keeps its name as its tooltip and its accessible name. */
-.panel-tablist.fit-words .panel-tab .ic, .panel-tablist.fit-active .panel-tab.on .ic { display: none; }
-.panel-tablist.fit-active .panel-tab:not(.on) > span:not(.count), .panel-tablist.fit-icons .panel-tab > span:not(.count) { display: none; }
-.panel-tablist.fit-words .panel-tab, .panel-tablist.fit-active .panel-tab, .panel-tablist.fit-icons .panel-tab { padding: 0 8px; }
-@media (max-width: 1023px) {
-  .panel-sheet .panel-tab { padding: 0 8px; }
-}
+   the word on the open tab only, or the icons alone; the first that fits wins. Every tab keeps its name
+   as its tooltip and its accessible name. */
+.panel-tablist.fit-active .panel-tab:not(.on) .panel-tab-word, .panel-tablist.fit-icons .panel-tab .panel-tab-word { display: none; }
 
 /* The Jobs tab's flat sections: a 12 px label and hairlines between. The Details tab started from the
    same rules and is drawn as cards below. */
@@ -263,17 +258,21 @@
   .chat-head { padding: 0 12px 0 24px; }
   .chat-scroll { padding: 20px 24px 16px; }
   .composer { padding: 8px 24px 16px; }
-  /* The panel is a column of the chat's grid, its share of the width dragged and remembered. The
-     grid column does not animate: the conversation reflows once, and the windowed list measures once. */
-  .chat-body.with-panel { display: grid; grid-template-columns: minmax(0, 1fr) clamp(var(--panel-w-min), var(--panel-w), 65%); }
+  /* The panel stands beside the whole chat at the window's full height, its tab row level with the
+     chat's header rather than under a header drawn across both. The chat keeps the room on its right
+     as padding, so the header, the conversation and the composer centre in what is left; the panel
+     lies in that room. Both read one size, so they cannot disagree by a pixel. The width does not
+     animate: the conversation reflows once, and the windowed list measures once. */
+  .chat.with-panel { --panel-size: clamp(var(--panel-w-min), var(--panel-w), 65%); padding-right: var(--panel-size); }
+  .chat.pane.with-panel { --panel-size: clamp(280px, var(--panel-w), 50%); }
   /* The panel lies on the page's own surface behind a hairline, as the conversation does: a lighter
      column beside it read as a sheet over the page. --panel-bg is what a sticky head inside paints. */
-  .panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); --panel-bg: var(--wash, var(--bg)); background: var(--panel-bg); opacity: 0; }
+  .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); --panel-bg: var(--wash, var(--bg)); background: var(--panel-bg); opacity: 0; }
   .panel { container-type: inline-size; }
   .panel.shown { opacity: 1; transition: opacity 200ms var(--ease-out); }
   .panel .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
-  .panel.full { position: absolute; inset: 0; z-index: 5; border-left: 0; }
-  .chat.pane .chat-body.with-panel { grid-template-columns: minmax(0, 1fr) clamp(280px, var(--panel-w), 50%); }
+  .chat > .panel { position: absolute; top: 0; right: 0; bottom: 0; width: var(--panel-size, clamp(var(--panel-w-min), var(--panel-w), 65%)); }
+  .chat > .panel.full { inset: 0; width: auto; z-index: 5; border-left: 0; }
   /* Cards spread across the width instead of stretching two of them over it. */
   .grid2, .grid4 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   /* The conversation is one centred stripe, and running text inside it stops at a reading width:

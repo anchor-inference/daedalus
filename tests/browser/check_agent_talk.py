@@ -137,8 +137,12 @@ def opens_on_a_reply(browser) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents/{S1}?lang=en&scheme=light&panel=details", wait_until="domcontentloaded")
-    expect(page.locator(".panel-tab[data-tab='agents']")).to_be_visible()
+    # The chat talks to another agent, so the panel's + offers the Agents tool; nothing opens it yet.
+    page.locator(".panel-add").click()
+    expect(page.locator(".panel-tools [data-tool='agents']")).to_be_visible()
+    page.keyboard.press("Escape")
     page.wait_for_timeout(6000)
+    expect(page.locator(".panel-tab[data-tab='agents']")).to_have_count(0)
     expect(page.locator(".panel-tab[data-tab='details']")).to_have_attribute("aria-selected", "true")
     talks.talks["t1"]["replies"] = 2
     talks.talks["t1"]["unread"] = 1

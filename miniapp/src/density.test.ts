@@ -159,7 +159,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   // The open Inbox entry reads as prose at the answer's size, and its title is a pane's heading.
   ".inbox-prose", ".inbox-pane-title",
   // A board card's pane is a pane: its title is a pane's heading (18/500) and its description prose.
-  ".task-pane-title", ".task-prose"];
+  ".task-pane-title", ".task-prose",
+  // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
+  ".ov-title"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -245,6 +247,13 @@ const CONTENT_BOXES = [
   { selector: ".tp-row-open", property: "height", max: 56 },
   { selector: ".tp-mem", property: "height", max: 56 },
   { selector: ".tp-pane-head", property: "height", max: 40 },
+  // The chat panel: an Overview row is the large 48 px row of a list of tools, a tool's list row (a
+  // file, a canvas, a remembered fact) the same; a group's label stands 40 px over its first row, and
+  // the Changes foot holds two buttons in the 56 px bar the design draws under the diff.
+  { selector: ".ov-row", property: "height", max: 48 },
+  { selector: ".tool-row", property: "min-height", max: 48 },
+  { selector: ".dt-grp", property: "height", max: 40 },
+  { selector: ".ch-foot", property: "min-height", max: 56 },
 ];
 
 /** Top and bottom padding of a shorthand, in px; a component that is not a plain length counts as its first literal. */

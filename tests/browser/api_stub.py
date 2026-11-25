@@ -744,6 +744,9 @@ GATES: dict[str, object] = {
     # No canvas anywhere: the chat header shows no canvas button. `canvas_stub.py` answers every
     # canvas route for a harness that opens one.
     "/api/canvases": {"scopes": [], "items": []},
+    # The board as a host with no task answers it: the chat panel's Overview reads one chat's tasks
+    # (`?session=`) under every conversation, and a harness without a board of its own lists none.
+    "/api/board": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
     "/api/sessions": {"sessions": [], "projects": []},

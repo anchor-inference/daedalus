@@ -6,7 +6,7 @@
 
 import { createElement } from "react";
 import {
-  Archive, ArrowDown, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
+  Archive, ArrowDown, Brain, Coins, Gauge, Info, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleQuestionMark, ClipboardPaste, Clock, Cloud, Code,
   Columns2, Compass, Copy, Crop, Database, Diamond, Dot, Download, Dumbbell, Ellipsis, EllipsisVertical,
   ExternalLink, Eye, EyeOff, FastForward, File, FileText, Flag, Folder, FolderPlus, Gift, GitBranch, GitBranchPlus,
@@ -31,7 +31,8 @@ export type IconName =
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
   | "note" | "bold" | "italic" | "strike" | "code" | "heading" | "quote" | "olist" | "tasks" | "table" | "hr"
-  | "open" | "cut" | "selectall";
+  | "open" | "cut" | "selectall"
+  | "info" | "gauge" | "coin" | "brain";
 
 /** One glyph as Lucide ships it: the SVG elements of a 24-unit drawing, each a tag and its attributes. */
 type IconNode = readonly (readonly [tag: string, attrs: Readonly<Record<string, string | number | undefined>>])[];
@@ -45,6 +46,10 @@ const LOGO: IconNode = [["path", { d: "M10 3.5H3.5v17h17v-17H14M10 16.5H7.5v-9h9
  *  checkbox rather than as Stop. The keys keep the order the icon picker of Settings shows them in. */
 const NODES: Record<IconName, IconNode> = {
   open: LogIn,
+  info: Info,
+  gauge: Gauge,
+  coin: Coins,
+  brain: Brain,
   cut: Scissors,
   selectall: ScanText,
   hand: Hand,

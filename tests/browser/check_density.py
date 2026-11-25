@@ -83,6 +83,8 @@ READ = """
     aside: box(one('.session-aside')),
     panel: box(one('.panel')),
     panelTabs: box(one('.panel-tabs')),
+    panelTop: one('.panel') ? Math.round(one('.panel').getBoundingClientRect().top) : null,
+    vh: window.innerHeight,
     headStatus: box(one('.chat-head .head-status')),
     headModel: box(one('.composer .model-select')),
     composerRow: box(one('.composer-row')),
@@ -703,10 +705,14 @@ def judge(m: dict) -> list[str]:
         if not m["panel"]:
             problems.append(f"{m['vw']}: the panel is not open beside the conversation")
         else:
-            if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
-                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            # 52, the header's height: the tabs draw their icon over their word, so six named tabs fit
-            # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
+            # 30 % of the window between 400 and 520 px until the operator drags it, and at the window's
+            # full height beside the chat: its top is the window's, its tab row level with the header.
+            want = min(520, max(400, round(0.3 * m["vw"])))
+            if abs(m["panel"]["w"] - want) > 1:
+                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, not {want} (30 % between 400 and 520)")
+            if m["panelTop"] != 0 or abs(m["panel"]["h"] - m["vh"]) > 1:
+                problems.append(f"{m['vw']}: the panel is not the window's full height ({m['panel']})")
+            # 52, the header's height, so the line under the tabs meets the line under the header.
             if not m["panelTabs"] or m["panelTabs"]["h"] != 52:
                 problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 52")
     elif m["panel"]:
@@ -742,11 +748,10 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 760")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 300 px
-        # sidebar is a 1140 px chat area, 58 % of it the conversation. The floor of 578 was set while a
-        # 52 px rail stood beside the sidebar as well; without it the column is wider still.
-        if m["vw"] == 1440 and m["timeline"]["w"] < 578:
-            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 578")
+        # Beside the 432 px panel a 1440 window keeps the conversation's whole stripe: 1440 less the
+        # 300 px sidebar and the panel leaves 708 px of chat, the stripe less its margins.
+        if m["vw"] == 1440 and m["timeline"]["w"] < 640:
+            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 640")
     return problems
 
 

@@ -977,14 +977,6 @@
   .btw-ask { padding: var(--space-3) var(--gutter); }
   .btw-ask textarea { font-size: var(--fs-16); }
   .btw-actions .btn { flex: 1; justify-content: center; min-height: 44px; }
-  .panel-sheet .sheet-head { flex-wrap: wrap; align-items: center; margin: 0 -16px; padding: 0 var(--space-2) 0 var(--gutter); gap: 0; border-bottom: 1px solid var(--line); }
-  .panel-sheet-title { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 2px 0 4px; }
-  .panel-sheet-title b { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
-  .panel-sheet-title span { font-size: var(--fs-13); color: var(--fg-3); }
-  .panel-sheet .sheet-head .panel-tabs { order: 3; flex: 1 1 100%; height: var(--tap); margin-left: calc(-1 * var(--space-3)); padding: 0; }
-  .panel-sheet .panel-tab { height: var(--tap); padding: 0 10px; font-size: var(--fs-14); font-weight: 500; }
-  .panel-sheet .panel-tab.on::after { left: 10px; right: 10px; bottom: 0; background: var(--fg); }
-  .panel-sheet .panel-tab .count { font-size: var(--fs-12); }
 
   /* A failed run and a compaction under way: in the conversation's own column, over the composer. */
   .ph-runerror { padding: 0 var(--space-3) var(--space-2); }
@@ -993,27 +985,6 @@
   .ph-compact-row .livebar { max-width: 100%; gap: var(--space-2); font-size: var(--fs-14); color: var(--fg-3); background: none; border: 0; padding: 0; }
   .ph-compact-row .livebar b { font-weight: 500; color: var(--fg); }
 
-  /* Details in the sheet: the desktop's cards as the phone's grouped cards, a 44 px header with the
-     title in the body's size, controls 36–44 px. The sheet is the lighter surface here, so the tiles
-     inside a card are the sheet's colour, set into it. */
-  /* The sheet is the floating surface, so what the desktop's cards hold as tiles are tiles here too, a
-     step up from it: on the sheet's own colour a tile, a field and a button had no edge at all. */
-  .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: transparent; --dt-tile: var(--surface-2); }
-  .panel-sheet .details .dt-section, .panel-sheet .details .dt-section:first-child { margin: 0; border: 0; border-radius: var(--radius-md); }
-  .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
-  .panel-sheet .details .dt-content { padding: 0 var(--space-4) var(--space-4); font-size: var(--fs-15); }
-  .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub, .panel-sheet .dt-content .dt-hint, .panel-sheet .dt-note { font-size: var(--fs-13); }
-  .panel-sheet .dt-stat-value, .panel-sheet .dt-today b { font-size: var(--fs-15); }
-  .panel-sheet .dt-row, .panel-sheet .dt-control { min-height: 40px; }
-  .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-16); }
-  .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
-  .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
-  .panel-sheet .dt-legend { grid-template-columns: minmax(0, 1fr); }
-  /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */
-  .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--tap); font-size: var(--fs-15); }
-  .panel-sheet .files .explorer-actions { opacity: 1; }
-  .panel-sheet .files .explorer-actions .iconbtn { color: var(--fg-2); }
-  .panel-sheet .files .field { min-height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
 
   /* A confirmation: the standard centred dialog with two 44 px buttons, the way back plain and the
      consequential one tinted rather than a solid red block beside it. */

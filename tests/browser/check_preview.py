@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from api_stub import DEFAULT_APP, FILE_TEXT, expect_app
 from playwright.sync_api import expect, sync_playwright
-from screenshots import S1, SILENCE, UNHANDLED, detail, respond, stub
+from screenshots import S1, SILENCE, UNHANDLED, detail, open_tool, respond, stub
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -190,12 +190,15 @@ def run() -> int:
         assert downloads.count("site/next.html") > before
         page.locator('.panel-toolbar button[aria-label="Phone width"]').click()
         assert page.locator(".html-frame").bounding_box()["width"] <= 390
+        # The panel keeps its own width in a wide window. Laid over the conversation it is wide enough to
+        # draw the tree beside the file, and the phone's width still holds the page to 390 px there.
         page.set_viewport_size({"width": 2560, "height": 1400})
+        page.keyboard.press("Control+Shift+Period")
         expect(page.locator(".panel-body.split")).to_be_visible()
         assert page.locator(".html-frame").bounding_box()["width"] <= 390
         page.emulate_media(reduced_motion="reduce")
         assert page.locator(".panel").evaluate("e => getComputedStyle(e).transitionDuration") == "0s"
-        page.locator('[data-tab="jobs"]').click()
+        open_tool(page, "jobs")
         page.locator(".receipt summary").click()
         expect(page.locator(".receipt .diff-add")).to_contain_text("new = 2")
         print("source, markdown, HTML navigation, image, PDF, CSV, TSV, JSON, media, diffs, office and binary: passed")
