@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
-import { confirmAsync, errorText } from "../ui";
-import { Segmented } from "../ui/components";
+import { errorText } from "../ui";
+import { Button, confirmDialog, Segmented, Select, Sheet, Switch } from "../ui/primitives";
+import { Row, SetBlock, SetGroup } from "../settingsrow";
 import { McpQuickAdd, locationOptions, policyOptions, type McpHost, type McpLocation, type McpPolicy } from "../mcpquickadd";
 
 
@@ -106,7 +107,7 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
     } finally { setBusy(null); }
   }
   async function remove(name: string) {
-    if (!(await confirmAsync(t("settings.mcp.remove.title", { name }), { body: t("settings.mcp.remove.body"), action: t("settings.mcp.remove.action"), danger: true }))) return;
+    if (!(await confirmDialog({ title: t("settings.mcp.remove.title", { name }), body: t("settings.mcp.remove.body"), action: t("settings.mcp.remove.action"), danger: true }))) return;
     setBusy(name);
     try {
       setServers((await api.delete<{ servers: McpServerView[] }>(`/api/mcp/servers/${enc(name)}`)).servers);
@@ -156,127 +157,136 @@ export function McpServers({ toast }: { toast: (text: string) => void }) {
     } finally { setBusy(null); }
   }
 
+  const canSave = !busy && !!(editing ?? draft?.name ?? "").trim() && (draft?.transport === "stdio" ? !!draft.command.trim() : !!draft?.url.trim());
+  const closeForm = () => { setDraft(null); setEditing(null); };
+  // Adding and changing are one form, in a sheet over the page: it is a task of its own with a
+  // decision at its foot, not a fifth block among the servers' rows.
   const form = draft && (
-    <div className="mfields mcp-form" data-mcp-form>
-      <label className="mfield">
-        <span>{t("settings.mcp.name")}</span>
-        <input className="field mono" value={draft.name} disabled={!!editing} placeholder="linear" spellCheck={false} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-      </label>
-      <div className="mfield">
-        <span>{t("settings.mcp.transport")}</span>
-        <Segmented value={draft.transport} label={t("settings.mcp.transport")} onChange={(transport) => setDraft({ ...draft, transport })}
-          options={[{ id: "http", label: t("settings.mcp.transport.http") }, { id: "stdio", label: t("settings.mcp.transport.stdio") }]} />
-      </div>
-      {draft.transport === "stdio" ? <>
-        <label className="mfield wide">
-          <span>{t("settings.mcp.command")}</span>
-          <input className="field mono" value={draft.command} placeholder="npx" spellCheck={false} onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
-        </label>
-        <label className="mfield wide">
-          <span>{t("settings.mcp.args")}</span>
-          <textarea className="field mono" rows={3} value={draft.args} placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/data"} spellCheck={false} onChange={(e) => setDraft({ ...draft, args: e.target.value })} />
-        </label>
-        <label className="mfield wide">
-          <span>{t("settings.mcp.env")}</span>
-          <textarea className="field mono" rows={2} value={draft.env} placeholder="API_KEY=…" spellCheck={false} onChange={(e) => setDraft({ ...draft, env: e.target.value })} />
-        </label>
-      </> : <>
-        <label className="mfield wide">
-          <span>{t("settings.mcp.url")}</span>
-          <input className="field mono" value={draft.url} placeholder="https://mcp.example.com/mcp" spellCheck={false} onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
-        </label>
-        <label className="mfield wide">
-          <span>{t("settings.mcp.headers")}</span>
-          <textarea className="field mono" rows={2} value={draft.headers} placeholder={t("settings.mcp.headers.example")} spellCheck={false} onChange={(e) => setDraft({ ...draft, headers: e.target.value })} />
-        </label>
-        <label className="mfield wide mcp-check">
-          <input type="checkbox" checked={draft.oauth} onChange={(e) => setDraft({ ...draft, oauth: e.target.checked })} />
-          <span>{t("settings.mcp.oauth")}</span>
-        </label>
-        {draft.oauth && <>
-          <label className="mfield wide">
-            <span>{t("settings.mcp.scopes")}</span>
-            <input className="field mono" value={draft.scopes} placeholder={t("settings.mcp.scopes.hint")} spellCheck={false} onChange={(e) => setDraft({ ...draft, scopes: e.target.value })} />
-          </label>
-          <label className="mfield">
-            <span>{t("settings.mcp.clientId")}</span>
-            <input className="field mono" value={draft.clientId} placeholder={t("settings.mcp.clientId.hint")} spellCheck={false} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} />
-          </label>
-          <label className="mfield">
-            <span>{t("settings.mcp.clientSecret")}</span>
-            <input className="field" type="password" autoComplete="off" value={draft.clientSecret} onChange={(e) => setDraft({ ...draft, clientSecret: e.target.value })} />
-          </label>
-        </>}
+    <Sheet
+      title={editing ?? t("settings.mcp.new")}
+      size="md"
+      onClose={closeForm}
+      footer={<>
+        <Button variant="quiet" onClick={closeForm}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={!canSave} busy={!!busy} onClick={() => void save()}>{busy ? t("settings.mcp.saving") : editing ? t("common.save") : t("settings.mcp.add")}</Button>
       </>}
-      <label className="mfield wide">
-        <span>{t("settings.mcp.description")}</span>
-        <input className="field" value={draft.description} placeholder={t("settings.mcp.description.hint")} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-      </label>
-      <div className="mfield end mcp-actions">
-        <button type="button" className="btn ghost" onClick={() => { setDraft(null); setEditing(null); }}>{t("common.cancel")}</button>
-        <button type="button" className="btn primary" disabled={!!busy || !(editing ?? draft.name).trim() || (draft.transport === "stdio" ? !draft.command.trim() : !draft.url.trim())} onClick={() => void save()}>
-          {busy ? t("settings.mcp.saving") : editing ? t("common.save") : t("settings.mcp.add")}
-        </button>
+    >
+      <div className="mfields mcp-form" data-mcp-form>
+        <label className="mfield">
+          <span>{t("settings.mcp.name")}</span>
+          <input className="field mono" value={draft.name} disabled={!!editing} placeholder="linear" spellCheck={false} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        </label>
+        <div className="mfield">
+          <span>{t("settings.mcp.transport")}</span>
+          <Segmented value={draft.transport} label={t("settings.mcp.transport")} onChange={(transport) => setDraft({ ...draft, transport })}
+            options={[{ id: "http", label: t("settings.mcp.transport.http") }, { id: "stdio", label: t("settings.mcp.transport.stdio") }]} />
+        </div>
+        {draft.transport === "stdio" ? <>
+          <label className="mfield wide">
+            <span>{t("settings.mcp.command")}</span>
+            <input className="field mono" value={draft.command} placeholder="npx" spellCheck={false} onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
+          </label>
+          <label className="mfield wide">
+            <span>{t("settings.mcp.args")}</span>
+            <textarea className="field mono" rows={3} value={draft.args} placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/data"} spellCheck={false} onChange={(e) => setDraft({ ...draft, args: e.target.value })} />
+          </label>
+          <label className="mfield wide">
+            <span>{t("settings.mcp.env")}</span>
+            <textarea className="field mono" rows={2} value={draft.env} placeholder="API_KEY=…" spellCheck={false} onChange={(e) => setDraft({ ...draft, env: e.target.value })} />
+          </label>
+        </> : <>
+          <label className="mfield wide">
+            <span>{t("settings.mcp.url")}</span>
+            <input className="field mono" value={draft.url} placeholder="https://mcp.example.com/mcp" spellCheck={false} onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+          </label>
+          <label className="mfield wide">
+            <span>{t("settings.mcp.headers")}</span>
+            <textarea className="field mono" rows={2} value={draft.headers} placeholder={t("settings.mcp.headers.example")} spellCheck={false} onChange={(e) => setDraft({ ...draft, headers: e.target.value })} />
+          </label>
+          <Row title={t("settings.mcp.oauth")}>
+            <Switch checked={draft.oauth} onChange={(oauth) => setDraft({ ...draft, oauth })} label={t("settings.mcp.oauth")} />
+          </Row>
+          {draft.oauth && <>
+            <label className="mfield wide">
+              <span>{t("settings.mcp.scopes")}</span>
+              <input className="field mono" value={draft.scopes} placeholder={t("settings.mcp.scopes.hint")} spellCheck={false} onChange={(e) => setDraft({ ...draft, scopes: e.target.value })} />
+            </label>
+            <label className="mfield">
+              <span>{t("settings.mcp.clientId")}</span>
+              <input className="field mono" value={draft.clientId} placeholder={t("settings.mcp.clientId.hint")} spellCheck={false} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} />
+            </label>
+            <label className="mfield">
+              <span>{t("settings.mcp.clientSecret")}</span>
+              <input className="field" type="password" autoComplete="off" value={draft.clientSecret} onChange={(e) => setDraft({ ...draft, clientSecret: e.target.value })} />
+            </label>
+          </>}
+        </>}
+        <label className="mfield wide">
+          <span>{t("settings.mcp.description")}</span>
+          <input className="field" value={draft.description} placeholder={t("settings.mcp.description.hint")} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+        </label>
       </div>
-    </div>
+    </Sheet>
   );
 
   return (
-    <div className="card" data-setting="mcp.servers">
-      <div className="section-title">{t("settings.mcp.title")}</div>
-      <div className="sub">{t("settings.mcp.sub")}</div>
-      <div className="dt-mcp mcp-list">
-        {servers !== null && servers.length === 0 && !draft && <div className="sub" style={{ marginTop: 6 }}>{t("settings.mcp.none")}</div>}
-        {(servers ?? []).map((s) => editing === s.name ? <div key={s.name}>{form}</div> : (
-          <div key={s.name} className="dt-server" data-mcp-server={s.name}>
-            <div className="dt-server-head">
-              <span className="dt-server-name">{s.name}</span>
-              <span className="dt-state" data-tone={TONE[s.state] ?? ""}>{t(`session.mcp.state.${s.state}`)}</span>
-              <span className="grow" />
-              {s.oauth && !s.oauth.linked && <button type="button" className="btn small primary" disabled={!!busy} onClick={() => void signIn(s.name, toast)}>{t("settings.mcp.signin")}</button>}
-              {s.oauth?.linked && <button type="button" className="btn small ghost" disabled={!!busy} onClick={() => void signOut(s.name)}>{t("settings.mcp.signout")}</button>}
-              <button type="button" className="btn small ghost" disabled={!!busy} onClick={() => void connect(s.name)}>{busy === s.name ? t("settings.mcp.checking") : t("settings.mcp.check")}</button>
-              <button type="button" className="btn small ghost" disabled={!!busy || !!draft} onClick={() => { setEditing(s.name); setDraft(draftOf(s)); }}>{t("common.edit")}</button>
-              <button type="button" className="btn small danger" disabled={!!busy} onClick={() => void remove(s.name)}>{t("common.remove")}</button>
-            </div>
-            <div className="dt-hint mono">{s.transport === "stdio" ? [s.command, ...s.args].join(" ") : s.url}</div>
-            {s.description && <div className="dt-hint">{s.description}</div>}
-            {s.error && <div className="dt-hint" data-tone="bad">{s.error}</div>}
-            {s.stderr && s.state !== "ready" && <details className="mcp-stderr"><summary>{t("mcp.quick.stderr")}</summary><pre className="mono">{s.stderr}</pre></details>}
-            {s.runs_in && <div className="dt-hint quiet" data-runs-in={s.runs_in}>{t(`mcp.where.${s.runs_in}`)}</div>}
-            {s.transport === "stdio" && host?.offered && (
-              <div className="mcp-policy" data-mcp-location={s.location ?? "server"}>
-                <span className="sub">{t("mcp.location")}</span>
-                <Segmented value={s.location ?? "server"} label={t("mcp.location")} options={locationOptions()} onChange={(location) => void setLocation(s, location)} />
-              </div>
-            )}
-            {s.transport === "stdio" && host?.offered && s.location === "host" && host.problem && (
-              <div className="dt-hint" data-tone="warn">{t("mcp.location.hostProblem", { problem: host.problem })}</div>
-            )}
-            <div className="mcp-policy" data-mcp-policy={s.approval}>
-              <span className="sub">{t("mcp.policy")}</span>
-              <Segmented value={s.approval as McpPolicy} label={t("mcp.policy")} options={policyOptions()} onChange={(approval) => void setPolicy(s, approval, s.tool_approval)} />
-            </div>
-            {(s.remote_tools ?? []).length > 0 && (
+    <SetGroup
+      title={t("settings.mcp.title")}
+      help={t("settings.mcp.sub")}
+      data-setting="mcp.servers"
+      action={<Button size="sm" disabled={!!draft} onClick={() => setDraft(blank())}>{t("settings.mcp.new")}</Button>}
+    >
+      {servers !== null && servers.length === 0 && <SetBlock><span className="set-hint">{t("settings.mcp.none")}</span></SetBlock>}
+      {(servers ?? []).map((s) => (
+        <div key={s.name} className="mcp-server" data-mcp-server={s.name}>
+          <Row
+            title={<span className="mcp-name"><span className="mono">{s.name}</span><span className="dt-state" data-tone={TONE[s.state] ?? ""}>{t(`session.mcp.state.${s.state}`)}</span></span>}
+            desc={<>
+              <span className="mono mcp-cmd">{s.transport === "stdio" ? [s.command, ...s.args].join(" ") : s.url}</span>
+              {s.description && <span className="mcp-line">{s.description}</span>}
+              {s.runs_in && <span className="mcp-line" data-runs-in={s.runs_in}>{t(`mcp.where.${s.runs_in}`)}</span>}
+            </>}
+          >
+            {s.oauth && !s.oauth.linked && <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void signIn(s.name, toast)}>{t("settings.mcp.signin")}</Button>}
+            {s.oauth?.linked && <Button size="sm" variant="quiet" disabled={!!busy} onClick={() => void signOut(s.name)}>{t("settings.mcp.signout")}</Button>}
+            <Button size="sm" variant="quiet" disabled={!!busy} onClick={() => void connect(s.name)}>{busy === s.name ? t("settings.mcp.checking") : t("settings.mcp.check")}</Button>
+            <Button size="sm" variant="quiet" disabled={!!busy || !!draft} onClick={() => { setEditing(s.name); setDraft(draftOf(s)); }}>{t("common.edit")}</Button>
+            <Button size="sm" variant="danger" disabled={!!busy} onClick={() => void remove(s.name)}>{t("common.remove")}</Button>
+          </Row>
+          {s.error && <SetBlock><span className="set-hint mcp-bad">{s.error}</span></SetBlock>}
+          {s.stderr && s.state !== "ready" && <SetBlock><details className="mcp-stderr"><summary>{t("mcp.quick.stderr")}</summary><pre className="mono">{s.stderr}</pre></details></SetBlock>}
+          {s.transport === "stdio" && host?.offered && (
+            <Row title={t("mcp.location")} data-mcp-location={s.location ?? "server"} desc={s.location === "host" && host.problem ? <span className="mcp-warn">{t("mcp.location.hostProblem", { problem: host.problem })}</span> : undefined}>
+              <Segmented value={s.location ?? "server"} label={t("mcp.location")} options={locationOptions()} onChange={(location) => void setLocation(s, location)} />
+            </Row>
+          )}
+          <Row title={t("mcp.policy")} data-mcp-policy={s.approval}>
+            <Segmented value={s.approval as McpPolicy} label={t("mcp.policy")} options={policyOptions()} onChange={(approval) => void setPolicy(s, approval, s.tool_approval)} />
+          </Row>
+          {(s.remote_tools ?? []).length > 0 && (
+            <SetBlock>
               <details className="mcp-tools">
                 <summary>{t("settings.mcp.tools", { n: s.remote_tools!.length })}</summary>
                 {s.remote_tools!.map((tool) => (
-                  <label key={tool} className="mcp-tool-row" data-mcp-tool={tool}>
+                  <div key={tool} className="mcp-tool-row" data-mcp-tool={tool}>
                     <span className="mono grow truncate">{tool}</span>
-                    <select className="field" value={s.tool_approval[tool] ?? "auto"} disabled={!!busy} aria-label={t("mcp.policy.tool", { tool })}
-                      onChange={(e) => void setPolicy(s, s.approval, { ...s.tool_approval, [tool]: e.target.value })}>
-                      {policyOptions().map((option) => <option key={option.id} value={option.id}>{option.id === "auto" ? t("mcp.policy.tool.auto") : option.label}</option>)}
-                    </select>
-                  </label>
+                    <Select
+                      label={t("mcp.policy.tool", { tool })}
+                      value={s.tool_approval[tool] ?? "auto"}
+                      disabled={!!busy}
+                      onChange={(approval) => void setPolicy(s, s.approval, { ...s.tool_approval, [tool]: approval })}
+                      options={policyOptions().map((option) => ({ id: option.id, label: option.id === "auto" ? t("mcp.policy.tool.auto") : option.label }))}
+                    />
+                  </div>
                 ))}
               </details>
-            )}
-          </div>
-        ))}
-      </div>
-      {!draft && <McpQuickAdd toast={toast} onAdded={() => load()} />}
-      {draft && !editing ? form : !draft && <button type="button" className="btn ghost small" style={{ marginTop: 10 }} onClick={() => setDraft(blank())}>{t("settings.mcp.new")}</button>}
-      <div className="sub" style={{ marginTop: 8 }}>{t("settings.mcp.apply")}</div>
-    </div>
+            </SetBlock>
+          )}
+        </div>
+      ))}
+      <SetBlock><McpQuickAdd toast={toast} onAdded={() => load()} /></SetBlock>
+      <SetBlock><span className="set-hint">{t("settings.mcp.apply")}</span></SetBlock>
+      {form}
+    </SetGroup>
   );
 }

@@ -13,11 +13,11 @@ import { useEffect, useState } from "react";
 import type { BrowserChrome, BrowserUserChoice, BrowserUserDevice, BrowserUserSettings, BrowserUserStatus, ChromeLauncherReport } from "../api";
 import { api } from "../api";
 import { t } from "../i18n";
-import { Icon } from "../icons";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Segmented, Switch, timeAgo, useCopied } from "../ui/components";
-import { Row } from "../settingsrow";
+import { timeAgo, useCopied } from "../ui/components";
+import { Button, confirmDialog, Dot, Segmented, Switch } from "../ui/primitives";
+import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { useEvent } from "../events";
 
 export const USER_STATUS = "/api/browser/user";
@@ -57,15 +57,13 @@ export function YourChrome({ user, setUser, toast }: { user: BrowserUserSettings
   const state = chromeState(status);
   if (!status || state === "none") return null;
   return (
-    <div className="card bs-chrome" data-setting="browser.user" data-state={state}>
-      <div className="section-title">{t("uc.title")}</div>
-      <div className="sub">{t("uc.sub")}</div>
+    <SetGroup title={t("uc.title")} help={t("uc.sub")} className="bs-chrome" data-setting="browser.user" data-state={state}>
       {status.native ? <Connector status={status} toast={toast} /> : null}
       <Connection status={status} state={state} toast={toast} />
       {!status.native && <Pairing status={status} toast={toast} />}
-      <div className="bs-chrome-consent sub">{status.consent}</div>
+      <SetBlock className="bs-chrome-consent"><span className="set-hint">{status.consent}</span></SetBlock>
       <Defaults user={user} setUser={setUser} />
-    </div>
+    </SetGroup>
   );
 }
 
@@ -89,64 +87,47 @@ function Connector({ status, toast }: { status: BrowserUserStatus; toast: (text:
   }
   const folder = report?.extension?.path ?? "";
   return (
-    <div className="bs-chrome-steps">
-      <div className="bs-chrome-step" data-step="connector" data-connector={connector}>
-        <span className={`dot ${connector === "registered" ? "ok" : connector === "restart" ? "warn" : "error"}`} aria-hidden="true" />
-        <span className="bs-row-main">
-          <b>{t("uc.connector.title")}</b>
-          <span className="sub">{report ? t(`uc.connector.${connector}`) : status.launcher_error || t("uc.connector.unknown")}</span>
-        </span>
-        {connector !== "registered" && report && (
-          <button type="button" className="btn small primary" disabled={busy} onClick={() => void register()}>{t("uc.connector.register")}</button>
-        )}
-      </div>
-      <div className="bs-chrome-step" data-step="extension">
-        <span className={`dot ${report?.extension?.ready ? "ok" : "error"}`} aria-hidden="true" />
-        <span className="bs-row-main">
-          <b>{t("uc.ext.title")}</b>
-          {report?.extension?.ready ? (
-            <>
-              <ol className="bs-chrome-howto sub">
-                <li>
-                  {t("uc.ext.step1")} <code className="bs-code">chrome://extensions</code>{" "}
-                  <button type="button" className="btn small" onClick={() => void copy("chrome://extensions").then((ok) => { if (!ok) toast(t("uc.copy.failed")); })}>{copied && <Icon name="check" size={13} />}{t("uc.copy")}</button>
-                </li>
-                <li>{t("uc.ext.step2")}</li>
-                <li>{t("uc.ext.step3")} <code className="bs-code mono">{folder}</code></li>
-              </ol>
-            </>
-          ) : (
-            <span className="sub">{report?.extension?.error || t("uc.ext.missing")}</span>
-          )}
-        </span>
-      </div>
-    </div>
+    <>
+      <Row
+        className="bs-chrome-step"
+        data-step="connector"
+        data-connector={connector}
+        title={<span className="bs-env-head"><Dot status={connector === "registered" ? "ok" : connector === "restart" ? "warn" : "error"} />{t("uc.connector.title")}</span>}
+        desc={report ? t(`uc.connector.${connector}`) : status.launcher_error || t("uc.connector.unknown")}
+      >
+        {connector !== "registered" && report && <Button size="sm" variant="primary" busy={busy} onClick={() => void register()}>{t("uc.connector.register")}</Button>}
+      </Row>
+      <Row
+        className="bs-chrome-step"
+        data-step="extension"
+        title={<span className="bs-env-head"><Dot status={report?.extension?.ready ? "ok" : "error"} />{t("uc.ext.title")}</span>}
+        desc={report?.extension?.ready ? undefined : report?.extension?.error || t("uc.ext.missing")}
+      />
+      {report?.extension?.ready && (
+        <SetBlock>
+          <ol className="bs-chrome-howto set-hint">
+            <li>
+              {t("uc.ext.step1")} <code className="bs-code">chrome://extensions</code>{" "}
+              <Button size="sm" icon={copied ? "check" : undefined} onClick={() => void copy("chrome://extensions").then((ok) => { if (!ok) toast(t("uc.copy.failed")); })}>{t("uc.copy")}</Button>
+            </li>
+            <li>{t("uc.ext.step2")}</li>
+            <li>{t("uc.ext.step3")} <code className="bs-code mono">{folder}</code></li>
+          </ol>
+        </SetBlock>
+      )}
+    </>
   );
 }
 
 function Connection({ status, state, toast }: { status: BrowserUserStatus; state: ChromeState; toast: (text: string) => void }) {
   if (state === "down") {
-    return (
-      <div className="bs-chrome-conn" data-conn="down">
-        <span className="dot error" aria-hidden="true" />
-        <span className="bs-row-main"><b>{t("uc.down")}</b><span className="sub">{status.detail || status.reason}</span></span>
-      </div>
-    );
+    return <Row className="bs-chrome-conn" data-conn="down" title={<span className="bs-env-head"><Dot status="error" />{t("uc.down")}</span>} desc={status.detail || status.reason} />;
   }
   const connected = (status.relay?.chromes ?? []).filter((c) => c.connected || c.reconnecting);
   if (state !== "connected" || connected.length === 0) {
-    return (
-      <div className="bs-chrome-conn" data-conn="waiting">
-        <span className="dot error" aria-hidden="true" />
-        <span className="bs-row-main"><b>{t("uc.waiting")}</b><span className="sub">{notConnectedReason(status)}</span></span>
-      </div>
-    );
+    return <Row className="bs-chrome-conn" data-conn="waiting" title={<span className="bs-env-head"><Dot status="error" />{t("uc.waiting")}</span>} desc={notConnectedReason(status)} />;
   }
-  return (
-    <div className="bs-chrome-list">
-      {connected.map((c) => <ChromeRow key={c.chrome} chrome={c} toast={toast} />)}
-    </div>
-  );
+  return <>{connected.map((c) => <ChromeRow key={c.chrome} chrome={c} toast={toast} />)}</>;
 }
 
 /** One connected Chrome: its name and versions, what agents have open there, and a check of its own,
@@ -167,20 +148,20 @@ function ChromeRow({ chrome, toast }: { chrome: BrowserChrome; toast: (text: str
   }
   return (
     <div className="bs-chrome-conn" data-conn="connected" data-chrome={chrome.chrome}>
-      <div className="bs-env-head">
-        <span className={`dot ${chrome.connected ? "ok" : "waiting"}`} aria-hidden="true" />
-        <b>{t(chrome.connected ? "uc.connected" : "uc.reconnecting", { name: chrome.profile_name || "Chrome" })}</b>
-      </div>
-      <div className="kv"><span>{t("uc.ext.version")}</span><b className="mono">{chrome.ext_version || "?"}</b></div>
-      <div className="kv"><span>{t("uc.chrome.version")}</span><b className="mono">{chrome.chrome_version || "?"}</b></div>
-      <div className="kv"><span>{t("uc.transport")}</span><b>{t(chrome.transport === "server" ? "uc.transport.server" : "uc.transport.native")}</b></div>
-      <div className="kv"><span>{t("uc.since")}</span><b>{timeAgo(chrome.since ?? null)}</b></div>
-      <div className="kv"><span>{t("uc.seen")}</span><b>{timeAgo(chrome.last_seen ?? null)}</b></div>
-      <div className="kv"><span>{t("uc.agent.tabs")}</span><b>{chrome.tabs ? t("uc.agent.tabs.open", { count: chrome.tabs }) : t("uc.agent.tabs.none")}</b></div>
-      <div className="btnrow">
-        <button type="button" className="btn small" disabled={checking || !chrome.connected} onClick={() => void check()}>{t("uc.check")}</button>
-        {rtt !== null && <span className="sub bs-chrome-rtt" data-rtt={rtt}>{t("uc.check.done", { ms: rtt })}</span>}
-      </div>
+      <Row
+        title={<span className="bs-env-head"><Dot status={chrome.connected ? "ok" : "waiting"} />{t(chrome.connected ? "uc.connected" : "uc.reconnecting", { name: chrome.profile_name || "Chrome" })}</span>}
+        desc={rtt !== null ? <span className="bs-chrome-rtt" data-rtt={rtt}>{t("uc.check.done", { ms: rtt })}</span> : undefined}
+      >
+        <Button size="sm" busy={checking} disabled={!chrome.connected} onClick={() => void check()}>{t("uc.check")}</Button>
+      </Row>
+      <SetBlock>
+        <div className="kv"><span>{t("uc.ext.version")}</span><b className="mono">{chrome.ext_version || "?"}</b></div>
+        <div className="kv"><span>{t("uc.chrome.version")}</span><b className="mono">{chrome.chrome_version || "?"}</b></div>
+        <div className="kv"><span>{t("uc.transport")}</span><b>{t(chrome.transport === "server" ? "uc.transport.server" : "uc.transport.native")}</b></div>
+        <div className="kv"><span>{t("uc.since")}</span><b>{timeAgo(chrome.since ?? null)}</b></div>
+        <div className="kv"><span>{t("uc.seen")}</span><b>{timeAgo(chrome.last_seen ?? null)}</b></div>
+        <div className="kv"><span>{t("uc.agent.tabs")}</span><b>{chrome.tabs ? t("uc.agent.tabs.open", { count: chrome.tabs }) : t("uc.agent.tabs.none")}</b></div>
+      </SetBlock>
     </div>
   );
 }
@@ -195,7 +176,7 @@ function Pairing({ status, toast }: { status: BrowserUserStatus; toast: (text: s
     }
   }
   async function revoke(d: BrowserUserDevice) {
-    if (!(await confirmAsync(t("uc.revoke.title", { name: d.name }), { body: t("uc.revoke.body"), action: t("uc.revoke"), danger: true }))) return;
+    if (!(await confirmDialog({ title: t("uc.revoke.title", { name: d.name }), body: t("uc.revoke.body"), action: t("uc.revoke"), danger: true }))) return;
     try {
       await api.delete(`${USER_STATUS}/devices/${encodeURIComponent(d.id)}`);
       invalidate(USER_STATUS);
@@ -205,35 +186,24 @@ function Pairing({ status, toast }: { status: BrowserUserStatus; toast: (text: s
   }
   const address = code?.server_url || status.server_url;
   return (
-    <div className="bs-chrome-pair">
-      <div className="btnrow">
-        <button type="button" className="btn small primary" onClick={() => void pair()}>{t("uc.pair")}</button>
-      </div>
+    <>
+      <SetFoot><Button size="sm" variant="primary" onClick={() => void pair()}>{t("uc.pair")}</Button></SetFoot>
       {code && (
-        <div className="bs-chrome-code" data-code={code.code}>
+        <SetBlock className="bs-chrome-code" data-code={code.code}>
           <div className="kv"><span>{t("uc.pair.code")}</span><b className="mono bs-chrome-code-value">{code.code}</b></div>
           <div className="kv"><span>{t("uc.pair.server")}</span><b className="mono">{address || t("uc.pair.noaddress")}</b></div>
-          <div className="sub">{t("uc.pair.hint")}</div>
-        </div>
+          <span className="set-hint">{t("uc.pair.hint")}</span>
+        </SetBlock>
       )}
-      <div className="section-title">{t("uc.devices")}</div>
+      <SetBlock><span className="field-label">{t("uc.devices")}</span></SetBlock>
       {status.devices.length === 0 ? (
-        <div className="sub">{t("uc.devices.none")}</div>
-      ) : (
-        <ul className="bs-rows">
-          {status.devices.map((d) => (
-            <li key={d.id} className="bs-row" data-device={d.id}>
-              <Icon name="globe" size={16} />
-              <span className="bs-row-main">
-                <b className="truncate">{d.name}</b>
-                <span className="sub truncate">{[d.connected ? t("uc.devices.connected") : t("uc.devices.seen", { when: timeAgo(d.last_seen) }), d.chrome_version].filter(Boolean).join(" · ")}</span>
-              </span>
-              <button type="button" className="btn small danger" onClick={() => void revoke(d)}>{t("uc.revoke")}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+        <SetBlock><span className="set-hint">{t("uc.devices.none")}</span></SetBlock>
+      ) : status.devices.map((d) => (
+        <Row key={d.id} className="bs-row" data-device={d.id} title={d.name} desc={[d.connected ? t("uc.devices.connected") : t("uc.devices.seen", { when: timeAgo(d.last_seen) }), d.chrome_version].filter(Boolean).join(" · ")}>
+          <Button size="sm" variant="danger" onClick={() => void revoke(d)}>{t("uc.revoke")}</Button>
+        </Row>
+      ))}
+    </>
   );
 }
 
@@ -241,7 +211,7 @@ function Defaults({ user, setUser }: { user: BrowserUserSettings; setUser: (patc
   const [text, setText] = useState(user.granted_sites.join("\n"));
   useEffect(() => setText(user.granted_sites.join("\n")), [user.granted_sites]);
   return (
-    <div className="bs-chrome-defaults">
+    <>
       <Row title={t("uc.enabled")} desc={t("uc.enabled.sub")} data-setting="browser.user.enabled">
         <Switch checked={user.enabled} onChange={(enabled) => setUser({ enabled })} label={t("uc.enabled")} />
       </Row>
@@ -260,13 +230,15 @@ function Defaults({ user, setUser }: { user: BrowserUserSettings; setUser: (patc
       <Row title={t("uc.close_tabs")} desc={t("uc.close_tabs.sub")} data-setting="browser.user.close_tabs">
         <Switch checked={user.close_tabs} onChange={(close_tabs) => setUser({ close_tabs })} label={t("uc.close_tabs")} />
       </Row>
-      <label className="field" htmlFor="browser-user-sites">{t("uc.sites")}</label>
-      <textarea id="browser-user-sites" data-setting="browser.user.granted_sites" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="example.com" onChange={(e) => setText(e.target.value)} onBlur={() => {
-        const next = [...new Set(text.split(/[\n,]/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
-        if (next.join("\n") !== user.granted_sites.join("\n")) setUser({ granted_sites: next });
-      }} />
-      <div className="sub">{t("uc.sites.hint")}</div>
-    </div>
+      <SetBlock data-setting="browser.user.granted_sites">
+        <label className="field-label" htmlFor="browser-user-sites">{t("uc.sites")}</label>
+        <textarea id="browser-user-sites" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="example.com" onChange={(e) => setText(e.target.value)} onBlur={() => {
+          const next = [...new Set(text.split(/[\n,]/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
+          if (next.join("\n") !== user.granted_sites.join("\n")) setUser({ granted_sites: next });
+        }} />
+        <span className="set-hint">{t("uc.sites.hint")}</span>
+      </SetBlock>
+    </>
   );
 }
 

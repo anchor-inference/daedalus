@@ -305,31 +305,37 @@
 .toolrow .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* tool groups: the installation's modes in Settings → Tools, and one session's in its Details */
-/* Tool groups in Settings: a settings row with two lanes between the words and the picker — the
-   usage, and a Reset that only a changed group fills — so the groups read down as columns. */
-.settings-row.tgroup { grid-template-columns: minmax(0, 1fr) 236px 56px auto; column-gap: 16px; }
+/* Tool groups in Settings: a card row with two lanes between the words and the picker — the usage,
+   and a Reset that only a changed group fills — so the groups read down as columns. */
 .tgroup .settings-row-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
-.tgroup-name { font-weight: 500; }
 .tgroup-cost { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; font-variant-numeric: tabular-nums; }
-.tgroup-use { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
+.tgroup .settings-row-ctl { gap: 12px; }
+.tgroup-use { display: inline-flex; flex: none; align-items: center; gap: 8px; width: 260px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 .tgroup-use-text { min-width: 0; }
 .tgroup-bar { flex: 0 0 56px; height: 4px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
 .tgroup-bar > span { display: block; height: 100%; background: var(--fg); }
-.tgroup-reset-slot { justify-self: end; }
+.tgroup-reset-slot { flex: none; width: 56px; text-align: right; }
 .tgroup-reset { color: var(--fg-2); font-size: var(--fs-13); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
 .tgroup-reset:hover { color: var(--fg); }
-.tgroup .dropdown { justify-self: end; }
 .tgroup .dropdown-btn { min-width: 136px; justify-content: space-between; }
-/* Narrower, the usage and the picker share the line under the words. */
+/* Narrower, the usage takes a line under the words and the Reset and the picker sit at its end. */
 @media (max-width: 899px) {
-  .settings-row.tgroup { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "text text text" "use reset pick"; row-gap: 8px; }
-  .tgroup .settings-row-text { grid-area: text; }
-  /* Wraps rather than running under the picker: on a phone "· 30 days" was cut off mid-word. */
-  .tgroup-use { grid-area: use; white-space: normal; line-height: 1.3; }
-  .tgroup-reset-slot { grid-area: reset; }
-  .tgroup .dropdown { grid-area: pick; }
+  .set-card .settings-row.tgroup { flex-wrap: wrap; }
+  .set-card .tgroup .settings-row-text { flex: 1 1 100%; }
+  .set-card .tgroup .settings-row-ctl { flex: 1 1 100%; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+  .tgroup-use { flex: 1 1 100%; width: auto; }
+  .tgroup-reset-slot { width: auto; margin-left: auto; }
+  .set-card .tgroup .settings-row-ctl > .dropdown { flex: none; width: auto; }
 }
-.tgroup-note { margin-top: 10px; }
+.tgroup-note { display: block; }
+/* Settings → Web search: a key beside the name of the engine it opens, and what a check found. */
+.set-key { display: block; width: 320px; max-width: 100%; }
+.search-result { gap: 8px; }
+.search-hit { display: flex; flex-direction: column; gap: 2px; }
+.search-hit-url { overflow-wrap: anywhere; }
+.search-bad { color: var(--bad); }
+/* The machine's load bar in a card carries its own space above it elsewhere; here the card's padding is it. */
+.set-block .loadbar { margin-top: 0; }
 .segmented.tgroup-load button { min-height: var(--ctl-h-sm); }
 .stgroups { display: grid; gap: 2px; }
 .stgroups > .sub { margin-bottom: 4px; }

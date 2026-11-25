@@ -11,6 +11,7 @@ import type { Settings, WorkloadsLoad } from "../api";
 import { t } from "../i18n";
 import { WorkloadsBar } from "../loadbar";
 import { useQuery } from "../store";
+import { SetBlock, SetGroup } from "../settingsrow";
 import { BrowserSettingsTab, DEFAULT_BROWSER } from "./BrowserSettings";
 import { DEFAULT_CAP, TerminalCap } from "./TerminalCap";
 
@@ -27,16 +28,17 @@ export function EnvironmentsTab({ s, save, toast }: { s: Settings; save: (patch:
   };
   return (
     <>
-      <div className="card env-load">
-        <div className="section-title">{t("settings.env.load")}</div>
-        {load.data && (load.data.terminals || load.data.browsers) ? (
-          <WorkloadsBar load={load.data} caps={caps} />
-        ) : load.error ? (
-          <div className="sub">{t("settings.cap.noload", { reason: load.error })}</div>
-        ) : (
-          <div className="sub">{t("common.loading")}</div>
-        )}
-      </div>
+      <SetGroup title={t("settings.env.load")} className="env-load">
+        <SetBlock>
+          {load.data && (load.data.terminals || load.data.browsers) ? (
+            <WorkloadsBar load={load.data} caps={caps} />
+          ) : load.error ? (
+            <span className="set-hint">{t("settings.cap.noload", { reason: load.error })}</span>
+          ) : (
+            <span className="set-hint">{t("common.loading")}</span>
+          )}
+        </SetBlock>
+      </SetGroup>
       <div id="terminal-sessions"><TerminalCap s={s} save={save} onDraft={onTerminals} /></div>
       <div id="browser-sessions"><BrowserSettingsTab s={s} save={save} toast={toast} onDraft={onBrowsers} part="capacity" /></div>
     </>

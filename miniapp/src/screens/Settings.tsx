@@ -207,112 +207,104 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
   };
   const fallbackIds = search.fallback ?? [];
   return (
-    <div className="search-card settings-groups">
-      {/* One card a group: the choice of backend, each engine in use, the keys, the check. As one card
-          the engines' fields ran on from the rows above them with only a heading between. */}
-      <div className="card">
-      <div className="section-title">{t("settings.search.title")}</div>
-      <div className="sub">{t("settings.search.sub")}</div>
-      <Row title={t("settings.search.backend")} stack data-setting="tools.web.search.backend">
-        <Select
-          id="search-backend"
-          label={t("settings.search.backend")}
-          value={search.backend}
-          onChange={(backend) => saveSearch({ backend })}
-          options={[
-            ...backends.map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !usable(b) })),
-            ...(backends.some((b) => b.id === search.backend) ? [] : [{ id: search.backend, label: search.backend }]),
-          ]}
-        />
-      </Row>
-      <Row title={t("settings.search.fallbacks")} desc={t("settings.search.fallbacks.sub")} stack data-setting="tools.web.search.fallback">
-        <SelectionList
-          id="search-fallbacks"
-          label={t("settings.search.fallbacks")}
-          emptyChosen={t("settings.search.fallbacks.none")}
-          chosenLabel={t("settings.search.fallbacks.chosen")}
-          ordered
-          value={fallbackIds.filter((id) => id !== search.backend)}
-          onChange={(fallback) => saveSearch({ fallback })}
-          items={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, detail: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, facts: [t(b.needs_key ? "settings.search.keyed" : "settings.search.keyless")], disabled: !usable(b) }))}
-        />
-      </Row>
-      <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
-      <NumRow setting="tools.web.search.timeout_seconds" title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
-      </div>
+    <>
+      {/* One group a concern: the choice of backend, each engine in use, the keys, the check. As one
+          card the engines' fields ran on from the rows above them with only a heading between. */}
+      <SetGroup title={t("settings.search.title")} help={t("settings.search.sub")}>
+        <Row title={t("settings.search.backend")} htmlFor="search-backend" data-setting="tools.web.search.backend">
+          <Select
+            id="search-backend"
+            label={t("settings.search.backend")}
+            value={search.backend}
+            onChange={(backend) => saveSearch({ backend })}
+            options={[
+              ...backends.map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !usable(b) })),
+              ...(backends.some((b) => b.id === search.backend) ? [] : [{ id: search.backend, label: search.backend }]),
+            ]}
+          />
+        </Row>
+        <SetBlock data-setting="tools.web.search.fallback">
+          <span className="field-label">{t("settings.search.fallbacks")}</span>
+          <span className="set-hint">{t("settings.search.fallbacks.sub")}</span>
+          <SelectionList
+            id="search-fallbacks"
+            label={t("settings.search.fallbacks")}
+            emptyChosen={t("settings.search.fallbacks.none")}
+            chosenLabel={t("settings.search.fallbacks.chosen")}
+            ordered
+            value={fallbackIds.filter((id) => id !== search.backend)}
+            onChange={(fallback) => saveSearch({ fallback })}
+            items={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, detail: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, facts: [t(b.needs_key ? "settings.search.keyed" : "settings.search.keyless")], disabled: !usable(b) }))}
+          />
+        </SetBlock>
+        <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
+        <NumRow setting="tools.web.search.timeout_seconds" title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
+      </SetGroup>
       {search.backend === "searxng" || fallbackIds.includes("searxng") ? (
-        <div className="card">
-          <div className="section-title">SearXNG</div>
+        <SetGroup title="SearXNG">
           <TextBlock setting="tools.web.search.searxng.url" label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
           <TextBlock setting="tools.web.search.searxng.engines" label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
           <TextBlock setting="tools.web.search.searxng.categories" label={t("settings.search.categories")} value={search.searxng.categories} placeholder="general" onSave={(v) => saveSearch({ searxng: { categories: v } })} />
           <Row title={t("settings.search.safe")} data-setting="tools.web.search.searxng.safesearch">
             <Segmented label={t("settings.search.safe")} value={String(Math.min(2, Math.max(0, search.searxng.safesearch)))} onChange={(v) => saveSearch({ searxng: { safesearch: Number(v) } })} options={["0", "1", "2"].map((id) => ({ id, label: t(`settings.search.safe.${id}`) }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "duckduckgo" || fallbackIds.includes("duckduckgo") ? (
-        <div className="card">
-          <div className="section-title">DuckDuckGo</div>
+        <SetGroup title="DuckDuckGo">
           <TextBlock setting="tools.web.search.duckduckgo.url" label={t("settings.search.html")} value={search.duckduckgo.url} onSave={(v) => saveSearch({ duckduckgo: { url: v } })} />
           <TextBlock setting="tools.web.search.duckduckgo.region" label={t("settings.search.region")} value={search.duckduckgo.region} placeholder="wt-wt, ru-ru, us-en" onSave={(v) => saveSearch({ duckduckgo: { region: v } })} />
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "serper" || fallbackIds.includes("serper") ? (
-        <div className="card">
-          <div className="section-title">Serper (Google)</div>
-          <div className="grid2 settings-block">
-            <TextBlock setting="tools.web.search.serper.gl" label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
-            <TextBlock setting="tools.web.search.serper.hl" label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
-          </div>
-        </div>
+        <SetGroup title="Serper (Google)">
+          <TextBlock setting="tools.web.search.serper.gl" label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
+          <TextBlock setting="tools.web.search.serper.hl" label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
+        </SetGroup>
       ) : null}
       {search.backend === "keenable" || fallbackIds.includes("keenable") ? (
-        <div className="card">
-          <div className="section-title">Keenable</div>
+        <SetGroup title="Keenable">
           <NumRow setting="tools.web.search.keenable.snippet_max_length" title={t("settings.search.snippet")} unit={t("settings.unit.chars")} value={search.keenable.snippet_max_length} min={180} step={60} onSave={(v) => saveSearch({ keenable: { snippet_max_length: v } })} />
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "tavily" || fallbackIds.includes("tavily") ? (
-        <div className="card">
-          <div className="section-title">Tavily</div>
+        <SetGroup title="Tavily">
           <Row title={t("settings.search.depth")} data-setting="tools.web.search.tavily.depth">
             <Select label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "exa" || fallbackIds.includes("exa") ? (
-        <div className="card">
-          <div className="section-title">Exa</div>
+        <SetGroup title="Exa">
           <Row title={t("settings.search.type")} data-setting="tools.web.search.exa.type">
             <Select label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
-      <div className="card"><SearchKeys toast={toast} onChanged={reload} /></div>
-      <div className="card">
-      <div className="btnrow search-check">
-        <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
-        <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
-      </div>
-      {checkError && <div className="sub" style={{ color: "var(--bad)" }}>{checkError}</div>}
-      {check && (
-        <div className="sub" style={{ marginTop: 8 }}>
-          {check.attempts.map((a) => (
-            <div key={a.backend}>
-              {a.error ? t("settings.search.attempt.error", { name: a.backend, error: a.error, ms: a.ms }) : t("settings.search.attempt.ok", { name: a.backend, n: a.hits, ms: a.ms })}
-            </div>
-          ))}
-          {check.hits.slice(0, 3).map((h) => (
-            <div key={h.url} style={{ marginTop: 4 }}>
-              <div>{h.title}{h.source ? ` · ${h.source}` : ""}</div>
-              <div style={{ wordBreak: "break-all" }}>{h.url}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      </div>
-    </div>
+      <SearchKeys toast={toast} onChanged={reload} />
+      <SetGroup>
+        <SetFoot className="search-check">
+          <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
+          <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
+        </SetFoot>
+        {checkError && <SetBlock><span className="set-hint search-bad">{checkError}</span></SetBlock>}
+        {check && (
+          <SetBlock className="search-result">
+            {check.attempts.map((a) => (
+              <span key={a.backend} className="set-hint">
+                {a.error ? t("settings.search.attempt.error", { name: a.backend, error: a.error, ms: a.ms }) : t("settings.search.attempt.ok", { name: a.backend, n: a.hits, ms: a.ms })}
+              </span>
+            ))}
+            {check.hits.slice(0, 3).map((h) => (
+              <span key={h.url} className="search-hit">
+                <span>{h.title}{h.source ? ` · ${h.source}` : ""}</span>
+                <span className="set-hint search-hit-url">{h.url}</span>
+              </span>
+            ))}
+          </SetBlock>
+        )}
+      </SetGroup>
+    </>
   );
 }
 
@@ -325,20 +317,18 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
 
-      <div className="card">
-        <div className="section-title">{t("settings.web.title")}</div>
+      <SetGroup title={t("settings.web.title")}>
         <NumRow setting="tools.web.fetch_timeout_seconds" title={t("settings.web.timeout")} unit={t("settings.unit.seconds")} value={web.fetch_timeout_seconds} min={1} onSave={(v) => save({ tools: { web: { fetch_timeout_seconds: v } } })} />
         <NumRow setting="tools.web.fetch_max_chars" title={t("settings.web.maxchars")} unit={t("settings.unit.chars")} value={web.fetch_max_chars} min={1000} step={1000} onSave={(v) => save({ tools: { web: { fetch_max_chars: v } } })} />
         <TextBlock setting="tools.web.proxy" label={t("settings.web.proxy")} value={web.proxy} placeholder="socks5://127.0.0.1:1080" hint={t("settings.web.proxy.hint")} onSave={(v) => save({ tools: { web: { proxy: v } } })} />
         <TextBlock setting="tools.web.user_agent" label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
-      </div>
+      </SetGroup>
 
-      <div className="card">
-        <div className="section-title">{t("settings.exec.title")}</div>
+      <SetGroup title={t("settings.exec.title")}>
         <NumRow setting="limits.tool_timeout_seconds" title={t("settings.exec.timeout")} desc={t("settings.exec.timeout.hint")} unit={t("settings.unit.seconds")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} />
         <NumRow setting="tools.exec.background_after_seconds" title={t("settings.exec.background")} desc={t("settings.exec.background.hint")} unit={t("settings.unit.seconds")} value={s.tools.exec.background_after_seconds} min={1} step={30} onSave={(v) => save({ tools: { exec: { background_after_seconds: v } } })} />
         <NumRow setting="tools.exec.max_output_chars" title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
-      </div>
+      </SetGroup>
     </>
   );
 }
@@ -964,9 +954,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
         const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.chat.telegram")}</div>
-            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
+          <SetGroup title={t("settings.chat.telegram")}>
+            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")}>
               <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
             </Row>
             {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
@@ -987,7 +976,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="chat-maxfile" setting="telegram.max_inbound_file_mb" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
             <NumRow id="chat-caption" setting="telegram.photo_caption_wait_seconds" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
             <NumRow id="chat-slowtool" setting="telegram.slow_tool_seconds" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
-          </div>
+          </SetGroup>
         );
       }
       case "schedules":

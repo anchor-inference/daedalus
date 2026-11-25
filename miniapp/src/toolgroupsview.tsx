@@ -7,7 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api, SessionToolGroup, Settings, ToolGroupCatalogue, ToolGroupLoad } from "./api";
 import { plural, t } from "./i18n";
 import { errorText, fmtTok } from "./ui";
-import { Select } from "./ui/components";
+import { Select } from "./ui/primitives";
+import { Row, SetBlock, SetGroup } from "./settingsrow";
 import { LOADS, groupAbout, groupName, loadWord, stateChip, usageLine, usageShare } from "./toolgroups";
 
 /** The three modes side by side: a session's Details, where a group is opened one at a time. */
@@ -50,25 +51,22 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
     }
   }
   return (
-    <div className="card tgroups" data-setting="tools.groups">
-      <div className="section-title">{t("tgroup.title")}</div>
-      <div className="sub">{t("tgroup.sub")}</div>
-      {data === null && <div className="sub">{t("common.loading")}</div>}
+    <SetGroup title={t("tgroup.title")} help={t("tgroup.sub")} className="tgroups" data-setting="tools.groups">
+      {data === null && <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>}
       {data?.groups.map((g) => {
         const share = usageShare(g.usage.sessions, data.sessions);
         const changed = g.load !== g.default;
         return (
-          // Not a plain settings row: the usage and the Reset have lanes of their own between the
-          // words and the picker, so a dozen groups line up as columns rather than each putting its
-          // usage wherever its description happened to end.
-          <div key={g.name} className="settings-row tgroup" data-group={g.name}>
-            <div className="settings-row-text">
-              <div className="settings-row-title">
-                <span className="tgroup-name">{groupName(g.name)}</span>
-                <span className="tgroup-cost">{plural("tgroup.tools", g.tools.length)} · ≈{fmtTok(g.tokens)} {t("tgroup.tokens")}</span>
-              </div>
-              <div className="settings-row-desc">{groupAbout(g.name, g.description)}</div>
-            </div>
+          // Not a plain row: the usage and the Reset have lanes of their own between the words and the
+          // picker, so a dozen groups line up as columns rather than each putting its usage wherever
+          // its description happened to end.
+          <Row
+            key={g.name}
+            className="tgroup"
+            data-group={g.name}
+            title={<><span className="tgroup-name">{groupName(g.name)}</span><span className="tgroup-cost">{plural("tgroup.tools", g.tools.length)} · ≈{fmtTok(g.tokens)} {t("tgroup.tokens")}</span></>}
+            desc={groupAbout(g.name, g.description)}
+          >
             <span className="tgroup-use" title={t("tgroup.usage.detail", { sessions: g.usage.sessions, total: data.sessions, runs: g.usage.runs, calls: g.usage.calls })}>
               <span className="tgroup-bar" aria-hidden><span style={{ width: `${Math.min(100, Math.max(share.pct > 0 ? 2 : 0, share.pct))}%` }} /></span>
               <span className="tgroup-use-text">{usageLine(g.usage.sessions, data.sessions, data.days)}</span>
@@ -90,11 +88,11 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
               onChange={(load) => pick(g.name, load)}
               options={LOADS.map((load) => ({ id: load, label: loadWord(load), hint: t(`tgroup.load.${load}.hint`) }))}
             />
-          </div>
+          </Row>
         );
       })}
-      <div className="sub tgroup-note">{t("tgroup.note")}</div>
-    </div>
+      <SetBlock><span className="set-hint tgroup-note">{t("tgroup.note")}</span></SetBlock>
+    </SetGroup>
   );
 }
 
