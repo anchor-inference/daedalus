@@ -127,8 +127,10 @@ def check_through_the_switch(browser, check, visual: str) -> None:  # type: igno
     context, page = open_page(browser, wire, {"width": 1440, "height": 900}, visual)
     control = VISUALS[visual]
     print(f"-- through the switch, with the {visual}")
-    page.wait_for_selector(".voice-stage.phase-speaking", timeout=15000)
-    page.wait_for_function("window.__played.length > 0", timeout=15000)
+    # Conditions that are met at once on a quiet machine; the limit is for a loaded one, where the
+    # first audio of the answer was seen to start more than fifteen seconds after the page.
+    page.wait_for_selector(".voice-stage.phase-speaking", timeout=60000)
+    page.wait_for_function("window.__played.length > 0", timeout=60000)
     # The microphone is opened first: what is being asserted is that it survives the change, and a
     # microphone that was never opened survives nothing.
     page.locator(control).click()
