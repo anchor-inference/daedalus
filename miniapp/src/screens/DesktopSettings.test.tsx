@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeskBridge, DeskInfo } from "../quick/bridge";
 
 const confirm = vi.hoisted(() => ({ answer: true }));
-vi.mock("../ui", async (importOriginal) => ({ ...(await importOriginal<typeof import("../ui")>()), confirmAsync: vi.fn(async () => confirm.answer) }));
+vi.mock("../ui/primitives", async (importOriginal) => ({ ...(await importOriginal<typeof import("../ui/primitives")>()), confirmDialog: vi.fn(async () => confirm.answer) }));
 
 import { DesktopPanel } from "./DesktopSettings";
 

@@ -169,6 +169,13 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-hint { color: var(--fg-2); font-size: var(--fs-13); }
 .set-warn { color: var(--bad); font-size: var(--fs-13); }
 .set-card .settings-value { font-size: var(--fs-14); }
+/* On a phone a row whose control needs the width (a number, a line of text, a key) puts it under its
+   words, as the same rows do outside a card (pages.css); a switch, a segmented choice, a select and a
+   button stay beside them. */
+@media (max-width: 599px) {
+  .set-card .settings-row.stack, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+  .set-card .settings-row.stack > .settings-row-ctl, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+}
 /* What a face or a size looks like, in the card under the rows that choose it. */
 .set-specimen { gap: 8px; }
 .set-specimen p { display: flex; gap: 16px; margin: 0; font-size: var(--fs-15); line-height: 1.45; overflow-wrap: anywhere; }
@@ -184,13 +191,13 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-card .set-value, .set-card .settings-row-ctl > .dropdown { max-width: 420px; }
 
 /* ── Security, components, dependencies and About: rows whose control is more than one thing ───
-   A row that holds several buttons, or a list of tools, has the lane's width to share with its words;
-   on a phone it goes under them, which is the shape a lone select or number already has. */
+   A row that holds several buttons has the lane's width to share with its words; on a phone it goes
+   under them, which is the shape a lone select or number already has. */
 .set-block.secrets-toolbar { flex-direction: row; }
 .set-block .secrets-search { flex: 1; }
 @media (max-width: 599px) {
-  .set-card .secret-row .settings-row, .set-card .settings-row:is(.stack, .comp-row) { flex-wrap: wrap; }
-  .set-card .secret-row .settings-row-ctl, .set-card .settings-row:is(.stack, .comp-row) > .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
+  .set-card .secret-row .settings-row, .set-card .settings-row.comp-row { flex-wrap: wrap; }
+  .set-card .secret-row .settings-row-ctl, .set-card .settings-row.comp-row > .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
   .secret-row .secret-row-tools { margin-left: auto; }
 }
 
