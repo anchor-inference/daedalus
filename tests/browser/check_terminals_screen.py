@@ -86,9 +86,9 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
 
     # The load bar: coloured by the projection, and in words. 20 GB of 62 in use, 5 running at 1.4 GB,
     # 15 more at 500 MB each would make 27.3 GB = 44 % — ok.
-    bar = page.locator(".pagehead .loadbar")
+    bar = page.locator(".term-screen-list .loadbar")
     if not bar.count():
-        problems.append("the header has no load bar")
+        problems.append("the page has no load bar")
     else:
         words = bar.inner_text().replace("\n", " | ")
         print("load bar:", words, "| level", bar.get_attribute("data-level"))
@@ -238,7 +238,7 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     term.load = load_answer(used_gb=54)
     # The Overview by name: a terminal opened above set up a pane, so a bare address opens the Workspace.
     page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".pagehead .loadbar[data-level='bad']", timeout=15000)
+    page.wait_for_selector(".term-screen-list .loadbar[data-level='bad']", timeout=15000)
     colour = page.eval_on_selector(".loadbar-now", "(e) => getComputedStyle(e).backgroundColor")
     bad = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--bad)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
     warning = page.locator(".loadbar-warning")
