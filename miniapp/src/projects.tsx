@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, Project, ProjectDir, ProjectEnvironments } from "./api";
 import { folderName, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
 import { Sheet } from "./ui/dialogs";
+import { Select } from "./ui/primitives";
 import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { navigate, pathFor, projectPagePath } from "./router";
@@ -225,7 +226,7 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
             { label:t("project.settings.for", { name:p.name }), icon:"settings", onSelect:() => setEditing(p) },
           ] });
         }}>
-          <button className="grow project-pick" onClick={() => pick(p.id)}>
+          <button className="grow project-open" onClick={() => pick(p.id)}>
             <span className="project-name truncate">
               {p.name}
               {!projectReachable(p) && <span className="badge attn" title={t("project.notmounted.bot")}>{t("project.notmounted")}</span>}
@@ -257,7 +258,7 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
           <summary>{t("project.archivedFold", { n: archived.length })}</summary>
           {archived.map((p) => (
             <div key={p.id} className="project-row archived" data-project={p.id}>
-              <span className="grow project-pick">
+              <span className="grow project-open">
                 <span className="project-name truncate">{p.name}</span>
                 <span className="sub mono truncate">{projectPath(p)}</span>
               </span>
@@ -493,9 +494,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       {environments && environments.available.length > 1 && (
         <>
           <label className="field" htmlFor="project-default-env">{t("project.defaultenv")}</label>
-          <select id="project-default-env" className="field" value={defaultEnv} onChange={(e) => setDefaultEnv(e.target.value as Env)}>
-            {environments.available.map((env) => <option key={env} value={env}>{t(`folder.env.${env}.long`)}</option>)}
-          </select>
+          <Select id="project-default-env" size="md" label={t("project.defaultenv")} value={defaultEnv} onChange={setDefaultEnv}
+            options={environments.available.map((env) => ({ id: env, label: t(`folder.env.${env}.long`) }))} />
           <div className="sub">{t("project.defaultenv.hint")}</div>
         </>
       )}
@@ -578,12 +578,11 @@ export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMo
   return (
     <Sheet title={t("move.title")} onClose={onClose} size="sm">
       <label className="field" htmlFor="move-project">{t("move.where")}</label>
-      <select id="move-project" className="field" value={target} onChange={(e) => { setTarget(e.target.value); setOwnDirectory(false); }}>
-        <option value="" disabled>{t("move.choose")}</option>
-        {(projects.data ?? []).filter((p) => !p.system || p.id === current).map((p) => (
-          <option key={p.id} value={p.id}>{p.name} · {projectPath(p)}</option>
-        ))}
-      </select>
+      <Select id="move-project" size="md" label={t("move.where")} value={target} onChange={(next) => { setTarget(next); setOwnDirectory(false); }}
+        options={[
+          ...(target ? [] : [{ id: "", label: t("move.choose"), disabled: true }]),
+          ...(projects.data ?? []).filter((p) => !p.system || p.id === current).map((p) => ({ id: p.id, label: p.name, hint: projectPath(p) })),
+        ]} />
       {chosen && (
         <>
           <label className="toggle-row">

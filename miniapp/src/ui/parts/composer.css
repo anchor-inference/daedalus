@@ -55,8 +55,8 @@
 .roundbtn.primary:disabled { opacity:1; background:var(--selected); color:var(--fg-3); cursor:default; }
 .roundbtn.primary.stop, .roundbtn.primary.queue, .roundbtn.primary.reply { background:var(--primary); color:var(--primary-ink); }
 /* The row's two chips: words on a 28 px line that take a wash under the pointer, never a box. */
-.composer-access, .model-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); min-width:0; padding:0 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.composer-access:hover, .composer-access[aria-expanded="true"], .model-select:hover, .model-select[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
+.composer-access, .model-select, .composer-mode, .composer-project, .runon-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); min-width:0; padding:0 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
+.composer-access:hover, .composer-access[aria-expanded="true"], .model-select:hover, .model-select[aria-expanded="true"], .composer-mode:hover, .composer-mode[aria-expanded="true"], .composer-project:hover, .composer-project[aria-expanded="true"], .runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
 .composer-access { flex:0 1 auto; max-width:260px; }
 .composer-access > .ic { flex:none; }
 .composer-access .access-more { flex:none; color:var(--fg-3); }
@@ -80,28 +80,17 @@
 .ctx-ring:disabled { cursor:default; }
 .ctx-ring.attn, .ctx-ring.bad { color:var(--attention); }
 .ctx-pct { line-height:1; }
-/* Where a new chat runs, beside the model in the start composer: the environment's own pill, on a
-   control's height, opening the two choices with the reason the host is greyed out when it is. */
-.runon-select { display:inline-flex; align-items:center; height:var(--ctl-h-sm); padding:0 4px; background:transparent; border:0; border-radius:var(--radius-sm); cursor:pointer; flex:none; }
-.runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--hover); }
-.runon-menu { width:min(320px, 92vw); max-width:min(320px, 92vw); }
-.menu .runon-option { align-items:flex-start; padding:8px 10px; }
-.runon-option-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
-.runon-option-main .sub { font-size:var(--fs-12); white-space:normal; }
-.menu .runon-option:disabled { cursor:default; opacity:.7; }
-.menu .runon-option:disabled:hover { background:none; }
-.menu .runon-option.on > .ic { color:var(--fg); margin-top:2px; }
-/* The start page's kind chip and its menu (chatkind.tsx): a word chip like the access chip, opening
-   rows of a name over its hint. */
-.composer-mode { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.composer-mode:hover, .composer-mode[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
-.mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
-.mode-list { display:flex; flex-direction:column; }
-.model-row { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--row-h); padding:4px 8px; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
-.model-row:hover, .model-row:focus-visible { background:var(--hover); outline:none; }
-.model-row .sub { font-size:var(--fs-12); color:var(--fg-3); }
-.model-text { display:flex; flex-direction:column; min-width:0; }
-.mode-row .model-text .sub { white-space:normal; }
+/* The start composer's own chips share the access chip's shape (above): the project the chat starts
+   in, what it will be, and where it runs. Only what is chosen away from the default takes ink. */
+.composer-project { flex:0 1 auto; max-width:220px; color:var(--fg); }
+.composer-project > .ic, .composer-mode > .ic, .runon-select > .ic { flex:none; color:var(--fg-3); }
+.composer-mode { max-width:180px; }
+.composer-mode > .ic:last-child, .composer-project > .ic:last-child { opacity:.7; }
+.runon-select { flex:none; }
+.runon-menu, .kind-menu, .project-menu { width:min(340px, 92vw); max-width:min(340px, 92vw); }
+.kind-menu { max-height:70vh; overflow-y:auto; }
+.menu .kind-row .menu-row-sub, .menu .runon-option .menu-row-sub { white-space:normal; }
+.menu .kind-row:disabled, .menu .runon-option:disabled { cursor:default; opacity:.55; }
 /* A session that runs on the host, on its row and in its details: the host pill, never squeezed. */
 .host-mark { display:inline-flex; flex:none; }
 .composer-box .attachments { margin:4px 6px 2px; width:auto; }
@@ -237,8 +226,8 @@
 .model-picker .model-tab .provider-mark { display:inline-flex; width:auto; height:auto; background:none; border:0; color:inherit; }
 .model-picker-title { flex:none; height:25px; box-sizing:border-box; padding:6px 10px 2px; font-size:var(--fs-12); font-weight:500; line-height:17px; color:var(--fg-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .model-picker-list { position:relative; flex:none; height:197px; display:flex; flex-direction:column; gap:1px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
-.model-picker .model-row { flex:none; display:flex; align-items:center; gap:10px; height:var(--row-h); padding:0 6px 0 10px; border-radius:var(--radius-sm); color:var(--fg); font-size:var(--fs-14); cursor:pointer; user-select:none; }
-.model-picker .model-row.active { background:var(--hover); }
+.model-picker .model-row { flex:none; display:flex; align-items:center; gap:10px; width:100%; height:var(--row-h); padding:0 6px 0 10px; border-radius:var(--radius-sm); color:var(--fg); font-size:var(--fs-14); cursor:pointer; user-select:none; }
+.model-picker .model-row:hover, .model-picker .model-row.active { background:var(--hover); }
 .model-picker .model-row.restore { color:var(--attention); }
 .model-row-name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .model-row-meta { flex:none; max-width:40%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--fs-12); color:var(--fg-3); }

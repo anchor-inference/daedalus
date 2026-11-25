@@ -119,9 +119,9 @@
 .project-chip .badge { margin-left: auto; }
 .project-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); padding-right: 8px; }
 .project-row.on { border-color: var(--fg); }
-.project-pick { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 8px 12px; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; min-width: 0; }
+.project-open { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 8px 12px; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; min-width: 0; }
 .project-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-14); }
-.project-pick .sub { font-size: var(--fs-12); }
+.project-open .sub { font-size: var(--fs-12); }
 .menu-item.on { border-color: var(--fg); }
 .readonly-path { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-13); word-break: break-all; }
 /* A folder is a card of its own inside the settings sheet: the name line carries the chips and the
@@ -166,7 +166,7 @@
 .disk-limit-custom .settings-unit { min-width: 0; }
 .project-archived-note { margin: 0 0 8px; }
 /* Archived rows are not picked, only restored or opened in settings, so they read quieter. */
-.project-row.archived .project-pick { cursor: default; color: var(--fg-2); }
+.project-row.archived .project-open { cursor: default; color: var(--fg-2); }
 .project-row.archived .btn { flex: none; }
 .project-archived { margin-top: 6px; }
 .dir-reach { font-size: var(--fs-12); }
@@ -651,8 +651,4 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 @media (max-width: 1023px) {
   .start-hero { justify-content:flex-end; min-height:calc((100svh - 63px - env(safe-area-inset-bottom)) / 2); padding-bottom:var(--space-4); }
   .start-hero > .start-greeting { margin-block:auto; }
-}
-@media (min-width: 1024px) {
-  .start { flex:1; min-height:0; }
-  .start-hero { flex:1; min-height:0; padding:var(--space-4) var(--space-4) 0; }
 }

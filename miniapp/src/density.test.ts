@@ -181,6 +181,9 @@ const BOX_ALLOWED = [
   // The open Inbox entry is a page of its own beside the list: the room above its first line and
   // below its last is the room a page has.
   ".inbox-pane",
+  // The start page's canvas holds the question, the composer and the list; the room under it is what
+  // lifts the group above the middle of the window.
+  ".start-hero",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -228,6 +231,11 @@ const CONTENT_BOXES = [
   // The Terminals page: a list row holds a title, a command and an owner, its memory meter two lines
   // and a bar, and a pane's header a title, a folder, the owner chip and four icon buttons. Each is
   // the size the approved page draws, stated here so a taller one fails.
+  // The start page's cards of chats to continue, the other programs' sessions under them and a
+  // project's row on the projects page are the large list row too: a title over a line, 56.
+  { selector: ".resume-card", property: "height", max: 56 },
+  { selector: ".start-import .si-row", property: "height", max: 56 },
+  { selector: ".projects-row", property: "height", max: 56 },
   { selector: ".tp-row-open", property: "height", max: 56 },
   { selector: ".tp-mem", property: "height", max: 56 },
   { selector: ".tp-pane-head", property: "height", max: 40 },
@@ -744,6 +752,30 @@ describe("rows and controls", () => {
     expect(decl(".msg.user")).toContain("max-width: min(560px, 100%)");
     expect(decl(".msg.user")).toContain("font-size: var(--fs-prose)");
     expect(decl(".msg.user")).toContain("border-radius: var(--radius-bubble)");
+  });
+});
+
+describe("the start page", () => {
+  const rule = (selector: string, media = "") => all.filter((r) => (media ? r.media.includes(media) : !r.media) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  const wide = "min-width: 1024px";
+
+  it("asks the question in 28 px over a composer in the conversation's own column", () => {
+    expect(rule("h1.start-greeting", wide)).toContain("font-size: var(--fs-28)");
+    expect(rule("h1.start-greeting", wide)).toContain("font-weight: 500");
+    expect(rule(".start-composer", wide)).toContain("max-width: var(--chat-w)");
+    expect(rule(".start-resume", wide) + rule(".start-composer", wide)).toContain("max-width: var(--chat-w)");
+  });
+
+  it("lists the chats to continue as 56 px cards under a 28 px label, and the projects as 56 px rows", () => {
+    expect(rule(".resume-card")).toContain("height: 56px");
+    expect(rule(".start-resume-head")).toContain("height: 28px");
+    expect(rule(".projects-row")).toContain("height: 56px");
+    expect(rule(".composer-project")).toContain("max-width: 220px");
+  });
+
+  it("has no row of chips under the composer: where the chat starts is a chip in its row", () => {
+    expect(css).not.toContain(".start-where");
+    expect(css).not.toContain(".start-live");
   });
 });
 

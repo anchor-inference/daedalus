@@ -26,7 +26,7 @@ import { USER_STATUS, chromeState } from "./browser/yourchrome";
 import { t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { useQuery } from "./store";
-import { Popover, Sheet } from "./ui/dialogs";
+import { MenuRow, Popover } from "./ui/primitives";
 
 export type ChatKind = "chat" | "computer" | "chrome" | "remote";
 export type KindTab = "all" | ChatKind;
@@ -321,7 +321,7 @@ const AGENT_ICON: IconName = "user";
  * A kind this installation cannot start stays in the list, greyed, with the reason under its name, so
  * the operator learns where it would be offered rather than wondering why it is missing.
  */
-export function KindSelect({ kind, offers, onChoose, sheet, className = "", agent = false, onAgent }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; sheet: boolean; className?: string; agent?: boolean; onAgent?: (on: boolean) => void }) {
+export function KindSelect({ kind, offers, onChoose, className = "", agent = false, onAgent }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; className?: string; agent?: boolean; onAgent?: (on: boolean) => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const asAgent = agent && kind === "chat" && !!onAgent;
@@ -340,36 +340,18 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "", agen
     if (k === "chrome" && !offers.chromeConnected) return t("kind.chrome.waiting");
     return t(`kind.mode.${k}.hint`);
   };
+  // One row per way a chat can begin. A kind this installation cannot start stays, greyed, with its
+  // reason in the row's second line, so the operator learns where it would be offered.
   const list = (
-    <div className="mode-list kind-list" role="menu" aria-label={t("kind.mode.label")}>
-      {!sheet && <div className="menu-heading sub">{t("kind.mode.label")}</div>}
+    <>
       {KINDS.flatMap((k) => {
-        const on = k === kind && !asAgent;
-        const row = (
-          <button key={k} type="button" role="menuitemradio" aria-checked={on} disabled={!offers[k].ok} data-kind={k}
-            className={`model-row mode-row kind-row ${on ? "on" : ""}`} onClick={() => pick(k)} title={offers[k].ok ? undefined : offers[k].reason}>
-            <span className={`kind-row-icon kind-${k}`}><Icon name={MODE_ICON[k]} size={16} /></span>
-            <span className="grow model-text">
-              <span className="truncate">{t(`kind.mode.${k}`)}</span>
-              <span className="sub clamp-2">{hint(k)}</span>
-            </span>
-            {on && <Icon name="check" size={16} />}
-          </button>
-        );
+        const row = <MenuRow key={k} icon={MODE_ICON[k]} label={t(`kind.mode.${k}`)} sub={hint(k)} checked={k === kind && !asAgent} disabled={!offers[k].ok}
+          className={`kind-row kind-${k}`} data={{ kind: k }} onSelect={() => pick(k)} />;
         if (k !== "chat" || !onAgent) return [row];
-        return [row, (
-          <button key="agent" type="button" role="menuitemradio" aria-checked={asAgent} data-kind="agent"
-            className={`model-row mode-row kind-row ${asAgent ? "on" : ""}`} onClick={pickAgent}>
-            <span className="kind-row-icon kind-agent"><Icon name={AGENT_ICON} size={16} /></span>
-            <span className="grow model-text">
-              <span className="truncate">{t("kind.mode.agent")}</span>
-              <span className="sub clamp-2">{t("kind.mode.agent.hint")}</span>
-            </span>
-            {asAgent && <Icon name="check" size={16} />}
-          </button>
-        )];
+        return [row, <MenuRow key="agent" icon={AGENT_ICON} label={t("kind.mode.agent")} sub={t("kind.mode.agent.hint")} checked={asAgent}
+          className="kind-row kind-agent" data={{ kind: "agent" }} onSelect={pickAgent} />];
       })}
-    </div>
+    </>
   );
   const label = asAgent ? t("kind.mode.agent") : t(`kind.mode.${kind}`);
   const shown = asAgent ? "agent" : kind;
@@ -381,13 +363,8 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "", agen
         <span className="truncate">{label}</span>
         <Icon name="chevron" size={12} />
       </button>
-      {open && sheet && (
-        <Sheet title={t("kind.mode.label")} onClose={() => setOpen(false)} className="mode-sheet" size="sm">
-          {list}
-        </Sheet>
-      )}
-      {open && !sheet && (
-        <Popover anchor={trigger.current} onClose={() => setOpen(false)} className="mode-menu kind-menu" label={t("kind.mode.label")}>
+      {open && (
+        <Popover anchor={trigger.current} onClose={() => setOpen(false)} className="kind-menu" label={t("kind.mode.label")}>
           {list}
         </Popover>
       )}
