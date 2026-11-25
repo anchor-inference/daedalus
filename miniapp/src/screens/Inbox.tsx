@@ -65,8 +65,10 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
 
   // A proposal or a schedule carries no project and no failure, so only the unfiltered views and the
   // one for what waits show them.
-  const extras = project === null && (filter === "all" || filter === "needs");
-  const pending = extras ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const outside = project === null;
+  const extras = outside && (filter === "all" || filter === "needs");
+  const allPending = outside ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const pending = extras ? allPending : [];
   const proposed = extras ? schedules : [];
 
   const groups = useMemo<Group[]>(() => {
@@ -82,7 +84,8 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
 
   const items = groups.flatMap((g) => g.items);
   const current = items.find((i) => i.key === picked) ?? (split ? items[0] : undefined);
-  const counts = (f: InboxFilter) => lists.count(f, pending.length + proposed.length);
+  // A tab counts what it would show, whichever tab is open.
+  const counts = (f: InboxFilter) => lists.count(f, allPending.length + (outside ? schedules.length : 0));
 
   /** The entry as the page last heard of it: the list's copy, or the one an answer brought back. */
   function patch(fn: (list: Notification[]) => Notification[], summary?: NotificationSummary) {

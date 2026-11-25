@@ -68,7 +68,8 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   const entries = (data?.entries ?? []).filter((e) => !e.needs_you && !answered.has(e.id));
   // A proposal or a schedule carries no project and no failure: only the views that could hold one show it.
   const extras = project === null && (filter === "all" || filter === "needs");
-  const pending = extras ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const allPending = project === null ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const pending = extras ? allPending : [];
   const waitingSchedules = usePendingSchedules();
   const schedules = extras ? waitingSchedules : [];
   const groups = byDay(entries);
@@ -197,20 +198,13 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     body = (
       <>
         <PushNudge />
-        {(needs.length > 0 || kept.length > 0) && (
+        {(needs.length > 0 || kept.length > 0 || (pending.length > 0 && selected === null)) && (
           <section className="ph-needs" aria-label={t("centre.needs")}>
-            <SectionHeader tone="warn" count={needs.length || undefined}>{t("centre.needs")}</SectionHeader>
+            <SectionHeader tone="warn" count={needs.length + (selected === null ? pending.length : 0) || undefined}>{t("centre.needs")}</SectionHeader>
             <div className="ph-list">
               {needs.map((e) => row(e))}
               {kept.map((a) => row(a.entry, { answered: a }))}
-            </div>
-          </section>
-        )}
-        {pending.length > 0 && selected === null && (
-          <section>
-            <SectionHeader count={pending.length}>{t("inbox.waiting")}</SectionHeader>
-            <div className="ph-list">
-              {pending.map((p) => (
+              {selected === null && pending.map((p) => (
                 <Row key={p.id} className="ph-irow" data={{ proposal: p.id }} title={p.title} unread
                   lead={<span className="ph-kico"><Icon name="changes" size={18} /></span>}
                   trail={<span className="ph-irow-tm" title={absTime(p.created_at)}>{relTime(p.created_at)}<span className="ph-udot" aria-hidden /></span>}
@@ -224,7 +218,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
         {selected === null && <PendingSchedules views={schedules} header={(n) => <SectionHeader count={n}>{t("inbox.schedules")}</SectionHeader>} />}
         {groups.map((group) => (
           <section key={group.key || "-"}>
-            <SectionHeader count={group.key !== "today" && group.key !== "earlier" ? group.entries.length : undefined}>{group.label}</SectionHeader>
+            <SectionHeader>{group.label}</SectionHeader>
             <div className="ph-list">{group.entries.map((e) => row(e))}</div>
           </section>
         ))}
@@ -250,7 +244,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       {!selected && (data || list.error) && !(nothing && filter === "all" && project === null) && (
         <ChipBar label={t("ph.inbox.filters")}>
-          {INBOX_FILTERS.map((f) => <Chip key={f.id} on={filter === f.id} count={lists.count(f.id, extras ? pending.length + schedules.length : 0) || undefined} onClick={() => setFilter(f.id)}>{t(f.label)}</Chip>)}
+          {INBOX_FILTERS.map((f) => <Chip key={f.id} on={filter === f.id} count={lists.count(f.id, allPending.length + (project === null ? waitingSchedules.length : 0)) || undefined} onClick={() => setFilter(f.id)}>{t(f.label)}</Chip>)}
           <Chip on={project !== null} label={t("inbox.project")} onClick={() => setOpen({ kind: "project" })}>{project ? projectNames(projects.data).get(project) ?? t("inbox.project.all") : t("inbox.project.all")}</Chip>
         </ChipBar>
       )}
