@@ -3635,6 +3635,10 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sched.kind.lazy": { en: "Lazy note", ru: "Заметка на потом" },
   "sched.kind.wake": { en: "Orchestrator wake-up", ru: "Пробуждение оркестратора" },
   "sched.new": { en: "New schedule", ru: "Новое расписание" },
+  "sched.pane": { en: "Schedule", ru: "Расписание" },
+  "sched.enabled": { en: "Enabled", ru: "Включено" },
+  "sched.nextrun": { en: "Next run", ru: "Следующий запуск" },
+  "sched.state": { en: "State", ru: "Состояние" },
   "sched.proposal.legacyfiles": { en: "These attachments may have changed since they were suggested. Use their current versions and look them over before approving.", ru: "Вложения могли измениться с момента предложения. Возьмите их текущие версии и просмотрите перед одобрением." },
   "sched.proposal.revision": { en: "review version {n}", ru: "версия проверки {n}" },
   "sched.proposal.reviewfiles": { en: "Use current files", ru: "Взять текущие файлы" },
@@ -3739,7 +3743,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sched.scope.all": { en: "All", ru: "Все" },
   "sched.scope.chat.empty": { en: "This chat has no schedules", ru: "У этого чата нет расписаний" },
   "sched.scope.showall": { en: "Show all schedules", ru: "Показать все" },
-  "sched.pick": { en: "Pick a schedule to see it here", ru: "Выберите расписание, чтобы открыть его здесь" },
   "sched.gone": { en: "This schedule is no longer here", ru: "Этого расписания больше нет" },
   "session.schedules": { en: "Schedules of this chat", ru: "Расписания этого чата" },
 

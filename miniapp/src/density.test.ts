@@ -41,6 +41,7 @@ import agentFeed from "./staff/agentfeed.css?raw";
 import app from "./App.tsx?raw";
 import canvasList from "./canvas/CanvasList.tsx?raw";
 import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
+import schedulesBrowser from "./schedules/SchedulesBrowser.tsx?raw";
 // Every stylesheet of the app, found rather than listed: a hand list was a line to add for each new
 // sheet, and a sheet left off it answered to nothing. The tokens come first, since the claims read
 // the first :root block as the scale; the Chrome side panel redefines the scale for its own subtree
@@ -164,6 +165,8 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".inbox-prose", ".inbox-pane-title",
   // A board card's pane is a pane: its title is a pane's heading (18/500) and its description prose.
   ".task-pane-title", ".task-prose",
+  // A schedule's pane opens on its name as the pane's heading, the same 18.
+  ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
   ".ov-title"];
 
@@ -191,6 +194,9 @@ const BOX_ALLOWED = [
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
   ".board-filters", ".task-pane-head", ".task-pane-foot",
+  // The schedule pane is the same pane: its head is level with the page header beside it (52), its foot
+  // holds the schedule's buttons with the room a dialog's foot has (64).
+  ".sched-pane-head", ".sched-pane-foot",
   // The start page's canvas holds the question, the composer and the list; the room under it is what
   // lifts the group above the middle of the window.
   ".start-hero",
@@ -254,6 +260,10 @@ const CONTENT_BOXES = [
   { selector: ".projects-row", property: "height", max: 56 },
   // A canvas is a row of the same size: a sketch of the board, its name over who touched it last.
   { selector: ".cv-row", property: "height", max: 56 },
+  // A schedule is a row of the same size: what it is over when and where, its state, how it last went. In
+  // the sheet over a chat a row that carries its decision below it grows from this height.
+  { selector: ".schedrow", property: "height", max: 56 },
+  { selector: ".schedbrowser .schedrow", property: "min-height", max: 56 },
   { selector: ".tp-row-open", property: "height", max: 56 },
   { selector: ".tp-mem", property: "height", max: 56 },
   { selector: ".tp-pane-head", property: "height", max: 40 },
@@ -534,6 +544,29 @@ describe("the canvas", () => {
     expect(canvasEditor).toContain("<Popover");
     expect(canvasEditor).not.toContain("cv-pick-note");
     expect(all.some((r) => selectors(r).some((sel) => sel.includes(".cv-pick-note") || sel === ".cv-tool" || sel.startsWith(".cv-tool-btn")))).toBe(false);
+  });
+});
+
+describe("the schedules", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists its schedules as 56 px rows in the 880 column, under group heads 36 px tall", () => {
+    expect(schedulesBrowser).toContain('<Page width="list"');
+    expect(rule(".schedrow")).toContain("height: 56px");
+    expect(rule(".schedlist-title")).toContain("height: 36px");
+  });
+
+  it("opens a schedule in a 420 px pane with a 52 px head and a 64 px foot, as a card is opened beside the board", () => {
+    expect(rule(".sched-pane")).toContain("width: 420px");
+    expect(rule(".sched-pane-head")).toContain("height: 52px");
+    expect(rule(".sched-pane-foot")).toContain("height: 64px");
+    expect(rule(".sched-pane-title")).toContain("font-size: var(--fs-18)");
+  });
+
+  it("says what waits for the operator in orange, a failed run in orange and one that is running in cyan", () => {
+    expect(rule(".schedrow-state.attention")).toContain("var(--attention)");
+    expect(rule(".schedrow-last.failed")).toContain("var(--attention)");
+    expect(rule(".schedrow-last.running .dot")).toContain("var(--live)");
   });
 });
 
