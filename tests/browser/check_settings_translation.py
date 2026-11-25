@@ -115,7 +115,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
         say("the translator is not chosen with the in-place model picker")
     else:
         preset.scroll_into_view_if_needed()
-        preset.locator(".sel-current .btn").click()
+        preset.locator("#translation-preset .sel-current .btn").click()
         search = preset.locator(".sel-search-field")
         search.wait_for(timeout=5000)
         search.click()
