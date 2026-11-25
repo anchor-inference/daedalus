@@ -18,12 +18,12 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useS
 import { retried } from "../chunks";
 import { api } from "../api";
 import { Select, StatusLabel, timeAgo } from "../ui/components";
-import { Row } from "../settingsrow";
+import { Row, SetFoot, SetGroup } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath } from "../router";
 import { OverflowMenu, PageHeader, go, useMedia } from "../ui/index";
-import { Sheet } from "../ui/primitives";
+import { Badge, Sheet } from "../ui/primitives";
 import type { MenuItem } from "../ui/dialogs";
 import { invalidate, prime, useQuery } from "../store";
 import { errorText, haptic } from "../ui";
@@ -795,79 +795,79 @@ export function VoiceSettings() {
         ? t("voice.card.in.server")
         : t("voice.card.in.none");
   return (
-    <div className="card voice-card" data-setting="companion.enabled">
-      <div className="section-title">{t("voice.card.title")}</div>
-      <div className="sub">{t("voice.card.intro")}</div>
-      <Row title={t("voice.card.enabled")}>
-        <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>
-      </Row>
-      <Row
-        data-setting="companion.preset"
-        title={t("voice.card.model")}
-        desc={
-          <>
-            {t("voice.card.model.hint")} {row.warn && <span className="chip attn">{t(row.warn)}</span>}
-            {row.addFast && (
-              <>
-                {" "}{t("voice.card.model.none")}{" "}
-                <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>{t("voice.card.model.add")}</a>
-              </>
-            )}
-            {problem && <span className="push-error"> {problem}</span>}
-          </>
-        }
-        stack
-      >
-        <Select
-          label={t("voice.card.model")}
-          value={row.value}
-          disabled={saving}
-          onChange={(preset) => void pick({ preset })}
-          options={[
-            { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
-            ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
-          ]}
-        />
-      </Row>
-      <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
-        <Select
-          label={t("voice.card.background")}
-          value={data.background_preset ?? ""}
-          disabled={saving}
-          onChange={(background_preset) => void pick({ background_preset })}
-          options={[
-            { id: "", label: t("voice.card.model.default") },
-            ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
-          ]}
-        />
-      </Row>
-      <Row title={t("voice.card.out")} stack>
-        <span className="settings-value">{spokenLine(data)}</span>
-      </Row>
-      <Row title={t("voice.card.in")} stack>
-        <span className="settings-value">{listens}</span>
-      </Row>
-      {local?.active && (
-        <Row title={t("voice.card.memory")}>
-          <span className="settings-value">
-            {data.stt?.state === "loading"
-              ? t("voice.card.memory.loading")
-              : data.stt?.state === "error"
-                ? data.stt.error || t("voice.card.memory.failed")
-                : data.stt?.loaded_in_ms
-                  ? t("voice.card.memory.ready", { s: (data.stt.loaded_in_ms / 1000).toFixed(1) })
-                  : t("voice.card.memory.later")}
-          </span>
+    <>
+      <SetGroup title={t("voice.card.title")} help={t("voice.card.intro")}>
+        <Row title={t("voice.card.enabled")} data-setting="companion.enabled">
+          <Badge tone={data.enabled ? "live" : "attention"}>{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</Badge>
         </Row>
-      )}
-      {/* Where the two lines above say "the browser's own" because nothing else is installed, the
-          offer to install it belongs directly under them rather than on another page. */}
-      <SpeechRuntimeNotice onInstalled={refresh} />
-      <div className="btnrow">
-        <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
-          {t("voice.card.open")}
-        </a>
-      </div>
-    </div>
+        <Row
+          data-setting="companion.preset"
+          title={t("voice.card.model")}
+          desc={
+            <>
+              {t("voice.card.model.hint")} {row.warn && <Badge tone="attention">{t(row.warn)}</Badge>}
+              {row.addFast && (
+                <>
+                  {" "}{t("voice.card.model.none")}{" "}
+                  <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>{t("voice.card.model.add")}</a>
+                </>
+              )}
+              {problem && <span className="push-error"> {problem}</span>}
+            </>
+          }
+          stack
+        >
+          <Select
+            label={t("voice.card.model")}
+            value={row.value}
+            disabled={saving}
+            onChange={(preset) => void pick({ preset })}
+            options={[
+              { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
+              ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
+            ]}
+          />
+        </Row>
+        <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
+          <Select
+            label={t("voice.card.background")}
+            value={data.background_preset ?? ""}
+            disabled={saving}
+            onChange={(background_preset) => void pick({ background_preset })}
+            options={[
+              { id: "", label: t("voice.card.model.default") },
+              ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
+            ]}
+          />
+        </Row>
+      </SetGroup>
+
+      <SetGroup title={t("voice.card.runs")}>
+        <Row title={t("voice.card.out")} desc={spokenLine(data)} />
+        <Row title={t("voice.card.in")} desc={listens} />
+        {local?.active && (
+          <Row
+            title={t("voice.card.memory")}
+            desc={
+              data.stt?.state === "loading"
+                ? t("voice.card.memory.loading")
+                : data.stt?.state === "error"
+                  ? data.stt.error || t("voice.card.memory.failed")
+                  : data.stt?.loaded_in_ms
+                    ? t("voice.card.memory.ready", { s: (data.stt.loaded_in_ms / 1000).toFixed(1) })
+                    : t("voice.card.memory.later")
+            }
+          />
+        )}
+        {/* Where the two lines above say "the browser's own" because nothing else is installed, the
+            offer to install it belongs directly under them rather than on another page. */}
+        <SpeechRuntimeNotice onInstalled={refresh} />
+        <SetFoot>
+          <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
+            {t("voice.card.open")}
+          </a>
+        </SetFoot>
+      </SetGroup>
+    </>
   );
 }

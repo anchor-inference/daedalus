@@ -31,7 +31,7 @@ def main() -> int:
 
                 page.route("**/api/settings", save)
                 suffix = f"?token=t&lang=ru&scheme={scheme}"
-                for section, selector in (("components", ".comp-grid"), ("speech-models", ".stt-list")):
+                for section, selector in (("components", ".comp-grid"),):
                     page.goto(f"{BASE}/settings/{section}{suffix}")
                     page.wait_for_selector(f"{selector} > div")
                     page.wait_for_timeout(250)

@@ -287,10 +287,9 @@ a.memory-source:hover { color: var(--fg); }
 .settings-col .secrets-toolbar > .secrets-add-open:only-child { margin-left: 0; }
 /* A catalogue (voices, recognition models, components): what is in use in a card, the filters and the
    tiles on the page under it, the chosen one's settings in a card after them. */
-.catalogue > .catalogue-filters { margin: 0 0 12px; }
-.catalogue > .stt-list, .catalogue > .comp-grid { margin: 0 0 16px; }
+.catalogue > .comp-grid { margin: 0 0 16px; }
 .catalogue > .sub.attn { margin: 0 2px 12px; }
-.catalogue > .card:last-child, .catalogue > :is(.stt-list, .comp-grid):last-child { margin-bottom: 0; }
+.catalogue > .card:last-child, .catalogue > .comp-grid:last-child { margin-bottom: 0; }
 /* Six themes, three to a row: at any width a fill of 148 px columns left the sixth alone on a row. */
 .settings-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
 .settings-themes button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: var(--row-h); padding: 8px 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; text-align: left; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }

@@ -177,53 +177,11 @@
 .project-ephemeral { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .project-ephemeral .sub { flex: 1 1 200px; }
 
-/* ── speech models: the picker for a recogniser that runs on this machine ────────────────── */
-/* Cards on a lighter step than the card they sit in, as everything raised here is: the list is
-   inside a panel, so it lifts rather than sinks, and the hairline is what separates two cards that
-   are nearly the same shade. The grid fills the width it is given — one column at 400 px, as many
-   as fit on a wide screen — because a list of twelve read one at a time is a list nobody finishes. */
-
-/* A catalogue's filters (speech models, voices): the search takes the room, the rest are compact. */
-.catalogue-filters { display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; margin: 12px 0 4px; }
-.catalogue-filters > .field { flex: 1 1 200px; min-width: 160px; margin: 0; padding: 6px 10px; }
-.filter-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+/* The speed of a voice: the range input a catalogue's chosen voice has, the one control with no primitive. */
 .settings-range { display: inline-flex; align-items: center; gap: 10px; }
 .settings-range input[type="range"] { width: 200px; accent-color: var(--fg); }
-
-/* Uneven tiles made the catalogue hard to scan. Let the longest description set their height
-   without clipping text, and keep every action at the bottom of its tile. */
-.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 10px; }
-/* A tile is a card on the page, as every group in Settings is. The one in use is the one with the ink
-   edge, the way the chosen theme is; its "in use" tag says the same in words. */
-.stt-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.stt-card > .btnrow { margin-top: auto; padding-top: 10px; }
-.stt-card.using { border-color: var(--fg); }
-.stt-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.stt-head b { font-size: var(--fs-14); font-weight: 600; margin-right: 2px; }
-.stt-facts { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); color: var(--fg-3); }
-.stt-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px; }
-.stt-bar { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
-.stt-bar > .sub { flex: none; width: 56px; }
-.stt-bar-track { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
-.stt-bar-fill { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
-.stt-bar-fill.accent { background: var(--fg); }
-.stt-progress { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.stt-progress .stt-bar-fill { background: var(--fg); }
-.stt-progress .sub { flex: none; min-width: 64px; text-align: right; }
-/* The chosen model's weights on their way into memory: a line that says the wait is happening now
-   rather than under the first thing the operator says. */
-.stt-load b.stt-loading { color: var(--warn); }
-.stt-load b.stt-loading::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
-
-@media (max-width: 480px) {
-  .stt-list { grid-template-columns: 1fr; }
-  .stt-bars { grid-template-columns: 1fr; }
-}
-
-/* The synthesis picker shares every class above — the two lists are the same list of cards with a
-   different thing on them — and adds one control the recogniser has no use for: a speed slider. A
-   range input inherits the text field's frame, which reads as an input box drawn around a track, so
-   it gives the frame back and keeps only the height and the accent. */
+/* A range input inherits the text field's frame, which reads as an input box drawn around a track,
+   so it gives the frame back and keeps only the height and the accent. */
 input.field[type="range"] {
   padding: 0;
   height: 28px;
@@ -247,7 +205,7 @@ input.field[type="range"] {
 .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 12px; }
 @media (max-width: 599px) {
   /* A single column does not need matching heights across separate rows. */
-  .comp-grid, .stt-list { grid-auto-rows: auto; }
+  .comp-grid { grid-auto-rows: auto; }
 }
 /* Each component is a card on the page; an installed one is marked by its tag, not by a brighter
    fill or a stronger edge that made the grid a patchwork. */

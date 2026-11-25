@@ -1630,10 +1630,10 @@ def scroll_to_accounts(page: Page) -> None:
 def scroll_to_voices(page: Page) -> None:
     """The settings body scrolls inside itself, so a full-page shot would still show only the top of it.
 
-    The synthesis picker is the last card in the Voice section; bringing it into view is what makes
-    the picture about the voices rather than about the recogniser above them.
+    The voice catalogue is the second group of the Voice section; bringing its rows into view is what
+    makes the picture about the voices rather than about the companion above them.
     """
-    page.locator(".stt-list").last.scroll_into_view_if_needed()
+    page.locator(".cat-row").last.scroll_into_view_if_needed()
     page.wait_for_timeout(400)
 
 
@@ -2650,7 +2650,7 @@ def run() -> int:
         shot(page, "projects", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_projects)
         shot(page, "new-project", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_new_project, settle=600)
         shot(page, "voice", "companion")
-        shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
+        shot(page, "voice-settings", "settings/voice", wait=".cat-row", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
         shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "cron", "schedules")

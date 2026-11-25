@@ -11,13 +11,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { Icon } from "../icons";
 import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
 import { invalidate } from "../store";
 import { errorText, haptic } from "../ui";
-import { Select, Switch } from "../ui/index";
-import { NumInput, Row } from "../settingsrow";
+import { Badge, Button, IconButton, Select, Switch, confirmDialog } from "../ui/primitives";
+import { NumInput, Row, SetBlock, SetGroup } from "../settingsrow";
+import { CatalogueProgress, CatalogueRow, Meter } from "./catalogue";
 import type { SpeechModel, SpeechView } from "../sttview";
 import { fetchSttView, mergeSttView, postSttSelect, sttFrame } from "../sttview";
 
@@ -26,18 +26,6 @@ export type { SpeechModel, SpeechView } from "../sttview";
 // The same table the synthesis picker beside this one reads: one language is one word, whichever of
 // the two lists it came from.
 const name = (code: string) => t(`lang.of.${code}`);
-
-/** One 0-100 score as a bar. Two of these side by side are the whole comparison most people make. */
-function Bar({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="stt-bar">
-      <span className="sub faint">{label}</span>
-      <span className="stt-bar-track">
-        <span className="stt-bar-fill" style={{ width: `${Math.max(3, Math.min(100, value))}%` }} />
-      </span>
-    </div>
-  );
-}
 
 function Languages({ model }: { model: SpeechModel }) {
   const shown = model.languages.slice(0, 4).map(name);
@@ -50,24 +38,18 @@ function LoadLine({ load }: { load: SpeechView["load"] }) {
   if (!load || load.state === "idle") return null;
   if (load.state === "loading") {
     return (
-      <div className="kv stt-load">
-        <span>{t("stt.memory")}</span>
-        <b className="stt-loading">{t("stt.memory.loading")}</b>
-      </div>
+      <Row title={t("stt.memory")}>
+        <span className="settings-value stt-loading">{t("stt.memory.loading")}</span>
+      </Row>
     );
   }
   if (load.state === "error") {
-    return (
-      <div className="sub attn" style={{ marginTop: 6 }}>
-        {t("stt.load.failed", { reason: load.error || t("stt.load.refused") })}
-      </div>
-    );
+    return <SetBlock><span className="sub attn">{t("stt.load.failed", { reason: load.error || t("stt.load.refused") })}</span></SetBlock>;
   }
   return (
-    <div className="kv">
-      <span>{t("stt.memory")}</span>
-      <b>{load.loaded_in_ms ? t("stt.memory.ready.in", { s: (load.loaded_in_ms / 1000).toFixed(1) }) : t("stt.memory.ready")}</b>
-    </div>
+    <Row title={t("stt.memory")}>
+      <span className="settings-value">{load.loaded_in_ms ? t("stt.memory.ready.in", { s: (load.loaded_in_ms / 1000).toFixed(1) }) : t("stt.memory.ready")}</span>
+    </Row>
   );
 }
 
@@ -174,7 +156,7 @@ export function SpeechModels() {
     }
   }
 
-  if (!view) return <div className="card"><div className="sub">{problem || t("stt.loading")}</div></div>;
+  if (!view) return <SetGroup title={t("stt.title")} data-setting="stt.models"><SetBlock><span className="sub">{problem || t("stt.loading")}</span></SetBlock></SetGroup>;
 
   const wanted = query.trim().toLowerCase();
   const shown = view.models.filter((m) => {
@@ -186,114 +168,112 @@ export function SpeechModels() {
   const installedCount = view.models.filter((m) => m.installed).length;
   // One model is fetched at a time — half a gigabyte twice over a link that carries neither faster is
   // not a thing to offer, and twelve Download buttons make it easy to ask for by accident. The other
-  // cards say so instead of starting a second and being queued.
+  // rows say so instead of starting a second and being queued.
   const busyElsewhere = view.models.some((m) => m.progress && ["downloading", "verifying", "unpacking"].includes(m.progress.state));
   // Whisper is told its language at load time, so "auto" is English for it and not a detection.
   const autoDetects = view.models.find((m) => m.id === view.selected)?.detects_language ?? true;
 
+  async function remove(id: string, label: string, bytes: number) {
+    const sure = await confirmDialog({ title: t("stt.delete.title", { name: label }), body: t("stt.delete.body", { size: size(bytes) }), action: t("stt.delete"), danger: true });
+    if (sure) await act(id, "delete");
+  }
+
   return (
-    <div className="catalogue settings-groups" id="speech-models" data-setting="stt.models">
-      {/* What is in use is one card, the models lie on the page under it and the chosen one's
-          settings are a card after them: all in one card, the models were cards in a card. */}
-      <div className="card">
-      <div className="section-title">{t("stt.title")}</div>
-      <div className="sub">{t("stt.intro")}</div>
+    <div id="speech-models">
+      <SetGroup title={t("stt.title")} help={t("stt.intro")}>
+        <Row title={t("stt.inuse")} data-setting="stt.local_model">
+          <span className="settings-value">{view.selected ? view.models.find((m) => m.id === view.selected)?.label ?? view.selected : t("stt.inuse.none")}</span>
+        </Row>
+        <Row title={t("stt.ondisk")}>
+          <span className="settings-value">{installedCount ? plural("stt.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("stt.ondisk.none")}</span>
+        </Row>
+        {view.selected && <LoadLine load={view.load} />}
+        {view.selected && !view.decoders?.opus && !view.decoders?.any && (
+          <SetBlock><span className="sub attn">{t("stt.nodecoder")}</span></SetBlock>
+        )}
+      </SetGroup>
 
-      <Row title={t("stt.inuse")} data-setting="stt.local_model">
-        <span className="settings-value">{view.selected ? view.models.find((m) => m.id === view.selected)?.label ?? view.selected : t("stt.inuse.none")}</span>
-      </Row>
-      <Row title={t("stt.ondisk")}>
-        <span className="settings-value">{installedCount ? plural("stt.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("stt.ondisk.none")}</span>
-      </Row>
-      {view.selected && <LoadLine load={view.load} />}
-      {view.selected && !view.decoders?.opus && !view.decoders?.any && (
-        <div className="sub attn" style={{ marginTop: 6 }}>{t("stt.nodecoder")}</div>
-      )}
-      </div>
-
-      {/* The catalogue's filters: the search takes the room, the language is a compact picker and
-          "streaming only" a labelled switch, the same controls as every setting above them. */}
-      <div className="catalogue-filters">
-        <input className="field" placeholder={t("stt.search")} aria-label={t("stt.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Select label={t("stt.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("stt.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
-        <span className="filter-switch">
-          <span>{t("stt.streaming.only")}</span>
-          <Switch checked={streamingOnly} onChange={setStreamingOnly} label={t("stt.streaming.only")} />
-        </span>
-      </div>
-
-      {problem && <div className="sub attn" style={{ marginTop: 8 }}>{problem}</div>}
-
-      <div className="stt-list">
+      <SetGroup title={t("stt.catalogue")} note={t("stt.catalogue.count", { shown: shown.length, n: view.models.length })} data-setting="stt.models">
+        {/* The filters are the first block of the card the rows are in: the search takes the room, the
+            language is a compact picker and "streaming only" a labelled switch. */}
+        <SetBlock className="cat-filters">
+          <input className="field" placeholder={t("stt.search")} aria-label={t("stt.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Select label={t("stt.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("stt.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
+          <span className="cat-switch">
+            <span>{t("stt.streaming.only")}</span>
+            <Switch checked={streamingOnly} onChange={setStreamingOnly} label={t("stt.streaming.only")} />
+          </span>
+        </SetBlock>
+        {problem && <SetBlock><span className="sub attn">{problem}</span></SetBlock>}
         {shown.map((m) => {
           const progress = m.progress;
           const downloading = progress && ["downloading", "verifying", "unpacking"].includes(progress.state);
           const queued = progress?.state === "queued";
           const recommended = language ? m.recommended_for.includes(language) : m.recommended_for.length > 0;
           return (
-            <div key={m.id} className={`stt-card ${m.selected ? "using" : ""}`}>
-              <div className="stt-head">
-                <b>{m.label}</b>
-                {recommended && <span className="chip accent">{language ? t("stt.recommended.for", { lang: name(language) }) : t("stt.recommended")}</span>}
-                {m.streaming ? <span className="chip ok">{t("stt.chip.streaming")}</span> : <span className="chip">{t("stt.chip.sentences")}</span>}
-                {m.selected && <span className="chip accent">{t("stt.card.using")}</span>}
-              </div>
-              <div className="sub">{m.note}</div>
-              <div className="stt-facts sub faint">
-                <span><Languages model={m} /></span>
-                <span>{t("stt.facts.size", { dl: size(m.size_bytes), disk: size(m.disk_bytes), mem: m.memory_mb })}</span>
-                <span>
-                  {t(m.verified ? "stt.facts.checksum" : "stt.facts.nochecksum", { licence: m.licence })}
-                  {m.detects_language ? "" : ` · ${t("stt.facts.englishonly")}`}
-                </span>
-              </div>
-              <div className="stt-bars">
-                <Bar label={t("stt.accuracy")} value={m.accuracy} />
-                <Bar label={t("stt.speed")} value={m.speed} />
-              </div>
-              {downloading && (
-                <div className="stt-progress">
-                  <span className="stt-bar-track">
-                    <span className="stt-bar-fill accent" style={{ width: `${Math.round((progress?.fraction ?? 0) * 100)}%` }} />
-                  </span>
-                  <span className="sub faint">
-                    {progress?.state === "downloading" ? `${Math.round((progress?.fraction ?? 0) * 100)}%` : t(`stt.progress.${progress?.state}`)}
-                  </span>
-                </div>
-              )}
-              {progress?.state === "failed" && <div className="sub attn">{progress.error || t("stt.failed")}</div>}
-              {queued && <div className="sub faint">{t("stt.queued")}</div>}
-              <div className="btnrow">
-                {downloading ? (
-                  <button className="btn small" onClick={() => void act(m.id, "cancel")}>{t("stt.cancel")}</button>
+            <CatalogueRow
+              key={m.id}
+              data-model={m.id}
+              using={m.selected}
+              name={m.label}
+              badges={
+                <>
+                  {m.selected && <Badge tone="accent">{t("stt.card.using")}</Badge>}
+                  {recommended && <Badge tone="live">{language ? t("stt.recommended.for", { lang: name(language) }) : t("stt.recommended")}</Badge>}
+                  {m.streaming ? <Badge tone="live">{t("stt.chip.streaming")}</Badge> : <Badge>{t("stt.chip.sentences")}</Badge>}
+                </>
+              }
+              note={m.note}
+              facts={[
+                <Languages key="languages" model={m} />,
+                t("stt.facts.size", { dl: size(m.size_bytes), disk: size(m.disk_bytes), mem: m.memory_mb }),
+                `${t(m.verified ? "stt.facts.checksum" : "stt.facts.nochecksum", { licence: m.licence })}${m.detects_language ? "" : ` · ${t("stt.facts.englishonly")}`}`,
+              ].flatMap((fact, i) => (i ? [" · ", fact] : [fact]))}
+              meters={
+                <>
+                  <Meter label={t("stt.accuracy")} value={m.accuracy} />
+                  <Meter label={t("stt.speed")} value={m.speed} />
+                </>
+              }
+              status={
+                <>
+                  {downloading && (
+                    <CatalogueProgress
+                      fraction={progress?.fraction ?? 0}
+                      label={progress?.state === "downloading" ? `${Math.round((progress?.fraction ?? 0) * 100)}%` : t(`stt.progress.${progress?.state}`)}
+                    />
+                  )}
+                  {progress?.state === "failed" && <div className="cat-note attn">{progress.error || t("stt.failed")}</div>}
+                  {queued && <div className="cat-note">{t("stt.queued")}</div>}
+                </>
+              }
+              actions={
+                downloading ? (
+                  <Button size="sm" onClick={() => void act(m.id, "cancel")}>{t("stt.cancel")}</Button>
                 ) : m.installed ? (
                   <>
                     {m.selected ? (
-                      <button className="btn small" onClick={() => void act("", "use")}>{t("stt.stop")}</button>
+                      <Button size="sm" onClick={() => void act("", "use")}>{t("stt.stop")}</Button>
                     ) : (
-                      <button className="btn small primary" disabled={busy === m.id} onClick={() => void act(m.id, "use")}>{t("stt.use")}</button>
+                      <Button size="sm" variant="primary" disabled={busy === m.id} onClick={() => void act(m.id, "use")}>{t("stt.use")}</Button>
                     )}
-                    <button className="btn small danger" disabled={busy === m.id} onClick={() => void act(m.id, "delete")}>{t("stt.delete")}</button>
+                    <IconButton icon="trash" label={t("stt.delete")} size={28} disabled={busy === m.id} onClick={() => void remove(m.id, m.label, m.disk_bytes)} />
                   </>
                 ) : (
-                  <button
-                    className="btn small primary"
-                    disabled={busy === m.id || (busyElsewhere && !queued)}
-                    onClick={() => void act(m.id, "download")}
-                  >
-                    <Icon name="download" size={14} /> {t("stt.download", { size: size(m.size_bytes) })}
-                  </button>
-                )}
-              </div>
-            </div>
+                  <Button size="sm" variant="primary" icon="download" disabled={busy === m.id || (busyElsewhere && !queued)} onClick={() => void act(m.id, "download")}>
+                    {t("stt.download", { size: size(m.size_bytes) })}
+                  </Button>
+                )
+              }
+            />
           );
         })}
-        {!shown.length && <div className="sub faint">{t("stt.nomatch", { n: view.models.length })}</div>}
-      </div>
+        {!shown.length && <SetBlock><span className="sub">{t("stt.nomatch", { n: view.models.length })}</span></SetBlock>}
+      </SetGroup>
 
       {view.selected && (
-        <div className="card catalogue-settings">
-          <Row title={t("stt.language")} stack data-setting="stt.local_language">
+        <SetGroup title={t("stt.settings")}>
+          <Row title={t("stt.language")} data-setting="stt.local_language">
             <Select
               label={t("stt.language")}
               value={view.language}
@@ -304,7 +284,7 @@ export function SpeechModels() {
           <Row title={t("stt.threads")} data-setting="stt.local_threads">
             <NumInput label={t("stt.threads")} value={view.threads} min={1} max={16} onSave={(threads) => void postSttSelect({ threads }).then(take).catch((x) => setProblem(errorText(x)))} />
           </Row>
-        </div>
+        </SetGroup>
       )}
     </div>
   );
