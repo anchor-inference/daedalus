@@ -13,6 +13,7 @@ import { prime, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { copyText } from "../ui/components";
 import { OverflowMenu, Sheet, toast } from "../ui/dialogs";
+import { IconButton, useLayer } from "../ui/primitives";
 import { BlockSection, MarkdownView, type BlockContext } from "./BlockView";
 import { eventAsText, eventProgress, inverseCheck, isKnown, statusFlow, type ActionBlock, type BlockOp, type EventStatus, type Group, type HistoryEntry, type TypeDef } from "./blocks";
 import { eventHistory, eventKey, refreshPlanner, runAction, setStatus } from "./data";
@@ -29,6 +30,8 @@ type Props = {
   groups: Group[];
   zone: string;
   phone: boolean;
+  /** Drawn beside the grid as a column of its own, or over it as a sheet. */
+  pane: boolean;
   busy: boolean;
   onClose: () => void;
   onEdit: (event: Occurrence) => void;
@@ -41,9 +44,11 @@ type Props = {
 /** Below this width a table is drawn as cards: four columns of a basket do not fit a phone. */
 const CARDS_BELOW = 560;
 
-export function EventView({ occurrence, calendars, types, groups, zone, phone, busy, onClose, onEdit, onDelete, onResolve, onOpenGroup, onOpenEvent }: Props) {
+export function EventView({ occurrence, calendars, types, groups, zone, phone, pane, busy, onClose, onEdit, onDelete, onResolve, onOpenGroup, onOpenEvent }: Props) {
   const full = useQuery<Occurrence>(eventKey(occurrence.event_id), { pollMs: 15000, staleMs: 3000 });
   useQueued();
+  // A pane is not a modal, so it is a layer of its own for Escape; a sheet is one already.
+  useLayer(onClose, pane);
   // The occurrence keeps its own times (one meeting of a weekly series), the read event brings the
   // body; until it arrives, the list's copy is drawn, which has everything but the blocks.
   // The read event is the stored row, not an occurrence: what it does not say (whether it can be
@@ -135,93 +140,118 @@ export function EventView({ occurrence, calendars, types, groups, zone, phone, b
   const description = event.description?.trim() ?? "";
   const meta = [calendar && calendarName(calendar), event.location, event.recurring && event.recurrence ? ruleText(event.recurrence) : ""].filter(Boolean);
 
-  const head = (
-    <div className="cal-view-head" style={{ "--c": accent } as CSSProperties}>
-      <TypeIcon icon={type?.icon} color={accent} size={18} className="cal-view-icon" />
-      <div className="cal-view-titles">
-        <h3 className="cal-view-title">{event.title || t("cal.untitled")}</h3>
-        <div className="cal-view-when">
-          <span>{when}</span>
-          {!readOnly ? (
-            <OverflowMenu label={t("cal.status.change")} className={`cal-status s-${status}`} small
-              trigger={<span className="cal-status-face"><Icon name={statusIcon(status)} size={12} />{statusLabel(status)}<Icon name="chevron" size={12} /></span>}
-              items={flow.map((s) => ({ label: statusLabel(s), icon: s === status ? "check" as const : statusIcon(s), disabled: statusBusy, onSelect: () => void changeStatus(s) }))} />
-          ) : status !== "planned" && <span className={`cal-status-face s-${status}`}><Icon name={statusIcon(status)} size={12} />{statusLabel(status)}</span>}
-          <ProgressPill progress={progress} />
-        </div>
+  const icon = <TypeIcon icon={type?.icon} color={accent} size={18} className="cal-view-icon" />;
+  const titles = (Title: "h2" | "h3") => (
+    <div className="cal-view-titles">
+      <Title className="cal-view-title">{event.title || t("cal.untitled")}</Title>
+      <div className="cal-view-when">
+        <span>{when}</span>
+        {!readOnly ? (
+          <OverflowMenu label={t("cal.status.change")} className={`cal-status s-${status}`} small
+            trigger={<span className="cal-status-face"><Icon name={statusIcon(status)} size={12} />{statusLabel(status)}<Icon name="chevron" size={12} /></span>}
+            items={flow.map((s) => ({ label: statusLabel(s), icon: s === status ? "check" as const : statusIcon(s), disabled: statusBusy, onSelect: () => void changeStatus(s) }))} />
+        ) : status !== "planned" && <span className={`cal-status-face s-${status}`}><Icon name={statusIcon(status)} size={12} />{statusLabel(status)}</span>}
+        <ProgressPill progress={progress} />
       </div>
-      {!readOnly && <button type="button" className="iconbtn cal-view-edit" onClick={() => onEdit(event)} aria-label={t("cal.edit")} title={t("cal.edit")} disabled={busy}><Icon name="pen" size={16} /></button>}
-      <OverflowMenu label={t("cal.view.menu")} items={[
-        { label: t("cal.copy.text"), icon: "copy", ticks: true, onSelect: () => copy(false) },
-        { label: t("cal.copy.markdown"), icon: "copy", ticks: true, onSelect: () => copy(true) },
-        { label: t("cal.history"), icon: "journal", onSelect: () => { if (!historyOpen) void toggleHistory(); window.setTimeout(() => box?.querySelector(".cal-history")?.scrollIntoView({ block: "start", behavior: "smooth" }), 60); } },
-        ...(!readOnly ? ["-" as const, { label: t("common.delete"), icon: "trash" as const, danger: true, onSelect: () => onDelete(event) }] : []),
-      ]} />
+    </div>
+  );
+  const edit = !readOnly && <IconButton icon="pen" className="cal-view-edit" label={t("cal.edit")} onClick={() => onEdit(event)} disabled={busy} />;
+  const more = (
+    <OverflowMenu label={t("cal.view.menu")} items={[
+      { label: t("cal.copy.text"), icon: "copy", ticks: true, onSelect: () => copy(false) },
+      { label: t("cal.copy.markdown"), icon: "copy", ticks: true, onSelect: () => copy(true) },
+      { label: t("cal.history"), icon: "journal", onSelect: () => { if (!historyOpen) void toggleHistory(); window.setTimeout(() => box?.querySelector(".cal-history")?.scrollIntoView({ block: "start", behavior: "smooth" }), 60); } },
+      ...(!readOnly ? ["-" as const, { label: t("common.delete"), icon: "trash" as const, danger: true, onSelect: () => onDelete(event) }] : []),
+    ]} />
+  );
+
+  const body = (
+    <div ref={setBox} className="cal-view-body">
+      {event.conflict && (
+        <div className="cal-conflict" role="alert">
+          <Icon name="alert" size={16} />
+          <div>
+            <b>{t("cal.conflict.title")}</b>
+            <p>{t("cal.conflict.body")}</p>
+            <div className="cal-conflict-actions">
+              <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(event, "local")}>{t("cal.conflict.local")}</button>
+              <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(event, "remote")}>{t("cal.conflict.remote.use")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {(group || event.tags?.length || meta.length > 0) && (
+        <div className="cal-view-meta">
+          {group && (
+            <button type="button" className="cal-chipbtn group" style={{ "--c": group.color ?? "var(--accent)" } as CSSProperties} onClick={() => onOpenGroup(group.id)}>
+              <TypeIcon icon={group.icon} color={group.color} size={13} />
+              <span>{group.name}</span>
+              <Icon name="forward" size={12} />
+            </button>
+          )}
+          {event.tags?.map((tag) => <span key={tag} className="cal-tag">#{tag}</span>)}
+          {meta.length > 0 && <span className="cal-view-where">{meta.join(" · ")}</span>}
+        </div>
+      )}
+      {readOnly && <div className="cal-note"><Icon name="lock" size={14} /> {t("cal.readonly")}</div>}
+      {(event.pending_sync || ticks.pendingFor(occurrence.event_id).length > 0) && (
+        <div className="cal-view-pending"><Icon name="reload" size={12} /> {ticks.pendingFor(occurrence.event_id).length ? t("cal.queued.here") : t("cal.pending")}</div>
+      )}
+      {description && !blocks.length && <MarkdownView text={description} className="cal-view-desc" />}
+      {loadingBody && <div className="cal-view-loading" role="progressbar" aria-label={t("common.loading")} />}
+      {blocks.map((block) => (
+        <BlockSection key={block.id} block={block} ctx={ctx} folded={isFolded(block.id, block.collapsed ?? !isKnown(block))} onFold={(f) => fold(block.id, f)} />
+      ))}
+      {description && blocks.length > 0 && <MarkdownView text={description} className="cal-view-desc" />}
+      {!description && !blocks.length && !loadingBody && <p className="cal-blk-empty">{t("cal.view.empty")}</p>}
+      <section className={`cal-history ${historyOpen ? "open" : ""}`}>
+        <button type="button" className="cal-blk-head" aria-expanded={historyOpen} onClick={() => void toggleHistory()}>
+          <Icon name="chevron" size={14} />
+          <span className="cal-blk-title">{t("cal.history")}</span>
+        </button>
+        {historyOpen && (
+          history === null ? <div className="cal-blk-empty">{t("common.loading")}</div>
+            : history.length === 0 ? <div className="cal-blk-empty">{t("cal.history.empty")}</div>
+            : (
+              <ol className="cal-history-list">
+                {history.map((entry, i) => (
+                  <li key={`${entry.at}-${i}`}>
+                    <span className={`cal-history-who ${entry.actor.startsWith("agent") ? "agent" : ""}`}><Icon name={entry.actor.startsWith("agent") ? "bots" : "user"} size={12} />{entry.actor.startsWith("agent") ? t("cal.history.agent") : t("cal.history.you")}</span>
+                    <span className="cal-history-what">{entry.summary}</span>
+                    <time dateTime={entry.at}>{historyTime(entry.at)}</time>
+                  </li>
+                ))}
+              </ol>
+            )
+        )}
+      </section>
     </div>
   );
 
+  if (pane) {
+    return (
+      <aside className="cal-pane cal-view" aria-label={event.title || t("cal.untitled")} data-event={occurrence.event_id}>
+        <div className="cal-pane-head">
+          <span className="cal-pane-kind">{t("cal.pane")}</span>
+          <span className="grow" />
+          {edit}
+          {more}
+          <IconButton icon="close" label={t("cal.pane.close")} onClick={onClose} />
+        </div>
+        <div className="cal-pane-scroll">
+          <div className="cal-view-head" style={{ "--c": accent } as CSSProperties}>
+            {icon}
+            {titles("h2")}
+          </div>
+          {body}
+        </div>
+      </aside>
+    );
+  }
   return (
-    <Sheet ariaLabel={event.title || t("cal.untitled")} onClose={onClose} className={`cal-view ${phone ? "phone" : ""}`} size={phone ? "full" : undefined} head={head}>
-      <div ref={setBox} className="cal-view-body">
-        {event.conflict && (
-          <div className="cal-conflict" role="alert">
-            <Icon name="alert" size={16} />
-            <div>
-              <b>{t("cal.conflict.title")}</b>
-              <p>{t("cal.conflict.body")}</p>
-              <div className="cal-conflict-actions">
-                <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(event, "local")}>{t("cal.conflict.local")}</button>
-                <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(event, "remote")}>{t("cal.conflict.remote.use")}</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {(group || event.tags?.length || meta.length > 0) && (
-          <div className="cal-view-meta">
-            {group && (
-              <button type="button" className="cal-chipbtn group" style={{ "--c": group.color ?? "var(--accent)" } as CSSProperties} onClick={() => onOpenGroup(group.id)}>
-                <TypeIcon icon={group.icon} color={group.color} size={13} />
-                <span>{group.name}</span>
-                <Icon name="forward" size={12} />
-              </button>
-            )}
-            {event.tags?.map((tag) => <span key={tag} className="cal-tag">#{tag}</span>)}
-            {meta.length > 0 && <span className="cal-view-where">{meta.join(" · ")}</span>}
-          </div>
-        )}
-        {readOnly && <div className="cal-note"><Icon name="lock" size={14} /> {t("cal.readonly")}</div>}
-        {(event.pending_sync || ticks.pendingFor(occurrence.event_id).length > 0) && (
-          <div className="cal-view-pending"><Icon name="reload" size={12} /> {ticks.pendingFor(occurrence.event_id).length ? t("cal.queued.here") : t("cal.pending")}</div>
-        )}
-        {description && !blocks.length && <MarkdownView text={description} className="cal-view-desc" />}
-        {loadingBody && <div className="cal-view-loading" role="progressbar" aria-label={t("common.loading")} />}
-        {blocks.map((block) => (
-          <BlockSection key={block.id} block={block} ctx={ctx} folded={isFolded(block.id, block.collapsed ?? !isKnown(block))} onFold={(f) => fold(block.id, f)} />
-        ))}
-        {description && blocks.length > 0 && <MarkdownView text={description} className="cal-view-desc" />}
-        {!description && !blocks.length && !loadingBody && <p className="cal-blk-empty">{t("cal.view.empty")}</p>}
-        <section className={`cal-history ${historyOpen ? "open" : ""}`}>
-          <button type="button" className="cal-blk-head" aria-expanded={historyOpen} onClick={() => void toggleHistory()}>
-            <Icon name="chevron" size={14} />
-            <span className="cal-blk-title">{t("cal.history")}</span>
-          </button>
-          {historyOpen && (
-            history === null ? <div className="cal-blk-empty">{t("common.loading")}</div>
-              : history.length === 0 ? <div className="cal-blk-empty">{t("cal.history.empty")}</div>
-              : (
-                <ol className="cal-history-list">
-                  {history.map((entry, i) => (
-                    <li key={`${entry.at}-${i}`}>
-                      <span className={`cal-history-who ${entry.actor.startsWith("agent") ? "agent" : ""}`}><Icon name={entry.actor.startsWith("agent") ? "bots" : "user"} size={12} />{entry.actor.startsWith("agent") ? t("cal.history.agent") : t("cal.history.you")}</span>
-                      <span className="cal-history-what">{entry.summary}</span>
-                      <time dateTime={entry.at}>{historyTime(entry.at)}</time>
-                    </li>
-                  ))}
-                </ol>
-              )
-          )}
-        </section>
-      </div>
+    <Sheet ariaLabel={event.title || t("cal.untitled")} onClose={onClose} className={`cal-view ${phone ? "phone" : ""}`} size={phone ? "full" : undefined}
+      head={<div className="cal-view-head" style={{ "--c": accent } as CSSProperties}>{icon}{titles("h3")}{edit}{more}</div>}>
+      {body}
     </Sheet>
   );
 }

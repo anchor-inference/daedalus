@@ -34,6 +34,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import (  # noqa: E402
     ATTACHED_PRESENTATION,
+    CALENDAR,
     DEFAULT_APP,
     FILE_TEXT,
     FOCUS_WORDS,
@@ -1123,6 +1124,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return None
     if rel.startswith("/api/projects/") and "/approval-rules" in rel and fulfil_shared(route):
         return None
+    if rel.startswith(("/api/calendar", "/api/planner")):
+        # A recipe's ``calendar_empty`` flag draws the planner with nothing on it.
+        CALENDAR.empty = bool(getattr(stub, "calendar_empty", False))
+        if fulfil_shared(route):
+            return None
     if rel.startswith("/api/proposals"):
         # A recipe's ``proposals_empty`` flag answers the list with nothing, and so does the empty inbox's scene:
         # a waiting proposal is an inbox entry too.

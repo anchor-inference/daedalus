@@ -48,12 +48,12 @@ import schedulesBrowser from "./schedules/SchedulesBrowser.tsx?raw";
 // and is held to that below, not to the desktop's. The shared stylesheet is a list of imports, which
 // are dropped; the guard reads rules one at a time, so the order they are joined in does not matter.
 const sheets = import.meta.glob(["./**/*.css", "!./ui/tokens.css", "!./sidepanel/sidepanel.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-// The sheets that were written before they were read here and break its claims (the calendar, the
-// canvas's plane, the agent link's cards, the rules editor and a few strips): each comes off this list
-// when the screen it draws is redrawn on the new scale, and nothing is ever added to it. The plane stays
-// on it for what it is: a drawing, whose words and frames are sized in the board's own units and scaled
-// with its zoom; the interface around the board (canvas.css) is held.
-const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./calendar/blocks.css", "./calendar/calendar.css", "./canvas/plane.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
+// The sheets that were written before they were read here and break its claims (the canvas's plane, the
+// agent link's cards, the rules editor and a few strips): each comes off this list when the screen it draws
+// is redrawn on the new scale, and nothing is ever added to it. The plane stays on it for what it is: a
+// drawing, whose words and frames are sized in the board's own units and scaled with its zoom; the
+// interface around the board (canvas.css) is held.
+const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./canvas/plane.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
 const css = tokens + "\n" + Object.keys(sheets).filter((name) => !NOT_YET_HELD.includes(name)).sort().map((name) => sheets[name].replace(/@import[^;]+;/g, "")).join("\n");
 
 type Rule = { selector: string; media: string; body: string };
@@ -168,7 +168,11 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   // A schedule's pane opens on its name as the pane's heading, the same 18.
   ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
-  ".ov-title"];
+  ".ov-title",
+  // The calendar: an open event's title is a pane's heading (a sheet's, 16 on a phone), the number of a
+  // day over its column and in the agenda is that day's heading, and a new event's title is typed at the
+  // size it will be read at.
+  ".cal-view-title", ".cal-tg-num", ".cal-agenda-num", ".cal-title-input", ".field.cal-title-input"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -197,6 +201,8 @@ const BOX_ALLOWED = [
   // The schedule pane is the same pane: its head is level with the page header beside it (52), its foot
   // holds the schedule's buttons with the room a dialog's foot has (64).
   ".sched-pane-head", ".sched-pane-foot",
+  // The open event's pane is a page of its own beside the grid, and its head is level with the page header.
+  ".cal-pane-head",
   // The start page's canvas holds the question, the composer and the list; the room under it is what
   // lifts the group above the middle of the window.
   ".start-hero",

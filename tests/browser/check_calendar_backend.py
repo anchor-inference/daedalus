@@ -202,10 +202,11 @@ def desktop(browser, backend: Backend, errors: list[str]) -> None:  # type: igno
     block.click()
     # A tap opens the event to be read; the pencil in its head opens the editor, and saving goes
     # back to the event as it is read.
-    view = page.locator(".sheet.cal-view")
+    view = page.locator(".cal-view")
     view.get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
-    editor.get_by_label("Repeat").select_option("weekly")
+    editor.get_by_label("Repeat").click()
+    page.get_by_role("option", name="Weekly on").click()
     editor.get_by_role("button", name="Save").click()
     expect(editor).to_be_hidden()
     expect(view).to_be_visible()
@@ -249,7 +250,7 @@ def desktop(browser, backend: Backend, errors: list[str]) -> None:  # type: igno
     # Delete the whole series from this week's event: nothing is left in the next three weeks.
     scroll_hours(page, 6)
     page.locator(".cal-block", has_text="Live standup").click()
-    page.locator(".sheet.cal-view").get_by_role("button", name="Event actions").click()
+    page.locator(".cal-view").get_by_role("button", name="Event actions").click()
     page.get_by_role("menuitem", name="Delete").click()
     ask = page.get_by_role("alertdialog")
     expect(ask).to_be_visible()
@@ -269,8 +270,8 @@ def phone(browser, backend: Backend, errors: list[str]) -> None:  # type: ignore
     page.route("**/api/**", routed(backend))
     page.goto(f"{BASE}/calendar?token=t&lang=ru")
     expect(page.locator(".cal-screen")).to_be_visible()
-    page.locator(".cal-fab").click()
-    sheet = page.get_by_role("dialog")
+    page.locator(".cal-new").click()
+    sheet = page.locator(".sheet.cal-quick")
     expect(sheet).to_be_visible()
     sheet.get_by_label("Название").fill("С телефона")
     sheet.get_by_role("button", name="Сохранить").click()
