@@ -59,7 +59,10 @@ async def test_a_file_at_the_vision_effort_gets_the_board_and_the_approvals(tmp_
     try:
         assert int((await db.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
         names = {r["name"] for r in await db.fetchall("SELECT name FROM sqlite_master")}
-        assert {"board_tasks_by_origin", "app_events_by_task", "project_approval_rules"} <= names
+        # The events' index by task is made by one of these migrations and dropped by the history's,
+        # which reads its own table instead; what stands at the end is the history table.
+        assert {"board_tasks_by_origin", "board_task_history", "project_approval_rules"} <= names
+        assert "app_events_by_task" not in names
         columns = {r["name"] for r in await db.fetchall("PRAGMA table_info(board_tasks)")}
         assert {"due_at", "assignee_operator"} <= columns
         assert [r["id"] for r in await db.fetchall("SELECT id FROM board_tasks")] == ["t1"]
