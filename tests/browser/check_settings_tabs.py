@@ -24,14 +24,17 @@ import copy
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app, terminal_load  # noqa: E402
 from browser_stub import browser_load, render_scenes  # noqa: E402
 from check_settings_browser import BROWSER, prepared  # noqa: E402
+from main_thread import prepare, quiet  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -129,9 +132,37 @@ def open_page(browser, width: int, lang: str) -> Page:  # type: ignore[no-untype
 
 # How long a condition may take to come true before it is called a failure. A wait that is met returns
 # at once, so this costs nothing on a quiet machine; it is long because a loaded one starts the app,
-# redirects and draws a section at a tenth of the speed, and a limit that a slow start can reach says
-# nothing about the page.
-BOUND_MS = 30_000
+# redirects and draws a section at a tenth of the speed (measured: an old address redirected after
+# 36 s at a load average of 60), and a limit that a slow start can reach says nothing about the page.
+BOUND_MS = 90_000
+
+
+def redirected(page: Page, home: str) -> bool:
+    """Whether the address ends up on `home`: when it does, or once the page has stopped arriving.
+
+    The redirect is made by the settings screen, which is a chunk of its own: it comes after the
+    app, the capabilities and the settings have loaded, so how long it takes is the machine's. A
+    page that has nothing in flight and has stopped changing is the page that is not going to
+    redirect, and that is what is reported, rather than whatever a fixed number of seconds found.
+    """
+    pattern = f"**/settings/{home}**"
+    deadline = time.monotonic() + 4 * BOUND_MS / 1000
+    while time.monotonic() < deadline:
+        try:
+            page.wait_for_url(pattern, timeout=2000, wait_until="commit")
+            return True
+        except PlaywrightTimeout:
+            pass
+        # Nothing in flight before the app has even mounted is the gap between the document and its
+        # first script, not a page that has finished.
+        mounted = page.evaluate("() => (document.getElementById('root')?.childElementCount ?? 0) > 0")
+        if mounted and quiet(page, quiet_ms=1500, limit_ms=20_000):
+            try:
+                page.wait_for_url(pattern, timeout=1500, wait_until="commit")
+                return True
+            except PlaywrightTimeout:
+                return False
+    return False
 
 
 def drawn(page: Page, section: str, lang: str, want: set[str]) -> set[str]:
@@ -163,12 +194,11 @@ def rows(browser, problems: list[str]) -> None:
 
 def old_addresses(browser, lang: str, width: int, problems: list[str]) -> None:
     page = open_page(browser, width, lang)
+    prepare(page)  # counts the page's requests in flight, for `redirected`
     for old, row, home in OLD:
         where = f"[{lang} {width}] /settings/{old}{'#' + row if row else ''}"
         page.goto(f"{BASE}/settings/{old}{'&' if '?' in old else '?'}token=t&lang={lang}{'#' + row if row else ''}")
-        try:
-            page.wait_for_url(f"**/settings/{home}**", timeout=BOUND_MS, wait_until="commit")
-        except Exception:  # noqa: BLE001
+        if not redirected(page, home):
             problems.append(f"{where}: stayed at {page.url}, not /settings/{home}")
             continue
         page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row", timeout=BOUND_MS)
