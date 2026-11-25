@@ -194,33 +194,6 @@
 /* The questions an orchestrator's turn put to the operator, under its worked group. */
 .step-asks { display: grid; gap: 6px; margin: 2px 0 8px; }
 
-/* A staff member's session: who, what runs it, where, and the controls; the messages sent to it. */
-.staff-head { flex: none; min-height: var(--head-h); padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--wash); }
-.staff-head-row { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-.staff-head-who { flex: 1; min-width: 180px; display: grid; gap: 2px; }
-.staff-head-name { font-weight: 500; font-size: var(--fs-14); }
-.staff-head-role { color: var(--fg-2); font-weight: 400; }
-.staff-head-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font-size: var(--fs-12); min-width: 0; }
-.staff-head-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* The facts wrap onto a second line rather than share one: on a phone the three of them, each cut
-   to a few letters ("Claude Code 2.1.2…", "worktree agen…", "task “…"), said nothing at all. One
-   fact still longer than the line ends in an ellipsis. */
-.staff-head-meta { flex-wrap: wrap; row-gap: 2px; }
-.staff-head-meta > span { max-width: 100%; }
-.staff-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.focus-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.focus-pill.tone-working { color: var(--live); }
-.focus-pill.tone-waiting { color: var(--warn); }
-.focus-pill.tone-review { color: var(--ok); }
-.focus-pill.tone-error { color: var(--bad); }
-.staff-messages { display: grid; gap: 4px; width: min(100%, var(--chat-w)); margin: 0 auto; padding: 6px 16px 0; }
-.staff-message { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-2); font-size: var(--fs-12); }
-.staff-message-from { flex: none; }
-.staff-message-text { min-width: 0; }
-.msg-state.acknowledged { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.msg-state.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
-.msg-state.submitted, .msg-state.written { color: var(--info); }
-
 /* The panel beside the orchestrator: the board drawn as one list inside it. */
 .pboard-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
 .pboard.embedded { padding: 4px 12px 16px; }

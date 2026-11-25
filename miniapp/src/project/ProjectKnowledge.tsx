@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
+import { Select } from "../ui/primitives";
 
 type Fact = { fact_id: string; version: number; claim: string; kind: string; status: string;
   source_kind: string; source_id: string; source_revision: string; source_digest: string;
@@ -210,10 +211,8 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
       </article>}
       <details onToggle={(event) => setCreateOpen(event.currentTarget.open)}><summary>{t("knowledge.add")}</summary>
         <label className="field">{t("knowledge.claim")}<textarea className="field" value={claim} maxLength={600} disabled={busy || !!pending} onChange={(event) => setClaim(event.target.value)} /></label>
-        <label className="field">{t("knowledge.sourceLabel")}<select className="field" value={sourceId} disabled={!!sources.error || busy || !!pending} onChange={(event) => setSourceId(event.target.value)}>
-          <option value="">{t("knowledge.chooseSource")}</option>
-          {sources.data?.map((item) => <option key={`${item.source_kind}:${item.source_id}`} value={`${item.source_kind}:${item.source_id}`}>{item.label}</option>)}
-        </select></label>
+        <div className="field-box"><span className="field-label">{t("knowledge.sourceLabel")}</span><Select label={t("knowledge.sourceLabel")} size="md" value={sourceId} disabled={!!sources.error || busy || !!pending} onChange={setSourceId}
+          options={[{ id: "", label: t("knowledge.chooseSource") }, ...(sources.data ?? []).map((item) => ({ id: `${item.source_kind}:${item.source_id}`, label: item.label }))]} /></div>
         {sources.error && <div className="result-warning">{t("knowledge.readFailed")} <button type="button" className="linkbtn" onClick={() => void sources.refresh()}>{t("common.retry")}</button></div>}
         {!sources.error && sources.data?.length === 0 && <p className="sub">{t("knowledge.noSources")}</p>}
         <button type="button" className="btn small" disabled={!writable || !source || claim.trim().length < 12} onClick={create}>{t("knowledge.create")}</button>

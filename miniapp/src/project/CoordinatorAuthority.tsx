@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { locale, t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
+import { Select } from "../ui/primitives";
 import { navigate, projectHome } from "../router";
 import { CoordinatorHandoff } from "./CoordinatorHandoff";
 
@@ -185,26 +186,22 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
         </div>}
         {!guided && past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
         {(!guided || !readyForTask) && <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
-          {guided ? <p>{bundleName(bundleId)}</p> : <label className="field">{t("authority.bundle")}
-            <select className="field" value={bundleId} onChange={(event) => { setBundleId(event.target.value as BundleId); setTaskId(""); }}>
-              {current.available_bundles.filter((item) => bundleIds.includes(item.id as BundleId)).map((item) => <option key={item.id} value={item.id}>{bundleName(item.id)}</option>)}
-            </select>
-          </label>}
+          {guided ? <p>{bundleName(bundleId)}</p> : <div className="field-box"><span className="field-label">{t("authority.bundle")}</span>
+            <Select label={t("authority.bundle")} size="md" value={bundleId} onChange={(next) => { setBundleId(next as BundleId); setTaskId(""); }}
+              options={current.available_bundles.filter((item) => bundleIds.includes(item.id as BundleId)).map((item) => ({ id: item.id, label: bundleName(item.id) }))} />
+          </div>}
           <p className="sub">{t(`authority.bundle.help.${bundleId}`)}</p>
           {!validBundle && <div className="result-warning" role="status">{t("authority.definitionChanged")}</div>}
           {guided && <p>{t("authority.task")} · {candidates.find((task) => task.id === taskId)?.title ?? t("authority.scope.task")}</p>}
-          {!guided && rule.scope_kind === "task" && <label className="field">{t("authority.task")}
-            <select className="field" value={taskId} disabled={!!tasks.error} onChange={(event) => setTaskId(event.target.value)}>
-              <option value="">{t("authority.task.choose")}</option>
-              {candidates.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-            </select>
-          </label>}
+          {!guided && rule.scope_kind === "task" && <div className="field-box"><span className="field-label">{t("authority.task")}</span>
+            <Select label={t("authority.task")} size="md" value={taskId} disabled={!!tasks.error} onChange={setTaskId}
+              options={[{ id: "", label: t("authority.task.choose") }, ...candidates.map((task) => ({ id: task.id, label: task.title }))]} />
+          </div>}
           {rule.scope_kind === "task" && tasks.error && <div className="result-warning" role="status">{t("authority.tasksFailed")} <button type="button" className="linkbtn" onClick={() => tasks.refresh()}>{t("common.retry")}</button></div>}
-          <label className="field">{t("authority.expiry")}
-            <select className="field" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
-              {[1, 8, 23].map((value) => <option key={value} value={value}>{t("authority.hours", { n: value })}</option>)}
-            </select>
-          </label>
+          <div className="field-box"><span className="field-label">{t("authority.expiry")}</span>
+            <Select label={t("authority.expiry")} size="md" value={String(hours)} onChange={(next) => setHours(Number(next))}
+              options={[1, 8, 23].map((value) => ({ id: String(value), label: t("authority.hours", { n: value }) }))} />
+          </div>
           <details><summary>{t("authority.exact")}</summary><div className="mono">{[...(bundle?.operations ?? []), ...(bundle?.effects ?? [])].join(" · ")}</div></details>
           <button type="button" className="btn small" disabled={!canApprove} onClick={() => void approve()}>{t("authority.approve")}</button>
         </details>}

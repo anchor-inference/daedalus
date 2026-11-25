@@ -243,6 +243,10 @@ const CONTENT_BOXES = [
   // line under an open question is the 48 px field the composer's answer line shares.
   { selector: ".inbox-row", property: "height", max: 64 },
   { selector: ".inbox-reply", property: "height", max: 48 },
+  // The Questions tab: its foot is the task pane's 64 px bar with Send, and the one line a chat shows
+  // for the questions waiting is the 48 px row the Inbox's answer line is.
+  { selector: ".questions-send", property: "min-height", max: 64 },
+  { selector: ".questions-line", property: "min-height", max: 48 },
   // The Terminals page: a list row holds a title, a command and an owner, its memory meter two lines
   // and a bar, and a pane's header a title, a folder, the owner chip and four icon buttons. Each is
   // the size the approved page draws, stated here so a taller one fails.
