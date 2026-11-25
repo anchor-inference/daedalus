@@ -201,7 +201,7 @@ function ScopePick({ scope, projects, chats, onPick }: { scope: Scope; projects:
   const label = (item: Pick) => (item.kind === "all" ? t("board.scope.everything") : item.name);
   return (
     <>
-      <button ref={anchor} type="button" className="board-scope-pick" aria-haspopup="dialog" aria-expanded={open} aria-label={t("board.scope.shown", { name })} title={t("board.scope.choose")} onClick={() => setOpen(!open)}>
+      <button ref={anchor} type="button" className="board-scope-pick" aria-haspopup="menu" aria-expanded={open} aria-label={t("board.scope.shown", { name })} title={t("board.scope.choose")} onClick={() => setOpen(!open)}>
         <Icon name={icon} size={16} />
         <span className="truncate">{name}</span>
         <Icon name="chevron" size={14} />

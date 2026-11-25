@@ -8,7 +8,7 @@ import { t } from "../i18n";
 import { absTime, relTime } from "../format";
 import { lanes, type Scope } from "../screens/boardview";
 import { IconButton } from "../ui/primitives";
-import { assigneeName, cardState, DEFAULT_PRIORITY, dueLabel, isFinished, type BoardTask, type Status } from "./tasks";
+import { assigneeName, byUrgency, cardState, columnLabel, DEFAULT_PRIORITY, dueLabel, isFinished, type BoardTask, type Status } from "./tasks";
 
 /** What the board knows about the chats its cards came from: a title for a lane or a card, and
  *  whether the chat is at work or waits on the operator, for the lane's dot and the card's line. */
@@ -47,6 +47,20 @@ export type BoardColumnsProps = {
 };
 
 const LIMIT = 60;
+
+/**
+ * A chat's own board in a narrow place, one column under another in the order a reader of that chat
+ * asks about them: what is being done, what is next, what waits for review, what is stuck, and the
+ * finished cards folded at the foot. Blocked is kept although a chat's board rarely has one: a card of
+ * this chat that is stuck must still show here.
+ */
+export function stackedColumns(tasks: BoardTask[]): BoardColumn[] {
+  const order: Status[] = ["doing", "todo", "review", "blocked"];
+  return [
+    ...order.map((status) => ({ key: status, name: columnLabel(status), drop: status, tasks: tasks.filter((task) => task.status === status).sort(byUrgency) })),
+    { key: "finished", name: t("board.finished"), folded: true, tasks: tasks.filter(isFinished).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)) },
+  ];
+}
 
 export function BoardColumns({ columns, scope, layout = "grid", selected = null, onOpen, chats, canMove, onMove, refusal = null, limit = LIMIT }: BoardColumnsProps) {
   const [dragging, setDragging] = useState<BoardTask | null>(null);
