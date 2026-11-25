@@ -99,7 +99,7 @@
 .dt-kv-k { flex: none; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); }
 /* A block, not a flex box: an ellipsis is drawn only on a block's own line of text. */
 .dt-kv-v { flex: 1; min-width: 0; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.dt-kv-v > * + * { margin-left: 6px; }
+.dt-kv-v > * + *, .dt-kv-v > .quiet { margin-left: 6px; }
 .dt-kv-v .truncate { min-width: 0; }
 .dt-kv-v.attn { color: var(--attention); }
 .dt-kv-v.live { color: var(--live); }
@@ -239,7 +239,8 @@
   /* A sheet's own heading rule gives every h3 the sheet title's size and a gap under it, which lifted
      this one off the crumb's line: here it is the last crumb, on that line. */
   .panel-sheet .dt-drillhead h3 { margin: 0; font-size: var(--fs-15); font-weight: 500; }
-  .panel-sheet .dt-grp { margin: 0; }
+  /* A sheet's heading rule sizes every h3 as the sheet's title: a group's label stays a label. */
+  .panel-sheet .details h3.dt-grp { margin: 0; font-size: var(--fs-12); font-weight: 500; }
   .panel-sheet .file-tab-name { font-size: var(--fs-13); }
   .panel-sheet .ch-diff { margin: 8px; }
   /* Details in the sheet: the desktop's cards as the phone's grouped cards, a 44 px header with the

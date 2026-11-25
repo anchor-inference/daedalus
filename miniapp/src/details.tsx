@@ -280,7 +280,7 @@ function stateFacts(detail: SessionDetail, busy: boolean): Fact[] {
   return [
     { key: "status", label: t("details.fact.status"), value: statusWord(detail.status), tone: busy ? "live" : undefined },
     ...(since ? [{ key: "started", label: t("details.fact.started"), value: shortDateTime(since), title: absTime(since) }, { key: "running", label: t("details.fact.running"), value: <Elapsed since={since} /> }] : []),
-    ...(detail.context ? [{ key: "messages", label: t("details.context.messages"), value: fmtInt(detail.context.messages) }] : []),
+    ...(detail.context ? [{ key: "messages", label: t("details.fact.messages"), value: fmtInt(detail.context.messages), title: t("details.context.messages") }] : []),
   ];
 }
 

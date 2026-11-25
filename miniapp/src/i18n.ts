@@ -5820,6 +5820,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "details.fact.tokens": { en: "{n} tokens", ru: "{n} токенов" },
   "details.fact.cache": { en: "From the cache", ru: "Из кэша" },
   "details.fact.cost": { en: "Cost", ru: "Стоимость" },
+  "details.fact.messages": { en: "Messages", ru: "Сообщений" },
   "details.group.where": { en: "Where it works", ru: "Где работает" },
   "details.group.own": { en: "On its own", ru: "Сам по себе" },
   "details.group.uses": { en: "What it may use", ru: "Что ему доступно" },
