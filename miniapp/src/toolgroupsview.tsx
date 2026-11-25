@@ -7,21 +7,13 @@ import { useCallback, useEffect, useState } from "react";
 import { api, SessionToolGroup, Settings, ToolGroupCatalogue, ToolGroupLoad } from "./api";
 import { plural, t } from "./i18n";
 import { errorText, fmtTok } from "./ui";
-import { Select } from "./ui/primitives";
+import { Segmented, Select } from "./ui/primitives";
 import { Row, SetBlock, SetGroup } from "./settingsrow";
 import { LOADS, groupAbout, groupName, loadWord, stateChip, usageLine, usageShare } from "./toolgroups";
 
 /** The three modes side by side: a session's Details, where a group is opened one at a time. */
 function LoadPicker({ label, value, onPick, busy }: { label: string; value: ToolGroupLoad; onPick: (load: ToolGroupLoad) => void; busy?: boolean }) {
-  return (
-    <div className="segmented inline tgroup-load" role="radiogroup" aria-label={label}>
-      {LOADS.map((load) => (
-        <button key={load} role="radio" aria-checked={value === load} className={value === load ? "on" : ""} disabled={busy} onClick={() => value !== load && onPick(load)} title={t(`tgroup.load.${load}.hint`)}>
-          {loadWord(load)}
-        </button>
-      ))}
-    </div>
-  );
+  return <Segmented className="tgroup-load" label={label} value={value} onChange={onPick} options={LOADS.map((load) => ({ id: load, label: loadWord(load), disabled: busy }))} />;
 }
 
 /** Settings → Tools: one row a group — what it is, what it costs and how often it was needed, and its
