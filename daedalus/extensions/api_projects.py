@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from starlette.datastructures import UploadFile
 
+from daedalus.config import TaskEffort
 from daedalus.extensions import questions, side_questions, wakeups
 from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.project_commands import ProjectCommands
@@ -199,6 +200,8 @@ class OrchestratorBody(BaseModel):
 
     model: str | None = Field(default=None, max_length=200)
     """A model preset id; empty is the Settings default for project orchestrators."""
+    effort: TaskEffort | None = None
+    """How hard it thinks; empty is the Settings default for project orchestrators."""
     autonomy: Literal["ask", "normal", "full"] | None = None
     concurrency_cap: int | None = Field(default=None, ge=1)
 
@@ -207,6 +210,7 @@ class OrchestratorPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str | None = Field(default=None, max_length=200)
+    effort: TaskEffort | None = None
     autonomy: Literal["ask", "normal", "full"] | None = None
     concurrency: int | None = Field(default=None, ge=1)
     concurrency_cap: int | None = Field(default=None, ge=1)
@@ -653,7 +657,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         """Switch the orchestrator on; a project that has one already only changes what is sent."""
         await existing(project_id)
         try:
-            project = await orchestrators().enable(project_id, model=body.model, autonomy=body.autonomy, concurrency_cap=body.concurrency_cap)
+            project = await orchestrators().enable(project_id, model=body.model, effort=body.effort, autonomy=body.autonomy, concurrency_cap=body.concurrency_cap)
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
         return office(project)
@@ -662,7 +666,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def patch_orchestrator(project_id: str, body: OrchestratorPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
         try:
-            project = await orchestrators().update(project_id, model=body.model, autonomy=body.autonomy, concurrency=body.concurrency, concurrency_cap=body.concurrency_cap)
+            project = await orchestrators().update(project_id, model=body.model, effort=body.effort, autonomy=body.autonomy, concurrency=body.concurrency, concurrency_cap=body.concurrency_cap)
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
         return office(project)

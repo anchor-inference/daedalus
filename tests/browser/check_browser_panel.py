@@ -263,7 +263,7 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     # The log: open it, and a row points the cursor at its element again.
     bs.set_control("g1", "agent")
     group.needs = None
-    page.locator(f"{ROOT} .bp-log-head").click()
+    # The panel's log is open from the start (the page at its own size leaves the rest of the pane to it).
     page.wait_for_selector(f"{ROOT} .bp-log.open .bp-log-row", timeout=5000)
     rows = page.locator(f"{ROOT} .bp-log-row").all_inner_texts()
     print(f"[{lang}] log: {rows}")

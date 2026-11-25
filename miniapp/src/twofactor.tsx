@@ -63,7 +63,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
         {codes.map((code) => <li key={code}>{code}</li>)}
       </ol>
       <div className="totp-actions">
-        <Button size="sm" onClick={() => void copy(codes.join("\n"))}>{copied && <Icon name="check" size={13} />}{t("settings.totp.codes.copy")}</Button>
+        <Button size="sm" icon={copied ? "check" : undefined} onClick={() => void copy(codes.join("\n"))}>{t("settings.totp.codes.copy")}</Button>
         <Button size="sm" variant="primary" onClick={onDone}>{t("settings.totp.codes.done")}</Button>
       </div>
     </SetBlock>
@@ -184,7 +184,7 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
               </form>
             </SetBlock>
           )}
-          {error && <SetBlock><div className="login-error totp-error" role="alert">{error}</div></SetBlock>}
+          {error && <SetBlock><div className="login-error totp-error" role="alert"><Icon name="alert" size={14} />{error}</div></SetBlock>}
         </>
       )}
     </SetGroup>

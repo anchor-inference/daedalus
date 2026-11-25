@@ -43,6 +43,7 @@ import { EnvironmentsTab } from "./Environments";
 import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
+import { WithEffort } from "../taskeffort";
 import { AsrSettingsCard } from "./AsrSettings";
 import { McpServers } from "./McpServers";
 import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
@@ -399,7 +400,9 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         </Row>
         <NumRow id="heartbeat-max" setting="heartbeat.max_runs_per_day" title={t("settings.heartbeat.max")} value={hb.max_runs_per_day} min={0} onSave={(v) => put({ max_runs_per_day: v })} />
         <Row title={t("settings.heartbeat.preset")} stack data-setting="heartbeat.preset">
-          <ModelChoice id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
+          <WithEffort id="heartbeat-effort" value={hb.effort} onChange={(effort) => put({ effort })} fallback="model">
+            <ModelChoice id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
+          </WithEffort>
         </Row>
         <SetFoot>
           <Button onClick={runNow} disabled={!text.trim() || hb.running}>{t("common.runnow")}</Button>
@@ -748,18 +751,23 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {/* Which models subagents may run on: it sat under Limits, but it is a choice of model and belongs with the others. */}
             <SetGroup title={t("settings.tasks.helpers")}>
               <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
-                <SubagentModelsPicker
-                  value={s.subagents?.models ?? { mode: "all", presets: [] }}
-                  {...modelItems(s)}
-                  onChange={(models) => save({ subagents: { ...s.subagents!, models } })}
-                />
+                <WithEffort id="subagents-effort" value={s.subagents?.models?.effort} fallback="model"
+                  onChange={(effort) => save({ subagents: { ...s.subagents!, models: { ...(s.subagents?.models ?? { mode: "all", presets: [] }), effort } } })}>
+                  <SubagentModelsPicker
+                    value={s.subagents?.models ?? { mode: "all", presets: [] }}
+                    {...modelItems(s)}
+                    onChange={(models) => save({ subagents: { ...s.subagents!, models: { ...models, effort: s.subagents?.models?.effort ?? "" } } })}
+                  />
+                </WithEffort>
               </Row>
               <Row title={t("qagent.title")} desc={t("qagent.settings.sub")} stack data-setting="subagents.quick_models">
-                <QuickModelsPicker
-                  value={s.subagents?.quick_models ?? []}
-                  {...modelItems(s)}
-                  onChange={(quick_models) => save({ subagents: { ...s.subagents!, quick_models } })}
-                />
+                <WithEffort id="quick-effort" value={s.subagents?.quick_effort} fallback="model" onChange={(quick_effort) => save({ subagents: { ...s.subagents!, quick_effort } })}>
+                  <QuickModelsPicker
+                    value={s.subagents?.quick_models ?? []}
+                    {...modelItems(s)}
+                    onChange={(quick_models) => save({ subagents: { ...s.subagents!, quick_models } })}
+                  />
+                </WithEffort>
               </Row>
               {/* Beside the models it limits: how long a quick agent holds its leader waiting for the operator in the browser. */}
               <NumRow id="quick-operator-wait" setting="subagents.operator_wait_minutes" title={t("qagent.wait.setting")} desc={t("qagent.wait.setting.sub")} unit={t("settings.unit.minutes")} value={s.subagents?.operator_wait_minutes ?? 10} min={1} max={60} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, operator_wait_minutes: v } })} {...shipped(s.subagents?.operator_wait_minutes ?? 10, 10, () => save({ subagents: { ...s.subagents!, operator_wait_minutes: 10 } }))} />
@@ -767,28 +775,32 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             {Object.keys(s.presets ?? {}).length > 0 && (
               <SetGroup title={t("settings.orchestrator.title")} help={t("settings.orchestrator.sub")}>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack data-setting="orchestrator.preset">
-                  <ModelPicker
-                    id="orchestrator-preset"
-                    label={t("settings.orchestrator.title")}
-                    catalogue={s}
-                    value={orchestratorPreset(s.presets, s.orchestrator?.preset, s.orchestrator?.strongest)}
-                    onChange={(preset) => save({ orchestrator: { preset } })}
-                    tag={(id) => (id === s.orchestrator?.strongest ? t("settings.orchestrator.strongest") : undefined)}
-                  />
+                  <WithEffort id="orchestrator-effort" value={s.orchestrator?.effort} onChange={(effort) => save({ orchestrator: { effort } as Settings["orchestrator"] })} fallback="model">
+                    <ModelPicker
+                      id="orchestrator-preset"
+                      label={t("settings.orchestrator.title")}
+                      catalogue={s}
+                      value={orchestratorPreset(s.presets, s.orchestrator?.preset, s.orchestrator?.strongest)}
+                      onChange={(preset) => save({ orchestrator: { preset } })}
+                      tag={(id) => (id === s.orchestrator?.strongest ? t("settings.orchestrator.strongest") : undefined)}
+                    />
+                  </WithEffort>
                 </Row>
               </SetGroup>
             )}
             {Object.keys(s.presets ?? {}).length > 0 && (
               <SetGroup title={t("settings.main.title")} help={t("settings.main.sub")} data-card="main-orchestrator">
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack data-setting="dispatcher.preset">
-                  <ModelPicker
-                    id="main-preset"
-                    label={t("settings.main.title")}
-                    catalogue={s}
-                    value={mainPreset(s.presets, s.dispatcher?.preset, s.dispatcher?.middle)}
-                    onChange={(preset) => save({ dispatcher: { preset } })}
-                    tag={(id) => (id === s.dispatcher?.middle ? t("settings.main.middle") : undefined)}
-                  />
+                  <WithEffort id="main-effort" value={s.dispatcher?.effort} onChange={(effort) => save({ dispatcher: { effort } as Settings["dispatcher"] })} fallback="model">
+                    <ModelPicker
+                      id="main-preset"
+                      label={t("settings.main.title")}
+                      catalogue={s}
+                      value={mainPreset(s.presets, s.dispatcher?.preset, s.dispatcher?.middle)}
+                      onChange={(preset) => save({ dispatcher: { preset } })}
+                      tag={(id) => (id === s.dispatcher?.middle ? t("settings.main.middle") : undefined)}
+                    />
+                  </WithEffort>
                 </Row>
               </SetGroup>
             )}
@@ -798,14 +810,16 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
                 {/* Only the models that see images are offered; the one in use stays listed even if
                     it does not, so the row names it rather than calling it missing. */}
-                <ModelPicker
-                  id="vision-preset"
-                  label={t("settings.vision.title")}
-                  catalogue={s}
-                  value={s.vision.preset}
-                  onChange={(preset) => save({ vision: { ...s.vision, preset } })}
-                  keep={(id, p) => p.images || id === s.vision.preset}
-                />
+                <WithEffort id="vision-effort" value={s.vision.effort} onChange={(effort) => save({ vision: { ...s.vision, effort } })} fallback="off">
+                  <ModelPicker
+                    id="vision-preset"
+                    label={t("settings.vision.title")}
+                    catalogue={s}
+                    value={s.vision.preset}
+                    onChange={(preset) => save({ vision: { ...s.vision, preset } })}
+                    keep={(id, p) => p.images || id === s.vision.preset}
+                  />
+                </WithEffort>
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
             </SetGroup>
@@ -816,14 +830,16 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               help={<>{t("settings.review.sub")}{" "}<a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a></>}
             >
               <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
-                <ModelPicker
-                  id="models-review-preset"
-                  label={t("rules.review.model")}
-                  catalogue={s}
-                  value={s.action_rules?.review_preset ?? ""}
-                  onChange={(review_preset) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_preset } })}
-                  defaultOption={{ label: t("rules.model.auto") }}
-                />
+                <WithEffort id="models-review-effort" value={s.action_rules?.review_effort} onChange={(review_effort) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_effort } })} fallback="off">
+                  <ModelPicker
+                    id="models-review-preset"
+                    label={t("rules.review.model")}
+                    catalogue={s}
+                    value={s.action_rules?.review_preset ?? ""}
+                    onChange={(review_preset) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_preset } })}
+                    defaultOption={{ label: t("rules.model.auto") }}
+                  />
+                </WithEffort>
               </Row>
             </SetGroup>
             {/* Beside the auxiliary models it governs: the summary model (Context) and the vision model above. */}
@@ -900,7 +916,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
             <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} {...shipped(s.compaction?.max_words ?? 1200, 1200, () => save({ compaction: { ...s.compaction, max_words: 1200 } }), `1200 ${t("settings.unit.words")}`)} />
             <NumRow id="compaction-core" setting="compaction.core_trigger_ratio" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} {...shipped(s.compaction?.core_trigger_ratio ?? 0.85, 0.85, () => save({ compaction: { ...s.compaction, core_trigger_ratio: 0.85 } }))} />
-            <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
+            <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })}
+              effort={s.compaction?.effort} onEffort={(effort) => save({ compaction: { ...s.compaction, effort } })} />
             <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
           </SetGroup>
         );
@@ -945,6 +962,15 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict" {...shipped(s.assist?.predict ?? true, true, () => save({ assist: { ...s.assist, predict: true } }), t("common.on"))}>
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
+              {/* The guess's model had no row, so it could be chosen only in the file; its effort is beside it. */}
+              {(s.assist?.predict ?? true) && (
+                <Row title={t("settings.chat.predict.model")} stack data-setting="assist.predict_preset">
+                  <WithEffort id="predict-effort" value={s.assist?.predict_effort} onChange={(predict_effort) => save({ assist: { predict: true, ...s.assist, predict_effort } })} fallback="off">
+                    <ModelChoice id="predict-preset" label={t("settings.chat.predict.model")} catalogue={s} value={s.assist?.predict_preset ?? ""}
+                      onChange={(predict_preset) => save({ assist: { predict: true, ...s.assist, predict_preset } })} defaultOption={{ label: t("rules.model.auto") }} />
+                  </WithEffort>
+                </Row>
+              )}
             </SetGroup>
             <AutopilotSettings s={s} save={save} />
             <UserStyleCard toast={toast} />

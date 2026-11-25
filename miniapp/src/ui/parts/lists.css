@@ -109,11 +109,11 @@
 .segmented.inline { display: inline-flex; margin: 0; }
 /* "Allow all from <server>": the button and its span read as one control, in the card's own button
    style; the row it sits in wraps rather than pushing the approval wider than the column. */
-.dock-actions:has(.srv-grant), .sp-card-actions:has(.srv-grant) { flex-wrap: wrap; }
+.dock-actions:has(.srv-grant) { flex-wrap: wrap; }
 .srv-grant { display: inline-flex; align-items: stretch; min-width: 0; max-width: 100%; }
 .srv-grant > .btn, .srv-grant > .ph-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
-.srv-grant-span { flex: none; font: inherit; font-size: var(--fs-12); color: var(--fg); background: var(--card); border: 1px solid var(--line); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 0 6px; }
-.srv-grant-span[data-forever] { color: var(--warn); }
+.srv-grant-span .dropdown-btn { height: 100%; border: 1px solid var(--line-strong); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--fg); font-size: var(--fs-12); }
+.srv-grant-span.forever .dropdown-btn { color: var(--attention); }
 .srv-grant.phone { width: 100%; }
 .srv-grant.phone > .ph-btn { flex: 1; }
 .dt-server-grant { display: flex; }

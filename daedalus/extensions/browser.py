@@ -53,6 +53,7 @@ from daedalus.browser.user import Pairing, RelayDesk
 from daedalus.browser.workflows import DRAFT_TIMEOUT_SECONDS, Workflows
 from daedalus.config import keyproxy_base
 from daedalus.extensions.notifications import Draft
+from daedalus.host import task_effort
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.events import EventFilter
 from daedalus.terminals.update import DaemonUpdate
@@ -316,34 +317,41 @@ def _port_range(text: str) -> list[int] | None:
     return [first, last] if 0 < first <= last <= 65535 else None
 
 
+async def page_model(app: Application, text: str, *, preset: str, effort: str, purpose: str, max_tokens: int, timeout: float) -> str:
+    """One request to the preset named for the purpose, else a middle one of the table: reading a page for
+    a word or a list is not what the agent's own model is for. ``effort`` is the purpose's own, from
+    Settings → Browser (:mod:`daedalus.host.task_effort`)."""
+    manager = app.manager
+    assert manager is not None
+    config = app.config
+    if preset not in config.presets:
+        preset = config.middle_preset() or ""
+    provider, model = manager.providers.rungs_for(config, preset or None)[0]
+    request = LLMRequest(
+        model=model,
+        messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)])],
+        max_tokens=task_effort.helper_tokens(max_tokens, effort),
+        temperature=0.0,
+        extra=task_effort.helper_extra(effort),
+        observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose=purpose, call_category="browser"),
+    )
+    response = await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
+    return "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock))
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     manager = app.manager
     assert manager is not None
     service = build(app)
 
-    async def small_model(text: str, *, preset: str, purpose: str, max_tokens: int, timeout: float) -> str:
-        """One request to the preset named for the purpose, else a middle one of the table: reading a
-        page for a word or a list is not what the agent's own model is for."""
-        config = app.config
-        if preset not in config.presets:
-            preset = config.middle_preset() or ""
-        provider, model = manager.providers.rungs_for(config, preset or None)[0]
-        request = LLMRequest(
-            model=model,
-            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)])],
-            max_tokens=max_tokens,
-            temperature=0.0,
-            extra={"enable_thinking": False},
-            observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose=purpose, call_category="browser"),
-        )
-        response = await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
-        return "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock))
+    async def small_model(text: str, *, preset: str, effort: str, purpose: str, max_tokens: int, timeout: float) -> str:
+        return await page_model(app, text, preset=preset, effort=effort, purpose=purpose, max_tokens=max_tokens, timeout=timeout)
 
     async def classify(text: str) -> str:
-        return await small_model(text, preset=app.config.browser.injection_monitor_preset, purpose="browser_injection_monitor", max_tokens=120, timeout=TIMEOUT_SECONDS)
+        return await small_model(text, preset=app.config.browser.injection_monitor_preset, effort=app.config.browser.injection_monitor_effort, purpose="browser_injection_monitor", max_tokens=120, timeout=TIMEOUT_SECONDS)
 
     async def extract(text: str) -> str:
-        return await small_model(text, preset=app.config.browser.extract_preset, purpose="browser_extract", max_tokens=2000, timeout=EXTRACT_TIMEOUT_SECONDS)
+        return await small_model(text, preset=app.config.browser.extract_preset, effort=app.config.browser.extract_effort, purpose="browser_extract", max_tokens=2000, timeout=EXTRACT_TIMEOUT_SECONDS)
 
     async def noted(note: dict[str, Any]) -> None:
         """The operator hears of a proposed note where they hear of everything waiting for them."""
@@ -357,7 +365,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     async def draft(text: str) -> str:
         """The operator's recorded steps drafted into a procedure: the model pages are read with."""
-        return await small_model(text, preset=app.config.browser.extract_preset, purpose="browser_procedure", max_tokens=2500, timeout=DRAFT_TIMEOUT_SECONDS)
+        return await small_model(text, preset=app.config.browser.extract_preset, effort=app.config.browser.extract_effort, purpose="browser_procedure", max_tokens=2500, timeout=DRAFT_TIMEOUT_SECONDS)
 
     notes = SiteNotes(app.db)
     agent = BrowserAgent(service, InjectionMonitor(classify), extract=extract, notes=notes, on_note=noted)

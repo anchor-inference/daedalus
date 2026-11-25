@@ -38,6 +38,9 @@ import terminals from "./terminal/workspace.css?raw";
 import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
+import orchestrationColumn from "./orchestration.tsx?raw";
+import projectColumn from "./project/ProjectSidebar.tsx?raw";
+import mainEntry from "./main/MainEntry.tsx?raw";
 import app from "./App.tsx?raw";
 import canvasList from "./canvas/CanvasList.tsx?raw";
 import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
@@ -264,6 +267,9 @@ const CONTENT_BOXES = [
   // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
   // large row the approved designs draw for a list of providers or entries. The 56 is that one.
   { selector: ".list-row.h56", property: "min-height", max: 56 },
+  // An importable session is the same large row: its name over a line of where it ran, how long it is and how
+  // big, with the program's mark; the folder rows of the same list stay at the row token.
+  { selector: ".imp-srow", property: "min-height", max: 56 },
   // The model picker's list is a window onto six 32 px rows (six and the five 1 px gaps between them),
   // the same height whatever the tab or the search holds, so the box around it never changes size.
   { selector: ".model-picker-list", property: "height", max: 197 },
@@ -277,6 +283,10 @@ const CONTENT_BOXES = [
   // line under an open question is the 48 px field the composer's answer line shares.
   { selector: ".inbox-row", property: "height", max: 64 },
   { selector: ".inbox-reply", property: "height", max: 48 },
+  // The Questions tab: its foot is the task pane's 64 px bar with Send, and the one line a chat shows
+  // for the questions waiting is the 48 px row the Inbox's answer line is.
+  { selector: ".questions-send", property: "min-height", max: 64 },
+  { selector: ".questions-line", property: "min-height", max: 48 },
   // The Terminals page: a list row holds a title, a command and an owner, its memory meter two lines
   // and a bar, and a pane's header a title, a folder, the owner chip and four icon buttons. Each is
   // the size the approved page draws, stated here so a taller one fails.
@@ -743,6 +753,29 @@ describe("the sidebar", () => {
     expect(wide(".sidebar .sb-acts")).toContain("display: none");
     expect(wide(".sidebar .sb-row:hover .sb-acts")).toContain("display: flex");
     expect(wide(".sidebar .sb-row:focus-within .sb-acts")).toContain("display: flex");
+  });
+});
+
+describe("orchestration mode", () => {
+  const rule = (selector: string) => all.filter((r) => selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("draws its column from the Agents column's 32 px rows, with no height of its own", () => {
+    // The main orchestrator, a project, a page of a project and a member were two-line rows of 36 to
+    // 48 px with a plate; they are the sidebar's one-line row, their state a word at the right edge
+    // and the rest in the tooltip, so switching modes changes the list and not its rhythm.
+    expect(mainEntry).toMatch(/className=\{`sb-row main-entry/);
+    expect(orchestrationColumn).toMatch(/className="sb-row orch-row"/);
+    expect(projectColumn).toMatch(/className=\{`sb-row focus-row/);
+    expect(projectColumn).toMatch(/className=\{`sb-row focus-staff/);
+    expect(projectColumn).toMatch(/className="sb-row focus-back"/);
+    for (const selector of [".main-entry", ".orch-row", ".focus-row", ".focus-staff", ".focus-back"]) {
+      expect(rule(selector)).not.toMatch(/(^|;)\s*(min-)?height:/);
+    }
+  });
+
+  it("counts what waits for the operator in the attention colour, as the Inbox's count", () => {
+    expect(rule(".needs-badge")).toContain("color: var(--attention)");
+    expect(rule(".needs-badge")).not.toContain("background");
   });
 });
 

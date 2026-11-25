@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { launchFeedback, type ProjectTask } from "./board";
@@ -109,10 +110,8 @@ export function RuntimeHandoff({ task, onChanged, bare = false }: { task: Projec
       {sourceId && !options.data.source_released && <p className="result-warning">{t("handoff.waitExit")}</p>}
       {sourceId && options.data.targets.length === 0 && <p className="sub">{t("handoff.noTarget")}</p>}
       {sourceId && options.data.targets.length > 0 && <label className="field">{t("handoff.target")}
-        <select value={targetId} disabled={busy || !!pending} onChange={(event) => setTargetId(event.target.value)}>
-          <option value="">{t("handoff.choose")}</option>
-          {options.data.targets.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.harness}</option>)}
-        </select>
+        <Select label={t("handoff.target")} size="md" className="wide" value={targetId} disabled={busy || !!pending} onChange={setTargetId}
+          options={[{ id: "", label: t("handoff.choose") }, ...options.data.targets.map((item) => ({ id: item.id, label: `${item.name} · ${item.harness}` }))]} />
       </label>}
       {preview.error && <p className="result-warning" role="alert">{errorText(preview.error)}</p>}
       {preview.data && target && <div className="sub">

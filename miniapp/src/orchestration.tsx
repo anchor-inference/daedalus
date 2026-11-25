@@ -7,7 +7,6 @@ import { copyText } from "./ui/components";
 // file draws them. The mode menu at the top of the sidebar (sidebar.tsx) switches between the modes.
 
 import type { ProjectFolder, SessionList, SessionSummary } from "./api";
-import { Dot } from "./ui/components";
 import { relTime } from "./format";
 import { plural, t } from "./i18n";
 import { Icon } from "./icons";
@@ -15,7 +14,7 @@ import { MainEntry } from "./main/MainEntry";
 import { MAIN_PATH } from "./main/model";
 import { colourOf, initials } from "./drawer";
 import { EmptyState, NewChatPill, SectionHeader, TopBar } from "./ui/phone";
-import { Row } from "./ui/primitives";
+import { Button, IconButton, Row } from "./ui/primitives";
 import { useMain } from "./main/data";
 import { orchestratedProjects, waitingInOrchestration } from "./mode";
 import { navigate, projectHome } from "./router";
@@ -39,29 +38,30 @@ export function useOrchestrationWaiting(): number {
   return waitingInOrchestration(data?.projects ?? [], main);
 }
 
-/** A project in orchestration mode's list: what its orchestrator is doing, the size of the team and
- *  how many at work, and how many requests wait for the operator. */
+/** A project in orchestration mode's list: one 32 px line, as a project is in the Agents column — its
+ *  name, then what its orchestrator is doing in a word (working, setting up) or when it last moved, and
+ *  how many requests wait for the operator in the attention colour. The team's size and how many of it
+ *  are at work are the row's tooltip: beside the name they took a second line on every row. */
 function ProjectRow({ project, sessions }: { project: ProjectFolder; sessions: SessionSummary[] }) {
   const o = project.orchestrator!;
   const href = projectHome(project.id);
   const orchestrator = sessions.find((s) => s.id === o.session_id);
   // The listing is a page of the most recent sessions; an orchestrator quiet for long may not be on
   // it, and then the project's own last activity says when it last moved.
-  const state = project.setup_by === "dispatcher" ? t("orch.row.setup")
+  const setup = project.setup_by === "dispatcher";
+  const tone = setup ? "waiting" : orchestrator?.status === "running" ? "running" : orchestrator?.status === "waiting" ? "waiting" : "";
+  const state = setup ? t("orch.row.setup")
     : orchestrator?.status === "running" ? t("orch.row.working")
     : orchestrator?.status === "waiting" ? t("orch.row.waiting")
     : project.last_message_at ? relTime(project.last_message_at) : t("orch.row.idle");
   const row = useRef<HTMLAnchorElement>(null);
   useContextActions(row, [{ label:t("focus.entry.open", { name:project.name }), icon:"folder", onSelect:() => navigate(href) }, { label:t("context.copyLink"), icon:"link", onSelect:() => void copyText(new URL(href, location.href).href) }]);
-  const meta = [state, plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
+  const team = [plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
   return (
-    <a ref={row} className="orch-row" href={href} onClick={(e) => go(e, href)} title={t("focus.entry.open", { name: project.name })} data-project={project.id}>
-      <span className="orch-row-icon"><Icon name="conductor" size={15} /></span>
-      <span className="orch-row-text">
-        <span className="orch-row-name truncate">{project.name}</span>
-        <span className="orch-row-meta truncate">{meta}</span>
-      </span>
-      {orchestrator?.status === "running" && <span className="folder-live"><Dot status="running" /></span>}
+    <a ref={row} className="sb-row orch-row" href={href} onClick={(e) => go(e, href)} title={`${project.name} · ${team}`} data-project={project.id} data-nav="project">
+      <span className="sb-tile"><Icon name="conductor" size={16} /></span>
+      <span className="sb-t orch-row-name">{project.name}</span>
+      <span className={`orch-row-meta ${tone ? `sb-word ${tone}` : "sb-time num"}`}>{state}</span>
       {o.needs_you > 0 && <span className="needs-badge" title={plural("focus.entry.needs", o.needs_you)} aria-label={plural("focus.entry.needs", o.needs_you)}>{o.needs_you}</span>}
     </a>
   );
@@ -76,20 +76,23 @@ function OrchestrationRows({ onMain, onProjects }: { onMain: boolean; onProjects
   // so there the empty line points at the Agents list, where every project is one tap away.
   const keyboard = useMedia("(hover: hover) and (pointer: fine)");
   return (
-    <>
+    <div className="sb-list">
       <div className="orch-main"><MainEntry current={onMain} /></div>
-      <div className="orch-section sub">{t("orch.projects")}</div>
+      <div className="sb-sec orch-section">
+        <span>{t("orch.projects")}</span>
+        <IconButton icon="plus" label={t("np.orch.title")} size={28} className="sb-sec-add" onClick={() => openNewProject("orchestration")} />
+      </div>
       {projects.map((p) => <ProjectRow key={p.id} project={p} sessions={data?.sessions ?? []} />)}
-      {!loading && data && projects.length === 0 && <div className="orch-empty sub">
+      {!loading && data && projects.length === 0 && <div className="orch-empty">
         {onProjects ? <>
           <p>{t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}</p>
-          <button className="btn primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</button>
+          <Button variant="primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</Button>
         </> : <>
           <p>{t(keyboard ? "orch.empty" : "orch.empty.touch")}</p>
-          <button className="btn primary" onClick={() => openNewProject("orchestration")}><Icon name="plus" size={14} /> {t("np.orch.title")}</button>
+          <Button variant="primary" icon="plus" onClick={() => openNewProject("orchestration")}>{t("np.orch.title")}</Button>
         </>}
       </div>}
-    </>
+    </div>
   );
 }
 

@@ -7,6 +7,9 @@ import type { RouteEntry } from "../api";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { HARNESS_NAMES } from "../team/team";
+// The select itself, not the primitives index: the route helpers below are tested without a window,
+// and the index reaches the router, which reads the address at import.
+import { Select } from "../ui/primitives/select";
 
 const RUNTIMES: RouteEntry["runtime"][] = ["claude", "codex", "grok", "opencode", "pi", "cursor", "daedalus"];
 
@@ -60,10 +63,9 @@ export function ProjectRoute({ projectId, saved, write, canWrite }: {
     {route.map((entry, index) => (
       <div className="project-route-row" key={index} data-route-row={entry.runtime}>
         <span className="sub project-route-index">{index + 1}</span>
-        <select className="field" aria-label={t("project.route.runtime", { n: index + 1 })} value={entry.runtime}
-          onChange={(e) => change(index, { runtime: e.target.value as RouteEntry["runtime"] })}>
-          {RUNTIMES.map((runtime) => <option key={runtime} value={runtime}>{HARNESS_NAMES[runtime]}</option>)}
-        </select>
+        <Select label={t("project.route.runtime", { n: index + 1 })} size="md" value={entry.runtime}
+          onChange={(next) => change(index, { runtime: next as RouteEntry["runtime"] })}
+          options={RUNTIMES.map((runtime) => ({ id: runtime, label: HARNESS_NAMES[runtime] }))} />
         <input className="field mono" aria-label={t("project.route.model", { n: index + 1 })} value={entry.model} maxLength={200}
           placeholder={t("project.route.model.default")} spellCheck={false} autoCapitalize="off" autoCorrect="off"
           onChange={(e) => change(index, { model: e.target.value })} />

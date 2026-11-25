@@ -1,0 +1,357 @@
+/* ── the agent's browser ──────────────────────────────────────────────────────────────────
+   The Browser tool (a sheet on a phone, a page of its own), the picture with the agent's cursor drawn
+   over it, the corner preview in the conversation's column, and the phone's takeover. The picture is
+   the page's; everything around it is ours and uses the tokens, so a light page on a dark app reads
+   as a window on the web rather than part of the conversation. The tool is drawn as a terminal's pane
+   is: a framed picture with a foot that says who holds it and offers the one way to change that. */
+.panel-body.tab-browser { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.bp { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+
+/* The head: history, the address, then what acts on the page. 44 px, as a list row with a title over a
+   line is; its controls are the 32 px ones. */
+.bp .bp-toolbar { flex: none; display: flex; align-items: center; gap: 4px; height: var(--row-h-2); box-sizing: border-box; padding: 0 12px; border-bottom: 0; container-type: inline-size; }
+.bp-nav { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+/* A side panel at its narrowest has no room for Record's word beside the Snapshot button: the red dot
+   alone says it, and the button's name and tooltip still do for a screen reader and a pointer. */
+@container (max-width: 520px) { .bp-rec-btn .bp-rec-label { display: none; } }
+.bp-address { flex: 1; min-width: 80px; display: flex; align-items: center; gap: 8px; height: var(--ctl-h); box-sizing: border-box; margin: 0 4px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--card); position: relative; overflow: hidden; }
+.bp-address input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); text-overflow: ellipsis; }
+.bp-address input:focus { outline: none; }
+.bp-address:not(.editable) input { cursor: default; }
+.bp-address.editable input { color: var(--fg); }
+.bp-address.editable:focus-within { border-color: var(--accent); box-shadow: var(--shadow-focus); }
+.bp-address-lock { flex: none; display: inline-flex; color: var(--fg-3); }
+.bp-address-lock.ok { color: var(--fg-2); }
+.bp-address-busy { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; }
+.bp-address-busy::after { content: ""; position: absolute; inset: 0; width: 30%; background: var(--live); animation: preview-progress 1.1s var(--ease-out) infinite; }
+.bp .bp-toolbar .iconbtn[disabled] { opacity: .35; }
+.bp-fit.on { background: var(--selected); color: var(--fg); }
+
+/* Pages open beside the one on screen: one row of 28 px chips under the head, the agent's own marked
+   with a cyan dot. */
+.bp-tabs { flex: none; display: flex; gap: 2px; min-width: 0; padding: 0 12px 8px; overflow-x: auto; scrollbar-width: none; }
+.bp-tabs::-webkit-scrollbar { display: none; }
+.bp-tabchip { position: relative; flex: 0 1 160px; min-width: 56px; display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.bp-tabchip:hover { background: var(--hover); color: var(--fg); }
+.bp-tabchip.on { background: var(--selected); color: var(--fg); }
+.bp-tabchip.agent::after { content: ""; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+.bp-favicon { flex: none; border-radius: 3px; object-fit: contain; }
+.bp-favicon.letter { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--fg-2); font-weight: 600; line-height: 1; }
+
+/* Take control is the pane's one action: in the foot, the way a terminal offers its keyboard. */
+.bp-control { flex: none; gap: 6px; white-space: nowrap; }
+.bp-control .ic { margin-right: 0; vertical-align: 0; }
+.bp-control.pulse { animation: bp-pulse 900ms var(--ease-out); }
+@keyframes bp-pulse { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 4px var(--line-strong); } }
+/* Take control is the one button here a finger has to find at once; on a touch screen wider than the
+   phone layout it was still the desktop's 28 px. */
+@media (pointer: coarse) { .btn.bp-control { min-height: 36px; } }
+
+.bp-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.bp-stage-wrap { flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 0 12px 8px; position: relative; }
+/* Fitting the page to the panel gives the picture all the height there is; kept at its own size it is
+   as tall as the page is, and the actions under it have the rest. */
+.bp.fit .bp-stage-wrap, .bp.full .bp-stage-wrap { flex: 1; }
+.bp-frame { position: relative; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--term-bg); overflow: hidden; }
+.bp.fit .bp-frame, .bp.full .bp-frame { flex: 1; }
+.bp-view { position: relative; display: flex; flex-direction: column; min-height: 0; }
+.bp.fit .bp-view, .bp.full .bp-view { flex: 1; }
+/* The picture takes the page's own proportions, as the page is drawn at its own size. */
+.bp:not(.fit):not(.full):not(.phone) .bp-view { aspect-ratio: var(--page-ratio, 16 / 10); }
+.bp-view > .bv { flex: 1; }
+.bp-view.editing > .bv, .bp-stage-wrap.editing > .bp-frame { display: none; }
+
+/* The foot: who holds the page, in a sentence, and the one action that changes it. 36 px like a
+   terminal pane's, on the same quiet tone. */
+.bp-banner { flex: none; display: flex; align-items: center; gap: 8px; height: 36px; box-sizing: border-box; padding: 0 8px 0 12px; border-top: 1px solid var(--line); background: var(--wash); color: var(--fg-2); font-size: var(--fs-13); }
+.bp-banner-icon { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
+.bp-banner-icon .ic { display: none; }
+.bp-banner-text { flex: 1; min-width: 0; }
+.bp-banner-text b { color: var(--attention); font-weight: 500; }
+.bp-banner.acting .bp-banner-icon { background: var(--live); animation: pulse 1.6s ease-in-out infinite; }
+.bp-banner.you .bp-banner-icon { background: var(--accent); }
+.bp-banner.you { color: var(--fg); }
+.bp-banner.paused .bp-banner-icon, .bp-banner.other .bp-banner-icon, .bp-banner.offline .bp-banner-icon { background: var(--attention); }
+.bp-banner.offline { color: var(--attention); }
+.bp-banner-viewers { flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 30%; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The action sits at the foot's end as the terminal's does: the accent word, no frame. */
+.bp-banner:not(.bp-handover) .btn.bp-control { height: var(--ctl-h-sm); padding: 0 8px; border: 0; background: none; color: var(--accent); font-size: var(--fs-13); font-weight: 500; }
+.bp-banner:not(.bp-handover) .btn.bp-control:hover { background: var(--hover); }
+
+/* The agent waits for the operator: the card the composer draws for a request, in the tool. What
+   happened, what it needs, and the one button. */
+.bp-handover { height: auto; flex-direction: column; align-items: stretch; gap: 8px; margin: 0 0 4px; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); color: var(--fg); }
+.bp-handover .approval-actions { margin-top: 4px; }
+.bp-handover .approval-actions .btn { height: var(--ctl-h); }
+
+/* The picture. */
+.bv { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--term-bg); user-select: none; -webkit-user-select: none; }
+.bv.driving { cursor: default; touch-action: none; }
+/* The picture, not the stage around it, says whose hand is on the page. */
+.bv.driving .bv-canvas { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); }
+.bv-canvas { position: absolute; display: block; opacity: 0; transition: opacity 220ms var(--ease-out); box-shadow: 0 0 0 1px var(--line); }
+.bv-canvas.painted { opacity: 1; }
+.bv.compact .bv-canvas { box-shadow: none; }
+.bv-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--fg-3); font-size: var(--fs-12); }
+.bv-placeholder .ic { animation: pulse 1.6s ease-in-out infinite; }
+.bv-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.bv-cursor { position: absolute; left: 0; top: 0; z-index: 3; transition: transform var(--t-base) var(--ease-out); will-change: transform; }
+.bv-cursor svg { display: block; margin: -3px 0 0 -4px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .45)); overflow: visible; }
+.bv-cursor-arrow { fill: var(--accent); stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
+.bv-cursor-tag { position: absolute; left: 14px; top: 17px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-11); font-weight: 600; line-height: 16px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); }
+.bv-overlay.parked .bv-cursor { opacity: .55; }
+.bv-overlay.parked .bv-cursor-arrow { fill: var(--fg-3); }
+.bv-overlay.parked .bv-cursor-tag { background: var(--surface-3); color: var(--fg-2); }
+.bv-ripple { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 2px solid var(--accent); border-radius: 50%; animation: bv-ripple 560ms var(--ease-out) forwards; }
+@keyframes bv-ripple { from { opacity: .9; transform: scale(.25); } to { opacity: 0; transform: scale(1.5); } }
+.bv-box { position: absolute; border: 2px solid var(--accent); border-radius: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); animation: bv-box 900ms ease-out forwards; }
+@keyframes bv-box { 0% { opacity: 0; transform: scale(1.06); } 14% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; } }
+.bv-box-label { position: absolute; left: -2px; bottom: 100%; margin-bottom: 4px; max-width: 240px; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-11); font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bv-chip { position: absolute; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg); font-size: var(--fs-11); line-height: 16px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); animation: bv-chip 1800ms ease-out forwards; }
+.bv-chip kbd { font-family: var(--mono); font-size: var(--fs-11); }
+@keyframes bv-chip { 0% { opacity: 0; transform: translateY(-3px); } 10%, 75% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.bv-overlay.compact .bv-box { border-width: 1.5px; border-radius: 3px; box-shadow: none; }
+.bv-overlay.compact .bv-ripple { width: 14px; height: 14px; margin: -7px 0 0 -7px; border-width: 1.5px; }
+.bv-overlay.compact .bv-cursor svg { margin: -2px 0 0 -2px; }
+/* The sharp frame: the browser's own drawing of the zoomed part, laid over the live picture it sharpens. */
+.bv-still { position: absolute; z-index: 1; display: block; pointer-events: none; }
+.bv-zoom { position: absolute; right: 10px; bottom: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--surface-2) 92%, transparent); box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
+.bv-zoom .iconbtn { border-radius: var(--radius-pill); }
+.bv-zoom .iconbtn:disabled { opacity: .4; }
+.bv-zoom-level { min-width: 46px; padding: 0 6px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-12); font-variant-numeric: tabular-nums; cursor: pointer; }
+.bv-zoom-level:hover { color: var(--accent); }
+.bv-zoom .bv-zoom-sharp.on { color: var(--accent); }
+.bv-ime { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; font-size: var(--fs-14); }
+@media (hover: none) { .bv-ime { font-size: 16px; } }
+.bp-veil { position: absolute; inset: 0; z-index: 4; display: flex; align-items: flex-end; justify-content: center; padding-bottom: var(--space-4); opacity: 0; transition: opacity var(--t-base); cursor: default; }
+.bv:hover .bp-veil { opacity: 1; }
+.bp-veil-hint { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); color: var(--fg); font-size: var(--fs-12); box-shadow: var(--shadow-md); backdrop-filter: blur(6px); }
+
+/* A page's own dialog (alert, confirm): the card family again, over the foot of the picture, answered
+   here while the page waits. It is not the app's dialog: the page asked, not the app. */
+.bp-dialog { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-md); font-size: var(--fs-13); animation: rise var(--t-base) var(--ease-out); }
+.bp-dialog > .ic { color: var(--attention); flex: none; }
+.bp-dialog-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bp-dialog-text b { font-weight: 500; }
+.bp-dialog-actions { flex: none; display: flex; gap: 6px; }
+
+/* The action log: a list of 32 px rows under the picture. Folded it is the one row that opens it; a
+   wide page of its own shows it as a column beside the picture. A phone's sheet keeps it under the
+   picture (`.page`) and does not fold it. */
+.bp-log { flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+.bp.fit .bp-log, .bp.full .bp-log { flex: none; }
+.bp.fit .bp-log.open { max-height: 40%; }
+.bp-log:not(.open):not(.page) { flex: none; }
+.bp-log:not(.open):not(.page) .bp-log-rows { display: none; }
+.bp-log-head { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; height: var(--row-h-2); box-sizing: border-box; padding: 0 16px 0 24px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.bp-log-head:hover { color: var(--fg); }
+.bp-log-head.static { cursor: default; }
+.bp-log-title { flex: none; color: var(--fg); font-weight: 500; }
+.bp-log-latest { flex: 1; min-width: 0; }
+.bp-log-count { flex: none; margin-left: auto; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.bp-log-head .chev { flex: none; }
+.bp-log-head .chev.open { transform: rotate(180deg); }
+.bp-log-rows { flex: 1; min-height: 0; margin: 0; padding: 0 12px 8px; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+.bp-log-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h); box-sizing: border-box; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.bp-log-row:hover { background: var(--hover); }
+.bp-log-row.on { background: var(--selected); }
+.bp-log-row.failed .bp-log-text { color: var(--attention); }
+.bp-log-time { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
+.bp-log-actor { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); }
+.bp-log-actor.operator { background: var(--selected); color: var(--accent); }
+.bp-log-actor.page { background: none; color: var(--fg-3); }
+.bp-log-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-log-flag { flex: none; padding: 0 6px; border-radius: var(--radius-xs); font-size: var(--fs-12); line-height: 18px; background: var(--surface-3); color: var(--fg-2); }
+.bp-log-flag.asked { background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
+.bp-log-flag.denied { background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
+.bp-log-flag.allowed_once, .bp-log-flag.allowed { background: color-mix(in srgb, var(--live) 14%, transparent); color: var(--live); }
+.bp-log-empty { padding: 8px 12px; font-size: var(--fs-13); }
+.bp-log.page { flex: 1; max-height: none; border-top: 0; }
+.bp-log-frame { flex: none; color: var(--fg-3); display: inline-flex; }
+@container (min-width: 900px) {
+  .bp.log-open:not(.phone) .bp-main { flex-direction: row; }
+  .bp.log-open:not(.phone) .bp-log { width: 280px; max-height: none; border-top: 0; border-left: 1px solid var(--line); }
+  .bp.log-open:not(.phone) .bp-log .bp-log-rows { display: block; }
+}
+
+.bp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: var(--space-8) var(--space-5); color: var(--fg-2); font-size: var(--fs-13); text-align: center; }
+.bp-empty .ic { color: var(--fg-3); margin-bottom: 4px; }
+.bp-empty b { color: var(--fg); font-size: var(--fs-14); font-weight: 500; }
+.bp-ownership { flex: none; width: 100%; max-width: 100%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--card); color: var(--fg); font-size: var(--fs-13); text-align: left; }
+.bp-ownership summary { cursor: pointer; min-height: var(--ctl-h); display: flex; align-items: center; }
+.bp-ownership-body { max-height: 35vh; overflow: auto; overflow-wrap: anywhere; }
+.bp-ownership-body p { margin: var(--space-2) 0; }
+
+/* Handing the page back: a note for the agent, in a popover of the card family's width. */
+.bp-give { width: 320px; padding: 12px; }
+/* Above the phone's driving screen, which is itself above the sheets. */
+.menu.bp-give { z-index: 42; }
+.bp-give-label { display: block; margin-bottom: 8px; color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
+.bp-give-note { display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); resize: vertical; }
+.bp-give-note:focus { outline: none; border-color: var(--accent); box-shadow: var(--shadow-focus); }
+.bp-give-foot { display: flex; align-items: flex-end; gap: 12px; margin-top: 8px; }
+.bp-give-foot .sub { flex: 1; font-size: var(--fs-12); line-height: 1.4; }
+.bp-give-foot .btn { flex: none; }
+
+/* Recording the operator's own steps. The dot is the one sign a recording is on, on the button that
+   starts it and on the bar over the picture while it runs: never silent. */
+.bp-rec-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--attention); }
+.bp-rec-dot.live { animation: pulse 1.6s ease-in-out infinite; }
+.bp-rec-btn { flex: none; gap: 6px; white-space: nowrap; }
+.bp-rec-start { width: 320px; padding: 14px; font-size: var(--fs-13); }
+.menu.bp-rec-start { z-index: 42; }
+.bp-rec-start-head { margin-bottom: 6px; color: var(--fg); font-size: var(--fs-14); font-weight: 500; }
+.bp-rec-start p { margin: 0 0 8px; color: var(--fg-2); line-height: 1.45; }
+.bp-rec-start-secret { display: flex; gap: 8px; align-items: flex-start; }
+.bp-rec-start-secret .ic { flex: none; margin-top: 2px; color: var(--fg-2); }
+.bp-rec-start-keep { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin: 4px 0 12px; padding: 10px 0 0; border-top: 1px solid var(--line); cursor: pointer; }
+.bp-rec-start-keep > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bp-rec-start-keep b { color: var(--fg); font-weight: 500; }
+.bp-rec-start-keep .sub { font-size: var(--fs-12); line-height: 1.4; }
+.bp-rec-start-foot { display: flex; justify-content: flex-end; }
+.bp-rec-start-foot .btn { gap: 6px; }
+.bp-recbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: var(--row-h-2); box-sizing: border-box; padding: 4px 8px 4px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-13); }
+.bp-recbar-title { flex: none; font-weight: 500; white-space: nowrap; }
+.bp-recbar-count { flex: none; color: var(--fg-3); white-space: nowrap; }
+.bp-recbar-latest { flex: 1; min-width: 0; color: var(--fg-2); }
+.bp-recbar .btn { flex: none; gap: 6px; white-space: nowrap; }
+/* A panel too narrow for the words and both buttons puts the latest step on a line under them. */
+@container (max-width: 460px) { .bp-recbar-latest { order: 3; flex: 1 1 100%; } .bp-recbar-count { flex: 1; } }
+
+/* A finished recording, a draft and the skill's editor are cards of the same family as a request: the
+   words at the top, what there is to decide, then the answers. */
+.bp-rec { flex: none; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-13); }
+.bp-rec-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-14); }
+.bp-rec-head > .ic { flex: none; color: var(--fg-2); }
+.bp-rec-head b { flex: none; color: var(--fg); font-weight: 500; }
+.bp-rec-toggle { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; }
+.bp-rec-toggle .chev.open { transform: rotate(180deg); }
+.bp-rec-steps { margin: 0; padding: 8px 12px 8px 32px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); font-size: var(--fs-13); color: var(--fg); max-height: 180px; overflow-y: auto; }
+.bp-rec-steps li { padding: 2px 0; }
+.bp-rec-steps li > span { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.bp-rec-steps li.quiet { color: var(--fg-3); }
+.bp-rec-steps li.yours { color: var(--fg-2); }
+.bp-rec-steps li.yours .ic { margin-right: 4px; vertical-align: -2px; }
+.bp-rec-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bp-rec-goal, .bp-proc-title { height: var(--ctl-h); box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); }
+.bp-rec-goal { flex: 1 1 100%; min-width: 0; }
+.bp-rec-goal:focus, .bp-proc-title:focus, .bp-proc-text:focus { outline: none; border-color: var(--accent); box-shadow: var(--shadow-focus); }
+
+/* The editors take the pane while they are open: the picture steps aside, the words scroll, and the
+   answers stay at the foot. */
+.bp-stage-wrap.editing { flex: 1; padding-top: 4px; }
+.bp-main:has(> .bp-stage-wrap.editing) > .bp-log { display: none; }
+.bp-stage-wrap.editing > .bp-rec { flex: 1; min-height: 0; max-height: none; padding: 0; overflow: hidden; }
+.bp-proc, .bp-skill { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.bp-stage-wrap.editing .bp-proc, .bp-stage-wrap.editing .bp-skill { flex: 1; min-height: 0; padding: 14px 16px 0; overflow-y: auto; overscroll-behavior: contain; }
+.bp-proc-host { margin-left: auto; color: var(--fg-3); font-size: var(--fs-12); }
+.bp-proc-by { font-size: var(--fs-12); line-height: 1.4; }
+.bp-proc-label { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.bp-proc-text { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.55; resize: vertical; }
+.bp-proc-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bp-stage-wrap.editing .bp-proc-foot { position: sticky; bottom: 0; margin: 0 -16px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--card); }
+.bp-skill-lead { margin: 0; font-size: var(--fs-13); line-height: 1.45; }
+.bp-skill-slug { font-size: var(--fs-12); }
+.bp-skill-steps { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; font-size: var(--fs-13); color: var(--fg); }
+.bp-skill-step { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px; border-radius: var(--radius-sm); }
+.bp-skill-step + .bp-skill-step { border-top: 1px solid var(--line); border-radius: 0; }
+.bp-skill-step.quiet .bp-skill-step-words { color: var(--fg-3); }
+.bp-skill-step.gone .bp-skill-step-words { color: var(--fg-3); text-decoration: line-through; }
+.bp-skill-step-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: var(--row-h); }
+.bp-skill-step-head > .ic { flex: none; color: var(--fg-2); }
+.bp-skill-step-words { flex: 1; min-width: 0; }
+.bp-skill-drop { flex: none; color: var(--fg-3); }
+.bp-skill-drop:hover { color: var(--fg); }
+.bp-skill-field, .bp-skill-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 6px; }
+.bp-skill-input { min-width: 0; flex: 1 1 180px; height: var(--ctl-h); box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--inset); color: var(--fg); font-size: var(--fs-13); }
+.bp-skill-input:focus { outline: none; border-color: var(--accent); box-shadow: var(--shadow-focus); }
+.bp-skill-input.bad { border-color: var(--attention); }
+.bp-skill-secret { display: grid; grid-template-columns: minmax(60px, 120px) minmax(0, 1fr); align-items: center; gap: 8px; flex: 1 1 100%; }
+.bp-skill-params { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-13); }
+.bp-skill-param { padding: 1px 6px; border-radius: var(--radius-xs); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-12); }
+.bp-skill-why { font-size: var(--fs-12); }
+
+/* The corner preview: inside the conversation's column, never over the panel beside it. A small card
+   that floats, so it carries the one shadow and the edge of what floats; the border says who holds the
+   page (the operator's accent, the attention colour while the agent waits). */
+.bp-pip { position: absolute; z-index: 6; width: var(--pip-w); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--shadow-md); overflow: hidden; cursor: pointer; touch-action: none; transform-origin: top right; animation: bp-pip-in 160ms var(--ease-out); }
+.bp-pip[data-corner$="l"] { transform-origin: top left; }
+.bp-pip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.bp-pip.dragging { cursor: grabbing; }
+.bp-pip.needs { border-color: var(--attention); }
+.bp-pip.you { border-color: var(--accent); }
+@keyframes bp-pip-in { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
+.bp-pip-frame { position: relative; aspect-ratio: 16 / 10; background: var(--term-bg); }
+.bp-pip-frame > .bv { position: absolute; inset: 0; }
+.bp-pip-actions { position: absolute; top: 6px; right: 6px; z-index: 5; display: flex; gap: 4px; opacity: 0; transform: translateY(-2px); transition: opacity var(--t-fast), transform var(--t-fast); }
+.bp-pip:hover .bp-pip-actions, .bp-pip:focus-within .bp-pip-actions { opacity: 1; transform: none; }
+.bp-pip-actions .iconbtn { background: var(--scrim); color: #fff; backdrop-filter: blur(6px); }
+.bp-pip-actions .iconbtn:hover { background: var(--scrim); filter: brightness(1.4); }
+.bp-pip-need { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: color-mix(in srgb, var(--attention) 16%, var(--card)); color: var(--attention); font-size: var(--fs-12); font-weight: 500; }
+.bp-pip-foot { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-top: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-12); }
+.bp-pip-domain { flex: 1; min-width: 0; }
+.bp-pip-more { flex: none; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); line-height: 15px; }
+.bp-pip-state { flex: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.browser-dot-i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); }
+.bp-pip-state.acting .browser-dot-i { background: var(--live); animation: dotpulse 1.4s ease-in-out infinite; }
+.bp-pip-state.you { color: var(--accent); }
+.bp-pip-state.you .browser-dot-i { background: var(--accent); }
+.bp-pip-state.needs { color: var(--attention); }
+.bp-pip-state.needs .browser-dot-i { background: var(--attention); }
+
+/* The phone: a thumbnail in the header, the sheet for watching, the whole screen for driving. */
+.browser-headbtn { position: relative; }
+.browser-headbtn-thumb { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 18px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--term-bg); color: var(--fg-3); overflow: hidden; }
+.browser-headbtn-thumb > .bv { position: absolute; inset: 0; }
+.browser-dot { position: absolute; top: 4px; right: 3px; width: 8px; height: 8px; border: 2px solid var(--bg); border-radius: 50%; background: var(--fg-3); box-sizing: content-box; }
+.browser-dot.acting { background: var(--live); }
+.browser-dot.you { background: var(--accent); }
+.browser-dot.needs { top: 1px; right: 0; width: 14px; height: 14px; background: var(--attention); color: var(--primary-ink); font-size: var(--fs-11); font-weight: 600; line-height: 14px; text-align: center; }
+.bp-phonebar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); }
+.bp-phonebar-domain { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
+.bp-phonebar-tabs { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
+.bp.phone .bp-stage-wrap { flex: none; }
+.bp.phone .bp-viewer { flex: none; width: 100%; }
+.bp.phone .bp-log.page { border-top: 1px solid var(--line); }
+.bp-drive-hint { position: absolute; left: 50%; bottom: var(--space-4); z-index: 4; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 6px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); color: var(--fg); font-size: var(--fs-12); text-align: center; box-shadow: var(--shadow-md); pointer-events: none; animation: rise var(--t-base) var(--ease-out); }
+.bp-drive { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--term-bg); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); animation: sheet-enter var(--t-base) var(--ease-out); }
+.bp-drive-head { flex: none; display: flex; align-items: center; gap: 8px; height: var(--head-h); padding: 0 8px 0 12px; background: var(--surface-1); border-bottom: 1px solid var(--line); }
+.bp-drive-domain { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
+.bp-drive-you { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: var(--fs-12); font-weight: 500; }
+.bp-drive-you i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.bp-drive-give .ic { margin-right: 4px; }
+.bp-drive-viewer { flex: 1; }
+.bp-drive-keys { flex: none; display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none; background: var(--surface-1); border-top: 1px solid var(--line); }
+.bp-drive-keys::-webkit-scrollbar { display: none; }
+.bp-drive-kbd { display: inline-flex; align-items: center; justify-content: center; color: var(--fg-2); }
+.bp-drive-clip { display: inline-flex; align-items: center; justify-content: center; }
+.bp-compose { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+.browser-full .bp { border-top: 1px solid var(--line); }
+.staff-panel.with-browser { display: flex; flex-direction: column; height: 100%; }
+.staff-panel-body.tab-browser { padding: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; }
+
+/* The conversation's switch heads the browser tool, above the head or the empty state. */
+.bp-switch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px 0; }
+.bp-empty .bp-switch { padding: 0 0 var(--space-3); justify-content: center; }
+.bp-switch-note { color: var(--attention); }
+
+/* The recording played back: a layer over the live picture, which keeps running underneath. Its bar
+   is the pane's head again: back to live first, then the steps, then where in the recording it is. */
+.bp-replay { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--term-bg); }
+.bp-replay-bar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h-2); box-sizing: border-box; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--wash); color: var(--fg-2); font-size: var(--fs-13); }
+.bp-replay-bar > svg { flex: none; color: var(--fg-2); }
+.bp-replay-when { flex: none; font-variant-numeric: tabular-nums; color: var(--fg-2); }
+.bp-replay-steps { flex: none; display: inline-flex; }
+.bp-replay-scrub { flex: 1; min-width: 60px; height: 16px; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.bp-replay-scrub::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+.bp-replay-scrub::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+.bp-replay-scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 2px solid var(--wash); border-radius: 50%; background: var(--fg); }
+.bp-replay-scrub::-moz-range-thumb { width: 10px; height: 10px; border: 2px solid var(--wash); border-radius: 50%; background: var(--fg); }
+.bp-replay-scrub:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 2px; }
+.bp-replay-live { flex: none; }
+.bp-replay-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.bp-replay-img { position: absolute; display: block; user-select: none; }
+.bp-replay-gone { position: absolute; inset: 0; display: grid; place-items: center; }
+.bp-replay-box { position: absolute; border: 2px solid var(--accent); border-radius: 3px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 60%, transparent); pointer-events: none; }
+.bp-replay-label { position: absolute; left: -2px; bottom: calc(100% + 4px); max-width: 280px; padding: 2px 6px; border-radius: var(--radius-xs); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); white-space: nowrap; }
+.bp-replay-point { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); pointer-events: none; }

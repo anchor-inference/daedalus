@@ -61,11 +61,11 @@ describe("SnapshotButton", () => {
     await draw(<ComposeTarget.Provider value="s1"><SnapshotButton capture={() => shot} toast={() => undefined} /></ComposeTarget.Provider>);
     await press(document.querySelector(".annotate-open"));
     const overlay = document.querySelector(".annotate");
-    expect(overlay?.parentElement).toBe(document.body);
+    expect(overlay?.closest("[data-overlay-root]")).not.toBeNull();
     expect(overlay?.querySelector(".annotate-where")?.textContent).toBe("https://example.com/cart");
     expect(overlay?.querySelectorAll(".annotate-tool")).toHaveLength(7);
     expect(overlay?.querySelectorAll(".annotate-swatch")).toHaveLength(7);
-    await press(document.querySelector(".annotate-cancel"));
+    await press(document.querySelector(".annotate .fullscreen-bar [aria-label='Close']"));
     expect(document.querySelector(".annotate")).toBeNull();
   });
 
@@ -139,7 +139,7 @@ describe("the pencil on a composer's picture", () => {
     await draw(<MarkupButton file={png()} onReplace={replace} />);
     await press(document.querySelector(".attachment-markup"));
     expect(document.querySelector(".annotate-attach")?.textContent).toBe("Done");
-    await press(document.querySelector(".annotate-cancel"));
+    await press(document.querySelector(".annotate .fullscreen-bar [aria-label='Close']"));
     expect(document.querySelector(".annotate")).toBeNull();
     await press(document.querySelector(".attachment-markup"));
     await press(document.querySelector(".annotate-attach"));

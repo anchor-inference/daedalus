@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Sheet } from "../ui/dialogs";
 import { Button, Select } from "../ui/primitives";
+import { WithEffort } from "../taskeffort";
 import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { t } from "../i18n";
 import { duration } from "../format";
@@ -32,6 +33,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
   const [view, setView] = useState<View | null>(null);
   const [instruction, setInstruction] = useState("");
   const [preset, setPreset] = useState("");
+  const [effort, setEffort] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [review, setReview] = useState(false);
@@ -71,7 +73,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
     setBusy(true);
     setProblem("");
     try {
-      await api.post("/api/prompt-change/request", { instruction, preset });
+      await api.post("/api/prompt-change/request", { instruction, preset, effort });
       await load();
     } catch (error) {
       setProblem(errorText(error));
@@ -124,8 +126,10 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
         <textarea id="prompt-change-request" className="field" rows={3} maxLength={2000} value={instruction} disabled={planning || busy} onChange={(event) => setInstruction(event.target.value)} placeholder={t("settings.rules.assistant.placeholder")} />
       </SetBlock>
       <Row title={t("settings.rules.assistant.model")} stack>
-        <Select<string> className="set-value" label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
-          options={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
+        <WithEffort id="prompt-change-effort" value={effort} onChange={setEffort} fallback="off" disabled={planning || busy}>
+          <Select<string> className="set-value" label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
+            options={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
+        </WithEffort>
       </Row>
       {planning && <SetBlock className="prompt-change-status"><span className="live-dot" /><span className="prompt-change-text" role="status"><b>{t("settings.rules.assistant.working")}</b><span className="sub">{t("settings.rules.assistant.elapsed", { time: elapsed(proposal.started_at) })}</span></span><Button size="sm" disabled={busy} onClick={() => void cancel()}>{t("common.cancel")}</Button></SetBlock>}
       {ready && <SetBlock className="prompt-change-ready"><span className="prompt-change-text"><b>{t("settings.rules.assistant.ready")}</b><span className="sub clamp-2">{proposal.summary}</span></span><Button size="sm" onClick={() => setReview(true)}>{t("settings.rules.assistant.review")}</Button></SetBlock>}

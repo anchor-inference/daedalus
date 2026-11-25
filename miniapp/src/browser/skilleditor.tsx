@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserStep, type BrowserWorkflow } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
+import { Button, Field, IconButton, Select } from "../ui/primitives";
 import { errorText, haptic } from "../ui";
 import { saveWorkflowSkill } from "./data";
 import { blocker, editableSteps, initialRow, isSecretRef, paramsOf, skillRequest, skillSlug, type SignIn, type SkillRow } from "./skilldraft";
@@ -59,11 +60,9 @@ export function SkillEditor({ group, recording, toast, onDone }: { group: string
         <b>{t("browser.skill.head")}</b>
       </div>
       <p className="sub bp-skill-lead">{t("browser.skill.lead")}</p>
-      <label className="bp-proc-label" htmlFor={`bp-skill-name-${recording.id}`}>{t("browser.skill.name")}</label>
-      <input id={`bp-skill-name-${recording.id}`} className="bp-proc-title bp-skill-name" value={name} maxLength={48} placeholder={t("browser.skill.name.placeholder")} onChange={(e) => setName(e.target.value)} />
-      {name && skillSlug(name) !== name && <span className="sub bp-skill-slug mono">{skillSlug(name)}</span>}
-      <label className="bp-proc-label" htmlFor={`bp-skill-desc-${recording.id}`}>{t("browser.skill.description")}</label>
-      <input id={`bp-skill-desc-${recording.id}`} className="bp-proc-title bp-skill-desc" value={description} maxLength={320} placeholder={t("browser.skill.description.placeholder")} onChange={(e) => setDescription(e.target.value)} />
+      <Field label={t("browser.skill.name")} id={`bp-skill-name-${recording.id}`} className="bp-skill-name" value={name} maxLength={48} placeholder={t("browser.skill.name.placeholder")} onChange={(e) => setName(e.target.value)}
+        hint={name && skillSlug(name) !== name ? <span className="bp-skill-slug mono">{skillSlug(name)}</span> : undefined} />
+      <Field label={t("browser.skill.description")} id={`bp-skill-desc-${recording.id}`} className="bp-skill-desc" value={description} maxLength={320} placeholder={t("browser.skill.description.placeholder")} onChange={(e) => setDescription(e.target.value)} />
       <ol className="bp-skill-steps">
         {steps.map((step) => {
           const row = rows.find((r) => r.n === step.n)!;
@@ -80,8 +79,8 @@ export function SkillEditor({ group, recording, toast, onDone }: { group: string
         ) : <span className="sub">{t("browser.skill.params.none")}</span>}
       </div>
       <div className="bp-proc-foot">
-        <button type="button" className="btn small primary bp-skill-save" disabled={busy || !!why} title={why ? t(why) : undefined} onClick={() => void save()}>{t(busy ? "browser.skill.saving" : "browser.skill.save")}</button>
-        <button type="button" className="btn small" disabled={busy} onClick={onDone}>{t("bs.notes.cancel")}</button>
+        <Button variant="primary" className="bp-skill-save" disabled={busy || !!why} onClick={() => void save()}>{t(busy ? "browser.skill.saving" : "browser.skill.save")}</Button>
+        <Button disabled={busy} onClick={onDone}>{t("bs.notes.cancel")}</Button>
         {why && <span className="sub bp-skill-why">{t(why)}</span>}
       </div>
     </div>
@@ -95,10 +94,7 @@ function SkillStepRow({ step, row, listId, onChange }: { step: BrowserStep; row:
       <div className="bp-skill-step-head">
         {step.action === "handoff" && <Icon name="lock" size={12} />}
         <span className="truncate bp-skill-step-words"><StepText step={step} /></span>
-        <button type="button" className="iconbtn bp-skill-drop" onClick={() => onChange({ keep: !row.keep })}
-          aria-label={t(row.keep ? "browser.skill.drop" : "browser.skill.keep")} title={t(row.keep ? "browser.skill.drop" : "browser.skill.keep")}>
-          <Icon name={row.keep ? "trash" : "undo"} size={13} />
-        </button>
+        <IconButton icon={row.keep ? "trash" : "undo"} size={28} className="bp-skill-drop" label={t(row.keep ? "browser.skill.drop" : "browser.skill.keep")} onClick={() => onChange({ keep: !row.keep })} />
       </div>
       {row.keep && step.action === "type" && (
         <div className="bp-skill-field">
@@ -120,11 +116,12 @@ function SkillStepRow({ step, row, listId, onChange }: { step: BrowserStep; row:
       )}
       {row.keep && step.action === "handoff" && (
         <div className="bp-skill-signin">
-          <select className="bp-skill-mode" value={row.signin} aria-label={t("browser.skill.signin")} onChange={(e) => onChange({ signin: e.target.value as SignIn })}>
-            <option value="operator">{t("browser.skill.signin.operator")}</option>
-            {(step.reason ?? "login") === "login" && <option value="saved">{t("browser.skill.signin.saved")}</option>}
-            {!!step.fields?.length && <option value="secrets">{t("browser.skill.signin.secrets")}</option>}
-          </select>
+          <Select<SignIn> className="bp-skill-mode" size="md" value={row.signin} label={t("browser.skill.signin")} onChange={(signin) => onChange({ signin })}
+            options={[
+              { id: "operator", label: t("browser.skill.signin.operator") },
+              ...((step.reason ?? "login") === "login" ? [{ id: "saved" as SignIn, label: t("browser.skill.signin.saved") }] : []),
+              ...(step.fields?.length ? [{ id: "secrets" as SignIn, label: t("browser.skill.signin.secrets") }] : []),
+            ]} />
           {row.signin === "secrets" && step.fields?.map((field, i) => (
             <label key={i} className="bp-skill-secret">
               <span className="sub truncate">{field.name || field.role}</span>

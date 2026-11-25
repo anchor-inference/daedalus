@@ -111,3 +111,17 @@ def test_prompt_change_view_requires_authentication(tmp_path: Any) -> None:
         response = client.get("/api/prompt-change", headers=HEAD)
         assert response.status_code == 200
         assert response.json() == {"proposal": None, "models": []}
+
+
+@pytest.mark.asyncio
+async def test_the_rules_assistant_thinks_only_as_hard_as_it_was_asked() -> None:
+    revised = "Working rules:\n- Be concise."
+    for effort, expected in (("", {"enable_thinking": False, "thinking_off": True}), ("high", {"enable_thinking": True, "reasoning_effort": "high"})):
+        provider = Provider([("ProposeWorkingRules", {"rules": revised, "summary": "Shorter."})])
+        instance = planner(provider)
+        await instance.start("be shorter", "test", effort=effort)
+        await instance.task
+        extra = provider.requests[0].extra
+        assert {key: extra[key] for key in expected} == expected
+        # A thinking call is given room for the thinking, up to what the model can write.
+        assert provider.requests[0].max_tokens == (16_000 if effort else 12_000)

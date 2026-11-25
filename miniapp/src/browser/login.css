@@ -7,7 +7,7 @@
 .login-label { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .login-private { color: var(--fg-3); }
 .login-saved { color: var(--fg-2); }
-.login-save { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); }
+.login-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); }
 .login-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .login-actions.end { justify-content: flex-end; margin-top: 0; }
 .login-actions .grow { flex: 1; }

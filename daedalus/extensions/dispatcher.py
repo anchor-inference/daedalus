@@ -244,6 +244,12 @@ class Dispatcher:
             return None
         return self.manager.config.dispatcher_preset()
 
+    def effort_for(self, state: SessionState) -> str | None:
+        """The manager's effort hook: the main orchestrator thinks as Settings say, as it runs their model."""
+        if not state.metadata.get("dispatcher"):
+            return None
+        return self.manager.config.dispatcher.effort
+
     async def _sync_model(self) -> None:
         """Write the effective preset on the session, so the chat's model chip shows what it runs; a
         change made in Settings reaches the chip at the next turn."""
@@ -276,6 +282,21 @@ class Dispatcher:
         else:
             self.manager.config.dispatcher.preset = raw["dispatcher"]["preset"]
         await self._sync_model()
+        return True
+
+    async def effort_chosen(self, session_id: str, effort: str) -> bool:
+        """The composer's effort on the main chat writes the Settings choice, as its model chip does."""
+        state = await self.manager.get_state(session_id)
+        if state is None or not state.metadata.get("dispatcher"):
+            return False
+        config = getattr(self.app, "config", None) or self.manager.config
+        raw = config.model_dump(mode="json")
+        raw["dispatcher"]["effort"] = effort
+        save = getattr(self.app, "save_config", None)
+        if save is not None:
+            await save(type(config).model_validate(raw))
+        else:
+            self.manager.config.dispatcher.effort = effort
         return True
 
     # -- what it sees ----------------------------------------------------------------------------
@@ -625,6 +646,7 @@ class Dispatcher:
         manager.service_hooks["dispatcher"] = self.service
         manager.turn_notes_hooks.append(self.turn_notes)
         manager.preset_hooks.append(self.preset_for)
+        manager.effort_hooks.append(self.effort_for)
         manager.on_finished(self.on_run_finished)
         manager.delete_hooks.append(self.on_session_deleted)
         notifications = self.app.notifications

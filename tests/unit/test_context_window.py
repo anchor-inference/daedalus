@@ -25,6 +25,7 @@ from daedalus.host.config_validation import ConfigConflict, config_revision
 from daedalus.providers import context_window as cw
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
 from daedalus.providers.registry import ProviderRegistry
+from tests.unit.test_providers_admin import FakeHealth
 
 # -- what each provider's listing says -------------------------------------------------------------
 
@@ -325,6 +326,7 @@ class _Providers:
 class _Manager:
     def __init__(self, providers: _Providers) -> None:
         self.providers = providers
+        self.model_health = FakeHealth()
 
     async def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
         return []

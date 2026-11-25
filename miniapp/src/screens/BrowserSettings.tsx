@@ -22,6 +22,7 @@ import { timeAgo } from "../ui/components";
 import { Button, confirmDialog, Dot, Select, Switch } from "../ui/primitives";
 import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { ModelPicker, type ModelCatalogue } from "../modelitems";
+import { WithEffort } from "../taskeffort";
 import { ProcedureEditor } from "../browser/steps";
 import { DEFAULT_USER, YourChrome } from "../browser/yourchrome";
 
@@ -385,7 +386,9 @@ function Monitor({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Parti
       </Row>
       <SetBlock data-setting="browser.injection_monitor_preset">
         <label className="field-label" htmlFor="browser-monitor-model">{t("bs.monitor.model")}</label>
-        <ModelPicker id="browser-monitor-model" label={t("bs.monitor.model")} catalogue={catalogue} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
+        <WithEffort id="browser-monitor-effort" value={b.injection_monitor_effort} onChange={(injection_monitor_effort) => set({ injection_monitor_effort })} fallback="off">
+          <ModelPicker id="browser-monitor-model" label={t("bs.monitor.model")} catalogue={catalogue} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
+        </WithEffort>
       </SetBlock>
     </SetGroup>
   );
@@ -396,7 +399,9 @@ function Reading({ b, set, catalogue }: { b: BrowserSettings; set: (patch: Parti
     <SetGroup title={t("bs.agent.title")} help={t("bs.agent.sub")} className="bs-reading">
       <SetBlock data-setting="browser.extract_preset">
         <label className="field-label" htmlFor="browser-extract-model">{t("bs.agent.extract")}</label>
-        <ModelPicker id="browser-extract-model" label={t("bs.agent.extract")} catalogue={catalogue} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
+        <WithEffort id="browser-extract-effort" value={b.extract_effort} onChange={(extract_effort) => set({ extract_effort })} fallback="off">
+          <ModelPicker id="browser-extract-model" label={t("bs.agent.extract")} catalogue={catalogue} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} defaultOption={{ label: t("bs.monitor.model.auto") }} />
+        </WithEffort>
       </SetBlock>
       <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")} data-setting="browser.point_clicks">
         <Switch checked={b.point_clicks} onChange={(point_clicks) => set({ point_clicks })} label={t("bs.agent.point")} />

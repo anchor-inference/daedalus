@@ -32,7 +32,7 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 SHOTS = os.environ.get("SHOTS", "")
-ROWS = ["answer_language", "translation.operator_language", "translation.agent_language", "translation.preset", "translation.timeout_seconds"]
+ROWS = ["answer_language", "translation.operator_language", "translation.agent_language", "translation.preset", "translation.fallback_preset", "translation.blocking_timeout_seconds", "translation.timeout_seconds"]
 WORDS = ["translate", "translation", "translator", "language", "перевод", "переводчик", "язык"]
 TITLE = {"en": "Translation", "ru": "Перевод"}
 
@@ -101,7 +101,7 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     # The translator is a model chosen from a list, as the value at the end of its row.
     preset = page.locator('[data-setting="translation.preset"]')
     preset.scroll_into_view_if_needed()
-    trigger = preset.locator(".dropdown-btn")
+    trigger = preset.locator(".dropdown-btn").first
     if not trigger.count():
         say("the translator is not chosen from a list")
     else:

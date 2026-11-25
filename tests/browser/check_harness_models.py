@@ -77,25 +77,31 @@ def ticked(page: Page) -> list[str]:
 
 
 def model_select(page: Page) -> dict[str, list[str]]:
-    """The hiring form's model options by group; ungrouped options under the empty name."""
-    return page.eval_on_selector("#staff-model", """select => {
+    """The hiring form's model options by group (the line each says under its name); ungrouped
+    options under the empty name. The list is the Select's, drawn only while it is open."""
+    page.locator("#staff-model").click()
+    page.wait_for_selector(".dropdown-list .dropdown-item", timeout=5000)
+    out = page.eval_on_selector_all(".dropdown-list .dropdown-item", """items => {
         const out = {};
-        for (const option of select.options) {
-            if (!option.value) continue;
-            const group = option.parentElement.tagName === 'OPTGROUP' ? option.parentElement.label : '';
-            (out[group] = out[group] || []).push(option.value);
+        for (const item of items) {
+            if (!item.dataset.value) continue;
+            const group = item.querySelector('.sub')?.textContent ?? '';
+            (out[group] = out[group] || []).push(item.dataset.value);
         }
         return out;
     }""")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".dropdown-list", state="detached", timeout=5000)
+    return out
 
 
 def hiring_models(page: Page, lang: str) -> dict[str, list[str]]:
     page.goto(f"{BASE}/project/{P1}/team?token=t&lang={lang}")
-    page.wait_for_selector(".pagehead-actions .iconbtn.primary", timeout=15000)
-    page.locator(".pagehead-actions .iconbtn.primary").click()
+    page.wait_for_selector(".pagehead-actions .btn.primary", timeout=15000)
+    page.locator(".pagehead-actions .btn.primary").click()
     page.wait_for_selector(".staff-sheet .executor", timeout=5000)
     page.locator(".staff-sheet .executor", has_text="Claude Code").click()
-    page.wait_for_selector("select#staff-model", timeout=5000)
+    page.wait_for_selector("#staff-model.dropdown-btn", timeout=5000)
     return model_select(page)
 
 

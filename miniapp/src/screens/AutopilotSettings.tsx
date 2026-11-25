@@ -10,6 +10,7 @@ import { api, type AutopilotOverview, type Settings, type UserStyle } from "../a
 import { plural, t } from "../i18n";
 import { NumRow, Row, SetBlock, SetGroup } from "../settingsrow";
 import { ModelChoice } from "../modelchoice";
+import { WithEffort } from "../taskeffort";
 import { Button, Switch, confirmDialog } from "../ui/primitives";
 import { errorText } from "../ui";
 import { timeAgo } from "../ui/components";
@@ -31,8 +32,10 @@ export function AutopilotSettings({ s, save }: SaveProps) {
         <Switch checked={pilot.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.autopilot.enabled")} />
       </Row>
       <Row title={t("settings.autopilot.preset")} desc={t("settings.autopilot.preset.sub")} stack data-setting="autopilot.preset">
-        <ModelChoice id="autopilot-preset" label={t("settings.autopilot.preset")} catalogue={s} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
-          defaultOption={{ label: t("settings.autopilot.preset.same") }} />
+        <WithEffort id="autopilot-effort" value={pilot.effort} onChange={(effort) => put({ effort })} fallback="off">
+          <ModelChoice id="autopilot-preset" label={t("settings.autopilot.preset")} catalogue={s} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
+            defaultOption={{ label: t("settings.autopilot.preset.same") }} />
+        </WithEffort>
       </Row>
       <NumRow id="autopilot-turns" setting="autopilot.max_continuations" title={t("settings.autopilot.turns")} desc={t("settings.autopilot.turns.sub")}
         value={pilot.max_continuations} min={0} max={20} step={1} onSave={(max_continuations) => put({ max_continuations })} />

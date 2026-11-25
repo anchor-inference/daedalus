@@ -144,8 +144,10 @@ def desktop(page: Page, lang: str) -> None:
     expect(rows).to_have_count(1)
     row = rows.first
     expect(row).to_have_attribute("data-project", PID)
-    expect(row.locator(".orch-row-meta")).to_contain_text(words["staff"])
-    expect(row.locator(".orch-row-meta")).to_contain_text(words["working"])
+    # One line a project: its state at the right edge, the team's size and who works in its tooltip.
+    expect(row).to_have_attribute("title", re.compile(words["staff"]))
+    expect(row).to_have_attribute("title", re.compile(words["working"]))
+    assert row.evaluate("el => el.getBoundingClientRect().height") <= 32, "a project is one 32 px row"
     expect(row.locator(".needs-badge")).to_have_text("1")
     expect(orch.locator(f"[data-project='{GARDEN}']")).to_have_count(0)
     assert page.evaluate("localStorage.getItem('daedalus.mode')") == "orchestration"

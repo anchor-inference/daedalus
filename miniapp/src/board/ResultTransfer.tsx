@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 
@@ -57,15 +58,12 @@ export function ResultTransfer({ projectId, artifacts, toast }: { projectId: str
     <b>{t("transfer.title")}</b>
     <p className="sub">{t("transfer.intro")}</p>
     <label className="field">{t("transfer.artifact")}
-      <select className="field" value={artifactId} onChange={(event) => { setArtifactId(event.target.value); operation.current = null; setConflict(false); }}>
-        {artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.artifact_key}</option>)}
-      </select>
+      <Select label={t("transfer.artifact")} size="md" className="wide" value={artifactId} onChange={(id) => { setArtifactId(id); operation.current = null; setConflict(false); }}
+        options={artifacts.map((artifact) => ({ id: artifact.id, label: artifact.artifact_key }))} />
     </label>
     <label className="field">{t("transfer.host")}
-      <select className="field" value={hostId} onChange={(event) => { setHostId(event.target.value); operation.current = null; setConflict(false); }}>
-        <option value="">{t("transfer.chooseHost")}</option>
-        {offered.map((host) => <option key={host.host_id} value={host.host_id}>{host.label}</option>)}
-      </select>
+      <Select label={t("transfer.host")} size="md" className="wide" value={hostId} onChange={(id) => { setHostId(id); operation.current = null; setConflict(false); }}
+        options={[{ id: "", label: t("transfer.chooseHost") }, ...offered.map((host) => ({ id: host.host_id, label: host.label }))]} />
     </label>
     {(offline || hosts.error || revision.error || readiness.error) && <p className="result-warning" role="status">{t("transfer.unconfirmed")}</p>}
     {hosts.data && offered.length === 0 && <p className="sub">{t("transfer.noHost")}</p>}

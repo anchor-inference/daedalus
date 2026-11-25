@@ -17,6 +17,7 @@ import { DICT, t } from "./i18n";
 import { useQuery } from "./store";
 import { Row, SetBlock, SetGroup } from "./settingsrow";
 import { ModelChoice } from "./modelchoice";
+import { WithEffort } from "./taskeffort";
 import { Select, Switch } from "./ui/primitives";
 import { timeAgo } from "./ui/components";
 import { go } from "./ui/index";
@@ -98,11 +99,22 @@ export function ActionRules({ s, save }: { s: Settings; save: (patch: Partial<Se
       </SetGroup>
       <SetGroup title={t("rules.review.title")} help={t("rules.review.sub")}>
         <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
-          <ModelChoice id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
+          <WithEffort id="action-review-effort" value={current.review_effort} onChange={(review_effort) => void put({ review_effort })} fallback="off">
+            <ModelChoice id="action-review-model" label={t("rules.review.model")} catalogue={s} value={current.review_preset} onChange={(review_preset) => void put({ review_preset })} defaultOption={{ label: t("rules.model.auto") }} />
+          </WithEffort>
         </Row>
         <Row title={t("rules.injection")} desc={t("rules.injection.sub")}>
           <Switch checked={current.injection_model} onChange={(injection_model) => void put({ injection_model })} label={t("rules.injection")} />
         </Row>
+        {/* The check's model had no row at all, so it could be chosen only in the file; its effort
+            beside it would have had nothing to stand beside. Shown while the check is on. */}
+        {current.injection_model && (
+          <Row title={t("rules.injection.model")} stack data-setting="action_rules.injection_preset">
+            <WithEffort id="action-injection-effort" value={current.injection_effort} onChange={(injection_effort) => void put({ injection_effort })} fallback="off">
+              <ModelChoice id="action-injection-model" label={t("rules.injection.model")} catalogue={s} value={current.injection_preset} onChange={(injection_preset) => void put({ injection_preset })} defaultOption={{ label: t("rules.model.auto") }} />
+            </WithEffort>
+          </Row>
+        )}
       </SetGroup>
       <ReviewLog entries={info.data?.log ?? null} />
     </>

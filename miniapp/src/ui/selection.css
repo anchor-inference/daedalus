@@ -55,6 +55,8 @@
 .sel-fact { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .sel-row.active .sel-fact, .sel-row:hover .sel-fact { background: var(--surface-4); }
+.sel-fact.alert.bad { color: var(--bad); }
+.sel-fact.alert.warn { color: var(--warn); }
 
 .sel-empty { padding: var(--space-2); }
 
@@ -106,3 +108,12 @@
 .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) { grid-template-columns: minmax(0, 1fr); }
 .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
 .settings-row-ctl > :has(.sel) { flex: 1 1 100%; min-width: 0; }
+
+/* A task's model and how hard that model thinks, as one control of its row: the effort a line under
+   the model, its name on the left and its compact list on the right, the way a settings card's row
+   reads. A second in-place list under the first made every task two pickers tall. */
+.task-model { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.task-effort { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row-h); min-width: 0; }
+.task-effort-title { color: var(--fg-2); font-size: var(--fs-13); }
+.task-effort-value .dropdown-btn { border-color: transparent; color: var(--fg-2); font-weight: 400; }
+.task-effort-value .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }

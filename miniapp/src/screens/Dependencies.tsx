@@ -5,6 +5,7 @@ import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
 import { Badge, Button, Field, Select, Switch } from "../ui/primitives";
+import { WithEffort } from "../taskeffort";
 import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
@@ -27,6 +28,7 @@ export function DependenciesTab() {
   const [offline, setOffline] = useState(false);
   const [request, setRequest] = useState("");
   const [preset, setPreset] = useState("");
+  const [effort, setEffort] = useState("");
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(false);
   const [accepted, setAccepted] = useState(false);
@@ -134,13 +136,15 @@ export function DependenciesTab() {
         {/* The planner's model is a setting of the request, so it is a row like every other choice. */}
         <Row title={t("deps.model")} data-setting="dependencies.model">
           {view.models.length
-            ? <Select id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} options={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+            ? <WithEffort id="dependency-effort" value={effort} onChange={setEffort} fallback="off" disabled={blocked}>
+                <Select id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked} onChange={setPreset} options={view.models.map((model) => ({ id: model.id, label: model.label }))} />
+              </WithEffort>
             : <span className="sub">{t("deps.noModels")}</span>}
         </Row>
         {proposal?.state === "failed" && <SetBlock><p className="sub attn" role="alert">{proposal.error}</p></SetBlock>}
         {proposal && <SetBlock><DependencyProgress value={proposal} active={planning} /></SetBlock>}
         <SetFoot>
-          <Button variant="primary" icon="bolt" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}>{t(planning ? "deps.planning" : "deps.prepare")}</Button>
+          <Button variant="primary" icon="bolt" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset, effort })}>{t(planning ? "deps.planning" : "deps.prepare")}</Button>
           {proposal && ["planning", "validating", "ready"].includes(proposal.state) && <Button disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</Button>}
           {proposal?.state === "ready" && <Button onClick={openReview}>{t("deps.review")}</Button>}
         </SetFoot>

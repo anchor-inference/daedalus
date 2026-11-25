@@ -344,7 +344,8 @@ def run() -> int:
         expect(authority).to_contain_text("Active approvals: 0")
         authority.get_by_text("Approve an action", exact=True).click()
         # The form opens on task assignment, which this project's coordinator is not offered.
-        authority.locator("select").first.select_option("planning")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='planning']").click()
         authority.get_by_role("button", name="Approve", exact=True).click()
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Couldn't confirm", timeout=5000)
@@ -352,9 +353,11 @@ def run() -> int:
         authority.get_by_role("button", name="Try again").click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[1] == authority_requests[0], "uncertain approval did not replay the exact request"
-        authority.locator("select").first.select_option("execution")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='execution']").click()
         expect(authority.get_by_role("button", name="Approve", exact=True)).to_be_disabled()
-        authority.locator("select").nth(1).select_option("t-owned")
+        authority.locator(".dropdown-btn").nth(1).click()
+        page.locator(".dropdown-list [role=option][data-value='t-owned']").click()
         authority.get_by_role("button", name="Approve", exact=True).click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("release its staff member or stop its bound execution")
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
@@ -367,7 +370,8 @@ def run() -> int:
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[-1]["expected_grant_generation"] == 1 and authority_requests[-1]["reason"] == "Reduce coordinator scope"
-        authority.locator("select").first.select_option("watch")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='watch']").click()
         expect(authority).to_contain_text("matching events may wake the coordinator")
         authority.get_by_role("button", name="Approve", exact=True).click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("without a new approval each time")

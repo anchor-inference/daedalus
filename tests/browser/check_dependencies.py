@@ -26,7 +26,7 @@ def run() -> None:
                         requests.append(path)
                         if path.endswith("/request"):
                             data = route.request.post_data_json
-                            assert data == {"request": "Add Pillow", "preset": "default"}
+                            assert data == {"request": "Add Pillow", "preset": "default", "effort": ""}
                             view["proposal"] = {"id": "request", "state": "ready", "request": data["request"], "explanation": "Pillow adds image processing.", "proposal": {"recipe": {"python": ["Pillow"], "system": []}, "patch": "--- deploy/dependencies/local.json\n+++ deploy/dependencies/local.json\n+ Pillow"}}
                         elif path.endswith("/cancel"):
                             view["proposal"]["state"] = "cancelled"

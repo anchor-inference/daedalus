@@ -356,37 +356,6 @@
 .loop-panel { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px 10px; margin-bottom: 8px; }
 .loop-instruction { color: var(--fg); white-space: pre-wrap; margin-bottom: 4px; }
 
-/* login */
-.gate { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); }
-/* A flow is taller than a sign-in box: it starts at the top and the page scrolls, rather than being
-   centred around a middle that leaves the first step above the fold. */
-.gate.tall { align-items: flex-start; height: 100dvh; height: var(--vh, 100dvh); overflow-y: auto; padding: clamp(20px, 4vh, 48px) clamp(14px, 3vw, 40px) 40px; }
-.login { width: 100%; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 28px 24px; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--drop-sm); }
-.login .lang { align-self: flex-end; margin: -12px -8px 0 0; }
-.login-logo { border-radius: 18px; }
-.login h1 { margin: 0; font-size: var(--fs-22); font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
-.login .sub.small { font-size: var(--fs-12); line-height: 1.45; }
-.login-methods { width: 100%; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
-.login-methods .btn.big { width: 100%; justify-content: center; min-height: var(--row-h-touch); font-size: var(--fs-15); gap: 8px; }
-.login-or { color: var(--fg-3); font-size: var(--fs-12); display: flex; align-items: center; gap: 12px; }
-.login-or::before, .login-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.login-widget { min-height: 48px; display: flex; justify-content: center; }
-.login-pair { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 6px; }
-.login-pair .share-field { display: flex; gap: 8px; }
-.login-pair .share-field .field { flex: 1; min-width: 0; }
-.login-pair .sub.small { margin: 2px 0 0; }
-.login-error { color: var(--bad); font-size: var(--fs-14); }
-.login-code .linkbtn { align-self: flex-start; }
-/* Two-factor enrolment. The code is drawn black on white in either theme: a scanner reads dark on
-   light, and an inverted code is one many authenticator apps refuse. */
-.totp-setup { display: flex; flex-direction: column; gap: 8px; }
-.totp-qr { width: 200px; max-width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); }
-.totp-secret { align-self: flex-start; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-14); letter-spacing: 0.04em; user-select: all; overflow-wrap: anywhere; }
-.totp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.totp-actions .field.totp-code { width: 12ch; flex: none; }
-.totp-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(17ch, 1fr)); gap: 4px 16px; margin: 0; padding-left: 2.2em; font-size: var(--fs-14); user-select: all; }
-.login-foot { margin-top: 8px; color: var(--fg-3); }
-
 /* rows in the Details and Jobs tabs */
 .wide-only { display: none; }
 .aside-row { display: flex; align-items: center; gap: 8px; min-height: var(--row-h-dense); font-size: var(--fs-13); color: var(--fg); width: 100%; background: none; border: 0; padding: 0; text-align: left; }

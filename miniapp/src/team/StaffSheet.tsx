@@ -6,8 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type StaffSessionView } from "../api";
 import { KeptList } from "../staff/StaffDetails";
 import { useQuery } from "../store";
-import { Sheet } from "../ui/dialogs";
-import { Icon } from "../icons";
+import { Button, Segmented, Select, Sheet } from "../ui/primitives";
 import { confirmAsync, errorText } from "../ui";
 import { t } from "../i18n";
 import { HarnessBadge, StaffAvatar } from "./parts";
@@ -180,7 +179,7 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
 
   const title = member ? member.name : t("team.hire.title");
   return (
-    <Sheet title={title} ariaLabel={member ? t("team.edit.for", { name: member.name }) : undefined} onClose={onClose} className="staff-sheet">
+    <Sheet size="md" title={title} ariaLabel={member ? t("team.edit.for", { name: member.name }) : undefined} onClose={onClose} className="staff-sheet">
       {member ? (
         <div className="staff-sheet-who">
           <StaffAvatar name={member.name} color={color || member.color} />
@@ -234,11 +233,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
         <div>
           <label className="field" htmlFor="staff-agent">{t(daedalus ? "team.persona" : "team.agent")}</label>
           {agents.length > 0 || daedalus ? (
-            <select id="staff-agent" className="field" value={agent} onChange={(e) => setAgent(e.target.value)}>
-              <option value="">{t(daedalus ? "team.persona.none" : "team.agent.default")}</option>
-              {agents.map((a) => <option key={a} value={a}>{a}</option>)}
-              {agent && !agents.includes(agent) && <option value={agent}>{agent}</option>}
-            </select>
+            <Select id="staff-agent" size="md" className="form-select" label={t(daedalus ? "team.persona" : "team.agent")} value={agent} onChange={setAgent}
+              options={[{ id: "", label: t(daedalus ? "team.persona.none" : "team.agent.default") }, ...agents.map((a) => ({ id: a, label: a })), ...(agent && !agents.includes(agent) ? [{ id: agent, label: agent }] : [])]} />
           ) : (
             <input id="staff-agent" className="field mono" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder={t("team.agent.default")} />
           )}
@@ -246,18 +242,15 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
         <div>
           <label className="field" htmlFor="staff-model">{t("team.model")}</label>
           {models.length > 0 || daedalus ? (
-            <select id="staff-model" className="field" value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">{daedalus && defaultModel ? t("team.model.default.named", { name: defaultModel }) : t("team.model.default")}</option>
-              {groups.others.length > 0 ? (
-                <>
-                  <optgroup label={t("team.model.offered")}>{groups.offered.map((m) => <option key={m} value={m}>{m}</option>)}</optgroup>
-                  <optgroup label={t("team.model.others")}>{groups.others.map((m) => <option key={m} value={m}>{m}</option>)}</optgroup>
-                </>
-              ) : (
-                models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)
-              )}
-              {model && !models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-            </select>
+            <Select id="staff-model" size="md" className="form-select" label={t("team.model")} value={model} onChange={setModel}
+              options={[
+                { id: "", label: daedalus && defaultModel ? t("team.model.default.named", { name: defaultModel }) : t("team.model.default") },
+                // The models the executor offers first, then the others it can run, each said under its name.
+                ...(groups.others.length > 0
+                  ? [...groups.offered.map((m) => ({ id: m, label: m, hint: t("team.model.offered") })), ...groups.others.map((m) => ({ id: m, label: m, hint: t("team.model.others") }))]
+                  : models.map((m) => ({ id: m.id, label: m.label }))),
+                ...(model && !models.some((m) => m.id === model) ? [{ id: model, label: model }] : []),
+              ]} />
           ) : (
             <input id="staff-model" className="field mono" value={model} onChange={(e) => setModel(e.target.value)} placeholder={t("team.model.default")} />
           )}
@@ -265,9 +258,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
         <div>
           <label className="field" htmlFor="staff-effort">{t("team.effort")}</label>
           {daedalus ? (
-            <select id="staff-effort" className="field" value={effort} onChange={(e) => setEffort(e.target.value)}>
-              {DAEDALUS_EFFORTS.map((value) => <option key={value} value={value}>{value ? t(`add.effort.${value}`) : t("team.effort.default")}</option>)}
-            </select>
+            <Select id="staff-effort" size="md" className="form-select" label={t("team.effort")} value={effort} onChange={setEffort}
+              options={DAEDALUS_EFFORTS.map((value) => ({ id: value, label: value ? t(`add.effort.${value}`) : t("team.effort.default") }))} />
           ) : (
             <input id="staff-effort" className="field mono" value={effort} onChange={(e) => setEffort(e.target.value)} placeholder={t("team.effort.default")} />
           )}
@@ -284,30 +276,19 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
       {daedalus ? (
         <div className="sub">{t("team.env.daedalus", { env: t(`team.env.${env}`) })}</div>
       ) : (
-        <div className="segmented" role="group" aria-label={t("team.env")}>
-          {(["container", "host"] as Env[]).map((value) => (
-            <button key={value} type="button" className={cliEnv === value ? "on" : ""} aria-pressed={cliEnv === value} onClick={() => setCliEnv(value)}>{t(`team.env.${value}`)}</button>
-          ))}
-        </div>
+        <Segmented label={t("team.env")} value={cliEnv} onChange={setCliEnv} options={(["container", "host"] as Env[]).map((value) => ({ id: value, label: t(`team.env.${value}`) }))} />
       )}
 
       <label className="field" htmlFor="staff-folder">{t("team.folder")}</label>
       {folders.length === 0 ? (
         <div className="sub attn">{t("team.folder.none", { env: t(`team.env.${env}`) })}</div>
       ) : (
-        <select id="staff-folder" className="field" value={folder?.id ?? ""} onChange={(e) => setFolderId(e.target.value === primaryId ? "" : e.target.value)}>
-          {folders.map((f) => (
-            <option key={f.id} value={f.id}>{f.label ? `${f.label} · ${f.path}` : f.path}</option>
-          ))}
-        </select>
+        <Select id="staff-folder" size="md" className="form-select" label={t("team.folder")} value={folder?.id ?? ""} onChange={(id) => setFolderId(id === primaryId ? "" : id)}
+          options={folders.map((f) => ({ id: f.id, label: f.label || f.path, hint: f.label ? f.path : undefined }))} />
       )}
 
       <label className="field">{t("team.isolation")}</label>
-      <div className="segmented" role="group" aria-label={t("team.isolation")}>
-        {ISOLATIONS.map((value) => (
-          <button key={value} type="button" className={isolation === value ? "on" : ""} aria-pressed={isolation === value} onClick={() => { setIsolation(value); setIsolationTouched(true); }}>{t(`team.isolation.${value}`)}</button>
-        ))}
-      </div>
+      <Segmented label={t("team.isolation")} value={isolation} onChange={(value) => { setIsolation(value); setIsolationTouched(true); }} options={ISOLATIONS.map((value) => ({ id: value, label: t(`team.isolation.${value}`) }))} />
       {worktreeProblem ? (
         <div className="sub attn">{worktreeProblem}</div>
       ) : isolation === "worktree" ? (
@@ -341,8 +322,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
       {member && <KeptFold member={member} />}
 
       <div className="sheet-foot">
-        {member ? <button className="btn danger" onClick={dismiss}><Icon name="trash" size={15} /> {t("team.dismiss")}</button> : <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>}
-        <button className="btn primary" onClick={save} disabled={!canSave}>{member ? t("common.save") : t("team.hire")}</button>
+        {member ? <Button variant="danger" icon="trash" onClick={dismiss}>{t("team.dismiss")}</Button> : <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>}
+        <Button variant="primary" onClick={save} disabled={!canSave}>{member ? t("common.save") : t("team.hire")}</Button>
       </div>
     </Sheet>
   );

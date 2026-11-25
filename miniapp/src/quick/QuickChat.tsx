@@ -523,12 +523,13 @@ export function QuickChat() {
         <span className="quick-hint" aria-hidden>{t("quick.hint")}</span>
       </div>
       {picker === "target" && (
-        <div className="quick-list" role="listbox" aria-label={t("quick.target.title")}>
+        <div className="quick-list combo-list" role="listbox" aria-label={t("quick.target.title")}>
           {targets.map((kind) => (
-            <button key={kind} type="button" role="option" aria-selected={kind === shown} className={`quick-option ${kind === shown ? "on" : ""}`}
+            <button key={kind} type="button" role="option" aria-selected={kind === shown} className="combo-item quick-option" data-selected={kind === shown ? "" : undefined}
               onClick={() => { setTarget(kind); setPicker(null); focus(); }}>
               <span className="quick-option-kind">{t(`quick.target.${kind}`)}</span>
               {kind !== "new" && <span className="quick-option-sub">{targetLabel(kind)}</span>}
+              {kind === shown && <Icon name="check" size={14} />}
             </button>
           ))}
         </div>
@@ -606,17 +607,17 @@ export function QuickChat() {
         </div>
       </div>
       {found && options > 0 && (
-        <div className="quick-list" role="listbox" aria-label={t(found.char === "@" ? "quick.mention.title" : "quick.skill.title")}>
+        <div className="quick-list combo-list" role="listbox" aria-label={t(found.char === "@" ? "quick.mention.title" : "quick.skill.title")}>
           {found.char === "@"
             ? mentions.map((item, index) => (
-              <button key={contextKey(item)} type="button" role="option" aria-selected={index === highlight} className={`quick-option ${index === highlight ? "on" : ""}`}
+              <button key={contextKey(item)} type="button" role="option" aria-selected={index === highlight} className="combo-item quick-option" data-highlighted={index === highlight ? "" : undefined}
                 onMouseDown={(e) => e.preventDefault()} onClick={() => complete(item)}>
                 <span className="quick-option-kind">{t(`quick.mention.${item.kind}`)}</span>
                 <span className="quick-option-sub">{contextLabel(item)}</span>
               </button>
             ))
             : skillHits.map((item, index) => (
-              <button key={item.id} type="button" role="option" aria-selected={index === highlight} className={`quick-option ${index === highlight ? "on" : ""}`}
+              <button key={item.id} type="button" role="option" aria-selected={index === highlight} className="combo-item quick-option" data-highlighted={index === highlight ? "" : undefined}
                 onMouseDown={(e) => e.preventDefault()} onClick={() => complete(item)}>
                 <span className="quick-option-kind mono">{item.name}</span>
                 <span className="quick-option-sub">{item.description}</span>

@@ -81,6 +81,12 @@ def sessions() -> list[dict[str, Any]]:
         _session("codex", "019b33d0-6c8e-7a2b-9d4f-1e3a5c7e9b02", f"{PROJECTS}/smart-home", "Why the reed switch does not wake it", minutes=60 * 24 * 7, messages=38, size=300 * 1024,
                  model="gpt-5.5-codex", project=HOME_PROJECT),
         _session("gemini", "6f2a1c9e-4b7d-4e2f-8a1c-0d3e5f7a9b24", f"{PROJECTS}/thesis-latex", "Bibliography in biblatex", minutes=60 * 24 * 9, messages=19, size=88 * 1024),
+        _session("grok", "8d3e5a17-92c4-4f0b-a6d1-3b7c9e1f5a22", f"{PROJECTS}/smart-home", "Dim the hallway lights after sunset", minutes=60 * 5, messages=47, size=260 * 1024,
+                 branch="main", model="grok-4.3", project=HOME_PROJECT),
+        _session("grok", "c41f6b09-7a2e-4d83-91bc-5e0a2d4f6c37", f"{PROJECTS}/esp32-door", "Debounce the reed switch in firmware", minutes=60 * 26, messages=29, size=140 * 1024, model="grok-4.3"),
+        _session("pi", "2026-11-20T09-14-02-418Z_4b1e7c3a", f"{PROJECTS}/smart-home", "Move the boiler schedule into a helper", minutes=60 * 24 * 3, messages=33, size=180 * 1024,
+                 branch="boiler", model="claude-sonnet-5", project=HOME_PROJECT),
+        _session("pi", "2026-11-12T18-40-55-102Z_9a6d2f4c", f"{PROJECTS}/daedalus", "Check the websocket reconnect backoff", minutes=60 * 24 * 12, messages=21, size=96 * 1024, model="claude-sonnet-5"),
     ]
 
 
@@ -89,6 +95,8 @@ HARNESSES = [
     {"id": "codex", "name": "Codex", "found": True, "root": "~/.codex/sessions", "version": "0.160.0"},
     {"id": "gemini", "name": "Gemini CLI", "found": True, "root": "~/.gemini/tmp", "version": ""},
     {"id": "opencode", "name": "opencode", "found": True, "root": "~/.local/share/opencode", "version": ""},
+    {"id": "grok", "name": "Grok CLI", "found": True, "root": "~/.grok/sessions", "version": "0.9.2"},
+    {"id": "pi", "name": "pi", "found": True, "root": "~/.pi/agent/sessions", "version": "0.52.1"},
     {"id": "cursor", "name": "Cursor", "found": False, "root": "", "version": ""},
 ]
 NAMES = {row["id"]: row["name"] for row in HARNESSES}

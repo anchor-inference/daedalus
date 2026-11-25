@@ -1,0 +1,155 @@
+/* A project's board, drawn as the Board page draws its own (board.css): 36 px column heads with the
+   name and the count, cards of 12 px corners with their title, a coloured state line and one line of
+   who and how far. On a phone and in a narrow panel it is one list under chips; from 1024 px the
+   columns stand side by side and each scrolls with the page, so a long queue never hides the review. */
+.pboard-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.pboard-unknown-stops { min-width: 0; margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-12); }
+.pboard-unknown-stops > summary { cursor: pointer; color: var(--warn); font-weight: 600; }
+.pboard-unknown-stops > p { margin: 8px 0; }
+.pboard-unknown-row { min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.pboard-unknown-row:first-of-type { margin-top: 8px; }
+.pboard-unknown-row > details { margin: 6px 0; }
+.pboard-unknown-row > details summary { cursor: pointer; color: var(--fg-2); }
+.pboard-unknown-row dl { margin: 8px 0; }
+.pboard-unknown-row dl > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 6px; padding: 2px 0; }
+.pboard-unknown-row dt { color: var(--fg-3); }
+.pboard-unknown-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.pboard-unknown-stops > .linkbtn { margin-right: 12px; }
+.pboard-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.pboard .section-title.kanban-head, .pboard .section-title.pboard-fold { height: 36px; margin: 0; padding: 0 0 0 2px; align-items: center; gap: var(--space-2); }
+.pboard .section-title.kanban-head { background: var(--wash, var(--bg)); }
+.pboard .section-title .kanban-name { color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
+.pboard .section-title .kanban-n { color: var(--fg-3); font-size: var(--fs-13); font-weight: 400; }
+.pboard-list > .section-title.pboard-fold { margin-top: var(--space-2); }
+/* A column with nothing in it is the Board's dashed 56 px box (`.kanban-empty`); in the one list of a
+   phone or the panel it is a quiet line under its heading. */
+.pboard-list .pboard-none { height: auto; border: 0; justify-content: flex-start; padding: 6px 4px; font-size: var(--fs-12); }
+.pboard-fold { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-12); color: var(--fg-2); align-items: center; }
+.pboard-fold .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
+.pboard-fold[aria-expanded="true"] .ic { transform: none; }
+.pboard-chips .chip.need:not([aria-pressed="true"]) { color: var(--warn); }
+/* The card's box is the Board's `.task-card`; what is here is what only a project's card carries. */
+.pcard { min-width: 0; }
+.pcard.need { cursor: default; }
+.pcard.need:hover { background: transparent; border-color: var(--line); }
+.pcard-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.pcard-head .task-card-title { flex: 1; min-width: 0; }
+/* The issue number is a link inside a clickable card; it keeps the chip's look and does not shrink away. */
+.pcard-issue { flex: none; text-decoration: none; color: inherit; font-variant-numeric: tabular-nums; }
+.pcard-issue:hover { text-decoration: underline; }
+.issue-import-repo { display: flex; gap: var(--space-2); align-items: center; }
+.issue-import-repo input.field { flex: 1; min-width: 0; }
+.issue-import-repo .btn { flex: none; }
+.issue-import-head { display: flex; align-items: center; gap: var(--space-2); margin-top: 12px; }
+.issue-row { align-items: flex-start; margin: 8px 0 0; }
+.issue-row input { margin-top: 2px; flex: none; }
+.issue-row.is-off { cursor: default; }
+.issue-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.issue-row-title { overflow-wrap: anywhere; }
+.issue-row-number { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pboard-import { display: block; margin: 0 0 8px; }
+.pcard-line { font-size: var(--fs-12); min-width: 0; color: var(--fg-2); }
+.pcard-line.task-card-chat > .ic { flex: none; color: var(--fg-3); }
+.pcard-meta.task-card-meta { gap: var(--space-2); }
+.pcard-meta > .truncate { min-width: 0; }
+.task-card-state.pcard-status > .truncate { min-width: 0; }
+.pcard-open { color: var(--fg-2); }
+.pcard-who { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.pcard-short { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); flex: none; }
+.pcard-branch { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-2); min-width: 0; display: block; }
+.pcard .btn.small { flex: none; }
+.btn.warn { color: var(--warn); background: transparent; border-color: var(--line); font-weight: 500; }
+.btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
+.host-capacity { margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
+.host-capacity.waiting { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); color: var(--fg); }
+.host-capacity-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.host-capacity-line > span { min-width: 0; overflow-wrap: anywhere; }
+.host-capacity-details { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+.host-capacity-details ol { margin: 6px 0 0; padding-left: 22px; }
+.host-capacity-details li { padding: 2px 0; }
+.task-workflow, .task-context { border-top: 1px solid var(--line); padding: 12px 0; }
+/* The section-title carries a two-pixel inline margin on board sections; alongside a full-width
+   button it widened the sheet's scroll area on a phone. Keep the whole heading tappable. */
+.task-workflow > .section-title, .task-context > .section-title { width: 100%; margin-inline: 0; text-align: left; }
+.task-workflow-body { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-body p { margin: 0; }
+.task-workflow-create, .task-workflow-run { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-step { display: grid; grid-template-columns: auto minmax(100px, 1fr) minmax(120px, 2fr); gap: 6px; align-items: center; margin: 8px 0; }
+.task-workflow-step > .field { min-width: 0; }
+.task-workflow-step > button, .task-workflow-step > .task-workflow-receipt { grid-column: 2 / -1; justify-self: start; }
+.task-workflow .pboard-item { min-width: 0; }
+@media (max-width: 440px) { .task-workflow-step { grid-template-columns: auto minmax(0, 1fr); } .task-workflow-step > .dropdown, .task-workflow-step > button { grid-column: 2; } }
+/* A chooser in a task's form or tool spans its column, as the field above or below it does; its words
+   are a member's name, a run, a file or a criterion, which a 340 px cap cut short. */
+.dropdown.wide { display: flex; width: 100%; max-width: 100%; }
+.dropdown.wide .dropdown-btn { width: 100%; max-width: 100%; }
+.dropdown.wide .dropdown-value { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.task-workflow-step > .dropdown { min-width: 0; }
+.task-workflow-step > .dropdown .dropdown-btn { width: 100%; }
+.pboard-moves { margin: 0 0 6px; flex-wrap: wrap; }
+.pboard-brief { border: 0; padding: 0; margin: 0; min-width: 0; }
+.pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.pboard-moves .sub { align-self: center; }
+.pboard-sheet textarea.field { resize: vertical; font: inherit; }
+.pboard-deps { margin-bottom: 4px; min-width: 0; }
+.pboard-notes { max-height: 180px; overflow: auto; }
+.pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.pcard-review .chip { flex: none; }
+.pcard-accept .ic { width: 11px; height: 11px; }
+/* The acceptance and the requirements of a card in its sheet: read-only blocks drawn like the review's.
+   Each item is its label in a narrow column and everything about it beside, so the text of a check
+   lines up under itself on a phone instead of wrapping back under "C1". */
+.pboard-contract { margin-top: 12px; }
+.pboard-contract-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.pboard-contract-head .pboard-contract-title { margin: 0; }
+.pboard-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--fs-13); }
+.pboard-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: baseline; min-width: 0; }
+.pboard-item > * { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.pboard-item-line { display: flex; align-items: baseline; gap: 6px; }
+.pboard-item-text { flex: 1; min-width: 0; }
+.pboard-item-line .chip { flex: none; }
+.pboard-item .sub { font-size: var(--fs-12); }
+.pboard-item.superseded .pboard-item-text, .pboard-item.withdrawn .pboard-item-text { text-decoration: line-through; color: var(--fg-3); }
+.pboard-item.superseded, .pboard-item.withdrawn { opacity: 0.75; }
+.pboard-req-file { display: flex; align-items: center; gap: 4px; }
+.pboard-req-file .ic { flex: none; }
+.pboard-deliveries { display: flex; flex-wrap: wrap; gap: 4px; }
+.pboard-deliveries .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The review of a staff branch in the task sheet: a bordered block over the move buttons, every row
+   free to shrink so a long branch name or path never widens the sheet on a phone. */
+.review-panel, .pboard-contract { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.review-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); }
+.review-head .pcard-branch { flex: 0 1 auto; }
+.review-stat { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-13); }
+.review-commits, .review-files, .review-receipts, .review-blockers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); min-width: 0; }
+.review-commits li, .review-files li, .review-receipts li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.review-commits li > .truncate, .review-files li > .truncate, .review-receipts li > .truncate { flex: 1; min-width: 0; }
+.review-files li > .num { flex: none; }
+.review-receipts li.ok { color: var(--ok); }
+.review-receipts li.bad, .review-blockers li.bad { color: var(--bad); }
+.review-blockers li.attn { color: var(--warn); }
+.review-blockers li::before { content: "· "; }
+.review-actions { flex-wrap: wrap; margin: 2px 0 0; }
+.review-why { font-size: var(--fs-12); }
+.review-reject { display: flex; flex-direction: column; gap: 4px; }
+.review-reject textarea.field { resize: vertical; font: inherit; }
+.review-diff .diff-view { font-size: var(--fs-mono); }
+.review-diff-scope { max-width: 420px; margin-bottom: 8px; }
+.review-base { font-size: var(--fs-12); overflow-wrap: anywhere; }
+.review-why.bad { color: var(--bad); }
+.review-why.attn { color: var(--warn); }
+.review-ci-setup { min-width: 0; font-size: var(--fs-12); }
+.review-ci-setup summary { color: var(--link); cursor: pointer; }
+.review-ci-fields { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+.review-ci-fields p { margin: 0; }
+.review-ci-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.review-ci-fields .field { width: 100%; min-width: 0; box-sizing: border-box; }
+.review-ci-fields textarea.field { resize: vertical; font: inherit; }
+.review-ci-fields .btn { align-self: flex-start; }
+@media (min-width: 1024px) {
+  .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)) minmax(180px, 0.8fr); gap: 12px; align-items: start; }
+  .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 0 0 8px; }
+  .pboard-col > .section-title.kanban-head { position: sticky; top: 0; z-index: 1; }
+}

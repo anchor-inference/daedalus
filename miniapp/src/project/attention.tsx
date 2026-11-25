@@ -9,14 +9,14 @@ import { askWords } from "../staff/model";
 import { StaffAvatar } from "../team/parts";
 import type { Staff } from "../team/team";
 import { Banner, EmptyState, SectionHeader, TopBar } from "../ui/phone";
-import { IconButton, Row } from "../ui/primitives";
+import { Button, IconButton, Row } from "../ui/primitives";
 import { DecisionSheet } from "./needs";
 import { useStreamUp } from "../events";
 import { clock, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { back as goBack, navigate, ORCHESTRATION, projectPagePath } from "../router";
 import { ProjectSettingsSheet } from "../projects";
-import { PageHeader } from "../shell";
+import { Page, PageHeader } from "../shell";
 import { useOffline, useQuery } from "../store";
 import { Skeleton } from "../ui/components";
 import { boardKey, staffKey, useProject } from "./data";
@@ -50,43 +50,51 @@ export function AttentionPage({ projectId, back, toast, phone = false }: { proje
     lastConfirmed={lastConfirmed} refresh={refresh} onBudget={project ? () => setSettingsOpen(true) : undefined}
     settings={settingsOpen && project ? <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => { setSettingsOpen(false); navigate(ORCHESTRATION); }} toast={toast} /> : null} />;
 
+  // The list page's groups, in the Inbox's order: what waits for an answer, then the results to
+  // review, then what is held up and the budget. Each item is a card with its kind in a coloured word,
+  // its title, its text and the one way on.
+  const holdups = otherActions.length + (budgetIssue ? 1 : 0);
   return <>
-    <PageHeader title={t("focus.nav.attention")} subtitle={project?.name} back={back ?? undefined} />
-    <main className="screen narrow focus-attention">
-      {uncertain && <div className="focus-attention-warning" role="status">{t("focus.attention.stale")} {Number.isFinite(lastConfirmed) && t("focus.attention.lastConfirmed", { time: relTime(new Date(lastConfirmed).toISOString()) })} <button type="button" className="linkbtn" onClick={refresh}>{t("common.retry")}</button></div>}
+    <PageHeader title={t("focus.nav.attention")} subtitle={project?.name} back={back ?? undefined}
+      actions={<IconButton icon="reload" label={t("pattn.refresh")} onClick={refresh} />} />
+    <Page width="list" className="focus-attention">
+      {uncertain && <div className="focus-attention-warning" role="status"><Icon name="alert" size={16} /><span className="grow">{t("focus.attention.stale")} {Number.isFinite(lastConfirmed) && t("focus.attention.lastConfirmed", { time: relTime(new Date(lastConfirmed).toISOString()) })}</span><Button size="sm" onClick={refresh}>{t("common.retry")}</Button></div>}
       {!known && !asks.error && !board.error && !next.error && !budget.error && <Skeleton rows={3} />}
-      {open.map((ask) => <section className="focus-attention-item" key={ask.id} aria-label={ask.heading || ask.title || ask.text}>
-        <div className="focus-attention-kind">{t(ask.kind === "permission" || ask.kind === "folder" ? "focus.attention.permission" : "focus.attention.question")} · {relTime(ask.created_at)}</div>
+      {open.length > 0 && <div className="orch-label"><span>{t("pattn.now")}</span><span className="orch-label-n">{open.length}</span></div>}
+      {open.map((ask) => <section className="focus-attention-item ask" key={ask.id} aria-label={ask.heading || ask.title || ask.text}>
+        <div className="focus-attention-kind attn">{t(ask.kind === "permission" || ask.kind === "folder" ? "focus.attention.permission" : "focus.attention.question")}<span className="focus-attention-age">{relTime(ask.created_at)}</span></div>
         <h2>{ask.heading || ask.title || ask.text}</h2>
         {(ask.heading || ask.title) && <p>{ask.text}</p>}
-        {ask.task_id && <button type="button" className="btn small ghost" onClick={() => navigate(projectPagePath(projectId, "board", { task: ask.task_id }))}>{t("focus.attention.task")}</button>}
         <AskAnswers ask={ask} projectId={projectId} toast={toast} unverified={uncertain} />
+        {ask.task_id && <div className="focus-attention-foot"><Button size="sm" variant="quiet" icon="board" onClick={() => navigate(projectPagePath(projectId, "board", { task: ask.task_id }))}>{t("focus.attention.task")}</Button></div>}
       </section>)}
-      {review.map((task) => <section className="focus-attention-item" key={task.id}>
-        <div className="focus-attention-kind">{t("focus.attention.review")}</div>
+      {review.length > 0 && <div className="orch-label"><span>{t("pattn.review")}</span><span className="orch-label-n">{review.length}</span></div>}
+      {review.map((task) => <section className="focus-attention-item review" key={task.id}>
+        <div className="focus-attention-kind live">{t("focus.attention.review")}</div>
         <h2>{task.title}</h2>
         <p>{task.acceptance || t("focus.attention.reviewHint")}</p>
-        <button type="button" className="btn primary" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id }))}>{t("focus.attention.inspect")}</button>
+        <div className="focus-attention-foot"><Button size="sm" variant="primary" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id }))}>{t("focus.attention.inspect")}</Button></div>
       </section>)}
+      {holdups > 0 && <div className="orch-label"><span>{t("pattn.blocked")}</span><span className="orch-label-n">{holdups}</span></div>}
       {otherActions.map((action) => <section className="focus-attention-item" key={action.action_id}>
-        <div className="focus-attention-kind">{t(action.enabled ? `focus.attention.action.${action.kind}` : "focus.attention.waiting")}</div>
+        <div className={`focus-attention-kind ${action.enabled ? "attn" : ""}`}>{t(action.enabled ? `focus.attention.action.${action.kind}` : "focus.attention.waiting")}</div>
         <h2>{titles.get(action.task_id) || t("focus.attention.task")}</h2>
         {!action.enabled && <p className="sub">{t("focus.attention.blocked", {
           reason: actionBlockerKeys(action.blockers).map((key) => t(key)).join(" · "),
         })}</p>}
-        <button type="button" className="btn small" onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.task")}</button>
+        <div className="focus-attention-foot"><Button size="sm" onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.task")}</Button></div>
       </section>)}
       {budgetIssue && <section className="focus-attention-item">
-        <div className="focus-attention-kind">{t("focus.attention.budget")}</div>
+        <div className="focus-attention-kind attn">{t("focus.attention.budget")}</div>
         <h2>{t(`focus.attention.budget.${budgetIssue.reason}`)}</h2>
         <p>{t("focus.attention.budget.scope", { scope: budgetIssue.scopes.map((scope) => t(`budget.${scope}`)).join(" · ") })}</p>
         <p className="sub">{t("focus.attention.budget.notReceipt")}</p>
-        {project && <button type="button" className="btn small" onClick={() => setSettingsOpen(true)}>{t("focus.attention.budget.inspect")}</button>}
+        {project && <div className="focus-attention-foot"><Button size="sm" onClick={() => setSettingsOpen(true)}>{t("focus.attention.budget.inspect")}</Button></div>}
       </section>}
-      {known && !uncertain && open.length === 0 && review.length === 0 && otherActions.length === 0 && !budgetIssue && <div className="empty"><b>{t("focus.attention.empty")}</b></div>}
-      {!known && (asks.error || board.error || next.error || budget.error) && <button type="button" className="btn" onClick={refresh}>{t("common.retry")}</button>}
+      {known && !uncertain && open.length === 0 && review.length === 0 && otherActions.length === 0 && !budgetIssue && <div className="empty"><Icon name="check" size={24} /><b>{t("focus.attention.empty")}</b><div>{t("pattn.empty.sub")}</div></div>}
+      {!known && (asks.error || board.error || next.error || budget.error) && <Button onClick={refresh}>{t("common.retry")}</Button>}
       {settingsOpen && project && <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => { setSettingsOpen(false); navigate(ORCHESTRATION); }} toast={toast} />}
-    </main>
+    </Page>
   </>;
 }
 

@@ -1,35 +1,30 @@
 /* ── add a model: the first-run flow and the same three steps from Settings ───────────────── */
-/* The flow is its own page when a fresh install opens it, wide enough that the endpoints and the
-   models are read across rather than scrolled through, and capped so a 2560 px window does not
-   stretch one sentence across a metre of glass. */
-.onboard { width: min(100%, 1680px); margin-inline: auto; }
-.onboard-head { display: flex; align-items: center; gap: 14px; padding: 0 2px 18px; }
-.onboard-head h1 { margin: 0; font-size: clamp(22px, 2.2vw, 28px); font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
-.onboard-head .sub { margin-top: 3px; }
-.onboard-logo { border-radius: var(--radius-sm); flex: none; }
-.onboard-head .lang { flex: none; align-self: flex-start; }
+/* The flow is one centred column when a fresh install opens it, the start page's own: the sentence at
+   28 px, then the steps under it as labelled lists. It is the conversation's width (--chat-w) and no
+   wider, so an endpoint is read down a short line rather than across a metre of glass. */
+.onboard { width: min(100%, var(--chat-w)); margin-inline: auto; padding-top: clamp(0px, 7vh, 72px); }
+.onboard-bar { display: flex; justify-content: flex-end; min-height: var(--ctl-h); }
+.onboard-head { padding: 8px 0 24px; }
+.onboard-head h1 { margin: 0; font-size: var(--fs-28); font-weight: 500; letter-spacing: -0.02em; line-height: 1.45; text-wrap: balance; }
+.onboard-head .sub { margin: 4px 0 0; font-size: var(--fs-14); color: var(--fg-2); }
 
 .addmodel { padding-bottom: 8px; }
-/* The flow is one surface: its steps are parts of it under a hairline each, not cards inside it, and
-   the things to pick are the only cards. A step that is not the one being worked on keeps every
-   colour it had — dimming it made its own heading unreadable, which is not the same as being out of
-   the way; the number says which step is the current one, in ink. */
-.addmodel .step { margin: 0; padding: 16px 0 20px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; }
-.addmodel .step:first-of-type { border-top: 0; padding-top: 4px; }
-.addmodel .step.waiting .step-head .sub { color: var(--fg-3); }
-.step-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.addmodel-mode { margin-bottom: 4px; }
+/* The steps are labels over lists, as a settings page draws its sections. A step that is not the one
+   being worked on keeps every colour it had — dimming it made its own heading unreadable, which is not
+   the same as being out of the way; the number says which step is the current one, in ink. */
+.step { margin-top: 20px; }
+.addmodel-mode + .step { margin-top: 12px; }
+.step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-height: 28px; margin-bottom: 4px; color: var(--fg-3); font-size: var(--fs-12); }
+.step-head b { font-weight: 500; color: var(--fg-2); }
+.step.on .step-head b { color: var(--fg); }
+.step-sub { min-width: 0; font-weight: 400; }
 .step-n {
-  flex: none; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-xs); display: inline-flex; align-items: center; justify-content: center;
-  background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; font-variant-numeric: tabular-nums;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: var(--radius-xs);
+  background: var(--selected); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; font-variant-numeric: tabular-nums;
 }
 .step.on .step-n { background: var(--fg); color: var(--bg); }
-.step.on .step-n.done, .step-n.done { background: var(--surface-2); color: var(--fg-2); }
-.step-head b { font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; }
-.step-head .sub { margin-top: 2px; }
-/* A step arrives rather than appearing: short enough not to be a wait, long enough to be followed.
-   The reduced-motion rule at the top of this file switches every one of these off. */
-.reveal { animation: reveal 200ms cubic-bezier(0.22, 0.8, 0.3, 1) both; }
-@keyframes reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.step.on .step-n.done, .step-n.done { background: var(--selected); color: var(--fg-2); }
 /* OpenRouter's providers of a model. A container query and not a media one: the same table sits in
    Add a model and in the narrower panel of a model's settings, and only its own width says which fits. */
 .orp { container-type: inline-size; }
@@ -48,8 +43,8 @@
 .orp-cell::before { content: attr(data-label) " "; color: var(--fg-3); }
 .orp-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .orp-note { margin: var(--space-2) 0 0; }
-@container (min-width: 760px) {
-  .orp-head, .orp-row { grid-template-columns: 44px minmax(130px, 1fr) repeat(3, 62px) 58px 74px 82px minmax(240px, 2.2fr); column-gap: var(--space-2); align-items: center; }
+@container (min-width: 900px) {
+  .orp-head, .orp-row { grid-template-columns: 20px minmax(130px, 1fr) repeat(3, 62px) 58px 74px 82px minmax(240px, 2.2fr); column-gap: var(--space-2); align-items: center; }
   .orp-head { display: grid; position: sticky; top: 0; z-index: 1; padding: 6px 10px; background: var(--surface-2); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
   .orp-row { padding: 2px 10px; min-height: var(--row-h); }
   .orp-row .switch { margin: 0; }
@@ -58,56 +53,91 @@
   .orp-cell { text-align: right; font-size: var(--fs-13); }
   .orp-head .num { text-align: right; }
 }
-.pickgrid, .modelgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-.modelgrid { padding: 2px; margin-top: 10px; }
+/* A list of things to pick: one card, a hairline between the rows, 56 px each. The endpoints, the
+   models of the one picked and the free catalogue's providers are all this. */
+.pick-group + .pick-group { margin-top: 12px; }
+.pick-label { display: flex; align-items: center; height: 28px; padding: 0 2px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.pickgrid { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
 .pick {
-  display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; text-align: left; cursor: pointer;
-  background: var(--card); border: 1px solid var(--line); box-shadow: var(--drop-xs); border-radius: var(--radius-md); padding: 10px 12px; color: var(--fg); font: inherit;
-  transition: background var(--t-fast), border-color var(--t-fast);
+  position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; min-height: var(--card-row-h-lg); padding: 8px 16px;
+  border: 0; border-radius: 0; background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer;
 }
-.pick:hover { background: var(--surface-2); }
-.pick:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-/* An endpoint with no credential: still readable, still saying which one it is, not a choice. It
-   lies flat, with no surface of its own, where a choice is a card. */
-.pick.blocked { cursor: default; background: transparent; box-shadow: none; }
+.pick + .pick { border-top: 1px solid var(--line); }
+.pick:hover { background: var(--hover); }
+.pick:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pick.on { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
+.pick .provider-mark { width: 20px; height: 20px; border-radius: var(--radius-xs); background: var(--selected); }
+.pick .provider-mark svg { width: 14px; height: 14px; }
+.pick-main { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.pick-main b { font-size: var(--fs-14); font-weight: 500; }
+.pick-line { color: var(--fg-3); font-size: var(--fs-13); line-height: 1.35; overflow-wrap: anywhere; }
+.pick-line.mono { font-size: var(--fs-12); }
+.pick-state { display: inline-flex; flex: none; align-items: center; gap: 6px; max-width: 40%; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.pick-state[data-tone="live"] { color: var(--live); }
+.pick-state[data-tone="attention"] { color: var(--attention); }
+.pick-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+/* An endpoint with no credential: still readable, still saying which one it is, not a choice. */
+.pick.blocked { cursor: default; }
 .pick.blocked:hover { background: transparent; }
-.pick.blocked b, .pick.blocked .sub { color: var(--fg-3); }
-/* The chosen one has the ink edge, as the chosen theme has. */
-.pick.on { border-color: var(--fg); background: var(--surface-2); }
-.pick-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pick-top b { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
-.pick-top .pill { flex: none; }
-.pick .sub { font-size: var(--fs-12); }
-.pick .mtags { padding: 4px 0 0; }
-.mtags-break { flex-basis: 100%; height: 0; }
-.addmodel-run { align-items: center; gap: 10px 16px; }
-.addmodel-run .segmented { margin: 0; }
-.addmodel-opt { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--fg); cursor: pointer; }
-/* The filter and the typed id are one row of two fields with their labels on the same line, so the
-   two boxes start and end together instead of sitting at two different heights. */
-.modelbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 12px; align-items: end; }
-.modelbar .field { margin: 0; }
-/* The one primary action of the flow, in a bar that floats over its foot while the steps scroll
-   under it: a floating surface, so it takes the ring and the drop and no border of its own. */
-.addmodel-foot {
-  position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-top: 4px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  background: var(--surface-1); border: 0; border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-}
-.addmodel-foot .sub { min-width: 0; flex: 1 1 140px; overflow-wrap: anywhere; }
+.pick.blocked .pick-main b { color: var(--fg-3); }
+.pick.model { min-height: var(--card-row-h-lg); }
+.mtags { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; max-width: 55%; }
+.pick-price { color: var(--fg-2); font-size: var(--fs-12); white-space: nowrap; }
+.pick-check { display: inline-flex; flex: none; width: 16px; color: var(--accent); }
+.modelgrid { margin-top: 12px; }
+
+/* What the endpoint just picked answers: the test and, beside it, the address it asked. */
+.pick-test { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; min-height: var(--card-row-h); padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.pick-test-note { color: var(--fg-3); font-size: var(--fs-13); }
+.pick-test-note[data-tone="live"] { color: var(--live); }
+.pick-test-note[data-tone="attention"] { color: var(--attention); }
+.pick-test-addr { flex: 1 1 180px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); text-align: right; }
+/* The address and key of an endpoint to add, under the list it was picked from. */
+.addmodel-form { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.addmodel-form .field-box, .addmodel-fields .field-box, .modelbar .field-box { margin: 0; }
+.addmodel-form-end { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+.addmodel-form .sub.mono { display: block; }
+
+.modelbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.modelbar .faint { font-weight: 400; }
+.addmodel-note { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 12px; padding: var(--space-5) var(--space-4); border-radius: var(--radius-md); background: var(--inset); color: var(--fg-2); font-size: var(--fs-14); }
 .empty.calm { padding: 26px 16px; background: var(--inset); border-radius: var(--radius-md); margin-top: 10px; }
+
+/* How it runs: three fields, then the switches in one card of 44 px rows. */
+.addmodel-card { margin-top: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.addmodel-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-height: var(--card-row-h); padding: 6px 16px; }
+.addmodel-row + .addmodel-row, .addmodel-pricing { border-top: 1px solid var(--line); }
+.addmodel-opt { display: inline-flex; align-items: center; gap: 10px; font-size: var(--fs-14); cursor: pointer; }
+.addmodel-pricing summary { display: flex; align-items: center; min-height: var(--card-row-h); padding: 0 16px; font-size: var(--fs-14); cursor: pointer; list-style: none; }
+.addmodel-pricing summary::-webkit-details-marker { display: none; }
+.addmodel-pricing summary::after { content: ""; flex: none; width: 6px; height: 6px; margin: -3px 2px 0 auto; border: solid var(--fg-3); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform var(--t-fast) var(--ease-out); }
+.addmodel-pricing[open] summary::after { margin-top: 3px; transform: rotate(225deg); }
+.addmodel-pricing summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.addmodel-pricing > :not(summary) { margin-inline: 16px; }
+.addmodel-pricing > .mfields { margin-bottom: 12px; }
+.addmodel-pricing > .sub { margin-bottom: 12px; }
+.addmodel-prepaid { margin: 8px 2px 0; }
+.addmodel-fields .field-box > .sub { margin-top: 2px; }
+/* The one primary action of the flow, in a bar that floats over its foot while the steps scroll
+   under it: a floating surface, with the edge and the shadow every floating surface has. */
+.addmodel-foot {
+  position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 20px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.addmodel-name { min-width: 0; flex: 1 1 140px; overflow-wrap: anywhere; }
 @media (min-width: 720px) {
   .modelbar { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
   /* On a wide screen the list scrolls inside its step, so step 3 stays in view; on a phone a
      scroll region inside a scrolling page is a trap, and the page simply grows. */
-  .modelgrid { max-height: 460px; overflow-y: auto; }
+  .modelgrid { max-height: 440px; overflow-y: auto; }
 }
-/* Room for a fourth and fifth card rather than a wider one: on a desktop window the endpoints and
-   the models are meant to be read across in a glance. */
-@media (min-width: 1280px) {
-  .addmodel .pickgrid, .addmodel .modelgrid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-  .addmodel .modelgrid { max-height: 560px; }
+@media (max-width: 719px) {
+  .pick.model { flex-wrap: wrap; row-gap: 4px; }
+  .pick.model .pick-main { flex-basis: calc(100% - 40px); }
+  .pick.model .mtags { order: 3; flex-basis: 100%; max-width: none; justify-content: flex-start; }
+  .pick-test-addr { flex-basis: 100%; text-align: left; }
 }
 
 /* ── projects: the folder an agent works in ─────────────────────────────────────────────── */

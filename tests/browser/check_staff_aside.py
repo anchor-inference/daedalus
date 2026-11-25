@@ -59,7 +59,8 @@ def panel(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page.wait_for_timeout(800)
     start = box(page, ".staff-aside")["width"]
     term_start = box(page, ".staff-term")["width"]
-    check.that(280 <= start <= 360, f"{lang}: the column starts {start} px wide, not the stylesheet's 280–360")
+    # The right panel's width (--panel-w: 30 % of the window between 400 and 520), as beside a chat.
+    check.that(400 <= start <= 520, f"{lang}: the column starts {start} px wide, not the panel's 400–520")
     before = len(term.resizes("tm-ira"))
 
     # Wider by 200 px: the terminal gives up the same, and is told its size a few times, not per frame.

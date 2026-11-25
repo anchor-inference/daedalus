@@ -3,6 +3,7 @@ import { api, ApiError, Project } from "../api";
 import { t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
+import { Select } from "../ui/primitives";
 
 type SelectedPath = { folder_id: string; path: string };
 type ExportReceipt = { receipt_id: string; archive_artifact_id: string; archive_digest: string; format_version: number; size_bytes: number; selected_files: SelectedPath[]; row_counts: Record<string, number>; private: boolean };
@@ -177,9 +178,8 @@ export function ProjectArchive({ project, onChanged, onOpenRestored, readFailed 
         <p className="sub">{t("archive.files.hint")}</p>
         {readableFolders.length > 0 ? <>
           <label className="field" htmlFor="archive-folder">{t("archive.folder")}</label>
-          <select id="archive-folder" className="field" value={folderId} onChange={(event) => setFolderId(event.target.value)}>
-            {readableFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label || t("archive.folder.default")}</option>)}
-          </select>
+          <Select id="archive-folder" label={t("archive.folder")} size="md" value={folderId} onChange={setFolderId}
+            options={readableFolders.map((folder) => ({ id: folder.id, label: folder.label || t("archive.folder.default") }))} />
           <label className="field" htmlFor="archive-relative-path">{t("archive.relativePath")}</label>
           <input id="archive-relative-path" className="field" value={relativePath} onChange={(event) => setRelativePath(event.target.value)} placeholder={t("archive.pathExample")} />
           <button type="button" className="btn small" onClick={addFile} disabled={!relativePath.trim() || !folderId}>{t("archive.files.add")}</button>

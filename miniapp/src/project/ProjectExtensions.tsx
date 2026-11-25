@@ -6,6 +6,7 @@ import { api, ApiError } from "../api";
 import { t } from "../i18n";
 import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
+import { Select } from "../ui/primitives";
 
 type InputField = { type?: string; title?: string; enum?: (string | number)[] };
 type PluginTool = { name: string; read_model?: string; input_schema: { properties?: Record<string, InputField>; required?: string[] } };
@@ -110,10 +111,8 @@ function ExtensionCard({ item, installed, activeVersion, revision, projectId, to
     {!installed && <button type="button" className="btn small" disabled={busy || installBlocked} onClick={() => void install()}>{t("extension.install")}</button>}
     {installed && fields.map(([name, field]) => <label key={name} className="field">
       <span>{field.title || name}</span>
-      {field.type === "boolean" || field.enum ? <select value={inputs[name] ?? ""} disabled={busy || !active} onChange={(event) => setInputs({ ...inputs, [name]: event.target.value })}>
-        <option value=""></option>
-        {(field.enum ?? ["true", "false"]).map((value) => <option key={String(value)} value={String(value)}>{String(value)}</option>)}
-      </select> : <input type={field.type === "integer" || field.type === "number" ? "number" : "text"} value={inputs[name] ?? ""} disabled={busy || !active} onChange={(event) => setInputs({ ...inputs, [name]: event.target.value })} />}
+      {field.type === "boolean" || field.enum ? <Select label={field.title || name} size="md" value={inputs[name] ?? ""} disabled={busy || !active} onChange={(next) => setInputs({ ...inputs, [name]: next })}
+        options={[{ id: "", label: "—" }, ...(field.enum ?? ["true", "false"]).map((value) => ({ id: String(value), label: String(value) }))]} /> : <input type={field.type === "integer" || field.type === "number" ? "number" : "text"} value={inputs[name] ?? ""} disabled={busy || !active} onChange={(event) => setInputs({ ...inputs, [name]: event.target.value })} />}
     </label>)}
     {installed && <button type="button" className="btn small" disabled={busy || !active || !supported} onClick={() => void test()}>{t("extension.test")}</button>}
     {installed?.status === "active" && <button type="button" className="btn small" disabled={busy || offline || !Number.isInteger(revision)} onClick={() => void changeLifecycle("remove")}>{t("extension.remove")}</button>}
@@ -203,9 +202,8 @@ function CustomReadBuilder({ models, installed, projectId, offline, safe, toast 
     <label className="field"><span>{t("extension.name")}</span><input value={name} onChange={(event) => setName(event.target.value)} /></label>
     <label className="field"><span>{t("extension.description")}</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label>
     <label className="field"><span>{t("extension.versionLabel")}</span><input value={version} onChange={(event) => setVersion(event.target.value)} /></label>
-    <label className="field"><span>{t("extension.readModel")}</span><select value={modelId} onChange={(event) => setModelId(event.target.value)}>
-      {models.map((entry) => <option key={entry.id} value={entry.id}>{t(`extension.model.${entry.id}`)}</option>)}
-    </select></label>
+    <div className="field-box"><span className="field-label">{t("extension.readModel")}</span><Select label={t("extension.readModel")} size="md" value={modelId} onChange={setModelId}
+      options={models.map((entry) => ({ id: entry.id, label: t(`extension.model.${entry.id}`) }))} /></div>
     <button type="button" className="btn small" disabled={!model || offline || safe || busy} onClick={() => void preview()}>{t("extension.preview")}</button>
     {reviewed && reviewed.source === source && <div className="project-extension">
       <div className="sub">{t("extension.previewOnly")}</div>

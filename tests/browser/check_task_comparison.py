@@ -15,6 +15,7 @@ from api_stub import (  # noqa: E402
     DEFAULT_APP,
     BoardStub,
     Unhandled,
+    choose_option,
     expect_app,
     folders,
     fulfil_shared,
@@ -160,9 +161,9 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     expect(section.get_by_text("Capacity change is unconfirmed" if language == "en" else "Изменение лимита не подтверждено", exact=False)).to_have_count(0)
     assert state["capacity_changes"] == [{"concurrency": 2, "concurrency_cap": 10}]
     assert not state["commands"], "saving capacity must not launch a comparison"
-    selects = section.locator("select.field")
-    selects.nth(0).select_option("one")
-    selects.nth(1).select_option("two")
+    selects = section.locator(".dropdown-btn")
+    choose_option(page, selects.nth(0), "one")
+    choose_option(page, selects.nth(1), "two")
     section.get_by_label("First allowance (USD)" if language == "en" else "Лимит первого (USD)").fill("1")
     section.get_by_label("Second allowance (USD)" if language == "en" else "Лимит второго (USD)").fill("1")
     section.get_by_label("Total ceiling (USD)" if language == "en" else "Общий потолок (USD)").fill("2")
