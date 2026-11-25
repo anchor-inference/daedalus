@@ -146,10 +146,6 @@
 .goal-strip.attn .goal-line { border-color: color-mix(in srgb, var(--attention) 40%, var(--line)); }
 .goal-strip.attn .goal-line > .ic:first-child { color: var(--attention); }
 .goal-primary > .btn { min-height: 36px; }
-.goal-counts { flex: 1; min-width: 0; display: flex; gap: 12px; overflow: hidden; white-space: nowrap; }
-.goal-count { flex: none; }
-.goal-count.decisions, .goal-count.waiting_for_you { color: var(--warn); }
-.goal-count-short { display: none; }
 .goal-chev { flex: none; display: inline-flex; color: var(--fg-3); transform: rotate(180deg); transition: transform var(--t-fast); }
 .goal-strip.open .goal-chev { transform: none; }
 .goal-list { display: grid; gap: 16px; max-height: min(50vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--shadow-md); min-width: 0; }
@@ -181,9 +177,6 @@
 @container goal (max-width: 640px) {
   .goal-line { gap: 6px; font-size: var(--fs-12); }
   .goal-line > svg { display: none; }
-  .goal-counts { gap: 8px; }
-  .goal-count-long { display: none; }
-  .goal-count-short { display: inline; }
 }
 @container goal (max-width: 390px) {
   .goal-primary { flex-wrap: wrap; }
@@ -191,8 +184,6 @@
 }
 .event-time { color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); }
 .event-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-/* The questions an orchestrator's turn put to the operator, under its worked group. */
-.step-asks { display: grid; gap: 6px; margin: 2px 0 8px; }
 
 /* The panel beside the orchestrator: the board drawn as one list inside it. */
 .pboard-bar { display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; }
@@ -446,45 +437,16 @@
 .app.project-phone .main.chat-open .composer { padding-bottom: 10px; }
 :root[data-keyboard="open"] .app.project-phone .composer { padding-bottom: 6px; }
 .pagehead .term-env { margin-right: 2px; flex: none; }
-.needs-banner { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.chat > .needs-banner { flex: none; margin: var(--space-2) 10px 0; }
-.phone-board > .needs-banner { margin: var(--space-2) 12px 0; }
-.needs-banner-head { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: var(--fs-12); font-weight: 500; }
-.needs-banner-more, .needs-banner-when { color: var(--fg-3); font-weight: 400; }
-.needs-banner-text { font-size: var(--fs-14); line-height: var(--lh-ui); overflow-wrap: anywhere; }
 .ask-answers-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .ask-answers-row .btn { flex: 1 1 auto; justify-content: center; min-height: var(--row-h-touch); }
 .ask-answers-own { display: flex; align-items: center; gap: var(--space-2); }
 .ask-answers-own .field { flex: 1; min-width: 0; min-height: var(--row-h-touch); margin: 0; }
 .ask-answers-own .btn { min-height: var(--row-h-touch); }
 .ask-answers-write { background: transparent; border-style: dashed; border-color: var(--line-strong); color: var(--fg-2); }
-.phone-staff { display: grid; }
-.phone-staff-item { display: flex; align-items: center; gap: 2px; min-width: 0; border-bottom: 1px solid var(--line); }
-.phone-staff-row { flex: 1; display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-3)); padding: 6px 4px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-.phone-staff-edit { background: transparent; color: var(--fg-3); }
-.phone-staff-row:active { background: var(--surface-1); }
-.phone-staff-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.phone-staff-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
-.phone-staff-name > .truncate { flex: 0 1 auto; min-width: 0; }
 /* The name is who the row is: the role gives way first. Both shrinking alike cut "Cleo" to "C…" and
    "langpt" to "l." beside a long role; the cap keeps a very long name from taking the whole line. */
-.phone-staff-name > .truncate:first-child { flex: 0 0 auto; max-width: 60%; }
-.phone-staff-role { color: var(--fg-2); font-size: var(--fs-12); font-weight: 400; }
-.phone-staff-name .harness-badge, .phone-staff-name .term-env { flex: none; margin-right: 0; }
-.phone-staff-line { color: var(--fg-3); font-size: var(--fs-12); }
-.phone-staff-line.waits { color: var(--warn); }
-.phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
 .phone-term-row { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-.phone-term-row > .phone-term { flex: 1; }
 .term-rename { display: grid; gap: var(--space-2); }
-.phone-term { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-2)); padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); }
-.phone-term > .ic { flex: none; color: var(--fg-3); }
-.phone-term.host > .ic { color: var(--warn); }
-.phone-term.ended { opacity: .66; }
-.phone-term-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.phone-term-title { font-family: var(--mono); font-size: var(--fs-13); font-weight: 500; }
-.phone-term-line { color: var(--fg-3); font-size: var(--fs-12); }
-.phone-term .term-env { margin-right: 0; }
 
 /* Spend where the work is: words under the project's name, a line in each team row, the totals over the journal. */
 .staff-spend { color: var(--fg-2); }

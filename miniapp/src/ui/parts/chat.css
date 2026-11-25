@@ -487,7 +487,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .badge.stream { color:var(--info); }
 .badge.structured { color:var(--warn); }
 .badge.text { color:var(--ok); }
-.grid4 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .filters { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px; }
 
 .models-menu-wrap { position:relative; display:inline-block; }

@@ -50,7 +50,6 @@
 .menu button[data-popup-open] { background: var(--selected); }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; flex: none; }
 .menu-group { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.menu-heading { padding: 6px 10px 2px; }
 /* A checkbox item sets how the items below it act; its box sits at the row's end, like a setting's. */
 .menu .menu-check { margin-left:auto; flex:none; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--line-strong); border-radius:4px; }
 .menu .menu-check.on { background:var(--accent); color:var(--accent-ink); box-shadow:none; }
@@ -67,7 +66,6 @@ button.menu-row:hover { background:var(--hover); }
 .menu-row-t { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .menu-row-sub { font-size:var(--fs-12); color:var(--fg-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .menu-row-aside { flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-12); color:var(--fg-3); }
-.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
 .menu-row-kbd { margin-left:auto; }
 .menu-row-check { flex:none; width:16px; display:inline-flex; color:var(--accent); }
 .menu-row-chev { flex:none; display:inline-flex; color:var(--fg-3); }

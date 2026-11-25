@@ -892,13 +892,12 @@ describe("rows and controls", () => {
   });
 
   it("give a phone's terminal and project the thumb's sizes from the tokens, and the visible height", () => {
-    // The keys row is a row of controls, and a banner's answers and a project's rows are touch rows:
+    // The keys row is a row of controls, and a banner's answers are touch rows:
     // on a phone the tokens make them 40 and 44 px, so nothing here states a size of its own. The
     // terminal is as tall as what the phone shows, which is what keeps its keys above the keyboard.
     expect(decl(".term-key")).toContain("height: var(--ctl-h)");
     expect(decl(".term-phone")).toContain("height: var(--vh, 100dvh)");
     expect(decl(".ask-answers-row .btn")).toContain("min-height: var(--row-h-touch)");
-    expect(decl(".phone-staff-row")).toContain("min-height: calc(var(--row-h-touch)");
     expect(decl(".project-tabs")).toContain("flex: none");
   });
 
@@ -923,9 +922,6 @@ describe("rows and controls", () => {
     expect(decl(".bp-pip")).toContain("width: var(--pip-w)");
     expect(decl(".bp-pip")).not.toMatch(/position: fixed/);
     expect(decl(".bp-pip-foot")).toContain("height: 24px");
-    // The phone's header thumbnail is a control, not a picture: 28 × 18 inside an icon button.
-    expect(decl(".browser-headbtn-thumb")).toContain("width: 28px");
-    expect(decl(".browser-headbtn-thumb")).toContain("height: 18px");
   });
 
   it("fold a step of the run into 28 px", () => {

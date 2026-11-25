@@ -151,7 +151,6 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-button { position: relative; }
 .term-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg); font-size: var(--fs-12); line-height: 14px; text-align: center; pointer-events: none; }
 .term-count.unseen { background: var(--accent); color: var(--accent-ink); }
-.erow-terms { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--fg-2); font-size: var(--fs-12); }
 .menu button.warn { color: var(--warn); }
 .menu button.warn .ic { color: var(--warn); }
 .term-sheet-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h); padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }

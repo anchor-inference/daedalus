@@ -96,7 +96,6 @@
 .task-card-who.you { color: var(--fg); font-weight: 500; }
 .task-card-due.late { color: var(--attention); }
 .task-card-prio { color: var(--fg-3); font-weight: 500; }
-.task-card-prio.p1, .task-card-prio.p2 { color: var(--attention); font-weight: 600; }
 .task-card-refusal, .task-refusal { font-size: var(--fs-13); line-height: 1.45; color: var(--attention); overflow-wrap: anywhere; }
 /* The compact card of a narrow column: the title and one line of state. */
 .task-card.compact { padding: 10px 12px; gap: 4px; border-radius: 10px; background: var(--card); }

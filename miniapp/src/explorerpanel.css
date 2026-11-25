@@ -75,9 +75,6 @@ button.explorer-where:hover { background: var(--hover); }
 .explorer-status-written { display:inline-flex; align-items:center; gap:5px; flex:none; white-space:nowrap; }
 .explorer-status-written::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--live); }
 
-/* A folder's badges at the end of its row in the folder list. */
-.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
-.menu .menu-aside .term-env { margin-right:0; }
 
 /* Rows enter quietly without changing their measured height or delaying hover feedback. */
 @keyframes row-enter { from { opacity:0; } to { opacity:1; } }

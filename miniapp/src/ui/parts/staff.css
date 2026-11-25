@@ -198,7 +198,7 @@
   /* Laid over the whole body rather than widened: out of the grid's flow, the column it leaves
      keeps its width, so the terminal underneath keeps its size and its PTY hears no resize. */
   .chat-body.with-staff-aside > .staff-aside.expanded { position: absolute; inset: 0; z-index: 6; border-left: 0; }
-  .staff-request .ask-answers-row .btn { flex: none; height: var(--ctl-h); min-height: var(--ctl-h); padding: 0 14px; border-radius: 9px; font-weight: 500; }
+  .staff-request .ask-answers-row .btn { flex: none; height: var(--ctl-h); min-height: var(--ctl-h); padding: 0 14px; border-radius: var(--radius-sm); font-weight: 500; }
   .staff-request .ask-answers-own .field, .staff-request .ask-answers-own .btn { min-height: var(--ctl-h); }
 }
 @media (max-width: 1023px) {
@@ -289,7 +289,7 @@
 .q-suggestion .ic { flex: none; margin-top: 2px; color: var(--fg-3); }
 
 .q-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.q-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 4px 14px; border: 1px solid var(--line-strong); border-radius: 9px; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; line-height: 1.35; text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
+.q-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 4px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; line-height: 1.35; text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
 /* An option is read whole, over as many lines as it takes: the operator chooses by it, and an
    ellipsis hid the half that told two options apart. A link with no spaces breaks anywhere. */
 .q-chip-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }

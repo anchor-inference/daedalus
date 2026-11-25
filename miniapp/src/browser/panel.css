@@ -301,15 +301,12 @@
 
 /* The phone: a thumbnail in the header, the sheet for watching, the whole screen for driving. */
 .browser-headbtn { position: relative; }
-.browser-headbtn-thumb { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 18px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--term-bg); color: var(--fg-3); overflow: hidden; }
-.browser-headbtn-thumb > .bv { position: absolute; inset: 0; }
 .browser-dot { position: absolute; top: 4px; right: 3px; width: 8px; height: 8px; border: 2px solid var(--bg); border-radius: 50%; background: var(--fg-3); box-sizing: content-box; }
 .browser-dot.acting { background: var(--live); }
 .browser-dot.you { background: var(--accent); }
 .browser-dot.needs { top: 1px; right: 0; width: 14px; height: 14px; background: var(--attention); color: var(--primary-ink); font-size: var(--fs-12); font-weight: 600; line-height: 14px; text-align: center; }
 .bp-phonebar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); }
 .bp-phonebar-domain { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
-.bp-phonebar-tabs { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
 .bp.phone .bp-stage-wrap { flex: none; }
 .bp.phone .bp-viewer { flex: none; width: 100%; }
 .bp.phone .bp-log.page { border-top: 1px solid var(--line); }

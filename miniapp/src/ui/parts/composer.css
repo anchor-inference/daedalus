@@ -390,7 +390,7 @@
 .approval-command { font-size:var(--fs-13); line-height:1.5; padding:10px 12px; background:var(--inset); border:1px solid var(--line); border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:calc(6lh + 20px); overflow:auto; }
 .approval-why { font-size:var(--fs-13); color:var(--fg-2); overflow-wrap:anywhere; }
 .approval-actions { display:flex; align-items:center; gap:8px; min-width:0; }
-.approval-actions .btn { flex:none; height:var(--ctl-h); padding:0 14px; border-radius:9px; font-weight:500; }
+.approval-actions .btn { flex:none; height:var(--ctl-h); padding:0 14px; border-radius:var(--radius-sm); font-weight:500; }
 .approval-actions .btn .kbd { min-height:0; padding:0; border:0; background:none; color:var(--fg-3); }
 .approval-actions .btn.primary .kbd { color:inherit; opacity:.8; }
 .approval-actions .approval-widen { min-width:0; flex:0 1 auto; }
@@ -409,9 +409,6 @@
   .composer > .approval-card { width:min(100%, var(--chat-w)); margin-inline:auto; }
 }
 
-/* subagents */
-.card.row.subrow { margin-left: 22px; padding-top: 8px; padding-bottom: 8px; position: relative; }
-.subarrow { position: absolute; left: -18px; top: 50%; transform: translateY(-50%); color: var(--fg-2); font-size: var(--fs-14); }
 .badge.sub { margin-left: 8px; color: var(--fg-2); vertical-align: 2px; }
 .leader-link { cursor: pointer; color: var(--fg-3); }
 .leader-link b { font-weight: 600; }

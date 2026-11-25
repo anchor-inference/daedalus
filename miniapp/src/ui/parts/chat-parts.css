@@ -98,7 +98,6 @@ button.secret-chip:hover { background: var(--surface-3); }
 .secret-value.shown { -webkit-text-security: none; }
 .secret-eye { position: absolute; top: 4px; right: 4px; }
 .secret-eye[aria-pressed="true"] { color: var(--fg); background: var(--surface-3); }
-.secret-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 /* The manager: a search and "Add secret" over a list of rows, the rows of a settings card whether the list
    is the Settings page's own or the body of the composer's sheet. A row's value is a fixed run of dots, so
    it says nothing of the length; the eye puts the value on the line under the row for half a minute,
@@ -435,9 +434,6 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 /* ── sharing a service ─────────────────────────────────────────────────────────────────── */
 .badge.share { color: var(--warn); }
 .badge.share.public { color: var(--bad); }
-.share-panel { border: 0; box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); padding: 10px 12px 12px; background: var(--inset); }
-.share-panel .segmented { margin-bottom: 8px; }
-.share-panel .segmented button { padding: 6px; font-size: var(--fs-13); }
 .share-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-width: 0; }
 .share-field input.field { flex: 1; min-width: 0; margin: 0; }
 .share-field .ic { color: var(--fg-3); flex: none; }

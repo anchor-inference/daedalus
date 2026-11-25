@@ -210,7 +210,6 @@ a.memory-source:hover { color: var(--fg); }
 .memory-import-flags { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: var(--fs-12); }
 .memory-import-flags:empty { display: none; }
 .memory-file { cursor: pointer; }
-.memory-sensitive-sub { margin: 4px 0 2px; }
 .memory-learning-lines { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; padding: 0; list-style: none; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); overflow-wrap: anywhere; }
 .memory-learning-lines [data-tone="warn"] { color: var(--warn); }
 .memory-learning-lines [data-tone="busy"] { color: var(--live); }

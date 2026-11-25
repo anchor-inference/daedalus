@@ -153,7 +153,6 @@
 .project-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-14); }
 .project-open .sub { font-size: var(--fs-12); }
 .menu-item.on { border-color: var(--fg); }
-.readonly-path { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-13); word-break: break-all; }
 /* A folder is a card of its own inside the settings sheet: the name line carries the chips and the
    remove button, the path wraps rather than truncates (a path cut in the middle names the wrong
    folder), and the sentence under it says who can reach it. */
@@ -203,7 +202,6 @@
 .dir-form { margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--inset); box-shadow: var(--shadow-ring); }
 .dir-form-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .dir-add-open { margin-top: 8px; }
-.dir-mount { margin-top: 6px; }
 .project-ephemeral { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .project-ephemeral .sub { flex: 1 1 200px; }
 
@@ -354,19 +352,10 @@ input.field[type="range"] {
 .computer-sheet .sheet-body { display:flex; flex-direction:column; gap:var(--space-2); }
 .computer-sheet .section-title { margin:var(--space-3) 2px 0; }
 .computer-grant, .computer-permissions { display:flex; flex-direction:column; gap:var(--space-2); }
-.computer-line { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
-.computer-label { color:var(--fg-2); font-size:var(--fs-13); min-width:96px; }
-.computer-line input.computer-minutes { width:84px; flex:none; margin:0; padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; }
-.computer-line input.computer-minutes.invalid { border-color:var(--bad); }
-.computer-list { display:flex; flex-direction:column; max-height:240px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); }
-.computer-list > .sub { padding:var(--space-2) var(--space-3); }
 .computer-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-2); padding:0 var(--space-3); min-width:0; }
-.computer-list .computer-row + .computer-row { border-top:1px solid var(--line); }
-.computer-list .computer-row { cursor:pointer; }
 .computer-row.off { opacity:0.55; cursor:default; }
 .computer-row-main { display:flex; flex-direction:column; flex:1; min-width:0; }
 .computer-row-main b { font-weight:500; }
-.computer-actions { display:flex; justify-content:flex-end; }
 .run-outcome { display:flex; align-items:flex-start; gap:var(--space-2); margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border:0; border-radius:var(--radius-sm); background:color-mix(in srgb, var(--bad) 12%, var(--card)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .run-outcome svg { flex:none; margin-top:2px; color:var(--bad); }
 .run-outcome.cause-cancelled { background:var(--surface-2); }
@@ -387,7 +376,6 @@ input.field[type="range"] {
 .run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
 .run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
-.menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
 /* The mark of a session with every check bypassed, beside its title in the header. */
 .bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 @media (min-width: 1024px) {
@@ -402,8 +390,6 @@ input.field[type="range"] {
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
 .search-passage { font-size: var(--fs-12); color: var(--fg-2); margin-top: var(--space-1); }
 .search-notice { padding: var(--space-2) var(--space-3); }
-.folder-add { width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:var(--space-1); padding:0; flex-shrink:0; display:grid; place-items:center; line-height:0; color:var(--fg-2); border-color:transparent; background:transparent; box-shadow:none; }
-.folder-add:hover { background: var(--hover); color:var(--fg); }
 .folder-add .ic, .pagehead-actions .iconbtn .ic { display:block; margin:auto; }
 @media (max-width:600px) { .folder-top .folder-add { min-width:44px; min-height:var(--row-h-touch); padding:8px; } }
 
@@ -446,20 +432,6 @@ input.field[type="range"] {
   .changed-file-row .list-row-t { font-family:var(--mono); font-size:var(--fs-13); }
   .folder .erow { border:0; border-radius:0; background:transparent; margin-inline:0; }
   .folder.single:not(.open) { border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
-  .folder-expand { order:2; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .folder-actions { order:1; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .folder-root { display:none; }
-  .folder-add { order:2; display:grid; place-items:center; width:var(--row-h-touch); height:var(--row-h-touch); min-width:var(--row-h-touch); min-height:var(--row-h-touch); padding:0; }
-  .folder-head > .chev { order:2; margin-left:auto; }
-  /* One order of controls on every row: the chevron inside the row, then its menu, then the new
-     agent. A project of one agent carries its menu inside the agent's row, which is why the
-     project's own menu comes before + rather than after it. The Voice folder's chevron is its own
-     button, and it moves to the same place at the right. */
-  .folder-head.linked > .folder-disclose { order:2; padding:4px 12px 4px 2px; }
-  /* Opening a project of one agent shows its folder's path and nothing else, and the path is not
-     drawn here: the chevron opened nothing, and it was a third, different control on that row. */
-  .folder.single .folder-expand { display:none; }
-  .folder.single .folder-top > .erow { padding-right:0; }
 }
 
 /* Subagents are peers of files and jobs, but opening one is navigation rather than panel content.
@@ -602,11 +574,7 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 .composer .upload-progress { padding: 8px 14px 0; }
 /* A phone searching its chats: the list takes the screen and the composer waits (Start.tsx, useFinding). */
 .start.finding { display:none; }
-.start.finding + .start-list { padding-top:calc(var(--space-3) + env(safe-area-inset-top)); }
-.start-list-head { display:flex; align-items:center; gap:var(--space-2); padding:0 14px; }
-.start-list-head .section-title { flex:1; margin-bottom:0; }
 /* The list below keeps its 14 px gutter; the search field ran from one edge of the glass to the other. */
-.start-list > .field.search { display:block; width:calc(100% - 28px); margin:2px 14px 6px; }
 /* A phone's hero is the upper half of the space above the tab bar (50 px of tab, 12 of padding and
    a hairline, then the home indicator), with the composer at its foot: the field sits in the middle
    of the screen where a thumb reaches it, and the chats begin under it at the middle line. At the

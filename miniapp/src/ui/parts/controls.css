@@ -72,8 +72,6 @@ a.btn { color: var(--fg); text-decoration: none; }
 .btn.busy { cursor: progress; opacity: 1; }
 .spinner { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.title-row .title { min-width: 0; flex: 0 1 auto; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .empty { color: var(--fg-2); text-align: center; padding: 48px 16px; display: grid; gap: 6px; justify-items: center; }
 /* The line under an empty state's heading is a sentence, and often the server's own words, which
@@ -234,8 +232,6 @@ a.iconbtn { text-decoration: none; }
 /* The three heights are the desktop's; a phone's rows take the phone's own sizes (lists.css), and a
    height class here outweighed them there. */
 @media (min-width: 1024px) {
-  .list-row.h44 { min-height: var(--row-h-2); }
-  .list-row.h56 { min-height: 56px; }
 }
 .list-row:hover { background: var(--hover); }
 .list-row.current { background: var(--selected); }

@@ -174,8 +174,6 @@
 .dt-tag { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--dt-tile); font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
 .dt-tag .ic { flex: none; color: var(--fg-3); }
 
-.dt-control { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: var(--ctl-h); }
-.dt-control-label { flex: none; width: 64px; color: var(--fg-2); }
 .dt-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .dt-action .dt-hint { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .dt-empty { display: flex; align-items: center; gap: 10px; color: var(--fg-2); }
@@ -349,7 +347,6 @@
 .badge.loop.stopped, .badge.loop.done { color: var(--fg-3); }
 .toggle-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: var(--fs-14); cursor: pointer; min-height: var(--row-h); }
 .toggle-row .sub { flex: 1; min-width: 0; }
-.loop-form { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 12px 10px; margin-bottom: 8px; }
 .loop-form select.field, .loop-panel select.field { flex: 1; min-width: 140px; }
 .loop-panel { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px 10px; margin-bottom: 8px; }
 .loop-instruction { color: var(--fg); white-space: pre-wrap; margin-bottom: 4px; }
@@ -363,10 +360,6 @@
 .aside-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aside-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; flex: none; }
 .aside-row .dot.failed { background: var(--bad); }
-/* The project root is the boundary, so it is shown whole: a path clipped after two segments says
-   nothing about which folder the agent is walled into. */
-.aside-row.project-root { align-items: flex-start; gap: 6px; padding-bottom: 4px; }
-.aside-row.project-root .mono { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .sheet-section { padding: 12px 0; border-top: 1px solid var(--line); }
 .sheet-section:first-child { border-top: 0; padding-top: 4px; }
 .sheet-section-title { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: var(--fs-14); margin-bottom: 4px; }
@@ -389,7 +382,6 @@
 .service-row .dot.dead { background: var(--bad); }
 .service-row .dot.unknown { background: var(--warn); }
 .service-name { font-size: var(--fs-13); font-weight: 500; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.service-url { color: var(--info); font-weight: 400; font-size: var(--fs-12); text-decoration: none; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-name { min-width: 0; }
 /* The command wraps, up to three lines: cut to one it lost its flags ("--host 0.0.…") on a phone, and
    nothing else on the screen shows the whole line. Breaks fall anywhere because a flag is one long

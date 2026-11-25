@@ -60,7 +60,6 @@
 .pcard .btn.small { flex: none; }
 .btn.warn { color: var(--warn); background: transparent; border-color: var(--line); font-weight: 500; }
 .btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
-.pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
 .host-capacity { margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
 .host-capacity.waiting { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); color: var(--fg); }
 .host-capacity-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
@@ -93,7 +92,6 @@
 .pboard-moves .sub { align-self: center; }
 .pboard-sheet textarea.field { resize: vertical; font: inherit; }
 .pboard-deps { margin-bottom: 4px; min-width: 0; }
-.pboard-notes { max-height: 180px; overflow: auto; }
 .pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .pcard-review .chip { flex: none; }
 .pcard-accept .ic { width: 11px; height: 11px; }
@@ -133,8 +131,6 @@
 .review-blockers li::before { content: "· "; }
 .review-actions { flex-wrap: wrap; margin: 2px 0 0; }
 .review-why { font-size: var(--fs-12); }
-.review-reject { display: flex; flex-direction: column; gap: 4px; }
-.review-reject textarea.field { resize: vertical; font: inherit; }
 .review-diff .diff-view { font-size: var(--fs-mono); }
 .review-diff-scope { max-width: 420px; margin-bottom: 8px; }
 .review-base { font-size: var(--fs-12); overflow-wrap: anywhere; }
