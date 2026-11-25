@@ -23,6 +23,7 @@ import { api, Project, type ProjectRef, SessionList, SessionSummary } from "../a
 import { projectPath } from "../folders";
 import { Skeleton, fmtInterval, statusWord } from "../ui/components";
 import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
+import { isAction } from "../ui/primitives";
 import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
@@ -678,12 +679,12 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     ...(onNewIn ? [{ label: t("side.project.newagent", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
     "-",
     ...items.map((item): MenuItem => {
-      if (item === "-") return item;
+      if (!isAction(item)) return item;
       const hint = item.icon === "pen" ? t("side.key.rename") : item.icon === "archive" ? t("side.key.archive") : item.icon === "trash" ? t("side.key.delete") : undefined;
       return hint ? { ...item, hint } : item;
     }),
   ];
-  const withRule = menu.flatMap((item, i) => (item !== "-" && item.danger && menu[i - 1] !== "-" ? ["-" as const, item] : [item]));
+  const withRule = menu.flatMap((item, i) => (isAction(item) && item.danger && menu[i - 1] !== "-" ? ["-" as const, item] : [item]));
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
@@ -844,7 +845,7 @@ export function useSessionCommands(session: SessionSummary, opts: { onProject?: 
   const layers = <>
     {moving && <MoveSessionSheet sessionId={session.id} current={session.project_id} currentOwn={!!session.workspace_own} onClose={() => setMoving(false)} onMoved={() => invalidate("/api/sessions")} toast={toast} />}
     {promoting && opts.chat && <MakeProjectSheet project={opts.chat} title={session.title} onClose={() => setPromoting(false)} onMade={opts.onMadeProject} />}
-    {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="narrow">
+    {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="sm">
       <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
         <input className="field" aria-label={t("session.rename")} autoFocus value={title} maxLength={128} onChange={(event) => setTitle(event.target.value)} />
         <button className="btn primary" type="submit" disabled={saving || !title.trim()}>{t("common.save")}</button>

@@ -14,7 +14,8 @@ import { navigate, pathFor } from "../router";
 import { peek, useQuery } from "../store";
 import { FILTERS, groupTerminals, headerCounts, matches, type TerminalFilter } from "../terminal/preview";
 import { TerminalCard } from "../terminal/phonecard";
-import { Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { IconButton, Sheet } from "../ui/primitives";
 import { FreeTerminalPicker, LIST_KEY } from "./Terminals";
 
 const LOAD_POLL_MS = 10000;
@@ -71,7 +72,7 @@ export function PhoneTerminals({ toast, project, projects }: { toast: (text: str
   return (
     <div className="ph-page ph-terms">
       <TopBar center title={t("nav.terminals")} sub={list.data && rows.length > 0 ? t("term.screen.counts", { open: counts.open, host: counts.host, staff: counts.staff }) : undefined}
-        actions={<IconButton icon="plus" label={t("term.new")} disabled={!!list.data && !anyEnv} onClick={() => setSheet("new")} />} />
+        actions={<IconButton icon="plus" label={t("term.new")} disabled={!!list.data && !anyEnv} onClick={() => setSheet("new")} className="ph-ib" />} />
       {load.data && rows.length > 0 && <CapacityLine load={load.data} onOpen={() => setSheet("capacity")} />}
       {rows.length > 0 && (
         <ChipBar label={t("term.filter.label")}>
@@ -130,7 +131,7 @@ function CapacitySheet({ load, onClose }: { load: TerminalLoad; onClose: () => v
   const f = loadFigures(load);
   const other = Math.max(0, f.machineNow - f.terminalsNow);
   return (
-    <BottomSheet onClose={onClose} className="ph-capacity" label={t("ph.term.cap.title")}
+    <Sheet onClose={onClose} className="ph-sheet ph-capacity" ariaLabel={t("ph.term.cap.title")}
       title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{t("ph.term.cap.title")}</span><span className="ph-sheet-kt-m">{t("load.percent", { percent: Math.round(f.memPercentNow) })}</span></span>}>
       <div className="ph-sheet-pad">
         <div className="ph-cap-big">{plural("load.atcap", f.cap, { used: size(f.terminalsAtCap), total: size(f.total) })}</div>
@@ -147,6 +148,6 @@ function CapacitySheet({ load, onClose }: { load: TerminalLoad; onClose: () => v
         {f.level !== "ok" && <Banner tone={f.level === "bad" ? "bad" : "warn"} icon="alert">{f.supported !== null ? plural("load.over", f.supported) : t("load.over.memory")}</Banner>}
         <button type="button" className="ph-btn" onClick={() => { onClose(); navigate(pathFor("settings", "environments")); }}>{t("ph.term.cap.change")}</button>
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }

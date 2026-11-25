@@ -222,7 +222,7 @@ export function ProposalCard({ p, toast, onDone }: { p: Proposal; toast: (t: str
         </div>
       </div>
       {rejecting && (
-        <Sheet title={t("inbox.reject.title")} onClose={() => setRejecting(false)} size="narrow">
+        <Sheet title={t("inbox.reject.title")} onClose={() => setRejecting(false)} size="sm">
           <div className="sub">{p.title}</div>
           <label className="field">{t("inbox.reason")}</label>
           <textarea className="field" rows={3} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("inbox.reason.placeholder")} />

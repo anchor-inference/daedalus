@@ -120,7 +120,7 @@ export function ReviewSheet({ entryId, onClose, onChanged }: { entryId?: string 
   });
 
   return (
-    <Sheet title={t("memory.review.title")} onClose={onClose} size="wide" className="memory-review">
+    <Sheet title={t("memory.review.title")} onClose={onClose} size="xl" className="memory-review">
       <div className="sub">{t("memory.review.sub")}</div>
       {!entryId && list.length > 0 && (
         <div className="memory-review-by">

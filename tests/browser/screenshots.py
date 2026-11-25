@@ -1681,7 +1681,7 @@ def agents_shots() -> int:
                 page.route("**/api/**", stub)
                 # A phone's folders are the Chats page's project sections (open unless closed by hand).
                 if mobile:
-                    shot(page, f"{prefix}{state}", "agents?view=chats", wait=".ph-row")
+                    shot(page, f"{prefix}{state}", "agents?view=chats", wait=".list-row")
                 else:
                     shot(page, f"{prefix}{state}", "agents", wait=".sb-row")
                 context.close()
@@ -2255,7 +2255,7 @@ def phone_project_shots(context) -> None:  # type: ignore[no-untyped-def]
     page.route("**/api/**", focus_stub(focus))
     pid = focus.projects[0]["id"]
     shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .ph-btn", settle=700)
-    shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .ph-row", settle=700)
+    shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .list-row", settle=700)
     shot(page, "phone-orchestrator", f"project/{pid}", wait=".chat.in-project .event-card", settle=900)
     page.close()
 
@@ -2373,7 +2373,7 @@ def pins_shots(browser) -> None:  # type: ignore[no-untyped-def]
         page = phone.new_page()
         page.route("**/api/**", stub)
         shot(page, "phone-drawer-pins", "agents", wait=".ph-home", before=open_drawer)
-        shot(page, "phone-chats-pins", "agents?view=chats", wait="[data-pinned] .ph-row")
+        shot(page, "phone-chats-pins", "agents?view=chats", wait="[data-pinned] .list-row")
         phone.close()
     finally:
         PINS.clear()
@@ -2493,9 +2493,9 @@ def run() -> int:
         shot(page, "phone-health", "health", settle=900)
         shot(page, "phone-more", "agents", before=open_more)
         shot(page, "phone-drawer", "agents", wait=".ph-home", before=open_drawer)
-        shot(page, "phone-chats", "agents?view=chats", wait=".ph-row")
+        shot(page, "phone-chats", "agents?view=chats", wait=".list-row")
         shot(page, "phone-new-project", "agents", wait=".ph-page", before=open_phone_new_project, settle=600)
-        shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .ph-row")
+        shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .list-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
         shot(page, "phone-settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
         shot(page, "phone-session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_phone_tool_groups, settle=300)

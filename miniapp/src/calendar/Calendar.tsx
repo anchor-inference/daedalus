@@ -779,7 +779,7 @@ function WeekStrip({ anchor, today, weekStart, span, busy, onPick }: { anchor: D
 function KeysSheet({ onClose }: { onClose: () => void }) {
   const rows: [string, string][] = [["T", "cal.keys.today"], ["J · →", "cal.keys.next"], ["K · ←", "cal.keys.previous"], ["D", "cal.keys.day"], ["W", "cal.keys.week"], ["M", "cal.keys.month"], ["A", "cal.keys.agenda"], ["C", "cal.keys.create"], ["/", "cal.keys.search"], ["Esc", "cal.keys.close"], ["?", "cal.keys.help"]];
   return (
-    <Sheet title={t("cal.keys")} onClose={onClose} size="narrow">
+    <Sheet title={t("cal.keys")} onClose={onClose} size="sm">
       <dl className="cal-keys">
         {rows.map(([key, what]) => <div key={what}><dt><kbd>{key}</kbd></dt><dd>{t(what)}</dd></div>)}
       </dl>

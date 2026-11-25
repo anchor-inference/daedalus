@@ -106,7 +106,7 @@ function CalendarSheet({ calendar, onClose, toast }: { calendar: CalendarRow | n
     finally { setBusy(false); }
   }
   return (
-    <Sheet title={t(calendar ? "cal.calendar.edit" : "cal.calendar.add")} onClose={onClose} size="narrow">
+    <Sheet title={t(calendar ? "cal.calendar.edit" : "cal.calendar.add")} onClose={onClose} size="sm">
       <form className="cal-form" onSubmit={save}>
         <label className="field" htmlFor="cal-cal-name">{t("cal.calendar.name")}</label>
         <input id="cal-cal-name" className="field" autoFocus required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />

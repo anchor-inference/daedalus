@@ -34,7 +34,7 @@ export function useRenameSheet(id: string, current: string, toast: (text: string
   }
 
   const layer = renaming ? (
-    <Sheet title={t("term.rename")} onClose={() => setRenaming(false)} size="narrow">
+    <Sheet title={t("term.rename")} onClose={() => setRenaming(false)} size="sm">
       <form className="term-rename" onSubmit={(e) => { e.preventDefault(); void rename(); }}>
         <input className="field" aria-label={t("term.rename")} autoFocus value={title} maxLength={200} placeholder={shown} onChange={(e) => setTitle(e.target.value)} />
         <div className="sub">{t("term.rename.hint")}</div>

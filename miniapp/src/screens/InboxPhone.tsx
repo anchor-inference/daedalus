@@ -24,7 +24,8 @@ import { MovesInProgress } from "../project/moves";
 import { errorText } from "../ui";
 import { deleteWithUndo, toast as statusLine, type MenuItem } from "../ui/dialogs";
 import { PendingSchedules, usePendingSchedules } from "../schedulecard";
-import { ActionSheet, Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { IconButton, Menu, Row, Sheet } from "../ui/primitives";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
 type Open = { kind: "entry"; id: number } | { kind: "proposal"; id: string } | { kind: "menu" } | { kind: "bulk" } | null;
@@ -150,7 +151,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     ];
     const detail = needsYou && entry.body ? firstLine(entry.body) : "";
     return (
-      <ListRow
+      <Row
         key={entry.id}
         className={`ph-irow ${done ? "dim" : ""}`}
         data={{ notice: String(entry.id) }}
@@ -214,7 +215,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
             <SectionHeader count={pending.length}>{t("inbox.waiting")}</SectionHeader>
             <div className="ph-list">
               {pending.map((p) => (
-                <ListRow key={p.id} className="ph-irow" data={{ proposal: p.id }} title={p.title} unread
+                <Row key={p.id} className="ph-irow" data={{ proposal: p.id }} title={p.title} unread
                   lead={<span className="ph-kico"><Icon name="changes" size={18} /></span>}
                   trail={<span className="ph-irow-tm" title={absTime(p.created_at)}>{relTime(p.created_at)}<span className="ph-udot" aria-hidden /></span>}
                   meta={<span className="ph-ell">{[t("ph.inbox.proposal"), p.pr_number ? `PR #${p.pr_number}` : ""].filter(Boolean).join(" · ")}</span>}
@@ -248,7 +249,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
           actions={<button type="button" className="ph-link" onClick={() => setSelected(new Set(everything.map((e) => e.id)))}>{t("ph.inbox.selectall")}</button>} />
       ) : (
         <TopBar center title={t("nav.inbox")} sub={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
-          actions={<IconButton icon="vdots" label={t("ph.inbox.menu")} popup="menu" onClick={() => setOpen({ kind: "menu" })} />} />
+          actions={<IconButton icon="vdots" label={t("ph.inbox.menu")} popup="menu" onClick={() => setOpen({ kind: "menu" })} className="ph-ib" />} />
       )}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       {!selected && (data || list.error) && !(nothing && filter === "all") && (
@@ -268,11 +269,11 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
         </div>
       )}
       {open?.kind === "menu" && (
-        <ActionSheet onClose={() => setOpen(null)} items={[
+        <Menu onClose={() => setOpen(null)} items={[
           { label: t("inbox.markall"), icon: "check", disabled: unseen === 0, onSelect: () => void markAllSeen() },
           { label: t("ph.inbox.select"), icon: "check", onSelect: () => setSelected(new Set()) },
           { label: t("ph.inbox.settings"), icon: "settings", onSelect: () => navigate(pathFor("settings", "notifications")) },
-        ]} />
+        ]} label={t("dlg.menu")} />
       )}
       {current && <EntrySheet entry={current} names={names} offline={offline} onClose={() => setOpen(null)} onOpen={() => { setOpen(null); openEntry(current); }}
         onUnread={() => { setSeen([current.id], false); setOpen(null); }} onDelete={() => remove([current.id])}
@@ -330,7 +331,7 @@ function EntrySheet({ entry, names, offline, answered, onClose, onOpen, onUnread
   const opens = !!(entry.link || entry.session_id);
   const command = entry.category === "permission";
   return (
-    <BottomSheet onClose={onClose} className="ph-entry" label={entry.title}
+    <Sheet onClose={onClose} className="ph-sheet ph-entry" ariaLabel={entry.title}
       title={<span className="ph-sheet-kt"><span className={`ph-kico ${toneClass(entry)}`}><Icon name={noticeIcon(entry)} size={18} /></span><span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{entry.title}</span><span className="ph-sheet-kt-m">{categoryLabel(entry.category)} · {relTime(entry.updated_at)}</span></span></span>}
       footer={needsYou ? (
         <div className="ph-foot-stack">
@@ -352,7 +353,7 @@ function EntrySheet({ entry, names, offline, answered, onClose, onOpen, onUnread
         <div className="ph-kv"><span>{t("ph.inbox.when")}</span><span>{absTime(entry.updated_at)}{entry.count > 1 ? ` · ×${entry.count}` : ""}</span></div>
         {resolution && <div className="ph-kv"><span>{t("ph.inbox.outcome")}</span><span>{answered?.conflict ? t("ph.inbox.elsewhere", { outcome: resolutionLabel(resolution) }) : resolutionLabel(resolution)}</span></div>}
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -372,7 +373,7 @@ function ProposalSheet({ p, toast, onClose, onDone }: { p: Proposal; toast: (tex
     }
   }
   return (
-    <BottomSheet full onClose={onClose} className="ph-proposal" label={p.title}
+    <Sheet size="full" onClose={onClose} className="ph-sheet ph-proposal" ariaLabel={p.title}
       title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{t("ph.inbox.proposal")}</span><span className="ph-sheet-kt-m">{[p.pr_number ? `PR #${p.pr_number}` : "", relTime(p.created_at)].filter(Boolean).join(" · ")}</span></span>}
       footer={
         <div className="ph-foot-row">
@@ -389,7 +390,7 @@ function ProposalSheet({ p, toast, onClose, onDone }: { p: Proposal; toast: (tex
         <label className="ph-label" htmlFor={`reason-${p.id}`}>{t("ph.inbox.reason")}</label>
         <textarea id={`reason-${p.id}`} className="ph-field area" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("inbox.reason.placeholder")} />
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -415,13 +416,13 @@ function AllowSheet({ entries, names, toast, onClose, onDone }: { entries: Notif
     onDone(results);
   }
   return (
-    <BottomSheet onClose={onClose} className="ph-allow" label={plural("ph.inbox.allow.title", entries.length)}
+    <Sheet onClose={onClose} className="ph-sheet ph-allow" ariaLabel={plural("ph.inbox.allow.title", entries.length)}
       title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{plural("ph.inbox.allow.title", entries.length)}</span><span className="ph-sheet-kt-m">{t("ph.inbox.allow.sub")}</span></span>}
       footer={<div className="ph-foot-row even"><button type="button" className="ph-btn" onClick={onClose}>{t("common.cancel")}</button><button type="button" className="ph-btn warn" disabled={busy} onClick={() => void allow()}>{t("ph.inbox.allow.do", { n: entries.length })}</button></div>}>
       <div className="ph-sheet-pad">
         <pre className="ph-code">{entries.map((e) => `${firstLine(e.body) || e.title}\n  ${e.project_id ? names.get(e.project_id) ?? "" : t("notice.anywhere")}`).join("\n")}</pre>
         <Banner tone="info" icon="alert">{t("ph.inbox.allow.note")}</Banner>
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }

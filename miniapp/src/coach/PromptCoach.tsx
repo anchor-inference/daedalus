@@ -2,17 +2,17 @@
 // embeds the coach's own session (drawn by the caller, so this file does not import the session screen
 // that imports it) and, once the coach has saved a prompt, offers it for the chat's message.
 
-import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
-import { Icon, type IconName } from "../icons";
+import { Icon } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
 import { useCopied } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { Banner } from "../ui/phone";
-import { type CoachResult, type CoachView, type Point, COMPOSER_CLEARANCE, EDGE, clampPosition, defaultPosition, readPosition, seedMessage, windowSize, writePosition } from "./coach";
+import { type CoachResult, type CoachView, POSITION_KEY, seedMessage } from "./coach";
+import { FloatingWindow } from "../ui/primitives/floatingwindow";
 
 export type PromptCoachProps = {
   parentId: string;
@@ -79,7 +79,7 @@ export function PromptCoach({ parentId, draft, raise, phone, toast, onClose, onI
       </Sheet>
     );
   }
-  return <FloatingWindow title={t("coach.title")} icon="wand" minimised={minimised} onMinimise={() => setMinimised((m) => !m)} onClose={onClose} menu={menu}>{body}</FloatingWindow>;
+  return <FloatingWindow title={t("coach.title")} icon="wand" positionKey={POSITION_KEY} minimised={minimised} onMinimise={() => setMinimised((m) => !m)} onClose={onClose} menu={menu}>{body}</FloatingWindow>;
 }
 
 /** The saved prompt: its first lines, the way into the message, a copy, and where it was saved. */
@@ -105,67 +105,5 @@ function ResultCard({ result, phone, onInsert, toast, onOpenFile }: { result: Co
         <button type="button" className={`btn primary ${phone ? "" : "small"} coach-insert`} onClick={() => onInsert(result.prompt)}><Icon name="send" size={16} />{t("coach.insert")}</button>
       </div>
     </section>
-  );
-}
-
-/**
- * The desktop's floating panel: dragged by its title bar, kept inside the screen, and left where the
- * viewer last put it. Minimised, it is a bar in the corner and the session inside stays mounted, so a
- * run streaming in it is not dropped and picked up again. The side question's window is the same panel
- * under its own title and with a place of its own.
- */
-export function FloatingWindow({ title, icon, positionKey, className, minimised, onMinimise, onClose, menu, children }: { title: string; icon: IconName; positionKey?: string; className?: string; minimised: boolean; onMinimise: () => void; onClose: () => void; menu: ReactNode; children: ReactNode }) {
-  const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
-  const [size, setSize] = useState(() => windowSize(viewport()));
-  const [at, setAt] = useState<Point>(() => {
-    const remembered = readPosition(positionKey);
-    const box = windowSize(viewport());
-    return remembered ? clampPosition(remembered, box, viewport()) : defaultPosition(box, viewport());
-  });
-  useEffect(() => {
-    const onResize = () => {
-      const box = windowSize(viewport());
-      setSize(box);
-      setAt((now) => clampPosition(now, box, viewport()));
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  const drag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (minimised || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
-    event.preventDefault();
-    const from = { x: event.clientX - at.x, y: event.clientY - at.y };
-    let last = at;
-    const move = (e: PointerEvent) => {
-      last = clampPosition({ x: e.clientX - from.x, y: e.clientY - from.y }, size, viewport());
-      setAt(last);
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-      writePosition(last, positionKey);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  };
-  const style = minimised ? { right: EDGE * 1.5, bottom: COMPOSER_CLEARANCE } : { left: at.x, top: at.y, width: size.width, height: size.height };
-  return createPortal(
-    <div className={`coach-window ${minimised ? "min" : ""} ${className ?? ""}`} style={style} role="dialog" aria-label={title}>
-      <div className="coach-head" onPointerDown={drag} title={minimised ? undefined : t("coach.drag")}>
-        <Icon name={icon} size={16} />
-        <span className="coach-title grow truncate">{title}</span>
-        {menu}
-        <button type="button" className="iconbtn small" onClick={onMinimise} aria-label={t(minimised ? "coach.restore" : "coach.minimise")} title={t(minimised ? "coach.restore" : "coach.minimise")}>
-          <Icon name={minimised ? "expand" : "down"} size={16} />
-        </button>
-        <button type="button" className="iconbtn small" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}>
-          <Icon name="close" size={16} />
-        </button>
-      </div>
-      <div className="coach-frame" hidden={minimised}>{children}</div>
-    </div>,
-    document.body,
   );
 }

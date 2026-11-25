@@ -19,7 +19,7 @@ import { navigate, projectPagePath } from "../router";
 import { answeredBy, askWords } from "../staff/model";
 import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
-import { BottomSheet } from "../ui/phone";
+import { Sheet } from "../ui/primitives";
 import { QuestionsPanel } from "../questions/QuestionsPanel";
 import { useQuestions } from "../questions/data";
 import type { Staff } from "../team/team";
@@ -56,10 +56,10 @@ export function DecisionSheet({ projectId, toast, onClose }: { projectId: string
   const { questions } = useQuestions(scope);
   const n = questions?.length ?? 0;
   return (
-    <BottomSheet full className="ph-decisions" onClose={onClose} label={t("panel.tab.questions")}
+    <Sheet size="full" className="ph-sheet ph-decisions" onClose={onClose} ariaLabel={t("panel.tab.questions")}
       title={<span className="ph-sheet-title">{t("panel.tab.questions")}{n > 0 && <span className="ph-badge warn">{n}</span>}</span>}>
       <QuestionsPanel scope={scope} toast={toast} />
-    </BottomSheet>
+    </Sheet>
   );
 }
 

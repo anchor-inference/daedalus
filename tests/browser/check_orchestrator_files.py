@@ -64,7 +64,7 @@ def visit(browser, lang: str, phone: bool) -> None:  # type: ignore[no-untyped-d
     expect(switcher).to_be_visible(timeout=15000)
     assert switcher.get_attribute("aria-label") == FOLDER_NAME[lang], f"{where}: the switch is named {switcher.get_attribute('aria-label')!r}"
     switcher.click()
-    options = page.locator(".menu [role=menuitem]").evaluate_all("els => els.map(e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim())")
+    options = page.locator(".menu [role=menuitem]").evaluate_all("els => els.map(e => (e.querySelector('.menu-row-t')?.textContent ?? '').trim())")
     label = f"{WORKTREE_MEMBER} · {WORKTREE_BRANCH}"
     assert options[:3] == ["bakery-site", "bakery-api", "bakery-bot"] and options[-1] == label, f"{where}: the switch lists {options}"
     page.keyboard.press("Escape")

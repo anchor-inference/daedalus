@@ -2,7 +2,8 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, ApiError, Project, SessionList, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
-import { BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, SegmentedControl, SheetRow, TopBar } from "../ui/phone";
+import { Chip, ChipBar, EmptyState, TopBar } from "../ui/phone";
+import { IconButton, MenuRow, Row, Segmented } from "../ui/primitives";
 import { colourOf, initials } from "../drawer";
 import { useMedia } from "../shell";
 import { StaffAvatar } from "../team/parts";
@@ -293,7 +294,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
       ...ending(task, blocked),
     ];
     return (
-      <ListRow key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
+      <Row key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
         meta={<>
           {task.assignee && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
           {task.needs_you && <span className="ph-pill warn" data-needs={task.needs_you}>{t(`board.needs.${task.needs_you}`)}</span>}
@@ -311,8 +312,8 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
     <div className="ph-page ph-board ph-gboard">
       <TopBar center title={screenTitle("board")} sub={undefined}
         actions={<>
-          <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} />
-          <IconButton icon="plus" label={t("board.new")} onClick={onNew} />
+          <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} className="ph-ib" />
+          <IconButton icon="plus" label={t("board.new")} onClick={onNew} className="ph-ib" />
         </>} />
       {tasks && tasks.length > 0 && (
         <ChipBar label={t("pboard.filter")}>
@@ -359,16 +360,16 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
         ))}
       </div>
       {options && (
-        <BottomSheet title={t("pbph.options")} onClose={() => setOptions(false)} className="ph-board-options">
+        <Sheet title={t("pbph.options")} onClose={() => setOptions(false)} className="ph-sheet ph-board-options">
           <div className="ph-gl">{t("pbph.show")}</div>
-          <div className="ph-board-opt"><SegmentedControl label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
-            options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} /></div>
+          <div className="ph-board-opt"><Segmented label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
+            options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} className="ph-seg" /></div>
           <div className="ph-gl">{t("board.group")}</div>
-          <div className="ph-board-opt"><SegmentedControl label={t("board.group")} value={grouping} onChange={(v) => setGrouping(v === "status" ? "status" : "project")}
-            options={[{ id: "project", label: t("board.group.project") }, { id: "status", label: t("board.group.status") }]} /></div>
-          {project && !project.system && !project.settings.ephemeral && <SheetRow icon="board" label={t("board.lens.project")} onClick={() => { setOptions(false); navigate(projectPagePath(project.id, "board")); }} />}
-          <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { refresh(); setOptions(false); }} />
-        </BottomSheet>
+          <div className="ph-board-opt"><Segmented label={t("board.group")} value={grouping} onChange={(v) => setGrouping(v === "status" ? "status" : "project")}
+            options={[{ id: "project", label: t("board.group.project") }, { id: "status", label: t("board.group.status") }]} className="ph-seg" /></div>
+          {project && !project.system && !project.settings.ephemeral && <MenuRow icon="board" label={t("board.lens.project")} onSelect={() => { setOptions(false); navigate(projectPagePath(project.id, "board")); }} />}
+          <MenuRow icon="reload" label={t("pboard.launch.refresh")} onSelect={() => { refresh(); setOptions(false); }} />
+        </Sheet>
       )}
       {sheets}
     </div>

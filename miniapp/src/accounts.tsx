@@ -13,7 +13,7 @@ import { Icon } from "./icons";
 import { navigate, pathFor } from "./router";
 import { Row } from "./settingsrow";
 import { confirmAsync, errorText } from "./ui";
-import { Dropdown, Switch } from "./ui/index";
+import { Select, Switch } from "./ui/index";
 import { ProviderMark } from "./ui/provider-mark";
 import "./accounts.css";
 
@@ -235,7 +235,7 @@ function UpstreamBlock({ row, terminal, toast, reload }: { row: SubscriptionUpst
       {several && (
         <div className="account-rules">
           <Row title={t("accounts.default.title")} desc={t("accounts.default.sub")} stack>
-            <Dropdown
+            <Select
               id={`accounts-default-${row.upstream}`}
               label={t("accounts.default.title")}
               value={row.default_account}

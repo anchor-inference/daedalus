@@ -29,7 +29,7 @@ def check(lang: str, width: int) -> None:
         page = browser.new_page(viewport={"width": width, "height": 560 if width == 320 else 800})
         serve(page, stub, unhandled)
         page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-        page.locator(".pcard.doing, .ph-row.doing", has_text="Checkout").first.click()
+        page.locator(".pcard.doing, .list-row.doing", has_text="Checkout").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
         # The workflow and the context wait in the task's menu, out of the task's text until chosen.
         expect(sheet.locator(".task-workflow-section")).to_have_count(0)

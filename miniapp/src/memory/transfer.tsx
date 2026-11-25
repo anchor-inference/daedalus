@@ -98,7 +98,7 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
 
   if (items) {
     return (
-      <Sheet title={t("memory.import.preview")} onClose={onClose} size="wide" className="memory-import">
+      <Sheet title={t("memory.import.preview")} onClose={onClose} size="xl" className="memory-import">
         <div className="sub">{items.length ? t("memory.import.preview.sub", { n: items.length }) : t("memory.import.none")}</div>
         {groups.map(([target, list]) => (
           <section key={target} className="memory-import-group" data-target={target}>
@@ -132,7 +132,7 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
   }
 
   return (
-    <Sheet title={t("memory.import.title")} onClose={onClose} size="wide" className="memory-import">
+    <Sheet title={t("memory.import.title")} onClose={onClose} size="xl" className="memory-import">
       <div className="sub">{t("memory.import.sub")}</div>
       <div className="memory-import-step">{t("memory.import.step1")}</div>
       <div className="memory-import-prompt">

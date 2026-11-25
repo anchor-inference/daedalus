@@ -145,7 +145,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
   if (job) {
     const fraction = job.total_bytes > 0 ? Math.min(1, job.done_bytes / job.total_bytes) : job.active ? 0 : 1;
     return (
-      <Sheet title={title} onClose={onClose} size="narrow">
+      <Sheet title={title} onClose={onClose} size="sm">
         <div className="np move-folder" data-move-state={job.state}>
           <div className="np-field">
             <span className="np-label">{t("move.from")}</span><span className="mono truncate" title={job.source}>{job.source}</span>
@@ -186,7 +186,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
   const skippedCount = plan?.skipped_count ?? 0;
   const leftoverHere = !!plan?.leftover && destination.trim() === plan.leftover.destination;
   return (
-    <Sheet title={title} onClose={onClose} size={browsing ? "wide" : "narrow"}>
+    <Sheet title={title} onClose={onClose} size={browsing ? "xl" : "sm"}>
       <div className="np move-folder" data-move-plan={plan ? plan.direction || "none" : "loading"}>
         <p className="np-intro sub">{t(toHost ? "move.intro.tohost" : "move.intro.tocontainer")}</p>
         <div className="np-field">

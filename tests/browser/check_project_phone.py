@@ -99,10 +99,10 @@ def more_sheet(page: Page, words: dict, badge: str | None) -> None:
     page.locator("nav.project-tabs button[data-tab='more']").tap()
     sheet = page.locator(".sheet.more-sheet")
     expect(sheet).to_be_visible()
-    items = sheet.locator(".ph-mrow")
+    items = sheet.locator(".menu-row")
     expect(items).to_have_count(len(words["more"]))
-    assert [x.strip() for x in items.locator(".ph-mrow-t").all_inner_texts()] == words["more"], items.all_inner_texts()
-    count = sheet.locator(".ph-mrow[data-more='attention'] .ph-badge")
+    assert [x.strip() for x in items.locator(".menu-row-t").all_inner_texts()] == words["more"], items.all_inner_texts()
+    count = sheet.locator(".menu-row[data-more='attention'] .ph-badge")
     if badge is None:
         expect(count).to_have_count(0)
     else:
@@ -138,7 +138,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     items = page.locator("[data-staff]")
     expect(items).to_have_count(6)
     expect(items.filter(has_text="Olga")).to_contain_text(invented["olga.role"])
-    tall_enough(page, "[data-staff] .ph-row", where)
+    tall_enough(page, "[data-staff] .list-row", where)
     fits(page, f"{where} team")
 
     # The board draws no card of its own: every request is a row of its Needs-you section, with an
@@ -170,7 +170,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_count(0)
 
     # A member with a conversation opens it without the tabs, and its back returns to the team.
-    items.filter(has_text="Lev").locator(".ph-row").tap()
+    items.filter(has_text="Lev").locator(".list-row").tap()
     page.wait_for_url(f"**/project/{PID}/s/sess-lev**")
     expect(page.locator(".chat.in-project")).to_be_visible()
     expect(page.locator("nav.project-tabs")).to_have_count(0)
@@ -216,7 +216,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # More opens its sheet over the page; the history opens from it, and the bar stays with More lit.
     more_sheet(page, words, None)
     fits(page, f"{where} more")
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='journal']").tap()
     page.wait_for_url(f"**/project/{PID}/journal**")
     page.wait_for_selector(".journal-entry", timeout=10000)
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
@@ -224,21 +224,21 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # Every other page of the sheet keeps the bar too, and its own item is the one marked.
     for key in ("attention", "brief", "wakeups", "folders"):
         more_sheet(page, words, None)
-        page.locator(f".sheet.more-sheet .ph-mrow[data-more='{key}']").tap()
+        page.locator(f".sheet.more-sheet .menu-row[data-more='{key}']").tap()
         page.wait_for_url(f"**/project/{PID}/{key}**")
         tabs(page, words, "more")
         fits(page, f"{where} {key}")
     more_sheet(page, words, None)
-    expect(page.locator(".sheet.more-sheet .ph-mrow.on")).to_have_attribute("data-more", "folders")
+    expect(page.locator(".sheet.more-sheet .menu-row.on")).to_have_attribute("data-more", "folders")
     # The project's settings open in place of the sheet.
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='settings']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='settings']").tap()
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     expect(page.get_by_role("dialog").get_by_role("textbox", name="Name" if lang == "en" else "Название")).to_have_value("Bakery 2.0")
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
     # And "All projects" leaves for orchestration's list.
     more_sheet(page, words, None)
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='projects']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='projects']").tap()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
 

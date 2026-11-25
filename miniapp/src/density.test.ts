@@ -53,11 +53,13 @@ import settingsDialog from "./screens/settings.css?raw";
 import explorerPanel from "./explorerpanel.css?raw";
 import launcher from "./navlauncher.css?raw";
 import selection from "./ui/selection.css?raw";
+import primitivesPage from "./screens/primitives.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
-// Terminals page, the task dialog, the agent link, the Files tab, the More launcher and the in-place
-// selection list keep their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher + "\n" + selection;
+// Terminals page, the task dialog, the agent link, the Files tab, the More launcher, the in-place
+// selection list and the primitives page keep their looks beside their components; they answer to
+// the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes + "\n" + guests + "\n" + explorerPanel + "\n" + settingsDialog + "\n" + launcher + "\n" + selection + "\n" + primitivesPage;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -176,6 +178,8 @@ const BOX_ALLOWED = [
   ".ne-dialog", ".ne-field", ".ne-tint", ".ne-read",
   // Settings is a dialog: its section is a page inside it, with the room round it a page has.
   ".settings-dialog",
+  // A layer over the whole window is a surface like a sheet: its bar is a page header's height.
+  ".fullscreen-",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -207,6 +211,9 @@ const CONTENT_BOXES = [
   // Not a box but the shade a sheet raises over its sticky footer while more waits below; shorter
   // than this it fell into the gap above the footer and said nothing.
   { selector: '.sheet-body[data-more="below"] .sheet-foot::before', property: "height", max: 56 },
+  // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
+  // large row the approved designs draw for a list of providers or entries. The 56 is that one.
+  { selector: ".list-row.h56", property: "min-height", max: 56 },
 ];
 
 /** Top and bottom padding of a shorthand, in px; a component that is not a plain length counts as its first literal. */
@@ -401,15 +408,15 @@ describe("the phone", () => {
     expect(phoneRule(".pagehead")).toContain("backdrop-filter: none");
     expect(phoneRule(".ph-ib")).toContain("width: var(--tap)");
     expect(phoneRule(".ph-ib")).toContain("height: var(--tap)");
-    expect(phoneRule(".ph-row")).toContain("min-height: var(--list-row-h)");
-    expect(phoneRule(".ph-row.one")).toContain("min-height: var(--list-row-h-1)");
-    expect(phoneRule(".ph-row")).not.toMatch(/border/);
+    expect(phoneRule(".list-row")).toContain("min-height: var(--list-row-h)");
+    expect(phoneRule(".list-row.one")).toContain("min-height: var(--list-row-h-1)");
+    expect(phoneRule(".list-row")).not.toMatch(/border/);
     expect(phoneRule(".ph-chip")).toContain("height: var(--chip-h)");
     expect(phoneRule(".ph-chip::after")).toContain("inset: -8px 0");
     // The sheet's head keeps its height under a long body: shrinking, it slid its subtitle under the
     // model sheet's search field.
     expect(phoneRule(".sheet-head")).toContain("flex: none");
-    expect(phoneRule(".ph-mrow")).toContain("min-height: var(--list-row-h-1)");
+    expect(phoneRule(".menu-row")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".ph-srow")).toContain("min-height: var(--set-row-h)");
     expect(phoneRule('.composer[data-shape="idle"] .composer-box')).toContain("min-height: var(--composer-h)");
     expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");

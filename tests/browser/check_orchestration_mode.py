@@ -246,24 +246,24 @@ def phone(page: Page, lang: str) -> None:
     drawer.locator("[data-nav='orchestration-list']").click()
     page.wait_for_url("**/app/orchestration/projects**")
     listing = page.locator(".ph-orch")
-    expect(listing.locator("[data-main-entry] .ph-row")).to_be_visible()
+    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
     # Main opens the chat as a detail of the list: no bar, and its back returns to the list.
-    listing.locator("[data-main-entry] .ph-row").click()
+    listing.locator("[data-main-entry] .list-row").click()
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator(".timeline > .questions-line")).to_be_visible()
     expect(page.locator("nav.tabbar")).to_have_count(0)
     fits(page, f"{lang} phone main chat")
     page.locator(".chat-head > button.iconbtn, .chat-head > .ph-ib").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(listing.locator("[data-main-entry] .ph-row")).to_be_visible()
+    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
     # Remembered by the phone too: a bare /app opens orchestration at its list.
     go(page, "/", lang)
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(listing.locator("[data-main-entry] .ph-row")).to_be_visible()
-    expect(listing.locator("[data-project] .ph-row")).to_have_count(1)
+    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
+    expect(listing.locator("[data-project] .list-row")).to_have_count(1)
     expect(listing.locator("[data-project] .ph-badge")).to_have_text("1")
     fits(page, f"{lang} phone orchestration list")
-    listing.locator("[data-project] .ph-row").first.click()
+    listing.locator("[data-project] .list-row").first.click()
     page.wait_for_url(re.compile(rf"/app/orchestration/project/{PID}(\?|$)"))
     project_tabs = page.locator("nav.tabbar.project-tabs > a, nav.tabbar.project-tabs > button")
     expect(project_tabs).to_have_count(5)
@@ -273,7 +273,7 @@ def phone(page: Page, lang: str) -> None:
     # The board is a tab of its own, and the project's other pages are in More's sheet.
     expect(page.locator("nav.tabbar.project-tabs a[data-tab='board']")).to_have_text(words["board"])
     page.locator("nav.tabbar.project-tabs button[data-tab='more']").click()
-    expect(page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']")).to_be_visible()
+    expect(page.locator(".sheet.more-sheet .menu-row[data-more='journal']")).to_be_visible()
     page.keyboard.press("Escape")
     # The project's hamburger opens the same drawer, in orchestration mode, with the project marked.
     page.locator(".pagehead .ph-menu").first.click()
@@ -289,7 +289,7 @@ def phone(page: Page, lang: str) -> None:
     # A notification with the old link, opened from the Inbox.
     go(page, "/inbox", lang)
     # The Inbox's row of an entry with a link opens it at once.
-    page.locator("[data-notice='77'] .ph-row").first.click()
+    page.locator("[data-notice='77'] .list-row").first.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/board**")
     expect(page.locator(".ph-board")).to_be_visible()
     expect(page.locator("nav.tabbar.project-tabs .active")).to_have_attribute("data-tab", "board")

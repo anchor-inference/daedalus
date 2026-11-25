@@ -37,7 +37,7 @@ import { budgetAttention, distinctOperatorActions, operatorAttentionCount, type 
 import { NeedsYouCard } from "./needs";
 import { operatorReviewReady } from "./focus";
 import { absDate } from "../format";
-import { BottomSheet, SheetRow } from "../ui/phone";
+import { MenuRow } from "../ui/primitives";
 import { useReveal } from "../reveal";
 
 const enc = encodeURIComponent;
@@ -151,19 +151,19 @@ function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }
   const value = (page: PhoneMorePage) => page === "attention" && badge ? <span className="ph-badge warn" title={unknown} aria-label={unknown ?? plural("phone.more.decisions", parts.asks + parts.review + parts.blocked)}>{badge}</span>
     : page === "folders" && project ? project.folders.length : undefined;
   return (
-    <BottomSheet onClose={onClose} className="more-sheet ph-more-sheet" label={t("nav.more")}
+    <Sheet onClose={onClose} className="ph-sheet more-sheet ph-more-sheet" ariaLabel={t("nav.more")}
       title={<span className="ph-sheet-title two"><span className="truncate">{project?.name ?? t("nav.more")}</span>{project && <span className="ph-sheet-sub truncate">{[t(`term.env.${env}`), t("pmore.created", { date: absDate(project.created_at) })].join(" · ")}</span>}</span>}>
       <div role="menu" className="ph-more-list">
         {PHONE_MORE.map((page) => (
-          <SheetRow key={page} icon={MORE_ICONS[page]} label={t(MORE_LABELS[page])} hint={hint(page)} value={value(page)} checked={here === page ? true : undefined}
-            data={{ more: page }} onClick={() => goTo(projectPagePath(projectId, page))} />
+          <MenuRow key={page} icon={MORE_ICONS[page]} label={t(MORE_LABELS[page])} sub={hint(page)} aside={value(page)} checked={here === page ? true : undefined}
+            data={{ more: page }} onSelect={() => goTo(projectPagePath(projectId, page))} />
         ))}
-        <SheetRow icon="settings" label={t("phone.more.settings")} hint={t("pmore.settings.hint")} disabled={!project} data={{ more: "settings" }} onClick={() => setSettings(true)} />
-        {revealer && project && <SheetRow icon="external" label={revealer.label} data={{ more: "reveal" }} onClick={() => { onClose(); void revealer.reveal({ project_id: project.id }); }} />}
+        <MenuRow icon="settings" label={t("phone.more.settings")} sub={t("pmore.settings.hint")} disabled={!project} data={{ more: "settings" }} onSelect={() => setSettings(true)} />
+        {revealer && project && <MenuRow icon="external" label={revealer.label} data={{ more: "reveal" }} onSelect={() => { onClose(); void revealer.reveal({ project_id: project.id }); }} />}
         <div className="ph-msep" role="separator" />
-        <SheetRow icon="grid" label={t("focus.all")} data={{ more: "projects" }} onClick={() => goTo(ORCHESTRATION_LIST)} />
+        <MenuRow icon="grid" label={t("focus.all")} data={{ more: "projects" }} onSelect={() => goTo(ORCHESTRATION_LIST)} />
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 

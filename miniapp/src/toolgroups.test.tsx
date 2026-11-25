@@ -121,7 +121,8 @@ describe("the panels", () => {
     expect(browser.querySelector(".tgroup-reset")).toBeNull();
     expect(host.querySelector('[data-group="board"] .tgroup-reset')!.getAttribute("title")).toContain("When it fits");
     await act(async () => browser.querySelector<HTMLElement>(".dropdown-btn")!.click());
-    const always = [...browser.querySelectorAll<HTMLElement>("[role=option]")].find((o) => o.dataset.value === "eager")!;
+    // The list opens over the page, outside the row: Base UI draws it in a portal.
+    const always = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((o) => o.dataset.value === "eager")!;
     await act(async () => always.click());
     const put = fetcher.mock.calls.find(([, init]) => init?.method === "PUT")!;
     expect(String(put[0])).toContain("/api/tool-groups/browser");

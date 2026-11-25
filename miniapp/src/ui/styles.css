@@ -2,7 +2,8 @@
 /* The shared stylesheet, in the order the cascade needs: each part is one area of the app, and a rule
    that a later part overrides relies on that part coming later. density.test.ts reads every part. */
 @import "./parts/base.css";
-@import "./parts/primitives.css";
+@import "./parts/controls.css";
+@import "./parts/overlays.css";
 @import "./parts/chat.css";
 @import "./parts/composer.css";
 @import "./parts/workspace.css";

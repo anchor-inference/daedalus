@@ -6,7 +6,7 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { FloatingWindow } from "../coach/PromptCoach";
+import { FloatingWindow } from "../ui/primitives/floatingwindow";
 import { t } from "../i18n";
 import { enterSends, errorText } from "../ui";
 import { OverflowMenu, Sheet, useLayer } from "../ui/dialogs";

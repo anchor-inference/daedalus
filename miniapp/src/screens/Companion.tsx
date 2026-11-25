@@ -17,12 +17,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { retried } from "../chunks";
 import { api } from "../api";
-import { Dropdown, StatusLabel, timeAgo } from "../ui/components";
+import { Select, StatusLabel, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath } from "../router";
-import { BottomSheet, OverflowMenu, PageHeader, go, useMedia } from "../ui/index";
+import { OverflowMenu, PageHeader, go, useMedia } from "../ui/index";
+import { Sheet } from "../ui/primitives";
 import type { MenuItem } from "../ui/dialogs";
 import { invalidate, prime, useQuery } from "../store";
 import { errorText, haptic } from "../ui";
@@ -682,9 +683,9 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
         </div>
       </div>
       {narrow && panel && (
-        <BottomSheet title={t("voice.agents")} onClose={() => setPanel(false)} className="voice-agents-sheet">
+        <Sheet title={t("voice.agents")} onClose={() => setPanel(false)} className="ph-sheet voice-agents-sheet">
           <div className="voice-agents">{agentList}</div>
-        </BottomSheet>
+        </Sheet>
       )}
     </>
   );
@@ -816,7 +817,7 @@ export function VoiceSettings() {
         }
         stack
       >
-        <Dropdown
+        <Select
           label={t("voice.card.model")}
           value={row.value}
           disabled={saving}
@@ -828,7 +829,7 @@ export function VoiceSettings() {
         />
       </Row>
       <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
-        <Dropdown
+        <Select
           label={t("voice.card.background")}
           value={data.background_preset ?? ""}
           disabled={saving}

@@ -16,7 +16,7 @@ import { filesKey, handleIds, keptBase, type KeptFile } from "./keptfiles";
 import { changedSource, sentSource, viewerKind } from "./mediaroute";
 import { useMedia } from "./shell";
 import { Chevron } from "./ui/components";
-import { BottomSheet, ListRow } from "./ui/phone";
+import { Row, Sheet } from "./ui/primitives";
 import type { MenuItem } from "./ui/dialogs";
 import { useReveal } from "./reveal";
 import { SENT_VISIBLE, type ChangedFile, type SentFile } from "./turnfiles";
@@ -197,7 +197,7 @@ function ChangedFiles({ sessionId, files, onOpen }: { sessionId: string; files: 
       <div className="changed-files">
         {head}
         {open && (
-          <BottomSheet title={plural("turn.files.changed", files.length)} onClose={() => setOpen(false)} className="changed-files-sheet">
+          <Sheet title={plural("turn.files.changed", files.length)} onClose={() => setOpen(false)} className="ph-sheet changed-files-sheet">
             {files.map((file) => {
               const src = changedSource(sessionId, file);
               const revealFile = revealOf(file);
@@ -207,7 +207,7 @@ function ChangedFiles({ sessionId, files, onOpen }: { sessionId: string; files: 
                 ...(revealer && revealFile ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealFile }] : []),
               ];
               return (
-                <ListRow
+                <Row
                   key={file.callId}
                   one
                   more={false}
@@ -220,7 +220,7 @@ function ChangedFiles({ sessionId, files, onOpen }: { sessionId: string; files: 
                 />
               );
             })}
-          </BottomSheet>
+          </Sheet>
         )}
       </div>
     );

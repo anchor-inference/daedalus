@@ -328,7 +328,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     await act(async () => { host.querySelector<HTMLButtonElement>(".sp-new .composer .mic")!.click(); });
     await settle();
     expect(requests.map((r) => r.op)).toContain("mic.grant");
-    expect(host.querySelector(".toast")?.textContent).toBe(t("sidepanel.mic.grant"));
+    expect(document.querySelector(".toast")?.textContent).toBe(t("sidepanel.mic.grant"));
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
   });
 

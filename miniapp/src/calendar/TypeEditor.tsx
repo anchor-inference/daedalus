@@ -28,7 +28,7 @@ export function TypesSheet({ types, onClose, toast }: { types: TypeDef[]; onClos
   const [editing, setEditing] = useState<TypeDef | "new" | null>(null);
   if (editing) return <TypeForm type={editing === "new" ? null : editing} taken={types.map((x) => x.id)} onClose={() => setEditing(null)} toast={toast} />;
   return (
-    <Sheet title={t("cal.types")} onClose={onClose} size="narrow" className="cal-types">
+    <Sheet title={t("cal.types")} onClose={onClose} size="sm" className="cal-types">
       <p className="cal-hint">{t("cal.types.hint")}</p>
       <ul className="cal-type-list">
         {types.map((type) => (

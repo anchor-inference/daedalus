@@ -141,7 +141,7 @@ def phone(browser, check) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".ph-home .start-composer", timeout=15000)
     page.wait_for_timeout(600)
     check(page.locator(".start-where, .start-live, .start-mark").count() == 0, "390: the phone's home has none of the desktop's parts")
-    check(page.locator(".ph-live .ph-row, .ph-live > *").count() >= 1, "390: and keeps its own live rows")
+    check(page.locator(".ph-live .list-row, .ph-live > *").count() >= 1, "390: and keeps its own live rows")
     page.locator(".ph-where").click()
     sheet = page.locator(".sheet .project-pick")
     check(sheet.count() == 1, "390: the phone's home chooses a project in a sheet")

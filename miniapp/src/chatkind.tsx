@@ -382,7 +382,7 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "", agen
         <Icon name="chevron" size={12} />
       </button>
       {open && sheet && (
-        <Sheet title={t("kind.mode.label")} onClose={() => setOpen(false)} className="mode-sheet" size="narrow">
+        <Sheet title={t("kind.mode.label")} onClose={() => setOpen(false)} className="mode-sheet" size="sm">
           {list}
         </Sheet>
       )}

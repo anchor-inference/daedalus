@@ -174,7 +174,7 @@ function CleanupSheet({ workspace, toast, onClose, onCleaned }: { workspace: Wor
     } catch (error) { toast(errorText(error)); }
     finally { setBusy(false); }
   }
-  return <Sheet title={t("disk.cleanup.title", { label: workspace.label })} onClose={onClose} size="narrow">
+  return <Sheet title={t("disk.cleanup.title", { label: workspace.label })} onClose={onClose} size="sm">
     {result ? <div data-disk-result>
       <p data-disk-freed><b>{t("disk.freed", { size: diskBytes(result.freed_bytes) })}</b></p>
       {result.refused.length > 0 && <div className="disk-refused">

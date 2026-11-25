@@ -200,7 +200,7 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
   if (empty) return null;
   if (editing) return <ProjectSettingsSheet project={editing} onClose={() => setEditing(null)} onRemoved={() => { setEditing(null); if (editing.id === current) onPick(""); onClose(); }} toast={toast} />;
   return (
-    <Sheet title={t("shell.projects")} onClose={onClose} size="narrow">
+    <Sheet title={t("shell.projects")} onClose={onClose} size="sm">
       <div className="sub" style={{ marginBottom: 8 }}>{t("project.intro")}</div>
       <button className={`menu-item ${current ? "" : "on"}`} onClick={() => pick("")}>
         <span className="grow truncate">{t("shell.projects.all")}</span>
@@ -470,7 +470,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
     }
   }
   return (
-    <Sheet title={project.name} ariaLabel={t("project.settings.for", { name: project.name })} onClose={onClose} size="narrow">
+    <Sheet title={project.name} ariaLabel={t("project.settings.for", { name: project.name })} onClose={onClose} size="sm">
       {project.settings.archived && <p className="sub attn project-archived-note" role="status">{t("project.archived.note")}</p>}
       {(writes.offline || !writes.readCurrent) && <div className="result-warning" role="status">{t("project.write.unverified")} <button type="button" className="linkbtn" disabled={writes.offline} onClick={projects.refresh}>{t("common.retry")}</button></div>}
       {writes.pending && <div className="result-warning" role="status">{t("project.write.pending", { action: writes.pending.label })} <button type="button" className="linkbtn" disabled={writes.offline || !!projects.error || writes.busy} onClick={() => void writes.retry()}>{t("project.write.retry")}</button></div>}
@@ -576,7 +576,7 @@ export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMo
     }
   }
   return (
-    <Sheet title={t("move.title")} onClose={onClose} size="narrow">
+    <Sheet title={t("move.title")} onClose={onClose} size="sm">
       <label className="field" htmlFor="move-project">{t("move.where")}</label>
       <select id="move-project" className="field" value={target} onChange={(e) => { setTarget(e.target.value); setOwnDirectory(false); }}>
         <option value="" disabled>{t("move.choose")}</option>

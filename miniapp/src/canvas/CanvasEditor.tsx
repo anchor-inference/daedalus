@@ -496,12 +496,12 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
         toast={toast}
       />
       {sitesOpen && (
-        <Sheet title={t("canvas.sites")} onClose={() => setSitesOpen(false)} size="narrow">
+        <Sheet title={t("canvas.sites")} onClose={() => setSitesOpen(false)} size="sm">
           <AllowedSites canvasId={id} version={originsVersion} onChanged={() => setOriginsVersion((n) => n + 1)} toast={toast} />
         </Sheet>
       )}
-      {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="right" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
-      {shareOpen && phone && <Sheet title={t("canvas.share")} onClose={() => setShareOpen(false)} size="narrow">{sharePanel}</Sheet>}
+      {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="end" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
+      {shareOpen && phone && <Sheet title={t("canvas.share")} onClose={() => setShareOpen(false)} size="sm">{sharePanel}</Sheet>}
     </div>
   );
 }

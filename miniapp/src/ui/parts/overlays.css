@@ -1,0 +1,180 @@
+/* ── what floats: popovers, menus, sheets, dialogs, tooltips, toasts ─────────────────────────
+   The primitives in ui/primitives draw these; the screens' own overlays borrow the classes until
+   each moves onto a primitive. One look for all of it: a popover is the pop surface with a real
+   1 px strong edge, 14 px corners and the one floating shadow; a dialog has the same corners; a
+   sheet on a phone has 20 px top corners. One entrance, 180 ms on the decelerating curve, and one
+   stack of z-indexes (tokens.css): overlay 30, popover 35, menu 38, confirm 40, toast 45.
+   Tokens this file reads that the token stylesheet adds: --hover and --selected (the row hover and
+   the chosen row; until they exist the solid surface steps stand in) and --attention (the orange
+   of "needs you"; --warn until then). */
+
+/* Base UI hangs every popup from a positioner it places itself. The positioner carries the layer's
+   place in the stack; the popup inside it is laid out in the positioner's box. */
+.layer-pos { z-index: var(--z-popover); outline: 0; }
+.layer-pos.menu-pos, .layer-pos.select-pos, .layer-pos.combo-pos { z-index: var(--z-menu); }
+.layer-pos.tooltip-pos { z-index: var(--z-toast); pointer-events: none; }
+.sheet-backdrop .layer-pos { z-index: var(--z-menu); }
+
+@keyframes layer-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+@keyframes scrim-in { from { opacity: 0; } }
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
+/* A floating popup fades in without moving: a transform on it, even for the 180 ms of its entrance,
+   makes it the box a `position: fixed` inside it is measured from, and the model list's effort panel
+   (effortselect.tsx) stood a popover's offset away until the entrance ended. */
+.layer-pos > .menu, .layer-pos > .dropdown-list, .layer-pos > .tooltip { animation: scrim-in var(--t-base) var(--ease-out); }
+.layer-pos > [data-ending-style] { opacity: 0; transition: opacity 120ms var(--ease-in); }
+@media (prefers-reduced-motion: reduce) {
+  .layer-pos > .menu, .layer-pos > .dropdown-list, .layer-pos > .tooltip, .sheet-backdrop, .sheet { animation: none !important; }
+}
+
+/* ── menus and popovers ───────────────────────────────────────────────────────────────────── */
+.menu { background:var(--surface-1); border:1px solid var(--line-strong); border-radius:var(--radius-lg); padding:6px; min-width:200px; max-width:min(320px,calc(100vw - 16px)); max-height:var(--available-height, calc(100dvh - 16px)); overflow:auto; box-shadow:var(--shadow-md); display:flex; flex-direction:column; gap:1px; outline:0; }
+.menu.pop { padding:6px; }
+/* A menu row is an icon and a label on one line: the icon centred on the row, a fixed gap from the
+   label, whatever draws the menu (an overflow button, a right click, a popover). The row lost its
+   flex layout when the palette was redrawn, leaving the icon inline on the text's baseline: three
+   pixels above the label's middle and touching it. `--menu-pad` is named so the rule below can line
+   a row that has no icon up with the ones that do. */
+.menu button { --menu-pad:10px; display:flex; align-items:center; gap:var(--space-2); width:100%; background:none; border:0; color:var(--fg); text-align:left; padding:0 var(--menu-pad); min-height:var(--row-h); border-radius:var(--radius-sm); font:inherit; font-size:var(--fs-14); cursor:pointer; }
+.menu button > .ic { flex:none; }
+.menu button .ic { color: var(--fg-2); }
+/* A menu in which some rows carry an icon has one text column: a row without its own (Open, Cut, a
+   checkbox row) is pushed in by an icon's width and the gap, so its label stands under the others
+   and not to the left of them. */
+.menu:has(> button > .ic:first-child) > button:not(:has(> .ic:first-child)) { padding-left:calc(var(--menu-pad) + var(--icon-sm) + var(--space-2)); }
+/* Base UI marks the row the keyboard or the pointer is on with data-highlighted, and moves the focus
+   with it: one highlight, whichever moved last. */
+.menu button:hover, .menu button[data-highlighted], .menu button:focus-visible { background: var(--hover, var(--surface-3)); outline: none; }
+.menu button:active { background:var(--selected, var(--surface-4)); }
+.menu button:disabled, .menu button[data-disabled] { opacity:.45; cursor:default; background:none; }
+.menu button.danger, .menu button.danger .ic { color:var(--bad); }
+.menu button.warn, .menu button.warn .ic { color:var(--attention, var(--warn)); }
+.menu button[data-popup-open] { background: var(--selected, var(--surface-3)); }
+.menu-sep { height: 1px; background: var(--line); margin: 4px 0; flex: none; }
+.menu-group { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.menu-heading { padding: 6px 10px 2px; }
+/* A checkbox item sets how the items below it act; its box sits at the row's end, like a setting's. */
+.menu .menu-check { margin-left:auto; flex:none; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--line-strong); border-radius:4px; }
+.menu .menu-check.on { background:var(--accent); color:var(--accent-ink); box-shadow:none; }
+.menu .menu-check .ic { color:inherit; }
+.context-menu { width:max-content; }
+
+/* One row of a menu or a sheet (MenuRow): 32 px, a 16 px icon, an 8 px gap; its second line, its aside
+   and its key at the far end in the meta size. */
+.menu-row { display:flex; align-items:center; gap:var(--space-2); width:100%; min-height:var(--row-h); padding:0 10px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
+button.menu-row:hover { background:var(--hover, var(--surface-2)); }
+.menu-row:disabled { opacity:.45; cursor:default; }
+.menu-row > .ic { flex:none; color:var(--fg-2); }
+.menu-row-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.menu-row-t { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.menu-row-sub { font-size:var(--fs-12); color:var(--fg-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.menu-row-aside { flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-12); color:var(--fg-3); }
+.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
+.menu-row-kbd { margin-left:auto; }
+.menu-row-check { flex:none; width:16px; display:inline-flex; color:var(--accent); }
+.menu-row-chev { flex:none; display:inline-flex; color:var(--fg-3); }
+.menu-row.danger, .menu-row.danger > .ic { color:var(--bad); }
+.menu-row.warn, .menu-row.warn > .ic { color:var(--attention, var(--warn)); }
+.menu-row.on { background:var(--selected, var(--surface-3)); }
+
+/* A popover or a menu drawn as a sheet below 1024 px keeps its `.menu` (the screens' rules and the
+   checks address it so) but loses the floating box: the sheet is the box now. */
+.menu.in-sheet { position:static; min-width:0; max-width:none; max-height:none; overflow:visible; border:0; border-radius:0; box-shadow:none; background:none; padding:0; animation:none; }
+.sheet-preview { margin:var(--space-1) 0 var(--space-2); padding:10px 12px; border-radius:var(--radius-md); background:var(--surface-2); }
+.sheet-preview-t { font-size:var(--fs-14); font-weight:500; overflow-wrap:anywhere; }
+.sheet-preview-m { font-size:var(--fs-13); color:var(--fg-2); margin-top:2px; overflow-wrap:anywhere; }
+
+/* ── the select's list ────────────────────────────────────────────────────────────────────── */
+/* As wide as its control at least (Base UI hands the positioner the control's width), so on a phone
+   row, where the control spans the row, the list cannot overhang either edge. */
+.dropdown-list { display: flex; flex-direction: column; width: max-content; min-width: max(var(--anchor-width, 0px), min(200px, calc(100vw - 16px))); max-width: min(360px, calc(100vw - 16px)); max-height: min(320px, var(--available-height, 320px)); overflow-y: auto; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); outline: 0; }
+.dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 4px 10px; border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); text-align: left; cursor: pointer; outline: 0; }
+.dropdown-item[data-highlighted] { background: var(--hover, var(--surface-3)); }
+.dropdown-item[data-disabled] { opacity: .5; cursor: not-allowed; }
+.dropdown-item .ic { flex: none; color: var(--fg-2); }
+.dropdown-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.dropdown-item-text .sub { font-size: var(--fs-12); }
+.dropdown-check { display: inline-flex; color: var(--accent); }
+
+/* ── the combobox's list ──────────────────────────────────────────────────────────────────── */
+.combo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.combo-list { display: flex; flex-direction: column; gap: 1px; outline: 0; overflow-y: auto; }
+.combo-popup { min-width: max(var(--anchor-width, 0px), 240px); }
+.combo-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-14); cursor: pointer; }
+.combo-item[data-highlighted] { background: var(--hover, var(--surface-3)); }
+.combo-item[data-selected] { color: var(--accent); }
+.combo-group-label { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.combo-empty:not(:empty) { padding: 8px 10px; color: var(--fg-3); font-size: var(--fs-13); }
+
+/* ── the tooltip ──────────────────────────────────────────────────────────────────────────── */
+.tooltip { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--fg); color: var(--bg); font-size: var(--fs-12); line-height: 1.35; box-shadow: var(--shadow-md); }
+.tooltip .kbd { background: color-mix(in srgb, var(--bg) 18%, transparent); color: inherit; border: 0; }
+
+/* ── sheets ───────────────────────────────────────────────────────────────────────────────── */
+.sheet-backdrop { position:fixed; inset:0; background:var(--scrim); z-index:var(--z-overlay); display:flex; align-items:flex-end; animation: scrim-in var(--t-base) var(--ease-out); }
+.sheet { width:100%; max-height:88%; background:var(--surface-1); outline:none; border:1px solid var(--line-strong); border-bottom:0; border-radius:var(--radius-xl) var(--radius-xl) 0 0; padding:8px 16px calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; box-shadow:var(--shadow-xl); animation: sheet-up var(--t-slow) var(--ease-out); }
+.sheet .grip { width:36px; height:4px; border-radius:2px; background:var(--line-strong); margin:4px auto 10px; flex:none; }
+.sheet h3 { margin:0 0 10px; font-size:var(--fs-16); font-weight:600; letter-spacing:-0.01em; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 6px; }
+.sheet-head h3 { margin: 0; text-align: left; }
+.sheet.untitled .sheet-head { justify-content: flex-end; }
+.sheet-body { overflow-y:auto; min-height:0; }
+/* More of the sheet waits below the fold (edgefade.ts): the body's lower edge fades, or, where a
+   sticky footer holds the actions, a shade rises above it. Without either, a touch screen showed a
+   hire sheet or a task's actions ending at the fold with nothing to say the rest was a swipe away. */
+.sheet-body[data-more="below"]:not(:has(.sheet-foot)) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.sheet-more-anchor { position: relative; height: 0; flex: none; }
+.sheet-more { position: absolute; left: 50%; bottom: var(--space-2); transform: translateX(-50%); display: none; align-items: center; justify-content: center; width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-pill); border: 1px solid var(--line-strong); background: var(--surface-1); color: var(--fg-2); box-shadow: var(--shadow-md); cursor: pointer; }
+.sheet-body[data-more="below"] + .sheet-more-anchor .sheet-more { display: inline-flex; }
+/* A sheet with a sticky footer says it with the shade over the footer instead: the arrow, standing
+   above the footer, sat on the last field's words. */
+.sheet-body[data-more="below"]:has(.sheet-foot) + .sheet-more-anchor .sheet-more { display: none; }
+.sheet-body[data-more="below"] .sheet-foot::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 56px; background: linear-gradient(to bottom, transparent, var(--surface-1) 85%); pointer-events: none; }
+.sheet-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 0 4px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--surface-1); }
+.sheet-foot.column { flex-direction: column; align-items: stretch; }
+.sheet.full { height: 100%; max-height: 100%; border-radius: 0; border: 0; padding-top: 4px; }
+@media (max-width: 1023px) {
+  .sheet { max-height: 92%; }
+  .sheet .grip { margin-bottom: 6px; }
+}
+/* A sheet on a wide screen is a dialog, not a full-width drawer, in one of five widths: 440 for a
+   question, 560 for a short form, 720 for most tasks, 960 for a list or a diff beside its form, and
+   the window. There were five before too (440, 460, 480, 820, 1100), none named for a use. */
+@media (min-width: 1024px) {
+  .sheet-backdrop { align-items: center; justify-content: center; }
+  .sheet { width: min(720px, 92vw); max-height: 86%; border-bottom: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 12px 24px 20px; animation-name: layer-in; }
+  .sheet.sm { width: min(440px, 92vw); }
+  .sheet.md { width: min(560px, 92vw); }
+  .sheet.xl { width: min(960px, 94vw); }
+  .sheet.full { width: 100vw; max-height: 100%; border-radius: 0; }
+  /* The grip says "drag me down" on a sheet that rises from the bottom edge; a centred dialog has
+     nothing to drag, and the bar read as a phone part left over on the desktop. */
+  .sheet .grip { display: none; }
+}
+
+/* ── the confirmation ─────────────────────────────────────────────────────────────────────── */
+.dialog { background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 20px 20px 16px; width: min(440px, calc(100vw - 32px)); box-shadow: var(--shadow-xl); outline: 0; animation: layer-in var(--t-base) var(--ease-out); }
+.dialog h3 { margin: 0 0 6px; font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.dialog-body { color: var(--fg-2); font-size: var(--fs-14); line-height: 1.45; text-wrap: pretty; }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.sheet-backdrop.confirm { align-items: center; justify-content: center; z-index:var(--z-confirm); }
+
+/* ── a layer over the whole window ────────────────────────────────────────────────────────── */
+.fullscreen-layer { position: fixed; inset: 0; z-index: var(--z-overlay); display: flex; flex-direction: column; background: var(--bg); outline: 0; animation: scrim-in var(--t-base) var(--ease-out); }
+.fullscreen-bar { flex: none; display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 24px; border-bottom: 1px solid var(--line); }
+.fullscreen-title { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-14); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fullscreen-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* ── toasts ───────────────────────────────────────────────────────────────────────────────── */
+/* At the top on a phone: at the foot it stood over the composer. Beside the chat it has the corner. */
+.toast-viewport { position: fixed; z-index: var(--z-toast); left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); width: max-content; max-width: min(92vw, 460px); outline: 0; }
+.toast { display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 14px; border-radius: var(--radius-md); font-size: var(--fs-13); box-shadow: var(--shadow-lg); animation: layer-in var(--t-base) var(--ease-out); }
+.toast .btn.small { min-height: 30px; padding: 4px 8px; }
+.toast > .ic { flex: none; color: var(--fg-2); }
+.toast.notice { align-items: flex-start; padding: 12px 10px 12px 14px; }
+.toast.notice.attention > .ic { color: var(--attention, var(--warn)); }
+.toast.notice.live > .ic { color: var(--live, var(--ok)); }
+.toast-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.toast-title { font-size: var(--fs-14); font-weight: 500; }
+.toast-body { color: var(--fg-2); }
+@media (min-width: 1024px) { .toast-viewport { left: auto; right: 24px; top: auto; bottom: 24px; transform: none; } }

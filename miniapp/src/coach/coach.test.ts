@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
-import { COMPOSER_CLEARANCE, EDGE, clampPosition, defaultPosition, readPosition, seedMessage, windowSize, writePosition } from "./coach";
+import { POSITION_KEY, seedMessage } from "./coach";
+import { COMPOSER_CLEARANCE, EDGE, clampPosition, defaultPosition, readPosition as readAt, windowSize, writePosition as writeAt } from "../ui/primitives/floating";
+
+const readPosition = () => readAt(POSITION_KEY);
+const writePosition = (at: { x: number; y: number }) => writeAt(at, POSITION_KEY);
 
 afterEach(() => setLang("en"));
 

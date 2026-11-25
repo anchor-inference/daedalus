@@ -137,8 +137,11 @@ def sweep(page: Page, width: int, lang: str, problems: list[str]) -> None:
             except Exception:  # noqa: BLE001
                 problems.append(f"{where}: the control «{label}» cannot be pressed: it is off the screen")
                 continue
-            listbox = page.locator(".settings-col .dropdown-list")
-            if not listbox.count():
+            # A select's list opens in a layer over the page, and to a finger a moment after the press.
+            listbox = page.locator(".layer-pos .dropdown-list")
+            try:
+                listbox.first.wait_for(state="visible", timeout=2000)
+            except Exception:  # noqa: BLE001
                 continue
             box = listbox.first.bounding_box()
             trigger = button.bounding_box()

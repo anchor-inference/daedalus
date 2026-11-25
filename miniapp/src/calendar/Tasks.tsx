@@ -111,7 +111,7 @@ export function TaskEditor({ draft: initial, lists, zone, today, busy, onClose, 
   const set = (patch: Partial<TaskDraft>) => setD((cur) => ({ ...cur, ...patch }));
   const blocked = d.scheduled_start && d.scheduled_end ? { from: toWall(d.scheduled_start, zone), to: toWall(d.scheduled_end, zone) } : null;
   return (
-    <Sheet title={initial.task ? t("cal.task.edit") : t("cal.new.task")} onClose={onClose} size="narrow" className="cal-editor">
+    <Sheet title={initial.task ? t("cal.task.edit") : t("cal.new.task")} onClose={onClose} size="sm" className="cal-editor">
       <form className="cal-form" onSubmit={(e) => { e.preventDefault(); if (d.title.trim()) onSave(d); }}>
         <div className="cal-task-title-row">
           {initial.task && (

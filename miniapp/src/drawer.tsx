@@ -22,7 +22,8 @@ import { Launcher } from "./navmenu";
 import type { PaletteItem } from "./shell";
 import { KindMark } from "./chatkind";
 import { PrivateMark, isPrivate } from "./privatechat";
-import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
+import { Drawer, NewChatPill, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
+import { IconButton, Segmented, Sheet } from "./ui/primitives";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
 export const CHATS_PATH = pathFor("agents", null, { view: "chats" });
@@ -132,9 +133,10 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
       <Drawer open={open} onClose={closeDrawer} label={t("nav.menu")} footer={footer}>
         <div className="ph-brand">
           <span className="ph-brand-name"><Icon name="logo" size={22} />Daedalus</span>
-          <IconButton icon="search" label={t("search.label")} onClick={() => navigateFromDrawer(pathFor("agents", null, { view: "chats", search: "1" }))} />
+          <IconButton icon="search" label={t("search.label")} onClick={() => navigateFromDrawer(pathFor("agents", null, { view: "chats", search: "1" }))} className="ph-ib" />
         </div>
-        <SegmentedControl<Mode>
+        <Segmented<Mode>
+          className="ph-seg"
           label={t("ph.mode")}
           value={shown}
           onChange={setShown}
@@ -231,7 +233,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
       {more && (
         // The same launcher as the desktop's, as a sheet: the dot marks what this drawer already
         // lists. The language moved to Settings → Appearance with the rest of how the app looks.
-        <BottomSheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-more-sheet launch-sheet">
+        <Sheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-sheet ph-more-sheet launch-sheet">
           <Launcher
             nav={layout}
             placed={shown === "agents" ? layout.drawer.agents : layout.drawer.orchestration}
@@ -243,7 +245,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
             onRun={(run) => { setMore(false); closeDrawer(); run(); }}
             onClose={() => setMore(false)}
           />
-        </BottomSheet>
+        </Sheet>
       )}
     </>
   );

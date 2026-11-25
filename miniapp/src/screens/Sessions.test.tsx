@@ -241,7 +241,8 @@ describe("the sidebar", () => {
     await act(async () => lone.click());
     expect(post).toHaveBeenCalledWith("/api/projects/esp/as-chat", expect.objectContaining({ client_operation_id: expect.any(String) }));
     const busy = (await menuOf('[data-project="home"] .sb-prow')).find((b) => b.textContent === "Turn back into a chat")!;
-    expect(busy.disabled).toBe(true);
+    // Base UI keeps a disabled command focusable, so a reader can reach it and hear why it is off.
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
     expect(busy.title).toBe("Only with one chat in it");
     await close();
     const voice = await menuOf('[data-project="voice"] .sb-prow');

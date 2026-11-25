@@ -30,7 +30,8 @@ import { steadySession } from "./details";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { HARNESS_BADGES, HARNESS_NAMES, type Staff } from "../team/team";
 import { act } from "../team/phone";
-import { BottomSheet, IconButton, SegmentedControl, TopBar } from "../ui/phone";
+import { TopBar } from "../ui/phone";
+import { IconButton, Segmented } from "../ui/primitives";
 import { PhoneAskAnswers } from "./phoneask";
 import { TerminalView } from "../terminal/view";
 import type { TerminalState } from "../terminal/instance";
@@ -228,11 +229,11 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           title={<span className="ph-who"><StaffAvatar name={member.name} color={member.color} /><span className="ph-who-w"><span className="ph-who-n">{member.name}</span><span className="ph-who-s">{who}</span></span></span>}
           actions={<>
             {hasBrowser && <BrowserHeadButton groups={browsers.groups} onOpen={showBrowser} streaming={!sheet} saving={deviceSaving(true)} />}
-            <IconButton icon="vdots" label={t("staff.side")} popup="dialog" onClick={() => setSheet(true)} />
+            <IconButton icon="vdots" label={t("staff.side")} popup="dialog" onClick={() => setSheet(true)} className="ph-ib" />
           </>} />
         <div className="ph-member-mode">
-          <SegmentedControl label={t("staff.mode")} value={shown} onChange={pick}
-            options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} />
+          <Segmented label={t("staff.mode")} value={shown} onChange={pick}
+            options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} className="ph-seg" />
         </div>
         <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText} compact>
           {flagged > 0 && (
@@ -263,7 +264,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           </div>
         </div>
         {sheet && (
-          <BottomSheet full onClose={() => setSheet(false)} className="staff-sheet ph-member-sheet" label={member.name}
+          <Sheet size="full" onClose={() => setSheet(false)} className="ph-sheet staff-sheet ph-member-sheet" ariaLabel={member.name}
             title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{member.name}</span><span className="ph-sheet-kt-m">{[member.role, version].filter(Boolean).join(" · ")}</span></span>}
             footer={member.live ? (
               <div className="ph-foot-row wrap">
@@ -273,7 +274,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
               </div>
             ) : undefined}>
             {panel}
-          </BottomSheet>
+          </Sheet>
         )}
       </div>
     );

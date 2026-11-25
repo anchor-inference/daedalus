@@ -7,6 +7,7 @@ import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "./i18n";
 import { leftLabel, ServerGrantButton, StandingGrants } from "./servergrant";
+import { ConfirmHost } from "./ui/dialogs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,8 +49,13 @@ describe("the button on the approval", () => {
 
   it("asks before a grant with no end, and grants nothing when told no", async () => {
     const granted: number[] = [];
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    await act(async () => root.render(<ServerGrantButton server="mobile-mcp" onGrant={(hours) => granted.push(hours)} />));
+    await act(async () => root.render(<><ServerGrantButton server="mobile-mcp" onGrant={(hours) => granted.push(hours)} /><ConfirmHost /></>));
+    const answer = async (yes: boolean) => {
+      const buttons = document.querySelectorAll<HTMLButtonElement>(".dialog .dialog-actions button");
+      expect(buttons).toHaveLength(2);
+      await act(async () => buttons[yes ? 1 : 0].click());
+      await flush();
+    };
     const select = host.querySelector("select")!;
     act(() => {
       select.value = "0";
@@ -58,11 +64,11 @@ describe("the button on the approval", () => {
     expect(select.hasAttribute("data-forever")).toBe(true);
     await act(async () => host.querySelector("button")!.click());
     await flush();
-    expect(confirm).toHaveBeenCalledOnce();
+    await answer(false);
     expect(granted).toEqual([]);
-    confirm.mockReturnValue(true);
     await act(async () => host.querySelector("button")!.click());
     await flush();
+    await answer(true);
     expect(granted).toEqual([0]);
   });
 });

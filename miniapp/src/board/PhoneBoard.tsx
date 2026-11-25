@@ -19,7 +19,8 @@ import { plural, t } from "../i18n";
 import { navigate, projectPagePath, projectSessionPath } from "../router";
 import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, SectionHeader, SegmentedControl, SheetRow, TopBar } from "../ui/phone";
+import { Chip, ChipBar, EmptyState, SectionHeader, TopBar } from "../ui/phone";
+import { IconButton, MenuRow, Row, Segmented, Sheet, isAction } from "../ui/primitives";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { statusTone } from "../team/team";
 import { DecisionSheet } from "../project/needs";
@@ -120,8 +121,8 @@ export function PhoneProjectBoard({ projectId, toast, selected, selectedResult }
     <div className="ph-page ph-board">
       <TopBar title={t("focus.page.board")} sub={<>{sub.filter(Boolean).join(" · ")}{data && money && <> · <span className="project-budget-chip">{money}</span></>}</>} pip={!!data && data.needs_you.length > 0}
         actions={<>
-          {data && !empty && <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} />}
-          <IconButton icon="plus" label={t("pboard.new")} onClick={() => setCreating(true)} disabled={!data} />
+          {data && !empty && <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} className="ph-ib" />}
+          <IconButton icon="plus" label={t("pboard.new")} onClick={() => setCreating(true)} disabled={!data} className="ph-ib" />
         </>} />
       {data && !empty && (
         <ChipBar label={t("pboard.filter")}>
@@ -156,7 +157,7 @@ export function PhoneProjectBoard({ projectId, toast, selected, selectedResult }
               return (
                 <section key={column} className={`ph-board-sec ${column}`} aria-label={t(`pboard.col.${column}`)} data-column={column}>
                   <SectionHeader tone={column === "needs" ? "warn" : undefined} count={columnCount(column, arranged, column === "done" ? data.counts : undefined)}
-                    action={filter === column ? undefined : <IconButton icon={fold ? "forward" : "chevron"} label={t(fold ? "pbph.unfold" : "pbph.fold", { column: t(`pboard.col.${column}`) })} onClick={() => toggleFold(column)} expanded={!fold} />}>
+                    action={filter === column ? undefined : <IconButton icon={fold ? "forward" : "chevron"} label={t(fold ? "pbph.unfold" : "pbph.fold", { column: t(`pboard.col.${column}`) })} onClick={() => toggleFold(column)} expanded={!fold} className="ph-ib" />}>
                     {t(`pboard.col.${column}`)}
                   </SectionHeader>
                   {!fold && rows(column)}
@@ -166,7 +167,7 @@ export function PhoneProjectBoard({ projectId, toast, selected, selectedResult }
             })}
             {filter === null && columnCount("done", arranged, data.counts) > 0 && (
               <SectionHeader count={columnCount("done", arranged, data.counts)}
-                action={<IconButton icon="forward" label={t("pbph.unfold", { column: t("pboard.col.done") })} onClick={() => pick("done")} />}>
+                action={<IconButton icon="forward" label={t("pbph.unfold", { column: t("pboard.col.done") })} onClick={() => pick("done")} className="ph-ib" />}>
                 {t("pboard.col.done")}
               </SectionHeader>
             )}
@@ -175,15 +176,15 @@ export function PhoneProjectBoard({ projectId, toast, selected, selectedResult }
       </div>
       {menu && data && <TaskMenu task={menu} projectId={projectId} titles={titles} toast={toast} onOpen={() => { setMenu(null); openTask(menu); }} onClose={() => setMenu(null)} onDone={reload} />}
       {options && (
-        <BottomSheet title={t("pbph.options")} onClose={() => setOptions(false)} className="ph-board-options">
+        <Sheet title={t("pbph.options")} onClose={() => setOptions(false)} className="ph-sheet ph-board-options">
           <div className="ph-gl">{t("pbph.show")}</div>
-          <div className="ph-board-opt"><SegmentedControl label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
-            options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} /></div>
+          <div className="ph-board-opt"><Segmented label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
+            options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} className="ph-seg" /></div>
           <div className="ph-msep" role="separator" />
-          <SheetRow icon="download" label={t("issues.open")} onClick={() => { setOptions(false); setImporting(true); }} />
+          <MenuRow icon="download" label={t("issues.open")} onSelect={() => { setOptions(false); setImporting(true); }} />
           <div className="ph-board-opt"><HostCapacity projectId={projectId} pending={false} /></div>
-          <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { reload(); setOptions(false); }} />
-        </BottomSheet>
+          <MenuRow icon="reload" label={t("pboard.launch.refresh")} onSelect={() => { reload(); setOptions(false); }} />
+        </Sheet>
       )}
       {deciding && <DecisionSheet projectId={projectId} toast={toast} onClose={() => setDeciding(false)} />}
       {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} onImport={() => { setCreating(false); setImporting(true); }} />}
@@ -230,7 +231,7 @@ function TaskRow({ task, titles, onOpen, onMenu }: { task: ProjectTask; titles: 
   const accept = acceptanceChip(task);
   const pct = task.checklist.length ? Math.round((100 * done) / task.checklist.length) : 0;
   return (
-    <ListRow
+    <Row
       className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`}
       data={{ task: task.id }}
       title={task.title}
@@ -267,7 +268,7 @@ function TaskRow({ task, titles, onOpen, onMenu }: { task: ProjectTask; titles: 
 function NeedRow({ need, onAnswer, onOpen }: { need: NeedsYou; onAnswer: () => void; onOpen: () => void }) {
   const who = need.staff ? t("pboard.need.from", { kind: t(`pboard.need.kind.${need.kind}`), name: need.staff.name }) : t("pboard.need.orchestrator", { kind: t(`pboard.need.kind.${need.kind}`) });
   return (
-    <ListRow
+    <Row
       className="ph-task need"
       data={{ need: need.short_id }}
       title={need.text}
@@ -317,10 +318,10 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
   };
   const ending = closeItems(task, blocked, { onDone, toast });
   return (
-    <BottomSheet onClose={onClose} className="ph-actions ph-task-menu" label={task.title}
+    <Sheet onClose={onClose} className="ph-sheet menu-sheet ph-task-menu" ariaLabel={task.title}
       preview={{ title: <span className="ph-task-preview">{task.title}{task.priority <= 2 && <span className={`ph-pill ${task.priority === 1 ? "bad" : ""}`}>P{task.priority}</span>}</span>, meta }}>
       <div role="menu">
-        <SheetRow icon="expand" label={t("common.open")} onClick={onOpen} />
+        <MenuRow icon="expand" label={t("common.open")} onSelect={onOpen} />
         {NEXT[task.status].length > 0 && (
           <>
             <div className="ph-gl ph-move-label">{t("board.moveto")}</div>
@@ -330,16 +331,16 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
             </div>
           </>
         )}
-        <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { onDone(); onClose(); }} />
-        {task.assignee?.session_id && <SheetRow icon="bots" label={t("pboard.open.staff", { name: task.assignee.name })} onClick={() => { onClose(); navigate(projectSessionPath(projectId, task.assignee!.session_id!)); }} />}
-        <SheetRow icon="copy" label={t("board.copyid")} value={<code>{task.id}</code>} onClick={async () => { onClose(); if (!(await copyText(task.id))) toast(task.id); }} />
+        <MenuRow icon="reload" label={t("pboard.launch.refresh")} onSelect={() => { onDone(); onClose(); }} />
+        {task.assignee?.session_id && <MenuRow icon="bots" label={t("pboard.open.staff", { name: task.assignee.name })} onSelect={() => { onClose(); navigate(projectSessionPath(projectId, task.assignee!.session_id!)); }} />}
+        <MenuRow icon="copy" label={t("board.copyid")} aside={<code>{task.id}</code>} onSelect={async () => { onClose(); if (!(await copyText(task.id))) toast(task.id); }} />
         <div className="ph-msep" role="separator" />
-        {task.status === "doing" && <SheetRow icon="stop" danger label={t("result.stopTaskAction")} hint={t("result.stopTaskScope")} disabled={blocked} onClick={() => void stop()} />}
-        {ending.map((item) => item !== "-" && (
-          <SheetRow key={item.label} icon={item.icon ?? "archive"} danger={item.danger} label={item.label} disabled={item.disabled}
-            onClick={() => { onClose(); item.onSelect(); }} />
+        {task.status === "doing" && <MenuRow icon="stop" danger label={t("result.stopTaskAction")} sub={t("result.stopTaskScope")} disabled={blocked} onSelect={() => void stop()} />}
+        {ending.map((item) => isAction(item) && (
+          <MenuRow key={item.label} icon={item.icon ?? "archive"} danger={item.danger} label={item.label} disabled={item.disabled}
+            onSelect={() => { onClose(); item.onSelect(); }} />
         ))}
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }

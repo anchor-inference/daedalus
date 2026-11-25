@@ -78,7 +78,7 @@ export function MenuBranch({ icon, title, value, label, inline, onChoose, branch
 
 function BranchPanel({ anchor, inline, onClose, label, onChoose, children }: { anchor: HTMLElement | null; inline: boolean; onClose: () => void; label: string; onChoose: (value: string) => void; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; side: "left" | "right" } | null>(null);
   useLayer(onClose);
   useLayoutEffect(() => {
     const reveal = () => {
@@ -98,7 +98,13 @@ function BranchPanel({ anchor, inline, onClose, label, onChoose, children }: { a
       const left = menu.left - width - 6;
       if (right + width > innerWidth - 8 && left < 8) { setPosition(null); requestAnimationFrame(reveal); return; }
       const height = Math.min(panel.current.getBoundingClientRect().height, innerHeight - 16);
-      setPosition({ left:right + width <= innerWidth - 8 ? right : left, top:Math.max(8, Math.min(anchor.getBoundingClientRect().top, innerHeight - height - 8)) });
+      // The model list floats in a Base UI positioner, which places it with a transform, and a
+      // transformed box is where a `position: fixed` inside it is measured from: the panel stood a
+      // whole popover's offset away from where it was put. The place is worked out on the screen and
+      // then said from that box's corner.
+      const frame = anchor.closest(".layer-pos")?.getBoundingClientRect();
+      const at = { left:right + width <= innerWidth - 8 ? right : left, top:Math.max(8, Math.min(anchor.getBoundingClientRect().top, innerHeight - height - 8)) };
+      setPosition({ left:at.left - (frame?.left ?? 0), top:at.top - (frame?.top ?? 0), side:at.left < anchor.getBoundingClientRect().left ? "left" : "right" });
     };
     place();
     const observer = new ResizeObserver(() => { place(); requestAnimationFrame(place); });
@@ -111,8 +117,8 @@ function BranchPanel({ anchor, inline, onClose, label, onChoose, children }: { a
   }, [anchor, inline]);
   useEffect(() => { panel.current?.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll:true }); }, []);
   return <div ref={panel} role="dialog" aria-label={label} className={`effort-menu effort-submenu ${position ? "floating" : "inline"}`}
-    data-side={position && anchor && position.left < anchor.getBoundingClientRect().left ? "left" : "right"}
-    style={position ? { position:"fixed", ...position } : undefined}
+    data-side={position?.side ?? "right"}
+    style={position ? { position:"fixed", left:position.left, top:position.top } : undefined}
     onKeyDown={(e) => {
       if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); onClose(); return; }
       if (!(e.target instanceof HTMLInputElement)) return;

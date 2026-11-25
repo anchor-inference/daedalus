@@ -81,8 +81,8 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
 
     def edit(name: str) -> None:
         if phone:
-            page.locator(row, has_text=name).locator(".ph-row").dispatch_event("contextmenu")
-            page.locator(".ph-actions .ph-mrow", has_text=words["edit.phone"]).click()
+            page.locator(row, has_text=name).locator(".list-row").dispatch_event("contextmenu")
+            page.locator(".menu-sheet .menu-row", has_text=words["edit.phone"]).click()
         else:
             page.get_by_role("button", name=words["edit"].format(name=name)).click()
     expect(page.get_by_role("heading", name="Bakery" if phone else words["title"], exact=True)).to_be_visible()

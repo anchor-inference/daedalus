@@ -33,7 +33,7 @@ export function SettingsSheet({ settings, zone, onClose, toast }: { settings: Ca
   }
 
   return (
-    <Sheet title={t("cal.settings")} onClose={onClose} size="narrow" className="cal-settings">
+    <Sheet title={t("cal.settings")} onClose={onClose} size="sm" className="cal-settings">
       <div className="cal-settings-body">
         <Row label={t("cal.settings.week.start")}>
           <Segmented value={String(s.week_start) as "0" | "1"} onChange={(v) => set({ week_start: Number(v) as 0 | 1 })} label={t("cal.settings.week.start")} options={[{ id: "1", label: t("cal.weekday.mo") }, { id: "0", label: t("cal.weekday.su") }]} />

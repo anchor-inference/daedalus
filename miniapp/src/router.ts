@@ -7,12 +7,13 @@ import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "companion" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "canvas" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page";
+export type Screen = "agents" | "companion" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "canvas" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page" | "primitives";
 
 export const SCREENS: Screen[] = ["agents", "companion", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "canvas", "services", "memory", "usage", "health", "settings"];
 /** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
- *  (its tab on a phone) goes there, and so does everything that belongs to it. */
-const INNER: Screen[] = ["orchestration", "browser"];
+ *  (its tab on a phone) goes there, and so does everything that belongs to it. The primitives page
+ *  is reached by its address only: it shows the parts the screens are drawn from. */
+const INNER: Screen[] = ["orchestration", "browser", "primitives"];
 
 /** Orchestration mode's home on a desktop: the main orchestrator's chat. */
 export const ORCHESTRATION = `${BASE}/orchestration`;

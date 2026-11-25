@@ -93,7 +93,7 @@ function UpdateDialog() {
   }
 
   return (
-    <Sheet title={t("update.title", { version: next })} size="narrow" className="update-sheet" onClose={closeUpdate}>
+    <Sheet title={t("update.title", { version: next })} size="sm" className="update-sheet" onClose={closeUpdate}>
       <div className="update-head">
         <span className="update-current">{t("update.current", { version: current })}</span>
         {notes}

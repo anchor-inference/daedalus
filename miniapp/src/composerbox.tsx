@@ -5,7 +5,8 @@ import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
-import { Banner, BottomSheet, SheetRow } from "./ui/phone";
+import { Banner } from "./ui/phone";
+import { MenuRow, Sheet } from "./ui/primitives";
 import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -874,22 +875,22 @@ export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onReco
 }) {
   const run = (fn: () => void) => () => { onClose(); fn(); };
   return (
-    <BottomSheet onClose={onClose} className="ph-plus-sheet" label={t("composer.plus")}>
+    <Sheet onClose={onClose} className="ph-sheet ph-plus-sheet" ariaLabel={t("composer.plus")}>
       <div className="ph-tiles">
         <button type="button" className="ph-tile" onClick={run(onPhoto)}><Icon name="camera" size={22} /><span>{t("composer.photo")}</span></button>
         <button type="button" className="ph-tile" onClick={run(onPhotos ?? onFiles)}><Icon name="image" size={22} /><span>{t("ph.plus.photos")}</span></button>
         <button type="button" className="ph-tile" onClick={run(onFiles)}><Icon name="attach" size={22} /><span>{t("session.attach")}</span></button>
       </div>
-      {onPaste && <SheetRow icon="paste" label={t("composer.paste")} hint={t("ph.plus.paste.hint")} onClick={onPaste} />}
-      {onRecord && <SheetRow icon="mic" label={t("session.mic")} onClick={run(onRecord)} />}
-      {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
-      {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
-      {onCoach && <SheetRow icon="wand" label={t("coach.open")} hint={t("coach.open.hint")} onClick={run(onCoach)} data={{ action: "coach" }} />}
-      {onBtw && <SheetRow icon="ask" label={t("btw.open")} hint={t("btw.open.hint")} onClick={run(onBtw)} data={{ action: "btw" }} />}
-      {onLanguage && <SheetRow icon="globe" label={t("agentlang.for")} value={language} chevron onClick={run(onLanguage)} data={{ action: "language" }} />}
-      {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
+      {onPaste && <MenuRow icon="paste" label={t("composer.paste")} sub={t("ph.plus.paste.hint")} onSelect={onPaste} />}
+      {onRecord && <MenuRow icon="mic" label={t("session.mic")} onSelect={run(onRecord)} />}
+      {onCommands && <MenuRow icon="bolt" label={t("ph.plus.commands")} sub={commandsHint} chevron onSelect={run(onCommands)} />}
+      {onSecret && <MenuRow icon="lock" label={t("composer.secret")} sub={t("composer.secret.hint")} onSelect={run(onSecret)} />}
+      {onCoach && <MenuRow icon="wand" label={t("coach.open")} sub={t("coach.open.hint")} onSelect={run(onCoach)} data={{ action: "coach" }} />}
+      {onBtw && <MenuRow icon="ask" label={t("btw.open")} sub={t("btw.open.hint")} onSelect={run(onBtw)} data={{ action: "btw" }} />}
+      {onLanguage && <MenuRow icon="globe" label={t("agentlang.for")} aside={language} chevron onSelect={run(onLanguage)} data={{ action: "language" }} />}
+      {place && <MenuRow icon="folder" label={t("ph.plus.place")} sub={t("ph.plus.place.hint")} aside={place} />}
       {extra}
-    </BottomSheet>
+    </Sheet>
   );
 }
 

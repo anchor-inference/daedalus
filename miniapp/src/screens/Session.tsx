@@ -93,7 +93,8 @@ import { FullResult, ToolResultView } from "../toolresult";
 import { SettingsChangeCard, settingsChangeIds } from "../settingschange";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
-import { Banner, IconButton } from "../ui/phone";
+import { Banner } from "../ui/phone";
+import { IconButton } from "../ui/primitives";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
 import { SourcesButton, SourcesPanel, hydrateRich, useTurnSources } from "../sources";
@@ -1893,7 +1894,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const phoneChip = phone && browserShown
     ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
     : phone && questionScope && waiting > 0
-      ? <IconButton icon="ask" label={plural("questions.line", waiting)} badge={waiting} className="questions-headbtn attn" onClick={() => panel.open("questions")} />
+      ? <IconButton icon="ask" label={plural("questions.line", waiting)} badge={waiting} className="ph-ib questions-headbtn attn" onClick={() => panel.open("questions")} />
       : null;
   return (
     <FocusChatContext.Provider value={focusChat}>

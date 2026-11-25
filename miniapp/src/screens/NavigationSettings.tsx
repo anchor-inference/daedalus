@@ -209,7 +209,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
         <button type="button" className="btn" data-nav="reset" data-setting="navigation.reset" onClick={() => void write({ ...EMPTY })}>{t("nav.cfg.reset")}</button>
       </div>
       {picking && (
-        <Sheet title={t("nav.cfg.icon", { name: picking.title })} onClose={() => setPicking(null)} size="narrow">
+        <Sheet title={t("nav.cfg.icon", { name: picking.title })} onClose={() => setPicking(null)} size="sm">
           <div className="nav-cfg-icons" role="group" aria-label={t("nav.cfg.icon", { name: picking.title })}>
             {ICON_NAMES.map((name) => (
               <button key={name} type="button" className={`iconbtn ${picking.icon === name && !picking.iconPath ? "on" : ""}`} data-icon={name} aria-label={name} title={name} aria-pressed={picking.icon === name && !picking.iconPath} onClick={() => setIcon(picking, name)}>

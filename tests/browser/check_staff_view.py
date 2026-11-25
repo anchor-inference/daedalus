@@ -372,9 +372,9 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(words["always"] in above, f"{lang} phone: the terminal's request offers {above}")
     # A tap on a command-line member's row in the team lands on its terminal, not on the Feed.
     page.goto(f"{BASE}/project/{pid}/team?token=t&lang={lang}")
-    row = page.locator(".ph-row-wrap[data-staff='st-ira'] .ph-row")
+    row = page.locator(".list-row-wrap[data-staff='st-ira'] .list-row")
     row.wait_for(timeout=10000)
-    row.locator(".ph-row-lead").tap()
+    row.locator(".list-row-lead").tap()
     page.wait_for_url("**/terminals/tm-ira**", timeout=10000)
     context.close()
     feed.close()

@@ -180,10 +180,10 @@ def run() -> int:
             section = page_.locator(".ph-chats section[data-project]").first
             name = section.locator(".ph-sec-t").inner_text()
             section.locator(".ph-sec-act .ph-ib").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
+            expect(page_.locator(".menu-sheet .menu-row").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
-            section.locator(".ph-row-more").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
+            section.locator(".list-row-more").first.click()
+            expect(page_.locator(".menu-sheet .menu-row").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
             if width != 390:
                 page_.close()

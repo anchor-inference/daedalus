@@ -6,7 +6,7 @@ import { ControlTrigger } from "./ui/control-trigger";
 
 import { useEffect, useId, useRef, useState } from "react";
 import { api, ModelFallback, Preset, ProviderConf } from "./api";
-import { SegmentedControl } from "./ui/phone";
+import { Segmented } from "./ui/primitives";
 import { REASONING_EFFORTS, effortIndex } from "./models";
 import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
@@ -119,7 +119,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         </Sheet>
       )}
       {open && !sheet && (
-        <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align={anchor ? "left" : "right"} label={t("session.model.for")}>
+        <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-menu" align={anchor ? "start" : "end"} label={t("session.model.for")}>
           {list}
         </Popover>
       )}
@@ -151,8 +151,13 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
   const matched = entries.filter(([id, p]) => (provider === null || p.provider === provider) && (!freeGroup || p.free_only) && `${id} ${p.label} ${p.provider} ${providerName(p.provider, cat.providers[p.provider])} ${p.model}`.toLocaleLowerCase().includes(search));
   const providers = [...new Set(entries.filter(([, p]) => !!p.free_only === freeGroup).map(([, p]) => p.provider))];
   const browsing = provider === null && !search;
-  const back = () => {
+  const back = (keys = false) => {
     const previous = provider;
+    // From the keyboard the search field holds the focus while the rows change: the focused row is
+    // removed, and Base UI gives a popup whose focus vanished the focus itself, a frame after this
+    // list had put it on the provider again. A press is left alone: on a phone a focused field
+    // opens the keyboard.
+    if (keys) list.current?.querySelector<HTMLInputElement>(".model-search")?.focus({ preventScroll:true });
     setProvider(null);
     setQuery("");
     requestAnimationFrame(() => list.current?.querySelector<HTMLButtonElement>(`[data-provider="${CSS.escape(previous ?? "")}"]`)?.focus({ preventScroll:true }));
@@ -177,7 +182,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
     />
   );
   return (
-    <div ref={list} className="model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); back(); } }}>
+    <div ref={list} className="model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); back(true); } }}>
       {/* The heading carries the key to the two marks, so what they mean is on the screen and not
           only in a tooltip a touch screen never shows. */}
       <div className="menu-heading sub model-heading">
@@ -186,7 +191,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
         {!browsing && <span className="model-legend"><span className="model-kind fast" aria-hidden>⚡</span> {t("composer.model.fast")}</span>}
       </div>
       {freeGroup && provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { setFreeGroup(false); setQuery(""); }}><Icon name="back" size={16} /><span className="grow">{t("composer.model.back")}</span></button>}
-      {provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={back} aria-label={t("composer.model.back")}>
+      {provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => back()} aria-label={t("composer.model.back")}>
         <Icon name="back" size={16} /><ProviderMark id={provider} kind={cat.providers[provider]?.kind} />
         <span className="grow">{providerName(provider, cat.providers[provider])}</span>
       </button>}
@@ -251,7 +256,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thin
 type PhoneListProps = {
   listRef: React.RefObject<HTMLDivElement | null>; cat: Catalogue; model: string; fallback: ModelFallback | null; configured: [string, Preset] | null; onPick: (c: ModelChoice) => void;
   query: string; setQuery: (q: string) => void; provider: string | null; setProvider: (p: string | null) => void; freeGroup: boolean; setFreeGroup: (on: boolean) => void;
-  browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: () => void;
+  browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: (keys?: boolean) => void;
   effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; account?: AccountChoice;
   showGlobal: boolean; addModel: () => void;
 };
@@ -353,7 +358,7 @@ function PhoneModelList(p: PhoneListProps) {
     );
   };
   return (
-    <div ref={p.listRef} className="model-list ph-model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && p.provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); p.back(); } }}>
+    <div ref={p.listRef} className="model-list ph-model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && p.provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); p.back(true); } }}>
       <label className="ph-search ph-model-search">
         <Icon name="search" size={18} />
         <input className="model-search" type="search" value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={t("composer.model.search")} aria-label={t("composer.model.search")} />
@@ -373,7 +378,7 @@ function PhoneModelList(p: PhoneListProps) {
       {p.onChooseEffort && p.browsing && !p.freeGroup && (
         <>
           <div className="ph-model-sec">{t("composer.effort.short")}</div>
-          <SegmentedControl className="ph-model-effort" label={t("composer.effort.short")}
+          <Segmented className="ph-seg ph-model-effort" label={t("composer.effort.short")}
             value={p.thinking ? REASONING_EFFORTS[effortIndex(p.effort)] : "off"}
             options={["off", ...REASONING_EFFORTS].map((value) => ({ id: value, label: t(value === "off" ? "composer.effort.offShort" : `add.effort.${value}`) }))}
             onChange={(value) => p.onChooseEffort!(value)} />
@@ -381,7 +386,7 @@ function PhoneModelList(p: PhoneListProps) {
       )}
       {p.account && p.browsing && !p.freeGroup && <PhoneAccounts choice={p.account} />}
       {p.freeGroup && p.provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { p.setFreeGroup(false); p.setQuery(""); }}><Icon name="back" size={18} /><span className="grow">{t("composer.model.back")}</span></button>}
-      {p.provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={p.back} aria-label={t("composer.model.back")}>
+      {p.provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => p.back()} aria-label={t("composer.model.back")}>
         <Icon name="back" size={18} />{mark(p.provider)}
         <span className="grow">{providerName(p.provider, cat.providers[p.provider])}</span>
       </button>}

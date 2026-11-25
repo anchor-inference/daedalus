@@ -1,7 +1,6 @@
 /* ── the right panel: the workspace beside the conversation ───────────────────────────── */
 /* A phone hosts the same tabs in a full sheet; the column exists from 1024 up. */
 .panel { display: none; }
-.sheet.full { height: 100%; max-height: 100%; border-radius: 0; padding-top: 4px; }
 .panel-sheet .sheet-head { margin: 0 -16px; padding: 0 8px 0 4px; border-bottom: 1px solid var(--line); }
 .panel-sheet .sheet-head .panel-tabs { flex: 1; min-width: 0; border-bottom: 0; }
 .panel-sheet .sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0 -16px; }
@@ -514,19 +513,10 @@
      field they are answered in all take the same stripe, so nothing is offset against anything
      else and the conversation uses the room the window gives it. */
   .answer, .msg-wrap, .thinking-head, .activity, .artifacts { max-width: 100%; }
-  /* A sheet on a wide screen is a dialog, not a full-width drawer. */
-  .sheet-backdrop { align-items: center; justify-content: center; }
-  .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-top: 14px; padding-bottom: 16px; }
-  .sheet.narrow { width: min(480px, 92vw); }
-  /* The grip says "drag me down" on a sheet that rises from the bottom edge; a centred dialog has
-     nothing to drag, and the bar read as a phone part left over on the desktop. */
-  .sheet .grip { display: none; }
 }
 /* A wide window is room to read in, not margin to look at. */
 @media (min-width: 1600px) { :root { --chat-w: 1120px; } }
 @media (min-width: 2100px) { :root { --chat-w: 1320px; }
-  .sheet.wide { width: min(1100px, 94vw); }
-  .menu { right: 24px; }
 }
 @media (min-width: 1600px) {
   .chat-head, .chat-scroll, .composer { padding-left: 40px; padding-right: 40px; }
@@ -639,9 +629,6 @@
    nothing about which folder the agent is walled into. */
 .aside-row.project-root { align-items: flex-start; gap: 6px; padding-bottom: 4px; }
 .aside-row.project-root .mono { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
-/* sheet sections */
-.sheet-head { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 6px; }
-.sheet-head h3 { margin: 0; text-align: left; }
 .sheet-section { padding: 12px 0; border-top: 1px solid var(--line); }
 .sheet-section:first-child { border-top: 0; padding-top: 4px; }
 .sheet-section-title { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: var(--fs-14); margin-bottom: 4px; }
@@ -653,7 +640,6 @@
   .wide-only { display: flex; }
   .phone-only { display: none !important; }
   .chat-head .title { font-size: var(--fs-14); }
-  .sheet { width: min(760px, 92vw); padding: 12px 24px 20px; }
   .sheet-section { padding: 14px 0; }
 }
 

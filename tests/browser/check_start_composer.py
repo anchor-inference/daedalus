@@ -131,7 +131,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(composer.locator(".roundbtn.primary")).to_be_visible()
     composer.locator(".plus").click()
     # A menu item on the desktop, a row of the + sheet on a phone.
-    mic = page.get_by_role("menuitem", name=words["mic"]).or_(page.locator(".ph-plus-sheet .ph-mrow").filter(has_text=re.compile(words["mic"], re.I)))
+    mic = page.get_by_role("menuitem", name=words["mic"]).or_(page.locator(".ph-plus-sheet .menu-row").filter(has_text=re.compile(words["mic"], re.I)))
     expect(mic).to_be_visible()
     mic.click()
     page.wait_for_selector(".start-composer .voicebar[data-phase=recording]", timeout=5000)

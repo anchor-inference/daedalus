@@ -560,7 +560,7 @@ button.composer-mode:hover, .composer-mode[aria-expanded="true"], .agentlang-chi
   .artifact + .artifact { border-top:1px solid var(--line); }
   .artifacts-more { align-self:stretch; min-height:var(--row-h-touch); padding-inline:var(--space-3); border-top:1px solid var(--line); border-radius:0; text-align:left; }
   .changed-files-head { min-height:var(--row-h-touch); }
-  .changed-file-row .ph-row-t { font-family:var(--mono); font-size:var(--fs-13); }
+  .changed-file-row .list-row-t { font-family:var(--mono); font-size:var(--fs-13); }
   .folder .erow { border:0; border-radius:0; background:transparent; margin-inline:0; }
   .folder.single:not(.open) { border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
   .folder-expand { order:2; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }

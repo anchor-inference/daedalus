@@ -59,7 +59,7 @@ export function ServicesScreen({ onOpen, toast }: { onOpen: (id: string) => void
         ))}
       </div>
       {log && (
-        <Sheet title={log.title} onClose={() => setLog(null)} size="wide">
+        <Sheet title={log.title} onClose={() => setLog(null)} size="xl">
           <pre className="filetext">{log.text}</pre>
         </Sheet>
       )}

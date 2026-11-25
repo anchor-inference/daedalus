@@ -153,7 +153,7 @@ export function CommentBar({ canvas, doc, chips, onRemove, onHighlight, onOwner,
         <button type="submit" className="btn primary cv-comment-send" disabled={empty || busy} aria-label={t("canvas.bar.send")} title={t("canvas.bar.send")}><Icon name="send" size={16} /></button>
       </form>
       {choosing && (
-        <Sheet title={t("canvas.bar.choose")} onClose={() => setChoosing(false)} size="narrow">
+        <Sheet title={t("canvas.bar.choose")} onClose={() => setChoosing(false)} size="sm">
           <p className="cv-choose-body">{t("canvas.bar.choose.body")}</p>
           <div className="cv-choose-list">
             {candidates.length === 0 && <div className="empty">{t("canvas.bar.choose.none")}</div>}
