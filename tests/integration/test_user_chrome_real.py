@@ -685,8 +685,8 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
         in_group = await worker.evaluate("async (url) => (await chrome.tabs.query({})).filter((t) => t.url === url).map((t) => t.groupId)", f"{site}/shop/index.html")
         assert in_group and in_group[0] != -1, f"the operator's tab did not join the conversation's group: {in_group}"
 
-        # Its next step asks for a new site; the card takes the focus and Enter allows it once.
-        card = frame.locator(".sp-card")
+        # Its next step asks for a new site; the composer's card shows it and Enter allows it once.
+        card = frame.locator(".composer .approval-card")
         await card.wait_for(timeout=40000)
         assert "localhost" in (await card.inner_text())
         await card.press("Enter")

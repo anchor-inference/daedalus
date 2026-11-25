@@ -13,6 +13,7 @@ import { relTime, absTime } from "./format";
 import { useCopied } from "./ui/components";
 import { confirmAsync, errorText } from "./ui";
 import { Icon } from "./icons";
+import { Select } from "./ui/primitives";
 
 export type LiveLinkVisitor = { name: string; first_seen_at: string; last_seen_at: string };
 export type LiveLink = {
@@ -123,9 +124,8 @@ export function LiveLinkSection({ sessionId, toast }: { sessionId: string; toast
       ))}
       <div className="live-create">
         <label className="sub" htmlFor="live-expiry">{t("live.expiry")}</label>
-        <select id="live-expiry" className="field" value={expiry ?? ""} onChange={(e) => setExpiry(e.target.value ? Number(e.target.value) : null)}>
-          {EXPIRIES.map((hours) => <option key={hours ?? "never"} value={hours ?? ""}>{t(hours === null ? "live.expiry.never" : hours === 1 ? "live.expiry.hour" : hours === 24 ? "live.expiry.day" : "live.expiry.week")}</option>)}
-        </select>
+        <Select id="live-expiry" size="md" label={t("live.expiry")} value={expiry === null ? "never" : String(expiry)} onChange={(id) => setExpiry(id === "never" ? null : Number(id))}
+          options={EXPIRIES.map((hours) => ({ id: hours === null ? "never" : String(hours), label: t(hours === null ? "live.expiry.never" : hours === 1 ? "live.expiry.hour" : hours === 24 ? "live.expiry.day" : "live.expiry.week") }))} />
         <button className="btn small primary" disabled={busy} onClick={() => void create()}>{t(active.length ? "live.create.another" : "live.create")}</button>
       </div>
       {ended.length > 0 && (
