@@ -3,12 +3,12 @@
 Ending. A tab's ✕ and its middle click end the terminal — at once for a shell the host says sits at
 its prompt, after a question naming the command for one that runs something, and Cancel keeps it.
 Keeping a terminal without its tab is the tab's right-click Detach, which sends nothing. Ctrl+Shift+W
-ends the terminal in front. The dock is hidden by a chevron, not a cross. On the Overview a card has
-End beside Open; "End idle" lists what it ends; a selection ends what was ticked after one question
-that names the staff member's session it would stop; a group ends all of its own; the Finished
-filter removes every finished card. On a phone the card and the terminal's header have End.
+ends the terminal in front. The dock is hidden by a chevron, not a cross. In the Terminals page's list
+a running row has End in its menu; "End idle" lists what it ends; a selection ends what was ticked
+after one question that names the staff member's session it would stop; a group ends all of its own;
+the list's menu removes every finished row. On a phone the card and the terminal's header have End.
 
-Opening. The dock's "+" and the Overview's "New terminal" ask the same question: the container,
+Opening. The dock's "+" and the page's "New terminal" ask the same question: the container,
 the host, another folder; 1/2/3 choose, the arrows and Enter too, Escape closes; an environment that
 cannot be used is disabled with the reason; the place chosen last is marked and takes the keyboard;
 Ctrl+Shift+` asks it too.
@@ -201,11 +201,20 @@ def open_page(context, term: TerminalStub, path: str, wait: str, lang: str = "en
     return page
 
 
-def the_overview(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+def row_menu(page, terminal: str, label: str | None = None):  # type: ignore[no-untyped-def]
+    """Opens a list row's menu; with a label, presses that command."""
+    page.locator(f".tp-row[data-terminal='{terminal}']").hover()
+    page.locator(f".tp-row[data-terminal='{terminal}'] .tp-row-menu").click()
+    page.wait_for_selector("[role=menu]", timeout=5000)
+    if label:
+        page.locator("[role=menuitem]", has_text=label).first.click()
+
+
+def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     term = fleet()
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme=SCHEME)
     context.add_init_script(LENS)
-    page = open_page(context, term, "terminals?view=overview", ".term-card")
+    page = open_page(context, term, "terminals", ".tp-list .tp-row")
     page.wait_for_timeout(400)
 
     # A terminal nobody has looked at for a week is marked as one to clean up.
@@ -213,16 +222,23 @@ def the_overview(browser, problems: list[str]) -> None:  # type: ignore[no-untyp
         problems.append("the forgotten terminal is not marked stale")
     if page.locator("[data-terminal='o2devsrv0000'][data-stale='1']").count():
         problems.append("a watched terminal is marked stale")
-    # Every running card has End beside Open; a finished one has neither.
+    # Every running row has End in its menu; a finished one has Remove instead.
     for i in ("o1idle000000", "o2devsrv0000", "o3staff00000"):
-        if page.locator(f"[data-terminal='{i}'] .term-card-foot [data-action='end']").count() != 1:
-            problems.append(f"the card {i} has no End")
-    if page.locator("[data-terminal='o4ended00000'] [data-action='end']").count():
-        problems.append("a finished card offers End")
-    page.screenshot(path=str(SHOTS / "terminals-overview-ending.png"))
+        row_menu(page, i)
+        if page.locator("[role=menuitem]", has_text="End").count() != 1:
+            problems.append(f"the row {i} has no End")
+        page.keyboard.press("Escape")
+    row_menu(page, "o4ended00000")
+    if page.locator("[role=menuitem]", has_text="End").count():
+        problems.append("a finished row offers End")
+    if not page.locator("[role=menuitem]", has_text="Remove").count():
+        problems.append("a finished row cannot be removed")
+    page.keyboard.press("Escape")
+    page.screenshot(path=str(SHOTS / "terminals-list-ending.png"))
 
     # End idle: only the idle, unwatched shell, after a question that lists it.
-    page.locator("[data-action='end-idle']").click()
+    page.locator(".tp-list-actions").click()
+    page.locator("[role=menuitem]", has_text="End idle").click()
     page.wait_for_selector(".dialog", timeout=5000)
     question = page.locator(".dialog").inner_text().replace("\n", " | ")
     print("end idle asks:", question)
@@ -234,12 +250,13 @@ def the_overview(browser, problems: list[str]) -> None:  # type: ignore[no-untyp
         problems.append(f"End idle ended {kills(term)}")
 
     # A selection: the dev server and the staff member's session, named in one question.
-    page.locator("[data-action='select']").click()
-    page.locator("[data-terminal='o2devsrv0000'] .term-card-check input").check()
-    page.locator("[data-terminal='o3staff00000'] .term-card-open").click()
+    page.locator(".tp-list-actions").click()
+    page.locator("[role=menuitem]", has_text="Select").click()
+    page.locator("[data-terminal='o2devsrv0000'] .tp-row-check input").check()
+    page.locator("[data-terminal='o3staff00000'] .tp-row-open").click()
     if page.url.split("?")[0].endswith("o3staff00000"):
-        problems.append("a press on a card while selecting opened it")
-    page.screenshot(path=str(SHOTS / "terminals-overview-selecting.png"))
+        problems.append("a press on a row while selecting opened it")
+    page.screenshot(path=str(SHOTS / "terminals-list-selecting.png"))
     page.locator("[data-action='end-selected']").click()
     page.wait_for_selector(".dialog", timeout=5000)
     question = page.locator(".dialog").inner_text().replace("\n", " | ")
@@ -247,34 +264,35 @@ def the_overview(browser, problems: list[str]) -> None:  # type: ignore[no-untyp
     if "End 2 terminals?" not in question or "npm run dev" not in question or "Ira's session" not in question:
         problems.append(f"End selected does not name what stops: {question!r}")
     page.wait_for_timeout(400)
-    page.screenshot(path=str(SHOTS / "terminals-overview-end-selected.png"))
+    page.screenshot(path=str(SHOTS / "terminals-list-end-selected.png"))
     page.locator(".dialog .btn.danger").click()
     page.wait_for_timeout(600)
     if sorted(kills(term)) != sorted(["o1idle000000", "o2devsrv0000", "o3staff00000"]):
         problems.append(f"End selected ended {kills(term)}")
 
-    # One card's End: an idle shell goes at once.
-    page.locator("[data-terminal='o6loose00000'] [data-action='end']").click()
+    # One row's End: an idle shell goes at once.
+    row_menu(page, "o6loose00000", "End")
     page.wait_for_timeout(500)
     if page.locator(".dialog").count() or kills(term)[-1:] != ["o6loose00000"]:
-        problems.append("a card's End on an idle shell did not end it at once")
+        problems.append("a row's End on an idle shell did not end it at once")
 
-    # Finished: one button forgets them all.
-    page.locator(".chip[data-filter='finished']").click()
-    page.locator("[data-action='remove-finished']").click()
+    # Finished: one command of the list's menu forgets them all.
+    page.locator(".tp-filter[data-filter='finished']").click()
+    page.locator(".tp-list-actions").click()
+    page.locator("[role=menuitem]", has_text="Remove all finished").click()
     page.wait_for_timeout(600)
     deletes = sorted(p.split("/")[3] for m, p, _ in term.requests if m == "DELETE")
     print("removed:", deletes)
     if not {"o4ended00000", "o5ended00000"} <= set(deletes):
         problems.append(f"Remove all finished removed {deletes}")
 
-    # The Overview's "New terminal" asks the same question as the dock's "+".
-    page.locator(".chip[data-filter='all']").click()
+    # The page's "New terminal" asks the same question as the dock's "+".
+    page.locator(".tp-filter[data-filter='all']").click()
     page.locator(".term-new-button").click()
     page.wait_for_selector(".term-pick-pop", timeout=5000)
     rows = page.locator(".term-pick-pop .term-pick-row[data-choice]:not([data-choice='sandbox'])")
     if [rows.nth(i).get_attribute("data-choice") for i in range(rows.count())] != ["container", "host", "folder"]:
-        problems.append("the Overview's question is not the dock's")
+        problems.append("the page's question is not the dock's")
     page.keyboard.press("2")
     page.wait_for_url("**/app/terminals/new*", timeout=10000)
     made = stub_requests(term, "POST", "/api/terminals")
@@ -286,16 +304,16 @@ def the_overview(browser, problems: list[str]) -> None:  # type: ignore[no-untyp
     term = fleet()
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme=SCHEME)
     context.add_init_script(LENS)
-    page = open_page(context, term, "terminals?view=overview", ".term-card", lang="ru")
+    page = open_page(context, term, "terminals", ".tp-list .tp-row", lang="ru")
     page.wait_for_timeout(400)
-    page.locator(f".term-group[data-group='{P1}'] [data-action='end-group']").click()
+    page.locator(f".tp-list-group[data-group='{P1}'] [data-action='end-group']").click()
     page.wait_for_selector(".dialog", timeout=5000)
     question = page.locator(".dialog").inner_text().replace("\n", " | ")
     print("end group asks:", question)
     if "Завершить 3 терминала" not in question or "сессия сотрудника Ira" not in question:
         problems.append(f"the group's End all does not say what it ends: {question!r}")
     page.wait_for_timeout(400)
-    page.screenshot(path=str(SHOTS / "terminals-overview-end-group-ru.png"))
+    page.screenshot(path=str(SHOTS / "terminals-list-end-group-ru.png"))
     page.locator(".dialog .btn.danger").click()
     page.wait_for_timeout(600)
     if sorted(kills(term)) != sorted(["o1idle000000", "o2devsrv0000", "o3staff00000"]):
@@ -350,7 +368,7 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         the_dock(browser, problems)
-        the_overview(browser, problems)
+        the_list(browser, problems)
         the_phone(browser, problems)
         browser.close()
     for problem in problems:

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TerminalView } from "../api";
 import { setLang } from "../i18n";
-import { cardStatus, groupTerminals, headerCounts, idleUnwatched, matches, ownerLine, ownerPath, previewRows, runColor, runStyle, span, staleFor } from "./preview";
+import { cardStatus, groupTerminals, headerCounts, idleUnwatched, matches, ownerLine, ownerPath, ownerShort, ownerWho, previewRows, rowCommand, rowTag, runColor, runStyle, span, staleFor } from "./preview";
 
 setLang("en");
 
@@ -146,5 +146,38 @@ describe("clean-up", () => {
     expect(staleFor(row("b", { live: unwatched, created_at: ago(60 * 24 * 7), last_output_at: ago(5) }), NOW)).toBe("");
     expect(staleFor(row("c", { created_at: ago(60 * 24 * 7) }), NOW)).toBe("");
     expect(staleFor(row("d", { live: unwatched, created_at: ago(60 * 24 * 3), owner: { kind: "staff", id: "st", label: "ira" } }), NOW)).toBe("");
+  });
+});
+
+describe("a list row", () => {
+  it("names its owner in a few words, and says when it runs on the host", () => {
+    expect(ownerWho(row("a", { owner: { kind: "session", id: "s", label: "Checkout" } }))).toBe("chat «Checkout»");
+    expect(ownerWho(row("a", { owner: { kind: "staff", id: "st", label: "Ira" } }))).toBe("staff Ira");
+    expect(ownerWho(row("a", { owner: { kind: "project", id: "p", label: "Bakery" } }))).toBe("project «Bakery»");
+    expect(ownerWho(row("a"))).toBe("you");
+    expect(ownerShort(row("a"))).toBe("you");
+    expect(ownerShort(row("a", { env: "host" }))).toBe("you · host");
+    expect(ownerShort(row("a", { env: "host", owner: { kind: "staff", id: "st", label: "Naya" } }))).toBe("staff Naya · host");
+  });
+
+  it("says what runs in it, else the last command, else the folder", () => {
+    expect(rowCommand(row("a", { running: "vite" }))).toBe("vite");
+    expect(rowCommand(row("a", { running: "vite", agent: { kind: "opencode", source: "staff", waiting_for: "bash: npm install" } }))).toBe("bash: npm install");
+    expect(rowCommand(row("a", { last_command: { command: "npm test", exit_code: 0, at: ago(1) } }))).toBe("npm test");
+    expect(rowCommand(row("a"))).toBe("/work");
+  });
+
+  it("says how a finished terminal ended, with its last command when it has one", () => {
+    expect(rowCommand(row("a", { status: "exited", exit_code: 0, last_command: { command: "\\q", exit_code: 0, at: ago(30) } }))).toBe("\\q · code 0");
+    expect(rowCommand(row("a", { status: "exited", exit_code: 1 }))).toBe("code 1");
+    expect(rowCommand(row("a", { status: "exited", exit_code: null, exit_signal: "KILL" }))).toBe("signal KILL");
+  });
+
+  it("tags a waiting terminal with the word, a stale one with its idle time, and the rest with their age", () => {
+    expect(rowTag(row("a", { activity: { status: "permission" } }), NOW)).toEqual({ text: "waiting", level: "wait" });
+    expect(rowTag(row("a"), NOW)).toEqual({ text: "38m", level: "plain" });
+    const left = row("a", { created_at: ago(3 * 24 * 60), last_input_at: ago(3 * 24 * 60), live: { clients: 0, busy: false, keyboard: { owner: "auto", until: null }, size_owner: "human", alt_screen: false } });
+    expect(rowTag(left, NOW)).toEqual({ text: "3d", level: "stale" });
+    expect(rowTag(row("a", { status: "exited", exited_at: ago(20) }), NOW)).toEqual({ text: "20m", level: "plain" });
   });
 });

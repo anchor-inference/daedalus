@@ -316,11 +316,14 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page.wait_for_url(f"**/project/{pid}/staff/st-ira**")
     expect(page.locator(".focus-staff.current")).to_contain_text("Ira")
 
-    # A staff member's card on the Terminals screen says what it is doing, and Answer leads here.
+    # A staff member's row on the Terminals page says it waits, its pane says what for, and Answer leads here.
     page.goto(f"{BASE}/terminals?lang={lang}")
-    card = page.locator(".term-card[data-terminal='tm-ira']")
-    expect(card.locator(".term-card-status")).to_contain_text(words["permission"], timeout=10000)
-    card.locator(".term-card-foot .btn", has_text=words["answer"]).click()
+    row = page.locator(".tp-row[data-terminal='tm-ira']")
+    expect(row.locator(".tp-row-tag")).to_have_attribute("data-level", "wait", timeout=10000)
+    row.locator(".tp-row-open").click()
+    attn = page.locator(".tp-pane[data-pane='tm-ira'] .tp-attn")
+    expect(attn).to_contain_text(words["answer"], timeout=10000)
+    attn.click()
     page.wait_for_url(f"**/project/{pid}/staff/st-ira**")
     check.that(sideways(page) <= 0, f"{lang}: the desktop scrolls sideways")
     context.close()

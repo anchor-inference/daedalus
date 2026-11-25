@@ -111,7 +111,7 @@ def open_page(context, term: TerminalStub, path: str, lang: str = "en") -> Page:
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.errors = errors  # type: ignore[attr-defined]
     page.goto(f"{BASE}/{path}{'&' if '?' in path else '?'}token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".tp-ws, .term-card, .term-phone", timeout=20000)
+    page.wait_for_selector(".tp-ws, .term-phone", timeout=20000)
     return page
 
 
@@ -216,7 +216,7 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     shoot(page, "terminals-panel-actions.png")
 
     # A staff member's pane: its CLI's tool calls.
-    page.locator(".tp-tab[data-slot='2']").click()
+    page.locator(".tp-pane[data-slot='2'] .tp-pane-head").click()
     page.wait_for_timeout(500)
     page.wait_for_selector(".tside-act[data-kind='edits']", timeout=5000)
     staff_titles = page.eval_on_selector_all(".tside-act", "(r) => r.map((e) => e.dataset.kind + ':' + e.dataset.state)")
@@ -233,7 +233,7 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     page.locator(f".tside-term[data-terminal='{SPARE}'] .tside-slot[data-slot='3']").click()
     page.wait_for_timeout(400)
     c.that(panes(page)[3] == SPARE, f"putting a terminal into pane 4 gave {panes(page)}")
-    c.that(page.locator(".tp-tab[data-slot='3']").get_attribute("aria-selected") == "true", "the place a terminal was put into is not the active one")
+    c.that(page.locator(".tp-pane.on[data-slot='3']").count() == 1, "the place a terminal was put into is not the active one")
 
     # A layout: saved, the grid changed, restored, renamed.
     page.locator(".tside-save .tside-input").fill("Bakery review")
@@ -243,7 +243,7 @@ def panel_steps(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(saved.get("panes") == [*IDS, SPARE] and saved.get("layout") == 4, f"the host was sent {saved}")
     c.that(page.locator(".tside-layout .tside-chip:not(.shape)").count() == 4, "the saved layout does not list its panes")
     shoot(page, "terminals-panel-panes.png")
-    page.locator(".tp-layout[data-layout='1']").click()
+    page.locator(".tp-layouts [role=radio]").nth(0).click()
     # Out of its pane, still running: the pane's menu says so by name (its ✕ would end it).
     page.locator(".tp-pane[data-slot='0'] .tp-pane-menu").click()
     page.locator(".menu button", has_text="Take out of the pane, keep running").click()

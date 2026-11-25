@@ -98,7 +98,6 @@ const SAME_IN_BOTH = [
   "term.status.cost.approx",
   "term.status.tok.k",
   "term.status.tok.m",
-  "term.ws.tab.tip",
   // A tool named by its own id and a count: the id is the same in both languages.
   "turn.family.other",
   // The update dialog's title is the product's name and the release's number.

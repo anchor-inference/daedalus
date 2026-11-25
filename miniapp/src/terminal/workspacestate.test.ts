@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeId, clampFraction, close, EMPTY, focus, fromAddress, hasPanes, maximise, normalise, openingView, place, replace, setFractions, setLayout, shownSlots, swap, toAddress, type Workspace } from "./workspacestate";
+import { activeId, clampFraction, close, EMPTY, focus, fromAddress, hasPanes, maximise, normalise, place, replace, setFractions, setLayout, shownSlots, swap, toAddress, type Workspace } from "./workspacestate";
 
 const four: Workspace = { ...EMPTY, layout: 4, panes: ["a", "b", "c", "d"] };
 const address = (detail: string | null, query = "") => ({ detail, query: new URLSearchParams(query) });
@@ -123,7 +123,7 @@ describe("the address", () => {
 
   it("names the active terminal in the path and the places in the query", () => {
     expect(toAddress({ ...four, active: 1 })).toEqual({ detail: "b", query: { layout: "4", panes: "a,b,c,d" } });
-    expect(toAddress({ ...EMPTY, panes: [null, "b", null, null] })).toEqual({ detail: null, query: { layout: "1", panes: ",b", view: "workspace" } });
+    expect(toAddress({ ...EMPTY, panes: [null, "b", null, null] })).toEqual({ detail: null, query: { layout: "1", panes: ",b" } });
   });
 
   it("opens a pasted link on the same grid, whatever this browser had stored", () => {
@@ -144,15 +144,5 @@ describe("the address", () => {
 
   it("names nothing when the active place is empty", () => {
     expect(activeId({ ...four, panes: [null, "b", null, null], active: 0 })).toBeNull();
-  });
-});
-
-describe("which view opens", () => {
-  it("is the Workspace when panes are set up, unless the Overview was chosen last", () => {
-    expect(openingView(null, EMPTY)).toBe("overview");
-    expect(openingView("workspace", EMPTY)).toBe("overview");
-    expect(openingView(null, four)).toBe("workspace");
-    expect(openingView("workspace", four)).toBe("workspace");
-    expect(openingView("overview", four)).toBe("overview");
   });
 });

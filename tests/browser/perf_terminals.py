@@ -1,4 +1,4 @@
-"""Measure many terminals at once: the Terminals screen with forty cards, and a dock with eight busy tabs.
+"""Measure many terminals at once: the Terminals page with forty rows, and a dock with eight busy tabs.
 
 Two scenes, each held for a while with the page's own probes running:
 
@@ -61,7 +61,7 @@ def page_numbers(page, cdp, seconds: float) -> dict:  # type: ignore[no-untyped-
     }
 
 
-def many_cards(browser, server: FloodServer, seconds: float) -> dict:  # type: ignore[no-untyped-def]
+def many_rows(browser, server: FloodServer, seconds: float) -> dict:  # type: ignore[no-untyped-def]
     term = TerminalStub(S1)
     for i in range(40):
         term.add(f"card{i:08d}", title=f"bash · job {i}", owner_kind="session", owner_label=f"Session {i}", clients=0,
@@ -72,7 +72,7 @@ def many_cards(browser, server: FloodServer, seconds: float) -> dict:  # type: i
     page.route("**/api/**", stub)
     page.route("**/api/terminals**", term.route)
     page.goto(f"{server.base}/terminals?token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".term-card", timeout=20000)
+    page.wait_for_selector(".tp-list .tp-row", timeout=20000)
     page.wait_for_timeout(500)
     cdp = context.new_cdp_session(page)
     polls_before = sum(1 for m, p, _ in term.requests if m == "GET" and p == "/api/terminals")
@@ -81,7 +81,7 @@ def many_cards(browser, server: FloodServer, seconds: float) -> dict:  # type: i
     page.wait_for_timeout(seconds * 1000)
     result = page_numbers(page, cdp, seconds)
     polls = sum(1 for m, p, _ in term.requests if m == "GET" and p == "/api/terminals") - polls_before
-    cards = page.locator(".term-card").count()
+    cards = page.locator(".tp-list .tp-row").count()
     context.close()
     return {"scene": "terminals screen", "cards": cards, "list_polls": polls, "seconds": seconds, **result, "load_before": load_before, "load_after": load()}
 
@@ -149,10 +149,10 @@ def main() -> int:
     problems: list[str] = []
     with FloodServer(DIST) as server, sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM, args=["--enable-unsafe-swiftshader", "--use-angle=swiftshader"])
-        cards = many_cards(browser, server, args.seconds)
+        cards = many_rows(browser, server, args.seconds)
         print(json.dumps(cards))
         if cards["cards"] != 40:
-            problems.append(f"the Terminals screen shows {cards['cards']} cards, not 40")
+            problems.append(f"the Terminals page shows {cards['cards']} rows, not 40")
         dock = busy_dock(browser, server, args.seconds)
         print(json.dumps(dock))
         browser.close()

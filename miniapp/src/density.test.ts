@@ -219,6 +219,12 @@ const CONTENT_BOXES = [
   // line under an open question is the 48 px field the composer's answer line shares.
   { selector: ".inbox-row", property: "height", max: 64 },
   { selector: ".inbox-reply", property: "height", max: 48 },
+  // The Terminals page: a list row holds a title, a command and an owner, its memory meter two lines
+  // and a bar, and a pane's header a title, a folder, the owner chip and four icon buttons. Each is
+  // the size the approved page draws, stated here so a taller one fails.
+  { selector: ".tp-row-open", property: "height", max: 56 },
+  { selector: ".tp-mem", property: "height", max: 56 },
+  { selector: ".tp-pane-head", property: "height", max: 40 },
 ];
 
 /** Top and bottom padding of a shorthand, in px; a component that is not a plain length counts as its first literal. */
@@ -609,16 +615,20 @@ describe("rows and controls", () => {
     expect(decl(".term-dock")).not.toContain("--chat-w");
   });
 
-  it("give the Terminals workspace a row for its bar, a dense row per pane header and a thin splitter", () => {
-    // paddock, which the workspace's arrangement comes from, draws a 40 px bar and 48 px pane headers
-    // over 15 px text. Here the bar is a row like any other, a pane header a dense row (four of them
-    // stack in a 2 × 2 grid, and every pixel they take is a terminal row lost), and the splitter a
-    // 5 px track that never grows into a gap.
-    expect(decl(".tp-top")).toContain("height: var(--row-h)");
-    expect(decl(".tp-pane-head")).toContain("height: var(--row-h-dense)");
-    expect(decl(".tp-row-open")).toContain("height: var(--row-h)");
-    expect(decl(".tp-tab")).toContain("height: var(--ctl-h-sm)");
-    expect(decl(".tp")).toContain("--tp-split: 5px");
+  it("give the Terminals page a 56 px list row, a 40 px pane header, a 36 px pane foot and a 12 px gap", () => {
+    // The page draws its list in rows of three lines (title, command, owner) at 56 px, a pane's header
+    // at 40 and its foot at 36, in panes a 12 px gap apart: the splitter is that gap, and it draws a
+    // line only while it is touched. The 52 px header over all of it is the page header's own.
+    expect(decl(".tp-row-open")).toContain("height: 56px");
+    expect(decl(".tp-pane-head")).toContain("height: 40px");
+    expect(decl(".tp-pane-foot")).toContain("height: 36px");
+    expect(decl(".tp-mem")).toContain("height: 56px");
+    expect(decl(".tp-label")).toContain("height: var(--row-h)");
+    expect(decl(".tp-filter")).toContain("height: var(--ctl-h-sm)");
+    expect(decl(".tp")).toContain("--tp-split: 12px");
+    expect(decl(".tp")).toContain("--tp-list-w: 280px");
+    expect(decl(".tp-list")).toContain("width: var(--tp-list-w)");
+    expect(decl(".tp-grid")).toContain("padding: 12px");
     // One colour per kind of data, and every one of them an alias of a token each theme sets: a
     // hex here would stay put while the theme around it changed.
     const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
