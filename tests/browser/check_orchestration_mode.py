@@ -215,7 +215,8 @@ def desktop(page: Page, lang: str) -> None:
     # A notification the host linked the old way, opened from the Inbox in Agents mode.
     go(page, "/agents", lang)
     page.locator(".sb-pinned-nav [data-nav='inbox']").click()
-    page.locator(".notice-row[data-notice='77']").first.click()
+    page.locator(".inbox-row[data-notice='77']").first.click()
+    page.locator(".inbox-pane[data-item='n77'] .inbox-open").click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/board**")
     expect(page.locator("nav.project-sidebar")).to_be_visible()
 
