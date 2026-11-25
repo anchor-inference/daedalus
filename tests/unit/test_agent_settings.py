@@ -241,7 +241,7 @@ async def test_the_operator_only_settings_are_refused_whatever_auto_apply_says(d
 def test_the_never_list_is_code_and_names_credentials_wherever_they_sit() -> None:
     assert rules.never_reason("self_change.approval") and rules.never_reason("webhooks.anything.prompt")
     assert rules.never_reason("mcp.servers.docs.env.TOKEN") and rules.never_reason("browser.rules")
-    assert rules.never_reason("navigation.rail") is None and rules.never_reason("compaction.auto_ratio") is None
+    assert rules.never_reason("navigation.pinned") is None and rules.never_reason("compaction.auto_ratio") is None
     # A credential under a section nobody listed is still one; a count named after tokens is not.
     assert rules.never_reason("voice.tts.api_key") == "a credential" and rules.never_reason("anything.client_secret")
     assert rules.never_reason("limits.max_run_tokens") is None and rules.never_reason("compaction.chunk_tokens") is None

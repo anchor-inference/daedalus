@@ -73,7 +73,7 @@ export function visibleScreens(list: Screen[], selfdev: SelfDevMode): Screen[] {
 
 /** The word beside a destination's name when it works differently here than the name suggests.
  *
- *  A key in the table rather than the word: the rail renders it, and the rail is read in two
+ *  A key in the table rather than the word: the sidebar renders it, and the sidebar is read in two
  *  languages.
  */
 export function screenTag(s: Screen, selfdev: SelfDevMode, beta: Screen[]): string {

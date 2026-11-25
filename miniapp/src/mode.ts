@@ -1,8 +1,8 @@
 // The two modes of the app: Agents, the chats and projects the operator works in directly, and
 // Orchestration, the main orchestrator and the projects that have an orchestrator of their own. The
-// operator asked for them apart: nothing of one is drawn in the other's lists, and the two mode items
-// of the rail (the first two tabs on a phone) are the only place where one mode speaks of the other —
-// as a count of what waits there.
+// operator asked for them apart: nothing of one is drawn in the other's lists, and the sidebar's mode
+// menu (the switch in the phone's drawer) is the only place where one mode speaks of the other — as a
+// count of what waits there.
 //
 // Everything here is pure, so which session belongs where, what the switch counts and where a link
 // lands are answered by tests without a browser.

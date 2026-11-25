@@ -1,7 +1,7 @@
-// Settings → Navigation: where each destination sits. The desktop half is three lists — the rail, the
-// More launcher, hidden — that an item is dragged between or sent to with its selector; the phone half is
-// the drawer's order and which items are in it at all. Every change is saved at once through the same
-// PUT the other sections use, and the rail redraws from the answer.
+// Settings → Navigation: where each destination sits. The desktop half is three lists — pinned at the
+// top of the sidebar, the More launcher, hidden — that an item is dragged between or sent to with its
+// selector; the phone half is the drawer's order and which items are in it at all. Every change is saved
+// at once through the same PUT the other sections use, and the sidebar redraws from the answer.
 //
 // Dragging is the quick way and the arrows are the way that always works: a keyboard, a screen reader
 // and a phone's browser (which has no HTML drag and drop) move an item one place at a time.
@@ -14,12 +14,12 @@ import { ICON_NAMES, Icon, type IconName } from "../icons";
 import { type NavConfig, type NavItem, type PageInfo, desktopLayout, drawerLayout, moveItem, resolveNav } from "../navconfig";
 import { prime, useQuery } from "../store";
 import { Sheet } from "../ui/dialogs";
-import { Switch } from "../ui/index";
+import { Select, Switch } from "../ui/primitives";
 import { NAV_KEY, PAGES_KEY } from "../usenav";
 
-type Place = "rail" | "more" | "hidden";
-const PLACES: Place[] = ["rail", "more", "hidden"];
-const EMPTY: Required<NavConfig> = { rail: [], more: [], drawer: [], hidden: [], icons: {} };
+type Place = "pinned" | "more" | "hidden";
+const PLACES: Place[] = ["pinned", "more", "hidden"];
+const EMPTY: Required<NavConfig> = { pinned: [], more: [], drawer: [], hidden: [], icons: {} };
 
 export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; selfdev: SelfDevMode }) {
   const pages = useQuery<{ pages?: PageInfo[] }>(PAGES_KEY, { staleMs: 30000 });
@@ -30,8 +30,8 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
   const [picking, setPicking] = useState<NavItem | null>(null);
   const saved = s.navigation ?? EMPTY;
   const config: NavConfig = draft ?? saved;
-  // The shell reads the section from its own light route; the fresh copy goes there too, so the rail
-  // changes the moment Settings does rather than at its next poll.
+  // The shell reads the section from its own light route; the fresh copy goes there too, so the
+  // sidebar changes the moment Settings does rather than at its next poll.
   useEffect(() => {
     if (s.navigation) prime(NAV_KEY, s.navigation);
   }, [s.navigation]);
@@ -39,7 +39,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
   const nav = resolveNav({ config, pages: pages.data?.pages, selfdev });
   const known = new Set(nav.catalogue.map((it) => it.id));
   const sections: Record<Place, NavItem[]> = {
-    rail: nav.rail,
+    pinned: nav.pinned,
     more: nav.more.flatMap((g) => g.items),
     hidden: nav.catalogue.filter((it) => nav.hidden.has(it.id)),
   };
@@ -138,9 +138,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
       {glyph(it)}
       <span className="nav-cfg-title truncate">{it.title}</span>
       {arrows(it, () => step(it.id, -1), () => step(it.id, 1))}
-      <select className="field nav-cfg-place" value={p} aria-label={t("nav.cfg.place", { name: it.title })} onChange={(e) => place(it.id, e.target.value as Place)}>
-        {PLACES.map((q) => <option key={q} value={q}>{t(`nav.cfg.place.${q}`)}</option>)}
-      </select>
+      <Select className="nav-cfg-place" value={p} label={t("nav.cfg.place", { name: it.title })} onChange={(q) => place(it.id, q)} options={PLACES.map((q) => ({ id: q, label: t(`nav.cfg.place.${q}`) }))} />
     </div>
   );
 
@@ -181,7 +179,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
 
   return (
     <>
-      <div className="card nav-cfg" data-setting="navigation.rail">
+      <div className="card nav-cfg" data-setting="navigation.pinned">
         <div className="section-title">{t("nav.cfg.desktop")}</div>
         <div className="sub">{t("nav.cfg.desktop.sub")}</div>
         {PLACES.map((p) => (

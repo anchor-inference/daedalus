@@ -357,10 +357,10 @@
       "synonyms": ["pet model", "mascot model", "companion model", "модель маскота", "реплики маскота"]
     },
     {
-      "section": "navigation", "anchor": "navigation.rail", "config": "navigation.rail",
+      "section": "navigation", "anchor": "navigation.pinned", "config": "navigation.pinned",
       "title": { "en": "Desktop navigation", "ru": "Навигация на компьютере" },
-      "about": { "en": "Which screens sit on the rail, which in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны на боковой панели, какие в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
-      "synonyms": ["rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
+      "about": { "en": "Which screens are pinned at the top of the sidebar, which wait in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны закреплены вверху боковой панели, какие ждут в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
+      "synonyms": ["pinned", "pin a screen", "rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
     },
     {
       "section": "navigation", "anchor": "navigation.drawer", "config": "navigation.drawer",
