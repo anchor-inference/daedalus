@@ -7,7 +7,7 @@
 @media (min-width: 1024px) {
   .start { flex:1; min-height:0; }
   .start-hero { flex:1 0 auto; justify-content:center; gap:28px; width:100%; padding:var(--space-6) var(--space-6) calc(var(--space-6) + 80px); }
-  h1.start-greeting { max-width:none; font-size:var(--fs-28); font-weight:500; letter-spacing:-0.02em; line-height:1.2; }
+  h1.start-greeting { max-width:none; font-size:var(--fs-28); font-weight:500; letter-spacing:-0.02em; line-height:1.45; }
   .start-composer, .start-resume, .start-import { width:100%; max-width:var(--chat-w); }
   /* The chat's composer pads itself off the conversation's edges; here the box is the column. */
   .start-composer.composer { padding:0; }
