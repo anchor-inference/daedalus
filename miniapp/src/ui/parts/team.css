@@ -249,11 +249,14 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
   .ph-member-tm { white-space: nowrap; }
   .ph-member-wait { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-13); line-height: 1.35; color: var(--warn); overflow-wrap: anywhere; }
   .ph-member-pv { display: inline-flex; align-items: center; gap: 10px; }
-  .ph-showmore { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--nav-row-h); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-14); cursor: pointer; }
-  .ph-team > .ph-empty { min-height: 60vh; }
-  /* The rows run edge to edge as every phone list does; the request card keeps the page's margin. */
-  .screen.ph-team { padding-left: 0; padding-right: 0; }
-  .screen.ph-team > .needs-banner, .screen.ph-team > .loading, .screen.ph-team > .team-setups { margin-left: var(--gutter); margin-right: var(--gutter); }
+  .ph-showmore { width: 100%; justify-content: space-between; min-height: var(--tap); }
+  .ph-team > .empty { min-height: 60vh; align-content: center; }
+  /* The members are the team page's card of rows, a hairline between them; a row is the long-press
+     row, so its own background gives way to the card's. */
+  .staff-list > .list-row-wrap + .list-row-wrap { border-top: 1px solid var(--line); }
+  .staff-list .list-row { border-radius: 0; background: transparent; }
+  .staff-list .list-row:active, .staff-list .list-row.pressed { background: var(--surface-2); }
+  .staff-list .list-row.current { background: var(--selected); }
   /* Hiring and editing a member: labelled fields in the phone's field shape, choices as segmented
      tracks, and the decision as two wide buttons at the foot. */
   .staff-sheet:not(.ph-member-sheet) label.field, .staff-sheet:not(.ph-member-sheet) legend.field { margin: var(--space-3) 4px 6px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
