@@ -221,7 +221,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 
     # The palette.
     page.keyboard.press("Control+k")
-    page.locator(".palette-sheet input").fill(words["palette"])
+    page.locator(".palette-sheet .combo-input").fill(words["palette"])
     page.locator(".palette-row").first.click()
     expect(page.locator(".sheet.imp-sheet")).to_be_visible()
     page.keyboard.press("Escape")

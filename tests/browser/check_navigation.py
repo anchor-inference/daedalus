@@ -36,8 +36,8 @@ LANG = os.environ.get("LANG_UI", "")
 SHIPPED = ["inbox", "board", "calendar", "changes", "terminals"]
 EMPTY = {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
 WORDS = {
-    "en": {"page": "Dosing calculator", "all": "All screens", "customise": "Customise…", "reset": "Reset to default", "pinned": "Pinned"},
-    "ru": {"page": "Калькулятор дозировки", "all": "Все экраны", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "pinned": "Закреплён"},
+    "en": {"page": "Dosing calculator", "group": "Pages", "customise": "Customise…", "reset": "Reset to default", "pinned": "Pinned"},
+    "ru": {"page": "Калькулятор дозировки", "group": "Страницы", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "pinned": "Закреплён"},
 }
 # The destinations pinned in the sidebar: its rows between New chat and More.
 PINNED = ".sb-pinned-nav a.sb-nav[data-nav]"
@@ -106,12 +106,12 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if pinned(page) != SHIPPED:
         say(f"with nothing configured the pinned rows read {pinned(page)}")
 
-    # The page is in the launcher's catalogue with its own glyph, not marked as pinned; a pinned item
+    # The page is in the launcher under Pages with its own glyph, not marked as pinned; a pinned item
     # is listed there too, with the mark.
     page.locator(".sb-pinned-nav [data-nav='menu']").click()
     entry = page.locator(".navmenu [data-nav-item='page:dosing']")
     expect(entry).to_contain_text(words["page"])
-    expect(page.locator(".launch-sec", has=page.locator("[data-nav-item='page:dosing']")).locator(".launch-label > span").first).to_have_text(words["all"])
+    expect(page.locator(".launch-sec", has=page.locator("[data-nav-item='page:dosing']")).locator(".launch-label").first).to_have_text(words["group"])
     if entry.get_attribute("data-placed") is not None:
         say("the page is marked as already pinned")
     if page.locator(".navmenu [data-nav-item='inbox']").get_attribute("data-placed") is None:

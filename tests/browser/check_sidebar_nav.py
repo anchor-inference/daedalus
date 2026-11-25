@@ -175,7 +175,10 @@ def desktop(page: Page, lang: str) -> None:
     expect(page.locator(".navmenu[role='dialog']")).to_be_visible()
     menu_box = box(page, ".navmenu")
     trigger_box = box(page, ".sb-pinned-nav [data-nav='menu']")
-    assert abs(menu_box["x"] - trigger_box["x"] - trigger_box["width"] - 6) <= 1, "More must open beside its own row"
+    sidebar_box = box(page, "nav.sidebar")
+    assert abs(menu_box["x"] - sidebar_box["x"] - sidebar_box["width"] - 8) <= 1, "More must open 8 px beside the sidebar"
+    # Level with its row, or higher where the window has no room below it.
+    assert menu_box["y"] <= trigger_box["y"] + 1, "More must open level with its own row"
     assert menu_box["y"] >= 8 and menu_box["y"] + menu_box["height"] <= page.viewport_size["height"] - 7  # type: ignore[index]
     field_box = box(page, ".start-composer")
     main_box = box(page, ".main")
