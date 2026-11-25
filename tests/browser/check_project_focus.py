@@ -238,9 +238,12 @@ def desktop(page: Page, lang: str, width: int) -> None:
     # A staff member's session, inside the project: its header, its messages, both sets of tabs.
     side.locator(".focus-staff", has_text="Lev").click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/s/sess-lev**")
-    head = page.locator(".staff-head")
-    expect(head).to_contain_text("Lev")
-    expect(head).to_contain_text("agent/lev/photos")
+    # One header: the member stands where the chat's title would, its controls among the header's own.
+    head = page.locator(".chat-head")
+    expect(head).to_have_count(1)
+    expect(head.locator(".staff-who")).to_contain_text("Lev")
+    expect(page.locator(".staff-head")).to_have_count(0)
+    expect(page.locator(".staff-facts")).to_contain_text("agent/lev/photos")
     expect(page.locator(".staff-message").first).to_contain_text(words["accepted"])
     expect(page.locator(".chat .composer-field")).to_have_attribute("placeholder", words["lev"])
     # Its panel keeps the project's tools the operator opened beside the orchestrator, and its "+" menu

@@ -70,7 +70,7 @@ import { excerptOf, messageBody, uploadText } from "../project/goalmodel";
 import { QuestionsLine, QuestionsPanel } from "../questions/QuestionsPanel";
 import { AskRecord } from "../questions/AskRecord";
 import { useQuestions, type QuestionScope } from "../questions/data";
-import { StaffHeader, StaffMessages, useMember } from "../project/staff";
+import { StaffControls, StaffFacts, StaffHeader, StaffMessages, StaffWho, useMember } from "../project/staff";
 import { BriefPage, FoldersPage, WakeupsPage } from "../project/pages";
 import { worktreesKey, type Listing as WorktreeListing } from "../project/ProjectWorktrees";
 import { worktreeFolders } from "../project/worktreefolders";
@@ -2011,6 +2011,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 if (e.key === "Escape") setEditingTitle(null);
               }}
             />
+          ) : staffId ? (
+            // A member's session is named by the member, as its own page is: one header, not the
+            // chat's title over a second bar that said who it was.
+            <StaffWho staffId={staffId} />
           ) : (
             <span className="chat-title-line">
               <span className="chat-title truncate">{detail?.title ?? "…"}</span>
@@ -2035,6 +2039,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         {!detail && (busy || saving) && <LiveBar status={status} saving={saving} base={tail} live={live} onJump={jumpToBottom} />}
         {offline && <span className="head-status offline">{t("session.reconnecting")}</span>}
         <div className="head-actions">
+          {staffId && <StaffControls projectId={focus!.projectId} staffId={staffId} toast={toast} />}
           {!visit && <LiveLinkChip sessionId={id} onOpen={() => setSharing(true)} />}
           {!visit && detail?.share && detail.share.mode !== "local" && (
             <button type="button" className={`chip ${detail.share.mode === "public" ? "bad" : "attn"}`} onClick={() => setSharing(true)}>
@@ -2065,7 +2070,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         </div>
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
       </div>}
-      {staffId && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} />}
+      {staffId && phone && !pane && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} release />}
+      {staffId && <StaffFacts projectId={focus!.projectId} staffId={staffId} />}
       {!bare && !(phone && !pane) && remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
       {banner}
 

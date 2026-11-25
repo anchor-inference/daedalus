@@ -103,7 +103,7 @@ def walk(page: Page) -> None:
     if advanced.get_attribute("open") is None:
         advanced.locator("summary").click()
     side.locator(".focus-staff", has_text="Lev").click()
-    expect(page.locator(".staff-head")).to_contain_text("Lev", timeout=15000)
+    expect(page.locator(".chat-head .staff-who")).to_contain_text("Lev", timeout=15000)
     no_notice(page, "staff session")
     side.locator(".focus-row", has_text="Board").click()
     expect(page.locator(".pboard")).to_be_visible(timeout=15000)

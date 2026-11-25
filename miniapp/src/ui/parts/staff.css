@@ -15,7 +15,17 @@
 .staff-head-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .staff-head-facts { flex: none; color: var(--fg-3); font-weight: 400; }
 .staff-head-actions { flex: none; display: flex; gap: 6px; }
-.staff-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 16px; min-height: 32px; padding: 4px 20px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); }
+.staff-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 16px; min-height: 32px; padding: 4px 24px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); }
+/* A Daedalus member's chat: the member stands in the chat header where the title would, and the facts
+   line hangs under that header, ruled below rather than above (the header draws the line between). */
+.staff-who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.staff-who .staff-head-name { min-width: 60px; }
+.chat > .staff-facts { flex: none; border-top: 0; border-bottom: 1px solid var(--line); }
+.chat-head:has(.staff-controls) { container: chathead / inline-size; }
+@container chathead (max-width: 899px) {
+  .staff-controls .staff-control-word { display: none; }
+  .staff-controls .btn { width: var(--ctl-h-sm); padding: 0; justify-content: center; }
+}
 .staff-facts:empty { display: none; }
 .staff-head-meta { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--fg-3); font-size: var(--fs-12); }
 .staff-head-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -23,7 +33,7 @@
 .staff-facts .staff-health, .staff-facts .staff-cond { margin: 0; align-items: center; }
 .staff-facts .staff-health .ic, .staff-facts .staff-cond .ic { margin-top: 0; }
 /* In the command-line view the row is also the chat's header, and holds the view and the column too. */
-.staff-cli > .staff-head > .chat-head { display: flex; align-items: center; gap: 10px; height: var(--head-h); min-height: var(--head-h); padding: 0 12px 0 20px; border: 0; flex-wrap: nowrap; }
+.staff-cli > .staff-head > .chat-head { display: flex; align-items: center; gap: 10px; height: var(--head-h); min-height: var(--head-h); padding: 0 12px 0 24px; border: 0; flex-wrap: nowrap; }
 .staff-cli > .staff-head .head-actions { flex: none; display: flex; align-items: center; gap: 4px; }
 .staff-cli .staff-mode { flex: none; }
 /* On a narrower desktop the facts of the turn give way before the controls. */
@@ -113,10 +123,13 @@
 .staff-cond-item.wait .staff-cond-why { color: var(--warn); }
 .staff-cond-why { color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
 .staff-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--wash, var(--bg)); }
-.staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-/* The right panel's tab row: 52 px, pills with an icon and a word, the open one filled. Five tabs in
-   Russian are wider than the narrowest column (260 px): the row scrolls sideways, as the session
-   panel's does, rather than wrapping under itself or clipping the last tab. */
+.staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; container: staffpanel / inline-size; }
+/* The right panel's tab row: 52 px, pills with an icon and a word, the open one filled. Four tabs in
+   Russian need about 490 px and five about 600, so in a narrower column (the 410 px one at 1366) the
+   tabs it is not on are their icons, as the session panel's are; at 1366 the last tab had scrolled
+   out of view. Below even that the row scrolls sideways rather than wrapping or clipping. */
+@container staffpanel (max-width: 499px) { .panel-tabs[data-tabs="4"] .panel-tab:not(.on) .panel-tab-word { display: none; } }
+@container staffpanel (max-width: 609px) { .panel-tabs[data-tabs="5"] .panel-tab:not(.on) .panel-tab-word { display: none; } }
 .staff-panel > .panel-tabs { height: var(--head-h); gap: 2px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
 .staff-panel .panel-tablist { flex: 1 1 auto; align-items: center; gap: 2px; }
 .staff-panel .panel-tab { flex: none; height: var(--ctl-h); gap: 7px; padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); }

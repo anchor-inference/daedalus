@@ -2371,7 +2371,7 @@ def run_focus() -> int:
         pid = focus.projects[0]["id"]
         shot(page, "project-focus", f"project/{pid}?panel=board", wait=".chat.in-project .event-card", before=open_focus_brief, settle=700)
         shot(page, "project-journal", f"project/{pid}/journal", wait=".journal-entry", settle=500)
-        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-head", settle=700)
+        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-who", settle=700)
         asking = FocusStub.bakery(LANG)
         asking.questions_of_bakery(LANG)
         page = desk.new_page()
