@@ -234,6 +234,8 @@ class CalendarStub:
         self.lang = lang
         self.writes: list[tuple[str, str, dict]] = []
         """Every write the screen sent, ``(method, path, body)``, for a check to read back."""
+        self.empty = False
+        """A calendar with nothing on it: the lists of events and tasks come back empty, the calendars stay."""
         ru = lang == "ru"
         self.settings: dict = {"week_start": 1, "work_start": "09:00", "work_end": "18:00", "default_view": "week", "default_duration": 60, "default_reminders": [10], "timezone": zone, "show_weekends": True}
 
@@ -900,6 +902,8 @@ class CalendarStub:
             return None
         q = parse_qs(query)
         body = body or {}
+        if self.empty and method == "GET" and (path in ("/api/calendar/events", "/api/calendar/search") or path == "/api/planner/tasks"):
+            return 200, []
         if method != "GET":
             self.writes.append((method, path + (f"?{query}" if query else ""), copy.deepcopy(body)))
         parts = path.split("/")

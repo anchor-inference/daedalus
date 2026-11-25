@@ -22,7 +22,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, S2, UNHANDLED, open_tool, stub  # noqa: E402
+from screenshots import S1, S2, S6, UNHANDLED, open_tool, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -140,6 +140,9 @@ def desktop(page: Page, scheme: str) -> None:
     page.keyboard.press("Escape")
     # The strip holds the Overview and what was opened: open enough tools that it has several tabs to
     # measure, in a panel at its widest so that each of them still draws its word beside its icon.
+    # In a chat with no open tasks: with some, the Board tab stands beside the opened ones, four tabs
+    # do not all fit with their words in 520 px, and the strip steps down to the open tab's word alone.
+    fresh(f"agents/{S6}")
     for tool in ("details", "context"):
         open_tool(page, tool)
     tabs = page.evaluate(TABS, ".panel-tab")

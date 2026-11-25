@@ -116,6 +116,13 @@ def open_sheet(page: Page, words: dict[str, str]) -> None:
     expect(page.locator("[data-guest-sheet]")).to_be_visible()
 
 
+def unfold(page: Page) -> None:
+    """The further limits sit under one line that opens them."""
+    if not page.locator("[data-guest-more]").count():
+        page.locator("[data-guest-more-toggle]").click()
+    expect(page.locator("[data-guest-more]")).to_be_visible()
+
+
 def card(page: Page, link_id: str):  # type: ignore[no-untyped-def]
     return page.locator(f"[data-guest-link='{link_id}']")
 
@@ -210,6 +217,7 @@ def check_stand_in(page: Page, words: dict[str, str], guests: FakeGuests, width:
     expect(page.locator("[data-guest-read]")).to_have_count(0)
     check_segments(page)
     # A stand-in's conversation lives only on the link, so its record is the record.
+    unfold(page)
     expect(page.locator("label[for='guest-retention_days']")).to_have_text(words["retention"])
     page.get_by_label(words["who"], exact=True).fill("Anna's agent")
     page.locator("#guest-topic").fill("Opening hours for the autumn")
@@ -294,6 +302,7 @@ def check_direct(page: Page, words: dict[str, str], guests: FakeGuests, width: i
     expect(page.get_by_role("radio", name=words["readonly"], exact=True)).to_have_attribute("aria-checked", "true")
     expect(page.locator("#guest-briefing")).to_have_count(0)
     # A direct conversation is also kept in the chat, so the link's own record is named as the link's.
+    unfold(page)
     expect(page.locator("label[for='guest-retention_days']")).to_have_text(words["retention_direct"])
     page.get_by_label(words["who"], exact=True).fill("Tomas")
     page.get_by_role("button", name=words["create"], exact=True).click()

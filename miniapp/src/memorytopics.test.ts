@@ -2,7 +2,7 @@
 // The Memory screen's topic helpers: typed topics read as the host keeps them, and the by-topic grouping.
 import { describe, expect, it } from "vitest";
 import type { MemoryRecord } from "./api";
-import { byTopic, parseTopics } from "./screens/Memory";
+import { byTopic, parseTopics } from "./memory/model";
 
 const record = (id: string, topics: string[]): MemoryRecord => ({
   id, scope: "global", scope_key: "", category: "fact", topics, text: id, salience: 0, version: 1, created_at: null, updated_at: null, last_accessed_at: null,

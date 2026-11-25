@@ -7,7 +7,7 @@ import { Icon } from "../icons";
 import { t } from "../i18n";
 import { absTime, relTime } from "../format";
 import { lanes, type Scope } from "../screens/boardview";
-import { IconButton } from "../ui/primitives";
+import { IconButton, OverflowMenu, type MenuItem } from "../ui/primitives";
 import { assigneeName, byUrgency, cardState, columnLabel, DEFAULT_PRIORITY, dueLabel, isFinished, type BoardTask, type Status } from "./tasks";
 
 /** What the board knows about the chats its cards came from: a title for a lane or a card, and
@@ -42,6 +42,9 @@ export type BoardColumnsProps = {
   canMove?: (task: BoardTask) => Status[];
   onMove?: (task: BoardTask, status: Status) => void;
   refusal?: Refusal | null;
+  /** The commands of a card's "…" button and right click, on the stacked form (where a card is too
+   *  narrow to be dragged with a mouse by everyone and has no pane beside it). No items, no button. */
+  cardMenu?: (task: BoardTask) => MenuItem[];
   /** Cards first drawn in a long column; the rest come with "Show more". */
   limit?: number;
 };
@@ -62,7 +65,7 @@ export function stackedColumns(tasks: BoardTask[]): BoardColumn[] {
   ];
 }
 
-export function BoardColumns({ columns, scope, layout = "grid", selected = null, onOpen, chats, canMove, onMove, refusal = null, limit = LIMIT }: BoardColumnsProps) {
+export function BoardColumns({ columns, scope, layout = "grid", selected = null, onOpen, chats, canMove, onMove, refusal = null, cardMenu, limit = LIMIT }: BoardColumnsProps) {
   const [dragging, setDragging] = useState<BoardTask | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [unfolded, setUnfolded] = useState<Record<string, boolean>>({});
@@ -114,12 +117,22 @@ export function BoardColumns({ columns, scope, layout = "grid", selected = null,
             {!folded && grouped.map((lane) => (
               <div key={lane.key} className="kanban-lane" data-lane={lane.key}>
                 {lane.label !== null && <LaneHead label={lane.label} chat={lane.chat} scope={scope} chats={chats} />}
-                {lane.items.map((task) => (
-                  <TaskCard key={task.id} task={task} compact={stacked} showChat={scope === "all"} chats={chats} selected={selected === task.id} onOpen={() => onOpen(task)}
-                    refusal={refusal?.taskId === task.id && refusal.where === "card" ? refusal.text : null}
-                    dragging={dragging?.id === task.id}
-                    drag={onMove && (canMove?.(task) ?? []).length > 0 ? { start: () => setDragging(task), end: () => { setDragging(null); setOver(null); } } : undefined} />
-                ))}
+                {lane.items.map((task) => {
+                  const card = (
+                    <TaskCard key={task.id} task={task} compact={stacked} showChat={scope === "all"} chats={chats} selected={selected === task.id} onOpen={() => onOpen(task)}
+                      refusal={refusal?.taskId === task.id && refusal.where === "card" ? refusal.text : null}
+                      dragging={dragging?.id === task.id}
+                      drag={onMove && (canMove?.(task) ?? []).length > 0 ? { start: () => setDragging(task), end: () => { setDragging(null); setOver(null); } } : undefined} />
+                  );
+                  const items = stacked && cardMenu ? cardMenu(task) : [];
+                  if (items.length === 0) return card;
+                  return (
+                    <div key={task.id} className="task-card-wrap">
+                      {card}
+                      <OverflowMenu small items={items} label={t("board.card.actions", { title: task.title })} className="task-card-more" contextSelector=".task-card-wrap" />
+                    </div>
+                  );
+                })}
               </div>
             ))}
             {!folded && !more[column.key] && column.tasks.length > limit && (

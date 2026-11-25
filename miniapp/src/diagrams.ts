@@ -7,6 +7,7 @@
 // still-streaming paragraph would vanish and come back on every token. The renderer is loaded the
 // first time a diagram is met and never before (see mermaidrender.ts).
 
+import { openDiagramZoom } from "./diagramzoom";
 import { t } from "./i18n";
 import { iconSvg } from "./icons";
 import type { MermaidTheme } from "./mermaidrender";
@@ -141,59 +142,32 @@ function paint(card: HTMLElement, theme: MermaidTheme): void {
 
 // ── the large view ──────────────────────────────────────────────────────────────────────────
 
-let zoom: HTMLDivElement | null = null;
-let returnFocus: HTMLElement | null = null;
-
-function closeZoom(): void {
-  zoom?.remove();
-  zoom = null;
-  returnFocus?.focus();
-  returnFocus = null;
-}
-
-function openZoom(card: HTMLElement, from: HTMLElement): void {
+function openZoom(card: HTMLElement): void {
   const svg = card.querySelector(":scope > .mermaid-view > svg");
   if (!svg) return;
-  closeZoom();
-  returnFocus = from;
-  zoom = document.createElement("div");
-  zoom.className = "diagram-zoom";
-  zoom.setAttribute("role", "dialog");
-  zoom.setAttribute("aria-modal", "true");
-  zoom.setAttribute("aria-label", t("diagram.label"));
-  zoom.tabIndex = -1;
-  const close = escapeText(t("common.close"));
-  zoom.innerHTML = `<div class="diagram-zoom-top"><button type="button" data-zoom-close="1" aria-label="${close}" title="${close}">${iconSvg("close", 18)}</button></div><div class="diagram-zoom-body"></div>`;
   // Re-scoped like any other copy, and freed of the width cap mermaid writes for the inline size.
-  const key = card.dataset.drawn ?? "";
-  const drawn = settled.get(key);
-  const body = zoom.querySelector(".diagram-zoom-body") as HTMLElement;
-  body.innerHTML = drawn && !("error" in drawn) ? ownIds(drawn) : svg.outerHTML;
-  const big = body.querySelector("svg");
+  const drawn = settled.get(card.dataset.drawn ?? "");
+  const holder = document.createElement("div");
+  holder.innerHTML = drawn && !("error" in drawn) ? ownIds(drawn) : (svg as Element).outerHTML;
+  const big = holder.querySelector("svg");
   if (big) {
     big.style.maxWidth = "";
     big.setAttribute("width", "100%");
     big.setAttribute("height", "100%");
   }
-  document.body.appendChild(zoom);
-  zoom.focus();
-}
-
-function escapeText(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  openDiagramZoom(holder.innerHTML);
 }
 
 if (typeof document !== "undefined") {
+  // Heard in the capture phase: a drawing inside a sheet (a note being read) sits under a root that
+  // stops its clicks from reaching the row that opened the sheet, and a listener on the bubble side
+  // of the document never heard its buttons.
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement | null;
-    if (zoom && (target?.closest?.("[data-zoom-close]") || target === zoom || target?.classList?.contains("diagram-zoom-body"))) {
-      closeZoom();
-      return;
-    }
     const button = target?.closest?.("button[data-mermaid-toggle], button[data-mermaid-open]") as HTMLButtonElement | null;
     const card = button?.closest(".codecard") as HTMLElement | null;
     if (!button || !card) return;
-    if (button.dataset.mermaidOpen) return openZoom(card, button);
+    if (button.dataset.mermaidOpen) return openZoom(card);
     // The reader's choice of code or drawing lives on the card; a streamed rewrite starts over at the drawing.
     const code = card.dataset.view !== "code";
     card.dataset.view = code ? "code" : "diagram";
@@ -201,10 +175,7 @@ if (typeof document !== "undefined") {
     button.setAttribute("aria-label", label);
     button.title = label;
     button.innerHTML = iconSvg(code ? "chart" : "braces", 14);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (zoom && e.key === "Escape") closeZoom();
-  });
+  }, true);
   // A theme change repaints the drawings in the new colours; the old ones stay until the new arrive.
   let timer = 0;
   new MutationObserver(() => {

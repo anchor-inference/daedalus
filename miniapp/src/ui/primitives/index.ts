@@ -12,6 +12,7 @@ export { Tooltip, TooltipProvider } from "./tooltip";
 export { Tabs, type TabItem } from "./tabs";
 export { Segmented, type SegmentedOption } from "./segmented";
 export { Switch } from "./switch";
+export { GLANCE_MS, NoticeGlyph, NoticeQueue, STACK_MAX, clearNotices, dismissNotice, noticesWaiting, raiseNotice, setNoticeFoot, type NoticeView } from "./notices";
 export { ToastHost, deleteWithUndo, dismissToast, toast, type ToastNotice, type ToastOptions } from "./toast";
 export { Button, Field, IconButton, type ButtonProps, type FieldProps, type IconButtonProps } from "./controls";
 export { Badge, Dot, Kbd } from "./markup";

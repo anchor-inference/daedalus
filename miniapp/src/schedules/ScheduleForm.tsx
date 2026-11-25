@@ -7,7 +7,7 @@ import { api, ApiError, type Schedule } from "../api";
 import { absTime, cronFor, describeCron, zoneOffsetMinutes } from "../format";
 import { t } from "../i18n";
 import { approvalExpiry } from "../schedulecard";
-import { Sheet } from "../ui/dialogs";
+import { Button, Field, Segmented, Select, Sheet, type SelectOption } from "../ui/primitives";
 import { errorText } from "../ui";
 import { reloadSchedules, type ScheduleEdit } from "./actions";
 import type { ScheduleRow } from "./model";
@@ -122,64 +122,50 @@ export function ScheduleFormBody({ existing, onCancel, onSave, onCreated, toast,
     }
   }
 
+  const whens: SelectOption<When>[] = (["once", "daily", "weekdays", "weekly", "hours", "cron"] as When[]).map((w) => ({ id: w, label: t(`sched.when.${w}`) }));
   return (
     <div className="schedform">
-      <label className="field">{t("common.name")}</label>
-      <input className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label={t("common.name")} autoFocus value={name} onChange={(e) => setName(e.target.value)} />
       {!existing && (
-        <>
-          <label className="field">{t("sched.type")}</label>
-          <div className="segmented inline" role="radiogroup">
-            <button role="radio" aria-checked={kind === "agent"} className={kind === "agent" ? "on" : ""} onClick={() => setKind("agent")}>{t("sched.kind.agent")}</button>
-            <button role="radio" aria-checked={kind === "message"} className={kind === "message" ? "on" : ""} onClick={() => setKind("message")}>{t("sched.kind.message")}</button>
-          </div>
-          <div className="sub schedform-hint">{t(kind === "agent" ? "sched.type.agent.hint" : "sched.type.message.hint")}</div>
-        </>
+        <div className="field-box">
+          <span className="field-label">{t("sched.type")}</span>
+          <Segmented<Schedule["kind"]> label={t("sched.type")} size="md" value={kind} onChange={setKind}
+            options={[{ id: "agent", label: t("sched.kind.agent") }, { id: "message", label: t("sched.kind.message") }]} />
+          <div className="sub field-hint">{t(kind === "agent" ? "sched.type.agent.hint" : "sched.type.message.hint")}</div>
+        </div>
       )}
-      <label className="field">{t(kind === "agent" ? "sched.instruction" : "sched.remindertext")}</label>
-      <textarea className="field" rows={existing ? 8 : 4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <label className="field">{t("sched.when")}</label>
-      {/* Wrapped, not scrolled: in one scrolling row a phone showed four and a half of the six, and
-          an existing Cron schedule opened with its own choice out of sight. */}
-      <div className="chips wrap">
-        {(["once", "daily", "weekdays", "weekly", "hours", "cron"] as When[]).map((w) => (
-          <button key={w} className="chip select" aria-pressed={when === w} onClick={() => setWhen(w)}>
-            {t(`sched.when.${w}`)}
-          </button>
-        ))}
+      <Field multiline label={t(kind === "agent" ? "sched.instruction" : "sched.remindertext")} rows={existing ? 8 : 4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <div className="field-box">
+        <span className="field-label">{t("sched.when")}</span>
+        <Select<When> label={t("sched.when")} size="md" className="schedform-when" value={when} options={whens} onChange={setWhen} />
       </div>
       {when === "once" && (
-        <div className="grid2">
-          <div><label className="field">{t("sched.date")}</label><input className="field" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div><label className="field">{t("sched.time")}</label><input className="field" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></div>
+        <div className="schedform-pair">
+          <Field label={t("sched.date")} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Field label={t("sched.time")} type="time" value={time} onChange={(e) => setTime(e.target.value)} />
         </div>
       )}
       {(when === "daily" || when === "weekdays" || when === "weekly" || when === "hours") && (
-        <div className="grid2">
-          <div><label className="field">{t(when === "hours" ? "sched.minute" : "sched.time")}</label><input className="field" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></div>
-          {when === "hours" && <div><label className="field">{t("sched.everyhours")}</label><input className="field" type="number" min={1} max={24} value={every} onChange={(e) => setEvery(e.target.value)} /></div>}
+        <div className="schedform-pair">
+          <Field label={t(when === "hours" ? "sched.minute" : "sched.time")} type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          {when === "hours" && <Field label={t("sched.everyhours")} type="number" min={1} max={24} value={every} onChange={(e) => setEvery(e.target.value)} />}
         </div>
       )}
       {when === "weekly" && (
-        <>
-          <label className="field">{t("sched.days")}</label>
-          <div className="chips wrap">
+        <div className="field-box">
+          <span className="field-label">{t("sched.days")}</span>
+          <div className="schedform-days" role="group" aria-label={t("sched.days")}>
             {DAYS.map((d, i) => (
-              <button key={d} className="chip select" aria-pressed={days.includes(i)} onClick={() => setDays((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i].sort()))}>{t(`fmt.dow.${d}`)}</button>
+              <button key={d} type="button" aria-pressed={days.includes(i)} onClick={() => setDays((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i].sort()))}>{t(`fmt.dow.${d}`)}</button>
             ))}
           </div>
-        </>
+        </div>
       )}
-      {when === "cron" && (
-        <>
-          <label className="field">{t("sched.cron.label")}</label>
-          <input className="field mono" placeholder="0 4 * * 1-5" value={cron} onChange={(e) => setCron(e.target.value)} />
-        </>
-      )}
-      <div className="sub preview-line">{preview ? t("sched.preview", { when: preview }) : t("sched.preview.none")}</div>
+      {when === "cron" && <Field mono label={t("sched.cron.label")} placeholder="0 4 * * 1-5" value={cron} onChange={(e) => setCron(e.target.value)} />}
+      <div className="schedform-preview" role="status">{preview ? t("sched.preview", { when: preview }) : t("sched.preview.none")}</div>
       <div className="schedform-foot">
-        <button className="btn ghost" onClick={onCancel}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !valid} onClick={() => void submit()}>{t(existing ? "common.save" : "common.create")}</button>
+        <Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button variant="primary" busy={busy} disabled={!valid} onClick={() => void submit()}>{t(existing ? "common.save" : "common.create")}</Button>
       </div>
     </div>
   );
@@ -188,7 +174,7 @@ export function ScheduleFormBody({ existing, onCancel, onSave, onCreated, toast,
 /** A new schedule, in a sheet over the list. */
 export function NewScheduleSheet({ onClose, toast, approvalDays }: { onClose: () => void; toast: (text: string) => void; approvalDays?: number }) {
   return (
-    <Sheet title={t("sched.new")} onClose={onClose}>
+    <Sheet title={t("sched.new")} size="md" onClose={onClose}>
       <ScheduleFormBody onCancel={onClose} onCreated={onClose} toast={toast} approvalDays={approvalDays} />
     </Sheet>
   );

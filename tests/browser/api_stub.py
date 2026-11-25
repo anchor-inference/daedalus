@@ -2919,6 +2919,8 @@ class BoardStub:
         """A task's stored events as ``GET /api/board/{id}/events`` answers them; a task without any has its creation."""
         self.refusals: dict[str, str] = {}
         """A task's id to the host's reason for refusing a move of it, as the update command words a conflict."""
+        self.session_projects: dict[str, str] = {}
+        """A chat's id to the project it belongs to: a create that names a known chat on another board is refused with 403, as the host's is."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -3204,6 +3206,12 @@ class BoardStub:
                              "receipt_id": "cancel-receipt", "entity_revision": entity_revision + 1}
         if path == base and method == "GET":
             return 200, self.listing("include_done=1" in query)
+        if path in (base, "/api/board") and method == "POST":
+            # The host puts a card on the board its source chat belongs to: the global board takes only a
+            # chat of no project, a project's board only that project's chats.
+            chat = (body or {}).get("session_id")
+            if chat in self.session_projects and self.session_projects[chat] != (self.project["id"] if path == base else ""):
+                return 403, {"detail": "the source session belongs to another board"}
         if path == base and method == "POST":
             payload = dict(body or {})
             self.created.append(payload)

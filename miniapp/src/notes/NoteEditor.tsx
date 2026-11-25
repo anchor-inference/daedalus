@@ -1,37 +1,38 @@
-// The note editor: a large dialog (the whole screen on a phone) with the Markdown source, the same
+// The note editor: a sheet (the whole screen on a phone) with the Markdown source, the same
 // drawing the answers get beside it or instead of it, and no Save button.
 //
 // Saving: every keystroke writes a draft on this device and schedules a save 700 ms later; blur, close
 // and a hidden tab save at once. A save carries the version the text was typed on, and a refusal (the
-// agent or another window saved in between) opens the conflict prompt instead of overwriting anything.
+// agent or another window saved in between) asks what to keep instead of overwriting anything.
 // Closing never discards: it saves first, and a save that cannot reach the host leaves the draft here
 // and says so. A new note is created on its first words, so an untouched one leaves no trace.
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { nameIncoming, pastedFiles } from "../attachfiles";
 import { relTime } from "../format";
 import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { MediaViewer, type ViewerItem } from "../media";
 import { downloadHref, FilePreview, type PreviewSource } from "../preview";
-import { Overlay, OverflowMenu, Popover, confirmDialog, trapDialogTab, useLayer, type MenuItem } from "../ui/dialogs";
+import { OverflowMenu, Popover, Sheet, confirmDialog, type MenuItem } from "../ui/dialogs";
+import { Button, Segmented } from "../ui/primitives";
 import { errorText } from "../ui";
-import { conflictOf, fileUrl, notesApi, seedFileUrl } from "./api";
+import { conflictOf, notesApi, seedFileUrl } from "./api";
 import {
   COLORS, continueList, draftKey, dropDraft, fileBase, indent, insertBlock, insertText, isImage, lineDiff, linePrefix, link, readDraft,
   readingMinutes, reference, rememberMode, toggleTask, trigger, wordCount, wrap, writeDraft,
   type Edit, type EditorMode, type LineKind, type Note, type NoteFile, type NoteScope,
 } from "./model";
 import { NoteView, scrollToHeading } from "./NoteView";
-import { fileFamily } from "../md";
+import { NotePicker, type PickGroup, type PickItem } from "./NotePicker";
 import { TINT_MAX, tint } from "./highlight";
 import { RawHtml } from "../rawhtml";
-import { applyEdit, caretPoint } from "./textarea";
+import { applyEdit } from "./textarea";
 
 /** What the editor was opened on. `opened` names the opening: the editor keeps its state across the
  *  moment a new note gets its id, which a key made of the id would throw away mid-sentence. */
 export type EditorTarget = { noteId: string | null; scope: NoteScope; mode: EditorMode; opened: number; heading?: string; template?: { title: string; body: string } };
-export type PickGroup = { label: string; files: NoteFile[] };
+export type { PickGroup };
 
 export type NoteEditorProps = {
   sessionId: string;
@@ -54,7 +55,7 @@ export type NoteEditorProps = {
 
 type Status = "idle" | "dirty" | "saving" | "saved" | "offline" | "conflict" | "gone";
 type Upload = { key: number; name: string; progress: number };
-type Popup = { kind: "file" | "slash"; from: number; query: string; index: number };
+type Popup = { kind: "file" | "slash"; from: number; query: string };
 
 const SAVE_MS = 700;
 const RETRY_MS = 5000;
@@ -80,7 +81,8 @@ export function NoteEditor(props: NoteEditorProps) {
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [popup, setPopup] = useState<Popup | null>(null);
   const [dropping, setDropping] = useState(false);
-  const [closing, setClosing] = useState(false);
+  // The conflict question was put and put off: the editor says so, and asks again when pressed.
+  const [deferred, setDeferred] = useState(false);
   const [viewer, setViewer] = useState<{ items: ViewerItem[]; index: number } | null>(null);
   const [preview, setPreview] = useState<PreviewSource | null>(null);
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
@@ -234,22 +236,25 @@ export function NoteEditor(props: NoteEditorProps) {
       } else if (!ok && dirty()) {
         if (!(await confirmDialog({ title: t("notes.close.unsaved"), body: t("notes.close.unsaved.body"), action: t("notes.close.later") }))) return;
       }
-      setClosing(true);
-      window.setTimeout(props.onClose, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 160);
+      props.onClose();
     } finally {
       closingRef.current = false;
     }
   }, [save, props.onClose]); // eslint-disable-line react-hooks/exhaustive-deps -- dirty reads refs
-  useLayer(() => void requestClose());
 
-  // Focus: a new or empty note starts in its words (or its title), an open one on the reading view.
-  useEffect(() => {
-    if (mode === "read") dialog.current?.focus();
+  // Focus: a new or empty note starts in its title, an open one in its words, a read one on the
+  // reading view. The sheet's contents are drawn a commit after it, so this runs when its shell
+  // appears rather than when the editor mounts; the sheet gives the focus back to the control that
+  // opened it.
+  const focused = useRef(false);
+  const shellRef = (el: HTMLDivElement | null) => {
+    dialog.current = el;
+    if (!el || focused.current) return;
+    focused.current = true;
+    if (mode === "read") el.focus();
     else if (!initial.title && !initial.body) titleField.current?.focus();
     else field.current?.focus();
-    const opener = document.activeElement as HTMLElement | null;
-    return () => opener?.focus?.();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, on open
+  };
 
   // A link to a heading opens the note scrolled to it.
   useEffect(() => {
@@ -299,7 +304,7 @@ export function NoteEditor(props: NoteEditorProps) {
     if (!el) return;
     if (mode === "read") pickMode("write");
     apply((text, s, e) => insertText(text, s, e, "[["));
-    setPopup({ kind: "file", from: el.selectionStart - 2, query: "", index: 0 });
+    setPopup({ kind: "file", from: el.selectionStart - 2, query: "" });
   };
 
   // ── uploads ─────────────────────────────────────────────────────────────────────────────────
@@ -349,14 +354,12 @@ export function NoteEditor(props: NoteEditorProps) {
   const syncPopup = (el: HTMLTextAreaElement) => {
     const found = trigger(el.value, el.selectionStart);
     if (!found || el.selectionStart !== el.selectionEnd) return setPopup(null);
-    setPopup((now) => (now && now.kind === found.kind && now.from === found.from ? { ...now, query: found.query, index: now.query === found.query ? now.index : 0 } : { ...found, index: 0 }));
+    // Once the list is open its own field has the keyboard; the text after the trigger only seeds it.
+    setPopup((now) => (now && now.kind === found.kind && now.from === found.from ? now : found));
   };
   const slashCommands = slashCommandsFor({ prefix, block, apply, upload: () => fileInput.current?.click(), picker: () => openPicker() });
-  const popupItems = usePopupItems(popup, props.pickable, slashCommands);
-  const choose = (index: number) => {
+  const choose = (item: PickItem) => {
     if (!popup) return;
-    const item = popupItems[index];
-    if (!item) return;
     const el = field.current;
     if (!el) return;
     const caret = el.selectionStart;
@@ -376,19 +379,6 @@ export function NoteEditor(props: NoteEditorProps) {
   };
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const mod = isMac ? e.metaKey : e.ctrlKey;
-    if (popup && popupItems.length) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const step = e.key === "ArrowDown" ? 1 : popupItems.length - 1;
-        setPopup({ ...popup, index: (popup.index + step) % popupItems.length });
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        choose(popup.index);
-        return;
-      }
-    }
     if (mod && !e.altKey) {
       const key = e.key.toLowerCase();
       const run = (fn: () => unknown) => {
@@ -445,18 +435,17 @@ export function NoteEditor(props: NoteEditorProps) {
     const el = field.current;
     const pane = previewPane.current;
     syncTint();
-    if (popup) setPopup({ ...popup });
     if (!el || !pane || mode !== "split") return;
     const share = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
     pane.scrollTop = share * (pane.scrollHeight - pane.clientHeight);
   };
 
-  // ── the conflict prompt's three ways out ─────────────────────────────────────────────────────
-  const keepMine = async () => {
-    if (!conflict || !idRef.current) return;
-    const theirs = conflict;
+  // ── the conflict question's three ways out ───────────────────────────────────────────────────
+  const keepMine = async (theirs: Note) => {
+    if (!idRef.current) return;
     setConflict(null);
     conflictRef.current = null;
+    setDeferred(false);
     setStatus("saving");
     try {
       const note = await notesApi.save(idRef.current, { ...latest.current, version: theirs.version, force: true });
@@ -481,11 +470,10 @@ export function NoteEditor(props: NoteEditorProps) {
     dropDraft(keyOf());
     setConflict(null);
     setRemote(null);
+    setDeferred(false);
     setStatus("saved");
   };
-  const keepBoth = async () => {
-    if (!conflict) return;
-    const theirs = conflict;
+  const keepBoth = async (theirs: Note) => {
     try {
       const copy = await notesApi.create(sessionId, { scope, title: `${latest.current.title || t("notes.untitled")} · ${t("notes.conflict.mine")}`, body: latest.current.body });
       props.onSaved(copy);
@@ -494,6 +482,35 @@ export function NoteEditor(props: NoteEditorProps) {
       toast(errorText(e));
     }
   };
+  /** Puts the question; an answer carries it out, and "decide later" leaves the note as it is with a
+      banner over it that asks again. The question is the app's own confirmation, so Escape and the
+      press outside mean the same as the button that says so. */
+  const askConflict = async (theirs: Note) => {
+    setDeferred(false);
+    const answer = await confirmDialog({
+      title: t("notes.conflict.title"),
+      body: <ConflictBody mine={latest.current} theirs={theirs} />,
+      wide: true,
+      cancel: t("notes.conflict.later"),
+      choices: [
+        { label: t("notes.conflict.take"), value: "theirs" },
+        { label: t("notes.conflict.both"), value: "both" },
+        { label: t("notes.conflict.keep"), value: "mine" },
+      ],
+    });
+    // The note may have been resolved another way (or closed) while the question stood.
+    if (conflictRef.current !== theirs) return;
+    if (answer === "mine") void keepMine(theirs);
+    else if (answer === "theirs") takeTheirs(theirs);
+    else if (answer === "both") void keepBoth(theirs);
+    else setDeferred(true);
+  };
+  const asked = useRef<Note | null>(null);
+  useEffect(() => {
+    if (!conflict || asked.current === conflict) return;
+    asked.current = conflict;
+    void askConflict(conflict);
+  }, [conflict]); // eslint-disable-line react-hooks/exhaustive-deps -- once for each version that disagrees
 
   // ── what is drawn ───────────────────────────────────────────────────────────────────────────
   // The tinted source under the field follows the text at once (it is the text), and its scroll.
@@ -539,18 +556,48 @@ export function NoteEditor(props: NoteEditorProps) {
 
   const editing = mode !== "read";
   const color = live?.color ?? "";
+  const modeOptions = (wide ? (["write", "split", "read"] as const) : (["write", "read"] as const)).map((m) => ({
+    id: m,
+    label: <><Icon name={m === "write" ? "pen" : m === "split" ? "columns" : "eye"} size={16} /><span>{t(`notes.mode.${m}`)}</span></>,
+  }));
+  const head = (
+    <div className="ne-head">
+      <button type="button" className="ne-swatch" onClick={(e) => setColorAnchor(e.currentTarget)} disabled={!note} aria-label={t("notes.color")} title={t("notes.color")}><i /></button>
+      <input
+        ref={titleField}
+        className="ne-title"
+        value={title}
+        placeholder={t("notes.untitled")}
+        aria-label={t("notes.title")}
+        maxLength={200}
+        onChange={(e) => changed({ title: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "ArrowDown") {
+            e.preventDefault();
+            if (mode === "read") pickMode(wide ? "split" : "write");
+            else field.current?.focus();
+          }
+        }}
+      />
+      <SaveState status={status} flash={flash} />
+      <Segmented className="ne-modes" label={t("notes.mode")} value={mode} options={modeOptions} onChange={pickMode} />
+      {note && <OverflowMenu items={menu} small label={t("notes.more")} />}
+    </div>
+  );
   return (
-    <Overlay>
-      <div className={`ne-backdrop ${closing ? "closing" : ""}`} onMouseDown={(e) => { if (e.target === e.currentTarget) void requestClose(); }}>
+    <>
+      <Sheet
+        size={window.innerWidth < 1024 ? "full" : wide ? "xl" : "lg"}
+        ariaLabel={title || t("notes.untitled")}
+        className={`note-sheet ne-dialog mode-${mode} ${color ? `tone-${color}` : ""}`}
+        onClose={() => void requestClose()}
+        head={head}
+      >
         <div
-          ref={dialog}
-          className={`ne-dialog mode-${mode} ${closing ? "closing" : ""} ${color ? `tone-${color}` : ""}`}
-          role="dialog"
-          aria-modal="true"
-          aria-label={title || t("notes.untitled")}
+          ref={shellRef}
+          className="ne-shell"
           tabIndex={-1}
           onKeyDown={(e) => {
-            if (!e.defaultPrevented) trapDialogTab(e);
             if (!editing && e.key.toLowerCase() === "e" && !e.metaKey && !e.ctrlKey && !e.altKey && (e.target as HTMLElement).tagName !== "INPUT") {
               e.preventDefault();
               pickMode(wide ? "split" : "write");
@@ -561,36 +608,6 @@ export function NoteEditor(props: NoteEditorProps) {
           onDragLeave={(e) => { if (e.currentTarget === e.target) setDropping(false); }}
           onDrop={onDrop}
         >
-          <header className="ne-head">
-            <button type="button" className="ne-swatch" onClick={(e) => setColorAnchor(e.currentTarget)} disabled={!note} aria-label={t("notes.color")} title={t("notes.color")}><i /></button>
-            <input
-              ref={titleField}
-              className="ne-title"
-              value={title}
-              placeholder={t("notes.untitled")}
-              aria-label={t("notes.title")}
-              maxLength={200}
-              onChange={(e) => changed({ title: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === "ArrowDown") {
-                  e.preventDefault();
-                  if (mode === "read") pickMode(wide ? "split" : "write");
-                  else field.current?.focus();
-                }
-              }}
-            />
-            <SaveState status={status} flash={flash} />
-            <div className="ne-modes" role="tablist" aria-label={t("notes.mode")}>
-              {(wide ? (["write", "split", "read"] as const) : (["write", "read"] as const)).map((m) => (
-                <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "on" : ""} onClick={() => pickMode(m)} title={`${t(`notes.mode.${m}`)} (${MOD}+Alt+P)`}>
-                  <Icon name={m === "write" ? "pen" : m === "split" ? "columns" : "eye"} size={14} />
-                  <span>{t(`notes.mode.${m}`)}</span>
-                </button>
-              ))}
-            </div>
-            {note && <OverflowMenu items={menu} small label={t("notes.more")} />}
-            <button type="button" className="iconbtn small" onClick={() => void requestClose()} aria-label={t("common.close")} title={t("common.close")}><Icon name="close" size={16} /></button>
-          </header>
           {editing && (
             <div className="ne-tools" role="toolbar" aria-label={t("notes.toolbar")}>
               {tools.map((tool, i) => tool === "-" ? <span key={`s${i}`} className="ne-sep" aria-hidden="true" /> : (
@@ -601,13 +618,15 @@ export function NoteEditor(props: NoteEditorProps) {
               <span className="ne-tools-hint">{t("notes.hint")}</span>
             </div>
           )}
-          {(remote || status === "gone") && !conflict && (
+          {(remote || status === "gone" || (conflict && deferred)) && (
             <div className="ne-banner" role="status">
-              <Icon name="alert" size={14} />
-              <span>{status === "gone" ? t("notes.gone") : t(remote?.updated_by === "agent" ? "notes.remote.agent" : "notes.remote.other")}</span>
-              {status === "gone"
-                ? <button type="button" className="btn small" onClick={() => noteId && void notesApi.restore(noteId).then((n) => { props.onSaved(n); setStatus("dirty"); void save(); }, (e) => toast(errorText(e)))}>{t("notes.restore")}</button>
-                : <button type="button" className="btn small" onClick={() => remote && setConflict(remote)}>{t("notes.remote.compare")}</button>}
+              <Icon name="alert" size={16} />
+              <span>{conflict ? t("notes.conflict.title") : status === "gone" ? t("notes.gone") : t(remote?.updated_by === "agent" ? "notes.remote.agent" : "notes.remote.other")}</span>
+              {conflict
+                ? <Button size="sm" onClick={() => { asked.current = conflict; void askConflict(conflict); }}>{t("notes.remote.compare")}</Button>
+                : status === "gone"
+                  ? <Button size="sm" onClick={() => noteId && void notesApi.restore(noteId).then((n) => { props.onSaved(n); setStatus("dirty"); void save(); }, (e) => toast(errorText(e)))}>{t("notes.restore")}</Button>
+                  : <Button size="sm" onClick={() => remote && setConflict(remote)}>{t("notes.remote.compare")}</Button>}
             </div>
           )}
           <div className="ne-body">
@@ -625,13 +644,10 @@ export function NoteEditor(props: NoteEditorProps) {
                   onKeyDown={onKeyDown}
                   onKeyUp={(e) => { if (e.key.startsWith("Arrow") && !popup) syncPopup(e.currentTarget); }}
                   onClick={(e) => syncPopup(e.currentTarget)}
-                  onBlur={() => { window.setTimeout(() => setPopup(null), 120); if (dirty()) void save(); }}
+                  onBlur={() => { if (dirty()) void save(); }}
                   onPaste={onPaste}
                   onScroll={onFieldScroll}
                 />
-                {popup && field.current && (
-                  <CaretMenu field={field.current} popup={popup} items={popupItems} onPick={choose} onHover={(index) => setPopup({ ...popup, index })} onClose={() => setPopup(null)} />
-                )}
               </div>
             )}
             {mode !== "write" && (
@@ -641,7 +657,7 @@ export function NoteEditor(props: NoteEditorProps) {
                   : <div className="ne-empty-read" onDoubleClick={() => pickMode("write")}>{t("notes.read.empty")}</div>}
               </div>
             )}
-            {dropping && <div className="ne-drop" aria-hidden="true"><Icon name="attach" size={22} /><span>{t("notes.drop")}</span></div>}
+            {dropping && <div className="ne-drop" aria-hidden="true"><Icon name="attach" size={24} /><span>{t("notes.drop")}</span></div>}
           </div>
           <footer className="ne-foot">
             <span className="ne-scope">{props.scopeLabel}</span>
@@ -654,10 +670,12 @@ export function NoteEditor(props: NoteEditorProps) {
             ))}
             {live && <span className="ne-edited">{t(live.updated_by === "agent" ? "notes.edited.agent" : "notes.edited.you", { when: relTime(live.updated_at) })}</span>}
           </footer>
-          {conflict && <ConflictPrompt mine={latest.current} theirs={conflict} onMine={() => void keepMine()} onTheirs={() => takeTheirs(conflict)} onBoth={() => void keepBoth()} />}
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
         </div>
-      </div>
+      </Sheet>
+      {popup && field.current && (
+        <NotePicker kind={popup.kind} field={field.current} from={popup.from} query={popup.query} groups={props.pickable} commands={slashCommands} onChoose={choose} onClose={() => setPopup(null)} />
+      )}
       {colorAnchor && note && (
         <Popover anchor={colorAnchor} onClose={() => setColorAnchor(null)} className="ne-colors" label={t("notes.color")}>
           {(["", ...COLORS] as const).map((c) => (
@@ -670,7 +688,7 @@ export function NoteEditor(props: NoteEditorProps) {
       )}
       {viewer && <MediaViewer items={viewer.items} start={viewer.index} onClose={() => setViewer(null)} />}
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}
-    </Overlay>
+    </>
   );
 }
 
@@ -706,25 +724,10 @@ function SaveState({ status, flash }: { status: Status; flash: "agent" | "operat
   return <span className="ne-state" aria-hidden="true" />;
 }
 
-// ── the menus at the caret ──────────────────────────────────────────────────────────────────
+// ── the blocks `/` offers ───────────────────────────────────────────────────────────────────
 
-type PopupItem = { kind: "file"; file: NoteFile; group: string } | { kind: "upload" } | { kind: "command"; id: string; icon: IconName; label: string; hint: string; run: () => void };
-
-function usePopupItems(popup: Popup | null, groups: PickGroup[], commands: PopupItem[]): PopupItem[] {
-  return useMemo(() => {
-    if (!popup) return [];
-    const q = popup.query.toLowerCase();
-    if (popup.kind === "file") {
-      const found: PopupItem[] = [];
-      for (const group of groups) for (const file of group.files) if (!q || file.name.toLowerCase().includes(q)) found.push({ kind: "file", file, group: group.label });
-      return [...found.slice(0, 40), { kind: "upload" }];
-    }
-    return commands.filter((item) => item.kind === "command" && (!q || item.id.includes(q) || item.label.toLowerCase().includes(q)));
-  }, [popup?.kind, popup?.query, groups, commands]); // eslint-disable-line react-hooks/exhaustive-deps
-}
-
-function slashCommandsFor(run: { prefix: (kind: LineKind) => void; block: (snippet: string, select?: [number, number]) => void; apply: (make: (text: string, s: number, e: number) => Edit | null) => boolean; upload: () => void; picker: () => void }) {
-  const cmd = (id: string, icon: IconName, go: () => void, hint = ""): PopupItem => ({ kind: "command", id, icon, label: t(`notes.slash.${id}`), hint, run: go });
+function slashCommandsFor(run: { prefix: (kind: LineKind) => void; block: (snippet: string, select?: [number, number]) => void; apply: (make: (text: string, s: number, e: number) => Edit | null) => boolean; upload: () => void; picker: () => void }): PickItem[] {
+  const cmd = (id: string, icon: IconName, go: () => void, hint = ""): PickItem => ({ kind: "command", id, icon, label: t(`notes.slash.${id}`), hint, run: go });
   return [
     cmd("h1", "heading", () => run.prefix("h1"), "#"),
     cmd("h2", "heading", () => run.prefix("h2"), "##"),
@@ -744,92 +747,24 @@ function slashCommandsFor(run: { prefix: (kind: LineKind) => void; block: (snipp
   ];
 }
 
-function CaretMenu({ field, popup, items, onPick, onHover, onClose }: { field: HTMLTextAreaElement; popup: Popup; items: PopupItem[]; onPick: (index: number) => void; onHover: (index: number) => void; onClose: () => void }) {
-  useLayer(onClose);
-  const box = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ top: number; left: number; up: boolean } | null>(null);
-  useLayoutEffect(() => {
-    const point = caretPoint(field, popup.from);
-    const host = field.parentElement as HTMLElement;
-    const width = Math.min(320, host.clientWidth - 16);
-    const left = Math.max(8, Math.min(field.offsetLeft + point.left, host.clientWidth - width - 8));
-    const below = field.offsetTop + point.top + point.height + 6;
-    const up = below + 260 > host.clientHeight && field.offsetTop + point.top > 200;
-    setPlace({ top: up ? field.offsetTop + point.top - 6 : below, left, up });
-  }, [field, popup.from, popup.query]);
-  useEffect(() => {
-    box.current?.querySelector(".on")?.scrollIntoView?.({ block: "nearest" });
-  }, [popup.index]);
-  if (!place) return null;
-  let lastGroup = "";
-  const rows: ReactNode[] = [];
-  items.forEach((item, i) => {
-    if (item.kind === "file" && item.group !== lastGroup) {
-      lastGroup = item.group;
-      rows.push(<div key={`g${item.group}`} className="ne-menu-group">{item.group}</div>);
-    }
-    rows.push(
-      <button key={item.kind === "file" ? item.file.id : item.kind === "command" ? item.id : "upload"} type="button" role="option" aria-selected={popup.index === i} className={`ne-menu-item ${popup.index === i ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => onHover(i)} onClick={() => onPick(i)}>
-        {item.kind === "file" ? <FileGlyph file={item.file} /> : <span className="ne-menu-ico"><Icon name={item.kind === "upload" ? "plus" : item.icon} size={15} /></span>}
-        <span className="ne-menu-label">{item.kind === "file" ? item.file.name : item.kind === "upload" ? t("notes.picker.upload") : item.label}</span>
-        {item.kind === "command" && item.hint && <kbd>{item.hint}</kbd>}
-      </button>,
-    );
-  });
-  return (
-    <div ref={box} className={`ne-menu ${place.up ? "up" : ""}`} role="listbox" aria-label={popup.kind === "file" ? t("notes.picker") : t("notes.slash")} style={{ top: place.top, left: place.left }}>
-      {items.length === (popup.kind === "file" ? 1 : 0) && <div className="ne-menu-empty">{popup.kind === "file" ? t("notes.picker.none") : t("notes.slash.none")}</div>}
-      {rows}
-    </div>
-  );
-}
+// ── the conflict question's body ────────────────────────────────────────────────────────────
 
-/** A file's small square: its picture for an image, its kind for anything else. */
-export function FileGlyph({ file, size = "sm" }: { file: NoteFile; size?: "sm" | "lg" }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isImage(file)) return;
-    let gone = false;
-    fileUrl(file.id).then((u) => !gone && setUrl(u), () => undefined);
-    return () => {
-      gone = true;
-    };
-  }, [file.id, file.mime]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (isImage(file)) return <span className={`note-glyph ${size} pic`}>{url && <img src={url} alt="" />}</span>;
-  const ext = (/\.([A-Za-z0-9]{1,4})$/.exec(file.name)?.[1] ?? file.mime.split("/")[1] ?? "").slice(0, 4).toUpperCase();
-  return <span className={`note-glyph ${size}`} data-kind={fileFamily(file)}>{ext}</span>;
-}
-
-// ── the conflict prompt ─────────────────────────────────────────────────────────────────────
-
-function ConflictPrompt({ mine, theirs, onMine, onTheirs, onBoth }: { mine: { title: string; body: string }; theirs: Note; onMine: () => void; onTheirs: () => void; onBoth: () => void }) {
-  const rows = useMemo(() => lineDiff(theirs.body, mine.body), [theirs.body, mine.body]);
+/** Both versions, line by line, under the sentence that says who saved the newer one. */
+function ConflictBody({ mine, theirs }: { mine: { title: string; body: string }; theirs: Note }) {
+  const rows = lineDiff(theirs.body, mine.body);
   const changedRows = rows.filter((row) => row.kind !== "same").length;
   return (
-    <div className="ne-conflict-wrap">
-      <div className="ne-conflict" role="alertdialog" aria-labelledby="ne-conflict-title">
-        <div className="ne-conflict-head">
-          <Icon name="alert" size={18} />
-          <div>
-            <h3 id="ne-conflict-title">{t("notes.conflict.title")}</h3>
-            <p>{t(theirs.updated_by === "agent" ? "notes.conflict.agent" : "notes.conflict.other", { when: relTime(theirs.updated_at) })}</p>
-          </div>
-        </div>
-        <div className="ne-diff" aria-label={t("notes.conflict.diff")}>
-          {mine.title !== theirs.title && (
-            <>
-              <div className="ne-diff-row theirs"><span>{t("notes.conflict.theirs")}</span>{theirs.title || t("notes.untitled")}</div>
-              <div className="ne-diff-row mine"><span>{t("notes.conflict.mine")}</span>{mine.title || t("notes.untitled")}</div>
-            </>
-          )}
-          {rows.map((row, i) => row.kind === "same" ? <div key={i} className="ne-diff-row same">{row.text || " "}</div> : <div key={i} className={`ne-diff-row ${row.kind}`}><span>{t(row.kind === "mine" ? "notes.conflict.mine" : "notes.conflict.theirs")}</span>{row.text || " "}</div>)}
-          {!changedRows && mine.title === theirs.title && <div className="ne-diff-row same">{t("notes.conflict.same")}</div>}
-        </div>
-        <div className="ne-conflict-actions">
-          <button type="button" className="btn" onClick={onTheirs}>{t("notes.conflict.take")}</button>
-          <button type="button" className="btn" onClick={onBoth}>{t("notes.conflict.both")}</button>
-          <button type="button" className="btn primary" onClick={onMine}>{t("notes.conflict.keep")}</button>
-        </div>
+    <div className="ne-conflict">
+      <p>{t(theirs.updated_by === "agent" ? "notes.conflict.agent" : "notes.conflict.other", { when: relTime(theirs.updated_at) })}</p>
+      <div className="ne-diff" aria-label={t("notes.conflict.diff")}>
+        {mine.title !== theirs.title && (
+          <>
+            <div className="ne-diff-row theirs"><span>{t("notes.conflict.theirs")}</span>{theirs.title || t("notes.untitled")}</div>
+            <div className="ne-diff-row mine"><span>{t("notes.conflict.mine")}</span>{mine.title || t("notes.untitled")}</div>
+          </>
+        )}
+        {rows.map((row, i) => row.kind === "same" ? <div key={i} className="ne-diff-row same">{row.text || " "}</div> : <div key={i} className={`ne-diff-row ${row.kind}`}><span>{t(row.kind === "mine" ? "notes.conflict.mine" : "notes.conflict.theirs")}</span>{row.text || " "}</div>)}
+        {!changedRows && mine.title === theirs.title && <div className="ne-diff-row same">{t("notes.conflict.same")}</div>}
       </div>
     </div>
   );

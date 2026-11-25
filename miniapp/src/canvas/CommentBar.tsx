@@ -12,6 +12,7 @@ import { navigate, pathFor } from "../router";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
 import { Sheet, useMedia } from "../ui/index";
+import { Button } from "../ui/primitives";
 import { nodeLabel, type Canvas, type CanvasDoc, type CanvasNode } from "./model";
 import { SELECTOR, type Picked } from "./frames";
 
@@ -150,7 +151,7 @@ export function CommentBar({ canvas, doc, chips, onRemove, onHighlight, onOwner,
           placeholder={phone && ownerTitle ? t("canvas.bar.placeholder.to", { chat: ownerTitle }) : t("canvas.bar.placeholder")}
           aria-label={t("canvas.bar.placeholder")}
         />
-        <button type="submit" className="btn primary cv-comment-send" disabled={empty || busy} aria-label={t("canvas.bar.send")} title={t("canvas.bar.send")}><Icon name="send" size={16} /></button>
+        <Button type="submit" variant="primary" icon="send" className="cv-comment-send" aria-label={t("canvas.bar.send")} disabled={empty || busy} />
       </form>
       {choosing && (
         <Sheet title={t("canvas.bar.choose")} onClose={() => setChoosing(false)} size="sm">

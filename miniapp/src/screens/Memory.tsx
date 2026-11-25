@@ -1,41 +1,25 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestion, MemorySuggestions } from "../api";
-import { MemoryEntryView, MemoryHome } from "../memory/MemoryEntries";
+import { useEffect, useMemo, useState } from "react";
+import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestions } from "../api";
+import { Page } from "../shell";
+import { MemoryEntries } from "../memory/MemoryEntries";
+import { MemoryComposer, MemoryHead, MemoryPane, useSplit, type Mode } from "../memory/frame";
+import { byTopic, categoryWord, parseTopics } from "../memory/model";
 import { learnedWhy } from "../memory/review";
+import { downloadExport, ImportSheet } from "../memory/transfer";
+import { undoToast, type Undoable } from "../memory/undo";
 import { navigate, pathFor, useRoute } from "../router";
-import { ChipRow, Segmented, Skeleton } from "../ui/index";
-import { Sheet, deleteWithUndo } from "../ui/dialogs";
+import { Segmented, Skeleton } from "../ui/index";
+import { Button, Field, IconButton, Select, Sheet, confirmDialog, deleteWithUndo, toast as showToast, type MenuItem } from "../ui/primitives";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
-import { PageHeader, screenTitle } from "../ui/index";
 import { hold, invalidate, prime, release, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
+import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 
 type View = "list" | "topics" | "categories";
 const VIEWS: View[] = ["list", "topics", "categories"];
 const VIEW_KEY = "daedalus.memory.view";
-
-/** The categories the app has a word for; anything else (a record the agent filed oddly) shows as written. */
-export const categoryWord = (category: string) => ((MEMORY_CATEGORIES as readonly string[]).includes(category) ? t(`memory.cat.${category}`) : category);
-
-/** Topics as the host keeps them, from what was typed: lower case, hyphens for spaces, no `#`. */
-export function parseTopics(text: string): string[] {
-  const out: string[] = [];
-  for (const part of text.split(/[,;\n]/)) {
-    const topic = part.trim().toLowerCase().replace(/^#+/, "").replace(/\s+/g, "-");
-    if (topic && !out.includes(topic)) out.push(topic);
-  }
-  return out.slice(0, 5);
-}
-
-/** Records grouped under each topic they carry (a record with two topics is under both), the
- *  biggest group first and the records without a topic last. */
-export function byTopic(records: MemoryRecord[]): [string, MemoryRecord[]][] {
-  const groups = new Map<string, MemoryRecord[]>();
-  for (const r of records) for (const topic of r.topics.length ? r.topics : [""]) groups.set(topic, [...(groups.get(topic) ?? []), r]);
-  return [...groups.entries()].sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : b[1].length - a[1].length || a[0].localeCompare(b[0])));
-}
+const SETTINGS_PATH = "/app/settings/memory";
 
 function storedView(): View {
   try {
@@ -46,25 +30,40 @@ function storedView(): View {
   }
 }
 
-type Mode = "entries" | "facts";
-
-/** The Memory screen: the entries (claude.ai's list) or every fact (the record grid), and one entry
- *  at /app/memory/<id>. ``?view=facts`` opens the grid, as does the tidying's notification link
- *  (``?suggestions=1``), whose suggestions live there; ``?record=<id>`` (the chat's "Saved to memory"
- *  chip) opens the entry that record is filed in. */
+/** The Memory screen: the entries (claude.ai's list) or every fact (the record list), each with the
+ *  thing it opens beside it, and one entry at /app/memory/<id>. ``?view=facts`` opens the facts, as
+ *  does the tidying's notification link (``?suggestions=1``), whose suggestions live there;
+ *  ``?record=<id>`` (the chat's "Saved to memory" chip) opens the entry that record is filed in. */
 export function MemoryScreen({ toast }: { toast: (t: string) => void }) {
   const route = useRoute();
   const [history, setHistory] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState("");
   const record = route.query.get("record");
   const mode: Mode = route.query.get("view") === "facts" || route.query.get("suggestions") === "1" ? "facts" : "entries";
-  const switcher = <Segmented label={t("memory.mode")} value={mode} onChange={(next: Mode) => navigate(pathFor("memory", null, next === "facts" ? { view: "facts" } : {}), { replace: true })} options={[{ id: "entries", label: t("memory.mode.entries") }, { id: "facts", label: t("memory.mode.facts") }]} />;
   if (record) return <RecordRedirect id={record} />;
+  const menu: MenuItem[] = [
+    { label: t("memory.import"), icon: "import", onSelect: () => setImporting(true) },
+    { label: t("memory.export"), icon: "download", onSelect: () => void exportMemory() },
+    "-",
+    { label: t("memory.settings"), icon: "settings", onSelect: () => navigate(SETTINGS_PATH) },
+  ];
+  const shared = { query, onQuery: setQuery, onHistory: () => setHistory(true), menu };
   return (
     <>
-      {route.detail ? <MemoryEntryView entryId={route.detail} onHistory={() => setHistory(true)} /> : mode === "facts" ? <MemoryFacts toast={toast} switcher={switcher} /> : <MemoryHome switcher={switcher} onHistory={() => setHistory(true)} />}
-      {history && mode === "entries" && <HistorySheet onClose={() => setHistory(false)} onChanged={() => invalidate("/api/memory")} toast={toast} />}
+      {mode === "facts" ? <MemoryFacts {...shared} toast={toast} /> : <MemoryEntries {...shared} onImport={() => setImporting(true)} />}
+      {history && <HistorySheet onClose={() => setHistory(false)} onChanged={() => invalidate("/api/memory")} toast={toast} />}
+      {importing && <ImportSheet onClose={() => setImporting(false)} onDone={() => { setImporting(false); invalidate("/api/memory"); }} />}
     </>
   );
+}
+
+async function exportMemory(): Promise<void> {
+  try {
+    await downloadExport();
+  } catch (e) {
+    showToast(errorText(e));
+  }
 }
 
 /** The entry a record is filed in, looked up and opened in place of this address. */
@@ -78,25 +77,25 @@ function RecordRedirect({ id }: { id: string }) {
   return error ? <div className="empty">{error}</div> : <Skeleton rows={4} />;
 }
 
+type Opened = { kind: "fact"; id: string } | { kind: "new" };
+type FactsProps = { query: string; onQuery: (query: string) => void; onHistory: () => void; menu: MenuItem[]; toast: (t: string) => void };
+
 /** What the agent remembered — by category and topic — to read, correct, merge, add to and prune. */
-function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher: ReactNode }) {
+function MemoryFacts({ query, onQuery, onHistory, menu, toast }: FactsProps) {
   const key = "/api/memory";
+  const split = useSplit();
   const { data, error, loading, refresh } = useQuery<MemoryListing>(key, { staleMs: 10000 });
   const [bucket, setBucket] = useState<string>("all");
   const [category, setCategory] = useState<string>("all");
   const [topic, setTopic] = useState<string | null>(null);
   const [view, setViewState] = useState<View>(storedView);
-  const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [editing, setEditing] = useState<MemoryRecord | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [opened, setOpened] = useState<Opened | null>(null);
   const [merging, setMerging] = useState<MemoryRecord[] | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [tidying, setTidying] = useState(() => new URLSearchParams(window.location.search).get("suggestions") === "1");
-  const [history, setHistory] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
   function setView(next: View) {
     setViewState(next);
@@ -109,8 +108,8 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
 
   const q = query.trim().toLowerCase();
   const all = data?.records ?? [];
-  // What the scope, the search and the topic leave, before the category: the chips count this, so
-  // each promises what a tap on it shows.
+  // What the scope, the search and the topic leave, before the category: the category list counts
+  // this, so each choice promises what it shows.
   const pool = useMemo(
     () => all.filter((r) => (bucket === "all" || `${r.scope}:${r.scope_key}` === bucket) && (!topic || r.topics.includes(topic)) && (!q || r.text.toLowerCase().includes(q) || r.topics.some((x) => x.includes(q)))),
     [all, bucket, q, topic],
@@ -128,6 +127,9 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
     return [["", records]];
   }, [view, records, categories]);
   const bucketLabel = (scope: string, k: string) => (scope === "global" ? t("memory.scope.global") : scope === "project" ? data?.projects[k] ?? t("memory.scope.deleted", { id: k }) : `${scope}: ${k}`);
+  const projects = Object.entries(data?.projects ?? {});
+  const chosen = all.filter((r) => selected.has(r.id));
+  const current = opened?.kind === "fact" ? all.find((r) => r.id === opened.id) : undefined;
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -144,7 +146,7 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
     hold(key);
     prime(key, { ...data, records: data.records.filter((r) => !ids.includes(r.id)) });
     setSelected(new Set());
-    setEditing(null);
+    setOpened(null);
     deleteWithUndo(
       plural("memory.forgotten", ids.length),
       async () => {
@@ -165,38 +167,56 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
 
   async function forgetMany() {
     const ids = [...selected];
-    if (!(await confirmAsync(t("memory.forget.many.title", { n: ids.length }), { body: t("memory.forget.body"), action: t("memory.forget") }))) return;
+    if (!(await confirmDialog({ title: t("memory.forget.many.title", { n: ids.length }), body: t("memory.forget.body"), action: t("memory.forget"), danger: true }))) return;
     forget(ids);
     setSelecting(false);
   }
 
-  function card(r: MemoryRecord, group: string) {
-    const long = r.text.length > 320 || r.text.split("\n").length > 5;
-    const open = expanded.has(r.id);
+  async function quickAdd(text: string): Promise<boolean> {
+    setBusy(true);
+    try {
+      const res = await api.post<{ decision: string; entry: { title: string } | null } & Undoable>("/api/memory/quick", { text });
+      const where = res.entry?.title ?? "";
+      const said = res.decision === "created" ? t("memory.quick.saved", { entry: where }) : res.decision === "merged" ? t("memory.quick.merged", { entry: where }) : t("memory.quick.held", { entry: where });
+      undoToast(said, res.history_id, () => { invalidate("/api/memory"); refresh(); });
+      invalidate("/api/memory");
+      refresh();
+      return true;
+    } catch (e) {
+      toast(errorText(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const factsMenu: MenuItem[] = [
+    { label: t(selecting ? "memory.select.done" : "memory.select"), icon: "check", onSelect: () => { setSelecting((v) => !v); setSelected(new Set()); } },
+    "-",
+    ...menu,
+  ];
+
+  function row(r: MemoryRecord, group: string) {
+    const on = opened?.kind === "fact" && opened.id === r.id;
+    const where = r.scope === "global" ? null : r.scope === "project" ? data?.projects[r.scope_key] ?? t("memory.scope.deleted.short") : `${r.scope}: ${r.scope_key}`;
+    const open = () => (selecting ? toggle(r.id) : setOpened({ kind: "fact", id: r.id }));
     return (
-      <div key={`${group}:${r.id}`} data-memory={r.id} className={`erow memory-card ${selecting ? "selecting" : ""} ${selected.has(r.id) ? "selected" : ""}`} role={selecting ? "checkbox" : "button"} aria-checked={selecting ? selected.has(r.id) : undefined} tabIndex={0} onClick={() => (selecting ? toggle(r.id) : setEditing(r))} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selecting ? toggle(r.id) : setEditing(r); } }}>
-        {selecting && <input type="checkbox" className="memory-check" checked={selected.has(r.id)} onChange={() => toggle(r.id)} onClick={(e) => e.stopPropagation()} aria-label={t("memory.select.one")} />}
-        <div className="erow-main">
-          <div className="erow-meta">
-            <span className={`chip cat-${r.category}`}>{categoryWord(r.category)}</span>
-            {r.scope === "global" ? <span>{t("memory.global")}</span> : r.scope === "project" ? <span>{data?.projects[r.scope_key] ?? t("memory.scope.deleted.short")}</span> : <span>{r.scope}: {r.scope_key}</span>}
-            {r.created_at && <span className="sep">·</span>}
-            {r.created_at && <span className="faint" title={absTime(r.created_at)}>{relTime(r.created_at)}</span>}
-          </div>
-          <div className={`memory-text ${long && !open ? "clamp-4" : ""}`}>{r.text}</div>
-          {long && (
-            <button className="linkbtn more" onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); }}>
-              {t(open ? "common.less" : "common.more")}
-            </button>
-          )}
-          {r.topics.length > 0 && (
-            <div className="memory-topics">
-              {r.topics.map((x) => (
-                <button key={x} className={`topic-tag ${topic === x ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); setTopic(topic === x ? null : x); }} aria-pressed={topic === x}>#{x}</button>
-              ))}
-            </div>
-          )}
-        </div>
+      <div key={`${group}:${r.id}`} data-memory={r.id} className={`memory-card ${selecting ? "selecting" : ""} ${selected.has(r.id) ? "selected" : ""} ${on ? "on" : ""}`} role={selecting ? "checkbox" : "button"} aria-checked={selecting ? selected.has(r.id) : undefined} aria-current={on || undefined} tabIndex={0} onClick={open}
+        onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}>
+        {selecting
+          ? <input type="checkbox" className="memory-check" checked={selected.has(r.id)} onChange={() => toggle(r.id)} onClick={(e) => e.stopPropagation()} aria-label={t("memory.select.one")} />
+          : <Icon name="brain" size={16} />}
+        <span className="memory-card-main">
+          <span className="memory-card-text">{r.text}</span>
+          <span className="memory-card-meta">
+            <span>{categoryWord(r.category)}</span>
+            {r.topics.slice(0, 2).map((x) => (
+              <button key={x} type="button" className={`topic-tag ${topic === x ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); setTopic(topic === x ? null : x); }} aria-pressed={topic === x}>{x}</button>
+            ))}
+            {where && <span>{where}</span>}
+          </span>
+        </span>
+        {r.created_at && <span className="memory-card-when" title={absTime(r.created_at)}>{relTime(r.created_at)}</span>}
       </div>
     );
   }
@@ -206,117 +226,110 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
     const label = view === "topics" ? (name ? `#${name}` : t("memory.topic.none")) : categoryWord(name);
     return (
       <div className="memory-group-head">
-        {view === "topics" && name ? <button className="linkbtn" onClick={() => setTopic(topic === name ? null : name)}>{label}</button> : <span className={view === "categories" ? `chip cat-${name}` : ""}>{label}</span>}
+        {view === "topics" && name ? <button className="linkbtn" onClick={() => setTopic(topic === name ? null : name)}>{label}</button> : <span>{label}</span>}
         <span className="faint">{size}</span>
         <span className="grow" />
-        {view === "topics" && name && <button className="iconbtn small" onClick={() => setRenaming(name)} title={t("memory.topic.rename")} aria-label={t("memory.topic.rename")}><Icon name="pen" size={14} /></button>}
+        {view === "topics" && name && <IconButton size={28} icon="pen" label={t("memory.topic.rename")} onClick={() => setRenaming(name)} />}
       </div>
     );
   }
 
-  const projects = Object.entries(data?.projects ?? {});
-  const chosen = all.filter((r) => selected.has(r.id));
+  const editor = opened && (opened.kind === "new" || current) && (
+    <FactEditor key={opened.kind === "new" ? "new" : `${current!.id}:${current!.version}`} r={current} projects={projects} as={split ? "pane" : "sheet"}
+      onClose={() => setOpened(null)} onSaved={() => { if (opened.kind === "new") setOpened(null); refresh(); }} onForget={current ? () => forget([current.id]) : undefined} toast={toast} />
+  );
+  const allSelected = records.length > 0 && records.every((r) => selected.has(r.id));
   return (
     <>
-      <PageHeader
-        title={screenTitle("memory")}
-        subtitle={data ? (records.length === all.length ? plural("memory.count", all.length) : t("memory.count.of", { shown: records.length, total: all.length })) : undefined}
-        actions={
-          <>
-            <button className={`iconbtn ${searching ? "on" : ""}`} onClick={() => { setSearching((v) => !v); if (searching) setQuery(""); }} title={t("common.search")} aria-label={t("common.search")} aria-pressed={searching}><Icon name="search" /></button>
-            <button className="iconbtn" data-action="history" onClick={() => setHistory(true)} title={t("memory.history")} aria-label={t("memory.history")}><Icon name="clock" /></button>
-            <button className={`iconbtn ${selecting ? "on" : ""}`} data-action="select" onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }} title={t(selecting ? "memory.select.done" : "memory.select")} aria-label={t(selecting ? "memory.select.done" : "memory.select")} aria-pressed={selecting}><Icon name="check" /></button>
-            <button className="iconbtn primary" onClick={() => setAdding(true)} title={t("memory.add")} aria-label={t("memory.add")}><Icon name="plus" /></button>
-          </>
-        }
-        filters={
-        <>
-        {searching && <input className="field search" autoFocus placeholder={t("memory.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.search.label")} />}
-        <div className="memory-modebar">{switcher}</div>
-        <div className="memory-view">
-          <Segmented label={t("memory.view")} value={view} onChange={setView} options={VIEWS.map((v) => ({ id: v, label: t(`memory.view.${v}`) }))} />
-        </div>
-        <ChipRow label={t("memory.category")}>
-          <button className="chip select" aria-pressed={category === "all"} onClick={() => setCategory("all")}>{t("common.all")} · {pool.length}</button>
-          {categories.map((c) => (
-            <button key={c} className="chip select" data-category={c} aria-pressed={category === c} onClick={() => setCategory(c)}>{categoryWord(c)} · {counts.get(c) ?? 0}</button>
-          ))}
-        </ChipRow>
-        {topic && (
-          <div className="memory-filter">
-            <button className="chip select" aria-pressed onClick={() => setTopic(null)} aria-label={t("memory.topic.clear")}>#{topic} <Icon name="close" size={12} /></button>
+      <MemoryHead mode="facts" subtitle={data ? (records.length === all.length ? plural("memory.count", all.length) : t("memory.count.of", { shown: records.length, total: all.length })) : undefined}
+        query={query} onQuery={onQuery} onHistory={onHistory} menu={factsMenu} onAdd={() => setOpened({ kind: "new" })} />
+      <div className="memory-split" data-view="facts">
+        <section className="memory-list">
+          <div className="memory-scroll">
+            <Page width="list" className="memory memory-facts">
+              {all.length > 0 && (
+                <div className="memory-bar">
+                  <Segmented label={t("memory.view")} size="sm" className="memory-view" value={view} onChange={setView} options={VIEWS.map((v) => ({ id: v, label: t(`memory.view.${v}`) }))} />
+                  <span className="grow" />
+                  {topic && <button type="button" className="chip select memory-filter" aria-pressed onClick={() => setTopic(null)} aria-label={t("memory.topic.clear")}>#{topic} <Icon name="close" size={12} /></button>}
+                  <Select size="sm" className="memory-category" label={t("memory.category")} value={category}
+                    options={[{ id: "all", label: `${t("common.all")} · ${pool.length}` }, ...categories.map((c) => ({ id: c, label: `${categoryWord(c)} · ${counts.get(c) ?? 0}` }))]} onChange={setCategory} />
+                  {(data?.buckets.length ?? 0) > 1 && (
+                    <Select size="sm" className="memory-scope" label={t("memory.scope")} value={bucket}
+                      options={[{ id: "all", label: t("memory.scope.every") }, ...(data?.buckets ?? []).map((b) => ({ id: `${b.scope}:${b.scope_key}`, label: `${bucketLabel(b.scope, b.scope_key)} · ${b.count}` }))]} onChange={setBucket} />
+                  )}
+                </div>
+              )}
+              {loading && !data && !error && <Skeleton rows={5} />}
+              {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+              {(data?.suggestions ?? 0) > 0 && (
+                <div className="memory-notes">
+                  <button className="memory-suggest-banner" onClick={() => setTidying(true)}>
+                    <Icon name="bulb" size={16} />
+                    <span className="memory-banner-text">{plural("memory.suggest.banner", data!.suggestions)}</span>
+                    <span className="memory-banner-act">{t("memory.review.open")}<Icon name="forward" size={14} /></span>
+                  </button>
+                </div>
+              )}
+              {data && records.length === 0 && (
+                <div className="empty memory-empty">
+                  <Icon name="brain" size={20} />
+                  <b>{t(all.length === 0 ? "memory.empty" : "memory.nomatch")}</b>
+                  {all.length === 0 && <div>{t("memory.empty.sub")}</div>}
+                </div>
+              )}
+              {groups.map(([name, rs]) => (
+                <section key={name || "-"} className={`memory-group ${view}`} data-group={view === "list" ? undefined : name}>
+                  {groupHead(name, rs.length)}
+                  <div className="memory-grid">{rs.map((r) => row(r, name))}</div>
+                </section>
+              ))}
+            </Page>
           </div>
-        )}
-        {(data?.buckets.length ?? 0) > 1 && (
-          <select className="field scope" value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label={t("memory.scope")}>
-            <option value="all">{t("memory.scope.every")}</option>
-            {(data?.buckets ?? []).map((b) => (
-              <option key={`${b.scope}:${b.scope_key}`} value={`${b.scope}:${b.scope_key}`}>{bucketLabel(b.scope, b.scope_key)} · {b.count}</option>
-            ))}
-          </select>
-        )}
-        </>
-        }
-      />
-      <div className="screen narrow memory">
-        {loading && !error && <Skeleton rows={5} />}
-        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {(data?.suggestions ?? 0) > 0 && (
-          <button className="memory-suggest-banner" onClick={() => setTidying(true)}>
-            <Icon name="bulb" size={16} /> <span>{plural("memory.suggest.banner", data!.suggestions)}</span>
-          </button>
-        )}
-        {data && records.length === 0 && (
-          <div className="empty">
-            <b>{t(all.length === 0 ? "memory.empty" : "memory.nomatch")}</b>
-            {all.length === 0 && <div>{t("memory.empty.sub")}</div>}
-          </div>
-        )}
-        {groups.map(([name, rs]) => (
-          <section key={name || "-"} className={`memory-group ${view}`} data-group={view === "list" ? undefined : name}>
-            {groupHead(name, rs.length)}
-            <div className="memory-grid">{rs.map((r) => card(r, name))}</div>
-          </section>
-        ))}
+          {selecting ? (
+            <div className="memory-bulkbar">
+              <Button variant="quiet" size="sm" onClick={() => setSelected(new Set(allSelected ? [] : records.map((r) => r.id)))}>{t(allSelected ? "common.none" : "memory.allshown")}</Button>
+              <span className="sub">{t("memory.selected", { n: selected.size })}</span>
+              <span className="grow" />
+              <Button size="sm" data-action="merge" disabled={selected.size < 2} onClick={() => setMerging(chosen)}>{t("memory.merge")}</Button>
+              <Button variant="danger" size="sm" icon="trash" disabled={selected.size === 0} onClick={forgetMany}>{t("memory.forget")} {selected.size || ""}</Button>
+            </div>
+          ) : (
+            <MemoryComposer placeholder={t("memory.quick.placeholder")} label={t("memory.quick.label")} busy={busy} onSend={quickAdd} />
+          )}
+        </section>
+        {split && editor}
       </div>
-      {selecting && (
-        <div className="bulkbar">
-          <button className="btn ghost small" onClick={() => setSelected(new Set(records.every((r) => selected.has(r.id)) ? [] : records.map((r) => r.id)))}>
-            {t(records.every((r) => selected.has(r.id)) ? "common.none" : "memory.allshown")}
-          </button>
-          <span className="sub">{t("memory.selected", { n: selected.size })}</span>
-          <span className="grow" />
-          <button className="btn small" data-action="merge" disabled={selected.size < 2} onClick={() => setMerging(chosen)}>{t("memory.merge")}</button>
-          <button className="btn small danger" disabled={selected.size === 0} onClick={forgetMany}><Icon name="trash" size={14} /> {t("memory.forget")} {selected.size || ""}</button>
-        </div>
-      )}
-      {editing && <MemorySheet r={editing} projects={projects} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} onForget={() => forget([editing.id])} toast={toast} />}
-      {adding && <MemorySheet projects={projects} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} toast={toast} />}
+      {!split && editor}
       {merging && <MergeSheet records={merging} onClose={() => setMerging(null)} onDone={() => { setMerging(null); setSelecting(false); setSelected(new Set()); refresh(); }} toast={toast} />}
       {renaming && <RenameSheet topic={renaming} onClose={() => setRenaming(null)} onDone={(to) => { setRenaming(null); if (topic === renaming) setTopic(to || null); refresh(); }} toast={toast} />}
       {tidying && <SuggestionsSheet projects={data?.projects ?? {}} onClose={() => setTidying(false)} onChanged={refresh} toast={toast} />}
-      {history && <HistorySheet onClose={() => setHistory(false)} onChanged={refresh} toast={toast} />}
     </>
   );
 }
 
-function MemorySheet({ r, projects, onClose, onSaved, onForget, toast }: { r?: MemoryRecord; projects: [string, string][]; onClose: () => void; onSaved: () => void; onForget?: () => void; toast: (t: string) => void }) {
+/** A fact to read and correct, or a new one to write: its text, category, scope and topics. It is the
+ *  pane beside the list, or a sheet when the window has no room for the pane. */
+function FactEditor({ r, projects, as, onClose, onSaved, onForget, toast }: { r?: MemoryRecord; projects: [string, string][]; as: "pane" | "sheet"; onClose: () => void; onSaved: () => void; onForget?: () => void; toast: (t: string) => void }) {
   const [text, setText] = useState(r?.text ?? "");
   // A new note may leave its category and topics to the host, which infers them as Remember does.
-  const [category, setCategory] = useState(r?.category ?? "");
+  const [category, setCategory] = useState(r?.category ?? "auto");
   const [topics, setTopics] = useState((r?.topics ?? []).join(", "));
   const [scope, setScope] = useState(r ? (r.scope === "global" ? "global" : `project:${r.scope_key}`) : "global");
   const [busy, setBusy] = useState(false);
+  const chosen = category === "auto" ? "" : category;
+  const unchanged = !!r && text.trim() === r.text && chosen === r.category && parseTopics(topics).join(",") === r.topics.join(",");
   async function save() {
     setBusy(true);
     try {
       if (r) {
-        await api.patch(`/api/memory/${encodeURIComponent(r.id)}`, { text: text.trim(), category, topics: parseTopics(topics) });
+        await api.patch(`/api/memory/${encodeURIComponent(r.id)}`, { text: text.trim(), category: chosen, topics: parseTopics(topics) });
+        toast(t("memory.updated"));
       } else {
         const typed = parseTopics(topics);
-        const res = await api.post<{ decision: string; record: MemoryRecord }>("/api/memory", { scope: scope === "global" ? "global" : "project", scope_key: scope === "global" ? "" : scope.slice("project:".length), category, topics: typed.length ? typed : null, text: text.trim() });
+        const res = await api.post<{ decision: string; record: MemoryRecord }>("/api/memory", { scope: scope === "global" ? "global" : "project", scope_key: scope === "global" ? "" : scope.slice("project:".length), category: chosen, topics: typed.length ? typed : null, text: text.trim() });
         // Not stored as written: the operator's words went into what was already there.
-      if (res.decision.toLowerCase() !== "created") toast(t("memory.similar", { decision: res.decision.toLowerCase() }));
+        if (res.decision.toLowerCase() !== "created") toast(t("memory.similar", { decision: res.decision.toLowerCase() }));
       }
       onSaved();
     } catch (e) {
@@ -325,42 +338,42 @@ function MemorySheet({ r, projects, onClose, onSaved, onForget, toast }: { r?: M
       setBusy(false);
     }
   }
-  const options = [...new Set([...(r ? [] : [""]), ...MEMORY_CATEGORIES, ...(category ? [category] : [])])];
-  return (
-    <Sheet title={t(r ? "memory.sheet.edit" : "memory.sheet.add")} onClose={onClose}>
-      <label className="field">{t("memory.text")}</label>
-      <textarea className="field" rows={6} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={t("memory.text.placeholder")} />
-      <div className="grid2">
-        <div>
-          <label className="field" htmlFor="memory-category">{t("memory.category")}</label>
-          <select id="memory-category" className="field" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {options.map((c) => <option key={c || "auto"} value={c}>{c ? categoryWord(c) : t("memory.category.auto")}</option>)}
-          </select>
+  const options = [...(r ? [] : ["auto"]), ...MEMORY_CATEGORIES, ...(r && !(MEMORY_CATEGORIES as readonly string[]).includes(r.category) ? [r.category] : [])];
+  const body = (
+    <div className="memory-fact-form" data-view="fact">
+      <Field multiline rows={6} autoFocus={!r} label={t("memory.text")} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("memory.text.placeholder")} />
+      <div className="memory-fact-pair">
+        <div className="field-box">
+          <label className="field-label" htmlFor="memory-category">{t("memory.category")}</label>
+          <Select id="memory-category" size="md" label={t("memory.category")} value={category} onChange={setCategory} options={options.map((c) => ({ id: c, label: c === "auto" ? t("memory.category.auto") : categoryWord(c) }))} />
         </div>
-        <div>
-          <label className="field">{t("memory.scope")}</label>
-          <select className="field" value={scope} disabled={!!r} title={r ? t("memory.scope.fixed") : undefined} onChange={(e) => setScope(e.target.value)}>
-            <option value="global">{t("memory.scope.globaloption")}</option>
-            {projects.map(([id, name]) => (
-              <option key={id} value={`project:${id}`}>{name}</option>
-            ))}
-          </select>
+        <div className="field-box">
+          <label className="field-label" htmlFor="memory-scope">{t("memory.scope")}</label>
+          <Select id="memory-scope" size="md" label={t("memory.scope")} value={scope} disabled={!!r} onChange={setScope} options={[{ id: "global", label: t("memory.scope.globaloption") }, ...projects.map(([id, name]) => ({ id: `project:${id}`, label: name }))]} />
         </div>
       </div>
-      <label className="field" htmlFor="memory-topics">{t("memory.topics")}</label>
-      <input id="memory-topics" className="field" value={topics} onChange={(e) => setTopics(e.target.value)} placeholder={t("memory.topics.placeholder")} />
+      {r && <div className="sub memory-fact-fixed">{t("memory.scope.fixed")}</div>}
+      <Field label={t("memory.topics")} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder={t("memory.topics.placeholder")} />
       {r && (
-        <div className="sub" style={{ marginTop: 8 }}>
+        <div className="sub memory-fact-history">
           {r.created_at ? t("memory.created", { when: absTime(r.created_at) }) : ""}{r.version > 1 ? t("memory.version", { n: r.version }) : ""}{r.last_accessed_at ? t("memory.recalled", { t: relTime(r.last_accessed_at) }) : ""}
         </div>
       )}
-      <div className="sheet-foot">
-        {r && onForget && <button className="btn danger" onClick={onForget}><Icon name="trash" size={14} /> {t("memory.forget")}</button>}
-        <span className="grow" />
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !text.trim()} onClick={save}>{t(r ? "common.save" : "memory.sheet.add")}</button>
-      </div>
-    </Sheet>
+    </div>
+  );
+  const actions = (
+    <>
+      {r && onForget && <Button variant="danger" icon="trash" onClick={onForget}>{t("memory.forget")}</Button>}
+      <span className="grow" />
+      <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+      <Button variant="primary" disabled={busy || !text.trim() || unchanged} onClick={() => void save()}>{t(r ? "common.save" : "memory.sheet.add")}</Button>
+    </>
+  );
+  if (as === "sheet") return <Sheet title={t(r ? "memory.sheet.edit" : "memory.sheet.add")} onClose={onClose} footer={actions}>{body}</Sheet>;
+  return (
+    <MemoryPane kind={t(r ? "memory.pane.fact" : "memory.sheet.add")} meta={r?.updated_at ? relTime(r.updated_at) : undefined} onClose={onClose} label={t(r ? "memory.sheet.edit" : "memory.sheet.add")} foot={<div className="memory-pane-foot">{actions}</div>}>
+      {body}
+    </MemoryPane>
   );
 }
 
@@ -385,26 +398,18 @@ function MergeSheet({ records, onClose, onDone, toast }: { records: MemoryRecord
     }
   }
   return (
-    <Sheet title={t("memory.merge.title", { n: records.length })} onClose={onClose} className="memory-merge">
+    <Sheet title={t("memory.merge.title", { n: records.length })} onClose={onClose} className="memory-merge"
+      footer={<><span className="grow" /><Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" data-action="merge-confirm" disabled={busy || !text.trim()} onClick={merge}>{t("memory.merge")}</Button></>}>
       <div className="sub">{t("memory.merge.sub")}</div>
-      <label className="field">{t("memory.text")}</label>
-      <textarea className="field" rows={7} autoFocus value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="grid2">
-        <div>
-          <label className="field" htmlFor="merge-category">{t("memory.category")}</label>
-          <select id="merge-category" className="field" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {MEMORY_CATEGORIES.map((c) => <option key={c} value={c}>{categoryWord(c)}</option>)}
-          </select>
+      <div className="memory-fact-form">
+        <Field multiline rows={7} autoFocus label={t("memory.text")} value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="memory-fact-pair">
+          <div className="field-box">
+            <label className="field-label" htmlFor="merge-category">{t("memory.category")}</label>
+            <Select id="merge-category" size="md" label={t("memory.category")} value={category} onChange={setCategory} options={MEMORY_CATEGORIES.map((c) => ({ id: c, label: categoryWord(c) }))} />
+          </div>
+          <Field id="merge-topics" label={t("memory.topics")} value={topics} onChange={(e) => setTopics(e.target.value)} />
         </div>
-        <div>
-          <label className="field" htmlFor="merge-topics">{t("memory.topics")}</label>
-          <input id="merge-topics" className="field" value={topics} onChange={(e) => setTopics(e.target.value)} />
-        </div>
-      </div>
-      <div className="sheet-foot">
-        <span className="grow" />
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" data-action="merge-confirm" disabled={busy || !text.trim()} onClick={merge}>{t("memory.merge")}</button>
       </div>
     </Sheet>
   );
@@ -425,16 +430,10 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
     }
   }
   return (
-    <Sheet title={t("memory.topic.rename.title", { topic })} onClose={onClose} size="sm">
+    <Sheet title={t("memory.topic.rename.title", { topic })} onClose={onClose} size="sm"
+      footer={<><Button variant="danger" disabled={busy} onClick={() => void rename("")}>{t("memory.topic.remove")}</Button><span className="grow" /><Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" disabled={busy || !parseTopics(to).length || parseTopics(to)[0] === topic} onClick={() => void rename(to)}>{t("common.save")}</Button></>}>
       <div className="sub">{t("memory.topic.rename.sub")}</div>
-      <label className="field" htmlFor="topic-rename">{t("memory.topic.rename.to")}</label>
-      <input id="topic-rename" className="field" autoFocus value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && parseTopics(to).length) void rename(to); }} />
-      <div className="sheet-foot">
-        <button className="btn danger ghost" disabled={busy} onClick={() => void rename("")}>{t("memory.topic.remove")}</button>
-        <span className="grow" />
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !parseTopics(to).length || parseTopics(to)[0] === topic} onClick={() => void rename(to)}>{t("common.save")}</button>
-      </div>
+      <Field id="topic-rename" label={t("memory.topic.rename.to")} autoFocus value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && parseTopics(to).length) void rename(to); }} />
     </Sheet>
   );
 }
@@ -469,7 +468,8 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
   }
   const list = data?.suggestions ?? [];
   return (
-    <Sheet title={t("memory.suggest.title")} onClose={onClose} size="xl" className="memory-suggestions">
+    <Sheet title={t("memory.suggest.title")} onClose={onClose} size="xl" className="memory-suggestions"
+      footer={<><Button variant="quiet" disabled={busy} onClick={() => void tidy()}>{t("memory.tidy")}</Button><span className="grow" /><Button onClick={onClose}>{t("common.close")}</Button></>}>
       <div className="sub">{t("memory.suggest.sub")}</div>
       {loading && !data && <Skeleton rows={3} />}
       {error && !data && <div className="empty">{error}</div>}
@@ -480,32 +480,27 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
         const kind = s.kind === "revision" ? `revision.${s.action === "retire" ? "retire" : "update"}` : s.kind;
         const apply = s.kind === "revision" ? (s.action === "retire" ? "retire" : "revision") : s.kind;
         return (
-        <div key={s.id} className="card memory-suggestion" data-suggestion={s.id} data-kind={s.kind}>
-          <div className="section-title">{t(`memory.suggest.${kind}`)}</div>
-          {s.memory_ids.map((id) => {
-            const r = data?.records[id];
-            return r ? (
-              <div key={id} className="memory-suggestion-record">
-                <div className="erow-meta"><span className={`chip cat-${r.category}`}>{categoryWord(r.category)}</span><span>{where(r)}</span>{r.updated_at && <span className="faint">· {relTime(r.updated_at)}</span>}</div>
-                <div className="memory-text">{r.text}</div>
-              </div>
-            ) : null;
-          })}
-          {!learned && <div className="sub"><b>{t("memory.suggest.keep")}</b> {s.text}</div>}
-          {learned && s.action !== "retire" && <div className="memory-text memory-suggestion-proposed"><b>{t(s.kind === "addition" ? "memory.suggest.new" : "memory.suggest.proposed")}</b> {s.text}</div>}
-          {learned && <div className="sub">{s.kind === "addition" && s.entry_title ? t("memory.suggest.into", { entry: s.entry_title }) + " · " : ""}{learnedWhy(s)}</div>}
-          <div className="row-actions">
-            <button className="btn small ghost" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/dismiss`)}>{t(learned ? "memory.suggest.dismiss.learned" : "memory.suggest.dismiss")}</button>
-            <button className="btn small primary" data-action="apply" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/apply`)}>{t(`memory.suggest.apply.${apply}`)}</button>
+          <div key={s.id} className="card memory-suggestion" data-suggestion={s.id} data-kind={s.kind}>
+            <div className="section-title">{t(`memory.suggest.${kind}`)}</div>
+            {s.memory_ids.map((id) => {
+              const r = data?.records[id];
+              return r ? (
+                <div key={id} className="memory-suggestion-record">
+                  <div className="memory-card-meta"><span>{categoryWord(r.category)}</span><span>{where(r)}</span>{r.updated_at && <span>{relTime(r.updated_at)}</span>}</div>
+                  <div className="memory-text">{r.text}</div>
+                </div>
+              ) : null;
+            })}
+            {!learned && <div className="sub"><b>{t("memory.suggest.keep")}</b> {s.text}</div>}
+            {learned && s.action !== "retire" && <div className="memory-text memory-suggestion-proposed"><b>{t(s.kind === "addition" ? "memory.suggest.new" : "memory.suggest.proposed")}</b> {s.text}</div>}
+            {learned && <div className="sub">{s.kind === "addition" && s.entry_title ? t("memory.suggest.into", { entry: s.entry_title }) + " · " : ""}{learnedWhy(s)}</div>}
+            <div className="row-actions">
+              <Button variant="quiet" size="sm" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/dismiss`)}>{t(learned ? "memory.suggest.dismiss.learned" : "memory.suggest.dismiss")}</Button>
+              <Button variant="primary" size="sm" data-action="apply" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/apply`)}>{t(`memory.suggest.apply.${apply}`)}</Button>
+            </div>
           </div>
-        </div>
         );
       })}
-      <div className="sheet-foot">
-        <button className="btn ghost" disabled={busy} onClick={() => void tidy()}>{t("memory.tidy")}</button>
-        <span className="grow" />
-        <button className="btn" onClick={onClose}>{t("common.close")}</button>
-      </div>
     </Sheet>
   );
 }
@@ -527,18 +522,18 @@ function HistorySheet({ onClose, onChanged, toast }: { onClose: () => void; onCh
   }
   const entries = data?.entries ?? [];
   return (
-    <Sheet title={t("memory.history.title")} onClose={onClose} size="xl" className="memory-history">
+    <Sheet title={t("memory.history.title")} onClose={onClose} size="xl" className="memory-history" footer={<><span className="grow" /><Button onClick={onClose}>{t("common.close")}</Button></>}>
       {loading && !data && <Skeleton rows={3} />}
       {error && !data && <div className="empty">{error}</div>}
       {data && entries.length === 0 && <div className="empty"><b>{t("memory.history.empty")}</b></div>}
       {entries.map((e) => (
         <div key={e.id} className={`card memory-history-entry ${e.undone_at ? "undone" : ""}`} data-history={e.id}>
-          <div className="erow-meta">
+          <div className="memory-card-meta">
             <b>{t(`memory.history.action.${e.action}`)}</b>
-            <span className="faint">· {t(e.actor === "auto" ? "memory.history.auto" : "memory.history.you")}</span>
-            <span className="faint" title={absTime(e.at)}>· {relTime(e.at)}</span>
+            <span>· {t(e.actor === "auto" ? "memory.history.auto" : "memory.history.you")}</span>
+            <span title={absTime(e.at)}>· {relTime(e.at)}</span>
             <span className="grow" />
-            {e.undone_at ? <span className="faint">{t("memory.history.undone")}</span> : <button className="btn small" data-action="undo" disabled={busy === e.id} onClick={() => void undo(e.id)}><Icon name="undo" size={14} /> {t("memory.history.undo")}</button>}
+            {e.undone_at ? <span>{t("memory.history.undone")}</span> : <Button size="sm" icon="undo" data-action="undo" disabled={busy === e.id} onClick={() => void undo(e.id)}>{t("memory.history.undo")}</Button>}
           </div>
           {e.after.slice(0, 1).map((r) => <div key={r.id} className="memory-text">{r.text}</div>)}
           {e.after.length === 0 && e.before.length === 0 && e.summary && <div className="memory-text faint">{e.summary}</div>}
@@ -550,10 +545,6 @@ function HistorySheet({ onClose, onChanged, toast }: { onClose: () => void; onCh
           )}
         </div>
       ))}
-      <div className="sheet-foot">
-        <span className="grow" />
-        <button className="btn" onClick={onClose}>{t("common.close")}</button>
-      </div>
     </Sheet>
   );
 }

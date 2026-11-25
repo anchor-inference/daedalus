@@ -48,7 +48,7 @@ def switch(page: Page, root: str, words: dict[str, str], where: str, problems: l
     if cited != ["3", "4", "5"]:
         problems.append(f"{where}: the cited lines are {cited}")
     tools = page.locator(f"{root} .source-tools")
-    rendered = tools.get_by_role("button", name=words["preview"], exact=True)
+    rendered = tools.get_by_role("radio", name=words["preview"], exact=True)
     if rendered.is_disabled():
         problems.append(f"{where}: Preview is disabled for a cited file")
         return
@@ -56,7 +56,7 @@ def switch(page: Page, root: str, words: dict[str, str], where: str, problems: l
     expect(page.locator(f"{root} .preview-doc")).to_be_visible(timeout=5000)
     if page.locator(f"{root} .preview-doc table").count() != 1:
         problems.append(f"{where}: Preview does not show the rendered document")
-    tools.get_by_role("button", name=words["source"], exact=True).click()
+    tools.get_by_role("radio", name=words["source"], exact=True).click()
     expect(page.locator(f"{root} .source-view")).to_be_visible(timeout=5000)
     again = page.locator(f"{root} .line.cited").evaluate_all("els => els.map(e => e.dataset.line)")
     if again != ["3", "4", "5"]:

@@ -258,24 +258,6 @@
   .ph-selbar button.warn { color: var(--warn); }
   .ph-inbox .push-nudge { margin: var(--space-2) var(--gutter) 0; }
   .ph-proposal-t { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; }
-  /* The pop-up at the top: one floating surface holding the newest entry and the links under it. It is
-     out of context too, so its Allow is no whiter than Deny, as on an Inbox row. */
-  .notice-toasts.banner { margin: calc(8px + env(safe-area-inset-top)) 12px 0; padding: 4px 4px 0; border: 0; border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-lg); gap: 0; }
-  .notice-toasts.banner .notice-toast { padding: 10px 10px 6px; border: 0; border-radius: var(--radius-md); background: none; box-shadow: none; }
-  .notice-toasts.banner .notice-toast-head { align-items: center; gap: 10px; }
-  .notice-toasts.banner .notice-toast-head .kind { width: 28px; height: 28px; border-radius: var(--radius-sm); }
-  .notice-toasts.banner .notice-title { font-size: var(--fs-14); padding-top: 0; }
-  .notice-toasts.banner .notice-body { font-size: var(--fs-13); color: var(--fg-2); }
-  .notice-toasts.banner .notice-toast-head .iconbtn { position: relative; width: 32px; height: 32px; min-height: 32px; }
-  .notice-toasts.banner .notice-toast-head .iconbtn::after { content: ""; position: absolute; inset: -6px; }
-  .notice-toasts.banner .notice-actions { gap: var(--space-2); margin-top: 6px; }
-  .notice-toast .notice-actions .btn { position: relative; height: 36px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--surface-3); box-shadow: none; color: var(--fg); font-size: var(--fs-14); font-weight: 500; }
-  .notice-toast .notice-actions .btn::after { content: ""; position: absolute; inset: -4px 0; }
-  .notice-toast .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
-  .notice-toast .notice-actions .btn.danger { color: var(--bad); }
-  .notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; }
-  .notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
-
   /* ── Terminals: one capacity line, cards with the screen's last rows, the sheets ─────────── */
   .ph-cap { flex: none; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: var(--tap); padding: 4px var(--gutter) 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .ph-cap-l { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-13); color: var(--fg-3); }
@@ -902,9 +884,6 @@
   .ph-linenote.resolved, .ph-linenote.waived { opacity: .6; }
   .ph-linenote-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--fs-13); color: var(--fg-3); }
   .ph-linenote-body { margin-top: 6px; font-size: var(--fs-15); line-height: 1.4; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
-
-  /* The planner's add button sat above the bottom bar; without one it sits above the home indicator. */
-  .cal-fab { bottom: calc(16px + env(safe-area-inset-bottom)); }
 
   /* ── Settings and Usage in grouped cards ─────────────────────────────────────────────────── */
   /* The language switch is a pair of small pills; each reaches 44 px to the finger. */

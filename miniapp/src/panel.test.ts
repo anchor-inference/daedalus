@@ -33,6 +33,7 @@ import {
   openFile,
   openSubagent,
   openTab,
+  openTask,
   panelQuery,
   panelShortcut,
   readPanelPx,
@@ -148,10 +149,10 @@ describe("the route", () => {
   });
 
   it("writes the tab and, on Preview, the path", () => {
-    expect(panelQuery(PANEL_CLOSED)).toEqual({ panel: null, path: null, lines: null, sub: null, tab: null });
-    expect(panelQuery(openTab(PANEL_CLOSED, "files"))).toEqual({ panel: "files", path: null, lines: null, sub: null, tab: null });
+    expect(panelQuery(PANEL_CLOSED)).toEqual({ panel: null, path: null, lines: null, sub: null, task: null, tab: null });
+    expect(panelQuery(openTab(PANEL_CLOSED, "files"))).toEqual({ panel: "files", path: null, lines: null, sub: null, task: null, tab: null });
     const s = openFile(PANEL_CLOSED, { base, path: "reports/menu-check.md" });
-    expect(panelQuery(s)).toEqual({ panel: "preview", path: "reports/menu-check.md", lines: null, sub: null, tab: null });
+    expect(panelQuery(s)).toEqual({ panel: "preview", path: "reports/menu-check.md", lines: null, sub: null, task: null, tab: null });
     expect(panelQuery(openTab(s, "details")).path).toBeNull();
   });
 
@@ -313,7 +314,7 @@ describe("the Browser tab", () => {
     const q = readPanelQuery(new URLSearchParams("panel=browser"), routeTabsFor("session"));
     expect(q).toEqual({ tab: "browser", path: null });
     expect(applyPanelQuery(PANEL_CLOSED, q, base).tab).toBe("browser");
-    expect(panelQuery(openTab(PANEL_CLOSED, "browser"))).toEqual({ panel: "browser", path: null, lines: null, sub: null, tab: null });
+    expect(panelQuery(openTab(PANEL_CLOSED, "browser"))).toEqual({ panel: "browser", path: null, lines: null, sub: null, task: null, tab: null });
   });
 
   it("is never where a session opens by itself: the next session may have no browser", () => {
@@ -339,7 +340,7 @@ describe("the Subagents tab", () => {
   });
   it("writes the helper it shows, and drops it on any other tab", () => {
     const s = openSubagent(PANEL_CLOSED, "child1");
-    expect(panelQuery(s)).toEqual({ panel: "subagents", path: null, lines: null, sub: "child1", tab: null });
+    expect(panelQuery(s)).toEqual({ panel: "subagents", path: null, lines: null, sub: "child1", task: null, tab: null });
     expect(panelQuery(openSubagent(s, null)).sub).toBeNull();
     expect(panelQuery(openTab(s, "files")).sub).toBeNull();
   });
@@ -434,5 +435,34 @@ describe("the pin", () => {
     rememberPanelPinned(false, storage);
     rememberPanel({ tab: null, open: ["jobs"] }, storage);
     expect(readPanelTab(1440, storage)).toBeNull();
+  });
+});
+
+describe("the chat's Board tab", () => {
+  it("is offered to a chat and to the main chat, and is the project's board beside an orchestrator or a member", () => {
+    expect(tabsFor("session")).not.toContain("board");
+    expect(tabsFor("session", { board: true })).toContain("board");
+    expect(tabsFor("main", { board: true })).toContain("board");
+    // The project's own board is among the orchestrator's and the member's tools whatever the chat's offer says.
+    expect(tabsFor("member", { board: true }).filter((tab) => tab === "board")).toHaveLength(1);
+    expect(tabsFor("orchestrator").filter((tab) => tab === "board")).toHaveLength(1);
+  });
+  it("sits with the agent's tools in the menu, ahead of the helpers", () => {
+    const groups = groupTools(tabsFor("session", { board: true, subagents: true }), "session");
+    expect(groups.find((g) => g.group === "agent")!.tabs.slice(0, 2)).toEqual(["board", "subagents"]);
+  });
+  it("writes the task it shows, reads it back from a link, and drops it on any other tab", () => {
+    const s = openTask(PANEL_CLOSED, "7f2a1c");
+    expect(s.tab).toBe("board");
+    expect(panelQuery(s)).toEqual({ panel: "board", path: null, lines: null, sub: null, task: "7f2a1c", tab: null });
+    const q = readPanelQuery(new URLSearchParams("panel=board&task=7f2a1c"), routeTabsFor("session"));
+    expect(q).toEqual({ tab: "board", path: null, task: "7f2a1c" });
+    expect(applyPanelQuery(PANEL_CLOSED, q, base).task).toBe("7f2a1c");
+    expect(panelQuery(openTask(s, null)).task).toBeNull();
+    expect(panelQuery(openTab(s, "files")).task).toBeNull();
+    expect(readPanelQuery(new URLSearchParams("panel=files&task=7f2a1c"))?.task).toBeUndefined();
+  });
+  it("forgets the task when its tab is closed", () => {
+    expect(closeTool(openTask(PANEL_CLOSED, "7f2a1c"), "board").task).toBeNull();
   });
 });
