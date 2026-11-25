@@ -2214,6 +2214,9 @@ export type Proposal = {
   status: string;
   reason: string | null;
   created_at: string;
+  /** The chat that made the change and when it was decided; rows from before these were kept have none. */
+  session_id?: string | null;
+  decided_at?: string | null;
 };
 
 /** What a watch waits for: ``event`` and the fields that kind of event has (the host adds the ids and
