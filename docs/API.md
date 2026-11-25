@@ -37,7 +37,9 @@ daemon, with the repository's hooks, external diffs, pager, signing program and 
 Whether to offer the tab at all needs no git: the session detail (`GET /api/sessions/{id}`) carries
 `repository` beside `branch`, read from the folder's `.git` and `HEAD` files on every poll — `true` in a
 repository (a detached `HEAD` included, with `branch` null), `false` outside one, `null` while it is not
-known, as for a remote conversation's folder or a host folder seen from the container.
+known. For a chat working in a host folder both come from git on the host through the terminal daemon,
+kept for fifteen seconds and asked again in the background, so they are `null` until the host first
+answers; a remote conversation's are always `null`.
 
 **The queue in front of a working agent.** A message sent to a session that is already running is a
 steer: it waits in a queue and is placed in front of the model's next call rather than starting a
