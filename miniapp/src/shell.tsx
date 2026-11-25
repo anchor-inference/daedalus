@@ -6,6 +6,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, IconName } from "./icons";
 import { Sheet } from "./ui/dialogs";
+import { IconButton } from "./ui/primitives";
 import { Screen, navigate, pathFor } from "./router";
 import { SelfDevMode, visibleScreens } from "./capabilities";
 import { t } from "./i18n";
@@ -24,32 +25,47 @@ export function go(e: React.MouseEvent, path: string) {
   navigate(path);
 }
 
-/** The screen's name at the top, with the one or two actions that belong to it.
+/** The width of a page's column: `list` is the centred 880 px column of lists and cards, `reading`
+ *  a 760 px one for prose, `full` the whole window between 24 px margins (boards, calendars, tables). */
+export type PageWidth = "list" | "reading" | "full";
+
+/** A page's body, in one of the three column widths. It stays a `.screen` so the phone's padding, the
+ *  empty-state centring and the project pages' rules keep reading it. */
+export function Page({ width = "list", className = "", children }: { width?: PageWidth; className?: string; children?: ReactNode }) {
+  return <div className={`screen page-${width} ${className}`.trim()}>{children}</div>;
+}
+
+/** The page's header: its name, then its filters, then its actions at the right edge.
  *
- *  On a phone it is the top bar: a page without `back` is a top-level page and gets the hamburger
- *  that opens the drawer, since the drawer is the only way to the other destinations there; its
- *  title is centred unless a second line asks for the room. A desktop draws exactly what it drew. */
-/** `lead` stands between the back or menu button and the title, so a face beside a two-line title
- * keeps both lines beside it instead of the subtitle wrapping under the face. */
-export function PageHeader({ title, subtitle, actions, back, lead, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: string; lead?: ReactNode; children?: ReactNode }) {
+ *  One 52 px row on a desktop, with the title 24 px from the main area's left edge on every page,
+ *  whatever the column below it is; `ruled` draws the line under it for the pages that scroll a
+ *  list beneath. On a phone it is the top bar: a page without `back` is a top-level page and gets
+ *  the hamburger that opens the drawer, since the drawer is the only way to the other destinations
+ *  there; its title is centred unless a second line asks for the room, and the filters sit in a row
+ *  under it, because a phone has no room beside a title for them.
+ *
+ *  `lead` stands between the back or menu button and the title, so a face beside a two-line title
+ *  keeps both lines beside it instead of the subtitle wrapping under the face; with a `lead` the
+ *  subtitle is under the name on a desktop too. Without one, `subtitle` is a count or a status,
+ *  beside the title on a desktop and under it on a phone. */
+export function PageHeader({ title, subtitle, filters, actions, ruled, back, lead }: { title: ReactNode; subtitle?: ReactNode; filters?: ReactNode; actions?: ReactNode; ruled?: boolean; back?: string; lead?: ReactNode }) {
   const phone = useMedia("(max-width: 1023px)");
   const centred = phone && !back && !subtitle;
   return (
-    <header className="pagehead">
+    <header className={ruled ? "pagehead ruled" : "pagehead"}>
       <div className="pagehead-row">
         {back ? (
-          <a className="iconbtn" href={back} onClick={(e) => go(e, back)} aria-label={t("shell.back")} title={t("shell.back")}>
-            <Icon name="back" />
-          </a>
+          <IconButton icon="back" label={t("shell.back")} href={back} />
         ) : phone && <MenuButton />}
         {lead}
-        <div className={`pagehead-title ${centred ? "center" : ""}`}>
+        <div className={["pagehead-title", centred && "center", lead && "stacked"].filter(Boolean).join(" ")}>
           <h1>{title}</h1>
           {subtitle && <div className="sub">{subtitle}</div>}
         </div>
+        {!phone && filters && <div className="pagehead-filters">{filters}</div>}
         {actions ? <div className="pagehead-actions">{actions}</div> : centred && <span className="ph-top-spacer" aria-hidden />}
       </div>
-      {children}
+      {phone && filters}
     </header>
   );
 }

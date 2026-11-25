@@ -214,8 +214,9 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
           </button>
           </>
         }
-      >
-        {load.data && <LoadBar load={load.data} compact />}
+        ruled
+        filters={
+        <>
         {selecting && (
           <div className="term-select-bar" role="toolbar" aria-label={t("term.select")}>
             <span className="sub num">{t("term.select.n", { n: chosen.length })}</span>
@@ -236,8 +237,12 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
             );
           })}
         </div>
-      </PageHeader>
+        </>
+        }
+      />
       <div className="screen wide term-screen-list">
+        {/* In the page, not the header: the header is one 52 px row, and the memory bar is three lines. */}
+        {load.data && <LoadBar load={load.data} compact />}
         {list.loading && !list.error && <Skeleton rows={3} />}
         {list.error && !list.data && (
           <div className="empty">

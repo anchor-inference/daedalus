@@ -180,7 +180,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
         title={screenTitle("board")}
         subtitle={tasks ? `${plural("board.open.count", openCount)}${finished.length && showDone ? t("board.finished.count", { n: finished.length }) : ""}` : undefined}
         actions={<button className="iconbtn primary" onClick={() => setCreating(true)} title={t("board.new")} aria-label={t("board.new")}><Icon name="plus" /></button>}
-      >
+        filters={
         <div className="chips">
           {project && <span className="chip accent">{t("board.lens", { name: project.name })}</span>}
           <button className="chip select" aria-pressed={!showDone} onClick={() => setShowDone(false)}>{t("board.filter.open")}</button>
@@ -192,7 +192,8 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
             <button className="chip select" onClick={() => navigate(projectPagePath(project.id, "board"))}>{t("board.lens.project")}</button>
           )}
         </div>
-      </PageHeader>
+        }
+      />
       <div className="screen wide board">
         {loading && !error && <Skeleton rows={4} />}
         {error && !tasks && <div className="empty"><b>{t("board.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

@@ -229,7 +229,8 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
             <button className="iconbtn primary" onClick={() => setAdding(true)} title={t("memory.add")} aria-label={t("memory.add")}><Icon name="plus" /></button>
           </>
         }
-      >
+        filters={
+        <>
         {searching && <input className="field search" autoFocus placeholder={t("memory.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.search.label")} />}
         <div className="memory-modebar">{switcher}</div>
         <div className="memory-view">
@@ -254,7 +255,9 @@ function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher
             ))}
           </select>
         )}
-      </PageHeader>
+        </>
+        }
+      />
       <div className="screen narrow memory">
         {loading && !error && <Skeleton rows={5} />}
         {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

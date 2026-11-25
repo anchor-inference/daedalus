@@ -194,9 +194,8 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
             <button className="iconbtn primary" onClick={() => setCreating(true)} title={t("pboard.new")} aria-label={t("pboard.new")}><Icon name="plus" /></button>
           </>
         }
-      >
-        {listChips}
-      </PageHeader>
+        filters={listChips}
+      />
       )}
       {embedded && listChips}
       <div className={`screen wide pboard ${wide ? "is-wide" : "is-list"} ${embedded ? "embedded" : ""}`}>
