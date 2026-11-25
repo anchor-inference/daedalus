@@ -41,7 +41,6 @@ from api_stub import (  # noqa: E402
     field_text,
     folders,
     fulfil_shared,
-    reveal_composer,
 )
 from event_feed import EventFeed  # noqa: E402
 
@@ -879,41 +878,45 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """The phone's composer: one 44 px row at rest at the bottom of the screen — +, the field, the
-    white circle (Send, greyed while the field is empty; never Voice mode) — that opens onto its toolbar
-    (mode, model and effort, the context ring, Send) once the field has the reader; the model and the
-    mode as sheets, the + as a sheet of tiles and rows."""
+    """The phone's composer: the desktop's card at the bottom of the screen, its field over one row of
+    44 px targets — +, the access shield and the model chip at the left, the context, the mic and the
+    40 px circle (Send, greyed while the field is empty; never Voice mode) at the right — the same at
+    rest and once the field has the reader; the model and the access as sheets, the + as a sheet."""
     problems: list[str] = []
     HOST.status = "idle"
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
     page = open_page(context, phone=True)
-    pill = page.locator(".composer-box").bounding_box()
-    if not pill or pill["x"] < 0 or pill["x"] + pill["width"] > 391:
-        problems.append(f"phone: the pill is outside the viewport ({pill})")
-    if not pill or round(pill["height"]) != 44:
-        problems.append(f"phone: the idle composer is not one 44 px row ({pill})")
-    elif 844 - (pill["y"] + pill["height"]) > 24:
-        problems.append(f"phone: the idle composer is not at the bottom ({pill})")
-    if page.locator('.composer[data-shape="idle"]').count() != 1:
-        problems.append("phone: the composer does not rest in its idle shape")
+    card = page.locator(".composer-box").bounding_box()
+    row = page.locator(".composer-row").bounding_box()
+    if not card or card["x"] < 0 or card["x"] + card["width"] > 391:
+        problems.append(f"phone: the card is outside the viewport ({card})")
+    elif 844 - (card["y"] + card["height"]) > 24:
+        problems.append(f"phone: the composer is not at the bottom ({card})")
+    if not row or round(row["height"]) != 44:
+        problems.append(f"phone: the controls are not one 44 px row ({row})")
     # Voice mode is a beta with a chat of its own; an ordinary chat offers dictation and nothing more.
     if page.locator('.composer [data-action="voice"], .composer .roundbtn.voice').count():
         problems.append("phone: an ordinary chat's composer still offers Voice mode")
     circle = page.locator('.composer .roundbtn[data-action="send"]')
     box = circle.bounding_box() if circle.count() else None
-    if not box or (round(box["width"]), round(box["height"])) != (34, 34):
-        problems.append(f"phone: the empty field's white circle is not the 34 px Send ({box})")
+    if not box or (round(box["width"]), round(box["height"])) != (40, 40):
+        problems.append(f"phone: the empty field's circle is not the 40 px Send ({box})")
     elif not circle.is_disabled():
         problems.append("phone: the empty field's Send is live with nothing to send")
-    if page.locator(".composer .model-select").is_visible():
-        problems.append("phone: the model selector crowds the idle row")
+    chip = page.locator(".composer .model-select").bounding_box()
+    shield = page.locator(".composer .composer-access").bounding_box()
+    if not chip or not shield or chip["x"] < shield["x"] + shield["width"] - 1 or chip["x"] > shield["x"] + shield["width"] + 8:
+        problems.append(f"phone: the model chip does not stand beside the access shield ({chip}, {shield})")
     if page.locator(".composer .effort-select").count():
         problems.append("phone: effort still occupies a separate composer control")
     fs = page.evaluate("() => getComputedStyle(document.querySelector('.composer .composer-field')).fontSize")
     if fs != "16px":
         problems.append(f"phone: the field is {fs}, which Safari would zoom into")
     field(page).click()
-    page.wait_for_selector('.composer[data-shape="open"] .model-select', timeout=5000)
+    page.wait_for_timeout(200)
+    focused = page.locator(".composer-box").bounding_box()
+    if card and focused and round(focused["height"]) != round(card["height"]):
+        problems.append(f"phone: the card changes height when the field takes the reader ({card} → {focused})")
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".sheet .model-picker [role=option]", timeout=5000)
     before = len(posts("/model"))
@@ -1195,7 +1198,6 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
         context = browser.new_context(viewport={"width": width, "height": 780}, is_mobile=True, has_touch=True, color_scheme="dark")
         context.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
         page = open_page(context, phone=True)
-        reveal_composer(page)
         box = page.locator(".composer .composer-access").bounding_box()
         row = page.locator(".composer-row").bounding_box()
         print("phone access chip", width, box, row)

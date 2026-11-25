@@ -20,8 +20,8 @@
 // ChatGPT on the same device, so it came down a step. A rule inside the phone media query is held to
 // the six steps instead of to the cap, the phone's :root block must move every desktop step onto one
 // of them, and the phone's rows, top bar, chips and composer must take their sizes from the phone
-// tokens (54 px rows, 44 with one line, a 52 px bar, a 44 px idle composer, 28 px chips, 44 px
-// targets). check_density.py measures the same claims on a drawn page.
+// tokens (54 px rows, 44 with one line, a 52 px bar, a composer row of 44 px targets, 28 px chips,
+// 44 px targets). check_density.py measures the same claims on a drawn page.
 //
 // The three functions below are the guard; the claims run them over the real stylesheet, and the
 // last describe runs them over a sheet of planted regressions, because a guard that is never shown
@@ -358,6 +358,7 @@ function oversizeBoxes(all: Rule[]): string[] {
 }
 
 const all = rules(css);
+const declaredRoot = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
 
 describe("the scale", () => {
   it("keeps the companion slider at or below the normal size", () => {
@@ -492,8 +493,9 @@ describe("the phone", () => {
     // The geometry of the redesign, a step smaller since the operator measured it as too large next
     // to Claude and ChatGPT on the same phone (their single-line rows are 40 to 48 px): a 52 px top
     // bar with no rule under it, 54 px rows (44 with one line), 44 px targets for every glyph, 28 px
-    // chips that reach 44 px to the finger, a 52 px project tab bar and an idle composer of one 44 px
-    // row with 34 px circles.
+    // chips that reach 44 px to the finger and a 52 px project tab bar. The composer is the desktop's
+    // card with its field over one row of 44 px targets and a 40 px send circle, the same at rest and
+    // while typing: it rested as one 44 px row and grew a toolbar under the finger that pressed it.
     const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
     expect(declared).toContain("--top-h: 52px");
     expect(declared).toContain("--list-row-h: 54px");
@@ -504,11 +506,11 @@ describe("the phone", () => {
     expect(declared).toContain("--ctl-round: 34px");
     expect(declared).toContain("--tabbar-h: 52px");
     expect(declared).toContain("--row-h-touch: 44px");
-    expect(rootPhone).toContain("--composer-h: 44px");
     expect(rootPhone).toContain("--head-h: var(--top-h)");
-    expect(phoneRule(".ph-top")).toContain("min-height: var(--top-h)");
-    expect(phoneRule(".ph-top")).not.toMatch(/border/);
+    // A phone screen's own bar (TopBar) is the page header's markup, so one set of rules draws both.
     expect(phoneRule(".pagehead-row")).toContain("min-height: var(--top-h)");
+    expect(phoneRule(".pagehead")).not.toMatch(/border/);
+    expect(all.filter((r) => selectors(r).some((selector) => selector.startsWith(".ph-top")))).toEqual([]);
     expect(phoneRule(".pagehead")).toContain("backdrop-filter: none");
     expect(phoneRule(".ph-ib")).toContain("width: var(--tap)");
     expect(phoneRule(".ph-ib")).toContain("height: var(--tap)");
@@ -522,11 +524,18 @@ describe("the phone", () => {
     expect(phoneRule(".sheet-head")).toContain("flex: none");
     expect(phoneRule(".menu-row")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".ph-srow")).toContain("min-height: var(--set-row-h)");
-    expect(phoneRule('.composer[data-shape="idle"] .composer-box')).toContain("min-height: var(--composer-h)");
     expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");
-    expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: var(--ctl-round)");
+    expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--tap)");
+    expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--tap)");
+    expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: 40px");
+    expect(all.filter((r) => r.selector.includes('data-shape="idle"'))).toEqual([]);
     expect(phoneRule(".tabbar.project-tabs > a")).toContain("height: var(--tabbar-h)");
     expect(phoneRule(".ph-drawer")).toContain("width: var(--drawer-w)");
+    // The drawer is the sidebar: 330 px of it, its rows the phone's 44 px ones at 15 px.
+    expect(declaredRoot()).toContain("--drawer-w: min(86vw, 330px)");
+    expect(phoneRule(".sb-nav")).toContain("font-size: var(--fs-15)");
+    expect(phoneRule(".sb-sec")).toContain("height: var(--tap)");
+    expect(phoneRule(".sidebar-foot")).toContain("height: calc(var(--tap) + var(--space-3))");
   });
 
   it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
@@ -536,7 +545,9 @@ describe("the phone", () => {
 });
 
 describe("the sidebar", () => {
-  const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  // What a desktop reads: the sidebar's rules draw the phone's drawer too, so most of them stand
+  // outside any media query and only the column's own (the grid, the fold, the hover) inside the wide one.
+  const wide = (selector: string) => all.filter((r) => (!r.media || r.media.includes("min-width: 1024px")) && selectors(r).includes(selector)).map((r) => r.body).join(";");
   const declared = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
 
   it("opens 300 px wide and stays a drag, with a 52 px head and foot and every row one 32 px line", () => {
@@ -572,10 +583,10 @@ describe("the sidebar", () => {
 
   it("gives the phone's kind tabs a finger's height", () => {
     // The desktop's kind tabs became the Show part of the Chats label's menu; the phone's Chats page
-    // keeps them as tabs, each the 44 px a finger needs.
-    const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
-    expect(rule(".kind-tab")).toContain("height: var(--ctl-h-sm)");
-    expect(rule(".ph-kinds .kind-tab")).toContain("height: var(--row-h-touch)");
+    // keeps them as the shared page tabs, each the 44 px a finger needs there.
+    const phone = (selector: string) => all.filter((r) => r.media.includes(PHONE) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+    expect(phone(".tabs-page .tab")).toContain("height: var(--tap)");
+    expect(all.filter((r) => selectors(r).some((selector) => selector.includes("kind-tab")))).toEqual([]);
   });
 
   it("shows a project's + and a row's menu on hover or focus, not always", () => {
@@ -749,7 +760,9 @@ describe("rows and controls", () => {
 
 describe("settings", () => {
   const decl = (selector: string) => all.filter((r) => r.selector === selector && !r.media).map((r) => r.body).join(" ");
-  const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  // What a desktop reads: the sidebar's rules draw the phone's drawer too, so most of them stand
+  // outside any media query and only the column's own (the grid, the fold, the hover) inside the wide one.
+  const wide = (selector: string) => all.filter((r) => (!r.media || r.media.includes("min-width: 1024px")) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
   it("opens as a dialog of Claude's proportions with a 248 px list and the section at the full width beside it", () => {
     // Settings was a page that took the window, its section a centred 960 px column; on the owner's

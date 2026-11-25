@@ -367,7 +367,7 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
     page = open_page(phone, term, "agents", ".ph-top .ph-menu")
     # Terminals is a destination of the drawer on a phone, two taps from anywhere.
     open_drawer(page)
-    more = page.locator(".ph-drawer-root.open [data-screen='terminals']")
+    more = page.locator(".ph-drawer-root.open [data-nav='terminals']")
     if not more.count():
         problems.append("the drawer has no Terminals")
     else:

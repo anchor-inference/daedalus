@@ -74,7 +74,7 @@ def run(browser, lang: str, phone: bool, default: str, problems: list[str]) -> N
 
     # The account is a chip on the picker's reasoning line, the same in its sheet on a phone.
     if phone:
-        page.locator(".ph-top .ph-top-tb").click()
+        page.locator(".ph-top .pagehead-tb").click()
     else:
         composer.locator(".model-select").click()
     rows = page.locator(".model-picker [data-branch='account']")

@@ -83,6 +83,26 @@ a { color: var(--accent); text-decoration: none; }
   /* The rule is an inset shadow, not a border, so a ruled header is as tall as an unruled one. */
   .pagehead.ruled { box-shadow: inset 0 -1px 0 var(--line); }
 }
+/* On a phone the page's header is the top bar, and a screen drawn for the phone alone (TopBar) draws
+   the same markup: one 52 px row, 4 px from the window's edges, of 44 px targets — the menu or back at
+   the left, the title beside it, at most two glyphs at the right. The title is 15/600 like the
+   desktop's, with a 12 px line over it (where a chat lives) or under it (a count, a state). No rule
+   and no blur band: the bar is the page's own colour. */
+@media (max-width: 1023px) {
+  .pagehead { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; padding: env(safe-area-inset-top) var(--space-1) 0; }
+  .pagehead.chat-head { display: block; height: auto; min-height: 0; border-bottom: 0; }
+  .pagehead-row { min-height: var(--top-h); gap: 0; }
+  .pagehead-title { display: flex; flex-direction: column; justify-content: center; padding: 0 var(--space-1); }
+  .pagehead h1, .pagehead-t { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg); font-size: var(--fs-15); font-weight: 600; letter-spacing: 0; line-height: 1.25; }
+  .pagehead-t .ic { vertical-align: -2px; margin-left: 4px; color: var(--fg-2); }
+  .pagehead-t .chat-title { display: inline; font: inherit; }
+  .pagehead-over, .pagehead .sub { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1.25; }
+  .pagehead-tb { display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: var(--tap); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .pagehead-tb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .pagehead-actions { gap: 0; }
+  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; }
+  .pagehead > :not(.pagehead-row) { margin-left: var(--space-3); margin-right: var(--space-3); }
+}
 /* The page's own column: the list is a centred 880 px, reading prose 760, and a board, table or
    calendar takes the window between the same 24 px margins as the header. The side padding is
    spelled 24 here rather than --page-pad, which grows to 40 on a wide window and would put the

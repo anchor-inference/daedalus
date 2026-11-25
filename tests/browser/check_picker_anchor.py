@@ -17,7 +17,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import expect_app, reveal_composer  # noqa: E402
+from api_stub import expect_app  # noqa: E402
 
 SHOTS = os.environ.get("SHOTS", "")
 
@@ -133,7 +133,6 @@ def main() -> int:
                     if mobile:
                         phone(page, language, where)
                     else:
-                        reveal_composer(page)
                         desktop(page, language, where)
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"{where}: the page scrolls sideways"
                     context.close()

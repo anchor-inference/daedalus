@@ -53,6 +53,9 @@ export type FrameProps = {
   menuButton: RefObject<HTMLButtonElement | null>;
   onToggle: () => void;
   onPalette: () => void;
+  /** Drawn in the phone's drawer (drawer.tsx): the head's last button closes the drawer, where a
+   *  desktop's folds the column, and the shortcuts a phone has no keys for are not drawn. */
+  drawer?: boolean;
 };
 
 const Frame = createContext<FrameProps | null>(null);
@@ -107,7 +110,11 @@ export function SidebarHead({ onSearch, searching = false }: { onSearch?: () => 
           <Icon name="search" size={16} />
         </button>
       </Tooltip>
-      <FoldButton onToggle={f.onToggle} />
+      {f.drawer ? (
+        <button type="button" className="iconbtn sidebar-close" onClick={f.onToggle} aria-label={t("nav.menu.close")}>
+          <Icon name="close" size={16} />
+        </button>
+      ) : <FoldButton onToggle={f.onToggle} />}
     </div>
   );
 }
@@ -182,7 +189,7 @@ export function SidebarPinned() {
         <a className="sb-nav-main" href={newChat} onClick={(e) => go(e, newChat)} data-nav="new" title={t("side.newchat.title")}>
           <Icon name="compose" size={16} />
           <span className="sb-nav-t">{t("ph.newchat")}</span>
-          <kbd className="sb-nav-kbd">{KEYS.newChat}</kbd>
+          {!f.drawer && <kbd className="sb-nav-kbd">{KEYS.newChat}</kbd>}
         </a>
         <OverflowMenu className="sb-new-more" icon="chevron" label={t("side.newchat.more")} items={newChatItems} />
       </div>
@@ -191,7 +198,7 @@ export function SidebarPinned() {
         aria-label={t("nav.more")} aria-haspopup="dialog" aria-expanded={f.menuOpen}>
         <Icon name="apps" size={16} />
         <span className="sb-nav-t">{t("nav.more")}</span>
-        <kbd className="sb-nav-kbd">{KEYS.menu}</kbd>
+        {!f.drawer && <kbd className="sb-nav-kbd">{KEYS.menu}</kbd>}
       </button>
     </div>
   );

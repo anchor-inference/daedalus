@@ -188,21 +188,23 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     def say(text: str) -> None:
         problems.append(f"[{lang}] phone: {text}")
 
+    # The drawer is the sidebar, so it holds what is pinned in the sidebar, in the same order.
     host = Host()
-    host.settings["navigation"]["drawer"] = ["page:dosing", "board", "inbox"]
+    host.settings["navigation"]["pinned"] = ["page:dosing", "board", "inbox"]
     host.settings["navigation"]["hidden"] = ["usage"]
     page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
     page.goto(f"{BASE}/inbox?token=t&lang={lang}")
     page.locator(".ph-menu").first.wait_for(timeout=15000)
     page.locator(".ph-menu").first.tap()
-    page.locator(".ph-nrow[data-screen]").first.wait_for(timeout=5000)
-    rows = page.locator(".ph-nrow[data-screen]").evaluate_all("els => els.map(e => e.dataset.screen)")
+    rows_at = page.locator(".ph-drawer-root.open .sb-pinned-nav [data-nav]")
+    rows_at.first.wait_for(timeout=5000)
+    rows = rows_at.evaluate_all("els => els.map(e => e.dataset.nav)")
     print(f"[{lang}] drawer: {rows}")
-    if rows != ["page:dosing", "board", "inbox"]:
+    if rows != ["new", "page:dosing", "board", "inbox", "menu"]:
         say(f"the drawer reads {rows}")
-    expect(page.locator(".ph-nrow[data-screen='page:dosing']")).to_contain_text(words["page"])
-    page.locator("[data-nav='more']").tap()
+    expect(page.locator(".ph-drawer-root.open [data-nav='page:dosing']")).to_contain_text(words["page"])
+    page.locator(".ph-drawer-root.open [data-nav='menu']").tap()
     # The sheet is the launcher: everything shown, what the drawer lists marked, nothing hidden.
     more = page.locator(".ph-more-sheet [data-screen]").evaluate_all("els => els.map(e => [e.dataset.screen, e.dataset.placed !== undefined])")
     marks = dict(more)

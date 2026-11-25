@@ -311,7 +311,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
   };
   return (
     <div className="ph-page ph-board ph-gboard">
-      <TopBar center title={screenTitle("board")} sub={undefined}
+      <TopBar title={screenTitle("board")} sub={undefined}
         actions={<>
           <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} className="ph-ib" />
           <IconButton icon="plus" label={t("board.new")} onClick={onNew} className="ph-ib" />

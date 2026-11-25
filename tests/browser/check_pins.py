@@ -153,10 +153,13 @@ def main() -> int:
 
             open_drawer(page)
             drawer = page.locator(".ph-drawer-root.open")
-            rows = drawer.locator(".ph-drow[data-pinned]").evaluate_all("els => els.map((e) => e.dataset.session || e.dataset.project)")
+            # The drawer is the sidebar: its pinned block heads the list, as the column's does.
+            block = drawer.locator(".sb-pinned")
+            rows = block.evaluate("el => [...el.children].map((c) => c.dataset.session || c.dataset.project)") if block.count() else []
             check(rows == [shots.P1, shots.S6], f"{lang} phone: the drawer heads with the pins ({rows})")
-            check(drawer.locator(f".ph-drow[data-project='{shots.P1}']").count() == 1, f"{lang} phone: and does not list the pinned project again")
-            check(drawer.locator(f".ph-drow[data-session='{shots.S6}']").count() == 1, f"{lang} phone: nor the pinned chat among the recents")
+            sections = drawer.locator(".sb-sec").evaluate_all("els => els.map((e) => e.textContent)")
+            check(bool(sections) and sections[0].startswith(words["pinned"]), f"{lang} phone: the block heads the drawer ({sections})")
+            check(drawer.locator(f"[data-session='{shots.S6}']").count() == 1, f"{lang} phone: and does not list the pinned chat again")
             page.keyboard.press("Escape")
             page.goto(f"{BASE}/agents?view=chats&token=t&scheme=dark&lang={lang}")
             expect(pinned.locator(".list-row").first).to_be_visible(timeout=15000)

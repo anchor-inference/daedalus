@@ -1889,8 +1889,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     : waitingLine ? <StateSub tone="running">{waitingLine}</StateSub>
     : ahead ? <span>{t("session.compacting.ahead", { what: compactionStage(ahead) })}</span>
     : remote ? <span className="ph-chat-remote">{remotePlace(remote)}</span>
-    : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
+    : detail?.fallback ? <span className="ph-chat-fallback">{shortModel(detail.fallback.to, 28)}</span>
     : null;
+  // Over the title: the chat it helps, or the project it lives in, as the desktop's header leads with.
+  const phoneOver = detail?.subagent_of ? (detail.leader_title ?? t("session.leader.word"))
+    : detail && isProject(detail.project) ? detail.project.name
+    : undefined;
   const phoneChip = phone && browserShown
     ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
     : phone && questionScope && waiting > 0
@@ -1903,12 +1907,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
-          // The phone's bar has no room beside the title: the BYPASS mark rides at the head of the second line,
-          // as the share tag does, so a session that asks nobody is told apart on a phone too.
+          over={phoneOver}
+          // The phone's bar has no room beside the title: the BYPASS mark rides at the head of the line
+          // under it, so a session that asks nobody is told apart on a phone too.
           sub={detail?.bypass ? <><BypassMark on /> {phoneSub}</> : phoneSub}
           back={main || focus?.kind === "member" ? onBack : undefined}
           onTitle={hasDetails ? () => { setDetailsFocus("session"); panel.open("details"); } : undefined}
-          chip={phoneChip}
+          chip={phoneChip ?? undefined}
+          onPanel={visit ? undefined : () => panel.open(panel.state.tab ?? "details")}
           onMenu={() => setPhoneSheet("menu")}
           shared={!visit && detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
           secret={isPrivate(detail)}

@@ -12,90 +12,27 @@
      nothing under its last row. */
   .screen { padding: 4px var(--gutter) calc(var(--space-6) + env(safe-area-inset-bottom)); }
 
-  /* ── the top bar ─────────────────────────────────────────────────────────────────────────── */
-  .ph-top { flex: none; display: flex; align-items: center; gap: 2px; min-height: var(--top-h); padding: env(safe-area-inset-top) var(--space-1) 0; background: var(--bg); position: relative; z-index: 12; }
-  .ph-top-title { flex: 1; min-width: 0; padding: 0 var(--space-2); font-size: var(--fs-16); font-weight: 600; line-height: 1.25; color: var(--fg); }
-  .ph-top-title.center { text-align: center; }
-  .ph-top-t { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .ph-top-t .ic { vertical-align: -2px; margin-left: 4px; color: var(--fg-2); }
-  .ph-top-sub { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); margin-top: 1px; }
-  .ph-top-tb { display: block; width: 100%; min-height: var(--tap); padding: 4px 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; border-radius: var(--radius-sm); }
-  .ph-top-actions { display: flex; align-items: center; flex: none; }
-  .ph-top-spacer { width: var(--tap); flex: none; }
+  /* A phone screen's icon button: a 20 px glyph in its 44 px target, where the shared one draws 16 in 32. */
   .ph-ib { position: relative; width: var(--tap); height: var(--tap); flex: none; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--fg); text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--t-fast); }
   .ph-ib:active { background: var(--surface-2); }
   .ph-ib:disabled { opacity: .4; }
   .ph-ib:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-  /* The phone's glyph is 20 px in its 44 px target; the shared icon button draws 16. */
   .ph-ib > .ic { width: 20px; height: 20px; }
   .ph-ib .iconbtn-badge { top: 5px; right: 3px; background: var(--bad); }
   .ph-ib .iconbtn-pip { top: 9px; right: 9px; }
   .ph-badge { position: absolute; top: 5px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-12); font-weight: 600; line-height: 16px; text-align: center; }
-  .ph-pip { position: absolute; top: 9px; right: 9px; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--bg); }
+  .ph-badge.warn { background: var(--warn); color: var(--bg); }
+  .ph-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+  .ph-dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; background: var(--fg-3); }
+  .ph-avatar { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; font-size: var(--fs-13); font-weight: 600; color: var(--c, var(--fg-2)); background: color-mix(in srgb, var(--c, var(--fg-2)) 12%, transparent); }
 
-  /* The page header every screen already draws becomes the same bar: no rule, no blur band, the
-     hamburger at its left (shell.tsx adds it), the title centred on a top-level page. */
-  .pagehead { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; padding: env(safe-area-inset-top) var(--space-1) 0; }
-  .pagehead-row { min-height: var(--top-h); gap: 2px; }
-  .pagehead-title { padding: 0 var(--space-2); }
-  .pagehead-title.center { text-align: center; }
-  .pagehead h1 { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
-  .pagehead .sub { font-size: var(--fs-13); color: var(--fg-3); }
-  .pagehead-actions { gap: 0; }
-  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; }
-  .pagehead > :not(.pagehead-row) { margin-left: var(--space-3); margin-right: var(--space-3); }
-
-  /* ── the drawer ──────────────────────────────────────────────────────────────────────────── */
+  /* ── the drawer: what only a phone's drawer does — slide in over a scrim, follow a finger out ── */
   .ph-drawer-root { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 1); pointer-events: none; }
   .ph-drawer-root.open { pointer-events: auto; }
   .ph-scrim { position: absolute; inset: 0; background: var(--scrim); opacity: 0; transition: opacity var(--t-base); }
   .ph-drawer-root.open .ph-scrim { opacity: 1; }
-  /* The drawer is the frame, as the desktop's sidebar is: the page's own colour, told from the page
-     by the scrim over it and the ring and drop of a floating surface along its edge. */
-  .ph-drawer { position: absolute; top: 0; bottom: 0; left: 0; width: var(--drawer-w); display: flex; flex-direction: column; background: var(--bg); box-shadow: var(--shadow-xl); padding-top: env(safe-area-inset-top); transform: translateX(-102%); transition: transform var(--t-base) var(--ease-out), visibility 0s linear var(--t-base); visibility: hidden; outline: none; touch-action: pan-y; }
+  .ph-drawer { position: absolute; top: 0; bottom: 0; left: 0; width: var(--drawer-w); display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); background: var(--bg); transform: translateX(-102%); transition: transform var(--t-base) var(--ease-out), visibility 0s linear var(--t-base); visibility: hidden; outline: none; touch-action: pan-y; }
   .ph-drawer-root.open .ph-drawer { transform: none; visibility: visible; transition: transform var(--t-base) var(--ease-out); }
-  .ph-drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: var(--space-4); scrollbar-width: none; }
-  .ph-drawer-foot { flex: none; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--gutter) calc(var(--space-3) + env(safe-area-inset-bottom)); }
-  .ph-brand { display: flex; align-items: center; height: var(--top-h); padding: 0 var(--space-1) 0 var(--gutter); gap: var(--space-2); }
-  .ph-brand-name { flex: 1; display: flex; align-items: center; gap: 10px; font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
-  .ph-brand-name .ic { color: var(--fg); }
-  .ph-drawer .ph-seg { margin: var(--space-1) var(--space-3) var(--space-2); }
-  /* A destination and a recent chat are rows set 8 px in from the drawer's edges with 8 px corners,
-     so the pressed and the current row read as a shape rather than a band across the drawer; their
-     words still start on the 16 px gutter. */
-  .ph-nrow { display: flex; align-items: center; gap: 12px; width: calc(100% - var(--space-4)); height: var(--nav-row-h); margin: 0 var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-sm); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; text-align: left; text-decoration: none; cursor: pointer; transition: background var(--t-fast); }
-  .ph-nrow:active, .ph-drow:active { background: var(--surface-2); }
-  .ph-nrow.on { background: var(--surface-3); }
-  .ph-nrow > .ic { flex: none; color: var(--fg-2); }
-  .ph-nrow.on > .ic { color: var(--fg); }
-  .ph-nrow-l { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .ph-nrow .ph-cnt { font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); font-variant-numeric: tabular-nums; }
-  .ph-nrow .ph-badge, .ph-drow .ph-badge { position: static; }
-  .ph-badge.warn { background: var(--warn); color: var(--bg); }
-  .ph-badge.quiet { background: var(--surface-3); color: var(--fg-2); }
-  .ph-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
-  .ph-dsec { display: flex; align-items: center; padding: var(--space-3) var(--gutter) 0; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .ph-dsec-act { margin-left: auto; margin-right: -8px; min-width: var(--tap); min-height: var(--tap); padding: 0 8px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; }
-  .ph-drow { display: flex; align-items: center; gap: 12px; width: calc(100% - var(--space-4)); min-height: var(--tap); margin: 0 var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-sm); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
-  /* Recents lists the whole first page, up to two hundred rows: the ones below the fold skip layout and paint. */
-  .ph-drow[data-session] { content-visibility: auto; contain-intrinsic-size: auto var(--tap); }
-  .ph-drow-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .ph-drow-tm { flex: none; font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-drow > .ic { color: var(--fg-2); flex: none; }
-  .ph-drow.tall { min-height: var(--set-row-h); }
-  .ph-dnote { padding: var(--space-2) var(--gutter); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-3); }
-  .ph-drow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .ph-drow-m { font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .ph-dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; background: var(--fg-3); }
-  .ph-dot.waiting { background: var(--warn); } .ph-dot.running { background: var(--live); animation: ph-pulse 1.4s ease-in-out infinite; }
-  .ph-dot.failed { background: var(--bad); } .ph-dot.done { background: var(--ok); }
-  /* The dot is 6 px in an icon's 18 px of room, so a recent chat starts its words where a project,
-     led by an icon, does. */
-  .ph-drow > .ph-dot { margin: 0 6px; }
-  @keyframes ph-pulse { 50% { opacity: .35; } }
-  .ph-avatar { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; font-size: var(--fs-13); font-weight: 600; color: var(--c, var(--fg-2)); background: color-mix(in srgb, var(--c, var(--fg-2)) 12%, transparent); }
-  .ph-round { width: var(--tap); height: var(--tap); flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--fg); cursor: pointer; transition: background var(--t-fast); }
-  .ph-round:active { background: var(--surface-3); }
 
   /* ── sheets ──────────────────────────────────────────────────────────────────────────────── */
   /* Every sheet of the app, not only the new ones: a handle, 20 px top corners, a 17/600 title and
@@ -652,12 +589,9 @@
   .ph-advanced summary { min-height: var(--tap); display: flex; align-items: center; cursor: pointer; }
   .ph-advanced .mono { display: block; overflow-wrap: anywhere; }
 
-  /* ── the creation pill ───────────────────────────────────────────────────────────────────── */
-  /* Starting a chat is the drawer's one raised control, in neutral ink on a filled surface: it was
-     the accent's blue, the colour kept for what is live. */
-  .ph-newchat { height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast); }
+  /* ── the creation pill: floating over a list, in neutral ink on a raised surface ──────────── */
+  .ph-newchat { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-1); box-shadow: var(--shadow-lg); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast); }
   .ph-newchat:active { background: var(--surface-3); }
-  .ph-newchat.fab { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; background: var(--surface-1); box-shadow: var(--shadow-lg); }
 
   /* ── home: a new chat, and only what is live above its composer ──────────────────────────── */
   .ph-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -675,107 +609,6 @@
   .ph-page-pad { padding: var(--space-1) var(--gutter) 0; }
   .ph-page-pad a { color: var(--accent); }
   .ph-lens { display: inline-flex; align-items: center; gap: 4px; }
-
-  /* ── the composer: one 44 px row at rest, the text above a toolbar once it holds something ──
-     A card on the page with a hairline ring. The ring is an inset shadow rather than a border, so the
-     idle row stays the 44 px the tokens name. */
-  .composer[data-shape] { gap: var(--space-2); padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, transparent, var(--bg) 14px); }
-  .composer[data-shape] .composer-box { position: relative; gap: 2px; padding: 5px; border: 0; border-radius: var(--radius-composer); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-sm); transition: box-shadow var(--t-fast); }
-  .composer[data-shape] .composer-box:focus-within { border-color: transparent; box-shadow: inset 0 0 0 1px var(--line-strong), var(--drop-sm); }
-  .composer[data-shape] .composer-box .composer-field { min-height: 34px; max-height: calc(5lh + 12px); padding: 6px 6px; font-size: var(--fs-16); line-height: 22px; }
-  .composer[data-shape] .composer-box .composer-field:has(.cf-card) { max-height: 45vh; }
-  .composer[data-shape] .composer-box .composer-field[data-empty]::before { color: var(--fg-3); }
-  /* In the pill the hint is a word in the row after the field, not a corner over the send button. */
-  .composer[data-shape] .composer-ghost-accept { position: static; order: 1; flex: none; align-self: center; }
-  .composer[data-shape] .composer-row { gap: 4px; align-items: center; }
-  .composer[data-shape] .composer-tools { gap: 4px; }
-  /* At rest: [+] [the field] [mic] [Send, greyed while empty], one row. The toolbar's other controls wait. */
-  .composer[data-shape="idle"] .composer-box { flex-direction: row; align-items: center; min-height: var(--composer-h); }
-  .composer[data-shape="idle"] .composer-row, .composer[data-shape="idle"] .composer-tools { display: contents; }
-  .composer[data-shape="idle"] .composer-box > .composer-field { order: 1; flex: 1; width: auto; overflow: hidden; }
-  .composer[data-shape="idle"] .iconbtn.plus { order: 0; }
-  .composer[data-shape="idle"] .composer-tools > .mic { order: 2; }
-  .composer[data-shape="idle"] .composer-tools > .roundbtn { order: 3; }
-  .composer[data-shape="idle"] .composer-access, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
-  .composer[data-shape="open"] .composer-box { border-radius: var(--radius-xl); }
-  .composer[data-shape="open"] .composer-box > .composer-field { padding: 8px 10px 4px; }
-  /* The desktop gives the mic and Send one slot; the phone keeps a disabled Send in view beside the
-     mic rather than leaving the row without its circle. */
-  .composer[data-shape][data-primary] .composer-tools:has(.mic) .roundbtn.primary:disabled { display: grid; place-items: center; }
-  /* The mic stays beside Send while there is text or an attachment: hiding it then left no way to
-     dictate the rest of a message once a photo was attached or a word typed. The model pill gives
-     up its width instead (it shrinks with an ellipsis, below). */
-  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-width: var(--ctl-round); min-height: var(--ctl-round); margin: 0; padding: 0; border-radius: 50%; }
-  .composer[data-shape] .iconbtn.plus { background: var(--surface-2); color: var(--fg); }
-  .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { background: none; color: var(--fg-2); }
-  .composer[data-shape] .iconbtn.plus::after, .composer[data-shape] .composer-tools > .mic::after, .composer[data-shape] .stop-aside::after, .composer[data-shape] .roundbtn::after { content: ""; position: absolute; inset: -5px; }
-  .composer[data-shape] .roundbtn { position: relative; width: var(--ctl-round); height: var(--ctl-round); margin: 0; border: 0; border-radius: 50%; }
-  .composer[data-shape] .roundbtn.primary { background: var(--primary); color: var(--primary-ink); }
-  .composer[data-shape] .roundbtn.primary.stop { background: var(--primary); color: var(--primary-ink); }
-  .composer[data-shape] .roundbtn.primary.queue, .composer[data-shape] .roundbtn.primary.reply { background: var(--primary); color: var(--primary-ink); }
-  /* Nothing to send yet: the circle is a filled neutral with a faint glyph, not a dimmed ink one. */
-  .composer[data-shape] .roundbtn.primary:disabled { background: var(--surface-3); color: var(--fg-3); opacity: 1; }
-  /* 10 px insets, not 12: Inter sets a model's name a little wider than the system face did, and at
-     360 px the pill showed one letter fewer than the ten that tell one model from another. */
-  .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 10px; gap: 4px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); }
-  .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
-  /* The access is its shield alone on a phone, in the attention colour while everything is let through. */
-  .composer[data-shape] .composer-access { position: relative; flex: none; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); padding: 0; justify-content: center; border-radius: 50%; }
-  .composer[data-shape] .composer-access::after { content: ""; position: absolute; inset: -5px; }
-  .composer[data-shape] .model-select { flex: 0 1 auto; min-width: 0; }
-  .composer[data-shape] .model-select > .ic:first-child { display: none; }
-  /* The effort stacks under the name (styles.css, a narrow composer), a size down from it. The pill
-     drops its caret, as the mode chip beside it does: at 360 px those 18 px are two more letters of
-     the name. A clipped effort read as another word ("высока"), so the effort is never the one cut. */
-  .composer[data-shape] .model-select:not(.attn) > .model-effort { font-size: var(--fs-12); }
-  .composer[data-shape] .model-select > .ic:last-child { display: none; }
-  .composer[data-shape] .model-select .model-effort { color: var(--fg-3); flex: none; }
-  .composer[data-shape] .model-select .model-label { min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
-  .composer[data-shape] .model-select .model-from { font-size: var(--fs-12); }
-  .composer[data-shape] .ctx-ring { position: relative; height: var(--ctl-round); padding: 0 2px; }
-  .composer[data-shape] .ctx-ring::after { content: ""; position: absolute; inset: -5px; }
-  .composer[data-shape] .composer-tools { margin-left: auto; }
-  .composer[data-shape] .upload-progress, .composer[data-shape] .ph-hint { padding: 2px 10px 0; font-size: var(--fs-13); color: var(--fg-3); }
-  .composer[data-shape] .attachments { margin: 4px 4px 2px; gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .composer[data-shape] .attachment-open { min-height: 64px; border: 0; border-radius: 12px; background: var(--surface-2); }
-  .composer[data-shape] .attachment.image .attachment-open { width: 64px; height: 64px; padding: 0; overflow: hidden; }
-  .composer[data-shape] .attachment.image .attachment-open img, .composer[data-shape] .attachment.image .attachment-open video { width: 64px; height: 64px; border-radius: 0; }
-  .composer[data-shape] .attachment.image .attachment-meta { display: none; }
-  .composer[data-shape] .attachment-name { font-size: var(--fs-13); }
-  .composer[data-shape] .attachment-meta .sub { font-size: var(--fs-12); }
-  .composer[data-shape] .attachment-glyph { font-size: var(--fs-17); }
-  .composer[data-shape] .attachment-x { background: color-mix(in srgb, var(--fg) 72%, transparent); color: var(--bg); }
-  /* A reply waits as a tile of the attachments' height, in the same sideways-scrolling row. */
-  .composer[data-shape] .reply-card .reply-card-open { width: 132px; border: 0; border-radius: 12px; background: var(--surface-2); flex: none; }
-  .composer[data-shape] .reply-card { flex: none; }
-  .sheet.ph-sheet.reply-sheet .sheet-body { padding: 0 var(--gutter) var(--space-4); }
-  .reply-sheet .reply-quote { font-size: var(--fs-15); }
-  .reply-sheet .reply-form { margin-top: var(--space-3); }
-  .reply-sheet .reply-input { height: var(--row-h-touch); font-size: var(--fs-16); }
-  .reply-sheet .reply-form .reply-add { width: var(--ctl-round); height: var(--ctl-round); }
-  .reply-sheet .reply-dialog-text { font-size: var(--fs-16); }
-  .reply-pill-btn { height: var(--ctl-round); padding: 0 var(--space-3); font-size: var(--fs-15); border-radius: 10px; }
-  /* The remove target grows up and to the right, out of the 64 px tile, not into it: grown inwards it
-     covered the tile's middle, and a tap meant to open the picture removed it. */
-  .composer[data-shape] .attachment-x::after { content: ""; position: absolute; inset: -8px -8px -2px -2px; }
-  /* The voice note: ✕, the wave and the time, ■ and ↑, in the 48 px row. */
-  .composer[data-shape] .voicebar { min-height: 36px; gap: 6px; padding: 0; }
-  .composer[data-shape] .voicebar .voicebar-cancel { position: relative; width: var(--ctl-round); height: var(--ctl-round); border-radius: 50%; background: var(--surface-2); }
-  .composer[data-shape] .voicebar .roundbtn { width: var(--ctl-round); height: var(--ctl-round); }
-  .composer[data-shape] .voicebar .voicebar-cancel::after, .composer[data-shape] .voicebar .roundbtn::after { content: ""; position: absolute; inset: -5px; }
-  .composer[data-shape] .voicebar-time { font-size: var(--fs-14); color: var(--fg); }
-  .composer[data-shape] .voicebar-busy { font-size: var(--fs-14); }
-  /* What waits for the running agent: the queue, in the tray shape above the field. */
-  .composer[data-shape] .steers { gap: 0; overflow: hidden; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
-  .composer[data-shape] .steer { min-height: var(--list-row-h-1); padding: 4px 6px 4px 14px; border: 0; border-radius: 0; background: none; font-size: var(--fs-12); column-gap: var(--space-2); }
-  .composer[data-shape] .steer + .steer { border-top: 1px solid var(--line); }
-  .composer[data-shape] .steer-text { font-size: var(--fs-14); }
-  .composer[data-shape] .steer-hint { font-size: var(--fs-12); }
-  .composer[data-shape] .steer-now { position: relative; height: 36px; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
-  .composer[data-shape] .steer-now::after { content: ""; position: absolute; inset: -4px 0; }
-  .composer[data-shape] .steer-x, .composer[data-shape] .steer-edit { width: var(--tap); height: var(--tap); border-radius: 12px; }
-  .composer[data-shape] > .ph-note { margin: 0; }
-  :root[data-keyboard="open"] .composer[data-shape] { padding-bottom: var(--space-2); }
 
   /* ── the project's tab bar: 52 px, a 52 × 30 tile behind the current tab's icon ───────────── */
   .tabbar.project-tabs { display: flex; padding: 0 0 env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
@@ -1073,7 +906,7 @@
   .ph-taskpage .review-head, .ph-taskpage .review-stat, .ph-taskpage .review-base, .ph-taskpage .review-why { font-size: var(--fs-14); }
   .ph-taskpage .review-commits { font-size: var(--fs-13); }
   /* One file's diff: wrapped to the width, the notes under their lines. */
-  .ph-filediff .ph-top-t .mono { font-family: var(--mono); font-size: var(--fs-16); }
+  .ph-filediff .pagehead-t .mono { font-family: var(--mono); font-size: var(--fs-16); }
   .ph-filediff-hint { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 0 var(--gutter) var(--space-2); font-size: var(--fs-14); color: var(--fg-2); }
   .ph-filediff-body { flex: 1; padding: 0 var(--gutter) var(--space-6); }
   .ph-filediff .diff-view { border-radius: var(--radius-md); overflow: hidden; background: var(--inset); box-shadow: var(--shadow-ring); font-size: var(--fs-mono); }
@@ -1099,17 +932,10 @@
   .settings-row { min-height: var(--set-row-h); }
   /* Section labels are words in the grey of the design, not tracked capitals. */
   .section-title { font-size: var(--fs-13); font-weight: 500; text-transform: none; letter-spacing: 0; margin: var(--space-5) 4px var(--space-2); }
-  .composer[data-shape] .composer-tools { flex: 1; min-width: 0; }
-  .composer[data-shape] .composer-tools > .model-select { margin-right: auto; }
-  .composer[data-shape="idle"] .composer-tools { flex: none; }
   .usage .card, .usage-card, .screen .kpi { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
   .kpi .value { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; }
 
-  /* ── the session: a two-line title button, at most one chip and the ⋮ ────────────────────── */
-  /* The bar keeps the desktop header's class, so what hides or measures "the chat's header" (the
-     voice page, the checks) still finds it; only its looks are the phone bar's. */
-  .chat-head.ph-chat-top { height: auto; min-height: calc(var(--top-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--space-1) 0; gap: 2px; border-bottom: 0; }
-  .ph-chat-top .ph-top-title { padding-left: var(--space-1); }
+  /* ── the session: the bar's state line, its chip, the ⋮ sheet ────────────────────────────── */
   .ph-chat-state { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
   .ph-chat-state > span:last-child { overflow: hidden; text-overflow: ellipsis; }
   .ph-chat-state .dot { width: var(--dot); height: var(--dot); flex: none; }
@@ -1117,7 +943,6 @@
   .ph-chat-state.waiting, .ph-chat-state.offline { color: var(--warn); }
   .ph-chat-state.failed { color: var(--bad); }
   .ph-chat-fallback { color: var(--warn); }
-  .ph-chat-top .chat-title { display: inline; font: inherit; letter-spacing: 0; }
   .ph-chat-top .ph-share-tag { height: 18px; margin-right: 6px; padding: 0 6px; font-size: var(--fs-12); font-weight: 600; vertical-align: 1px; }
   .ph-chat-top .questions-headbtn.attn { color: var(--warn); }
   .ph-chat-strip { border-bottom: 0; }
@@ -1157,30 +982,6 @@
   .thinking-head .chev { margin-left: auto; }
   .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); }
   .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; }
-
-  /* The tray over the field: the queue, a permission request and the agent's question share one
-     shape — a card with a 13 px label line, the content, and full-width answers 44 px to the finger. */
-  .composer[data-shape] .ph-tray-head { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .composer[data-shape] .ph-tray-head.warn { color: var(--warn); }
-  .composer[data-shape] .ph-tray-head.bad { color: var(--bad); }
-  .composer[data-shape] .steers .ph-tray-head { min-height: 36px; padding: 4px 14px 0; font-weight: 500; }
-  .composer[data-shape] .steers .ph-tray-head + .steer { border-top: 0; }
-  .composer[data-shape] .steer > .ic:first-child { display: none; }
-  /* The controls take the next columns in their order, so a card without Steer leaves no empty one. */
-  .composer[data-shape] .steer { grid-template-columns: minmax(0, 1fr); grid-auto-columns: auto; row-gap: 1px; }
-  .composer[data-shape] .steer-text { grid-row: 1; grid-column: 1; -webkit-line-clamp: 1; line-clamp: 1; }
-  .composer[data-shape] .steer-hint { grid-row: 2; grid-column: 1; }
-  .composer[data-shape] .steer-now { grid-row: 1 / 3; }
-  .composer[data-shape] .steer-x, .composer[data-shape] .steer-edit { grid-row: 1 / 3; color: var(--fg); }
-  .composer[data-shape] .steer-x .ic, .composer[data-shape] .steer-edit .ic { width: 18px; height: 18px; }
-  .composer[data-shape] .steer-now { color: var(--fg); }
-  .composer[data-shape] .steer[data-kind="steer"] .steer-hint { color: var(--info); }
-  .composer[data-shape] .dock.ph-tray { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 12px 14px; border: 0; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); max-height: 55vh; overflow-y: auto; overscroll-behavior: contain; }
-  .ph-tray-title { font-size: var(--fs-15); line-height: 1.35; color: var(--fg); overflow-wrap: anywhere; }
-  .ph-tray-detail { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6lh; overflow-y: auto; }
-  .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
-  .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
-  .ph-btn.ph-deny { background: none; color: var(--bad); }
 
   /* The session's sheet (details, files, jobs, browser…): the chat's title and a line over a strip of
      44 px tabs, raised from the bottom with the bar still showing above it, the way every sheet is. */

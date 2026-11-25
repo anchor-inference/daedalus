@@ -165,12 +165,10 @@ def phone(page: Page, lang: str) -> None:
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     expect(page.locator(".ph-home .main-entry")).to_have_count(0)
     fits(page, f"{lang} phone start")
-    # The drawer's Orchestration lists Main and the projects; its "See all" opens orchestration's
-    # list, not the main chat: Main is the list's first row, with the pill.
+    # The drawer's mode menu goes to orchestration's home on a phone, its list of projects, not the
+    # main chat: Main is the list's first row, with the pill.
     open_drawer(page)
-    page.locator(".ph-drawer .ph-seg button").nth(1).click()
-    expect(page.locator(".ph-drawer-root.open [data-nav='main']")).to_be_visible()
-    page.locator(".ph-drawer-root.open [data-nav='orchestration-list']").click()
+    switch_mode(page, "orchestration", scope=".ph-drawer-root.open")
     page.wait_for_url("**/app/orchestration/projects**")
     assert ("/api/main", {}) not in main.posts, "the list opened the main chat's session"
     first = page.locator(".ph-orch [data-main-entry] .list-row")

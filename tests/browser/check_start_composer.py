@@ -92,7 +92,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
             say(f"the composer {box} is not one 44 px row at the bottom")
         if greeting["y"] + greeting["height"] > box["y"]:
             say("the question is not above the composer")
-        expect(page.locator(".ph-top .ph-top-tb")).to_contain_text("gpt-6-luna")
+        expect(page.locator(".ph-top .pagehead-tb")).to_contain_text("gpt-6-luna")
         if page.evaluate("document.documentElement.scrollWidth - innerWidth") > 0:
             say("the page scrolls sideways")
 
@@ -101,7 +101,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(model.locator(".model-effort")).to_contain_text(words["high"])
     # The reasoning is a row of the picker, which stays open on a pick; Escape puts it away.
     if phone:
-        page.locator(".ph-top .ph-top-tb").click()
+        page.locator(".ph-top .pagehead-tb").click()
     else:
         model.click()
     page.locator(".model-picker .model-effort-seg button[role='radio']").nth(1).click()

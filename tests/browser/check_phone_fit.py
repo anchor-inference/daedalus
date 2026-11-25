@@ -27,7 +27,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app  # noqa: E402
 from check_main import serve as serve_main  # noqa: E402
 from check_project_focus import PID, fits, serve  # noqa: E402
 
@@ -145,7 +145,6 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(300)
     # The phone's composer rests as one row; its toolbar (toggles, model, effort) is the open shape's.
-    reveal_composer(page)
     try:
         facts = page.evaluate("""() => {
           const box = document.querySelector('.composer-box').getBoundingClientRect();

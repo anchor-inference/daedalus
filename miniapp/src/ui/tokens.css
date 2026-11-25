@@ -157,21 +157,21 @@
   --z-sidebar: 15; --z-popover: 35; --z-navigation: 36; --z-menu: 38; --z-overlay: 30; --z-confirm: 40; --z-toast: 45;
   --head-h: 52px;        /* every header: a page's, a conversation's, the sidebar's head, a pane's */
   --page-pad: 14px;     /* a page's side padding; 24 on a desktop, 40 on a wide one */
-  --composer-h: 46px;
   /* The phone's own geometry. Declared here with the rest so every size has one home, and used only
-     by rules inside the phone media query (ui/phone.css): a desktop never reads them. Measured from
+     by rules inside the phone media query (ui/phone.css, and the phone blocks of the shared parts):
+     a desktop never reads them. Measured from
      the two chat apps the operator holds on the same phone every day, and taken down a step after the
      operator measured the first cut as too large next to them on that phone: their single-line rows
      are 40 to 48 px, ours were 52, and every two-line row of ours was 60. */
   --top-h: 52px;          /* the top bar: one row of 44 px glyph targets, no background, no rule */
   --list-row-h: 54px;     /* a list row with a title and a meta line */
   --list-row-h-1: 44px;   /* a list row with a title only, and a sheet's action row */
-  --nav-row-h: 44px;      /* a destination in the drawer */
+  --nav-row-h: 44px;      /* a one-line action under a phone list (show more) */
   --set-row-h: 48px;      /* a row of a grouped settings card */
   --tabbar-h: 52px;       /* the project's tab bar, above the home indicator */
-  --ctl-round: 34px;      /* the composer's filled circles: +, mic, send */
+  --ctl-round: 34px;      /* a phone's small round control: a voice note's buttons, a terminal's send */
   --chip-h: 28px;         /* a chip's visible height inside its 44 px hit area */
-  --drawer-w: min(86vw, 336px);
+  --drawer-w: min(86vw, 330px);
   --gutter: 16px;         /* a phone page's side padding: both reference apps measure 16 */
   --radius-xl: 20px;      /* a sheet's top corners, a grouped card's outer corners */
   --radius-composer: var(--radius-xl);
@@ -263,7 +263,7 @@
 @media (max-width: 1023px) {
   :root {
     --fs-18: 17px; --fs-20: 17px; --fs-22: 17px; --fs-28: 17px; --fs-prose: var(--fs-16);
-    --head-h: var(--top-h); --page-pad: var(--gutter); --composer-h: 44px;
+    --head-h: var(--top-h); --page-pad: var(--gutter);
     --radius-md: 16px; --radius-lg: 20px;
   }
 }

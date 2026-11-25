@@ -1,9 +1,10 @@
-// The phone's building blocks. Every screen below 1024 px is drawn from these, so a screen states
-// what it shows and leaves the sizes, the gestures and the keyboard to this file; ui/phone.css holds
-// their looks, all of it inside the phone media query, which is why a desktop never changes when they
-// do. The sizes come from the phone tokens in ui/tokens.css (--top-h, --list-row-h, --chip-h…).
+// The phone's own pieces: the drawer that holds the sidebar, the hamburger that opens it, and the
+// screens' top bar, which is the page header every desktop page draws (shell.tsx), at the phone's
+// touch sizes. ui/phone.css keeps only what a phone alone does; the bar's looks live with the page
+// header in ui/parts/base.css, the drawer's with the sidebar in ui/parts/sidebar.css.
 //
-//   TopBar          the page's bar: hamburger or back, a title (a button when it holds more), ≤ 2 glyphs
+//   TopBar          the page header of a screen drawn for the phone: menu or back, a title of one or
+//                   two lines (a button when it holds more), at most two glyphs
 //   MenuButton      the hamburger that opens the app's drawer (openDrawer), from any screen
 //   Drawer          a left sheet with a scrim: Escape, Back, a swipe and the scrim close it; focus stays in
 //   SectionHeader   a list's group label: 15/600 grey, a count, an optional action at the right
@@ -12,7 +13,7 @@
 //   RowSkeleton     a list's placeholder rows at the real row height while it loads
 //   Banner          a 32 px strip under the top bar (offline) or a tinted note with an action
 //   Group, GroupRow a grouped card of 56 px settings rows with 2 px gaps and 20/6 px corners
-//   NewChatPill     the one accent creation pill: in the drawer's foot, or floating over a list
+//   NewChatPill     the one accent creation pill, floating over a list
 //
 // The pieces both sizes share live in ui/primitives: the sheet, the menu and its rows, the list row,
 // the icon button and the segmented choice. A phone screen dresses an icon button and a segmented
@@ -54,13 +55,6 @@ export function useDrawerOpen(): boolean {
   );
 }
 
-/** Go somewhere from inside the drawer: the drawer's own history entry is replaced, so Back from the
- *  destination returns to the page under the drawer rather than reopening it. */
-export function navigateFromDrawer(path: string): void {
-  navigate(path, { replace: inLayer() });
-  closeDrawer();
-}
-
 // ── the top bar ─────────────────────────────────────────────────────────────────────────────────
 
 /** The hamburger. `pip` is the amber mark of something waiting for the operator somewhere in the drawer. */
@@ -71,11 +65,10 @@ export function MenuButton({ pip }: { pip?: boolean }) {
 
 export type TopBarProps = {
   title: ReactNode;
-  /** The second line: the model, the live state, a count. A detail page's title with one sits left;
-   *  a top-level page that asks for `center` keeps both lines centred (the Inbox's "4 unread"). */
+  /** The line under the title: a count, the live state of a page. */
   sub?: ReactNode;
-  /** Centred, as a top-level page's title is. */
-  center?: boolean;
+  /** The line over the title: where the thing lives (a chat's project), read before its name. */
+  over?: ReactNode;
   /** A pushed page: the back arrow instead of the hamburger. */
   back?: () => void;
   /** The way out drawn as another glyph and name (a selection's ✕ "Done selecting"). */
@@ -92,20 +85,29 @@ export type TopBarProps = {
   className?: string;
 };
 
-export function TopBar({ title, sub, center, back, backIcon, backLabel, bare, pip, onTitle, titleLabel, actions, className = "" }: TopBarProps) {
+/** A screen drawn for the phone heads itself with this: the page header's own markup and classes
+ *  (`pagehead`, `pagehead-row`, `pagehead-title`, `pagehead-actions`), so it is the same 52 px bar as
+ *  every page's, from the same rules. The title starts beside the button at the left on every screen,
+ *  as the desktop's starts 24 px in on every page: a centred title moved from screen to screen with
+ *  the buttons around it. `ph-top` names a phone screen's bar for the screens and checks that look
+ *  for it. */
+export function TopBar({ title, sub, over, back, backIcon, backLabel, bare, pip, onTitle, titleLabel, actions, className = "" }: TopBarProps) {
   const words = (
     <>
-      <span className="ph-top-t">{title}</span>
-      {sub && <span className="ph-top-sub">{sub}</span>}
+      {over && <span className="pagehead-over">{over}</span>}
+      <span className="pagehead-t">{title}</span>
+      {sub && <span className="sub">{sub}</span>}
     </>
   );
   return (
-    <header className={`ph-top ${className}`}>
-      {back ? <IconButton icon={backIcon ?? "back"} label={backLabel ?? t("shell.back")} onClick={back} className="ph-ib" /> : !bare && <MenuButton pip={pip} />}
-      <div className={`ph-top-title ${center ? "center" : ""}`}>
-        {onTitle ? <button type="button" className="ph-top-tb" onClick={onTitle} aria-label={titleLabel}>{words}</button> : words}
+    <header className={`pagehead ph-top ${className}`}>
+      <div className="pagehead-row">
+        {back ? <IconButton icon={backIcon ?? "back"} label={backLabel ?? t("shell.back")} onClick={back} className="ph-ib" /> : !bare && <MenuButton pip={pip} />}
+        <div className="pagehead-title">
+          {onTitle ? <button type="button" className="pagehead-tb" onClick={onTitle} aria-label={titleLabel}>{words}</button> : words}
+        </div>
+        {actions && <div className="pagehead-actions">{actions}</div>}
       </div>
-      {actions ? <div className="ph-top-actions">{actions}</div> : center ? <span className="ph-top-spacer" aria-hidden /> : null}
     </header>
   );
 }
@@ -113,14 +115,15 @@ export function TopBar({ title, sub, center, back, backIcon, backLabel, bare, pi
 // ── the drawer ──────────────────────────────────────────────────────────────────────────────────
 
 /**
- * A sheet from the left over a scrim. It takes a history entry while open, so Android's back gesture
- * and the browser's Back close it instead of leaving the page; Escape, a tap on the scrim and a swipe
- * to the left close it too. Focus moves into it on open, Tab stays inside, and focus returns to the
+ * A sheet from the left over a scrim, holding the sidebar (drawer.tsx). It takes a history entry
+ * while open, so Android's back gesture and the browser's Back close it instead of leaving the page,
+ * and a move from inside it takes that entry's place (router.ts); Escape, a tap on the scrim and a
+ * swipe to the left close it too. Focus moves into it on open, Tab stays inside, and focus returns to the
  * control that opened it. Its contents are drawn only while it is open (and through the slide that
  * closes it): mounted but inert, its rows of recents duplicated every row of the page under it for
  * anything that looked a chat up by its id.
  */
-export function Drawer({ open, onClose, label, children, footer, className = "" }: { open: boolean; onClose: () => void; label: string; children: ReactNode; footer?: ReactNode; className?: string }) {
+export function Drawer({ open, onClose, label, children, className = "" }: { open: boolean; onClose: () => void; label: string; children: ReactNode; className?: string }) {
   const panel = useRef<HTMLElement>(null);
   const [drag, setDrag] = useState(0);
   const [mounted, setMounted] = useState(open);
@@ -186,8 +189,7 @@ export function Drawer({ open, onClose, label, children, footer, className = "" 
         }}
         onPointerCancel={() => { start.current = null; setDrag(0); }}
       >
-        <div className="ph-drawer-body">{(open || mounted) && children}</div>
-        {footer && (open || mounted) && <div className="ph-drawer-foot">{footer}</div>}
+        {(open || mounted) && children}
       </aside>
     </div>
   );
@@ -305,9 +307,9 @@ export function GroupRow({ icon, title, sub, value, href, onClick, danger, chevr
   return <div className={cls}>{body}</div>;
 }
 
-export function NewChatPill({ label, icon = "compose", onClick, floating }: { label: string; icon?: IconName; onClick: () => void; floating?: boolean }) {
+export function NewChatPill({ label, icon = "compose", onClick }: { label: string; icon?: IconName; onClick: () => void }) {
   return (
-    <button type="button" className={`ph-newchat ${floating ? "fab" : ""}`} onClick={onClick}>
+    <button type="button" className="ph-newchat" onClick={onClick}>
       <Icon name={icon} size={18} />
       <span>{label}</span>
     </button>

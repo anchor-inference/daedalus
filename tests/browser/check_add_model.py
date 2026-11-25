@@ -29,7 +29,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 
 # The same invented installation the pictures are taken of.
 from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402
@@ -90,7 +90,6 @@ def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-unty
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en")
         page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
-        reveal_composer(page)
         page.locator(".composer .model-select").first.click()
         page.wait_for_selector(".model-picker [role=option]", timeout=5000)
         if page.locator(".model-picker input:not(.model-search)").count():
