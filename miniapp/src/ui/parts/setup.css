@@ -461,6 +461,7 @@ input.field[type="range"] {
 /* Keep the newest-message shortcut above a card of any height. */
 .composer-jump-anchor { position:relative; flex:none; height:0; }
 .composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); }
+@media (max-width: 1023px) { .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); } .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; } }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
 .search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
@@ -487,16 +488,14 @@ input.field[type="range"] {
   .chat-scroll { overflow-x:hidden; padding-top:var(--space-3); }
   .chat-head .head-status { max-width:40%; gap:var(--space-1); font-size:var(--fs-12); }
   .chat-head .head-status > span:not(.dot):not(.num) { display:none; }
-  .thinking-head { min-height:var(--row-h-touch); flex-wrap:wrap; gap:var(--space-1); }
+  .thinking-head { flex-wrap:wrap; }
   /* What the run did wraps under the head rather than going missing: without it a phone said less
      about the same run than the other two sizes. */
   .thinking-head .families { flex:1 1 100%; order:1; }
   .sysnote-head { min-height:var(--row-h-touch); }
   .run-disclosure { flex:none; }
   .activity { border-left:1px solid var(--line-strong); padding-left:var(--space-2); }
-  .msg-actions .iconbtn.small, .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
-  .msg-actions { opacity:1; }
+  .chat-head .iconbtn, .pagehead .iconbtn, .artifact-actions .iconbtn.small { min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
   .composer-row .model-select, .composer-row .composer-access { min-height:var(--row-h-touch); }
   .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }

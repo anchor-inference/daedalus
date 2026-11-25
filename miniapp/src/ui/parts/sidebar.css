@@ -7,7 +7,6 @@
 @media (min-width: 1024px) {
   /* Folded, --sidebar-w is 0 and the screen has the window. */
   .app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
-  .tabbar { display: none; }
   .main { grid-column: 2; min-width: 0; }
   /* The column is fixed rather than a grid item: beside a long conversation, a scrolling column inside
      the grid sent Blink into a layout loop that froze the page. The grid keeps a column of its width,
@@ -232,4 +231,15 @@
   .sidebar-foot { height: calc(var(--tap) + var(--space-3)); }
   .sb-account { height: var(--tap); }
   .sb-avatar { width: 24px; height: 24px; }
+}
+
+/* On a phone: the drawer around the sidebar. */
+@media (max-width: 1023px) {
+  /* the drawer: what only a phone's drawer does — slide in over a scrim, follow a finger out */
+  .ph-drawer-root { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 1); pointer-events: none; }
+  .ph-drawer-root.open { pointer-events: auto; }
+  .ph-scrim { position: absolute; inset: 0; background: var(--scrim); opacity: 0; transition: opacity var(--t-base); }
+  .ph-drawer-root.open .ph-scrim { opacity: 1; }
+  .ph-drawer { position: absolute; top: 0; bottom: 0; left: 0; width: var(--drawer-w); display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); background: var(--bg); transform: translateX(-102%); transition: transform var(--t-base) var(--ease-out), visibility 0s linear var(--t-base); visibility: hidden; outline: none; touch-action: pan-y; }
+  .ph-drawer-root.open .ph-drawer { transform: none; visibility: visible; transition: transform var(--t-base) var(--ease-out); }
 }

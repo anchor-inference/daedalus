@@ -9,7 +9,7 @@ import { Dot } from "../ui/components";
 import { Icon, type IconName } from "../icons";
 import { t } from "../i18n";
 import { PrivateBadge } from "../privatechat";
-import { TopBar } from "../ui/phone";
+import { TopBar } from "../shell";
 import { IconButton, MenuRow, Sheet } from "../ui/primitives";
 import { ChatSearchBody } from "../chatsearch";
 

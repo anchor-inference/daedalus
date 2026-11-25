@@ -4,7 +4,7 @@
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
-import { Banner } from "./ui/phone";
+import { Banner } from "./ui/primitives";
 import { MenuRow, Popover } from "./ui/primitives";
 import { useOffline } from "./store";
 import { Icon } from "./icons";

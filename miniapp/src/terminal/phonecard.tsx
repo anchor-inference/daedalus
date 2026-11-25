@@ -13,7 +13,7 @@ import { peek, useOffline, useQuery } from "../store";
 import { colourVar, initials } from "../team/team";
 import { alwaysServer, askWords, canAlways } from "../staff/model";
 import { PhoneAskAnswers } from "../staff/phoneask";
-import { Banner, RowSkeleton } from "../ui/phone";
+import { Banner, RowSkeleton } from "../ui/primitives";
 import { Menu, Sheet, useLongPress } from "../ui/primitives";
 import { cardStatus, ownerLine, previewRows, runStyle, running } from "./preview";
 import { useTerminalCommands } from "./rowmenu";

@@ -13,7 +13,7 @@ import { t } from "./i18n";
 import { relTime } from "./format";
 import { insideTerminal } from "./terminal/keys";
 import { latinKey } from "./navigation";
-import { MenuButton } from "./ui/phone";
+import { MenuButton } from "./ui/primitives";
 
 // The names, icons and counts of the destinations live with the resolver that places them; these
 // are the same objects, re-exported for the screens that have always imported them from here.
@@ -44,7 +44,7 @@ export function Page({ width = "list", className = "", children }: { width?: Pag
  *  top-level page and gets the hamburger that opens the drawer, since the drawer is the only way to
  *  the other destinations there; the title stands beside it, and the filters sit in a row under it,
  *  because a phone has no room beside a title for them. A screen drawn for the phone alone heads
- *  itself with TopBar (ui/phone.tsx), which draws this same markup.
+ *  itself with TopBar (below), which draws this same markup.
  *
  *  `lead` stands between the back or menu button and the title, so a face beside a two-line title
  *  keeps both lines beside it instead of the subtitle wrapping under the face; with a `lead` the
@@ -67,6 +67,57 @@ export function PageHeader({ title, subtitle, filters, actions, ruled, back, lea
         {actions && <div className="pagehead-actions">{actions}</div>}
       </div>
       {phone && filters}
+    </header>
+  );
+}
+
+// ── the phone's own bar ───────────────────────────────────────────────────────────────────
+
+export type TopBarProps = {
+  title: ReactNode;
+  /** The line under the title: a count, the live state of a page. */
+  sub?: ReactNode;
+  /** The line over the title: where the thing lives (a chat's project), read before its name. */
+  over?: ReactNode;
+  /** A pushed page: the back arrow instead of the hamburger. */
+  back?: () => void;
+  /** The way out drawn as another glyph and name (a selection's ✕ "Done selecting"). */
+  backIcon?: IconName;
+  backLabel?: string;
+  /** No hamburger and no back (a full-screen flow with its own way out). */
+  bare?: boolean;
+  pip?: boolean;
+  /** The title is a button when it holds more than it shows: the full title, the model, the live state. */
+  onTitle?: () => void;
+  titleLabel?: string;
+  /** At most two IconButtons; everything else belongs in a ⋮ sheet. */
+  actions?: ReactNode;
+  className?: string;
+};
+
+/** A screen drawn for the phone heads itself with this: the page header's own markup and classes
+ *  (`pagehead`, `pagehead-row`, `pagehead-title`, `pagehead-actions`), so it is the same 52 px bar as
+ *  every page's, from the same rules. The title starts beside the button at the left on every screen,
+ *  as the desktop's starts 24 px in on every page: a centred title moved from screen to screen with
+ *  the buttons around it. `ph-top` names a phone screen's bar for the screens and checks that look
+ *  for it. */
+export function TopBar({ title, sub, over, back, backIcon, backLabel, bare, pip, onTitle, titleLabel, actions, className = "" }: TopBarProps) {
+  const words = (
+    <>
+      {over && <span className="pagehead-over">{over}</span>}
+      <span className="pagehead-t">{title}</span>
+      {sub && <span className="sub">{sub}</span>}
+    </>
+  );
+  return (
+    <header className={`pagehead ph-top ${className}`}>
+      <div className="pagehead-row">
+        {back ? <IconButton icon={backIcon ?? "back"} label={backLabel ?? t("shell.back")} onClick={back} className="ph-ib" /> : !bare && <MenuButton pip={pip} />}
+        <div className="pagehead-title">
+          {onTitle ? <button type="button" className="pagehead-tb" onClick={onTitle} aria-label={titleLabel}>{words}</button> : words}
+        </div>
+        {actions && <div className="pagehead-actions">{actions}</div>}
+      </div>
     </header>
   );
 }

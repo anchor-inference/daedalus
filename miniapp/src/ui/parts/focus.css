@@ -437,8 +437,18 @@
 /* ── a project on a phone (project/phone.tsx) ────────────────────────────────────────────────
    The project's tabs stand in the column rather than over it, so the conversation's composer and a
    list's last row end above them without a fixed allowance; with the keyboard up they step aside. */
-.tabbar.project-tabs { position: static; flex: none; }
-:root[data-keyboard="open"] .tabbar.project-tabs { display: none; }
+.project-tabs { flex: none; padding: 0 var(--space-1) env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
+:root[data-keyboard="open"] .project-tabs { display: none; }
+/* The shared tabs, drawn as a bar: five equal slots, each an icon over its name, the chosen one filled
+   as a chosen row is. What waits is a count on the icon's corner, in the colour of a request. */
+.project-tabs .tabs-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; overflow: visible; }
+.project-tabs .tab { position: relative; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; height: var(--tabbar-h); padding: 0; border-radius: var(--radius-sm); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.project-tabs .tab.on { color: var(--fg); }
+.project-tabs .tab .ic { width: 22px; height: 22px; }
+/* No side padding and a hair tighter: in Inter "Оркестратор" is a few pixels wider than the 78 px a
+   fifth of a 390 px phone leaves, and it lost its last letter to an ellipsis. */
+.project-tabs .tab-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -0.02em; }
+.project-tabs .tab-count { position: absolute; top: 2px; left: calc(50% + 7px); }
 .app.project-phone .screen { padding-bottom: var(--space-4); }
 .app.project-phone .main.chat-open .composer { padding-bottom: 10px; }
 :root[data-keyboard="open"] .app.project-phone .composer { padding-bottom: 6px; }
@@ -491,4 +501,144 @@
   .focus-attention .ask-answers { margin-top: 6px; }
   .focus-attention .ask-answers-row .btn, .focus-attention .ask-answers-own .btn { flex: none; min-height: var(--ctl-h); }
   .focus-attention .ask-answers-own .field { min-height: var(--ctl-h); }
+}
+
+/* On a phone: a project on a phone: the request card, the setup card, Needs decision, the terminals page and its full-screen terminal. */
+@media (max-width: 1023px) {
+  /* Terminals: one capacity line, cards with the screen's last rows, the sheets */
+  .ph-cap { flex: none; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: var(--tap); padding: 4px var(--gutter) 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .ph-cap-l { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-13); color: var(--fg-3); }
+  .ph-cap-l > .ic:last-child { margin-left: auto; color: var(--fg-3); }
+  .ph-cap[data-level="warn"] .ph-cap-l { color: var(--warn); } .ph-cap[data-level="bad"] .ph-cap-l { color: var(--bad); }
+  .ph-cbar { display: flex; width: 100%; height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
+  .ph-cbar.big { height: 8px; border-radius: 4px; }
+  .ph-cbar i { display: block; height: 100%; flex: none; }
+  .ph-cbar .o { background: var(--fg-3); }
+  .ph-cbar .n { background: var(--ok); }
+  .ph-cbar .k { background: repeating-linear-gradient(135deg, var(--ok) 0 3px, color-mix(in srgb, var(--ok) 35%, transparent) 3px 6px); }
+  .ph-cbar[data-level="warn"] .n { background: var(--warn); } .ph-cbar[data-level="warn"] .k { background: repeating-linear-gradient(135deg, var(--warn) 0 3px, color-mix(in srgb, var(--warn) 35%, transparent) 3px 6px); }
+  .ph-cbar[data-level="bad"] .n { background: var(--bad); } .ph-cbar[data-level="bad"] .k { background: repeating-linear-gradient(135deg, var(--bad) 0 3px, color-mix(in srgb, var(--bad) 35%, transparent) 3px 6px); }
+  .ph-cap-big { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+  .ph-legend { display: flex; flex-direction: column; }
+  .ph-legend > div { display: flex; align-items: center; gap: 10px; min-height: 36px; font-size: var(--fs-14); }
+  .ph-legend .sw { width: 14px; height: 14px; flex: none; border-radius: 4px; }
+  .ph-legend .sw.o { background: var(--fg-3); } .ph-legend .sw.n { background: var(--ok); } .ph-legend .sw.f { background: var(--surface-3); }
+  .ph-legend .sw.k { background: repeating-linear-gradient(135deg, var(--ok) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent); }
+  .ph-legend .v { margin-left: auto; color: var(--fg-2); }
+  .ph-kv[data-level="warn"] > :last-child { color: var(--warn); } .ph-kv[data-level="bad"] > :last-child { color: var(--bad); }
+  .ph-tcards { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--gutter); }
+  /* A terminal is a card on the page. One that asks says so in amber words in its foot and by a faint
+     amber ring; the amber stripe down its side said the same thing a third time. */
+  .ph-tcard { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); overflow: hidden; }
+  .ph-tcard.ask { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+  .ph-tcard.ended { opacity: .7; }
+  .ph-tcard-open { display: block; padding: 12px 12px 0 14px; transition: background var(--t-fast); cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  .ph-tcard-open:active { background: var(--surface-2); }
+  .ph-tcard-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .ph-tcard-hd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .ph-tcard-nm { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-14); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard .term-env { height: 24px; padding: 0 8px; margin: 0; border: 0; font-size: var(--fs-12); }
+  .ph-tcard .term-env.container { color: var(--fg-2); background: var(--surface-2); }
+  .ph-tcard-sb { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard-term { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); box-shadow: var(--shadow-ring); background: var(--term-bg, #000); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.45; white-space: pre; overflow: hidden; }
+  .ph-tcard-term > div { overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
+  .ph-tcard-ft { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 8px 0 14px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-tcard-st { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard-st[data-level="warn"] { color: var(--warn); } .ph-tcard-st[data-level="bad"] { color: var(--bad); }
+  .ph-terms .ph-page-pad { padding-bottom: var(--space-1); }
+  .ph-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-ask-row { display: flex; gap: var(--space-2); }
+  .ph-ask-wide { width: 100%; }
+  .ph-ask .btn, .ph-ask-own .btn { min-height: var(--tap); }
+  .ph-ask-own .field { min-height: var(--tap); font-size: var(--fs-16); }
+  .ph-ask-note { font-size: var(--fs-13); color: var(--warn); }
+  .ph-ask-own { display: flex; flex-direction: column; gap: var(--space-2); }
+  /* The full-screen terminal: the page's bar (back, the title in the terminal's face over where it
+     runs, the command jumps, ⋮), round keys, and a compose line in the composer's shape. With the
+     soft keyboard up the keys and the line become one raised card above it, so the terminal keeps
+     every row the keyboard leaves. */
+  .term-phone { background: var(--term-bg, var(--bg)); }
+  .term-phone-head { min-height: var(--top-h); padding: 0 var(--space-1); gap: 0; border: 0; background: var(--bg); }
+  .term-phone-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .term-phone-head .iconbtn:disabled { opacity: .35; }
+  .term-phone-titles { padding: 0 var(--space-2); }
+  .term-phone-title { font-size: var(--fs-14); font-weight: 500; }
+  .term-phone-cwd { display: flex; align-items: center; gap: 4px; font-family: inherit; font-size: var(--fs-13); color: var(--fg-3); }
+  .term-phone-cwd.host { color: var(--warn); }
+  .term-phone-actions { padding: var(--space-2) var(--space-2) var(--space-1); border: 0; background: var(--bg); }
+  .term-phone-ask-text { font-size: var(--fs-13); }
+  /* The member's request above the keys: buttons of equal weight, the refusal as easy as the grant. */
+  .term-phone-actions .ask-answers-row { gap: var(--space-2); }
+  .term-phone-actions .ask-answers-row .btn { position: relative; min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); font-weight: 500; }
+  .term-phone-actions .ask-answers-row .btn::after { content: ""; position: absolute; inset: -4px 0; }
+  .term-phone-actions .ask-answers-row .ask-answers-write { background: none; color: var(--fg-2); border: 0; }
+  .term-keys { gap: 6px; padding: 6px 8px; border: 0; background: var(--bg); }
+  .term-key { position: relative; min-width: 44px; height: 36px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-14); }
+  .term-key::after { content: ""; position: absolute; inset: -4px 0; }
+  .term-key.on { background: var(--primary); color: var(--primary-ink); }
+  .term-key.locked { box-shadow: inset 0 -2px 0 var(--fg); }
+  .term-compose { align-items: center; gap: 4px; margin: 0 var(--space-2) var(--space-2); padding: 6px; border-radius: var(--radius-composer); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-sm); }
+  .term-compose-field { min-height: 36px; padding: 7px 8px; border: 0; border-radius: 0; background: none; font-size: var(--fs-16); line-height: 22px; }
+  .term-compose-field:focus { border: 0; }
+  .term-compose .iconbtn { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; }
+  .term-compose .iconbtn::after { content: ""; position: absolute; inset: -4px; }
+  .term-compose-enter { font-size: var(--fs-17); }
+  :root[data-keyboard="open"] .term-phone .term-keys { margin: 0 var(--space-2); padding: 6px 6px 2px; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--surface-1); box-shadow: inset 1px 1px 0 var(--line), inset -1px 0 0 var(--line); }
+  :root[data-keyboard="open"] .term-phone .term-compose { margin-top: 0; margin-bottom: var(--space-2); border-radius: 0 0 var(--radius-xl) var(--radius-xl); box-shadow: inset 1px -1px 0 var(--line), inset -1px 0 0 var(--line); }
+  :root[data-keyboard="open"] .term-phone .term-key { background: var(--surface-2); }
+  .ph-asks { gap: var(--space-2); }
+  .ph-ask-card { gap: 10px; padding: 12px 14px; border: 0; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
+  .ph-ask-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-14); font-weight: 600; color: var(--warn); }
+  .ph-ask-head .staff-request-id { margin-left: auto; font-size: var(--fs-12); font-weight: 400; color: var(--fg-3); }
+  /* The card: who asks and how long ago, the request in two lines, the answers. The amber is in the
+     word and its glyph; the amber edge down the card's side said it a third time. */
+  .needs-card { flex: none; display: flex; flex-direction: column; gap: 10px; margin: var(--space-2) var(--gutter); padding: 12px 14px 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); color: var(--fg); }
+  .needs-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); color: var(--fg-3); }
+  .needs-head > .ic { flex: none; color: var(--warn); }
+  .needs-card.answered .needs-head > .ic { color: var(--ok); }
+  .needs-word { flex: none; font-weight: 600; color: var(--warn); }
+  .needs-card.answered .needs-word { color: var(--fg); }
+  .needs-who { flex: 1; min-width: 0; font-size: var(--fs-14); }
+  .needs-more { position: relative; flex: none; display: inline-flex; align-items: center; gap: 2px; height: 28px; margin: -4px -6px -4px 0; padding: 0 4px 0 8px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .needs-more::after { content: ""; position: absolute; inset: -8px -4px; }
+  .needs-text { font-size: var(--fs-15); line-height: 1.4; overflow-wrap: anywhere; }
+  .needs-card.answered .needs-text { color: var(--fg-2); }
+  .needs-code { display: block; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+  .needs-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+  .needs-card .btn { min-height: var(--tap); padding: 0 var(--space-4); }
+  /* An option is read whole: on a narrower phone it takes a second line inside its button rather than
+     losing its end to an ellipsis, which hid the word that told two options apart. */
+  .needs-row .btn.grow { flex: 1 1 auto; height: auto; padding: 6px 14px; white-space: normal; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
+  .needs-links { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: -4px 0 -8px -8px; }
+  .needs-links .btn { color: var(--fg-2); font-weight: 400; }
+  .needs-pen { flex: none; width: var(--tap); height: var(--tap); color: var(--fg-2); }
+  .needs-held { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: var(--space-2); height: var(--tap); padding: 0 var(--space-4); border-radius: 12px; box-shadow: inset 0 0 0 1.5px var(--fg); font-size: var(--fs-14); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .needs-held .ic { flex: none; }
+  .needs-note { display: flex; align-items: flex-start; gap: var(--space-2); padding: 10px 12px; border-radius: 12px; font-size: var(--fs-14); line-height: 1.4; }
+  .needs-note .ic { flex: none; margin-top: 2px; }
+  .needs-note.bad { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--fg); } .needs-note.bad .ic { color: var(--bad); }
+  .needs-note.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .needs-own { display: flex; align-items: center; gap: var(--space-2); }
+  .needs-own .iconbtn { width: var(--tap); height: var(--tap); }
+  .needs-own .field { flex: 1; min-width: 0; height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); padding: 0 14px; font-size: var(--fs-16); }
+  /* A project still being set up: the steps done and left, and the button that ends it. */
+  .setup-card { flex: none; margin: var(--space-2) var(--gutter); padding: 16px 14px 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
+  .setup-card h3 { margin: 0; font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
+  .setup-card p { margin: 4px 0 6px; font-size: var(--fs-14); color: var(--fg-2); }
+  .setup-card ul { list-style: none; margin: 0 0 var(--space-3); padding: 0; }
+  .setup-card li > button, .setup-step { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--tap); padding: 0; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
+  .setup-card li > button > .ic { margin-left: auto; color: var(--fg-3); }
+  .setup-card li.done .setup-step { color: var(--fg-2); }
+  .setup-mark { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); color: var(--primary-ink); }
+  .setup-card li.done .setup-mark { box-shadow: none; background: var(--ok); }
+  /* Needs decision: rows to answer, cards to review, and what is blocked. */
+  .ph-card { margin: 0 var(--gutter) var(--space-2); padding: 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
+  .ph-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--fs-16); }
+  .ph-card-head b { flex: 1; min-width: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .ph-card p { margin: 6px 0 12px; font-size: var(--fs-14); line-height: 1.4; color: var(--fg-2); overflow-wrap: anywhere; }
+  .ph-card .waiting { color: var(--warn); }
+  .ph-card .btn { min-height: var(--tap); }
+  .ph-attention .ph-page-pad { padding-top: var(--space-2); }
+  /* An empty or failed list puts its state in the middle of the page, not under the bar. */
+  .ph-board .ph-page-body.list:has(> .ph-empty), .ph-attention .ph-page-body.list:has(> .ph-empty) { display: flex; flex-direction: column; }
 }

@@ -110,36 +110,17 @@ a { color: var(--accent); text-decoration: none; }
 .screen.page-list, .screen.page-reading, .screen.page-full { padding-inline: 24px; }
 .screen.page-list { width: min(100%, calc(880px + 48px)); margin-inline: auto; }
 .screen.page-reading { width: min(100%, calc(760px + 48px)); margin-inline: auto; }
-.tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-  /* Opaque: at 88 % over a blur the rows scrolling under it stayed readable between the tab labels,
-     a line of an inbox card legible behind "Board" and "Inbox", and blur is not drawn everywhere. */
-  background: var(--bg);
-  border-top: 1px solid var(--line);
-}
-.tabbar > a, .tabbar > button {
-  min-height: 50px; background: none; border: 0; padding: 4px 0 2px; color: var(--fg-3); text-decoration: none;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: var(--fs-11); font-weight: 500; border-radius: var(--radius-md); cursor: pointer;
-}
-.tabbar > .active { color: var(--fg); }
-.tabbar > .active .glyph { background: var(--surface-3); }
-.tabbar .glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 28px; border-radius: 14px; line-height: 1; transition: background var(--t-fast); }
-/* A count over an icon is one thing wherever it sits (the tab bar, the rail, the bell, the drawer, the
-   launcher): a small round plate in the alert colour with the frame's colour for its figure, which
-   every theme keeps readable against it; a count that asks for nothing is the grey .quiet plate. */
-.tab-badge { position: absolute; top: -6px; right: -14px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--bg); font-size: var(--fs-11); line-height: 16px; text-align: center; font-weight: 600; }
-.tab-badge.dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 1px; right: 8px; background: var(--warn); }
-.more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 0 8px; }
-.more-item { position: relative; display: grid; justify-items: center; gap: 8px; padding: 14px 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-13); font-weight: 500; text-align: center; }
-/* A project's More holds its settings, which open a sheet rather than a page: that item is a button,
-   and without these it wore the browser's border and font beside the links. */
-button.more-item { border: 0; font-family: inherit; cursor: pointer; }
-.more-item .ic { color: var(--fg-2); }
-.more-item.active { background: var(--surface-3); }
-.more-item.active .ic { color: var(--fg); }
-.more-item .tab-badge { top: 8px; right: 8px; }
+/* The dot a Settings section carries when something in it is missing. */
+.tab-badge.dot { position: absolute; width: 8px; height: 8px; border-radius: var(--radius-pill); top: 1px; right: 8px; background: var(--warn); }
 /* The language, under the destinations: the sheet is the menu on a phone. */
 .more-lang { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-13); font-weight: 500; }
 .sidebar { display: none; }
+
+/* On a phone: the page and its screens. */
+@media (max-width: 1023px) {
+  body { background: var(--bg); }
+  .main { background: var(--bg); }
+  /* The bottom bar is gone from every page but a project's, so a page no longer keeps 76 px of
+     nothing under its last row. */
+  .screen { padding: 4px var(--gutter) calc(var(--space-6) + env(safe-area-inset-bottom)); }
+}

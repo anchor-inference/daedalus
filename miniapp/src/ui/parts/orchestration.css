@@ -56,3 +56,22 @@
 .dropdown.form-select { display: flex; max-width: none; }
 .dropdown.form-select .dropdown-btn { flex: 1; min-width: 0; max-width: none; font-weight: 400; }
 .dropdown.form-select .dropdown-value { flex: 1; text-align: left; }
+
+/* On a phone: the main orchestrator's chat. */
+@media (max-width: 1023px) {
+  /* The main chat's flow: a project being set up, and each dispatch as a card. */
+  .main-flow .main-setup, .chat .main-setup { gap: var(--space-3); padding: 14px; border: 0; border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-15); }
+  .main-setup > .ic { color: var(--warn); }
+  .main-setup .btn { height: 40px; padding: 0 var(--space-4); border: 0; border-radius: 12px; background: var(--primary); box-shadow: none; color: var(--primary-ink); font-size: var(--fs-14); font-weight: 500; }
+  .dispatch-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 0; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
+  .dispatch-head { gap: var(--space-2); font-size: var(--fs-14); }
+  .dispatch-project { font-size: var(--fs-15); font-weight: 600; color: var(--fg); }
+  .dispatch-seq { font-size: var(--fs-15); font-weight: 600; color: var(--fg); }
+  .dispatch-state { margin-left: auto; height: 22px; display: inline-flex; align-items: center; padding: 0 7px; border: 0; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .dispatch-age { font-size: var(--fs-13); }
+  .dispatch-title { font-size: var(--fs-15); color: var(--fg-2); }
+  .dispatch-last { font-size: var(--fs-13); }
+  .dispatch-actions { justify-content: flex-start; gap: var(--space-2); margin-top: 6px; }
+  .dispatch-actions .btn { height: 40px; padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .dispatch-actions .dispatch-open { background: var(--surface-2); color: var(--fg); }
+}

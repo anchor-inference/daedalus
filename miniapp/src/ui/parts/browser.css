@@ -400,3 +400,12 @@
 .panel-tab .tab-mark.busy { animation: dotpulse 1.4s ease-in-out infinite; }
 .panel-tab .tab-mark.attn { background: var(--warn); }
 .toast .toast-action { color: var(--accent); font-weight: 600; }
+
+/* On a phone: Settings → Navigation. */
+@media (max-width: 1023px) {
+  /* Settings → Navigation: a phone's browser has no drag and drop, so the grip goes and its width is
+     the name's; the arrows and the place selector do the moving. */
+  .nav-cfg-grip { display: none; }
+  .nav-cfg-row { gap: var(--space-1); padding: 0; }
+  .nav-cfg-place { width: 96px; }
+}

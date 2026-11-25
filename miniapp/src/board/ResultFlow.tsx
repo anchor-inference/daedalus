@@ -20,7 +20,7 @@ import { ArtifactCard } from "../artifact";
 import { filesKey, keptBase, type KeptFile } from "../keptfiles";
 import { downloadHref } from "../preview";
 import { Icon } from "../icons";
-import { EmptyState } from "../ui/phone";
+import { EmptyState } from "../ui/primitives";
 import { Segmented, Select, Sheet } from "../ui/primitives";
 import { DecisionSlot } from "./slot";
 
