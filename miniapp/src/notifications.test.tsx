@@ -6,7 +6,7 @@ import { act as reactAct } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Notification } from "./api";
-import { ActionButtons, act, byDay, byProject, entryPath, noticeLine } from "./notifications";
+import { ActionButtons, act, byDay, byProject, entryPath, markUnseen, noticeLine, whereLine } from "./notifications";
 import { setLang } from "./i18n";
 import { prime } from "./store";
 
@@ -24,12 +24,12 @@ beforeEach(() => setLang("en"));
 afterEach(() => vi.restoreAllMocks());
 
 describe("grouping", () => {
-  it("puts the reader's today first and everything before it under Earlier", () => {
+  it("puts the reader's today first, then yesterday, and everything before them under Earlier", () => {
     const now = new Date(2026, 8, 24, 15, 0);
     const today = new Date(2026, 8, 24, 0, 5).toISOString();
     const yesterday = new Date(2026, 8, 23, 23, 55).toISOString();
     const groups = byDay([entry(3, { updated_at: today }), entry(2, { updated_at: yesterday }), entry(1, { updated_at: "2026-09-01T10:00:00Z" })], now);
-    expect(groups.map((g) => [g.label, g.entries.map((e) => e.id)])).toEqual([["Today", [3]], ["Earlier", [2, 1]]]);
+    expect(groups.map((g) => [g.label, g.entries.map((e) => e.id)])).toEqual([["Today", [3]], ["Yesterday", [2]], ["Earlier", [1]]]);
     expect(byDay([], now)).toEqual([]);
   });
 
@@ -37,6 +37,19 @@ describe("grouping", () => {
     const names = new Map([["p1", "Bakery"], ["p2", "Expenses"]]);
     const groups = byProject([entry(5, { project_id: "p2" }), entry(4), entry(3, { project_id: "p1" }), entry(2, { project_id: "p2" }), entry(1, { project_id: "gone" })], names);
     expect(groups.map((g) => [g.label, g.entries.map((e) => e.id)])).toEqual([["Expenses", [5, 2]], ["Bakery", [3]], ["Outside projects", [4, 1]]]);
+  });
+});
+
+describe("marking unread", () => {
+  it("asks the host, which keeps the mark, and takes the badge from its answer", async () => {
+    const fetch = answer(200, { marked: 1, summary: { unseen: 3, needs_you: 1 } });
+    await markUnseen([7]);
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/notifications/unseen");
+    expect(JSON.parse(String(init?.body))).toEqual({ ids: [7] });
+    fetch.mockClear();
+    await markUnseen([]);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -112,6 +125,11 @@ describe("the buttons", () => {
 });
 
 describe("the line under a notification", () => {
+  it("says where an entry came from without its kind, for the Inbox's own row", () => {
+    expect(whereLine(entry(4, { category: "spend" }), new Map())).toBe("the whole app");
+    expect(whereLine(entry(5, { project_id: "p1" }), new Map([["p1", "Bakery"]]))).toBe("Bakery");
+  });
+
   it("names the project once when the session's title already carries it", () => {
     prime("/api/sessions", { sessions: [{ id: "o1", title: "Orchestrator · Anchor Inference" }, { id: "s1", title: "Anchor Inference" }] });
     const names = new Map([["p1", "Anchor Inference"]]);
