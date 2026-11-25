@@ -120,7 +120,11 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     bs.add("g1", scene="qr", owner_id=S1)
     box = scenes["qr"].boxes["qr"]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    url = f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}&panel=browser"
+    # The panel's own width (30 % of the window, at most 520 px) fits the page so small that even zoomed
+    # all the way the code stays just under the screen pixels a module this check asks for. An operator
+    # reading a code drags the panel wider; the stored width is that drag, about the old 42 % of the chat.
+    context.add_init_script("try { localStorage.setItem('daedalus.width.panel', '600'); } catch (e) {}")
+    url =f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}&panel=browser"
     page = open_page(context, bs, stub, url)
     page.wait_for_selector(f"{VIEWER}[data-state='live']", timeout=10000)
     wait_frames(page, ROOT, 1)
