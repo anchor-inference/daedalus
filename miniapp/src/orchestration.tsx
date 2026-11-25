@@ -128,7 +128,7 @@ export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
   const mainSub = mainRow?.status === "running" ? t("main.entry.working") : going ? plural("main.entry.going", going) : t("main.entry.sub");
   return (
     <div className="ph-page ph-orch">
-      <TopBar center title={t("mode.orchestration")} pip={waiting > 0} />
+      <TopBar title={t("mode.orchestration")} pip={waiting > 0} />
       <div className="ph-page-body list">
         <Row
           className="ph-orch-main"
@@ -150,7 +150,7 @@ export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
             action={<button type="button" className="ph-btn" onClick={data.projects.length === 0 ? () => openNewProject("orchestration") : onProjects}>{t(data.projects.length === 0 ? "np.orch.title" : "shell.projects")}</button>} />
         )}
       </div>
-      <NewChatPill floating icon="plus" label={t("ph.newproject")} onClick={() => openNewProject("orchestration")} />
+      <NewChatPill icon="plus" label={t("ph.newproject")} onClick={() => openNewProject("orchestration")} />
     </div>
   );
 }

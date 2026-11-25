@@ -19,7 +19,7 @@
 // tab is the new chat's default mode, so an operator looking at their computer chats who presses New
 // chat starts another one of those.
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { BrowserUserStatus, SessionSummary } from "./api";
 import { COMPUTER, type ComputerState, wordsText } from "./computer";
 import { USER_STATUS, chromeState } from "./browser/yourchrome";
@@ -231,73 +231,6 @@ export function takeComputerSheet(sessionId: string): boolean {
 
 export function tabLabel(tab: KindTab): string {
   return t(`kind.tab.${tab}`);
-}
-
-/**
- * The tabs over a chat list: All, Chats, Computer, Browser, Remote. Drawn as a tab bar with an underline, not
- * as pills, so they do not read as one more row of the status chips under them. The underline slides
- * to the next tab rather than jumping, measured from the buttons themselves, because the labels are as wide
- * as their words and Russian ones are half as wide again. Arrows move between them, as a tab list's do.
- */
-export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindTab; onChange: (tab: KindTab) => void; counts?: Record<KindTab, number>; className?: string }) {
-  const box = useRef<HTMLDivElement>(null);
-  const pill = useRef<HTMLSpanElement>(null);
-  // The underline is placed on the element itself, not through state. The tabs stretch with the
-  // sidebar, so dragging its edge resizes them every frame, and a state update per measurement made
-  // React commit once per pointer move for the whole drag.
-  useLayoutEffect(() => {
-    const place = () => {
-      const bar = box.current;
-      if (!bar) return;
-      // Five tabs do not fit a sidebar of the usual width with every label written out, least of all
-      // in Russian. Where they do not, the kinds that have an icon keep only the icon and the count,
-      // and the chosen one keeps its word: measured with the words out, so widening the column brings
-      // them back. The words stay in the page, clipped, for a screen reader and the tooltip says them.
-      delete bar.dataset.compact;
-      const cut = bar.scrollWidth > bar.clientWidth + 1 || [...bar.querySelectorAll<HTMLElement>(".kind-tab")].some((b) => b.scrollWidth > b.clientWidth + 1);
-      if (cut) bar.dataset.compact = "";
-      const on = bar.querySelector<HTMLElement>(`[data-kind-tab="${tab}"]`);
-      const line = pill.current;
-      if (!on || !line) return;
-      // The first placement must not slide in from the left edge.
-      const first = !line.dataset.placed;
-      if (first) line.style.transition = "none";
-      line.style.transform = `translateX(${on.offsetLeft}px)`;
-      line.style.width = `${on.offsetWidth}px`;
-      line.dataset.placed = "1";
-      if (first) { void line.offsetWidth; line.style.transition = ""; }
-    };
-    place();
-    if (typeof ResizeObserver === "undefined" || !box.current) return;
-    const observer = new ResizeObserver(place);
-    observer.observe(box.current);
-    return () => observer.disconnect();
-  }, [tab, counts?.all, counts?.remote]);
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const at = KIND_TABS.indexOf(tab);
-    const next = KIND_TABS[(at + (e.key === "ArrowRight" ? 1 : KIND_TABS.length - 1)) % KIND_TABS.length];
-    onChange(next);
-    box.current?.querySelector<HTMLElement>(`[data-kind-tab="${next}"]`)?.focus();
-  };
-  return (
-    <div ref={box} className={`kind-tabs ${className}`} role="tablist" aria-label={t("kind.tabs.label")} onKeyDown={onKey}>
-      <span ref={pill} className="kind-tabs-pill" data-on={tab} aria-hidden />
-      {KIND_TABS.map((k) => {
-        const icon = k === "all" ? null : kindIcon(k);
-        const n = counts?.[k];
-        return (
-          <button key={k} type="button" role="tab" data-kind-tab={k} aria-selected={tab === k} tabIndex={tab === k ? 0 : -1}
-            className={`kind-tab ${tab === k ? "on" : ""}`} onClick={() => onChange(k)} title={t(`kind.tab.${k}.title`)}>
-            {icon && <Icon name={icon} size={13} />}
-            <span>{tabLabel(k)}</span>
-            {n !== undefined && n > 0 && k !== "all" && k !== "chat" && <b className="num">{n}</b>}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 /** The small mark a computer, Chrome or remote chat carries where kinds are listed together; nothing for a

@@ -28,7 +28,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import S1, SETTINGS, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -281,7 +281,6 @@ def composer(browser, width: int, failures: list[str]) -> None:  # type: ignore[
     sent: list = []
     context, page = open_page(browser, width, f"agents/{S1}", settings_with_models(), sent)
     page.wait_for_selector(".composer", timeout=15000)
-    reveal_composer(page)
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-picker [role=option]")
     page.wait_for_timeout(200)

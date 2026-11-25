@@ -532,6 +532,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "shell.sidebar.label": { en: "Sessions", ru: "Сессии" },
   "shell.sidebar.collapse": { en: "Fold the sidebar (Ctrl/⌘ \\)", ru: "Свернуть боковую панель (Ctrl/⌘ \\)" },
   "nav.menu": { en: "Menu", ru: "Меню" },
+  "nav.menu.close": { en: "Close the menu", ru: "Закрыть меню" },
   "shell.back": { en: "Back", ru: "Назад" },
   "shell.waiting": { en: "{n} waiting", ru: "{n} ждут вас" },
 
@@ -1966,14 +1967,12 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "projects.orchestrated.names": { en: "{name} and {n} more", ru: "{name} и ещё {n}" },
   "projects.orchestrated.open": { en: "Open orchestration →", ru: "Открыть оркестрацию →" },
   // The phone: the drawer, the home, the Chats page and the composer's sheets.
-  "ph.mode": { en: "Mode", ru: "Режим" },
   "ph.chats": { en: "Chats", ru: "Чаты" },
   "ph.chats.count": { en: "{n} chat|{n} chats", ru: "{n} чат|{n} чата|{n} чатов" },
   "ph.newchat": { en: "New chat", ru: "Новый чат" },
   "ph.newchat.in": { en: "New chat in {name}", ru: "Новый чат в {name}" },
   "ph.newproject": { en: "New project", ru: "Новый проект" },
   "ph.seeall": { en: "See all", ru: "Все" },
-  "ph.recents": { en: "Recents", ru: "Недавние" },
   "ph.live": { en: "Active now", ru: "Сейчас в работе" },
   "ph.live.confirmed": { en: "last confirmed {time}", ru: "подтверждено в {time}" },
   "ph.loop": { en: "Loop", ru: "Цикл" },

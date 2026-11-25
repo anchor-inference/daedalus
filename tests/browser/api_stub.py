@@ -2511,33 +2511,37 @@ class Unhandled:
 
 
 def open_drawer(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the phone's drawer from whatever screen is showing: every top bar has the hamburger."""
+    """Open the phone's drawer from whatever screen is showing: every top bar has the hamburger. The
+    drawer is the desktop's sidebar, so what is in it is found by the sidebar's own selectors."""
     page.locator(".ph-menu:visible").first.click()
-    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=10000)
+    page.wait_for_selector(".ph-drawer-root.open .sidebar .sb-nav", timeout=10000)
     page.wait_for_timeout(300)
 
 
 def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-untyped-def]
-    """Go to a destination from the phone's drawer: a daily one is a row of it, the rest are in its
-    More sheet. `mode` switches the drawer to that mode's lists first ("agents", "orchestration")."""
+    """Go to a destination from the phone's drawer: a pinned one is a row of it, the rest are in its
+    More sheet. `mode` first chooses that mode ("agents", "orchestration") from the drawer's mode menu,
+    which goes to the mode's home, and opens the drawer again there."""
     open_drawer(page)
     if mode:
-        page.locator(".ph-drawer .ph-seg button").nth(0 if mode == "agents" else 1).click()
-        page.wait_for_timeout(200)
-    row = page.locator(f".ph-drawer-root.open [data-screen='{screen}']")
+        switch_mode(page, mode, scope=".ph-drawer-root.open")
+        page.wait_for_timeout(400)
+        open_drawer(page)
+    row = page.locator(f".ph-drawer-root.open [data-nav='{screen}']")
     if row.count():
         row.first.click()
     else:
-        page.locator(".ph-drawer-root.open [data-nav='more']").click()
+        page.locator(".ph-drawer-root.open [data-nav='menu']").click()
         page.locator(f".ph-more-sheet [data-screen='{screen}']").click()
     page.wait_for_timeout(400)
 
 
-def switch_mode(page, mode: str) -> None:  # type: ignore[no-untyped-def]
-    """Choose Agents or Orchestration from the mode menu at the top of the desktop sidebar. The menu
-    lists the two modes in that order in either language."""
-    page.locator("nav.sidebar .sidebar-head .sb-mode").click()
-    page.locator(".menu [role=menuitem]").nth(0 if mode == "agents" else 1).click()
+def switch_mode(page, mode: str, scope: str = "") -> None:  # type: ignore[no-untyped-def]
+    """Choose Agents or Orchestration from the mode menu at the top of the sidebar, the desktop's
+    column or the phone's drawer (`scope`). The menu lists the two modes in that order in either
+    language; on a phone it is a sheet of the same items."""
+    page.locator(f"{scope} nav.sidebar .sidebar-head .sb-mode".strip()).click()
+    page.locator(".menu [role=menuitem], .menu-sheet [role=menuitem]").nth(0 if mode == "agents" else 1).click()
 
 
 def open_projects(page) -> None:  # type: ignore[no-untyped-def]
@@ -2549,7 +2553,10 @@ def open_projects(page) -> None:  # type: ignore[no-untyped-def]
         page.wait_for_selector(".projects-page")
         return
     open_drawer(page)
-    page.locator(".ph-drawer-root.open [data-nav='projects']").click()
+    page.locator(".ph-drawer-root.open [data-action='all-projects']").click()
+    # The sheet opens once the drawer's history entry is gone, and slides in: wait until it stands.
+    page.wait_for_selector(":is(.project-row, .projects-row)", timeout=10000)
+    page.wait_for_timeout(400)
 
 
 FIELD_TEXT = "el => [...el.querySelectorAll('[data-line]')].map(line => line.textContent).join('\\n')"
@@ -2560,14 +2567,6 @@ out. The field is an editable element, not a textarea, so it has no value to rea
 def field_text(locator) -> str:  # type: ignore[no-untyped-def]
     """The text in a composer field, given its locator."""
     return locator.evaluate(FIELD_TEXT)
-
-
-def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
-    """On a phone the composer rests as one row; the model, the access chip and the context are in the
-    toolbar it opens onto when its field has the reader. A no-op where they already show."""
-    if not page.locator(".composer .model-select, .composer .composer-access").first.is_visible():
-        page.locator(".composer .composer-field").first.click()
-        page.wait_for_timeout(150)
 
 
 def wait_until(page, ready, timeout: float = 5.0) -> bool:  # type: ignore[no-untyped-def]

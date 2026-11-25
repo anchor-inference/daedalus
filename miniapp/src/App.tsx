@@ -785,7 +785,8 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} search={paletteItems} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} search={paletteItems} onPalette={openPalette} mainOpen={mainChat}
+        session={sessionId} projects={agentProjects} project={project} onProjects={() => setSwitching(true)} onClearProject={clearProject} onOpen={open} toast={showToast} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PairingHost />

@@ -1,42 +1,27 @@
-// The phone's navigation: one drawer from the left in place of the five tabs and their More sheet.
-// It holds the switch between the two modes, which was invisible before (a tab you happened to have
-// last used), every global destination, the mode's own lists (Projects and Recents, or the main
-// orchestrator and the orchestrated projects), and the one accent creation pill. Settings is the
-// round button beside the pill. Every screen's hamburger opens it (ui/phone.tsx, openDrawer).
+// The phone's navigation is the desktop's sidebar in a drawer from the left: the same head (the mark,
+// the mode menu, search), the same pinned rows in the same order with the same words, the same list of
+// projects and chats with the same filters, the same foot (the account and Settings). Only the drawer
+// around it is the phone's own — the scrim, the swipe that closes it, the history entry Back takes —
+// and its sizes are the phone's touch sizes (ui/parts/sidebar.css). A drawer of its own used to list
+// other destinations under other names, so the two sizes of the app taught two different maps.
+// Every screen's hamburger opens it (ui/phone.tsx, openDrawer).
 
-import { useEffect, useMemo, useState } from "react";
-import type { Project, SessionList } from "./api";
-import { SelfDevMode, screenTag } from "./capabilities";
-import { relTime } from "./format";
-import { agentName, arrange, splitPinned } from "./grouping";
-import { plural, t } from "./i18n";
-import { Icon, type IconName } from "./icons";
-import { useMain } from "./main/data";
-import { type Mode, agentsListingOf, orchestratedProjects } from "./mode";
-import { ORCHESTRATION, ORCHESTRATION_LIST, type Screen, pathFor, projectHome, sessionPath, useRoute } from "./router";
-import { type NavItem, type ResolvedNav, currentId } from "./navconfig";
-import { screenTitle } from "./shell";
-import { useQuery } from "./store";
-import { useStreamUp } from "./events";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import type { Project } from "./api";
+import { SelfDevMode } from "./capabilities";
+import { t } from "./i18n";
+import { type Mode } from "./mode";
+import { inLayer, navigate, pathFor, useRoute } from "./router";
+import { type ResolvedNav, currentId } from "./navconfig";
 import { Launcher } from "./navmenu";
 import type { PaletteItem } from "./shell";
-import { KindMark } from "./chatkind";
-import { PrivateMark, isPrivate } from "./privatechat";
-import { Drawer, NewChatPill, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
-import { IconButton, Segmented, Sheet } from "./ui/primitives";
+import { OrchestrationSidebar } from "./orchestration";
+import { Sidebar, SidebarFrame } from "./sidebar";
+import { Drawer, closeDrawer, useDrawerOpen } from "./ui/phone";
+import { Sheet } from "./ui/primitives";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
 export const CHATS_PATH = pathFor("agents", null, { view: "chats" });
-
-/** Chats narrowed to one project for this visit, without touching the remembered lens. */
-function chatsIn(project: string): string {
-  return pathFor("agents", null, { view: "chats", project });
-}
-
-/** The daily destinations of each mode and what waits in More come from navconfig.ts, which knows
- *  the shipped drawer and the operator's own order. */
-const BETA: Screen[] = [];
-const PROJECTS = 5;
 
 /** Initials for a project's avatar: the first letters of its first two words. */
 export function initials(name: string): string {
@@ -53,200 +38,85 @@ export function colourOf(id: string): string {
 
 export type AppDrawerProps = {
   mode: Mode;
-  /** What the drawer and its More sheet hold, badges included. */
+  /** What the sidebar and its More launcher hold, badges included. */
   nav: ResolvedNav;
   /** What waits for the operator in orchestration mode. */
   waiting: number;
   selfdev: SelfDevMode;
-  /** Agents mode's projects (none with an orchestrator). */
-  projects: Project[];
-  /** The project switcher: every project, adding one, the archived ones. */
-  onProjects: () => void;
-  /** The Ctrl K palette's items, which the More sheet's search field searches. */
+  /** The Ctrl K palette's items, which the More launcher's search field searches. */
   search?: () => PaletteItem[];
+  /** The palette, which the head's search opens outside the Agents list. */
+  onPalette: () => void;
+  /** Orchestration mode's list: whether the main chat is the page under the drawer. */
+  mainOpen: boolean;
+  /** Agents mode's list, as the desktop's column gets it. */
+  session: string | null;
+  projects: Project[];
+  project: string;
+  /** Every project, adding one, the archived ones: a sheet over the screen on a phone. */
+  onProjects: () => void;
+  onClearProject: () => void;
+  onOpen: (id: string) => void;
+  toast: (t: string) => void;
 };
 
-export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects, search }: AppDrawerProps) {
+/** Closes the drawer and runs `then` once its history entry is gone. A sheet opened at once (the
+ *  projects, the palette) was there before the drawer's Back landed, and that late Back moved the
+ *  address under the new sheet, which a busy phone then showed closing again. */
+function closeThen(then: () => void): void {
+  if (!inLayer()) { closeDrawer(); then(); return; }
+  window.addEventListener("popstate", () => window.setTimeout(then, 0), { once: true });
+  closeDrawer();
+}
+
+export function AppDrawer(p: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
-  // The switch shows a mode's lists without leaving the page; a destination inside it goes there.
-  const [shown, setShown] = useState<Mode>(mode);
   const [more, setMore] = useState(false);
-  useEffect(() => { if (open) setShown(mode); }, [open, mode]);
-  const live = useStreamUp();
-  const listing = useQuery<SessionList>("/api/sessions", { pollMs: live ? 60000 : 15000, staleMs: 5000 });
-  const { data: main } = useMain();
-  const agents = useMemo(() => agentsListingOf(listing.data), [listing.data]);
-  // The pinned block heads the menu as it heads the desktop's sidebar, and what is in it is not
-  // listed again under Projects or Recents.
-  const pinned = useMemo(() => (agents ? splitPinned(arrange(agents.sessions, agents.projects).folders).pinned : []), [agents]);
-  const pinnedIds = useMemo(() => new Set(pinned.map((f) => f.key)), [pinned]);
-  // Every chat of the listing's first page, not the last eight: the drawer scrolls, and a title the
-  // operator has to go looking for under Chats is a title hidden for no reason. The page is the
-  // server's (two hundred); "See all" beside the heading is the way to the rest and to the filters.
-  const recents = useMemo(() => [...(agents?.sessions ?? [])]
-    .filter((s) => !s.metadata?.subagent_of && !s.archived && !pinnedIds.has(s.project_id))
-    .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at)), [agents, pinnedIds]);
-  const orchestrated = useMemo(() => orchestratedProjects(Array.isArray(listing.data?.projects) ? listing.data!.projects : []), [listing.data]);
-  const agentsWaiting = (agents?.sessions ?? []).filter((s) => s.status === "waiting").length;
-  const folderOf = (id: string) => agents?.projects.find((p) => p.id === id);
-  const moreItems = layout.phoneMore;
-  const moreCount = moreItems.reduce((n, it) => n + it.badge, 0);
-  const standing = currentId(route.screen, route.detail);
-  const here = (it: NavItem) => !route.session && standing === it.id;
-
-  const place = (it: NavItem) => {
-    const n = it.badge;
-    const tag = it.screen ? screenTag(it.screen, selfdev, BETA) : "";
-    return (
-      <a key={it.id} className={`ph-nrow ${here(it) ? "on" : ""}`} href={it.path} data-screen={it.id} aria-current={here(it) ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(it.path); }}>
-        <Icon name={it.icon} size={20} path={it.iconPath} />
-        <span className="ph-nrow-l">{it.title}</span>
-        {tag && <span className="ph-tag">{t(tag)}</span>}
-        {n > 0 && <span className="ph-badge">{n > 99 ? "99+" : n}</span>}
-      </a>
-    );
+  const moreButton = useRef<HTMLButtonElement>(null);
+  // Every move from inside the drawer closes it. The router has already put the destination in the
+  // drawer's own history entry (router.ts, navigate), so Back from there returns to the page under it.
+  const at = window.location.pathname + window.location.search;
+  useEffect(() => { closeDrawer(); }, [at]);
+  // A link or a chat's row for where the reader already is changes no address, so the drawer closes
+  // itself once the row has had its click. Not before it: closing first took the drawer's history
+  // entry back while the row's own move was still to come, and Back's late arrival undid that move.
+  const onClick = (e: MouseEvent) => {
+    const link = (e.target as Element).closest?.("a[href], [data-nav='chat']");
+    if (link && !(e.metaKey || e.ctrlKey || e.shiftKey)) closeDrawer();
   };
-  const nav = (key: string, icon: IconName, label: string, path: string, active: boolean, trail?: React.ReactNode) => (
-    <a key={key} className={`ph-nrow ${active ? "on" : ""}`} href={path} data-nav={key} aria-current={active ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(path); }}>
-      <Icon name={icon} size={20} />
-      <span className="ph-nrow-l">{label}</span>
-      {trail}
-    </a>
-  );
-  const onChats = route.screen === "agents" && !route.session && route.query.get("view") === "chats";
-
-  const footer = (
-    <>
-      {shown === "agents"
-        ? <NewChatPill label={t("ph.newchat")} onClick={() => navigateFromDrawer(pathFor("agents"))} />
-        : <NewChatPill label={t("ph.newproject")} icon="plus" onClick={() => { closeDrawer(); onProjects(); }} />}
-      <span className="grow" />
-      <button type="button" className="ph-round" aria-label={screenTitle("settings")} title={screenTitle("settings")} data-screen="settings" onClick={() => navigateFromDrawer(pathFor("settings"))}>
-        <Icon name="settings" size={20} />
-      </button>
-    </>
-  );
-
+  const here = currentId(route.screen, route.detail);
+  const frame = {
+    mode: p.mode, screen: route.screen, detail: route.detail, waiting: p.waiting, nav: p.nav,
+    menuOpen: more, onMenu: () => setMore(true), menuButton: moreButton, onToggle: closeDrawer, onPalette: () => closeThen(p.onPalette), drawer: true,
+  };
   return (
-    <>
-      <Drawer open={open} onClose={closeDrawer} label={t("nav.menu")} footer={footer}>
-        <div className="ph-brand">
-          <span className="ph-brand-name"><Icon name="logo" size={22} />Daedalus</span>
-          <IconButton icon="search" label={t("search.label")} onClick={() => navigateFromDrawer(pathFor("agents", null, { view: "chats", search: "1" }))} className="ph-ib" />
+    <SidebarFrame value={frame}>
+      <Drawer open={open} onClose={closeDrawer} label={t("nav.menu")}>
+        <div className="ph-drawer-nav" onClick={onClick}>
+          {p.mode === "orchestration" ? <OrchestrationSidebar onMain={p.mainOpen} /> : (
+            <Sidebar session={p.session} projects={p.projects} project={p.project} onProjects={() => closeThen(p.onProjects)}
+              onClearProject={p.onClearProject} onOpen={p.onOpen} toast={p.toast} />
+          )}
         </div>
-        <Segmented<Mode>
-          className="ph-seg"
-          label={t("ph.mode")}
-          value={shown}
-          onChange={setShown}
-          options={[
-            { id: "agents", label: t("mode.agents"), badge: shown !== "agents" && agentsWaiting > 0 ? <span className="ph-badge quiet">{agentsWaiting}</span> : undefined },
-            { id: "orchestration", label: t("mode.orchestration"), badge: shown !== "orchestration" && waiting > 0 ? <span className="ph-badge warn" data-waiting={waiting}>{waiting > 99 ? "99+" : waiting}</span> : undefined },
-          ]}
-        />
-        {shown === "agents" ? (
-          <>
-            {nav("chats", "bots", t("ph.chats"), CHATS_PATH, onChats, agents ? <span className="ph-cnt">{agents.sessions.filter((s) => !s.metadata?.subagent_of).length}</span> : undefined)}
-            {layout.drawer.agents.map(place)}
-            <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
-              <Icon name="grid" size={20} />
-              <span className="ph-nrow-l">{t("nav.more")}</span>
-              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreItems.length}</span>}
-            </button>
-            {pinned.length > 0 && <div className="ph-dsec"><span className="ph-pinhead"><Icon name="pushpin" size={14} />{t("side.pinned")}</span></div>}
-            {pinned.map((f) => {
-              const s = f.chat ? f.rows[0]?.s : undefined;
-              return s ? (
-                <button key={f.key} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-pinned="" data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
-                  <span className={`ph-dot ${s.status}`} aria-hidden />
-                  <span className="ph-drow-t">{agentName(s)}</span>
-                  <KindMark s={s} />
-                  <PrivateMark on={isPrivate(s)} />
-                  <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
-                </button>
-              ) : (
-                <button key={f.key} type="button" className="ph-drow" data-pinned="" data-project={f.key} onClick={() => navigateFromDrawer(chatsIn(f.key))}>
-                  <Icon name={f.system ? "mic" : "folder"} size={18} />
-                  <span className="ph-drow-t">{f.name}</span>
-                  <span className="ph-drow-tm">{plural("agents.count", f.total)}</span>
-                </button>
-              );
-            })}
-            {/* The project switcher (every project, adding one, the archived ones) is "See all"
-                here, even with no project yet: it is where the first one is added. */}
-            <div className="ph-dsec">{t("shell.projects")}<button type="button" className="ph-dsec-act" data-nav="projects" onClick={() => { closeDrawer(); onProjects(); }}>{t(projects.length ? "ph.seeall" : "shell.projects.add")}</button></div>
-            {projects.length > 0 && (
-              <>
-                {projects.filter((p) => !pinnedIds.has(p.id)).slice(0, PROJECTS).map((p) => {
-                  const folder = folderOf(p.id);
-                  return (
-                    <button key={p.id} type="button" className="ph-drow" data-project={p.id} onClick={() => navigateFromDrawer(chatsIn(p.id))}>
-                      <Icon name="folder" size={18} />
-                      <span className="ph-drow-t">{p.name}</span>
-                      {folder && <span className="ph-drow-tm">{plural("agents.count", folder.total)}</span>}
-                    </button>
-                  );
-                })}
-              </>
-            )}
-            {recents.length > 0 && <div className="ph-dsec">{t("ph.recents")}<button type="button" className="ph-dsec-act" data-nav="chats" onClick={() => navigateFromDrawer(CHATS_PATH)}>{t("ph.seeall")}</button></div>}
-            {recents.map((s) => (
-              <button key={s.id} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
-                <span className={`ph-dot ${s.status}`} aria-hidden />
-                <span className="ph-drow-t">{agentName(s)}</span>
-                <KindMark s={s} />
-                <PrivateMark on={isPrivate(s)} />
-                <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
-              </button>
-            ))}
-          </>
-        ) : (
-          <>
-            {nav("main", "conductor", t("main.title"), ORCHESTRATION, route.screen === "orchestration" && !route.project && route.detail !== "projects",
-              main && waiting > 0 ? <span className="ph-badge warn">{waiting > 99 ? "99+" : waiting}</span> : undefined)}
-            {layout.drawer.orchestration.map(place)}
-            <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
-              <Icon name="grid" size={20} />
-              <span className="ph-nrow-l">{t("nav.more")}</span>
-              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreItems.length}</span>}
-            </button>
-            <div className="ph-dsec">{t("orch.projects")}<button type="button" className="ph-dsec-act" data-nav="orchestration-list" onClick={() => navigateFromDrawer(ORCHESTRATION_LIST)}>{t("ph.seeall")}</button></div>
-            {orchestrated.map((p) => {
-              const o = p.orchestrator!;
-              const meta = [p.last_message_at ? relTime(p.last_message_at) : "", plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
-              return (
-                <button key={p.id} type="button" className={`ph-drow tall ${route.project === p.id ? "on" : ""}`} data-project={p.id} onClick={() => navigateFromDrawer(projectHome(p.id))}>
-                  <span className="ph-avatar" style={{ ["--c" as string]: colourOf(p.id) }} aria-hidden>{initials(p.name)}</span>
-                  <span className="ph-drow-main">
-                    <span className="ph-drow-t">{p.name}</span>
-                    <span className="ph-drow-m">{meta}</span>
-                  </span>
-                  {o.needs_you > 0 && <span className="ph-badge warn" aria-label={plural("focus.entry.needs", o.needs_you)}>{o.needs_you}</span>}
-                </button>
-              );
-            })}
-            {listing.data && orchestrated.length === 0 && <div className="ph-dnote">{t("orch.empty.touch")}</div>}
-          </>
-        )}
       </Drawer>
       {more && (
-        // The same launcher as the desktop's, as a sheet: the dot marks what this drawer already
-        // lists. The language moved to Settings → Appearance with the rest of how the app looks.
+        // The desktop's More launcher, as a sheet over the drawer: the dot marks what the pinned rows
+        // already hold, as it does beside the desktop's column.
         <Sheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-sheet ph-more-sheet launch-sheet">
           <Launcher
-            nav={layout}
-            placed={shown === "agents" ? layout.drawer.agents : layout.drawer.orchestration}
-            current={route.session ? "" : standing}
-            selfdev={selfdev}
-            search={search}
+            nav={p.nav}
+            placed={p.nav.pinned}
+            current={route.session ? "" : here}
+            selfdev={p.selfdev}
+            search={p.search}
             phone
-            onGo={(path) => { setMore(false); navigateFromDrawer(path); }}
-            onRun={(run) => { setMore(false); closeDrawer(); run(); }}
+            onGo={(path) => { setMore(false); navigate(path); }}
+            onRun={(run) => { setMore(false); closeThen(run); }}
             onClose={() => setMore(false)}
           />
         </Sheet>
       )}
-    </>
+    </SidebarFrame>
   );
 }

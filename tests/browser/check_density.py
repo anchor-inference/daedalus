@@ -9,9 +9,10 @@ and rows at the three sizes the owner uses.
 The phone has its own claims since the redesign modelled on the chat apps of the operator's phone
 (check_phone): six type steps (12 / 13 / 14 / 15 / 16 / 17) on every drawn text of the home, the
 Chats page, the drawer and the composer's sheets; a 52 px top bar with no rule under it; 54 px list
-rows and 44 px destinations in the drawer; an idle composer of one 44 px row at the bottom of the
-screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
-::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
+rows; a drawer that is the sidebar, 330 px wide at 412 with 44 px rows; a composer card whose
+controls are one row of 44 px targets, at rest as while typing; no bottom bar outside a project; and a
+44 px target for every control, counting the invisible ::after that a 40 px circle or a 28 px chip
+carries. The numbers are a step under the first cut of the
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
 large next to Claude and ChatGPT on the same phone.
 
@@ -357,9 +358,9 @@ READ_PHONE = """
     if (el.tagName === 'INPUT' && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     const r = el.getBoundingClientRect();
     let w = r.width, h = r.height;
-    // The composer's field is 34 px inside its 44 px pill, and a tap on the pill focuses the field.
-    const pill = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
-    if (pill) h = Math.max(h, pill.getBoundingClientRect().height);
+    // The composer's field is one line inside its card, and a tap on the card focuses the field.
+    const card = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
+    if (card) h = Math.max(h, card.getBoundingClientRect().height);
     const after = getComputedStyle(el, '::after');
     if (after.content !== 'none' && after.position === 'absolute') {
       const px = (v) => (v.endsWith('px') ? parseFloat(v) : 0);
@@ -376,12 +377,12 @@ READ_PHONE = """
     topBorder: top ? parseFloat(getComputedStyle(top).borderBottomWidth) : null,
     topBg: top ? getComputedStyle(top).backgroundColor : null,
     pageBg: getComputedStyle(document.body).backgroundColor,
-    idle: rect('.composer[data-shape="idle"] .composer-box'),
-    open: rect('.composer[data-shape="open"] .composer-box'),
+    card: rect('.composer[data-shape] .composer-box'),
+    composerRow: rect('.composer[data-shape] .composer-row'),
     circle: rect('.composer[data-shape] .roundbtn'),
     rows: [...document.querySelectorAll('.list-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     chips: [...document.querySelectorAll('.ph-chip')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
-    nav: [...document.querySelectorAll('.ph-drawer-root.open .ph-nrow')].map((r) => Math.round(r.getBoundingClientRect().height)),
+    nav: [...document.querySelectorAll('.ph-drawer-root.open .sb-pinned-nav .sb-nav')].map((r) => Math.round(r.getBoundingClientRect().height)),
     drawer: rect('.ph-drawer-root.open .ph-drawer'),
     tabbar: document.querySelectorAll('nav.tabbar').length,
     scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
@@ -428,12 +429,12 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
             problems.append(f"home {lang}: the top bar has a {m['topBorder']} px rule")
         if m["topBg"] != m["pageBg"]:
             problems.append(f"home {lang}: the top bar {m['topBg']} is not the page colour {m['pageBg']}")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"home {lang}: the idle composer is {m['idle']}, not one 44 px row")
-        elif m["idle"]["b"] > 24:
-            problems.append(f"home {lang}: the idle composer stands {m['idle']['b']} px above the bottom")
-        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (34, 34):
-            problems.append(f"home {lang}: the white circle is {m['circle']}, not 34 × 34")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"home {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        elif m["card"]["b"] > 24:
+            problems.append(f"home {lang}: the composer stands {m['card']['b']} px above the bottom")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"home {lang}: the send circle is {m['circle']}, not 40 × 40")
         if m["tabbar"]:
             problems.append(f"home {lang}: a bottom bar is still drawn")
         for h in m["rows"]:
@@ -442,9 +443,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
 
         page.locator(".ph-home .composer .composer-field").fill("Wire the order form to the sheet")
         page.wait_for_timeout(300)
-        m = read("composer-open", ".ph-home .composer")
-        if not m["open"]:
-            problems.append(f"composer {lang}: typing does not open the composer onto its toolbar")
+        read("composer-typed", ".ph-home .composer")
         # The mic stays beside Send once something is typed: hiding it left no way to dictate the rest.
         mic = page.locator(".ph-home .composer .composer-tools > .mic")
         if mic.count() and not mic.is_visible():
@@ -455,8 +454,10 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         page.wait_for_selector(".ph-drawer-root.open", timeout=5000)
         page.wait_for_timeout(400)
         m = read("drawer", ".ph-drawer-root.open")
-        if not m["drawer"] or m["drawer"]["w"] != 336:
-            problems.append(f"drawer {lang}: {m['drawer']}, not 336 wide at 412")
+        if not m["drawer"] or m["drawer"]["w"] != 330:
+            problems.append(f"drawer {lang}: {m['drawer']}, not 330 wide at 412")
+        if not m["nav"]:
+            problems.append(f"drawer {lang}: no pinned rows of the sidebar in it")
         if any(h != 44 for h in m["nav"]):
             problems.append(f"drawer {lang}: destination rows {m['nav']}, not 44")
         page.keyboard.press("Escape")
@@ -497,18 +498,30 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         # icon row in 44 px targets, the idle composer, and the ⋮ sheet with its tiles.
         go(f"agents/{S1}", ".ph-chat-top")
         m = read("session", ".chat")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"session {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"session {lang}: the send circle is {m['circle']}, not 40 × 40")
+        before = m["card"]
+        page.locator(".chat .composer .composer-field").first.click()
+        page.wait_for_timeout(200)
+        after = page.evaluate(READ_PHONE, ".chat")["card"]
+        if before and after and before["h"] != after["h"]:
+            problems.append(f"session {lang}: the composer is {before['h']} px at rest and {after['h']} px once the field has the reader")
+        page.keyboard.press("Escape")
         top = page.locator(".ph-chat-top").bounding_box()
         if not top or round(top["height"]) != 52:
             problems.append(f"session {lang}: the bar is {top}, not 52 tall")
         if page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top')).borderBottomWidth)"):
             problems.append(f"session {lang}: the bar has a rule under it")
-        glyphs = page.locator(".ph-chat-top .ph-top-actions > *").count()
+        glyphs = page.locator(".ph-chat-top .pagehead-actions > *").count()
         if glyphs > 2:
             problems.append(f"session {lang}: {glyphs} glyphs at the right of the bar, more than two")
-        if not page.locator(".ph-chat-top .ph-top-sub").count():
-            problems.append(f"session {lang}: the title has no second line")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 44 px row")
+        # The title is 15 px with the 12 px line of where the chat lives over it, when it lives
+        # somewhere of another name than its own.
+        title = page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top .pagehead-t')).fontSize)")
+        if title != 15:
+            problems.append(f"session {lang}: the title is {title} px, not 15")
         page.locator(".ph-chat-top button[aria-haspopup='menu']").click()
         page.wait_for_selector(".ph-session-menu .ph-tile", timeout=5000)
         page.wait_for_timeout(300)

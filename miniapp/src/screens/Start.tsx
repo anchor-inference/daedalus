@@ -255,7 +255,6 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
   return (
     <div className="ph-page ph-home">
       <TopBar
-        center
         pip={waiting > 0}
         title={<>{model.label}<Icon name="chevron" size={14} /></>}
         onTitle={() => model.setOpen(true)}

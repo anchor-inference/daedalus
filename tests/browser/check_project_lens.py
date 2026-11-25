@@ -136,7 +136,9 @@ def main() -> int:
             check(len(posted) == 2, f"{lang}: both projects were posted ({len(posted)})")
             context.close()
 
-            # The phone: a project from the drawer narrows Chats for the visit, not the device.
+            # The phone: the drawer is the sidebar, so a project's row there folds its chats in and out
+            # as the column's does and narrows nothing; Chats narrowed to a project by its address is
+            # narrowed for the visit, not the device.
             context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
             page = context.new_page()
             page.route("**/api/**", shots.stub)
@@ -144,13 +146,13 @@ def main() -> int:
             page.wait_for_selector(".app")
             open_drawer(page)
             drawer = page.locator(".ph-drawer-root.open")
-            recents = drawer.locator(".ph-drow[data-session]").count()
-            check(recents > 8, f"{lang} phone: the drawer lists every recent chat, not eight ({recents})")
-            check(drawer.locator(".ph-dsec [data-nav='chats']").count() == 1, f"{lang} phone: Recents has See all")
-            drawer.locator(f".ph-drow[data-project='{shots.P1}']").first.click()
+            check(drawer.locator(f"[data-project='{shots.P1}']").count() >= 1, f"{lang} phone: the drawer lists the project")
+            check(drawer.locator(".sb-lens").count() == 0, f"{lang} phone: and no lens")
+            page.keyboard.press("Escape")
+            page.goto(f"{BASE}/agents?view=chats&project={shots.P1}&token=t&scheme=dark&lang={lang}")
             chip = page.locator(".ph-lens")
             expect(chip).to_be_visible(timeout=10000)
-            check("project=" in page.url, f"{lang} phone: the drawer's project is in the address ({page.url})")
+            check("project=" in page.url, f"{lang} phone: the project is in the address ({page.url})")
             check(page.evaluate(f"localStorage.getItem('{LENS}')") is None, f"{lang} phone: and not remembered as the lens")
             chip.click()
             expect(page.locator(".ph-lens")).to_have_count(0)

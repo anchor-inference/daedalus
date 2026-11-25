@@ -1512,16 +1512,16 @@ def pick_a_model(page: Page) -> None:
 
 
 def open_drawer(page: Page) -> None:
-    """The phone's drawer: the two modes as a switch, the destinations, the projects and the recents."""
+    """The phone's drawer: the desktop's sidebar — its head, pinned rows, projects and chats, foot."""
     page.locator(".ph-menu:visible").first.click()
-    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=5000)
+    page.wait_for_selector(".ph-drawer-root.open .sidebar .sb-nav", timeout=5000)
     page.wait_for_timeout(400)
 
 
 def open_more(page: Page) -> None:
     """The drawer's More sheet on a phone: the same launcher as the desktop's, as a sheet."""
     open_drawer(page)
-    page.locator(".ph-drawer-root.open [data-nav='more']").click()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").click()
     page.wait_for_selector(".ph-more-sheet", timeout=5000)
     page.wait_for_timeout(300)
 
