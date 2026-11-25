@@ -8,7 +8,7 @@ import "./primitives.css";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { PageHeader } from "../shell";
-import { Badge, Button, Combobox, Dot, Field, IconButton, Kbd, MenuRow, OverflowMenu, Popover, Row, Segmented, Select, Sheet, Switch, Tabs, Tooltip, confirmDialog, menuRowBody, toast, type MenuItem } from "../ui/primitives";
+import { Badge, Button, Combobox, Dot, Field, IconButton, Kbd, MenuRow, OverflowMenu, Popover, Row, Segmented, Select, Sheet, Switch, Tabs, Tooltip, NoticeGlyph, confirmDialog, menuRowBody, raiseNotice, toast, type MenuItem } from "../ui/primitives";
 
 /** Models for the sample picker: names, not words, so they are not translated. */
 const MODELS = ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "GPT-6 Codex", "Gemini 3 Pro", "DeepSeek Flash", "Qwen 3.8"];
@@ -140,6 +140,7 @@ export function PrimitivesScreen() {
             <Button size="sm" onClick={() => setSheet(true)}>{t("primitives.open.sheet")}</Button>
             <Button size="sm" onClick={confirm}>{t("primitives.open.confirm")}</Button>
             <Button size="sm" onClick={() => toast(t("primitives.sample.toast"), { undo: () => {} })}>{t("primitives.open.toast")}</Button>
+            <Button size="sm" onClick={() => raiseNotice({ key: -Date.now(), seq: Date.now(), ms: 7000, view: { title: t("primitives.sample.notice.title"), body: t("primitives.sample.notice.body"), icon: <NoticeGlyph name="inbox" className="ok" />, onOpen: () => {} } })}>{t("primitives.open.notice")}</Button>
             <button ref={popAnchor} type="button" className="btn small" aria-haspopup="menu" aria-expanded={popover} onClick={() => setPopover((open) => !open)}>{t("primitives.open.popover")}</button>
           </div>
         </section>

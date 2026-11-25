@@ -6,12 +6,14 @@
 import "./notes.css";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEvent, useStreamUp } from "../events";
+import { FileTile } from "../filetile";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { MediaViewer, type ViewerItem } from "../media";
 import { downloadHref, FilePreview, type PreviewSource } from "../preview";
 import { peek, prime, useQuery } from "../store";
 import { confirmDialog, toast as undoToast, type MenuItem } from "../ui/dialogs";
+import { Button, IconButton, Tabs } from "../ui/primitives";
 import { errorText } from "../ui";
 import { notesApi, referencedBy, seedFileUrl } from "./api";
 import { attachToMessage, copyMarkdown, downloadNote } from "./export";
@@ -382,32 +384,32 @@ export function NotesPanel({ sessionId, project, phone, toast }: NotesPanelProps
       }}
     >
       {hasProject && (
-        <div className="notes-subtabs" role="tablist" aria-label={t("notes.scopes")} style={{ "--at": shownScope === "project" ? 0 : 1 } as React.CSSProperties}>
-          <i className="notes-subtab-pill" aria-hidden="true" />
-          {(["project", "chat"] as const).map((kind) => (
-            <button key={kind} type="button" role="tab" data-scope={kind} aria-selected={shownScope === kind} className={`notes-subtab ${shownScope === kind ? "on" : ""}`} onClick={() => pickScope(kind)}>
-              <Icon name={kind === "project" ? "folder" : "chat"} size={14} />
-              <span className="notes-subtab-name">{kind === "project" ? project!.name : t("notes.scope.chat")}</span>
-              <span className="notes-subtab-count">{countOf(kind === "project" ? projectScope : chat, kind)}</span>
-            </button>
-          ))}
-        </div>
+        <Tabs
+          variant="page"
+          className="notes-subtabs"
+          label={t("notes.scopes")}
+          value={shownScope}
+          onChange={(id) => pickScope(id as NoteScope)}
+          tabs={(["project", "chat"] as const).map((kind) => ({
+            id: kind,
+            icon: kind === "project" ? "folder" as const : "chat" as const,
+            label: kind === "project" ? project!.name : t("notes.scope.chat"),
+            count: countOf(kind === "project" ? projectScope : chat, kind),
+          }))}
+        />
       )}
       <div className="notes-bar">
         <label className="notes-search">
-          <Icon name="search" size={14} />
+          <Icon name="search" size={16} />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("notes.search")} aria-label={t("notes.search")} onKeyDown={(e) => { if (e.key === "Escape" && search) { e.stopPropagation(); setSearch(""); } }} />
           {search && <button type="button" className="notes-search-clear" onClick={() => setSearch("")} aria-label={t("notes.search.clear")} title={t("notes.search.clear")}><Icon name="close" size={12} /></button>}
         </label>
-        <button type="button" className={`iconbtn small notes-shelf-toggle ${shelf ? "on" : ""}`} aria-pressed={shelf} onClick={() => setShelf((v) => !v)} aria-label={t("notes.files")} title={t("notes.files")}>
-          <Icon name="attach" size={16} />
-          {current.files.length > 0 && <span className="notes-shelf-count">{current.files.length}</span>}
-        </button>
-        <button type="button" className="btn primary small notes-new" onClick={() => create()}><Icon name="plus" size={14} /><span>{t("notes.new")}</span></button>
+        <IconButton className="notes-shelf-toggle" icon="attach" label={t("notes.files")} pressed={shelf} badge={current.files.length} onClick={() => setShelf((v) => !v)} />
+        <Button className="notes-new" variant="primary" size="sm" icon="plus" onClick={() => create()}>{t("notes.new")}</Button>
       </div>
       {shelf && <FilesShelf files={current.files} uploading={uploading} onAdd={() => fileInput.current?.click()} onOpen={openFile} onCopy={copyRef} onRemove={(f) => void removeFile(f)} />}
       <div key={shownScope} className="notes-scope">
-        {!listing && query.error && <div className="notes-error">{query.error}<button type="button" className="btn small" onClick={() => void query.refresh()}>{t("common.retry")}</button></div>}
+        {!listing && query.error && <div className="notes-error">{query.error}<Button size="sm" onClick={() => void query.refresh()}>{t("common.retry")}</Button></div>}
         {!listing && !query.error && <div className="notes-loading" aria-busy="true"><i /><i /><i /></div>}
         {empty && <EmptyState scope={shownScope} projectName={project?.name ?? ""} onCreate={create} />}
         {!empty && listing && visible.length === 0 && <div className="notes-none">{t("notes.search.none", { query: search })}</div>}
@@ -466,16 +468,10 @@ function EmptyState({ scope, projectName, onCreate }: { scope: NoteScope; projec
   const templates = (["checklist", "meeting", "decision"] as const).map((id) => ({ id, title: t(`notes.template.${id}`), body: t(`notes.template.${id}.body`) }));
   return (
     <div className="notes-empty">
-      <svg className="notes-empty-art" viewBox="0 0 120 84" aria-hidden="true">
-        <rect className="sheet back" x="30" y="6" width="62" height="72" rx="8" />
-        <rect className="sheet front" x="20" y="12" width="62" height="66" rx="8" />
-        <path className="lines" d="M31 30h34M31 40h40M31 50h26" />
-        <path className="tick" d="M31 62l4 4 8-9" />
-        <circle className="dot" cx="94" cy="20" r="5" />
-      </svg>
+      <FileTile family="text" size="lg"><Icon name="note" size={20} /></FileTile>
       <h4>{scope === "project" ? t("notes.empty.project", { name: projectName }) : t("notes.empty.chat")}</h4>
       <p>{t(scope === "project" ? "notes.empty.project.body" : "notes.empty.chat.body")}</p>
-      <button type="button" className="btn primary" onClick={() => onCreate()}><Icon name="plus" size={14} />{t("notes.new")}</button>
+      <Button variant="primary" icon="plus" onClick={() => onCreate()}>{t("notes.new")}</Button>
       <div className="notes-templates" aria-label={t("notes.templates")}>
         {templates.map((tpl) => (
           <button key={tpl.id} type="button" className="chip" onClick={() => onCreate({ title: tpl.title, body: tpl.body })}>{tpl.title}</button>

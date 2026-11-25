@@ -124,7 +124,7 @@ def run() -> int:
         open_file("src/main.py", '.line.cited[data-line="4"]', "4-5")
         assert page.locator(".line.cited").count() == 2
         open_file("NOTES.md", ".preview-doc")
-        page.get_by_role("button", name="Source", exact=True).click()
+        page.get_by_role("radio", name="Source", exact=True).click()
         expect(page.locator(".source-view")).to_be_visible()
         open_file("data/sample.csv", ".preview-grid")
         expect(page.locator(".preview-grid")).to_contain_text("fresh, daily")
@@ -136,12 +136,12 @@ def run() -> int:
         before = page.locator(".json-row").count()
         page.locator(".json-row button").first.click()
         assert page.locator(".json-row").count() < before
-        page.get_by_role("button", name="Source", exact=True).click()
+        page.get_by_role("radio", name="Source", exact=True).click()
         expect(page.locator(".source-view")).to_be_visible()
         for name in ["change.diff", "change.patch"]:
-            open_file(name, ".diff-view")
-            expect(page.locator(".diff-add")).to_contain_text("new = 2")
-            expect(page.locator(".diff-del")).to_contain_text("old = 1")
+            open_file(name, ".patch-view")
+            expect(page.locator(".patch-view .dp-line.add")).to_contain_text("new = 2")
+            expect(page.locator(".patch-view .dp-line.del")).to_contain_text("old = 1")
         open_file("sample.svg", ".preview-image")
         expect(page.locator(".source-tools")).to_contain_text("80 × 40 px")
         page.get_by_role("button", name="1:1", exact=True).click()

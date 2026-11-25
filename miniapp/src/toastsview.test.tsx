@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEvent, Notification } from "./api";
 import { ToastHost } from "./ui/dialogs";
 import { popupsShown, setPopupsShown } from "./popups";
-import { GLANCE_MS, NotificationToasts, TOAST_MS } from "./toasts";
+import { GLANCE_MS } from "./ui/primitives";
+import { NotificationToasts, TOAST_MS } from "./toasts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

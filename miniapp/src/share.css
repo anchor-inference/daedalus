@@ -1,0 +1,26 @@
+/* The share dialog's lower half: the note under the choices, the warning about a missing public address,
+   and the live link (livelink.tsx). A live link hands the conversation itself to whoever holds it, so its
+   warning is the first thing in the section and keeps the warning's orange; everything else is the plain
+   surface of the dialog. */
+
+.share-note { margin: 12px 0 0; padding: 0 12px; }
+.share-warn { margin: 8px 0 0; padding: 0 12px; color: var(--warn); }
+
+.live-links { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.live-title { margin: 0; font-size: var(--fs-14); font-weight: 500; }
+.live-warning, .live-reach { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-13); line-height: 1.45; }
+.live-warning { color: var(--fg); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.live-warning .ic, .live-reach .ic { flex: none; margin-top: 2px; }
+.live-warning .ic { color: var(--warn); }
+.live-reach { color: var(--fg); background: var(--surface-2); }
+.live-reach.ok .ic { color: var(--ok); }
+.live-reach.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.live-reach.warn .ic { color: var(--warn); }
+.live-link { display: flex; flex-direction: column; gap: 6px; }
+.live-link .share-field { margin-bottom: 0; }
+.live-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--fg-2); font-size: var(--fs-13); }
+.live-visitors { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: var(--fs-13); }
+.live-create { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.live-create .link-label { margin: 0 4px 0 0; }
+.live-ended { display: grid; gap: 2px; color: var(--fg-3); font-size: var(--fs-13); }
+.live-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }

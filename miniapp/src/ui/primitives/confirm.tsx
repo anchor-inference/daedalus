@@ -8,8 +8,9 @@ import { closeHandler, useFocusBack, useLayer } from "./layers";
 import { STOP } from "./sheet";
 
 /** `choices` asks a three-way question ("Save", "Discard", "Keep editing"): each is a button, and
-    the answer is its `value`. Without it the answer is yes or no. */
-export type ConfirmOptions = { title: string; body?: ReactNode; action?: string; cancel?: string; danger?: boolean; choices?: ConfirmChoice[] };
+    the answer is its `value`. Without it the answer is yes or no. `wide` is for a body that shows
+    something to compare (two versions of a note, line by line) and so needs more than a sentence's width. */
+export type ConfirmOptions = { title: string; body?: ReactNode; action?: string; cancel?: string; danger?: boolean; choices?: ConfirmChoice[]; wide?: boolean };
 export type ConfirmChoice = { label: string; value: string; danger?: boolean };
 
 type Pending = ConfirmOptions & { resolve: (answer: boolean | string) => void };
@@ -60,7 +61,7 @@ function ConfirmBox({ pending, onDone }: { pending: Pending; onDone: (answer: bo
     <AlertDialog.Root open onOpenChange={closeHandler(isTop, () => onDone(false))}>
       <AlertDialog.Portal className="overlay-root">
         <AlertDialog.Viewport className="sheet-backdrop confirm" data-overlay-root="" {...STOP}>
-          <AlertDialog.Popup ref={box} className="dialog" aria-modal="true" initialFocus={first} finalFocus={false}>
+          <AlertDialog.Popup ref={box} className={`dialog ${pending.wide ? "wide" : ""}`.trim()} aria-modal="true" initialFocus={first} finalFocus={false}>
             <AlertDialog.Title render={<h3 id="confirm-title" />}>{pending.title}</AlertDialog.Title>
             {pending.body && <AlertDialog.Description render={<div className="dialog-body" />}>{pending.body}</AlertDialog.Description>}
             <div className="dialog-actions">
