@@ -176,6 +176,7 @@ def spending(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     expect(page.locator("details.sheet-section", has_text="$0.35")).to_contain_text("already included" if lang == "en" else "уже учтена")
     expect(page.locator("details.sheet-section", has_text="$1.12")).to_contain_text("not the provider's final bill" if lang == "en" else "не окончательный счёт провайдера")
     page.get_by_role("button", name="Reset counters" if lang == "en" else "Обнулить счётчики").click()
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
     expect(meter).to_contain_text("$0.00")
     expect(meter).to_contain_text("$1.12")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "budget details overflow the phone"

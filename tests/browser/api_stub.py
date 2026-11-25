@@ -686,7 +686,20 @@ GATES: dict[str, object] = {
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "ruBERT mini FRIDA", "size_bytes": 131205411, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
-    "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    "/api/providers/free-catalog": {
+        "providers": [
+            {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key_url": "https://openrouter.ai/settings/keys", "key_required": True, "fresh": True,
+             "models": [
+                 {"id": "vendor/free-chat:free", "name": "Free Chat", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": True},
+                 {"id": "vendor/free-code:free", "name": "Free Code", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": False, "agent_ready": False, "may_train": False},
+                 {"id": "vendor/promo", "name": "Promo", "provider": "openrouter", "mechanism": "unverified_promotion", "tools_reported": True, "agent_ready": False, "may_train": False},
+             ]},
+            {"id": "kilo", "name": "Kilo Gateway", "base_url": "https://api.kilo.ai/api/gateway", "key_url": "https://kilo.ai", "key_required": False, "fresh": True,
+             "models": [{"id": "kilo/free", "name": "Kilo Free", "provider": "kilo", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": False}]},
+        ],
+        "updated_at": 1790000000,
+        "stale": False,
+    },
     # Settings → Models → Providers and Settings → Tools → Search keys read what the key proxy holds.
     # check_keyproxy.py keeps a proxy of its own that stores what is written.
     "/api/keyproxy": KEYPROXY_VIEW,

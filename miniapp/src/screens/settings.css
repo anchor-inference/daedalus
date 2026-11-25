@@ -204,6 +204,11 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .nav-cfg-list + .nav-cfg-list { margin-top: 20px; }
 .set-actions { margin-top: 20px; }
 
+/* A row whose control is a list of models (a picker, the helpers' choice) takes the whole width under
+   its words at every width, as it does outside a card (selection.css): beside them it was clipped. */
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+
 /* ── Catalogues of downloadable models: voices and recognition models ───────────────────────── */
 .set-card .settings-value { color: var(--fg-2); font-size: var(--fs-14); }
 /* A value that is only the state of something loading: the pulse says the wait is happening now,
@@ -234,6 +239,31 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .cat-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 /* What offers the speech runtime, where the card above says the browser's own is all there is. */
 .set-card > .voice-needs { margin: 0; padding: 12px 16px; border-radius: 0; background: transparent; }
+
+/* ── Key proxy ───────────────────────────────────────────────────────────────────────────── */
+/* A line that says the section cannot do what it normally does, or does it with a caveat. */
+.set-note { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-13); }
+.set-note .ic { flex: none; margin-top: 2px; }
+.set-note[data-tone="warn"] { background: color-mix(in srgb, var(--attention) 12%, transparent); color: var(--attention); }
+.keyproxy-card > .set-group, .keyproxy-card > .keyproxy-clients { margin-top: var(--space-5); }
+.keyproxy-card > .set-help + .set-group { margin-top: 0; }
+.kp-item + .kp-item { border-top: 1px solid var(--line); }
+.kp-open .ic { transition: transform var(--t-fast) var(--ease-out); }
+.kp-item.open .kp-open .ic { transform: rotate(180deg); }
+.kp-edit { border-top: 1px solid var(--line); background: var(--bg); gap: var(--space-3); }
+.kp-add { gap: var(--space-3); }
+.kp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kp-field .field { margin: 0; }
+.kp-field code { color: var(--fg-3); font-size: var(--fs-12); }
+.kp-edit-foot { display: flex; }
+
+/* ── Free models: the providers as rows to choose from, the chosen one's models under them ───── */
+.free-catalog > .set-group { margin-top: var(--space-5); }
+.free-catalog > .set-help + .set-group { margin-top: 0; }
+.accounts > .set-help, .keyproxy-card > .set-help, .free-catalog > .set-help { margin: 0 0 var(--space-4); }
+.free-pick.on { background: var(--selected); }
+.free-pick-key { flex: none; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.free-pick-mark { display: grid; flex: none; place-items: center; width: var(--ctl-h-sm); color: var(--fg); }
 
 /* ── Models and providers ─────────────────────────────────────────────────────────────────── */
 .prov + .prov { border-top: 1px solid var(--line); }
@@ -311,5 +341,8 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .cat-meter { flex: 1; min-width: 140px; }
   .cat-actions { justify-content: flex-start; }
   .set-card .settings-row-ctl > .field { width: 100%; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) { flex-direction: column; align-items: stretch; gap: 8px; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) > .settings-row-ctl { max-width: none; }
+  .settings-range input[type="range"] { flex: 1; width: auto; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
 }

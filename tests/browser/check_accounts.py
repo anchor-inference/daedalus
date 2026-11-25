@@ -31,8 +31,8 @@ from screenshots import UNHANDLED, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 WORDS = {
-    "en": {"title": "Subscription accounts", "resting": "resting: usage limit, back in", "on": "signed in", "off": "not signed in", "default": "default", "add": "Add account", "remove": "Remove", "fallover": "Switch account at a limit", "calls": "41 calls in 24 h", "default_title": "Default account"},
-    "ru": {"title": "Аккаунты подписок", "resting": "пауза: лимит использования, вернётся через", "on": "вход выполнен", "off": "нет входа", "default": "по умолчанию", "add": "Добавить аккаунт", "remove": "Удалить", "fallover": "Переключать аккаунт при лимите", "calls": "запросов за 24 ч: 41", "default_title": "Аккаунт по умолчанию"},
+    "en": {"title": "Subscription accounts", "resting": "resting: usage limit, back in", "on": "signed in", "off": "not signed in", "default": "default", "add": "Add account", "remove": "Remove", "fallover": "Switch account at a limit", "calls": "41 calls in 24 h", "default_title": "Default account", "edit": "Edit the account"},
+    "ru": {"title": "Аккаунты подписок", "resting": "пауза: лимит использования, вернётся через", "on": "вход выполнен", "off": "нет входа", "default": "по умолчанию", "add": "Добавить аккаунт", "remove": "Удалить", "fallover": "Переключать аккаунт при лимите", "calls": "запросов за 24 ч: 41", "default_title": "Аккаунт по умолчанию", "edit": "Изменить аккаунт"},
 }
 OUTSIDE = """() => {
   const vw = document.documentElement.clientWidth;
@@ -81,11 +81,12 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     rows = claude.locator(".account-row")
     expect(rows).to_have_count(3)
     first = rows.nth(0)
-    expect(first.locator(".mmeta")).to_have_text("someone@example.org · max")
-    expect(first.locator(".chip.accent")).to_have_text(words["default"])
+    expect(first.locator(".account-meta")).to_have_text("someone@example.org · max")
+    expect(first.locator(".badge.accent")).to_have_text(words["default"])
     expect(first.locator("[data-account-status]")).to_contain_text(words["resting"])
     expect(first.locator(".account-facts")).to_contain_text(words["calls"])
     expect(first.locator("[data-account-usage]")).to_contain_text("5h")
+    first.get_by_role("button", name=words["edit"]).click()
     if first.locator('[data-action="remove"]').count():
         problems.append(f"{lang} {width}: the default account offers Remove")
     expect(rows.nth(1).locator("[data-account-status]")).to_have_text(words["on"])
@@ -112,6 +113,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.goto(f"{BASE}/settings/accounts?token=t&lang={lang}")
     work = page.locator('[data-account-upstream="claude"] [data-account="k3v9q2ma"]')
     work.scroll_into_view_if_needed()
+    work.get_by_role("button", name=words["edit"]).click()
     work.locator('[data-action="remove"]').click()
     dialog = page.locator(".sheet-backdrop.confirm .dialog")
     expect(dialog).to_be_visible()

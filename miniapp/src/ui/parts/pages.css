@@ -340,14 +340,14 @@ a.memory-source:hover { color: var(--fg); }
 .model-price { border-top: 1px solid var(--line); }
 .model-price .model-price-rates { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 4px; }
 .model-price-foot { margin-top: 8px; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-/* Which models helpers may use: three labelled ways stacked, each saying what it allows, then the list. */
+/* Which models helpers may use: three ways as one choice, the sentence for the chosen one under it, then the list. */
 .dt-subagent-models { display: grid; gap: 6px; margin-top: 6px; }
 .subagent-models, .quick-models { display: grid; gap: var(--space-2); min-width: 0; width: 100%; }
-.subm-modes { display: grid; gap: 2px; }
-.subm-mode { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px var(--space-2); border-radius: var(--radius-sm); cursor: pointer; min-width: 0; }
-.subm-mode:hover { background: var(--surface-2); }
-.subm-mode.on { background: var(--surface-3); }
-.subm-mode input { margin: 0; flex: none; accent-color: var(--fg); }
+.subagent-models .subm-modes { display: flex; width: 100%; min-width: 0; box-sizing: border-box; margin: 0; }
+.subagent-models .subm-modes.segmented button { flex: 1 1 0; min-width: 0; padding: 4px 6px; }
+/* The names of the three ways are long in Russian and wrap in their segment rather than being cut. */
+.subagent-models .subm-modes .segmented-label { white-space: normal; text-align: center; line-height: 1.25; }
+.subm-explain { margin-top: -2px; }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }

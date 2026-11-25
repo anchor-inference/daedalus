@@ -5084,6 +5084,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "fallback.done": { en: "Done", ru: "Готово" },
   "fallback.skipped": { en: "{names}: its provider is not ready, so it is skipped", ru: "{names} пропускается: провайдер не готов" },
   "settings.models.auto_fallback.sub": { en: "Off by default. Temporary failures may retry on the selected model. Turn on to allow switching to a fallback model.", ru: "По умолчанию выключено. При временном сбое запрос может повториться на выбранной модели. Включите, чтобы разрешить переход на запасную." },
+  "settings.tasks.helpers": { en: "Helper agents", ru: "Агенты-помощники" },
   "settings.orchestrator.title": { en: "Project orchestrator", ru: "Оркестратор проекта" },
   "settings.orchestrator.sub": {
     en: "The model a project's orchestrator runs when its project names none. It plans and decides for a whole team, so the strongest model pays for itself here.",
@@ -5236,6 +5237,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "accounts.key.placeholder": { en: "the plan's key", ru: "ключ тарифа" },
   "accounts.signin": { en: "Sign in", ru: "Войти" },
   "accounts.signin.again": { en: "Sign in again", ru: "Войти заново" },
+  "accounts.edit": { en: "Edit the account", ru: "Изменить аккаунт" },
   "accounts.up": { en: "Move up", ru: "Выше" },
   "accounts.down": { en: "Move down", ru: "Ниже" },
   "accounts.remove": { en: "Remove", ru: "Удалить" },
@@ -5351,6 +5353,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.limits.noproviders": { en: "No providers yet — they are added under Models and providers.", ru: "Провайдеров пока нет — они добавляются в разделе «Модели и провайдеры»." },
   "settings.limits.since": { en: "counting since {when}", ru: "считаем с {when}" },
   "settings.limits.since.start": { en: "the beginning", ru: "самого начала" },
+  "settings.limits.reset.title": { en: "Reset the spend counters?", ru: "Обнулить счётчики трат?" },
+  "settings.limits.reset.body": { en: "Counting starts again from zero: what has been spent so far no longer counts against the total caps.", ru: "Подсчёт начнётся заново с нуля: потраченное до сих пор больше не учитывается в общих потолках." },
   "settings.limits.reset": { en: "Reset counters", ru: "Обнулить счётчики" },
   "settings.compaction": { en: "Context compaction", ru: "Сжатие контекста" },
   "settings.compaction.sub": {
