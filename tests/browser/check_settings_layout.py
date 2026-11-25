@@ -50,7 +50,8 @@ def main() -> int:
                 assert panel.locator(".attn").is_visible()
                 page.goto(f"{BASE}/settings/tools{suffix}")
                 page.wait_for_selector(".tgroup")
-                assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => r.querySelector('.tgroup-use-text').getBoundingClientRect().right <= r.querySelector('.dropdown-btn').getBoundingClientRect().left - 7)")
+                # The usage never runs under the picker: beside it where there is room, over it on a narrow screen.
+                assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => { const use = r.querySelector('.tgroup-use-text').getBoundingClientRect(), pick = r.querySelector('.dropdown-btn').getBoundingClientRect(); return use.right <= pick.left - 7 || use.bottom <= pick.top; })")
                 page.goto(f"{BASE}/settings/search{suffix}")
                 page.wait_for_selector("#search-fallbacks")
                 # The fallbacks are an in-place list: ticking rows must not shift its search field sideways

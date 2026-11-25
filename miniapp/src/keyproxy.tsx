@@ -12,7 +12,7 @@ import { relTimeLong } from "./format";
 import { t } from "./i18n";
 import { Icon } from "./icons";
 import { confirmAsync, errorText } from "./ui";
-import { NumInput, Row } from "./settingsrow";
+import { NumInput, Row, SetBlock, SetGroup } from "./settingsrow";
 
 /** One variable of the proxy's file. A secret carries no value, only whether it is set. */
 export type KeyproxyVar = { name: string; secret: boolean; set: boolean; source: "file" | "environment" | "default"; value?: string; default?: string };
@@ -365,14 +365,12 @@ export function SearchKeys({ toast, onChanged }: { toast: (text: string) => void
   const { data, write } = useKeyproxy(toast, onChanged);
   const rows = (data?.upstreams ?? []).filter((row) => row.group === "search");
   return (
-    <div className="keyproxy-search" data-setting="tools.web.search.keys">
-      <div className="section-title">{t("keyproxy.search.title")}</div>
-      <div className="sub">{t("keyproxy.search.sub")}</div>
-      {!data?.reachable ? <Unavailable data={data} /> : rows.map((row) => (
-        <Row key={row.upstream} title={upstreamTitle(row)} desc={KEY_LINKS[row.upstream] ? <>{t("free.key.get")} <a href={KEY_LINKS[row.upstream]} target="_blank" rel="noopener noreferrer">{upstreamTitle(row)} ↗</a></> : undefined} stack>
-          <KeyInput v={row.key} label={`${upstreamTitle(row)}: ${t("keyproxy.key")}`} disabled={!data.writable} onSave={(value) => write(row.key.name, value)} />
+    <SetGroup title={t("keyproxy.search.title")} help={t("keyproxy.search.sub")} data-setting="tools.web.search.keys">
+      {!data?.reachable ? <SetBlock><Unavailable data={data} /></SetBlock> : rows.map((row) => (
+        <Row key={row.upstream} title={upstreamTitle(row)} desc={KEY_LINKS[row.upstream] ? <>{t("free.key.get")} <a href={KEY_LINKS[row.upstream]} target="_blank" rel="noopener noreferrer">{upstreamTitle(row)} ↗</a></> : undefined}>
+          <span className="set-key"><KeyInput v={row.key} label={`${upstreamTitle(row)}: ${t("keyproxy.key")}`} disabled={!data.writable} onSave={(value) => write(row.key.name, value)} /></span>
         </Row>
       ))}
-    </div>
+    </SetGroup>
   );
 }
