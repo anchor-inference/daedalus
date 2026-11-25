@@ -1559,6 +1559,11 @@ export type SessionDetail = {
    *  Present until the next run starts: the reply the model managed to write is not the only trace of a failure. */
   error?: string;
   compacting?: Compacting | null;
+  /** When the run it is on began, by the host's clock (a run resumed after a question counts from the
+   *  resume); null while it does nothing. */
+  run_started_at?: string | null;
+  /** The git branch of the folder it works in, read from the repository at each read; null outside one. */
+  branch?: string | null;
   /** The summary being written ahead of the trigger; the session is not compacting while it is. */
   compaction_background?: Compacting | null;
   run_id: string | null;

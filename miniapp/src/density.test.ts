@@ -198,8 +198,11 @@ const PHONE_SURFACES = [".ph-empty", ".ph-tile", ".ph-hero", ".bp-list-open", ".
 /** Content with an intentional height: two-line file cards, a message placeholder,
  *  and the document viewport. Keep their limits explicit so larger boxes still fail the guard. */
 const CONTENT_BOXES = [
-  { selector: ".artifact", property: "min-height", max: 48 },
-  { selector: ".artifact-main", property: "min-height", max: 46 },
+  // A file card and the changed-files card under an answer are the design's 52 px two-line card (48
+  // before it): the same frame for a file handed over and for the files written.
+  { selector: ".artifact", property: "min-height", max: 52 },
+  { selector: ".artifact-main", property: "min-height", max: 50 },
+  { selector: ".changed-files-head", property: "height", max: 52 },
   { selector: ".turn-skeleton .sk-user", property: "height", max: 40 },
   { selector: ".html-frame", property: "min-height", max: 400 },
   // A note card's picture and the card-shaped placeholders the Notes tab shows while it loads.
@@ -726,12 +729,18 @@ describe("rows and controls", () => {
     expect(wide).not.toMatch(/\.answer[^{]*\{[^}]*max-width: var\(--reading-w\)/);
   });
 
-  it("widens the stripe on a wide window rather than leaving margin", () => {
-    // A 2560 screen should read wider than a 1440 one; the owner's standing complaint is narrowness.
-    const stripes = all.filter((r) => r.selector === ":root" && /--chat-w/.test(r.body));
-    const widths = stripes.map((r) => Number(/--chat-w:\s*(\d+)px/.exec(r.body)?.[1] ?? 0));
-    expect(widths.length).toBeGreaterThan(1);
-    expect(Math.max(...widths)).toBeGreaterThan(Math.min(...widths));
+  it("holds the stripe at 760 px at every window width", () => {
+    // One measure, 760 px at 15/1.6 (about 85 characters), on a
+    // laptop and on a 2560 screen alike. The stripe once widened to 1120 and 1320 on wide windows, and
+    // every line of an answer became a long return trip for the eye. One declaration, no media rule
+    // that moves it; the Appearance setting's narrow and wide columns are the operator's own choice.
+    const stripes = all.filter((r) => /--chat-w:/.test(r.body) && /(^|[\s,]):root($|[\s,])/.test(r.selector));
+    expect(stripes.map((r) => r.media)).toEqual([""]);
+    expect(stripes[0].body).toMatch(/--chat-w: 760px/);
+    // The operator's bubble reads at the answer's size and stops at three quarters of the stripe.
+    expect(decl(".msg.user")).toContain("max-width: min(560px, 100%)");
+    expect(decl(".msg.user")).toContain("font-size: var(--fs-prose)");
+    expect(decl(".msg.user")).toContain("border-radius: var(--radius-bubble)");
   });
 });
 

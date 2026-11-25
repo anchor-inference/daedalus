@@ -200,6 +200,12 @@ ANSWER = """The menu page is live and checked on a phone.
 - prices are formatted from the same JSON; no more hand-typed `€` in the markup
 - the hero image is 46 KB now (was 1.9 MB), same crop
 
+```javascript
+const price = (cents) =>
+  new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" })
+    .format(cents / 100);
+```
+
 **Checks**
 
 | check | result |

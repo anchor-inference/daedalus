@@ -259,8 +259,9 @@
   .main { min-width: 0; }
   :root { --page-pad: 24px; }
   .screen { padding: 4px 24px 32px; }
-  .chat-head { padding: 0 16px; }
-  .chat-scroll { padding: 8px 24px 16px; }
+  /* The title 24 px in from the main's edge, as every page's; the buttons 12 px from the other. */
+  .chat-head { padding: 0 12px 0 24px; }
+  .chat-scroll { padding: 20px 24px 16px; }
   .composer { padding: 8px 24px 16px; }
   /* The panel is a column of the chat's grid, its share of the width dragged and remembered. The
      grid column does not animate: the conversation reflows once, and the windowed list measures once. */
@@ -284,12 +285,10 @@
      else and the conversation uses the room the window gives it. */
   .answer, .msg-wrap, .thinking-head, .activity, .artifacts { max-width: 100%; }
 }
-/* A wide window is room to read in, not margin to look at. */
-@media (min-width: 1600px) { :root { --chat-w: 1120px; } }
-@media (min-width: 2100px) { :root { --chat-w: 1320px; }
-}
+/* The conversation keeps one measure at every width: 760 px at 15/1.6 is about 85 characters, and a
+   stripe that grew to 1120 and 1320 on a wide window made every line of an answer a long return trip
+   for the eye. The room a wide window has is the margin around the column, as in a book. */
 @media (min-width: 1600px) {
-  .chat-head, .chat-scroll, .composer { padding-left: 40px; padding-right: 40px; }
   :root { --page-pad: 40px; }
   .screen { padding-left: 40px; padding-right: 40px; }
 }
@@ -408,7 +407,6 @@
 @media (min-width: 1024px) {
   .wide-only { display: flex; }
   .phone-only { display: none !important; }
-  .chat-head .title { font-size: var(--fs-14); }
   .sheet-section { padding: 14px 0; }
 }
 

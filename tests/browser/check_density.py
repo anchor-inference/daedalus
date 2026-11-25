@@ -87,6 +87,13 @@ READ = """
     composerRow: box(one('.composer-row')),
     subMeta: box(one('.chat-head .sub.meta')),
     headSub: box(one('.chat-head .chat-sub')),
+    headTitle: box(one('.chat-head .chat-title')),
+    // How far the run line's middle is from the title's: 0 when they share the line, as they must.
+    subOffset: (() => { const s = one('.chat-head .chat-sub'), t = one('.chat-head .chat-title'); if (!s || !t) return null; const a = s.getBoundingClientRect(), b = t.getBoundingClientRect(); return a.height ? Math.round((a.top + a.height / 2) - (b.top + b.height / 2)) : null; })(),
+    // Where the title's words start, from the main area's edge (the sidebar is draggable, so the window's
+    // x would hold only at its default width), and how much room the scroller gives the stripe.
+    titleX: (() => { const t = one('.chat-head .chat-title'); const m = one('.main'); if (!t || !m) return null; const r = document.createRange(); r.selectNodeContents(t); return Math.round(r.getBoundingClientRect().x - m.getBoundingClientRect().x); })(),
+    scrollRoom: (() => { const s = one('.chat-scroll'); if (!s) return null; const cs = getComputedStyle(s); return Math.round(s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)); })(),
     chat: box(one('.chat')),
     head: box(one('.chat-head')),
     timeline: box(one('.timeline')),
@@ -669,10 +676,14 @@ def judge(m: dict) -> list[str]:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
-    # The desktop header is two lines inside the same 52 px: the title, then the project, the model
-    # and the live state in the meta size — the phone's title button, not a second row of chips.
-    if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
-        problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
+    # The desktop header is one line, as every page's: the place and the title 24 px in from the main
+    # area's edge, then the run in the meta size on the same line. It was two lines in the same 52 px,
+    # the model and the state under the title, which read as a second toolbar.
+    if not phone:
+        if m["titleX"] != 24:
+            problems.append(f"{m['vw']}: the chat's title starts {m['titleX']} px from the main area's edge, not 24")
+        if m["subOffset"] is not None and abs(m["subOffset"]) > 3:
+            problems.append(f"{m['vw']}: the header's run line sits {m['subOffset']} px off the title's line")
     if m["chips"]:
         problems.append(f"{m['vw']}: {len(m['chips'])} chip(s) are still in the header")
     if not phone:
@@ -704,14 +715,18 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: an icon button is {b['w']}×{b['h']}, not {want}")
     if m["answerFs"] != (16 if phone else 15):
         problems.append(f"{m['vw']}: the answer is {m['answerFs']}px")
+    # The operator's bubble reads at the answer's size and stops at 560 px, three quarters of the stripe.
+    if not phone and m["userW"] and (m["userFs"] != 15 or m["userW"]["w"] > 560):
+        problems.append(f"{m['vw']}: the operator's bubble is {m['userW']['w']}px wide at {m['userFs']}px, not 15 px within 560")
     if m["timeline"]:
-        # The conversation and the field that answers it are one column. Two claims, both of them
-        # about what went wrong before: the field is exactly as wide as the conversation above it
-        # (they were offset against each other), and the stripe is never exceeded. How much room a
-        # panel leaves is not arithmetic worth pinning here; the widening claim is made below.
-        stripe = 920 if m["vw"] < 1600 else (1120 if m["vw"] < 2100 else 1320)
-        if m["timeline"]["w"] > stripe:
-            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
+        # The conversation and the field that answers it are one column, 760 px at every width (the
+        # owner's measure; it widened to 1120 and 1320 on wide windows before). Three claims: the stripe
+        # is never exceeded, it is the whole 760 wherever the scroller has the room, and the field is
+        # exactly as wide as the conversation above it (they were offset against each other once).
+        if m["timeline"]["w"] > 760:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the 760 stripe")
+        if not phone and m["scrollRoom"] is not None and m["scrollRoom"] >= 760 and m["timeline"]["w"] != 760:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 760")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
         # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 300 px
@@ -832,11 +847,6 @@ def run() -> int:
         problems += judge_sidebar(measured["sidebar"])
     if MEASURE:
         Path(MEASURE).write_text(json.dumps(measured, indent=1) + "\n")
-    if ASSERT:
-        # A wider window must read wider, not pad the sides: the owner's standing complaint.
-        wide = {m["vw"]: m["timeline"]["w"] for n, m in measured.items() if n.startswith("session-") and m.get("timeline") and m["vw"] >= 1024}
-        if len(wide) > 1 and wide[max(wide)] <= wide[min(wide)]:
-            problems.append(f"the conversation does not widen with the window: {wide}")
     print("problems:", problems or "none")
     return 1 if problems else 0
 
