@@ -3144,7 +3144,6 @@ def run_browser() -> int:
         page.goto(f"{BASE}/agents/{S1}?panel=browser&token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".panel .bp .bv[data-state='live']", timeout=15000)
         wait_frames(page, ".panel .bp", 1)
-        page.locator(".panel .bp-log-head").click()
         page.wait_for_timeout(500)
         bs.act("g1", "type", "search", name="Search", element="the shop's search field", text_len=15, text="whole rye flour")
         page.wait_for_timeout(280)

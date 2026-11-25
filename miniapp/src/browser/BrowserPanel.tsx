@@ -7,10 +7,11 @@
 // over. "Take control" hands this window the page — the agent's calls then wait, and it sees nothing of
 // the page while a person types — and "Give back" returns it with a note the agent is woken with.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup, BrowserUserChoice, BrowserWorkflow } from "../api";
 import { OverflowMenu, Popover, toast as statusToast, type MenuItem } from "../ui/dialogs";
+import { IconButton } from "../ui/primitives";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
@@ -241,7 +242,10 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const needs = needsOf(group.needs_you, snap);
   const viewing = snap.tabs.find((tab) => tab.id === (snap.viewing ?? snap.active)) ?? group.tabs.find((tab) => tab.active) ?? group.tabs[0] ?? null;
   const url = viewing?.url ?? "";
-  const [logOpen, setLogOpen] = useState(false);
+  // Open from the start in the panel: with the page at its own size the picture is only as tall as the
+  // page is, and the list of what was done is what fills the rest of the pane. A page of its own folds it
+  // away, because there the picture has the whole window.
+  const [logOpen, setLogOpen] = useState(!full);
   const [fit, setFit] = useFitChoice(group.id, !phone);
   useFillPage(group.id, stage, !phone && fit);
   const recording = useRecording(group.id);
@@ -325,11 +329,47 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   }, [live]);
 
   const tabs = snap.tabs.length ? snap.tabs : group.tabs;
+  const offline = snap.state.kind === "reconnecting" || snap.state.kind === "proxy-blocked";
+  // A request the agent made of the operator is drawn as a card above the picture; every other state
+  // is a line in the picture's foot.
+  const handover = !phone && !offline && drive === "needs";
+  const picture = (
+    <BrowserViewer
+      live={live}
+      snap={snap}
+      tier="live"
+      interactive={drive === "you" && !phone}
+      agent={agent}
+      saving={saving}
+      quality={quality}
+      onChord={onChord}
+      stageRef={(el) => { stage.current = el; }}
+      className="bp-viewer"
+      style={phone ? { aspectRatio: `${group.viewport.w} / ${group.viewport.h}` } : undefined}
+    >
+      {phone && drive !== "you" && drive !== "closed" && snap.painted && (
+        // A tap on the picture says how to use the page and offers the button that hands it over,
+        // instead of doing nothing at all.
+        <div className="bp-tapveil" onClick={() => statusToast(t("browser.take.hint"), { action: { label: t("browser.take"), run: () => void control.take() } })} />
+      )}
+      {drive !== "you" && !phone && snap.painted && (
+        // A click on the picture must not take the page from the agent by accident: it points at the
+        // button that does, and says so.
+        <div className="bp-veil" onClick={(e) => pulse(e.currentTarget.closest(".bp"))}>
+          <span className="bp-veil-hint"><Icon name="user" size={14} /> {t("browser.take.hint")}</span>
+        </div>
+      )}
+    </BrowserViewer>
+  );
+  const dialogChip = snap.dialog ? <DialogChip group={group.id} tab={viewing?.id ?? null} dialog={snap.dialog} canAnswer={drive === "you"} toast={toast} /> : null;
+  const replayStage = replaying ? (
+    <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} phone={phone} />
+  ) : null;
   const viewer = (
-    <div className="bp-stage-wrap">
+    <div className={`bp-stage-wrap ${editing || draft ? "editing" : ""}`}>
       {phone
         ? <PhoneNote drive={drive} needs={needs} state={snap.state.kind} viewers={snap.viewers} />
-        : <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} />}
+        : handover && <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} />}
       <BrowserLoginCard group={group} toast={toast} compact />
       {(snap.state.kind === "reconnecting" || snap.state.kind === "proxy-blocked" || snap.state.kind === "unavailable") && <OwnershipDisclosure groupId={group.id} />}
       {steps && <RecordBar group={group.id} recording={steps} tab={viewing?.id ?? null} toast={toast} />}
@@ -339,35 +379,11 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
           <span className="truncate">{url.replace(/^https?:\/\//, "") || t("browser.blank")}</span>
         </div>
       )}
-      <BrowserViewer
-        live={live}
-        snap={snap}
-        tier="live"
-        interactive={drive === "you" && !phone}
-        agent={agent}
-        saving={saving}
-        quality={quality}
-        onChord={onChord}
-        stageRef={(el) => { stage.current = el; }}
-        className="bp-viewer"
-        style={phone ? { aspectRatio: `${group.viewport.w} / ${group.viewport.h}` } : undefined}
-      >
-        {phone && drive !== "you" && drive !== "closed" && snap.painted && (
-          // A tap on the picture says how to use the page and offers the button that hands it over,
-          // instead of doing nothing at all.
-          <div className="bp-tapveil" onClick={() => statusToast(t("browser.take.hint"), { action: { label: t("browser.take"), run: () => void control.take() } })} />
-        )}
-        {drive !== "you" && !phone && snap.painted && (
-          // A click on the picture must not take the page from the agent by accident: it points at the
-          // button that does, and says so.
-          <div className="bp-veil" onClick={(e) => pulse(e.currentTarget.closest(".bp"))}>
-            <span className="bp-veil-hint"><Icon name="user" size={14} /> {t("browser.take.hint")}</span>
-          </div>
-        )}
-      </BrowserViewer>
-      {snap.dialog && <DialogChip group={group.id} tab={viewing?.id ?? null} dialog={snap.dialog} canAnswer={drive === "you"} toast={toast} />}
-      {replaying && (
-        <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} phone={phone} />
+      {phone ? <>{picture}{dialogChip}{replayStage}</> : (
+        <div className="bp-frame">
+          <div className="bp-view">{picture}{dialogChip}{replayStage}</div>
+          {!handover && <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} foot />}
+        </div>
       )}
       {editing ? (
         <section className="bp-rec" data-state="skill"><SkillEditor key={editing.id} group={group.id} recording={editing} toast={toast} onDone={() => setEditing(null)} /></section>
@@ -380,7 +396,8 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   );
 
   return (
-    <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${logOpen ? "log-open" : ""} ${phone && replaying ? "replaying" : ""}`} data-group={group.id} data-drive={drive}>
+    <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${fit && !phone ? "fit" : ""} ${logOpen ? "log-open" : ""} ${phone && replaying ? "replaying" : ""}`} data-group={group.id} data-drive={drive}
+      style={{ "--page-ratio": `${group.viewport.w} / ${group.viewport.h}` } as CSSProperties}>
       {switcher}
       {phone ? (
         <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} live={live} toast={toast} />
@@ -495,7 +512,7 @@ export function ControlButton({ control, compact, phone, ready = true }: { contr
     );
   }
   return (
-    <button type="button" className={`btn small bp-control take ${drive === "needs" ? "needs" : ""}`} disabled={busy} onClick={() => void control.take()} title={`${t("browser.take")} (${navigator.platform?.includes("Mac") ? "⌘⇧K" : "Ctrl+Shift+K"})`}>
+    <button type="button" className={`btn ${drive === "needs" ? "primary" : "small"} bp-control take ${drive === "needs" ? "needs" : ""}`} disabled={busy} onClick={() => void control.take()} title={`${t("browser.take")} (${navigator.platform?.includes("Mac") ? "⌘⇧K" : "Ctrl+Shift+K"})`}>
       <Icon name="user" size={14} />
       {compact ? t("browser.take.short") : drive === "other" ? t("browser.takeover") : t("browser.take")}
     </button>
@@ -645,25 +662,27 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
     },
   ];
   return (
-    <div className="bp-toolbar panel-toolbar">
-      <button className="iconbtn small" disabled={!driving} onClick={() => nav("back")} aria-label={t("panel.back")} title={driving ? t("panel.back") : t("browser.nav.locked")}><Icon name="back" size={16} /></button>
-      <button className="iconbtn small" disabled={!driving} onClick={() => nav("forward")} aria-label={t("panel.forward")} title={driving ? t("panel.forward") : t("browser.nav.locked")}><Icon name="forward" size={16} /></button>
-      <button className="iconbtn small" disabled={!driving} onClick={() => nav("reload")} aria-label={t("panel.reload")} title={driving ? t("panel.reload") : t("browser.nav.locked")}><Icon name="reload" size={16} /></button>
-      <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
+    <>
+      <div className="bp-toolbar panel-toolbar">
+        <span className="bp-nav">
+          <IconButton icon="back" label={t("panel.back")} disabled={!driving} onClick={() => nav("back")} />
+          <IconButton icon="forward" label={t("panel.forward")} disabled={!driving} onClick={() => nav("forward")} />
+          <IconButton icon="reload" label={t("panel.reload")} disabled={!driving} onClick={() => nav("reload")} />
+        </span>
+        <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
+        {recordable && <RecordButton group={group.id} toast={toast} />}
+        <SnapshotButton session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))} />
+        <IconButton icon="expand" label={t("browser.fit")} pressed={fit} onClick={() => onFit(!fit)} className="bp-fit" />
+        <OverflowMenu
+          className="bp-quality"
+          label={t("browser.quality", { quality: t(`browser.quality.${quality}`) })}
+          icon="image"
+          items={PICTURE_QUALITIES.map((q) => ({ label: t(`browser.quality.${q}`), hint: t(`browser.quality.${q}.hint`), checked: q === quality, onSelect: () => onQuality(q) }))}
+        />
+        <OverflowMenu label={t("browser.menu")} items={items} />
+      </div>
       {tabs.length > 1 && <TabStrip tabs={tabs} viewing={viewing} active={snap.active} onPick={(id) => live?.view({ tab: id })} />}
-      {recordable && <RecordButton group={group.id} toast={toast} />}
-      <SnapshotButton session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))} />
-      <button type="button" className={`iconbtn small bp-fit ${fit ? "on" : ""}`} aria-pressed={fit} onClick={() => onFit(!fit)} aria-label={t("browser.fit")} title={t(fit ? "browser.fit.on" : "browser.fit.off")} data-fit={fit ? "on" : "off"}><Icon name="expand" size={16} /></button>
-      <OverflowMenu
-        className="bp-quality"
-        label={t("browser.quality", { quality: t(`browser.quality.${quality}`) })}
-        icon="image"
-        small
-        items={PICTURE_QUALITIES.map((q) => ({ label: t(`browser.quality.${q}`), hint: t(`browser.quality.${q}.hint`), checked: q === quality, onSelect: () => onQuality(q) }))}
-      />
-      <ControlButton control={control} />
-      <OverflowMenu label={t("browser.menu")} small items={items} />
-    </div>
+    </>
   );
 }
 
@@ -755,9 +774,10 @@ function PhoneNote({ drive, needs, state, viewers }: { drive: DriveState; needs:
   if (state === "reconnecting" || state === "proxy-blocked") return <div className="bp-pnote warn" role="status" data-banner="offline"><Icon name="reload" size={18} /><span className="bp-pnote-main"><b>{t("browser.banner.offline")}</b></span></div>;
   if (drive === "needs") {
     return (
-      <div className="bp-pnote warn" role="status" data-banner="needs">
-        <Icon name="user" size={18} />
-        <span className="bp-pnote-main"><b>{t("browser.ph.needs.title", { what: needWords(needs) })}</b><span>{t("browser.ph.needs.sub")}</span></span>
+      <div className="bp-pnote warn bp-handover" role="status" data-banner="needs">
+        <div className="approval-eyebrow"><Icon name="hand" size={20} />{t("browser.handover.eyebrow")}</div>
+        <div className="approval-question">{needWords(needs)}</div>
+        <div className="approval-why">{t("browser.ph.needs.sub")}</div>
       </div>
     );
   }
@@ -777,34 +797,51 @@ function PhoneNote({ drive, needs, state, viewers }: { drive: DriveState; needs:
 
 // ── the banner over the picture ──────────────────────────────────────────────────────────────
 
-const BANNER_ICON: Record<DriveState, IconName> = { acting: "bolt", idle: "globe", you: "user", other: "user", paused: "pause", needs: "alert", closed: "stop" };
-
-function Banner({ drive, agent, needs, state, control, viewers }: { drive: DriveState; agent: string; needs: { reason: string; what?: string } | null; state: string; control: ControlApi; viewers: LiveSnapshot["viewers"] }) {
+/**
+ * Who holds the page, as the foot of the picture says it, or, while the agent waits for the operator,
+ * as a card above it: what happened, what it needs, and the one button (the shape the composer's
+ * request has). The words are the same either way; only a request that blocks the agent earns a card.
+ */
+function Banner({ drive, agent, needs, state, control, viewers, foot = false }: { drive: DriveState; agent: string; needs: { reason: string; what?: string } | null; state: string; control: ControlApi; viewers: LiveSnapshot["viewers"]; foot?: boolean }) {
   const offline = state === "reconnecting" || state === "proxy-blocked";
+  const others = viewers.others.filter((o) => o.label);
+  if (!foot && !offline && drive === "needs") {
+    return (
+      <div className="bp-banner bp-handover needs" role="status" data-banner="needs">
+        <div className="approval-eyebrow"><Icon name="hand" size={16} />{t("browser.handover.eyebrow")}</div>
+        <div className="approval-question">{needWords(needs)}</div>
+        <div className="approval-why">{t("browser.ph.needs.sub")}</div>
+        <div className="approval-actions">
+          <span className="grow" />
+          <ControlButton control={control} />
+        </div>
+      </div>
+    );
+  }
   let text: ReactNode;
   let action: ReactNode = null;
   if (offline) text = t("browser.banner.offline");
   else if (state === "unavailable") text = t("browser.state.gone");
   else if (drive === "you") {
     text = t("browser.banner.you", { name: agent });
+    action = <ControlButton control={control} />;
   } else if (drive === "other") {
     text = t("browser.banner.other");
-    action = <button type="button" className="bp-banner-act" onClick={() => void control.take()}>{t("browser.takeover")}</button>;
+    action = <ControlButton control={control} />;
   } else if (drive === "needs") {
     text = <><b>{t("browser.banner.needs")}</b> {needWords(needs)}</>;
-    action = <button type="button" className="bp-banner-act" onClick={() => void control.take()}>{t("browser.take")}</button>;
   } else if (drive === "paused") {
     text = t("browser.banner.paused", { name: agent });
-    action = <button type="button" className="bp-banner-act" onClick={() => void control.resume()}>{t("browser.resume")}</button>;
+    action = <ControlButton control={control} />;
   } else if (drive === "closed") {
     text = t("browser.banner.closed");
   } else {
     text = drive === "acting" ? t("browser.banner.acting", { name: agent }) : t("browser.banner.idle", { name: agent });
+    action = <ControlButton control={control} />;
   }
-  const others = viewers.others.filter((o) => o.label);
   return (
     <div className={`bp-banner ${offline ? "offline" : drive}`} role="status" data-banner={offline ? "offline" : drive}>
-      <span className="bp-banner-icon"><Icon name={offline ? "reload" : BANNER_ICON[drive]} size={13} /></span>
+      <span className="bp-banner-icon" aria-hidden="true" />
       <span className="bp-banner-text truncate">{text}</span>
       {others.length > 0 && <span className="bp-banner-viewers" title={others.map((o) => o.label).join(", ")}><Icon name="eye" size={12} />{others.map((o) => o.label).join(", ")}</span>}
       {action}

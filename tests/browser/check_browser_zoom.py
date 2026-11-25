@@ -162,6 +162,17 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
         say(f"Ctrl with the wheel zoomed only to {scale:.2f}")
     if [i for i in bs.inputs("g1")[inputs:] if i.get("type") != "move"]:
         say(f"the zoom's wheel reached the page: {bs.inputs('g1')[inputs:]}")
+    # The picture fills its frame and the code lies near its top edge, so zooming about the pointer leaves the
+    # code's first rows outside the frame; drag it to the middle, as a person reading it would.
+    clip, _ = code_on_screen(page, box)
+    shown = page.locator(VIEWER).bounding_box()
+    dx = shown["x"] + shown["width"] / 2 - (clip["x"] + clip["width"] / 2)
+    dy = shown["y"] + shown["height"] / 2 - (clip["y"] + clip["height"] / 2)
+    page.mouse.move(shown["x"] + shown["width"] / 2, shown["y"] + shown["height"] / 2)
+    page.mouse.down(button="middle")
+    page.mouse.move(shown["x"] + shown["width"] / 2 + dx, shown["y"] + shown["height"] / 2 + dy, steps=6)
+    page.mouse.up(button="middle")
+    page.wait_for_timeout(300)
     if not wait_for(page, lambda: any(v.get("quality") == 92 and v.get("adaptive") is False for v in live.of("view")[views:])):
         say(f"zoomed, the view asked for no sharper frames: {live.of('view')[views:]}")
     page.wait_for_timeout(800)

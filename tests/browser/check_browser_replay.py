@@ -67,7 +67,6 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
 
     first = bs.act("g1", "click", "add", name="Add to cart", element="the Add to cart button")
     second = bs.act("g1", "click", "size", name="5 kg", element="the 5 kg size option")
-    page.locator(f"{ROOT} .bp-log-head").click()
     page.wait_for_selector(f"{ROOT} .bp-log-row[data-action='{second['id']}'] .bp-log-frame", timeout=10000)
     marked = page.locator(f"{ROOT} .bp-log-row .bp-log-frame").count()
     if marked < 2:

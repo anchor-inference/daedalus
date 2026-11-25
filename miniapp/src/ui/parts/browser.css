@@ -535,3 +535,9 @@ button.coach-path:hover { color: var(--fg); }
   .answer-translation.offer { height:auto; margin-top:var(--space-1); }
   .answer-translation.offer .linkbtn { position:static; opacity:1; pointer-events:auto; padding:0; border:0; background:none; color:var(--fg-3); }
 }
+
+/* The panel tab's mark and a toast's action, kept here from the browser block they were written in. */
+.panel-tab .tab-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.panel-tab .tab-mark.busy { animation: dotpulse 1.4s ease-in-out infinite; }
+.panel-tab .tab-mark.attn { background: var(--warn); }
+.toast .toast-action { color: var(--accent); font-weight: 600; }
