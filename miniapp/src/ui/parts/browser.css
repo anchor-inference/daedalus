@@ -763,22 +763,17 @@ button.coach-path:hover { color: var(--fg); }
 .pair-error { margin-bottom: var(--space-3); color: var(--bad); font-size: var(--fs-13); }
 .pair-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .pair-missing p { margin: var(--space-3) 0 0; line-height: 1.45; }
-.devices-steps { margin: 0 0 var(--space-4); padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-13); line-height: 1.45; }
+.devices-steps { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-13); line-height: 1.45; }
 .devices-cmd { display: flex; align-items: center; gap: 4px; max-width: 100%; margin-top: 4px; padding: 3px 4px 3px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); }
 .devices-cmd code { flex: 1 1 auto; min-width: 0; font-size: var(--fs-12); }
-.devices-code { display: flex; flex-direction: column; gap: 6px; padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .devices-code-row { display: flex; gap: 8px; }
-.devices-code-row .field { flex: 1 1 auto; min-width: 0; max-width: 220px; letter-spacing: .08em; text-transform: uppercase; }
-.device-row .mtitle { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.device-row .mtitle > .ic { flex: none; color: var(--kind-remote); }
-.device-meta { font-family: inherit; }
+.devices-code-row .field { flex: 1 1 auto; min-width: 0; max-width: 220px; margin: 0; letter-spacing: .08em; text-transform: uppercase; }
+.device-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
+.device-name > .ic { flex: none; color: var(--kind-remote); }
 .device-link { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
 .device-link.on { color: var(--ok); }
 .device-rename { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .device-rename .field { flex: 1 1 auto; min-width: 0; }
-.device-confirm { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 8px; font-size: var(--fs-13); }
-.device-confirm .sub { line-height: 1.45; }
-.device-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 /* The phone's "where it runs" chip beside the project and the mode under the new chat's heading: the
    host in the amber the host pill wears everywhere, so the side reads before the word does. */
 .ph-hero .runon-chip { max-width: none; }

@@ -9,11 +9,11 @@
 import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { errorText } from "./ui";
-import { Switch, useCopied } from "./ui/components";
-import { Icon } from "./icons";
+import { useCopied } from "./ui/components";
+import { Button, Select, Switch } from "./ui/primitives";
 import { t } from "./i18n";
 import { pathFor } from "./router";
-import { Row, TextBlock } from "./settingsrow";
+import { Row, SetBlock, SetGroup, TextBlock } from "./settingsrow";
 import { go, useMedia } from "./shell";
 import { prime, useQuery } from "./store";
 import { QrCode } from "./twofactor";
@@ -116,18 +116,18 @@ function TokenField({ id, label, saved, busy, setting, onSave }: { id: string; l
   if (saved && !replacing) {
     return (
       <Row title={label} desc={t("address.token.saved")} stack={narrow} data-setting={setting} data-token="saved">
-        <button type="button" className="btn small" onClick={() => setReplacing(true)}>{t("address.token.replace")}</button>
-        <button type="button" className="btn small" disabled={busy} onClick={() => void onSave("")}>{t("address.token.forget")}</button>
+        <Button size="sm" onClick={() => setReplacing(true)}>{t("address.token.replace")}</Button>
+        <Button size="sm" disabled={busy} onClick={() => void onSave("")}>{t("address.token.forget")}</Button>
       </Row>
     );
   }
   return (
     <form className="settings-block" data-setting={setting} data-token="empty" onSubmit={save}>
-      <label className="field" htmlFor={id}>{label}</label>
+      <label className="field-label" htmlFor={id}>{label}</label>
       <div className="share-field">
         <input id={id} className="field mono" type="password" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="new-password" spellCheck={false} maxLength={512} />
-        <button type="submit" className="btn primary small" disabled={busy || !draft.trim()}>{t("common.save")}</button>
-        {saved && <button type="button" className="btn small" onClick={() => (setDraft(""), setReplacing(false))}>{t("common.cancel")}</button>}
+        <Button type="submit" variant="primary" size="sm" disabled={busy || !draft.trim()}>{t("common.save")}</Button>
+        {saved && <Button size="sm" onClick={() => (setDraft(""), setReplacing(false))}>{t("common.cancel")}</Button>}
       </div>
     </form>
   );
@@ -137,27 +137,30 @@ function ExternalLink({ href, text }: { href: string; text: string }) {
   return <a href={href} target="_blank" rel="noopener">{text}</a>;
 }
 
+/** What the chosen provider needs besides the choice: a client found, a token, a server. Rows of the
+ *  provider's card; the sentences that explain them are blocks of it. */
 function Setup({ view, busy, change, windows }: { view: Tunnel; busy: boolean; change: (body: AddressChange) => Promise<boolean>; windows: boolean }) {
   const ngrok = view.providers.ngrok;
   const frp = view.providers.frp;
+  const readable = !view.tokens_hidden && <SetBlock data-address-readable=""><span className="set-hint">{t("address.token.readable")}</span></SetBlock>;
   switch (view.provider) {
     case "ngrok":
       return (
         <>
-          {!view.tokens_hidden && <div className="sub" data-address-readable="">{t("address.token.readable")}</div>}
+          {readable}
           {ngrok.found && !ngrok.client && (
             <Row title={t("address.ngrok.found")} desc={<span className="mono">{ngrok.found}</span>} data-setting="address.ngrok.trust">
-              <button type="button" className="btn small" disabled={busy} onClick={() => void change({ trust_ngrok: true })}>{t("address.ngrok.trust")}</button>
+              <Button size="sm" disabled={busy} onClick={() => void change({ trust_ngrok: true })}>{t("address.ngrok.trust")}</Button>
             </Row>
           )}
-          {!ngrok.found && !ngrok.client && <div className="sub" data-address-get="ngrok">{t("address.ngrok.missing")} <ExternalLink href={NGROK_DOWNLOAD} text={t("address.ngrok.get")} /></div>}
+          {!ngrok.found && !ngrok.client && <SetBlock data-address-get="ngrok"><span className="set-hint">{t("address.ngrok.missing")} <ExternalLink href={NGROK_DOWNLOAD} text={t("address.ngrok.get")} /></span></SetBlock>}
           <TokenField id="address-ngrok-token" label={t("address.ngrok.token")} saved={ngrok.token} busy={busy} setting="address.ngrok.token" onSave={(token) => change({ ngrok_token: token })} />
         </>
       );
     case "tailscale":
       return view.providers.tailscale.signed_in && view.state !== "sign_in" ? (
         <Row title={t("address.tailscale.signedin")} data-setting="address.tailscale.signout">
-          <button type="button" className="btn small" disabled={busy} onClick={() => void change({ sign_out: true })}>{t("address.tailscale.signout")}</button>
+          <Button size="sm" disabled={busy} onClick={() => void change({ sign_out: true })}>{t("address.tailscale.signout")}</Button>
         </Row>
       ) : null;
     case "frp":
@@ -167,10 +170,12 @@ function Setup({ view, busy, change, windows }: { view: Tunnel; busy: boolean; c
           <TextBlock key={`server-${frp.server ?? ""}`} id="address-frp-server" label={t("address.frp.server")} value={frp.server ?? ""} placeholder="vps.example.com:7000" setting="address.frp.server" onSave={(value) => void change({ frp_server: value })} />
           <TextBlock key={`domain-${frp.domain ?? ""}`} id="address-frp-domain" label={t("address.frp.domain")} value={frp.domain ?? ""} placeholder="tunnel.example.com" setting="address.frp.domain" onSave={(value) => void change({ frp_domain: value })} />
           <TokenField id="address-frp-token" label={t("address.frp.token")} saved={frp.token} busy={busy} setting="address.frp.token" onSave={(token) => change({ frp_token: token })} />
-          <div className="sub"><ExternalLink href={FRP_DOCS} text={t("address.frp.docs")} /></div>
-          <div className="sub" data-address-frp-tls="">{t("address.frp.tls")}</div>
-          {!view.tokens_hidden && <div className="sub" data-address-readable="">{t("address.token.readable")}</div>}
-          {windows && <div className="sub" data-address-defender="">{t("address.frp.defender")}</div>}
+          <SetBlock>
+            <span className="set-hint"><ExternalLink href={FRP_DOCS} text={t("address.frp.docs")} /></span>
+            <span className="set-hint" data-address-frp-tls="">{t("address.frp.tls")}</span>
+            {windows && <span className="set-hint" data-address-defender="">{t("address.frp.defender")}</span>}
+          </SetBlock>
+          {readable}
         </>
       );
     default:
@@ -210,54 +215,62 @@ function Tunnelled({ view }: { view: Tunnel }) {
 
   return (
     <>
-      <div className="card address-card" data-address={view.state} data-provider={view.provider}>
+      <SetGroup className="address-card" data-address={view.state} data-provider={view.provider}>
         <Row title={t("address.switch")} desc={<span className={`address-status ${status.tone}`} role={status.tone === "bad" ? "alert" : "status"} data-address-status="">{status.text}</span>} data-setting="address.enabled">
           <Switch checked={view.enabled} disabled={busy} onChange={(enabled) => void change({ enabled })} label={t("address.switch")} />
         </Row>
         {view.state === "failed" && view.detail && (
-          <details className="address-detail">
-            <summary>{t("address.detail")}</summary>
-            <code className="mono">{view.detail}</code>
-          </details>
+          <SetBlock>
+            <details className="address-detail">
+              <summary>{t("address.detail")}</summary>
+              <code className="mono">{view.detail}</code>
+            </details>
+          </SetBlock>
         )}
         {link && (
           <Row title={t("address.signin.title")} data-setting="address.signin">
             <a className="btn primary small" href={link} target="_blank" rel="noopener">{t("address.signin")}</a>
           </Row>
         )}
-        <div className="access-options address-providers" role="radiogroup" aria-label={t("address.provider")} data-setting="address.provider">
-          {PROVIDERS.map((provider) => (
-            <label key={provider} className={`access-option ${view.provider === provider ? "on" : ""}`} data-address-provider={provider}>
-              <input type="radio" name="address-provider" checked={view.provider === provider} disabled={busy} onChange={() => void change({ provider })} />
-              <span>
-                <b>{t(`address.provider.${provider}`)}</b>
-                <span className="sub">{t(`address.provider.${provider}.sub`)}</span>
-              </span>
-            </label>
-          ))}
-        </div>
+        {problem && <SetBlock><span className="login-error address-problem" role="alert">{problem}</span></SetBlock>}
+      </SetGroup>
+
+      <SetGroup className="address-card" data-address-provider={view.provider}>
+        {/* One choice of four with a sentence for each: the list says what each is, and the row says it
+            again for the one in use, so the sentence is read where the choice was made. */}
+        <Row title={t("address.provider")} htmlFor="address-provider" desc={t(`address.provider.${view.provider}.sub`)} data-setting="address.provider">
+          <Select
+            id="address-provider"
+            label={t("address.provider")}
+            value={view.provider}
+            disabled={busy}
+            onChange={(provider) => void change({ provider })}
+            options={PROVIDERS.map((provider) => ({ id: provider, label: t(`address.provider.${provider}`), hint: t(`address.provider.${provider}.sub`) }))}
+          />
+        </Row>
         <Setup view={view} busy={busy} change={change} windows={windows} />
-        {problem && <div className="login-error address-problem" role="alert">{problem}</div>}
-      </div>
+      </SetGroup>
 
       {shown && (
-        <div className="card address-card" data-address-shown="">
-          <div className="section-title">{t("address.current")}</div>
-          <div className="share-field">
-            <input className="field mono" readOnly value={view.address} title={view.address} onFocus={(e) => e.target.select()} aria-label={t("address.current")} />
-            <button type="button" className="btn small" onClick={() => void copyAddress()}><Icon name={copied ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
-          </div>
-          {view.qr.length > 0 && <QrCode rows={view.qr} label={t("address.qr")} />}
-        </div>
+        <SetGroup title={t("address.current")} className="address-card" data-address-shown="">
+          <SetBlock>
+            <div className="share-field">
+              <input className="field mono" readOnly value={view.address} title={view.address} onFocus={(e) => e.target.select()} aria-label={t("address.current")} />
+              <Button size="sm" icon={copied ? "check" : "copy"} onClick={() => void copyAddress()}>{t("common.copy")}</Button>
+            </div>
+            {view.qr.length > 0 && <QrCode rows={view.qr} label={t("address.qr")} />}
+          </SetBlock>
+        </SetGroup>
       )}
 
-      <div className="card address-card" data-address-exposed="">
-        <div className="section-title">{t("address.exposed")}</div>
+      <SetGroup title={t("address.exposed")} className="address-card" data-address-exposed="">
         <Row title={t("address.exposed.links")}><span className="settings-value" data-exposed="links">{view.exposed.links}</span></Row>
         <Row title={t("address.exposed.services")}><span className="settings-value" data-exposed="services">{view.exposed.services}</span></Row>
-        <div className="sub">{t("address.exposed.notapp")}</div>
-        <div className="sub">{t("address.down")}</div>
-      </div>
+        <SetBlock>
+          <span className="set-hint">{t("address.exposed.notapp")}</span>
+          <span className="set-hint">{t("address.down")}</span>
+        </SetBlock>
+      </SetGroup>
     </>
   );
 }
@@ -265,11 +278,11 @@ function Tunnelled({ view }: { view: Tunnel }) {
 export function PublicAddressPanel() {
   // Polled here and nowhere else: the query stops with the section, and the index asks only once.
   const { data, error } = useQuery<PublicAddress>(ADDRESS, { pollMs: POLL_MS, staleMs: 1000 });
-  if (!data) return error ? <div className="card"><div className="sub" role="alert">{error}</div></div> : <div className="empty">{t("common.loading")}</div>;
+  if (!data) return error ? <SetGroup><SetBlock><span className="set-hint" role="alert">{error}</span></SetBlock></SetGroup> : <div className="empty">{t("common.loading")}</div>;
   if (!data.native) return null;
   if (!data.available || !data.tunneld) {
     const reason = data.available ? "no_tunneld" : data.reason === "old_launcher" ? "old_launcher" : "no_launcher";
-    return <div className="card" data-address-unavailable={reason}><div className="sub">{t(`address.unavailable.${reason}`)}</div></div>;
+    return <SetGroup data-address-unavailable={reason}><SetBlock><span className="set-hint">{t(`address.unavailable.${reason}`)}</span></SetBlock></SetGroup>;
   }
   return <Tunnelled view={data} />;
 }

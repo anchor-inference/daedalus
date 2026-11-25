@@ -966,9 +966,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
         const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.chat.telegram")}</div>
-            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
+          <SetGroup title={t("settings.chat.telegram")}>
+            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")}>
               <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
             </Row>
             {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
@@ -989,7 +988,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="chat-maxfile" setting="telegram.max_inbound_file_mb" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
             <NumRow id="chat-caption" setting="telegram.photo_caption_wait_seconds" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
             <NumRow id="chat-slowtool" setting="telegram.slow_tool_seconds" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
-          </div>
+          </SetGroup>
         );
       }
       case "schedules":
