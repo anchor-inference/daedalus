@@ -38,22 +38,20 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .staff-sheet-who { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 4px; }
 .executor-choice { border: 0; padding: 0; margin: 0; min-width: 0; }
 .executor-choice legend { padding: 0; margin: 14px 0 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.executor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+/* As many tiles a row as their names fit: six squeezed into the sheet cut every name to four letters. */
+.executor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 6px; }
 .executor { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: var(--row-h); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; min-width: 0; transition: background var(--t-fast); }
 .executor:hover:not(:disabled) { background: var(--surface-2); }
 .executor.on { border-color: var(--fg); }
 .executor:disabled { cursor: not-allowed; opacity: 0.55; }
 .executor-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.executor-why { color: var(--fg-3); font-size: var(--fs-11); }
+.executor-why { color: var(--fg-3); font-size: var(--fs-12); }
 .staff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-3); }
 .branch-preview { font-family: var(--mono); font-size: var(--fs-12); word-break: break-all; }
 .colour-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 4px; }
 .colour-swatch { --c: var(--staff-blue); width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-sm); border: 2px solid transparent; background: var(--c); cursor: pointer; padding: 0; }
 .colour-swatch.on { border-color: var(--fg); box-shadow: inset 0 0 0 2px var(--surface-1); }
 .staff-sheet textarea.field { resize: vertical; font: inherit; }
-@media (min-width: 720px) {
-  .executor-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-}
 @media (max-width: 479px) {
   .staff-grid { grid-template-columns: minmax(0, 1fr); }
   .staff-row { padding: 10px; gap: var(--space-2); }
