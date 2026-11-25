@@ -14,7 +14,7 @@
 // Either dialog is opened from anywhere by `openNewProject()`, so a button in the sidebar, the
 // projects list, the palette or a phone's page needs nothing passed down to it.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, ApiError, type Project, type ProjectEnvironments } from "../api";
 import { t } from "../i18n";
 import { Icon } from "../icons";
@@ -23,6 +23,7 @@ import { useMedia } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 import { Sheet } from "../ui/dialogs";
+import { Button, Segmented, Switch } from "../ui/primitives";
 import { FolderBrowser, type Env, type FolderChoice } from "./FolderBrowser";
 import { folderNameProblem, freeName, slugify } from "./slug";
 import "./newproject.css";
@@ -281,8 +282,8 @@ export function NewProjectDialog({ onClose, onCreated, onOrchestration, toast }:
         </button>
         {extras && (
           <div className="np-extras-body">
-            <Toggle id="np-snapshots" on={snapshotsOn} onChange={setSnapshots} title={t("np.snapshots")} sub={t("np.snapshots.sub")} />
-            {mode === "existing" && <Toggle id="np-readonly" on={readonly} onChange={setReadonly} title={t("np.readonly")} sub={t("np.readonly.sub")} />}
+            <Toggle on={snapshotsOn} onChange={setSnapshots} title={t("np.snapshots")} sub={t("np.snapshots.sub")} />
+            {mode === "existing" && <Toggle on={readonly} onChange={setReadonly} title={t("np.readonly")} sub={t("np.readonly.sub")} />}
             {mode === "existing" && (
               <div className="np-field">
                 <label className="np-label" htmlFor="np-label">{t("np.label")} <span className="sub">{t("np.optional")}</span></label>
@@ -302,7 +303,7 @@ export function NewProjectDialog({ onClose, onCreated, onOrchestration, toast }:
         <div className="np-failed" role="alert">
           <Icon name="alert" size={15} />
           <span className="grow">{failed.message}</span>
-          <button type="button" className="btn small" disabled={busy || offline} onClick={() => void send(failed.body, true)}>{t("common.retry")}</button>
+          <Button size="sm" disabled={busy || offline} onClick={() => void send(failed.body, true)}>{t("common.retry")}</Button>
         </div>
       )}
       {offline && <p className="sub attn" role="status">{t("result.block.unconfirmed")}</p>}
@@ -313,10 +314,8 @@ export function NewProjectDialog({ onClose, onCreated, onOrchestration, toast }:
       <button type="button" className="np-hint" onClick={() => onOrchestration(name)}>
         <Icon name="compass" size={13} /><span>{t("np.orch.hint")} <span className="np-hint-link">{t("np.orch.link")}</span></span>
       </button>
-      <button type="button" className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-      <button type="button" className="btn primary np-create" onClick={create} disabled={blocked}>
-        {t("np.create")}{wide && <kbd aria-hidden>Ctrl ↵</kbd>}
-      </button>
+      <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+      <Button variant="primary" className="np-create" onClick={create} disabled={blocked}>{t("np.create")}{wide && <kbd className="kbd btn-kbd" aria-hidden="true">Ctrl ↵</kbd>}</Button>
     </div>
   );
   return (
@@ -336,22 +335,13 @@ function ChoiceCard({ on, title, sub, onPick }: { on: boolean; title: string; su
   );
 }
 
-function Toggle({ id, on, onChange, title, sub }: { id: string; on: boolean; onChange: (on: boolean) => void; title: string; sub: string }) {
+/** An on/off choice of the dialog: its words, and the switch at the row's end. The whole row is the
+ *  control, as a label's would be, and the switch itself answers once. */
+function Toggle({ on, onChange, title, sub }: { on: boolean; onChange: (on: boolean) => void; title: string; sub: string }) {
   return (
-    <label className="np-toggle" htmlFor={id}>
-      <input id={id} type="checkbox" role="switch" checked={on} onChange={(event) => onChange(event.target.checked)} />
-      <span className="np-switch" aria-hidden />
+    <div className="np-toggle" onClick={(event) => { if (!(event.target as HTMLElement).closest(".switch")) onChange(!on); }}>
       <span className="np-card-text"><b>{title}</b><span className="sub">{sub}</span></span>
-    </label>
-  );
-}
-
-function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: ReactNode }[]; onChange: (value: T) => void; label: string }) {
-  return (
-    <div className="np-seg" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? "on" : ""} onClick={() => onChange(option.id)}>{option.label}</button>
-      ))}
+      <Switch checked={on} onChange={onChange} label={title} />
     </div>
   );
 }
