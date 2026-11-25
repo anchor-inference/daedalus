@@ -74,6 +74,7 @@ def check(page: Page, width: int, lang: str, saved: list[dict], problems: list[s
     for i in range(rows.count()):
         trigger = rows.nth(i).locator(".dropdown-btn")
         trigger.click()
+        page.wait_for_selector("[role=option]", timeout=5000)
         levels = page.locator("[role=option]").evaluate_all("els => els.map(e => e.dataset.value)")
         # The chosen level is pressed to close the list: choosing what is chosen saves nothing.
         page.locator(f"[role=option][data-value='{rows.nth(i).get_attribute('data-level')}']").click()

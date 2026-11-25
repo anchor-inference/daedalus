@@ -280,3 +280,10 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .fallback-warn { flex-basis: 100%; text-align: left; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
 }
+
+/* ── A phone: a number field is a finger's height ───────────────────────────────────────────── */
+/* Stacked under its words a number is a row's only control and the thing the finger lands on; the
+   35 px the field takes from its padding is under the 44 px every target on a phone reaches. */
+@media (max-width: 599px) {
+  .set-card .settings-num input.field { min-height: var(--tap); }
+}

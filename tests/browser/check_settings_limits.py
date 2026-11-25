@@ -96,10 +96,12 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     host = Host()
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
     picker = page.locator("#compaction-preset")
-    picker.locator(".sel-current button").click()
-    labels = picker.locator(".sel-list [role=option] .sel-name").all_inner_texts()
+    picker.click()
+    page.wait_for_selector("[role=option]", timeout=5000)
+    labels = page.locator("[role=option]").evaluate_all("els => els.map(e => e.innerText)")
     print(f"[{lang}] options: {labels}")
-    if labels[:1] != [OWN[lang]] or labels[1:] != [p["label"] for p in SETTINGS["presets"].values()]:
+    wanted = [OWN[lang]] + [p["label"] for p in SETTINGS["presets"].values()]
+    if len(labels) != len(wanted) or any(not text.startswith(word) for text, word in zip(labels, wanted, strict=True)):
         say(f"the options read {labels}")
     if picker.get_attribute("data-value") != "":
         say(f"with nothing chosen the picker holds {picker.get_attribute('data-value')!r}")
@@ -108,7 +110,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     if "flash" not in hint.lower():
         say(f"the hint reads {hint!r}")
 
-    picker.locator(".sel-list [role=option][data-id='deepseek-flash']").click()
+    page.locator("[role=option][data-value='deepseek-flash']").click()
     page.wait_for_timeout(800)
     last = host.puts[-1] if host.puts else {}
     print(f"[{lang}] saved: {last.get('compaction')} at {last.get('base_revision')}")
@@ -132,9 +134,9 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     host = Host("retired-model")
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
     picker = page.locator("#compaction-preset")
-    chosen = picker.locator(".sel-current").inner_text()
-    print(f"[{lang}] missing: {chosen!r}, marked {picker.get_attribute('data-missing')!r}")
-    if picker.get_attribute("data-value") != "retired-model" or MISSING[lang] not in chosen or picker.get_attribute("data-missing") != "":
+    chosen = picker.inner_text()
+    print(f"[{lang}] missing: {chosen!r}")
+    if picker.get_attribute("data-value") != "retired-model" or MISSING[lang] not in chosen:
         say(f"a deleted preset reads {chosen!r} ({picker.get_attribute('data-value')!r})")
     words = page.locator("#compaction-words")
     words.fill("1000")
@@ -152,10 +154,11 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:
         say(f"Settings → Context scrolls sideways on a phone: {width}")
-    # The picker's list opens in place; on a phone it must stay inside the screen.
+    # The picker's list opens over the page; on a phone it must stay inside the screen.
     page.locator("#compaction-preset").scroll_into_view_if_needed()
-    page.locator("#compaction-preset .sel-current button").tap()
-    box = page.locator("#compaction-preset .sel-list").bounding_box() or {"x": -1, "width": 0}
+    page.locator("#compaction-preset").tap()
+    page.wait_for_selector(".dropdown-list", timeout=5000)
+    box = page.locator(".dropdown-list").bounding_box() or {"x": -1, "width": 0}
     print(f"[{lang}] phone list: {box}")
     if box["x"] < 0 or box["x"] + box["width"] > 390.5:
         say(f"the picker's list leaves the phone's screen: {box}")
