@@ -352,7 +352,7 @@
     },
     {
       "section": "navigation", "anchor": "navigation.pinned", "config": "navigation.pinned",
-      "title": { "en": "Pinned screens", "ru": "Закреплённые экраны" },
+      "title": { "en": "Sidebar navigation", "ru": "Навигация в боковой панели" },
       "about": { "en": "Which screens are pinned at the top of the sidebar, which wait in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны закреплены вверху боковой панели, какие ждут в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
       "synonyms": ["pinned", "pin a screen", "rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
     },

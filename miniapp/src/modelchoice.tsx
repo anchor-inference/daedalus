@@ -24,7 +24,8 @@ export function ModelChoice({ id, label, catalogue, value, onChange, defaultOpti
   const { items } = modelItems(catalogue);
   const options = [
     ...(defaultOption ? [{ id: "", label: defaultOption.label }] : []),
-    ...items.map((item) => ({ id: item.id, label: item.label, hint: item.detail })),
+    // A broken or slow model says so in its name, in the list and as the chosen value, so a bad choice is seen before it is made.
+    ...items.map((item) => ({ id: item.id, label: item.alert ? `${item.label} · ${item.alert.word}` : item.label, hint: [item.alert?.why, item.detail].filter(Boolean).join(" · ") || undefined })),
   ];
   // A model chosen here and deleted since stays in the configuration; the value still names it, as
   // missing, rather than showing the first option and letting the operator think it is in use.

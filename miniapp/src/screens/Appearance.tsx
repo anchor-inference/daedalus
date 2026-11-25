@@ -148,7 +148,7 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
       <SetGroup title={t("theme.size")} help={t("theme.size.lead")}>
         <Row title={t("theme.size.step")} data-setting="appearance.scale"><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
         <Row title={t("theme.prose")} desc={t("theme.prose.sub")} data-setting="appearance.prose"><ProseStepper prefs={prefs} update={update} /></Row>
-        <SetBlock className="set-specimen"><p style={{ fontSize: `${prefs.prose ?? Math.round(usualProse(prefs.scale, window.matchMedia?.("(max-width: 1023px)")?.matches ?? false))}px` }}>{t("theme.prose.preview")}</p></SetBlock>
+        <SetBlock className="set-specimen"><p className="prose-stepper-preview" style={{ fontSize: `${prefs.prose ?? Math.round(usualProse(prefs.scale, window.matchMedia?.("(max-width: 1023px)")?.matches ?? false))}px` }}>{t("theme.prose.preview")}</p></SetBlock>
         <Row title={t("theme.leading")} data-setting="appearance.leading"><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
         <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </SetGroup>
