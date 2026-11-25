@@ -12,7 +12,7 @@
 
 import { type Settings } from "../api";
 import { lang, t } from "../i18n";
-import { ModelChoice } from "../modelchoice";
+import { ModelPicker } from "../modelitems";
 import { WithEffort } from "../taskeffort";
 import { NumRow, Row, SetGroup } from "../settingsrow";
 import { Select } from "../ui/primitives";
@@ -86,7 +86,7 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
           model the host would use. */}
       <Row title={t("settings.translation.preset")} desc={t("settings.translation.preset.sub")} stack data-setting="translation.preset">
         <WithEffort id="translation-effort" value={current.effort} onChange={(effort) => put({ effort })} fallback="off">
-          <ModelChoice
+          <ModelPicker
             id="translation-preset"
             label={t("settings.translation.preset")}
             catalogue={s}
@@ -99,7 +99,7 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
       {/* The rescue when the translator is slow: asked with no thinking whatever the effort above, since it
           is there to be quick, so it has no effort of its own. Automatic names the route the host would use. */}
       <Row title={t("settings.translation.fallback")} desc={t("settings.translation.fallback.sub")} stack data-setting="translation.fallback_preset">
-        <ModelChoice
+        <ModelPicker
           id="translation-fallback"
           label={t("settings.translation.fallback")}
           catalogue={s}
