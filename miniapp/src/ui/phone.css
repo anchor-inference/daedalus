@@ -518,8 +518,8 @@
   .main .settings-col .settings-groups > .section-title:first-child { margin-top: var(--space-2); }
   .main .settings-col .settings-groups > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
   .main .settings-col .catalogue > .catalogue-filters { margin: 0 0 var(--space-2); }
-  .main .settings-col .catalogue > :is(.stt-list, .comp-grid) { gap: var(--space-2); margin: 0 0 var(--space-2); }
-  .main .settings-col :is(.stt-card, .comp-card) { border-radius: var(--radius-xl); }
+  .main .settings-col .catalogue > .stt-list { gap: var(--space-2); margin: 0 0 var(--space-2); }
+  .main .settings-col .stt-card { border-radius: var(--radius-xl); }
 
   /* ── Usage: the period as a segmented track, the tightest quota first and wide, the rest as the
      settings' cards ──────────────────────────────────────────────────────────────────────────── */
@@ -998,7 +998,7 @@
   .provider-letter { font-size: var(--fs-14); font-weight: 600; line-height: 1; color: var(--fg); background: var(--surface-2); }
   /* The Secret form in the phone's dress: the labels and fields of the other phone forms, and 16 px in the
      fields so Safari does not zoom into them. */
-  .secret-sheet label.field, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .secret-sheet .field-label, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
   .secret-sheet .secret-form { padding: 0 var(--gutter); }
   .secret-sheet input.field, .secret-sheet textarea.field { font-size: var(--fs-16); }
   .secret-sheet input.field { height: var(--tap); }
@@ -1008,9 +1008,7 @@
   .secret-sheet .secret-add { padding: var(--space-3); }
   .secret-sheet .secret-edit { padding: 0; }
   .secrets-search input.field { font-size: var(--fs-16); height: var(--tap); }
-  .secret-row { padding: var(--space-3); }
-  .secret-row-name { font-size: var(--fs-15); }
-  .secret-row-note, .secret-row-dots, .secret-confirm-text { font-size: var(--fs-14); }
+  .secret-row-dots { font-size: var(--fs-14); }
   .secret-row-scope, .secret-row-meta, .secret-row-attached, .secrets-group > .secret-heading { font-size: var(--fs-13); }
   .secret-row-tools .iconbtn { width: var(--tap); height: var(--tap); }
   .secret-row-tools { gap: 0; }

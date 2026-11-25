@@ -4,7 +4,7 @@ import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { go, screenTitle, useMedia } from "../ui/index";
 import { api, telegram, HeartbeatStatus, SearchBackendInfo, SearchCheck, Settings } from "../api";
-import { confirmAsync, errorText } from "../ui";
+import { errorText } from "../ui";
 import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
 import { shortDateTime } from "../format";
@@ -24,7 +24,7 @@ import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { Select, Segmented, SelectionList, Switch } from "../ui/index";
-import { Button } from "../ui/primitives";
+import { Button, confirmDialog } from "../ui/primitives";
 import { type Changed, NumInput, NumRow, Row, SetBlock, SetFoot, SetGroup, TextBlock } from "../settingsrow";
 import { ModelChoice } from "../modelchoice";
 import { DesktopPanel } from "./DesktopSettings";
@@ -440,12 +440,12 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
   );
 }
 
-/** Security: each concern its own card — two-factor sign-in, the operator's secrets, signing out everywhere. */
+/** Security: each concern its own group — two-factor sign-in, the operator's secrets, signing out everywhere. */
 function SecurityTab({ toast }: { toast: (t: string) => void }) {
   // Nothing on this screen changes when the other sessions end, so the button keeps the answer.
   const [signedOut, setSignedOut] = useState(false);
   const signOutEverywhere = async () => {
-    if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
+    if (!(await confirmDialog({ title: t("settings.security.signoutall.title"), body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall"), danger: true }))) return;
     try {
       await api.post("/api/auth/sessions/revoke");
       setSignedOut(true);
@@ -457,12 +457,12 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   return (
     <>
       <TwoFactorCard toast={toast} />
-      <SecretsCard toast={toast} ago={timeAgo} confirm={(title, body) => confirmAsync(title, { body, action: t("common.remove") })} />
-      <div className="card">
+      <SecretsCard toast={toast} />
+      <SetGroup title={t("settings.security.sessions")}>
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")} data-setting="security.signout">
-          <button className="btn small" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</button>
+          <Button size="sm" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</Button>
         </Row>
-      </div>
+      </SetGroup>
     </>
   );
 }
@@ -1026,8 +1026,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             <DesktopAppCard toast={toast} />
-            <div className="card">
-              <div className="section-title">{t("settings.about.runtime")}</div>
+            <SetGroup title={t("settings.about.runtime")}>
               {status ? (
                 <>
                   <Row title={t("settings.about.providers")}>{value(status.providers?.length ? status.providers.join(", ") : "—")}</Row>
@@ -1040,22 +1039,21 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   ) : (
                     <Row title={t("settings.about.supervisor")}>{value(t("settings.about.nosupervisor.short"))}</Row>
                   )}
-                  {status.budget_exceeded && <div className="sub" style={{ color: "var(--bad)" }}>{t("settings.about.budget", { what: String(status.budget_exceeded) })}</div>}
+                  {status.budget_exceeded && <SetBlock><span className="set-warn">{t("settings.about.budget", { what: String(status.budget_exceeded) })}</span></SetBlock>}
                 </>
               ) : (
-                <div className="sub">{t("settings.about.nostatus")}</div>
+                <SetBlock><span className="set-hint">{t("settings.about.nostatus")}</span></SetBlock>
               )}
-            </div>
+            </SetGroup>
             {!telegram()?.initData && (
-              <div className="card">
-                <div className="section-title">{t("settings.about.browser")}</div>
+              <SetGroup title={t("settings.about.browser")}>
                 <Row title={t("settings.sec.appearance")} desc={t("settings.about.appearance")}>
                   <a className="btn small" href={pathFor("settings", "appearance")} onClick={(e) => go(e, pathFor("settings", "appearance"))}>{t("settings.about.open")}</a>
                 </Row>
                 <Row title={t("settings.logout")} desc={t("settings.about.logout.sub")} data-setting="logout">
-                  <button className="btn small" onClick={() => void logout()}>{t("settings.about.logout.action")}</button>
+                  <Button size="sm" onClick={() => void logout()}>{t("settings.about.logout.action")}</Button>
                 </Row>
-              </div>
+              </SetGroup>
             )}
           </>
         );

@@ -218,12 +218,12 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
     # Remove: the warning names the conversations, Undo brings it back, and left alone it goes.
     row(page, "router_admin").locator(".secret-remove").click()
-    page.locator(".secret-confirm .warn").wait_for(timeout=5000)
-    warning = page.locator(".secret-confirm").inner_text()
+    page.locator(".dialog .secret-warn").wait_for(timeout=5000)
+    warning = page.locator(".dialog").inner_text()
     if "Firmware update" not in warning:
         problems.append(f"desktop: the removal does not say which conversations name it ({warning!r})")
     shot(page, "desktop-remove")
-    page.locator(".secret-remove-yes").click()
+    page.locator(".dialog .dialog-actions .btn.danger").click()
     wait_for(page, lambda: row(page, "router_admin").count() == 0, "desktop: the removed row leaving", problems)
     page.locator(".toast button").first.click()
     wait_for(page, lambda: row(page, "router_admin").count() == 1, "desktop: Undo bringing it back", problems)
@@ -232,7 +232,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if store.deleted:
         problems.append(f"desktop: an undone removal still reached the host ({store.deleted})")
     row(page, "router_admin").locator(".secret-remove").click()
-    page.locator(".secret-remove-yes").click()
+    page.locator(".dialog .dialog-actions .btn.danger").click()
     wait_for(page, lambda: row(page, "router_admin").count() == 0, "desktop: removed again", problems)
     context.clock.fast_forward(7_000)
     wait_for(page, lambda: store.deleted == ["s1"], "desktop: the removal going out when the undo ran out", problems)

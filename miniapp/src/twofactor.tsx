@@ -1,6 +1,6 @@
 // Two-factor sign-in in Settings → Security: enrolment by QR code or typed key, confirmation with a
 // first code, the recovery codes shown once, and turning it off or replacing the codes with a code.
-// Its own card and its own file, so the other cards of the section stay independent of it.
+// Its own group and its own file, so the other groups of the section stay independent of it.
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "./api";
 import { errorText } from "./ui";
@@ -8,7 +8,8 @@ import { useCopied } from "./ui/components";
 import { Icon } from "./icons";
 import { shortDateTime } from "./format";
 import { t } from "./i18n";
-import { Row } from "./settingsrow";
+import { Row, SetBlock, SetGroup } from "./settingsrow";
+import { Button } from "./ui/primitives";
 import { useMedia } from "./shell";
 
 export type TwoFactorStatus = { enabled: boolean; enrolling: boolean; recovery_left: number; enabled_at: string | null };
@@ -55,17 +56,17 @@ function grouped(secret: string): string {
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   const [copied, copy] = useCopied();
   return (
-    <div className="totp-codes-box">
+    <SetBlock>
       <div className="settings-row-title">{t("settings.totp.codes.title")}</div>
-      <div className="sub">{t("settings.totp.codes.sub")}</div>
+      <div className="set-hint">{t("settings.totp.codes.sub")}</div>
       <ol className="totp-codes mono">
         {codes.map((code) => <li key={code}>{code}</li>)}
       </ol>
       <div className="totp-actions">
-        <button className="btn small" onClick={() => void copy(codes.join("\n"))}>{copied && <Icon name="check" size={13} />}{t("settings.totp.codes.copy")}</button>
-        <button className="btn primary small" onClick={onDone}>{t("settings.totp.codes.done")}</button>
+        <Button size="sm" onClick={() => void copy(codes.join("\n"))}>{copied && <Icon name="check" size={13} />}{t("settings.totp.codes.copy")}</Button>
+        <Button size="sm" variant="primary" onClick={onDone}>{t("settings.totp.codes.done")}</Button>
       </div>
-    </div>
+    </SetBlock>
   );
 }
 
@@ -137,53 +138,55 @@ export function TwoFactorCard({ toast }: { toast: (text: string) => void }) {
   }
 
   return (
-    <div className="card totp-card" data-setting="two_factor" data-totp={status ? (status.enabled ? "on" : "off") : "loading"}>
-      <div className="section-title">{t("settings.totp.title")}</div>
+    <SetGroup title={t("settings.totp.title")} help={desktop ? undefined : t("settings.totp.sub")} className="totp-card" data-setting="two_factor" data-totp={status ? (status.enabled ? "on" : "off") : "loading"}>
       {desktop ? (
-        <div className="sub">{status?.enabled ? t("settings.totp.on", { t: shortDateTime(status.enabled_at) }) : t("settings.totp.off")} · {t("settings.totp.desktop")}</div>
+        <Row title={status?.enabled ? t("settings.totp.on", { t: shortDateTime(status.enabled_at) }) : t("settings.totp.off")} desc={t("settings.totp.desktop")} />
       ) : (
         <>
-          <div className="sub">{t("settings.totp.sub")}</div>
-          {status === null && <div className="empty">{t("common.loading")}</div>}
+          {status === null && <SetBlock><span className="set-hint">{t("common.loading")}</span></SetBlock>}
           {codes && <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />}
           {status && !status.enabled && !setup && (
             <Row title={t("settings.totp.off")}>
-              <button className="btn primary small" disabled={busy} onClick={() => void begin()}>{t("settings.totp.setup")}</button>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void begin()}>{t("settings.totp.setup")}</Button>
             </Row>
           )}
           {setup && (
-            <form className="totp-setup" onSubmit={enable}>
-              <div className="sub">{t("settings.totp.scan")}</div>
-              <QrCode rows={setup.qr} label={t("settings.totp.qr")} />
-              <div className="sub">{t("settings.totp.manual")}</div>
-              <code className="totp-secret mono" data-secret={setup.secret}>{grouped(setup.secret)}</code>
-              <label className="sub" htmlFor="totp-enable-code">{t("settings.totp.confirm")}</label>
-              <div className="totp-actions">
-                <CodeField id="totp-enable-code" value={code} onChange={(v) => setCode(v.replace(/\D/g, ""))} label={t("settings.totp.code")} digitsOnly />
-                <button className="btn primary small" type="submit" disabled={busy || code.length !== 6}>{t("settings.totp.enable")}</button>
-                <button className="btn small" type="button" onClick={cancel}>{t("settings.totp.cancel")}</button>
-              </div>
-            </form>
+            <SetBlock>
+              <form className="totp-setup" onSubmit={enable}>
+                <div className="set-hint">{t("settings.totp.scan")}</div>
+                <QrCode rows={setup.qr} label={t("settings.totp.qr")} />
+                <div className="set-hint">{t("settings.totp.manual")}</div>
+                <code className="totp-secret mono" data-secret={setup.secret}>{grouped(setup.secret)}</code>
+                <label className="set-hint" htmlFor="totp-enable-code">{t("settings.totp.confirm")}</label>
+                <div className="totp-actions">
+                  <CodeField id="totp-enable-code" value={code} onChange={(v) => setCode(v.replace(/\D/g, ""))} label={t("settings.totp.code")} digitsOnly />
+                  <Button size="sm" variant="primary" type="submit" disabled={busy || code.length !== 6}>{t("settings.totp.enable")}</Button>
+                  <Button size="sm" onClick={cancel}>{t("settings.totp.cancel")}</Button>
+                </div>
+              </form>
+            </SetBlock>
           )}
           {status?.enabled && !ask && (
             <Row title={t("settings.totp.on", { t: shortDateTime(status.enabled_at) })} desc={t("settings.totp.recoveryleft", { n: status.recovery_left })} stack={narrow}>
-              <button className="btn small" onClick={() => (setAsk("regenerate"), setCode(""), setError(null))}>{t("settings.totp.regenerate")}</button>
-              <button className="btn small" onClick={() => (setAsk("disable"), setCode(""), setError(null))}>{t("settings.totp.disable")}</button>
+              <Button size="sm" onClick={() => (setAsk("regenerate"), setCode(""), setError(null))}>{t("settings.totp.regenerate")}</Button>
+              <Button size="sm" onClick={() => (setAsk("disable"), setCode(""), setError(null))}>{t("settings.totp.disable")}</Button>
             </Row>
           )}
           {status?.enabled && ask && (
-            <form className="totp-setup" onSubmit={confirm}>
-              <label className="sub" htmlFor="totp-ask-code">{t(ask === "disable" ? "settings.totp.ask.disable" : "settings.totp.ask.regenerate")}</label>
-              <div className="totp-actions">
-                <CodeField id="totp-ask-code" value={code} onChange={setCode} label={t("settings.totp.ask.code")} />
-                <button className="btn primary small" type="submit" disabled={busy || !code.trim()}>{t("settings.totp.ask.confirm")}</button>
-                <button className="btn small" type="button" onClick={cancel}>{t("settings.totp.cancel")}</button>
-              </div>
-            </form>
+            <SetBlock>
+              <form className="totp-setup" onSubmit={confirm}>
+                <label className="set-hint" htmlFor="totp-ask-code">{t(ask === "disable" ? "settings.totp.ask.disable" : "settings.totp.ask.regenerate")}</label>
+                <div className="totp-actions">
+                  <CodeField id="totp-ask-code" value={code} onChange={setCode} label={t("settings.totp.ask.code")} />
+                  <Button size="sm" variant="primary" type="submit" disabled={busy || !code.trim()}>{t("settings.totp.ask.confirm")}</Button>
+                  <Button size="sm" onClick={cancel}>{t("settings.totp.cancel")}</Button>
+                </div>
+              </form>
+            </SetBlock>
           )}
-          {error && <div className="login-error totp-error" role="alert">{error}</div>}
+          {error && <SetBlock><div className="login-error totp-error" role="alert">{error}</div></SetBlock>}
         </>
       )}
-    </div>
+    </SetGroup>
   );
 }
