@@ -1,6 +1,8 @@
-/* Settings: a dialog over the app on a desktop, a two-level stack on a phone. The rows inside are
-   settingsrow.tsx's and keep their own rules in ui/styles.css, since other screens draw them too;
-   this file is the frame around them and what is Settings' alone (the changed-value mark, the search). */
+/* Settings: a page of its own on a desktop (the list of sections where the sidebar was, the open
+   section in a centred 880 px column), a two-level stack on a phone. The rows inside are
+   settingsrow.tsx's and keep their own rules in ui/parts, since other screens draw them too; this file
+   is the frame around them, what is Settings' alone (the changed-value mark, the search), and the
+   cards a section is drawn in (`.set-label`, `.set-card`, `.set-row`). */
 
 /* ── a row that knows its default ───────────────────────────────────────────────────────── */
 .settings-changed { display: inline-block; width: 6px; height: 6px; margin: 0 7px 0 0; border-radius: 50%; background: var(--accent); vertical-align: middle; }
@@ -25,7 +27,7 @@
 /* The icon set's chevron points down; a row that leads somewhere points the way it goes. */
 .settings-link .chev { display: none; color: var(--fg-3); transform: rotate(-90deg); }
 .settings-link { position: relative; }
-.settings-link > .settings-mark { position: absolute; top: 50%; right: 10px; margin-top: -4px; }
+.settings-link > .settings-mark { position: absolute; top: 50%; right: 12px; margin-top: -4px; }
 /* A row a search found by one of its names, under its section: indented to the section's words so
    it reads as part of it. */
 .settings-field-hit { display: block; margin: 0 0 1px 34px; padding: 5px 8px; border-radius: var(--radius-xs); color: var(--fg-2); font-size: var(--fs-13); text-decoration: none; overflow-wrap: anywhere; }
@@ -41,7 +43,7 @@
 .settings-search-clear { position: absolute; right: 4px; }
 
 /* What a search found, as the sections' own controls: everything else in a section's body is hidden
-   (settingsdialog.tsx marks it), so a found row is the same control it is on its page. */
+   (settingssearch.tsx marks it), so a found row is the same control it is on its page. */
 .settings-hit-section + .settings-hit-section { margin-top: 22px; }
 .settings-hit-head { margin: 0 0 8px; font-size: var(--fs-12); font-weight: 600; color: var(--fg-2); }
 .settings-hit-head a { color: inherit; text-decoration: none; }
@@ -56,53 +58,53 @@
 .settings-hit-link:hover { background: var(--surface-2); }
 
 h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter-spacing: -.018em; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
+/* Out of the link's grid like the Components mark, so a badge does not push the chevron to a row of its own. */
+.settings-count-badge { position: absolute; top: 50%; right: 12px; color: var(--attention); font-size: var(--fs-12); font-weight: 600; line-height: 1; transform: translateY(-50%); }
+.settings-none { display: flex; flex-direction: column; gap: 4px; }
 .settings-about { margin: 4px 0 0; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; text-wrap: pretty; }
 
-/* ── the dialog (a desktop) ──────────────────────────────────────────────────────────────── */
+/* ── the page (a desktop) ──────────────────────────────────────────────────────────────────── */
 @media (min-width: 1024px) {
-  .settings-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 2); display: grid; place-items: center; background: var(--scrim); animation: settings-fade var(--t-fast) var(--ease-out); }
-  /* Claude's proportions: nine tenths of the window up to 1100 × 760, so the screen it was opened
-     from stays visible round it and closing it is plainly going back there. */
-  .settings-dialog { width: min(90vw, 1100px); height: min(100vh - 64px, 760px); overflow: hidden; border: 0; border-radius: var(--radius-lg); background: var(--wash, var(--bg)); box-shadow: var(--shadow-xl); outline: none; animation: settings-rise var(--t-slow) var(--ease-out); }
-  .settings-stage { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; }
-  .settings-nav { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 16px 10px 0; border-right: 1px solid var(--line); background: var(--bg); }
-  h2.settings-dialog-title { margin: 2px 8px 4px; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.005em; }
-  .settings-nav .settings-index { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -10px; padding: 0 10px 8px; }
-  .settings-foot { display: flex; justify-content: space-between; gap: 8px; margin: 0 -10px; padding: 10px 14px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
-  .settings-foot > span:first-child { overflow: hidden; text-overflow: ellipsis; }
-  .settings-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .settings-head { display: flex; align-items: flex-start; gap: 16px; padding: 24px 20px 12px 28px; }
-  .settings-head-text { flex: 1; min-width: 0; }
-  .settings-close { flex: none; margin: -4px -4px 0 0; }
-  .settings-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  /* The content takes the pane's whole width: the dialog is already the reading width, and a narrower
-     column inside it put rows' words and controls a long way apart for nothing. */
-  .settings-dialog .settings-col { padding: 12px 28px 32px; }
-  .settings-dialog .settings-col > .card:first-child, .settings-dialog .settings-col > .section-title:first-child { margin-top: 0; }
+  .settings-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; height: var(--vh, 100dvh); overflow: hidden; background: var(--wash); }
+  .settings-page { display: flex; flex: 1; min-height: 0; outline: none; }
+  /* The list of sections takes the sidebar's place and its width, so going into Settings and back
+     moves nothing on the left but what the column lists. */
+  .settings-nav { display: flex; flex-direction: column; flex: none; width: 300px; min-height: 0; border-right: 1px solid var(--line); background: var(--bg); }
+  .settings-nav-head { display: flex; flex: none; align-items: center; height: var(--head-h); padding: 0 8px; }
+  .settings-close { display: flex; align-items: center; gap: 10px; width: 100%; height: var(--row-h); padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; text-align: left; cursor: pointer; }
+  .settings-close:hover { background: var(--hover); }
+  .settings-close:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .settings-close > .ic { color: var(--fg-2); }
+  .settings-close-text { flex: 1; }
+  .settings-close-key { color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); font-weight: 400; }
+  .settings-nav .settings-search-box { flex: none; padding: 0 8px 8px; }
+  .settings-nav .settings-search-box > .ic { left: 18px; }
+  .settings-nav .settings-search-box .settings-search { height: var(--ctl-h); padding-left: 34px; border: 1px solid var(--line-strong); background: var(--wash); font-size: var(--fs-14); }
+  .settings-nav .settings-search-key { right: 18px; background: none; font-size: var(--fs-12); }
+  .settings-nav .settings-search-clear { right: 12px; }
+  .settings-nav .settings-index { flex: 1; min-height: 0; overflow-y: auto; gap: 2px; padding: 0 4px 16px 8px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .settings-nav .settings-group-block { gap: 2px; }
+  .settings-nav .settings-group-block + .settings-group-block { margin-top: 12px; }
+  .settings-nav .settings-group { display: flex; align-items: center; height: 28px; margin: 0; padding: 0 12px; }
+  .settings-nav .settings-link { grid-template-columns: auto minmax(0, 1fr) auto; height: var(--row-h); min-height: 0; padding: 0 12px; color: var(--fg); }
+  .settings-nav .settings-link .ic { color: var(--fg-2); }
+  .settings-nav .settings-link:hover { background: var(--hover); }
+  .settings-nav .settings-link.active { background: var(--selected); }
+  .settings-nav .settings-link.active .ic { color: var(--fg); }
+  .settings-nav .settings-link.active .settings-link-text b { font-weight: 400; }
+  .settings-nav .settings-field-hit { margin-left: 38px; }
+  .settings-nav .settings-count, .settings-nav .settings-empty { padding: 0 12px; }
 
-  /* 1024–1180 px: the list is a column of icons with the names in tooltips, so the section keeps its
-     width; the search button opens the list out over the section while it is in use. */
-  .settings-stage.icons { grid-template-columns: 56px minmax(0, 1fr); }
-  .settings-stage.icons .settings-nav { align-items: stretch; padding: 14px 8px 0; }
-  .settings-stage.icons:not(.opened) .settings-dialog-title,
-  .settings-stage.icons:not(.opened) .settings-search-box,
-  .settings-stage.icons:not(.opened) .settings-group,
-  .settings-stage.icons:not(.opened) .settings-link-text,
-  .settings-stage.icons:not(.opened) .settings-foot { display: none; }
-  .settings-stage.icons:not(.opened) .settings-link { grid-template-columns: 1fr; justify-items: center; padding: 0; }
-  .settings-stage.icons:not(.opened) .settings-group-block + .settings-group-block { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-  .settings-stage.icons:not(.opened) .settings-index { margin: 0 -8px; padding: 0 8px 8px; }
-  .settings-search-open { align-self: center; }
-  /* Opened, the list takes its full width back and the section narrows beside it rather than going
-     under it: the search's results are live controls on the right, and covered they could not be used. */
-  .settings-stage.icons.opened { grid-template-columns: 248px minmax(0, 1fr); }
-  .settings-stage.icons.opened .settings-nav { padding: 16px 10px 0; }
-  /* The Components mark sits on the icon's corner when the name is hidden. */
-  .settings-stage.icons:not(.opened) .settings-link > .settings-mark { top: 5px; right: 7px; }
+  .settings-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+  .settings-head { display: flex; flex: none; align-items: center; gap: 8px; height: var(--head-h); padding: 0 12px 0 24px; }
+  h1.settings-title { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-15); font-weight: 600; letter-spacing: 0; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; }
+  .settings-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* Every section reads in one centred column the conversation's own way, 880 px or the pane less
+     its 24 px sides, whichever is less. */
+  .settings-page .settings-col { box-sizing: border-box; width: min(880px, 100% - 48px); margin: 0 auto; padding: var(--space-5) 0 var(--space-6); }
+  .settings-page .settings-col > .card:first-child, .settings-page .settings-col > .section-title:first-child { margin-top: 0; }
+  .settings-page .settings-col > .settings-about { margin: 0 0 16px; }
 }
-@keyframes settings-fade { from { opacity: 0; } }
-@keyframes settings-rise { from { opacity: 0; transform: scale(.96); } }
-@media (prefers-reduced-motion: reduce) { .settings-backdrop, .settings-dialog { animation: none; } }
 
 /* ── the stack (a phone) ─────────────────────────────────────────────────────────────────── */
 @media (max-width: 1023px) {
@@ -127,8 +129,100 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .settings-phone .settings-link .ic:last-child { color: var(--fg-3); }
   .settings-phone .settings-link-text b { font-size: var(--fs-15); white-space: normal; }
   .settings-phone .settings-link .chev { display: inline-flex; }
+  .settings-phone .settings-link > .settings-count-badge { right: 40px; }
   .settings-phone .settings-field-hit { margin: 6px 0; padding: 10px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-15); }
 }
 /* A check of one search engine names it, and a long name in Russian ("Проверить только SearXNG
    (self-hosted)") ran 17 px past a 360 px phone in Inter: the label wraps inside its button instead. */
 .search-check .btn { max-width: 100%; white-space: normal; text-align: center; }
+
+/* ── the cards a section is drawn in ─────────────────────────────────────────────────────────
+   A small label over a card of 44 px rows with a hairline between them, the control at the row's
+   end. Models and providers is drawn in them; the other sections move into them one by one. */
+.set-label { display: flex; align-items: center; gap: 12px; height: 28px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.set-label:not(:first-child) { margin-top: 20px; }
+.set-label > :first-child { flex: 1; }
+.set-label-note { font-weight: 400; }
+.set-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.set-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 0 16px; font-size: var(--fs-14); }
+.set-row + .set-row { border-top: 1px solid var(--line); }
+.set-row-title { flex: 1; min-width: 0; }
+/* A value and its caret, as the row's end: the box round a select is the card's own edge. */
+.set-row .set-value .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
+.set-row .set-value .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.set-row .set-value { max-width: 420px; }
+
+/* ── Models and providers ─────────────────────────────────────────────────────────────────── */
+.prov + .prov { border-top: 1px solid var(--line); }
+.prov-row { display: flex; align-items: center; gap: 12px; width: 100%; height: var(--card-row-h-lg); padding: 0 12px 0 16px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.prov-row:hover { background: var(--hover); }
+.prov-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.prov-row .provider-mark { width: 20px; height: 20px; border-radius: var(--radius-xs); background: var(--selected); color: var(--fg); font-size: var(--fs-12); font-weight: 600; }
+.prov-row .provider-mark svg { width: 14px; height: 14px; }
+.prov-name { flex: 1; min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.prov-kind, .prov-count { flex: none; width: 92px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.prov-status { display: flex; flex: none; align-items: center; gap: 6px; width: 124px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.prov-status[data-tone="live"] { color: var(--live); }
+.prov-status[data-tone="attention"] { color: var(--attention); }
+.prov-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.prov-chev { display: grid; flex: none; place-items: center; width: var(--ctl-h); height: var(--ctl-h); color: var(--fg-2); }
+.prov-chev .ic { transition: transform var(--t-fast) var(--ease-out); }
+.prov.open .prov-chev .ic { transform: rotate(90deg); }
+.prov-body { display: flex; flex-direction: column; padding: 8px 16px 12px 48px; border-top: 1px solid var(--line); background: var(--bg); }
+.prov-empty { margin: 4px 0; }
+.pmodel-head { display: flex; align-items: center; gap: 12px; height: 24px; padding-right: 0; color: var(--fg-3); font-size: var(--fs-12); }
+.pmodel-head-name { flex: 1; }
+.pmodel-head-context { width: 56px; text-align: right; }
+.pmodel-head-star { width: 28px; text-align: center; }
+.pmodel-row { display: flex; align-items: center; gap: 12px; height: var(--row-h); margin-left: -8px; padding: 0 0 0 8px; border-radius: var(--radius-sm); }
+.pmodel-row:hover { background: var(--hover); }
+.pmodel-open { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; height: var(--row-h); padding: 0; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.pmodel-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
+.pmodel-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pmodel-tag { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--hover); color: var(--fg-2); font-size: var(--fs-12); line-height: 20px; }
+.pmodel-tag.accent { color: var(--accent); }
+.pmodel-tag.failed { color: var(--attention); }
+.pmodel-caps { flex: none; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.pmodel-context { flex: none; width: 56px; color: var(--fg-2); font-size: var(--fs-13); text-align: right; }
+.pmodel-star.iconbtn { width: 28px; min-width: 28px; height: 28px; color: var(--fg-3); }
+.pmodel-star.on { background: transparent; color: var(--accent); }
+.pmodel-star.on svg { fill: currentColor; }
+.pmodel.open > .pmodel-row { background: var(--hover); }
+.pmodel-editor { margin: 4px 0 12px; padding: 12px 0 0; }
+.prov-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.prov-note { flex: 1; min-width: 160px; color: var(--fg-3); font-size: var(--fs-13); }
+.prov-note[data-tone="live"] { color: var(--live); }
+.prov-note[data-tone="attention"] { color: var(--attention); }
+.prov-connection { margin-top: 12px; }
+.prov-none { display: flex; flex-direction: column; gap: 4px; padding: 16px; }
+.add-provider { display: flex; flex-direction: column; gap: 16px; }
+.add-provider .opencode-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.fallback-card { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; padding: 14px 16px; }
+.fallback-head { display: flex; align-items: center; gap: 12px; }
+.fallback-title { flex: 1; font-weight: 500; }
+.fallback-sub { margin: 0; color: var(--fg-2); font-size: var(--fs-13); }
+.fallback-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; }
+.fallback-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fallback-step { display: flex; align-items: center; gap: 6px; }
+.fallback-step > .ic { color: var(--fg-3); }
+.fallback-chip { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--hover); color: var(--fg); font-size: var(--fs-13); }
+.fallback-step[data-tone="attention"] .fallback-chip { color: var(--attention); }
+.fallback-n { color: var(--fg-3); font-size: var(--fs-12); }
+.fallback-warn { flex: 1; color: var(--attention); font-size: var(--fs-12); text-align: right; }
+
+.project-approvals-none { margin: 8px 0 0; }
+
+@media (max-width: 1023px) {
+  /* A phone keeps the name and the state: kind and count leave the line rather than squeeze it. */
+  .prov-kind, .prov-count, .pmodel-caps, .pmodel-head-context, .pmodel-context { display: none; }
+  .prov-row { min-height: var(--set-row-h); height: auto; padding: 8px var(--space-4); }
+  .prov-status { width: auto; }
+  .prov-body { padding: 8px var(--space-4) 12px; }
+  .pmodel-row { height: var(--row-h-touch); }
+  .pmodel-open { height: var(--row-h-touch); }
+  .set-row { min-height: var(--set-row-h); }
+  .set-row .set-value, .set-row .set-value .dropdown-btn { max-width: 60vw; }
+  .fallback-warn { flex-basis: 100%; text-align: left; }
+  .settings-phone-actions { margin: 0 0 var(--space-3); }
+}

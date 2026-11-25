@@ -37,10 +37,10 @@ from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 INDEX = json.loads((Path(__file__).resolve().parents[2] / "miniapp/src/screens/settings-index.json").read_text(encoding="utf-8"))
-GROUPS = ["you", "models", "agent", "tools", "integrations", "system"]
+GROUPS = ["general", "voice", "models", "autonomy", "tools", "integrations", "system"]
 GROUP_WORDS = {
-    "en": ["Personal", "Models", "Agent", "Tools", "Integrations", "System"],
-    "ru": ["Личное", "Модели", "Агент", "Инструменты", "Интеграции", "Система"],
+    "en": ["General", "Voice", "Models", "Autonomy", "Tools", "Connections", "Security and system"],
+    "ru": ["Основное", "Голос", "Модели", "Автономия", "Инструменты", "Подключения", "Безопасность и система"],
 }
 # Drawn only in a state no stub puts the page in: a voice of several speakers chosen and installed.
 CONDITIONAL = {"companion.tts.local_speaker"}
@@ -53,7 +53,9 @@ ELSEWHERE = {"desktop", "address"}
 OLD = [
     ("heartbeat", None, "schedules"),
     ("terminals", None, "environments"),
-    ("models?tab=providers", None, "providers"),
+    ("models?tab=providers", None, "models"),
+    ("providers", None, "models"),
+    ("providers", "providers.list", "models"),
     ("models?tab=free", None, "free-models"),
     ("voice", "asr.transcriber", "dictation"),
     ("voice", "stt.models", "speech-models"),
@@ -127,13 +129,14 @@ def open_page(browser, width: int, lang: str) -> Page:  # type: ignore[no-untype
 
 def drawn(page: Page, section: str, lang: str, want: set[str]) -> set[str]:
     page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
-    page.wait_for_selector(".settings-col .card, .settings-col .settings-row, .settings-col .empty", timeout=15000)
+    page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row, .settings-col .empty", timeout=15000)
     # Cards that read their own listing draw their rows after it answers: waited for, up to a limit.
     try:
-        page.wait_for_function("(want) => want.every((key) => document.querySelector(`.settings-col [data-setting=\"${key}\"]`))", arg=sorted(want), timeout=10000)
+        page.wait_for_function("(want) => want.every((key) => document.querySelector(`.settings-col [data-setting=\"${key}\"], .settings-head [data-setting=\"${key}\"]`))", arg=sorted(want), timeout=10000)
     except Exception:  # noqa: BLE001
         pass
-    return set(page.evaluate("() => [...document.querySelectorAll('.settings-col [data-setting]')].map((el) => el.dataset.setting)"))
+    # The page's header belongs to the section too: Models and providers keeps Add a model there.
+    return set(page.evaluate("() => [...document.querySelectorAll('.settings-col [data-setting], .settings-head [data-setting]')].map((el) => el.dataset.setting)"))
 
 
 def rows(browser, problems: list[str]) -> None:
@@ -161,7 +164,7 @@ def old_addresses(browser, lang: str, width: int, problems: list[str]) -> None:
         except Exception:  # noqa: BLE001
             problems.append(f"{where}: stayed at {page.url}, not /settings/{home}")
             continue
-        page.wait_for_selector(".settings-col .card, .settings-col .settings-row", timeout=15000)
+        page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row", timeout=15000)
         if "tab=" in page.url:
             problems.append(f"{where}: the old tab is still in the address: {page.url}")
         if row:
@@ -216,7 +219,7 @@ def listing(browser, lang: str, width: int, problems: list[str]) -> None:
         problems.append(f"{where}: the entries are not one height: {sorted(set(state['heights']))}")
     if not phone:
         if not state["scrolls"] or state["overflow"] not in ("auto", "scroll"):
-            problems.append(f"{where}: the list does not scroll inside the dialog: {state['scrolls']} {state['overflow']}")
+            problems.append(f"{where}: the list does not scroll inside its column: {state['scrolls']} {state['overflow']}")
         if state["active"] != "about" or not state["activeIn"]:
             problems.append(f"{where}: the open section's entry is not in view in the list: {state['active']} {state['activeIn']}")
     print(f"{where} groups {heads}, {sum(len(g['sections']) for g in state['groups'])} sections, entry height {sorted(set(state['heights']))}")

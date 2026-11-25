@@ -2,12 +2,12 @@ import type React from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, PriceView, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
-import { confirmAsync, errorText, numInput } from "../ui";
+import { go, screenTitle, useMedia } from "../ui/index";
+import { api, telegram, HeartbeatStatus, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { confirmAsync, errorText } from "../ui";
 import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
-import { shortDateTime, tokens } from "../format";
+import { shortDateTime } from "../format";
 import { useMoreBelow } from "../edgefade";
 import { SpeechModels } from "./Speech";
 import { TtsVoices } from "./Voices";
@@ -16,16 +16,13 @@ import { ComponentsTab } from "./Components";
 import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
-import { ModelPrice } from "../modelprice";
 import { QuickModelsPicker, SubagentModelsPicker } from "../subagentmodels";
 import { ModelPicker, modelItems } from "../modelitems";
 import { FreeModels } from "./FreeModels";
-import { OpenRouterProviders } from "./OpenRouterProviders";
-import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
+import { orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
-import { describeIntegration, type IntegrationRow } from "../integrationHealth";
 import { Select, Segmented, SelectionList, Switch } from "../ui/index";
 import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
@@ -44,31 +41,19 @@ import { EnvironmentsTab } from "./Environments";
 import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
-import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
 import { AsrSettingsCard } from "./AsrSettings";
 import { McpServers } from "./McpServers";
 import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
 import { TranslationSettings } from "./TranslationSettings";
 import { DesktopAppCard } from "../updatedialog";
-import { ProviderLimit } from "./ProviderLimit";
-import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
-import { SubscriptionAccountsCard, accountName, useSubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
+import { SubscriptionAccountsCard, useSubscriptionAccounts, type SubscriptionAccounts } from "../accounts";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
 import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, sectionOfAnchor, type SectionGroup } from "./settingsindex";
-import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
-
-const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
-/** The generic protocol also serves remote vendors, so temperature is available there too. */
-const TEMPERATURE_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
-const KEY_LINKS: Record<string, string> = {
-  openrouter: "https://openrouter.ai/settings/keys",
-  opencode_zen: "https://opencode.ai/auth",
-  groq: "https://console.groq.com/keys",
-  cerebras: "https://cloud.cerebras.ai/platform",
-  gemini: "https://aistudio.google.com/apikey",
-};
+import { HitBody, hitCount, moveInList, usePageKeys } from "./settingssearch";
+import { AddProvider, ModelsSection } from "./ModelsSection";
+import { ProjectApprovals } from "./ProjectApprovals";
 
 function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: string; onSave: (rules: string) => void }) {
   const [text, setText] = useState(rules || fallback);
@@ -110,467 +95,6 @@ function shipped<T>(value: T, fallback: T, reset: () => void, shown = String(fal
 function presetName(s: Settings, id: string): string {
   const p = s.presets?.[id];
   return p ? p.label || `${p.provider}/${p.model}` : id;
-}
-
-type Patch = (id: string, patch: Record<string, unknown>) => Promise<Settings | undefined>;
-
-/** "⟳ /models" button with a floating list over the card instead of inflating it. */
-function ModelsMenu({ load, current, onPick }: { load: () => Promise<string[] | null>; current: string; onPick: (m: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [models, setModels] = useState<string[] | null>(null);
-  const [filter, setFilter] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest?.(".models-menu-wrap")) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  async function toggle() {
-    if (open) return setOpen(false);
-    setOpen(true);
-    setBusy(true);
-    setModels(await load());
-    setBusy(false);
-  }
-  const shown = (models ?? []).filter((m) => m.toLowerCase().includes(filter.toLowerCase()));
-  return (
-    <span className="models-menu-wrap">
-      <button className="btn small" onClick={toggle} disabled={busy}>
-        {busy ? "…" : "⟳ /models"}
-      </button>
-      {open && (
-        <div className="models-menu">
-          <input className="field" autoFocus placeholder={t("settings.models.menu")} value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <div className="models-menu-list">
-            {busy && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.loading")}</div>}
-            {!busy && models === null && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.unreachable")}</div>}
-            {!busy && models !== null && shown.length === 0 && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.none")}</div>}
-            {shown.map((m) => (
-              <button key={m} className={`models-menu-item ${m === current ? "on" : ""}`} onClick={() => (setOpen(false), onPick(m))}>
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </span>
-  );
-}
-
-/** Where a preset's window came from, what every source says, and the way back to automatic. */
-function WindowSource({ source, sources, onAuto, onRefresh }: { source: ContextWindowSource; sources?: ContextWindowSources; onAuto: () => void; onRefresh: () => void }) {
-  const said = (n: number | null | undefined) => (n ? tokens(n) : t("window.unknown"));
-  const detail = sources ? t("window.sources", { provider: said(sources.provider), catalog: said(sources.catalog), table: said(sources.table), error: said(sources.error) }) : undefined;
-  const text = source === "manual" ? t("window.manual") : source === "default" ? t("window.default") : t("window.found", { source: t(`window.by.${source}`) });
-  return (
-    <span className="sub faint window-source" title={detail} data-testid="window-source">
-      {text}{" "}
-      {source === "manual"
-        ? <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onAuto(); }}>{t("window.auto")}</button>
-        : <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onRefresh(); }}>{t("window.refresh")}</button>}
-    </span>
-  );
-}
-
-/** Which OpenRouter providers a model is limited to, and the table to change it, read when opened. */
-function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Preset>) => void }) {
-  const [open, setOpen] = useState(false);
-  const [listing, setListing] = useState<RouteListing | null>(null);
-  const [failed, setFailed] = useState(false);
-  const saved = p.openrouter_providers ?? [];
-  const [chosen, setChosen] = useState(saved);
-  const gone = p.openrouter_providers_gone ?? [];
-  useEffect(() => setChosen(p.openrouter_providers ?? []), [p.openrouter_providers]);
-  useEffect(() => {
-    if (!open) return;
-    let current = true;
-    setListing(null);
-    setFailed(false);
-    api.get<RouteListing>(`/api/providers/${encodeURIComponent(p.provider)}/model-providers?model=${encodeURIComponent(p.model)}`)
-      .then((found) => { if (!current) return; if (found.rows.length) setListing(found); else setFailed(true); })
-      .catch(() => { if (current) setFailed(true); });
-    return () => { current = false; };
-  }, [open, p.provider, p.model]);
-  const changed = chosen.join("\n") !== saved.join("\n");
-  return (
-    <>
-      <Row title={t("settings.preset.routes")} desc={saved.length ? t("settings.preset.routes.only", { slugs: saved.join(", ") }) : t("settings.preset.routes.auto")}>
-        <button className="btn small" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{t(open ? "common.close" : "settings.preset.routes.choose")}</button>
-      </Row>
-      {gone.length > 0 && <p className="result-warning" role="alert">{t("settings.preset.routes.gone", { slugs: gone.join(", ") })}</p>}
-      {open && !listing && !failed && <div className="sub faint">{t("settings.preset.routes.asking")}</div>}
-      {open && failed && <p className="sub">{t("settings.preset.routes.unavailable")}</p>}
-      {open && listing && <OpenRouterProviders listing={listing} chosen={chosen} saved={saved} onChange={setChosen} />}
-      {open && (listing ? changed : failed && saved.length > 0) && (
-        <div className="btnrow">
-          {listing ? <button className="btn small primary" onClick={() => onPatch({ openrouter_providers: chosen })}>{t("common.save")}</button>
-            : <button className="btn small" onClick={() => onPatch({ openrouter_providers: [] })}>{t("settings.preset.routes.clear")}</button>}
-        </div>
-      )}
-    </>
-  );
-}
-
-/** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
-  id: string;
-  p: Preset;
-  /** The subscription behind this model's client, when it has more than one account to choose from. */
-  accounts?: SubscriptionUpstream;
-  price?: PriceView;
-  onPriceSaved: (next: Settings) => void;
-  toast: (text: string) => void;
-  /** Its endpoint is OpenRouter, which alone routes between providers. */
-  routed: boolean;
-  onDemandByModel?: boolean;
-  windowSources?: ContextWindowSources;
-  isDefault: boolean;
-  inChain: boolean;
-  providers: string[];
-  onDefault: () => void;
-  onPatch: (patch: Partial<Preset>) => void;
-  onDelete: () => void;
-  onLookup: (provider: string) => Promise<string[] | null>;
-  onRefreshWindow: () => void;
-}) {
-  const [label, setLabel] = useState(p.label);
-  const [model, setModel] = useState(p.model);
-  // Opened when a link to its Images switch brought the operator here (a vision refusal names the
-  // session model's switch): the switch is inside the fold.
-  const [open, setOpen] = useState(() => settingTarget() === `presets.${id}.images`);
-  useEffect(() => setLabel(p.label), [p.label]);
-  useEffect(() => setModel(p.model), [p.model]);
-  const title = p.label || `${p.provider}/${p.model}`;
-  return (
-    <div className={`mrow ${isDefault ? "default" : ""} ${open ? "open" : ""}`}>
-      <div className="mline noradio">
-        <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          {/* The provider's mark leads the title on a phone, where these cards are the list of models;
-              the desktop row keeps its own layout, so the mark is phone-only there. */}
-          <span className="mtitle"><ProviderMark id={p.provider} name={providerTitle(p.provider)} className="phone-only" />{title}</span>
-          <span className="mmeta">{p.provider} · {p.model}</span>
-        </button>
-        <div className="mtags">
-          {isDefault && <span className="chip accent">{t("settings.preset.default")}</span>}
-          {!isDefault && inChain && <span className="pill">{t("settings.preset.fallback")}</span>}
-          <span className="pill">{p.thinking ? t("settings.preset.think", { effort: t(`add.effort.${p.reasoning_effort}`) }) : t("settings.preset.nothink")}</span>
-          {p.images && <span className="pill">{t("settings.preset.images")}</span>}
-          {(p.openrouter_providers_gone?.length ?? 0) > 0 && <span className="pill failed">{t("settings.preset.routes.gone.pill")}</span>}
-          {!onDemandGroups(p, onDemandByModel) && <span className="pill" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand.offpill")}</span>}
-          <span className="pill">{Math.round(p.context_window / 1000)}k</span>
-        </div>
-        <div className="mactions">
-          <button className={`iconbtn small ${open ? "on" : ""}`} onClick={() => setOpen((o) => !o)} title={t(open ? "common.close" : "common.edit")} aria-label={t(open ? "common.close" : "common.edit")}><span className={`chev ${open ? "down" : ""}`}>›</span></button>
-        </div>
-      </div>
-      {open && (
-        <div className="mpanel">
-          <div className="mfields">
-            <label className="mfield">
-              <span>{t("settings.preset.label")}</span>
-              <input className="field" value={label} placeholder={`${p.provider}/${p.model}`} onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() !== p.label && onPatch({ label: label.trim() })} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.client")}</span>
-              <select className="field" value={p.provider} onChange={(e) => onPatch({ provider: e.target.value })}>
-                {providers.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-                {!providers.includes(p.provider) && <option>{p.provider}</option>}
-              </select>
-            </label>
-            <label className="mfield wide">
-              <span>{t("settings.preset.model")}</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input className="field" style={{ flex: 1, minWidth: 0 }} value={model} placeholder={t("settings.preset.model.placeholder")} onChange={(e) => setModel(e.target.value)} onBlur={() => model.trim() && model.trim() !== p.model && onPatch({ model: model.trim() })} />
-                <ModelsMenu load={() => onLookup(p.provider)} current={p.model} onPick={(m) => onPatch({ model: m })} />
-              </div>
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.window")}</span>
-              {/* Keyed by the number so a window the host found replaces what the uncontrolled field shows. */}
-              <input key={p.context_window} className="field" type="number" min={8000} step={1000} defaultValue={p.context_window} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.context_window) onPatch({ context_window: v }); }} />
-              <WindowSource source={p.context_window_source ?? "default"} sources={windowSources} onAuto={() => onPatch({ context_window_source: "auto" } as unknown as Partial<Preset>)} onRefresh={onRefreshWindow} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.output")}</span>
-              <input className="field" type="number" min={1024} step={1000} defaultValue={p.max_output_tokens} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.max_output_tokens) onPatch({ max_output_tokens: v }); }} />
-            </label>
-          </div>
-          {/* The model's switches as rows like every other setting: "thinking on" and "images on"
-              were buttons whose label was their own state, and nobody could tell the state from
-              the action. */}
-          <div className="mpanel-rows">
-            <Row title={t("settings.preset.thinking")}>
-              <Switch checked={p.thinking} onChange={(thinking) => onPatch({ thinking })} label={t("settings.preset.thinking")} />
-            </Row>
-            <Row title={t("settings.preset.effort")} desc={p.thinking ? undefined : t("settings.preset.effort.off")}>
-              <div className="segmented inline" role="group" aria-label={t("settings.preset.effort")}>
-                {REASONING_EFFORTS.map((e) => (
-                  <button key={e} className={p.reasoning_effort === e ? "on" : ""} disabled={!p.thinking} onClick={() => onPatch({ reasoning_effort: e })}>{t(`add.effort.${e}`)}</button>
-                ))}
-              </div>
-            </Row>
-            <Row title={t("settings.preset.imagestoggle")} desc={t("settings.preset.images.title")} data-setting={`presets.${id}.images`}>
-              <Switch checked={p.images} onChange={(images) => onPatch({ images })} label={t("settings.preset.imagestoggle")} />
-            </Row>
-            <Row title={t("settings.preset.ondemand")} desc={t("settings.preset.ondemand.title")} stack>
-              <span className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")}>
-                {ON_DEMAND_CHOICES.map((choice) => (
-                  <button
-                    key={String(choice)}
-                    className={(p.on_demand_tool_groups ?? null) === choice ? "on" : ""}
-                    title={choice === null ? t("settings.preset.ondemand.bymodel.title", { state: t(onDemandByModel ?? true ? "common.on" : "common.off") }) : undefined}
-                    onClick={() => onPatch({ on_demand_tool_groups: choice })}
-                  >
-                    {/* The model's own value goes in the title: written into the label it made the
-                        row read "as the model: on · on · off", a second "on" that looked like a typo. */}
-                    {choice === null ? t("settings.preset.ondemand.bymodel") : t(choice ? "common.on" : "common.off")}
-                  </button>
-                ))}
-              </span>
-            </Row>
-            {routed && <PresetRoutes p={p} onPatch={onPatch} />}
-            {accounts && accounts.accounts.length > 1 && (
-              <Row title={t("settings.preset.account")} desc={t("settings.preset.account.sub")} stack data-setting={`presets.${id}.account`}>
-                <Select
-                  id={`preset-account-${id}`}
-                  label={t("settings.preset.account")}
-                  value={accounts.accounts.some((a) => a.id === p.account) ? (p.account as string) : ""}
-                  onChange={(account) => onPatch({ account })}
-                  options={[
-                    { id: "", label: t("settings.preset.account.default", { name: accountName(accounts.accounts.find((a) => a.id === accounts.default_account) ?? { id: accounts.default_account, label: "" }) }) },
-                    ...accounts.accounts.map((a) => ({ id: a.id, label: accountName(a) })),
-                  ]}
-                />
-              </Row>
-            )}
-          </div>
-          <ModelPrice id={id} view={price} onSaved={onPriceSaved} toast={toast} />
-          <div className="btnrow mrow-foot">
-            <span className="sub mono">{id}</span>
-            {isDefault ? <span className="sub">{t("settings.preset.opens")}</span> : <button className="btn small primary" onClick={onDefault}>{t("settings.preset.makedefault")}</button>}
-            <span className="grow" />
-            <button className="btn small danger" disabled={isDefault} title={t(isDefault ? "settings.preset.cannotdelete" : "settings.preset.remove.title")} onClick={async () => { if (await confirmAsync(t("settings.preset.delete.title", { title }), { body: t("settings.preset.delete.body"), action: t("settings.preset.delete.action") })) onDelete(); }}>
-              <Icon name="trash" size={14} /> {t("common.delete")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Whether a client can answer: the key state the host reports, the same one Add a model shows.
- * Whether an adapter could be built said nothing about a key behind the key proxy, and read as
- * "ready" for an endpoint whose every call the proxy refused for want of one.
- */
-export function providerReady(s: Pick<Settings, "provider_keys">, id: string): boolean {
-  return s.provider_keys?.[id]?.ready ?? false;
-}
-
-/** One client: id, kind and readiness on a line; the address and the key behind it. */
-function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }: {
-  id: string;
-  p: ProviderConf;
-  kinds: string[];
-  available: boolean;
-  /** Reached through the key proxy: a key typed here is handed to the proxy, which alone signs its calls. */
-  viaProxy: boolean;
-  onPatch: Patch;
-  onRemove: (id: string) => void;
-}) {
-  // Opened when a link to its key brought the operator here: the key field is inside the fold.
-  const [open, setOpen] = useState(() => settingTarget() === `providers.${id}.api_key`);
-  const [name, setName] = useState(p.name ?? "");
-  const [baseUrl, setBaseUrl] = useState(p.base_url);
-  const [keyDraft, setKeyDraft] = useState("");
-  const plan = opencodePlanOf(p.kind, p.billing);
-  const keyLink = KEY_LINKS[id] ?? (plan ? OPENCODE_KEY_URL : undefined);
-  useEffect(() => setBaseUrl(p.base_url), [p.base_url]);
-  useEffect(() => setName(p.name ?? ""), [p.name]);
-  useEffect(() => setKeyDraft(""), [p.api_key_set]);
-  return (
-    <div className={`mrow ${open ? "open" : ""}`} data-setting={`providers.${id}.api_key`}>
-      <div className="mline noradio">
-        <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className="mtitle"><ProviderMark id={id} kind={p.kind} name={providerTitle(id, p)} className="phone-only" />{p.name || id}</span>
-          <span className="mmeta">{p.kind} · {p.base_url || t("settings.provider.noaddress")}</span>
-          {plan && <span className="mmeta opencode-hint">{t(plan.hint)}</span>}
-        </button>
-        <div className="mtags">
-          <span className={`pill ${available ? "idle" : "waiting"}`}>{t(available ? "settings.provider.ready" : "settings.provider.needs")}</span>
-          {p.api_key_set && <span className="pill">{t("settings.provider.keystored")}</span>}
-        </div>
-        <div className="mactions">
-          <button className={`iconbtn small ${open ? "on" : ""}`} onClick={() => setOpen((o) => !o)} title={t(open ? "common.close" : "common.edit")} aria-label={t(open ? "common.close" : "common.edit")}><span className={`chev ${open ? "down" : ""}`}>›</span></button>
-        </div>
-      </div>
-      {open && (
-        <div className="mpanel">
-          <div className="mfields">
-            <label className="mfield">
-              <span>{t("settings.provider.name")}</span>
-              <input className="field" value={name} placeholder={id} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() !== (p.name ?? "") && onPatch(id, { name: name.trim() })} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.provider.kind")}</span>
-              <select className="field" value={p.kind} onChange={(e) => onPatch(id, { kind: e.target.value })}>
-                {kinds.map((k) => (
-                  <option key={k}>{k}</option>
-                ))}
-              </select>
-            </label>
-            <label className="mfield wide">
-              <span>{t("settings.provider.baseurl")}</span>
-              <input
-                className="field"
-                value={baseUrl}
-                placeholder="http://<host>:<port>/v1"
-                onChange={(e) => setBaseUrl(e.target.value)}
-                onBlur={() => baseUrl.trim() !== p.base_url && baseUrl.trim() && onPatch(id, { base_url: baseUrl.trim() })}
-              />
-            </label>
-            {TEMPERATURE_KINDS.has(p.kind) && (
-              <label className="mfield">
-                <span>{t("settings.provider.temperature")}</span>
-                <input
-                  className="field num"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  defaultValue={p.temperature ?? ""}
-                  placeholder={t("settings.provider.temperature.default")}
-                  title={t("settings.provider.temperature.hint")}
-                  onBlur={(e) => {
-                    const raw = e.target.value.trim();
-                    if (!raw) {
-                      if (p.temperature != null) onPatch(id, { temperature: null });
-                      return;
-                    }
-                    const v = Number(raw);
-                    if (!Number.isFinite(v) || v < 0 || v > 2) return;
-                    if (v !== p.temperature) onPatch(id, { temperature: v });
-                  }}
-                />
-              </label>
-            )}
-            <label className="mfield wide">
-              <span>{t(p.api_key_set ? "settings.provider.apikey.stored" : viaProxy ? "settings.provider.apikey.proxy" : "settings.provider.apikey")}</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input
-                  className="field"
-                  style={{ flex: 1, minWidth: 0 }}
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={t(p.api_key_set ? "settings.provider.apikey.placeholder" : "settings.provider.apikey.none")}
-                  value={keyDraft}
-                  onChange={(e) => setKeyDraft(e.target.value)}
-                  onBlur={() => {
-                    const v = keyDraft.trim();
-                    if (v) {
-                      onPatch(id, { api_key: v });
-                      setKeyDraft("");
-                    }
-                  }}
-                />
-                {p.api_key_set && (
-                  <button className="btn small danger" title={t("settings.provider.forget.title")} onClick={() => onPatch(id, { api_key: "" })}>
-                    {t("settings.provider.forget")}
-                  </button>
-                )}
-              </div>
-              {keyLink && <span className="sub">{t("free.key.get")} <a href={keyLink} target="_blank" rel="noopener noreferrer">{p.name || id} ↗</a></span>}
-            </label>
-          </div>
-          <ProviderLimit providerId={id} />
-          <div className="btnrow mrow-foot">
-            <span className="grow" />
-            <button className="btn small danger" onClick={async () => { if (await confirmAsync(t("settings.provider.remove.title", { id }), { body: t("settings.provider.remove.body"), action: t("settings.provider.remove.action") })) onRemove(id); }}>
-              <Icon name="trash" size={14} /> {t("common.remove")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The OpenCode plans no endpoint is yet, each one click away with its route already wired. */
-function AddOpencodeRow({ providers, keyproxyBase, onAdd }: { providers: Record<string, ProviderConf>; keyproxyBase: string; onAdd: (id: string, patch: Record<string, unknown>) => void }) {
-  const absent = missingPlans(Object.values(providers)).filter((plan) => !providers[plan.id]);
-  if (!absent.length) return null;
-  return (
-    <div className="opencode-add">
-      <span className="sub">{t("settings.provider.opencode")}</span>
-      {absent.map((plan) => (
-        // The hint opens with the plan's name, so it is the whole label: the name twice read as a stutter.
-        <button key={plan.id} className="btn small" onClick={() => onAdd(plan.id, opencodeProvider(plan, keyproxyBase))}>
-          ＋ {t(plan.hint)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: string, baseUrl: string, kind: string) => void; toast: (t: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [id, setId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [kind, setKind] = useState("vllm");
-  function add() {
-    const pid = id.trim();
-    const base = baseUrl.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(pid)) {
-      toast(t("settings.provider.id.bad"));
-      return;
-    }
-    if (!base.startsWith("http")) {
-      toast(t("settings.provider.url.bad"));
-      return;
-    }
-    onAdd(pid, base, kind);
-    setId("");
-    setBaseUrl("");
-    setOpen(false);
-  }
-  if (!open)
-    return (
-      <button className="btn small" onClick={() => setOpen(true)}>
-        ＋ {t("settings.provider.add")}
-      </button>
-    );
-  return (
-    <div className="mpanel add">
-      <div className="mfields">
-        <label className="mfield">
-          <span>{t("settings.provider.id")}</span>
-          <input className="field" value={id} placeholder="my-provider" onChange={(e) => setId(e.target.value)} />
-        </label>
-        <label className="mfield">
-          <span>{t("settings.provider.kind")}</span>
-          <select className="field" value={kind} onChange={(e) => setKind(e.target.value)}>
-            {kinds.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-        </label>
-        <label className="mfield wide">
-          <span>{t("settings.provider.baseurl.short")}</span>
-          <input className="field" value={baseUrl} placeholder="http://<host>:<port>/v1" onChange={(e) => setBaseUrl(e.target.value)} />
-        </label>
-      </div>
-      <div className="btnrow">
-        <button className="btn small primary" onClick={add}>{t("common.add")}</button>
-        <button className="btn small" onClick={() => setOpen(false)}>{t("common.cancel")}</button>
-      </div>
-    </div>
-  );
 }
 
 type SpendBalance = { spent_usd: number; unmetered: number; cap_usd: number; reserved_usd: number; uncertain_usd: number; reserved_count: number; uncertain_count: number };
@@ -811,115 +335,6 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
   );
 }
 
-type Check = { name: string; ok: boolean; message: string; severity: string; fix_hint: string; fixable: boolean; fixed: boolean };
-
-function HealthTab({ toast }: { toast: (t: string) => void }) {
-  const [data, setData] = useState<{ checks: Check[]; summary: Record<string, number> } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [integrations, setIntegrations] = useState<IntegrationRow[] | null>(null);
-  const loadIntegrations = async () => {
-    // The quick answer draws the card at once; the probed one follows with GitHub's verdict. Either
-    // failing leaves the card as it was: the doctor's list below is the screen's real job.
-    try {
-      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health")).rows ?? []);
-      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health?probe=true")).rows ?? []);
-    } catch {
-      /* the card stays as it was */
-    }
-  };
-  const load = async (fix = false) => {
-    setBusy(true);
-    void loadIntegrations();
-    try {
-      setData(fix ? await api.post("/api/doctor/fix") : await api.get("/api/doctor"));
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  if (!data) return <div className="empty">{t(busy ? "settings.health.checking" : "common.loading")}</div>;
-  // The app's own glyphs, coloured by the state, as the dependency cards draw a failure; emoji drew
-  // the same states in each platform's own colours and shapes.
-  const mark = (c: Check): [IconName, string] => (c.fixed ? ["wrench", "ok"] : c.ok ? ["check", "ok"] : c.severity === "fail" ? ["close", "bad"] : ["alert", "warn"]);
-  // An answer without `checks` is not a screen that should go down with "Cannot read properties of
-  // undefined": the doctor is one endpoint away and an installation that has not got it yet reads
-  // as no checks rather than as a broken page.
-  const checks = data.checks ?? [];
-  const summary = data.summary ?? {};
-  const fixable = checks.some((c) => !c.ok && c.fixable);
-  return (
-    <>
-      <div className="card">
-        <div className="row health-summary">
-          <div className="grow">
-            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {plural("settings.health.warn", summary.warn ?? 0)} · {plural("settings.health.fail", summary.fail ?? 0)}
-          </div>
-          <button className="btn small" disabled={busy} onClick={() => load(false)}>
-            {t("settings.health.recheck")}
-          </button>
-          {fixable && (
-            <button className="btn small primary" disabled={busy} onClick={() => load(true)}>
-              {t("settings.health.fix")}
-            </button>
-          )}
-        </div>
-      </div>
-      {integrations && integrations.length > 0 && <IntegrationsCard rows={integrations} />}
-      <div className="card">
-        {checks.map((c, i) => (
-          <div key={i} className="row health-row">
-            <span className={`health-mark ${mark(c)[1]}`}><Icon name={mark(c)[0]} size={16} /></span>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>
-                <b>{c.name}</b> <span className="sub">{c.message}</span>
-              </div>
-              {!c.ok && c.fix_hint && <div className="sub">→ {c.fix_hint}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-/** GitHub, each MCP server and each model provider: one line each, the remedy under a failing one,
- * and the host's technical text folded away. */
-function IntegrationsCard({ rows }: { rows: IntegrationRow[] }) {
-  const mark: Record<IntegrationRow["severity"], [IconName, string]> = { ok: ["check", "ok"], info: ["dot", "info"], warn: ["alert", "warn"], fail: ["close", "bad"] };
-  return (
-    <div className="card integrations">
-      <div className="section-title">{t("health.int.title")}</div>
-      {rows.map((row) => {
-        const words = describeIntegration(row);
-        const [icon, tone] = mark[row.severity] ?? mark.info;
-        return (
-          <div key={`${row.kind}:${row.name}`} className="row integration health-row" data-kind={row.kind} data-state={row.state} data-severity={row.severity}>
-            <span className={`health-mark ${tone}`}><Icon name={icon} size={16} /></span>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>
-                <b>{row.name}</b> <span className="sub">{words.kind} · {words.state}</span>
-              </div>
-              {words.fix && <div className="sub integration-fix">→ {words.fix}</div>}
-              {/* A healthy row's detail (a tool count, where its key comes from) is not worth a fold of its own. */}
-              {row.detail && row.severity !== "ok" && (
-                <details className="integration-detail">
-                  <summary className="sub">{t("health.int.details")}</summary>
-                  <code>{row.detail}</code>
-                </details>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void }) {
   const [hb, setHb] = useState<HeartbeatStatus | null>(null);
   const [text, setText] = useState("");
@@ -1026,35 +441,6 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
   );
 }
 
-/** The doctor's checks as a screen of their own. */
-export function HealthScreen({ toast }: { toast: (t: string) => void }) {
-  return (
-    <>
-      <PageHeader title={screenTitle("health")} />
-      <div className="screen narrow">
-        <HealthTab toast={toast} />
-        {!telegram()?.initData && (
-          <div className="btnrow">
-            <button
-              className="btn small"
-              onClick={async () => {
-                try {
-                  await api.post("/api/auth/logout");
-                  sessionStorage.removeItem("daedalus_token");
-                } finally {
-                  window.location.reload();
-                }
-              }}
-            >
-              {t("settings.logout")}
-            </button>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
 /** Security: each concern its own card — two-factor sign-in, the operator's secrets, signing out everywhere. */
 function SecurityTab({ toast }: { toast: (t: string) => void }) {
   // Nothing on this screen changes when the other sessions end, so the button keeps the answer.
@@ -1083,12 +469,13 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
 }
 
 type Section =
-  | "appearance" | "text" | "notifications" | "voice" | "dictation" | "speech-models" | "navigation" | "desktop" | "security"
-  | "models" | "tasks" | "providers" | "accounts" | "keyproxy" | "free-models"
-  | "chat" | "rules" | "approvals" | "memory" | "memory-upkeep" | "translation" | "budget" | "limits" | "context" | "schedules"
+  | "appearance" | "text" | "notifications" | "navigation" | "desktop"
+  | "voice" | "dictation" | "speech-models"
+  | "models" | "tasks" | "accounts" | "keyproxy" | "free-models" | "budget"
+  | "chat" | "rules" | "approvals" | "limits" | "context" | "memory" | "memory-upkeep" | "translation" | "schedules"
   | "tools" | "search" | "browser" | "browser-safety" | "environments"
   | "telegram" | "mcp" | "devices" | "address"
-  | "components" | "dependencies" | "about";
+  | "security" | "components" | "dependencies" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1100,12 +487,14 @@ const sectionLabel = (id: Section) => t(`settings.sec.${id}`);
 
 /** Sections that were pages of their own and are now part of another: an address written down, sent
  *  in a notification or bookmarked still lands on the setting, scrolled to the part it named. The
- *  models page's tabs are sections of their own now, so its old `?tab=` addresses are here too. A row
+ *  models page's tabs are sections of their own now, so its old `?tab=` addresses are here too; the
+ *  providers became part of the models' section, which draws each model inside its provider. A row
  *  that moved needs no entry: an address naming it goes to the section the index says holds it. */
 const MOVED: Record<string, { to: Section; anchor?: string }> = {
   terminals: { to: "environments", anchor: "terminal-sessions" },
   heartbeat: { to: "schedules" },
-  "models?tab=providers": { to: "providers" },
+  providers: { to: "models" },
+  "models?tab=providers": { to: "models" },
   "models?tab=free": { to: "free-models" },
 };
 
@@ -1118,29 +507,32 @@ function movedTo(section: string | null | undefined, search: string, row: string
   return (tab ? MOVED[`${section}?tab=${tab}`] : undefined) ?? MOVED[section];
 }
 
-/** Settings: a dialog over the screen it was opened from on a desktop, a full-screen stack of two
- *  levels on a phone. `onClose` is the shell's way back to that screen. */
+/** How many subscriptions hold an account added but not signed in yet: the one number worth a badge in
+ *  the list of sections, since that account is skipped until it is. */
+function signInsWaiting(accounts: SubscriptionAccounts | null | undefined): number {
+  return (accounts?.upstreams ?? []).filter((u) => u.sign_in === "terminal" && u.accounts.some((a) => !a.configured)).length;
+}
+
+/** Settings: a page of its own on a desktop — the list of sections where the sidebar was, the open
+ *  section in a centred column — and a full-screen stack of two levels on a phone. `onClose` is the
+ *  shell's way back to where the operator was. */
 export function SettingsScreen({ toast, section, onClose }: { toast: (t: string) => void; section?: string | null; onClose?: () => void }) {
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
   // `?add=1` on the models section opens the add sheet straight away: the composer's model picker
   // sends the operator here to add a model, and landing on the list would leave one more click to find.
-  const [adding, setAdding] = useState(() => section === "models" && new URLSearchParams(window.location.search).get("add") === "1");
+  const [adding, setAdding] = useState(() => (section === "models" || section === "providers") && new URLSearchParams(window.location.search).get("add") === "1");
+  const [addingProvider, setAddingProvider] = useState(false);
   const [status, setStatus] = useState<any>(null);
-  // Names only, for a model's account choice: the quota reading is the accounts card's, in its own section.
+  // Names and sign-in state: a model's account choice, a provider's status, the badge on Accounts.
   const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
-  const dialog = useRef<HTMLDivElement>(null);
+  const page = useRef<HTMLDivElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLElement>(null);
-  // Between 1024 and 1180 px the list of sections is a column of icons, so the section keeps the width
-  // it needs; it opens out to its full width while the search is in use.
-  const narrow = useMedia("(max-width: 1180px)");
-  const [opened, setOpened] = useState(false);
   const close = onClose ?? (() => navigate(modeHome(storedMode(), wide)));
-  useDialogKeys({ dialog, search: searchField, query, clear: () => setQuery(""), onClose: close });
-  const covered = useCovered();
+  usePageKeys({ page, search: searchField, query, clear: () => setQuery(""), onClose: close });
   const target = settingTarget();
   const moved = movedTo(section, window.location.search, target);
   const movedTarget = moved?.to;
@@ -1177,10 +569,16 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     return () => window.clearInterval(timer);
   }, [anchor]);
   const shown: Section | null = current ?? (wide ? "models" : null);
-  // The list of sections is taller than the dialog: the open one is brought into it, or a link to
+  // The list of sections is taller than the window: the open one is brought into it, or a link to
   // About opened a page whose own entry sat below the fold of the list beside it.
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(".settings-link.active")?.scrollIntoView({ block: "nearest" });
+  }, [shown]);
+  // A section's column starts at its top: the page keeps one scroller, and the next section opened
+  // in it began where the last one had been read to.
+  const main = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    main.current?.scrollTo({ top: 0 });
   }, [shown]);
   // A link to one setting (`#<key>`, from an error's button or a link in the agent's answer): the tab
   // that holds it is opened, the row is scrolled to once it has drawn and blinks, and the name leaves
@@ -1190,7 +588,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     // Not while the address is on its way to the section that holds the row: it is not on this one.
     if (!target || !shown || movedTarget) return;
     let cancelled = false;
-    void revealSetting(target, { root: dialog.current ?? document }).then(() => {
+    void revealSetting(target, { root: page.current ?? document }).then(() => {
       if (!cancelled) clearSettingTarget();
     });
     return () => {
@@ -1202,9 +600,12 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     api.get("/api/status").then(setStatus).catch(() => setStatus(null));
   }, [toast]);
 
+  /** A settings body the host answered with, keeping the list of reachable providers when it left it out. */
+  const take = (next: Settings) => setS((now) => ({ ...next, providers_available: next.providers_available ?? (now?.providers_available ?? []) }));
+
   // After a key proxy value changes, provider readiness and the search backends are read again.
   function rereadSettings() {
-    api.get<Settings>("/api/settings").then((next) => setS((current) => ({ ...next, providers_available: next.providers_available ?? (current?.providers_available ?? []) }))).catch(() => undefined);
+    api.get<Settings>("/api/settings").then(take).catch(() => undefined);
   }
 
   async function save(patch: Partial<Settings>) {
@@ -1219,62 +620,19 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       // An answer without its list of problems still ends in a sentence the operator can read; indexing
       // the missing list put "Cannot read properties of undefined (reading '0')" in a toast.
       if (!validation.valid) throw new Error(validation.problems?.[0]?.message || t("settings.validation.invalid"));
-      const next = await api.put<Settings>("/api/settings", { ...patch, base_revision: s.revision });
-      setS({ ...next, providers_available: next.providers_available ?? s?.providers_available ?? [] });
+      take(await api.put<Settings>("/api/settings", { ...patch, base_revision: s.revision }));
     } catch (e) {
       toast((e as Error).message);
     }
   }
-  async function patchProvider(id: string, patch: Record<string, unknown>): Promise<Settings | undefined> {
+  async function addProvider(id: string, patch: Record<string, unknown>): Promise<Settings | undefined> {
     try {
       const next = await api.put<Settings>(`/api/providers/${encodeURIComponent(id)}`, patch);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-      if ("api_key" in patch) announceProviderKeys();
+      take(next);
       return next;
     } catch (e) {
       toast((e as Error).message);
       return undefined;
-    }
-  }
-  async function patchPreset(id: string, patch: Partial<Preset>) {
-    try {
-      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, patch);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  async function refreshWindow(id: string) {
-    try {
-      await api.post(`/api/presets/${encodeURIComponent(id)}/context-window`, {});
-      const next = await api.get<Settings>("/api/settings");
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  async function removePreset(id: string) {
-    try {
-      const next = await api.delete<Settings>(`/api/presets/${encodeURIComponent(id)}`);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  async function lookupProviderModels(provider: string): Promise<string[] | null> {
-    try {
-      return (await api.post<{ models: string[] }>("/api/providers/lookup-models", { provider })).models;
-    } catch (e) {
-      toast((e as Error).message);
-      return null;
-    }
-  }
-  async function removeProvider(id: string) {
-    try {
-      const next = await api.delete<Settings>(`/api/providers/${encodeURIComponent(id)}`);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
     }
   }
 
@@ -1293,33 +651,34 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   const about = (id: Section) => INDEX_SECTIONS.find((item) => item.id === id)?.about[lang()] ?? t(`settings.sec.${id}.hint`);
   const leave = (e: React.MouseEvent, href: string) => {
     setQuery("");
-    setOpened(false);
     go(e, href);
   };
   // Enter in the search goes where the first result does: the first row found, else the first section.
   const first = fields[0] ? fieldPath(fields[0]) : hits[0] ? pathFor("settings", hits[0].id) : null;
+  const waiting = signInsWaiting(subscriptionAccounts);
 
   const link = (sec: { id: Section; icon: IconName }) => {
     const href = pathFor("settings", sec.id);
     const here = !needle && shown === sec.id;
     return (
-      <a key={sec.id} href={href} className={`settings-link ${here ? "active" : ""}`} aria-current={here ? "page" : undefined} title={narrow && wide ? sectionLabel(sec.id) : undefined} data-section={sec.id} onClick={(e) => leave(e, href)}>
+      <a key={sec.id} href={href} className={`settings-link ${here ? "active" : ""}`} aria-current={here ? "page" : undefined} data-section={sec.id} onClick={(e) => leave(e, href)}>
         <Icon name={sec.icon} size={wide ? 16 : 18} />
         <span className="settings-link-text">
           <b>{sectionLabel(sec.id)}</b>
           <span className="sub">{t(`settings.sec.${sec.id}.hint`)}</span>
         </span>
         {/* A mark, not a count: the one thing worth interrupting a reader for is a feature they have
-            already configured whose runtime is not installed. Beside the words rather than in them, so
-            it stays on the icon when the list is folded to icons. */}
+            already configured whose runtime is not installed. */}
         {sec.id === "components" && componentsNeedAttention(caps.data) && <span className="tab-badge dot settings-mark" role="img" aria-label={t("comp.state.missing")} />}
+        {/* Subscriptions that wait for a sign-in: every model behind them is skipped until then. */}
+        {sec.id === "accounts" && waiting > 0 && <span className="settings-count-badge" role="img" aria-label={plural("settings.accounts.waiting", waiting)}>{waiting}</span>}
         <span className="chev" aria-hidden><Icon name="chevron" size={14} /></span>
       </a>
     );
   };
   const search = (
     <div className="settings-search-box">
-      <Icon name="search" size={15} />
+      <Icon name="search" size={16} />
       <input
         ref={searchField}
         className="field settings-search"
@@ -1327,12 +686,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         placeholder={t("settings.find.placeholder")}
         aria-label={t("settings.find.placeholder")}
         onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => setOpened(true)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && first) {
             e.preventDefault();
             setQuery("");
-            setOpened(false);
             navigate(first);
           } else moveInList(e, list.current);
         }}
@@ -1345,7 +702,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     </div>
   );
   const index = (
-    <nav ref={list} className="settings-index" aria-label={screenTitle("settings")} onKeyDown={(e) => moveInList(e, list.current)}>
+    <nav ref={list} className="settings-index" aria-label={t("settings.index")} onKeyDown={(e) => moveInList(e, list.current)}>
       {needle ? (
         hits.length ? (
           <div className="settings-group-block">
@@ -1370,7 +727,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           const items = group.sections.filter((sec) => visible(sec.id));
           if (!items.length) return null;
           return (
-            <div key={group.id} className="settings-group-block">
+            <div key={group.id} className="settings-group-block" data-group={group.id}>
               <div className="settings-group">{t(`settings.group.${group.id}`)}</div>
               {items.map(link)}
             </div>
@@ -1387,79 +744,9 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     if (sec === "devices") return <DevicesPanel toast={toast} />;
     if (sec === "address") return <PublicAddressPanel />;
     if (!s) return <div className="empty">{t("common.loading")}</div>;
-    const kinds = s.provider_kinds ?? DEFAULT_KINDS;
-    const providerIds = Object.keys(s.providers ?? {});
     switch (sec) {
       case "models":
-        return (
-          <>
-          <div className="card">
-            <div className="section-title">{t("settings.models.title")}</div>
-            <div className="sub">{t("settings.models.sub")}</div>
-            <div className="mlist" data-setting="model.preset">
-              {Object.entries(s.presets ?? {}).map(([id, p]) => (
-                <PresetRow
-                  key={id}
-                  id={id}
-                  p={p}
-                  routed={s.providers[p.provider]?.kind === "openrouter"}
-                  accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
-                  onDemandByModel={s.on_demand_defaults?.[id]}
-                  windowSources={s.context_window_sources?.[id]}
-                  price={s.prices?.[id]}
-                  onPriceSaved={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })}
-                  toast={toast}
-                  onRefreshWindow={() => void refreshWindow(id)}
-                  isDefault={s.model.preset === id}
-                  inChain={(s.model.chain ?? []).includes(id)}
-                  providers={providerIds}
-                  onDefault={() => save({ model: { preset: id } as any })}
-                  onPatch={(patch) => void patchPreset(id, patch)}
-                  onDelete={() => void removePreset(id)}
-                  onLookup={lookupProviderModels}
-                />
-              ))}
-            </div>
-            {Object.keys(s.presets ?? {}).length === 0 && (
-              <div className="empty">
-                <b>{t("settings.models.empty")}</b>
-                <div className="sub">{t("settings.models.empty.sub")}</div>
-              </div>
-            )}
-            <div className="card-foot" data-setting="models.add">
-              <button className="btn primary" onClick={() => setAdding(true)}>
-                <Icon name="plus" size={14} /> {t("settings.models.add")}
-              </button>
-              <span className="sub faint">{t("settings.models.add.hint")}</span>
-            </div>
-          </div>
-          {/* What happens when a model fails is a group of its own: the switch that allows a stand-in
-              and the stand-ins in their order. Above the list of models and under its button, the two
-              read as part of the list, and the page was one card from top to bottom. */}
-          <div className="card">
-            <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
-              <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
-            </Row>
-            {/* The whole chain in one place, in its order. It was a switch inside each model's
-                expanded row and a line of ids joined by arrows: nobody could see the set at once
-                or change the order without switching models off and on again. */}
-            {Object.keys(s.presets ?? {}).length > 1 && (
-              <Row title={t("settings.models.chain.title")} desc={t("settings.models.chain.sub")} stack data-setting="model.chain">
-                <SelectionList
-                  id="model-chain"
-                  label={t("settings.models.chain.title")}
-                  ordered
-                  chosenLabel={t("settings.models.chain.chosen")}
-                  emptyChosen={t("settings.models.chain.empty")}
-                  {...modelItems(s, (id) => id !== s.model.preset)}
-                  value={(s.model.chain ?? []).filter((id) => id !== s.model.preset)}
-                  onChange={(chain) => save({ model: { chain } as any })}
-                />
-              </Row>
-            )}
-          </div>
-          </>
-        );
+        return <ModelsSection s={s} take={take} save={save} toast={toast} accounts={subscriptionAccounts} />;
       case "tasks":
         return (
           <>
@@ -1561,23 +848,6 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             </div>
           </>
         );
-      case "providers":
-        return (
-          <div className="card">
-            <div className="section-title">{t("settings.providers.title")}</div>
-            <div className="sub">{t("settings.providers.sub")}</div>
-            <div className="mlist" data-setting="providers.list">
-              {providerIds.map((id) => (
-                <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
-              ))}
-            </div>
-            {/* Every way to add an endpoint, in the card's foot under the ones there are. */}
-            <div className="card-foot provider-add">
-              <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
-              <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
-            </div>
-          </div>
-        );
       case "accounts":
         return <SubscriptionAccountsCard toast={toast} />;
       case "keyproxy":
@@ -1611,6 +881,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
             </div>
             <ActionRules s={s} save={save} />
+            <ProjectApprovals toast={toast} />
           </>
         );
       case "budget":
@@ -1799,7 +1070,6 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       }
     }
   };
-
   // Closing the sheet takes `add` out of the address, so a reload or the back button does not open it again.
   const stopAdding = () => {
     setAdding(false);
@@ -1810,22 +1080,46 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       navigate(window.location.pathname + (rest ? `?${rest}` : ""), { replace: true });
     }
   };
-  const addSheet = adding && (
-    <Sheet title={t("settings.models.add")} size="xl" onClose={stopAdding}>
-      <AddModel
-        toast={toast}
-        onCancel={stopAdding}
-        onSaved={(_, next) => {
-          setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-          stopAdding();
-        }}
-      />
-    </Sheet>
+  const sheets = (
+    <>
+      {adding && (
+        <Sheet title={t("settings.models.add")} size="xl" onClose={stopAdding}>
+          <AddModel
+            toast={toast}
+            onCancel={stopAdding}
+            onSaved={(_, next) => {
+              take(next);
+              stopAdding();
+            }}
+          />
+        </Sheet>
+      )}
+      {addingProvider && s && (
+        <Sheet title={t("settings.provider.add")} onClose={() => setAddingProvider(false)}>
+          <AddProvider s={s} toast={toast} onAdd={addProvider} onDone={() => setAddingProvider(false)} />
+        </Sheet>
+      )}
+    </>
   );
-  // Found rows as the controls they are, each section's body cut down to them (settingsdialog.tsx);
+  /** What a section puts in the page's header beside its title: the models' two ways to add. */
+  const actions = (sec: Section) =>
+    sec === "models" && s ? (
+      <>
+        <button type="button" className="btn" data-setting="models.add" onClick={() => setAdding(true)}>
+          <Icon name="plus" size={16} /> {t("settings.models.add")}
+        </button>
+        <button type="button" className="btn primary" onClick={() => setAddingProvider(true)}>
+          <Icon name="plus" size={16} /> {t("settings.provider.add")}
+        </button>
+      </>
+    ) : null;
+  // Found rows as the controls they are, each section's body cut down to them (settingssearch.tsx);
   // a section found by its own name, not by a row, is a way into it.
   const results = hits.length === 0 ? (
-    <div className="empty">{t("settings.search.empty")}</div>
+    <div className="empty settings-none" role="status">
+      <b>{t("settings.search.empty")}</b>
+      <span className="sub">{t("settings.search.empty.sub")}</span>
+    </div>
   ) : (
     hits.map((sec) => {
       const own = fieldsOf(sec.id);
@@ -1851,47 +1145,32 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   );
 
   if (wide) {
-    const open = needle !== "" || opened;
     return (
-      <div className="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-        <div ref={dialog} className="settings-dialog" role="dialog" aria-modal={covered ? undefined : true} aria-labelledby="settings-dialog-title" tabIndex={-1} onKeyDown={trapTab}>
-          <div className={`settings-stage ${narrow ? "icons" : ""} ${narrow && open ? "opened" : ""}`.trim()}>
-            <aside
-              className="settings-nav"
-              onBlur={(e) => {
-                if (!needle && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpened(false);
-              }}
-            >
-              <h2 id="settings-dialog-title" className="settings-dialog-title">{screenTitle("settings")}</h2>
-              {narrow && !open && (
-                <button type="button" className="iconbtn settings-search-open" aria-label={t("settings.find.placeholder")} title={t("settings.find.placeholder")} onClick={() => (setOpened(true), window.setTimeout(() => searchField.current?.focus()))}>
-                  <Icon name="search" size={16} />
-                </button>
-              )}
-              {search}
-              {index}
-              <div className="settings-foot">
-                <span>{status?.supervisor?.bot ? `Daedalus ${String(status.supervisor.bot).slice(0, 7)}` : "Daedalus"}</span>
-                <span>{t("settings.esc")}</span>
-              </div>
-            </aside>
-            <div className="settings-pane">
-              <header className="settings-head">
-                <div className="settings-head-text">
-                  <h1 className="settings-title">{needle ? t("settings.find.title", { q: needle }) : sectionLabel(shown!)}</h1>
-                  <p className="settings-about">{needle ? t("settings.find.lead") : about(shown!)}</p>
-                </div>
-                <button type="button" className="iconbtn settings-close" aria-label={t("common.close")} title={t("settings.esc")} onClick={close}>
-                  <Icon name="close" size={18} />
-                </button>
-              </header>
-              <div className="settings-main">
-                <div className="settings-col">{needle ? results : body(shown!)}</div>
-              </div>
+      <div ref={page} className="settings-page" tabIndex={-1} aria-labelledby="settings-page-title">
+        <aside className="settings-nav" aria-label={screenTitle("settings")}>
+          <div className="settings-nav-head">
+            <button type="button" className="settings-close" aria-label={t("settings.back.label")} onClick={close}>
+              <Icon name="back" size={16} />
+              <span className="settings-close-text">{t("settings.back")}</span>
+              <kbd className="settings-close-key" aria-hidden>Esc</kbd>
+            </button>
+          </div>
+          {search}
+          {index}
+        </aside>
+        <main className="settings-pane">
+          <header className="settings-head">
+            <h1 id="settings-page-title" className="settings-title">{needle ? t("settings.find.title", { q: needle }) : sectionLabel(shown!)}</h1>
+            {!needle && actions(shown!)}
+          </header>
+          <div ref={main} className="settings-main">
+            <div className="settings-col" data-section={needle ? undefined : shown!}>
+              {needle && hits.length > 0 && <p className="settings-about">{t("settings.find.lead")}</p>}
+              {needle ? results : body(shown!)}
             </div>
           </div>
-        </div>
-        {addSheet}
+        </main>
+        {sheets}
       </div>
     );
   }
@@ -1899,12 +1178,12 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   // opens the second level straight away; its back goes to the first, not out of Settings.
   const level = current && !needle ? current : null;
   return (
-    <div ref={dialog} className="settings-phone" tabIndex={-1} aria-labelledby="settings-dialog-title">
+    <div ref={page} className="settings-phone" tabIndex={-1} aria-labelledby="settings-page-title">
       <header className="pagehead settings-phone-head">
         <div className="pagehead-row">
           {level ? (
             <button type="button" className="settings-phone-back" onClick={() => navigate(pathFor("settings"), { replace: true })}>
-              <Icon name="back" /> <span id="settings-dialog-title">{screenTitle("settings")}</span>
+              <Icon name="back" /> <span id="settings-page-title">{screenTitle("settings")}</span>
             </button>
           ) : (
             <>
@@ -1912,16 +1191,17 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <Icon name="close" />
               </button>
               <div className="pagehead-title">
-                <h1 id="settings-dialog-title">{screenTitle("settings")}</h1>
+                <h1 id="settings-page-title">{screenTitle("settings")}</h1>
               </div>
             </>
           )}
         </div>
       </header>
       {level ? (
-        <div className="screen narrow settings-col">
+        <div className="screen narrow settings-col" data-section={level}>
           <h1 className="settings-title">{sectionLabel(level)}</h1>
           <p className="settings-about">{about(level)}</p>
+          {level === "models" && s && <div className="btnrow settings-phone-actions">{actions(level)}</div>}
           {body(level)}
         </div>
       ) : (
@@ -1930,7 +1210,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           {index}
         </div>
       )}
-      {addSheet}
+      {sheets}
     </div>
   );
 }

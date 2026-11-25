@@ -2581,6 +2581,31 @@ def wait_until(page, ready, timeout: float = 5.0) -> bool:  # type: ignore[no-un
     return True
 
 
+def settings_model(page, name: str):  # type: ignore[no-untyped-def]
+    """A model in Settings → Models and providers, by its name: each model is drawn inside its provider,
+    so every provider still folded is opened first. Answers the model's block; its line's button is
+    ``.pmodel-open`` and its fields are under it once that is pressed."""
+    page.wait_for_selector(".prov-row", timeout=15000)
+    folded = page.locator(".prov-row[aria-expanded='false']")
+    # One at a time from the top: each one opened leaves the set, so a list taken first goes stale.
+    for _ in range(folded.count()):
+        folded.first.click()
+    return page.locator(".pmodel", has_text=name).first
+
+
+def settings_provider(page, provider_id: str):  # type: ignore[no-untyped-def]
+    """A provider in Settings → Models and providers, opened, with its Connection fields shown."""
+    block = page.locator(f".prov[data-provider='{provider_id}']")
+    block.wait_for(timeout=15000)
+    if block.locator(".prov-row").get_attribute("aria-expanded") != "true":
+        block.locator(".prov-row").click()
+    toggle = block.locator(".prov-foot button[aria-expanded]")
+    if toggle.get_attribute("aria-expanded") != "true":
+        toggle.click()
+    block.locator(".prov-connection").wait_for(timeout=5000)
+    return block
+
+
 def expect_app(base: str) -> None:
     """Refuse to drive a browser at an address that is not the built Mini App.
 

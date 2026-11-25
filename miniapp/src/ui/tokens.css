@@ -138,6 +138,8 @@
   --row-h-2: 44px;      /* a two-line row: a title over a line of meta, in a list that is not the sidebar's */
   --row-h-dense: 28px;  /* a dense row: explorer tree, terminal pane headers, aside rows, a step of a run */
   --row-h-touch: 44px;  /* phones only: rows and icon buttons */
+  --card-row-h: 44px;   /* a row of a settings card on a desktop: a name and its value or switch */
+  --card-row-h-lg: 56px; /* a settings card's row that leads a group: a provider, with its models under it */
   --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
   --composer-toolbar-h: 32px;
   --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */

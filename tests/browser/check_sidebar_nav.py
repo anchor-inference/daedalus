@@ -148,25 +148,26 @@ def desktop(page: Page, lang: str) -> None:
         page.locator(f".sb-pinned-nav [data-nav='{key}']").click()
         page.wait_for_url(f"**{path}")
         expect(page.locator(f".sb-pinned-nav [data-nav='{key}']")).to_have_class(re.compile(r"\bon\b"))
-    # Settings is a dialog over the screen it was opened from: the sidebar and the screen stay under
-    # it, and closing it goes back there however many sections were opened inside it.
+    # Settings is a page of its own: its list of sections stands where the sidebar was, as wide, and
+    # Back goes to where it was opened from however many sections were opened inside it.
     page.locator(".sidebar-foot [data-nav='settings']").click()
     page.wait_for_url("**/app/settings")
-    dialog = page.locator(".settings-dialog[role='dialog'][aria-modal='true']")
-    expect(dialog).to_be_visible()
-    expect(side).to_be_visible()
-    assert round(box(page, ".desktop-column")["width"]) == 300, f"{lang}: the sidebar changed width under Settings"
+    settings = page.locator(".settings-page")
+    expect(settings).to_be_visible()
+    expect(side).to_be_hidden()
+    assert round(box(page, ".settings-nav")["width"]) == 300, f"{lang}: the list of sections is not the sidebar's width"
     page.locator(".settings-nav a[href$='/settings/security']").click()
     page.wait_for_url("**/app/settings/security")
     expect(page.locator("h1.settings-title")).to_have_text("Security" if lang == "en" else "Безопасность")
     page.locator(".settings-close").click()
     page.wait_for_url(re.compile(r"/app/calendar(/|\?|$)"))
-    expect(dialog).to_be_hidden()
+    expect(settings).to_be_hidden()
+    expect(side).to_be_visible()
     # The account is Settings' security section.
     page.locator(".sidebar-foot [data-nav='account']").click()
     page.wait_for_url("**/app/settings/security")
     page.locator(".settings-close").click()
-    expect(dialog).to_be_hidden()
+    expect(settings).to_be_hidden()
     page.locator(".sb-pinned-nav [data-nav='new']").click()
     page.wait_for_url("**/app/agents")
     expect(page.locator(".sb-pinned-nav .sb-newchat")).to_have_class(re.compile(r"\bon\b"))

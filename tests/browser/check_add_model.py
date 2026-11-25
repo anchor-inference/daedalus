@@ -29,7 +29,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, reveal_composer, settings_provider  # noqa: E402
 
 # The same invented installation the pictures are taken of.
 from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402
@@ -44,7 +44,8 @@ TYPED = "z-ai/glm-5.3-flash"  # $0.15/$0.50, 200k, text only
 
 
 def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]
-    """Settings -> Providers: the Go row says how it is paid for, and Zen is one click away."""
+    """Settings -> Models and providers: the Go row says how it is paid for, its connection names the plan,
+    and Zen is one click away under Add a provider."""
     settings = copy.deepcopy(SETTINGS)
     settings["keyproxy_base"] = "http://keyproxy:3200"
     settings["providers"] = {"opencode": {"kind": "opencode", "name": "OpenCode Go", "base_url": "http://keyproxy:3200/opencode", "billing": "subscription", "timeout_seconds": 900}}
@@ -65,17 +66,22 @@ def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyp
         page = context.new_page()
         page.route("**/api/**", host)
         page.goto(f"{BASE}/settings/providers?token=t")
-        row = page.locator(".mrow", has_text="OpenCode Go").first
-        if GO_HINT not in row.inner_text():
+        row = page.locator(".prov[data-provider='opencode']")
+        row.wait_for(timeout=15000)
+        if width >= 1024 and row.locator(".prov-kind").inner_text() != "subscription":
             failures.append(f"{width}: the OpenCode Go row does not say it is a subscription")
-        add = page.locator(".opencode-add button", has_text="OpenCode Zen")
+        if GO_HINT not in settings_provider(page, "opencode").locator(".prov-connection").inner_text():
+            failures.append(f"{width}: the OpenCode Go connection does not name its plan")
+        page.get_by_role("button", name="Add a provider").click()
+        add = page.locator(".add-provider .opencode-add button", has_text="OpenCode Zen")
+        add.first.wait_for(timeout=5000)
         if add.count() != 1 or ZEN_HINT not in add.first.inner_text():
             failures.append(f"{width}: Settings does not offer OpenCode Zen with its line about paying per token")
         else:
             add.first.click()
             page.wait_for_timeout(300)
         if not page.evaluate("document.documentElement.scrollWidth <= innerWidth"):
-            failures.append(f"{width}: the providers tab scrolls sideways")
+            failures.append(f"{width}: the models and providers section scrolls sideways")
         context.close()
     expected = ("/api/providers/opencode_zen", {"kind": "opencode", "name": "OpenCode Zen", "base_url": "http://keyproxy:3200/opencode_zen", "billing": "metered"})
     if added != [expected, expected]:

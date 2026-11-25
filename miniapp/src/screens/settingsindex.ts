@@ -11,7 +11,7 @@ import index from "./settings-index.json";
 import type { IconName } from "../icons";
 import type { Lang } from "../i18n";
 
-export type SectionGroup = "you" | "models" | "agent" | "tools" | "integrations" | "system";
+export type SectionGroup = "general" | "voice" | "models" | "autonomy" | "tools" | "integrations" | "system";
 type Words = Record<Lang, string>;
 
 export type IndexSection = { id: string; group: SectionGroup; icon: IconName; title: Words; about: Words; synonyms: string[] };
@@ -20,7 +20,7 @@ export type IndexField = { section: string; anchor: string; config: string | nul
 export const INDEX_SECTIONS = index.sections as IndexSection[];
 export const INDEX_FIELDS = index.fields as IndexField[];
 
-const ORDER: SectionGroup[] = ["you", "models", "agent", "tools", "integrations", "system"];
+const ORDER: SectionGroup[] = ["general", "voice", "models", "autonomy", "tools", "integrations", "system"];
 
 /** The sections grouped the way the page lists them, in the order the table gives. */
 export const SECTION_GROUPS: { id: SectionGroup; sections: { id: string; icon: IconName }[] }[] = ORDER.map((group) => ({
@@ -51,7 +51,7 @@ export function sectionOfAnchor(anchor: string): string | null {
 
 const DRAWN: [string, string][] = [
   ["presets.", "models"],
-  ["providers.", "providers"],
+  ["providers.", "models"],
   ["limits.usd_total_per_provider.", "budget"],
   ["accounts.", "accounts"],
   ["keyproxy.", "keyproxy"],

@@ -29,7 +29,7 @@ describe("the reference", () => {
 
   it("becomes the section's address naming the row", () => {
     expect(settingPath(SUMMARY)).toBe("/app/settings/context#compaction.preset");
-    expect(settingPath({ page: "providers", key: "providers.opencode.api_key" })).toBe("/app/settings/providers#providers.opencode.api_key");
+    expect(settingPath({ page: "models", key: "providers.opencode.api_key" })).toBe("/app/settings/models#providers.opencode.api_key");
     expect(settingPath({ page: "tasks", key: "vision.preset" })).toBe("/app/settings/tasks#vision.preset");
   });
 
