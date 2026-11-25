@@ -230,6 +230,8 @@ a.memory-source:hover { color: var(--fg); }
   .memory-composer { padding-inline: var(--gutter); }
   .memory-composer textarea { font-size: var(--fs-16); }
   .memory-bulkbar { padding-inline: var(--gutter); }
+  /* A note's sentence wraps on a phone rather than ending in dots: it is the one thing the row is for. */
+  .memory-banner-text, .memory-pill-text { white-space: normal; padding: 6px 0; line-height: 1.35; }
   .memory-search { width: 100%; flex: 1 1 100%; }
   .memory-fact-pair { grid-template-columns: 1fr; }
   /* The view's switch takes a row, the two selects share the next, so the list starts under two rows of controls rather than three. */
