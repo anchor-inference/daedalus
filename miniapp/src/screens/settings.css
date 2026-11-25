@@ -188,6 +188,10 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-card .set-face .combo-input { margin: 0; }
 .set-card .settings-themes { margin: 0; }
 .set-card .prose-stepper { flex-direction: row; align-items: center; gap: 8px; }
+/* A model with the effort it thinks at under it: both read as values at the row's end, the effort's
+   name beside its value rather than at the far side of a wide lane. */
+.set-card .settings-row-ctl .task-model { align-items: flex-end; }
+.set-card .settings-row-ctl .task-effort { justify-content: flex-end; }
 /* A value and its caret, as the row's end: the box round a select is the card's own edge. */
 .set-card .set-value .dropdown-btn, .set-card .settings-row-ctl > .dropdown > .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; background: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
 .set-card .set-value .dropdown-btn:hover:not(:disabled), .set-card .settings-row-ctl > .dropdown > .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
