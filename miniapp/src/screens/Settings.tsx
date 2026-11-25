@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, PriceView, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, ModelCheckResult, ModelHealth, Preset, PriceView, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
 import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
@@ -18,7 +18,7 @@ import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
 import { ModelPrice } from "../modelprice";
 import { QuickModelsPicker, SubagentModelsPicker } from "../subagentmodels";
-import { ModelPicker, modelItems } from "../modelitems";
+import { ModelPicker, healthAlert, modelItems } from "../modelitems";
 import { FreeModels } from "./FreeModels";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
@@ -216,9 +216,20 @@ function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Pres
 }
 
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
+/** A preset's health in its row: the broken or slow mark, else how fast the last check answered. */
+function HealthPill({ health }: { health?: ModelHealth }) {
+  const alert = healthAlert(health);
+  if (alert) return <span className={`pill ${alert.tone === "bad" ? "failed" : "warn"}`} data-health={health?.state} title={alert.why}>{alert.word}</span>;
+  const check = health?.check;
+  if (check?.state === "failed") return <span className="pill warn" data-health="failed" title={check.detail}>{t("modelhealth.failed")}</span>;
+  if (check?.state === "ok" && check.ms != null) return <span className="pill" data-health="ok">{t("modelhealth.ok", { s: (check.ms / 1000).toFixed(1) })}</span>;
+  return null;
+}
+
+function PresetRow({ id, p, health, routed, accounts, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
+  health?: ModelHealth;
   /** The subscription behind this model's client, when it has more than one account to choose from. */
   accounts?: SubscriptionUpstream;
   price?: PriceView;
@@ -255,6 +266,7 @@ function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, pr
           <span className="mmeta">{p.provider} · {p.model}</span>
         </button>
         <div className="mtags">
+          <HealthPill health={health} />
           {isDefault && <span className="chip accent">{t("settings.preset.default")}</span>}
           {!isDefault && inChain && <span className="pill">{t("settings.preset.fallback")}</span>}
           <span className="pill">{p.thinking ? t("settings.preset.think", { effort: t(`add.effort.${p.reasoning_effort}`) }) : t("settings.preset.nothink")}</span>
@@ -267,6 +279,9 @@ function PresetRow({ id, p, routed, accounts, onDemandByModel, windowSources, pr
           <button className={`iconbtn small ${open ? "on" : ""}`} onClick={() => setOpen((o) => !o)} title={t(open ? "common.close" : "common.edit")} aria-label={t(open ? "common.close" : "common.edit")}><span className={`chev ${open ? "down" : ""}`}>›</span></button>
         </div>
       </div>
+      {(health?.state === "broken" || health?.check?.state === "failed") && (
+        <div className="sub mhealth" data-health-detail={id}>{health.state === "broken" ? health.detail : health.check?.detail}</div>
+      )}
       {open && (
         <div className="mpanel">
           <div className="mfields">
@@ -1130,6 +1145,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   // sends the operator here to add a model, and landing on the list would leave one more click to find.
   const [adding, setAdding] = useState(() => section === "models" && new URLSearchParams(window.location.search).get("add") === "1");
   const [status, setStatus] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<{ ok: number; n: number } | null>(null);
   // Names only, for a model's account choice: the quota reading is the accounts card's, in its own section.
   const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
   const wide = useMedia("(min-width: 1024px)");
@@ -1254,6 +1271,21 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
     } catch (e) {
       toast((e as Error).message);
+    }
+  }
+  // One tiny request to every model, only when pressed: each probe is spent from a plan.
+  async function checkModels() {
+    setChecking(true);
+    try {
+      const result = await api.post<ModelCheckResult>("/api/models/check", {});
+      setS((current) => current && { ...current, model_health: result.health });
+      // The rows show each result; the foot counts them, since a toast is for what went wrong.
+      const states = Object.values(result.results);
+      setChecked({ ok: states.filter((r) => r.state === "ok" || r.state === "slow").length, n: states.length });
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setChecking(false);
     }
   }
   async function removePreset(id: string) {
@@ -1405,6 +1437,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   key={id}
                   id={id}
                   p={p}
+                  health={s.model_health?.[id]}
                   routed={s.providers[p.provider]?.kind === "openrouter"}
                   accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
                   onDemandByModel={s.on_demand_defaults?.[id]}
@@ -1435,6 +1468,14 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </button>
               <span className="sub faint">{t("settings.models.add.hint")}</span>
             </div>
+            {Object.keys(s.presets ?? {}).length > 0 && (
+              <div className="card-foot" data-setting="models.check">
+                <button className="btn" disabled={checking} onClick={() => void checkModels()}>
+                  {checking ? t("settings.models.check.running") : t("settings.models.check")}
+                </button>
+                <span className="sub faint" data-checked={checked ? "" : undefined}>{checked ? t("settings.models.check.answered", checked) : t("settings.models.check.hint")}</span>
+              </div>
+            )}
           </div>
           {/* What happens when a model fails is a group of its own: the switch that allows a stand-in
               and the stand-ins in their order. Above the list of models and under its button, the two

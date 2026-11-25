@@ -15,6 +15,7 @@ from daedalus.providers.openrouter_routes import priced_entry
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.stores.database import Database
 from tests.unit.test_billing_policy import errors, reply, run, started
+from tests.unit.test_providers_admin import FakeHealth
 
 
 def _with(runtime: RuntimeConfig, provider: str, model: str, entry: dict[str, Any] | None) -> RuntimeConfig:
@@ -109,7 +110,7 @@ class _App:
         self.settings = settings
         self.config = runtime
         self.providers = ProviderRegistry(settings, runtime)
-        self.manager = type("M", (), {"providers": self.providers, "list_sessions": staticmethod(lambda limit=100: [])})()
+        self.manager = type("M", (), {"providers": self.providers, "list_sessions": staticmethod(lambda limit=100: []), "model_health": FakeHealth()})()
         self.front: Any = None
         self.extensions: dict[str, Any] = {}
 

@@ -94,7 +94,7 @@ describe("the settings index", () => {
   // "translation" does not contain "translate", so each row names the words outright.
   it("finds every row of Translation, and the section, by any word for it in either language", () => {
     const rows = INDEX_FIELDS.filter((field) => field.section === "translation").map((field) => field.anchor).sort();
-    expect(rows).toEqual(["answer_language", "translation.agent_language", "translation.operator_language", "translation.preset", "translation.timeout_seconds"]);
+    expect(rows).toEqual(["answer_language", "translation.agent_language", "translation.blocking_timeout_seconds", "translation.fallback_preset", "translation.operator_language", "translation.preset", "translation.timeout_seconds"]);
     const section = INDEX_SECTIONS.find((item) => item.id === "translation")!;
     for (const word of ["translate", "translation", "translator", "language", "перевод", "переводчик", "язык"]) {
       expect(matchFields(word, "translation").map((field) => field.anchor).sort(), word).toEqual(rows);

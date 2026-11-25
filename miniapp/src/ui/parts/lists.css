@@ -103,6 +103,8 @@
 .mactions .chev.down { transform: rotate(90deg); }
 .mactions .iconbtn.on .chev { color: var(--fg); }
 .mpanel { padding: 8px 0 0; }
+/* The upstream's words for a broken model, under its row: a phone has no tooltip to hold them. */
+.mhealth { color: var(--bad); padding: 0 0 4px; overflow-wrap: anywhere; }
 .mpanel.add { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); padding: 12px; }
 .mfields { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .mfield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

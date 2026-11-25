@@ -2433,6 +2433,16 @@ export type Preset = {
   account?: string;
 };
 
+/** One probe of Check models: `ok` and `slow` answered (in `ms`), `broken` was refused in words about the
+ *  model, `failed` is any other failure, with its reason in `detail`. */
+export type ModelCheck = { state: "ok" | "slow" | "broken" | "failed"; detail: string; ms?: number; at: string };
+
+/** A preset's mark. `broken` carries the upstream's own message; `slow` the median wait over recent calls;
+ *  an empty state is nothing known yet. */
+export type ModelHealth = { state: "" | "ok" | "slow" | "broken"; detail: string; at?: string; median_ms?: number; calls?: number; check?: ModelCheck };
+
+export type ModelCheckResult = { checked_at: string; results: Record<string, ModelCheck>; health: Record<string, ModelHealth> };
+
 /** The operator's levels for what the agent does in the world (`[action_rules]`). */
 export type ActionRulesSettings = {
   levels: Record<string, string>;
@@ -2455,6 +2465,8 @@ export type Settings = {
   on_demand_defaults?: Record<string, boolean>;
   /** Per preset, what every context-window source says, so the settings can explain the number. */
   context_window_sources?: Record<string, ContextWindowSources>;
+  /** Per preset, whether its model is broken or slow, from the calls made and the last Check models. */
+  model_health?: Record<string, ModelHealth>;
   /** What each preset costs and where that comes from, by preset id. */
   prices?: Record<string, PriceView>;
   providers: Record<string, ProviderConf>;
@@ -2491,7 +2503,8 @@ export type Settings = {
   autopilot?: { enabled: boolean; preset?: string; effort?: string; max_continuations: number; usd_per_day: number };
   /** Talking to the agent in another language: the operator's own, the default for the agent, the
    *  translator's model ("" automatic, `suggested` naming what that resolves to) and its time limit. */
-  translation?: { operator_language: string; agent_language: string; preset: string; effort?: string; timeout_seconds: number; suggested?: string };
+  /** `suggested` and `fallback_suggested` are the host's to say: what an empty preset and an empty fallback mean now. */
+  translation?: { operator_language: string; agent_language: string; preset: string; effort?: string; fallback_preset?: string; blocking_timeout_seconds?: number; timeout_seconds: number; suggested?: string; fallback_suggested?: string };
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;

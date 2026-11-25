@@ -557,6 +557,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         route_refusal: Callable[[str, str], None] | None = None,
         on_unreachable: UnreachableNotice | None = None,
         accounts: AccountRouter | None = None,
+        model_refusal: Callable[[str, str, int, str], None] | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
 
@@ -575,8 +576,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         run's screen can say what it is waiting for rather than look stuck.
 
         ``accounts`` chooses the subscription account each call goes out on and moves a call that one
-        account refused for its limit to the next (:mod:`daedalus.providers.accounts`)."""
+        account refused for its limit to the next (:mod:`daedalus.providers.accounts`).
+
+        ``model_refusal(endpoint id, model, status, body)`` hears every other refusal too, so the model's
+        health can be marked when the words say the model itself is gone (:mod:`daedalus.host.model_health`)."""
         self.endpoint = endpoint
+        self._model_refusal = model_refusal
         self._accounts = accounts
         self._context_refusal = context_refusal
         self._routing_for = routing_for or (lambda _model: ())
@@ -1266,11 +1271,18 @@ class OpenAICompatibleProvider(ILLMProvider):
                     self._context_refusal(self.endpoint.id, request.model, window)
                 except Exception:  # noqa: BLE001 — learning the window is a side effect; the refusal is the error
                     logger.exception("could not record the context window %s stated for %s", window, request.model)
-        if self._route_refusal is not None and self.endpoint.kind == "openrouter" and status == 404 and refused_route(text):
+        routing = self.endpoint.kind == "openrouter" and status == 404 and refused_route(text) is not None
+        if self._route_refusal is not None and routing:
             try:
                 self._route_refusal(self.endpoint.id, request.model)
             except Exception:  # noqa: BLE001 — marking the model is a side effect; the refusal is the error
                 logger.exception("could not record the refused route of %s", request.model)
+        if self._model_refusal is not None and not routing:
+            # A route refused by OpenRouter's provider choice is the choice's fault, not the model's.
+            try:
+                self._model_refusal(self.endpoint.id, request.model, status, text)
+            except Exception:  # noqa: BLE001 — marking the model is a side effect; the refusal is the error
+                logger.exception("could not record the refusal of %s", request.model)
         if self._admission is not None and hasattr(self._admission, "failure"):
             try:
                 await self._admission.failure(self.endpoint, request, reservation, evidence)

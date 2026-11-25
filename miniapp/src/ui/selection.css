@@ -55,6 +55,8 @@
 .sel-fact { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .sel-row.active .sel-fact, .sel-row:hover .sel-fact { background: var(--surface-4); }
+.sel-fact.alert.bad { color: var(--bad); }
+.sel-fact.alert.warn { color: var(--warn); }
 
 .sel-empty { padding: var(--space-2); }
 

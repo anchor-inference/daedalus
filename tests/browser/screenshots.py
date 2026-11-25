@@ -583,7 +583,11 @@ def usage_data() -> dict:
 SETTINGS = {
     # Settings → Chat → Translation: the operator writes Russian, the agent works in English by default,
     # and the translator is left to the host, which names the cheap model it picks.
-    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "effort": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
+    # The rescue left to the host as well, which names the model on another route it would ask.
+    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "effort": "", "fallback_preset": "", "blocking_timeout_seconds": 30, "timeout_seconds": 120,
+                    "suggested": "deepseek-flash", "fallback_suggested": "gpt-5.6-luna"},
+    # Settings → Models: nothing known about any model's health yet, so no mark (check_model_health.py draws them).
+    "model_health": {},
     # Settings → Navigation: the layout the app ships with.
     "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
@@ -1100,6 +1104,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, PROJECTS)
     if rel == "/api/settings":
         return respond(route, SETTINGS)
+    if rel == "/api/models/check" and request.method == "POST":
+        # Check models: every model answers at once, so the pictures do not move under a press.
+        results = {pid: {"state": "ok", "detail": "", "ms": 900, "at": "2026-11-25T12:00:00+00:00"} for pid in SETTINGS["presets"]}
+        return respond(route, {"checked_at": "2026-11-25T12:00:00+00:00", "results": results, "health": {pid: {"state": "ok", "detail": "", "check": r} for pid, r in results.items()}})
     if rel == "/api/limits/spend":
         # Settings → Limits reads it for the spend beside each cap; without it the whole section fails to draw.
         return respond(route, {"since": "", "total": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 0, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1}, "per_provider": {}})

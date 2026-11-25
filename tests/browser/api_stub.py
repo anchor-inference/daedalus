@@ -927,6 +927,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
     # The key proxy card's client versions: look again, update Claude Code, put it back.
+    # Settings → Models' Check models: nothing configured in the shared host answers it with nothing to report.
+    ("POST", "/api/models/check"): (200, "application/json", json.dumps({"checked_at": "", "results": {}, "health": {}})),
     ("POST", "/api/keyproxy/clients/check"): (200, "application/json", json.dumps(KEYPROXY_CLIENTS)),
     ("POST", "/api/keyproxy/clients/claude/update"): (200, "application/json", json.dumps(KEYPROXY_CLIENT_UPDATED)),
     ("POST", "/api/keyproxy/clients/claude/revert"): (200, "application/json", json.dumps({"client": keyproxy_client("claude", "Claude Code", "2.1.296", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS), "reverted": {"from": "2.1.310", "to": "2.1.296", "automatic": False}})),
