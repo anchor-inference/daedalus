@@ -337,7 +337,7 @@ function ChoiceCard({ on, title, sub, onPick }: { on: boolean; title: string; su
 
 /** An on/off choice of the dialog: its words, and the switch at the row's end. The whole row is the
  *  control, as a label's would be, and the switch itself answers once. */
-function Toggle({ on, onChange, title, sub }: { on: boolean; onChange: (on: boolean) => void; title: string; sub: string }) {
+export function Toggle({ on, onChange, title, sub }: { on: boolean; onChange: (on: boolean) => void; title: string; sub: string }) {
   return (
     <div className="np-toggle" onClick={(event) => { if (!(event.target as HTMLElement).closest(".switch")) onChange(!on); }}>
       <span className="np-card-text"><b>{title}</b><span className="sub">{sub}</span></span>

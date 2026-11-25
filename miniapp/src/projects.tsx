@@ -28,7 +28,7 @@ import { ProjectResources, resourceProfileKey } from "./project/ProjectResources
 import { ProjectRoute } from "./project/ProjectRoute";
 import { RevealButton } from "./reveal";
 import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
-import { openNewProject } from "./project/NewProject";
+import { Toggle, openNewProject } from "./project/NewProject";
 import { MoveFolderButton, movable } from "./project/MoveFolder";
 import { MoveLive, useFolderMove } from "./project/moves";
 import { openImport } from "./imports/ImportExplorer";
@@ -499,11 +499,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
           <div className="sub">{t("project.defaultenv.hint")}</div>
         </>
       )}
-      <label className="toggle-row">
-        <input type="checkbox" checked={snapshots} onChange={(e) => setSnapshots(e.target.checked)} />
-        <span>{t("project.snapshots")}</span>
-        <span className="sub">{t("project.snapshots.hint.edit")}</span>
-      </label>
+      <Toggle on={snapshots} onChange={setSnapshots} title={t("project.snapshots")} sub={t("project.snapshots.hint.edit")} />
       <label className="field" htmlFor="project-setup-command">{t("project.setup")}</label>
       <input id="project-setup-command" className="field mono" value={setupCommand} maxLength={2000}
         spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(e) => setSetupCommand(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
