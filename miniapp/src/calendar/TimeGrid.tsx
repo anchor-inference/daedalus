@@ -32,7 +32,9 @@ type Props = {
   defaultDuration: number;
   selection: Slot | null;
   onSelect: (slot: Slot, rect: DOMRect | null) => void;
-  onAllDay: (day: Day) => void;
+  onAllDay: (day: Day, rect: DOMRect | null) => void;
+  /** The key of the item open in the pane, drawn as chosen. */
+  openKey?: string | null;
   onOpen: (item: Item) => void;
   onMove: (item: Item, startDay: Day, startMinutes: number, endDay: Day, endMinutes: number) => void;
   onToggleTask: (task: Task) => void;
@@ -258,12 +260,12 @@ export function TimeGrid(props: Props) {
             ) : <span>{t("cal.allday.short")}</span>}</div>
             <div className="cal-tg-allday-cells">
               {days.map((day, index) => (
-                <button key={day} type="button" className="cal-tg-allday-cell" style={{ gridColumn: index + 1 }} tabIndex={-1} aria-label={t("cal.new.allday.on", { day: dayLabel(day, locale(), { day: "numeric", month: "long" }) })} onClick={() => props.onAllDay(day)} />
+                <button key={day} type="button" className="cal-tg-allday-cell" style={{ gridColumn: index + 1 }} tabIndex={-1} aria-label={t("cal.new.allday.on", { day: dayLabel(day, locale(), { day: "numeric", month: "long" }) })} onClick={(e) => props.onAllDay(day, e.currentTarget.getBoundingClientRect())} />
               ))}
               {bars.filter((b) => b.lane < shownLanes).map((bar) => (
                 <ItemChip key={bar.item.key} item={bar.item} zone={zone} className={`cal-bar ${bar.before ? "cut-start" : ""} ${bar.after ? "cut-end" : ""}`}
                   style={{ gridColumn: `${bar.span.first + 1} / ${bar.span.last + 2}`, gridRow: bar.lane + 1 }}
-                  onOpen={props.onOpen} onToggleTask={props.onToggleTask} />
+                  open={props.openKey === bar.item.key} onOpen={props.onOpen} onToggleTask={props.onToggleTask} />
               ))}
               {collapsed && days.map((day, index) => {
                 const hidden = bars.filter((b) => b.lane >= shownLanes && index >= b.span.first && index <= b.span.last).length;
@@ -291,7 +293,7 @@ export function TimeGrid(props: Props) {
                   const height = Math.max(((bottom - top) / 60) * H, 18);
                   const blockStyle = { top: (top / 60) * H, height, left: `calc(${at.left * 100}% + 1px)`, width: `calc(${at.width * 100}% - ${at.left + at.width >= 0.999 ? 6 : 2}px)`, zIndex: 1 + at.column, "--c": item.color } as CSSProperties;
                   return (
-                    <Block key={item.key} item={item} zone={zone} day={day} style={blockStyle} height={height} past={item.end < props.now} ghost={hidden}
+                    <Block key={item.key} item={item} zone={zone} day={day} style={blockStyle} height={height} past={item.end < props.now} ghost={hidden} open={props.openKey === item.key}
                       continuesBefore={piece.continuesBefore} continuesAfter={piece.continuesAfter}
                       onPointerDown={(e, resize) => onBlockPointerDown(e, item, resize)}
                       onOpen={() => { if (!suppressClick.current) props.onOpen(item); }}
@@ -341,8 +343,8 @@ function movable(item: Item): boolean {
   return !!item.event?.writable && item.firstDay === item.lastDay;
 }
 
-function Block({ item, zone, day, style, height, past, ghost, continuesBefore, continuesAfter, onPointerDown, onOpen, onToggleTask, resizable }: {
-  item: Item; zone: string; day: Day; style: CSSProperties; height: number; past: boolean; ghost: boolean; continuesBefore: boolean; continuesAfter: boolean;
+function Block({ item, zone, day, style, height, past, ghost, open, continuesBefore, continuesAfter, onPointerDown, onOpen, onToggleTask, resizable }: {
+  item: Item; zone: string; day: Day; style: CSSProperties; height: number; past: boolean; ghost: boolean; open: boolean; continuesBefore: boolean; continuesAfter: boolean;
   onPointerDown: (e: React.PointerEvent<HTMLElement>, resize: boolean) => void; onOpen: () => void; onToggleTask: (task: Task) => void; resizable: boolean;
 }) {
   const time = itemTime(item, zone, day);
@@ -350,7 +352,7 @@ function Block({ item, zone, day, style, height, past, ghost, continuesBefore, c
   const task = item.task;
   const label = `${item.title || t("cal.untitled")}${item.chip ? `, ${item.chip}` : ""}, ${time}${item.location ? `, ${item.location}` : ""}`;
   return (
-    <div className={`cal-block ${item.kind} ${short ? "short" : ""} ${past ? "past" : ""} ${ghost ? "ghost" : ""} ${item.done ? "done" : ""} ${item.event?.pending_sync ? "pending" : ""} ${continuesBefore ? "cut-start" : ""} ${continuesAfter ? "cut-end" : ""}`}
+    <div className={`cal-block ${item.kind} ${short ? "short" : ""} ${past ? "past" : ""} ${ghost ? "ghost" : ""} ${open ? "open" : ""} ${item.done ? "done" : ""} ${item.event?.pending_sync ? "pending" : ""} ${continuesBefore ? "cut-start" : ""} ${continuesAfter ? "cut-end" : ""}`}
       style={style} data-key={item.key} onPointerDown={(e) => onPointerDown(e, false)} onClick={onOpen}>
       {/* The click is also read on the block itself: once a mouse press is captured for a possible
           drag, the browser sends the click to the block rather than to this button. */}
@@ -378,12 +380,12 @@ function Block({ item, zone, day, style, height, past, ghost, continuesBefore, c
 
 /** One line for an item in the all-day row, a month cell or a list: its colour, a checkbox for a
  *  task, its title. */
-export function ItemChip({ item, zone, className = "", style, onOpen, onToggleTask, showTime }: { item: Item; zone: string; className?: string; style?: CSSProperties; onOpen: (item: Item) => void; onToggleTask: (task: Task) => void; showTime?: boolean }) {
+export function ItemChip({ item, zone, className = "", style, open, onOpen, onToggleTask, showTime }: { item: Item; zone: string; className?: string; style?: CSSProperties; open?: boolean; onOpen: (item: Item) => void; onToggleTask: (task: Task) => void; showTime?: boolean }) {
   const task = item.task;
   const time = showTime && !item.allDay ? itemTime(item, zone).split(" – ")[0] : "";
   const label = `${item.title || t("cal.untitled")}${item.chip ? `, ${item.chip}` : ""}${item.allDay ? "" : `, ${itemTime(item, zone)}`}`;
   return (
-    <div className={`cal-chip ${item.kind} ${item.allDay ? "solid" : "timed"} ${item.done ? "done" : ""} ${className}`} style={{ ...style, "--c": item.color } as CSSProperties}>
+    <div className={`cal-chip ${item.kind} ${item.allDay ? "solid" : "timed"} ${item.done ? "done" : ""} ${open ? "open" : ""} ${className}`} style={{ ...style, "--c": item.color } as CSSProperties}>
       {task && (
         <button type="button" className={`cal-check ${item.done ? "on" : ""}`} role="checkbox" aria-checked={!!item.done} aria-label={t("cal.task.complete.named", { title: item.title })} onClick={(e) => { e.stopPropagation(); onToggleTask(task); }}>
           {item.done && <Icon name="check" size={10} />}

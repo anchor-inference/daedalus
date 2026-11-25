@@ -35,7 +35,6 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 /* The sheet's "more below" button stood on the table's totals bar; the bar and the cards under it
    already say there is more. */
 .sheet.cal-view .sheet-more-anchor { display: none; }
-@media (min-width: 1024px) { .sheet.cal-view { width: min(640px, 94vw); } .sheet.cal-view.cal-group-page { width: min(820px, 94vw); } }
 .sheet.cal-view .sheet-head { align-items: flex-start; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 0; }
 .cal-view-head { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
 .cal-view-icon { width: 36px; height: 36px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--c) 14%, var(--surface-2)); }
@@ -55,7 +54,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-view-where { font-size: var(--fs-12); color: var(--fg-3); min-width: 0; overflow-wrap: anywhere; }
 .cal-chipbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--c) 12%, transparent); color: var(--fg); font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
 .cal-chipbtn:hover { background: color-mix(in srgb, var(--c) 20%, transparent); }
-.cal-view-pending { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--warn); }
+.cal-view-pending { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--attention); }
 .cal-view-loading { height: 2px; border-radius: 1px; background: linear-gradient(90deg, transparent, var(--live), transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: cal-view-load 1.1s linear infinite; }
 @keyframes cal-view-load { from { background-position: -50% 0; } to { background-position: 150% 0; } }
 .cal-md { font-size: var(--fs-14); line-height: var(--lh-prose); color: var(--fg); overflow-wrap: anywhere; }
@@ -131,7 +130,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-field dt { font-size: var(--fs-12); color: var(--fg-3); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-field dd { margin: 0; font-size: var(--fs-14); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .cal-field.stale { opacity: .7; border: 1px dashed var(--line-strong); background: none; }
-.cal-stale { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; }
+.cal-stale { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--attention) 16%, transparent); color: var(--attention); font-size: var(--fs-11); font-weight: 600; }
 
 /* Steps: big numbers that are the step's checkbox, and a timer where the step takes time. */
 .cal-steps-view { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: none; }
@@ -196,8 +195,8 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-agg { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; border-radius: var(--radius-xs); background: var(--surface-2); font-size: var(--fs-12); font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cal-agg.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .cal-agg.ok > .ic { color: var(--ok); }
-.cal-agg.low, .cal-agg.high { background: color-mix(in srgb, var(--warn) 12%, transparent); }
-.cal-agg-mark { color: var(--warn); font-weight: 600; }
+.cal-agg.low, .cal-agg.high { background: color-mix(in srgb, var(--attention) 12%, transparent); }
+.cal-agg-mark { color: var(--attention); font-weight: 600; }
 .cal-agg-label { font-weight: 500; color: var(--fg-3); }
 
 /* The week and the day: a typed block's progress beside its time; a done event goes quiet. */
@@ -205,7 +204,6 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-chip-progress { flex: none; margin-left: auto; font-size: var(--fs-11); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .cal-block.done:not(.task) { opacity: .62; }
 .cal-mark.done { opacity: .4; }
-.cal-mark-more { font-size: var(--fs-11); line-height: 6px; color: var(--fg-3); font-weight: 600; }
 
 /* The phone's rows: the time narrower, and the same four columns in the view and on a plan's page,
    which is drawn in a sheet outside the screen's own element. */
@@ -218,9 +216,6 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-view.phone .cal-agenda-wd b { font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); }
 
 /* ── the header's filter button ── */
-.cal-filter-btn { position: relative; }
-.cal-filter-btn.on { color: var(--fg); background: var(--surface-3); }
-.cal-filter-count { position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); font-size: var(--fs-11); line-height: 15px; font-weight: 600; }
 .cal-filter-body { display: grid; gap: 16px; }
 .cal-filter-group { display: grid; gap: 8px; }
 .cal-filter-group .segmented { margin: 0; justify-self: start; }
@@ -254,7 +249,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-bedit-kind { flex: none; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 input.field.cal-bedit-title { flex: 1 1 120px; min-width: 0; width: auto; padding: 5px 8px; font-size: var(--fs-13); }
 .cal-bedit-items, .cal-bedit-stack { display: grid; gap: 6px; }
-@media (min-width: 1024px) { .cal-bedit input.field, .cal-bedit select.field, .cal-bedit textarea.field { padding: 6px 10px; font-size: var(--fs-13); } }
+@media (min-width: 1024px) { .cal-bedit input.field, .cal-bedit textarea.field { padding: 6px 10px; font-size: var(--fs-13); } }
 .cal-bedit-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .cal-bedit-item:has(.cal-bedit-min) { grid-template-columns: 22px minmax(0, 1fr) 76px auto; }
 .cal-bedit-item.fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 76px auto; }
@@ -268,21 +263,25 @@ input.field.cal-bedit-min { width: 100%; }
 .cal-bedit-table { display: grid; gap: 8px; min-width: 0; }
 .cal-bedit-cols { display: grid; gap: 6px; }
 .cal-bedit-col { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto auto; gap: 6px; align-items: center; }
-.cal-bedit-col:not(:has(select + select)) { grid-template-columns: minmax(0, 1fr) 120px auto; }
+.cal-bedit-col:not(:has(.dropdown + .dropdown)) { grid-template-columns: minmax(0, 1fr) 120px auto; }
 .cal-bedit-cols > .btn, .cal-bedit-table > .btn, .cal-bedit-items > .btn { justify-self: start; }
 .cal-bedit-grid { display: grid; gap: 4px 6px; align-items: center; overflow-x: auto; padding-bottom: 2px; }
 .cal-bedit-row { display: contents; }
 .cal-bedit-th { font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-bedit-grid input.field { padding: 5px 8px; font-size: var(--fs-13); min-width: 0; }
-.cal-type-row-grid { display: grid; gap: 8px; }
 .cal-type-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.cal-type-row > select.field { flex: 1 1 160px; width: auto; }
+.cal-type-row > .dropdown { flex: 1 1 160px; max-width: none; }
+.cal-type-row > .dropdown .dropdown-btn { width: 100%; justify-content: space-between; }
 .cal-tfields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; min-width: 0; }
 .cal-tfield { display: grid; gap: 4px; font-size: var(--fs-12); color: var(--fg-2); min-width: 0; }
 .cal-tfield-control { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cal-tfield-control .field { flex: 1; min-width: 0; width: auto; }
 .cal-tfield-control small { color: var(--fg-3); font-size: var(--fs-12); }
 .cal-tfield.stale .cal-tfield-control { color: var(--fg-3); }
+/* A choice in a grid cell fills the cell, as the field beside it does. */
+.cal-type-field .dropdown, .cal-type-block .dropdown, .cal-type-agg .dropdown, .cal-bedit-col .dropdown, .cal-bedit-pair .dropdown, .cal-tfield-control .dropdown, .cal-custom-row .dropdown { max-width: none; width: 100%; }
+.cal-type-field .dropdown-btn, .cal-type-block .dropdown-btn, .cal-type-agg .dropdown-btn, .cal-bedit-col .dropdown-btn, .cal-bedit-pair .dropdown-btn, .cal-tfield-control .dropdown-btn { width: 100%; justify-content: space-between; }
+.cal-custom-row .dropdown { width: auto; }
 
 /* ── the type editor ── */
 .cal-type-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
@@ -294,7 +293,7 @@ button.cal-type-row:hover { background: var(--surface-2); }
 .cal-type-name small { font-size: var(--fs-12); color: var(--fg-3); }
 .cal-type-top { display: flex; align-items: center; gap: 10px; }
 .cal-type-top .field { flex: 1; }
-.cal-type-preview { width: 40px; height: 40px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--c) 14%, var(--surface-2)); }
+.cal-type-preview { width: var(--ctl-h-lg); height: var(--ctl-h-lg); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--c) 14%, var(--surface-2)); }
 .cal-icon-grid { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .cal-icon-pick { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); color: var(--fg-2); cursor: pointer; }
 .cal-icon-pick:hover { background: var(--surface-2); }
@@ -324,7 +323,7 @@ input.field.cal-emoji { width: 64px; text-align: center; }
   .cal-type-field > :nth-child(3), .cal-type-field > :nth-child(4) { grid-column: span 1; }
   .cal-type-agg { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
   .cal-type-block { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; }
-  .cal-bedit-col, .cal-bedit-col:not(:has(select + select)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .cal-bedit-col, .cal-bedit-col:not(:has(.dropdown + .dropdown)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
   .cal-bedit-pair { grid-template-columns: minmax(0, 1fr); }
 }
 
