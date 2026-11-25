@@ -46,23 +46,9 @@
 /* ── the microphone ────────────────────────────────────────────────────────────────────── */
 .roundbtn:disabled { opacity: .4; cursor: default; }
 
-/* ── memory ────────────────────────────────────────────────────────────────────────────── */
-.memory-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
-.memory-toolbar select.field { flex: 1 1 200px; width: auto; }
-.memory-toolbar input.field { flex: 2 1 160px; width: auto; }
-.memory-bulk { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 8px; min-height: 36px; }
-.memory-row { display: flex; gap: 10px; align-items: flex-start; }
-.memory-row.selected { border-color: var(--line-strong); background: var(--surface-2); }
-.memory-check { width: 18px; height: 18px; margin: 4px 0 0; accent-color: var(--primary); flex: none; }
-.memory-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; font-size: var(--fs-12); color: var(--fg-3); }
-.memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
-.memory-actions { display: flex; gap: 4px; flex: none; }
 .badge.kind-decision { color: var(--warn); }
 .badge.kind-preference { color: var(--info); }
 .badge.kind-reflection { color: var(--ok); }
-@media (max-width: 480px) {
-  .memory-actions { flex-direction: column; }
-}
 
 /* ── settings: models and clients as rows that expand ───────────────────────────────────
    Rows of one list, parted by hairlines. The default model is named by its tag: the stripe down the

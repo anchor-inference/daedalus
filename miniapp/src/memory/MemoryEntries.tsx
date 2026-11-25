@@ -1,21 +1,23 @@
-// The Memory screen as claude.ai draws it: the entries grouped (you, projects, topics, recent work),
-// each opening onto its bullets with where every one was learned; a field at the bottom that files a
-// note (on the list) or changes the entry in the operator's words (on an entry), the change shown as
-// a diff before anything is applied. The record grid stays one segment away as "All facts".
+// The Memory screen's entries: the list of sections grouped as you, projects, topics and recent work,
+// and the section a row opens, beside the list in a pane (or as a page when the window is too narrow
+// for both): its summary, its facts with where each was learned, and a field that changes it in the
+// operator's words, the change shown as a diff before anything is applied. The record grid stays one
+// segment away as "All facts".
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type MemoryBullet, type MemoryEntry, type MemoryEntryDetail, type MemoryEntryListing, type MemoryOp, type MemoryProposal, type MemorySource } from "../api";
 import { dayLabel } from "../format";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
-import { navigate, pathFor, sessionPath } from "../router";
+import { navigate, pathFor, sessionPath, useRoute } from "../router";
 import { invalidate, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
-import { OverflowMenu, Sheet, toast } from "../ui/dialogs";
-import { PageHeader, Skeleton, go } from "../ui/index";
+import { errorText } from "../ui";
+import { Page, PageHeader } from "../shell";
+import { Skeleton, go } from "../ui/index";
+import { Button, IconButton, OverflowMenu, Sheet, confirmDialog, toast, type MenuItem } from "../ui/primitives";
+import { MemoryComposer, MemoryHead, MemoryPane, useSplit } from "./frame";
 import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, sourceLabel, splitArchived, statusPill, updatedLabel } from "./model";
 import { ReviewBanner, ReviewSheet } from "./review";
-import { ImportSheet, downloadExport } from "./transfer";
 import { type Undoable, undoToast } from "./undo";
 
 export const ENTRIES_KEY = "/api/memory/entries";
@@ -25,78 +27,59 @@ function refreshMemory(): void {
   invalidate("/api/memory");
 }
 
-/** The pill under the title: on, paused, not learning, today's budget used, or when memory last changed. */
-export function StatusPill({ listing }: { listing: MemoryEntryListing | undefined }) {
+/** One quiet row above the list: whether memory learns from chats, paused, over today's budget, or
+ *  when it last changed by itself. It opens Settings, where those are set. */
+export function StatusRow({ listing }: { listing: MemoryEntryListing | undefined }) {
   const pill = statusPill(listing?.status);
   if (!pill) return null;
   return (
     <a className={`memory-pill ${pill.tone}`} href={SETTINGS_PATH} onClick={(e) => go(e, SETTINGS_PATH)} data-status={pill.tone} title={t("memory.status.settings")}>
       <span className="memory-pill-dot" aria-hidden />
-      <span>{pill.text}</span>
+      <span className="memory-pill-text">{pill.text}</span>
+      <Icon name="forward" size={14} />
     </a>
   );
 }
 
-/** The field pinned under the list or the entry: one line that grows, sent with Enter. */
-function MemoryComposer({ placeholder, label, busy, onSend }: { placeholder: string; label: string; busy: boolean; onSend: (text: string) => Promise<boolean> }) {
-  const [text, setText] = useState("");
-  const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [text]);
-  async function send() {
-    const value = text.trim();
-    if (!value || busy) return;
-    if (await onSend(value)) setText("");
-  }
-  const key = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      void send();
-    }
-  };
-  return (
-    <div className="memory-composer" data-busy={busy || undefined}>
-      <div className="memory-composer-pill">
-        <textarea ref={area} rows={1} value={text} placeholder={placeholder} aria-label={label} onChange={(e) => setText(e.target.value)} onKeyDown={key} disabled={busy} />
-        <button type="button" className="iconbtn primary memory-send" onClick={() => void send()} disabled={busy || !text.trim()} aria-label={label} title={label}>
-          <Icon name={busy ? "dot" : "send"} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function EntryRow({ entry, index }: { entry: MemoryEntry; index: number }) {
+function EntryRow({ entry, open }: { entry: MemoryEntry; open: boolean }) {
   const href = pathFor("memory", entry.id);
   const count = entry.count ?? 0;
+  const waiting = entry.suggestions ?? 0;
   return (
-    <a className="erow memory-entry-row" href={href} onClick={(e) => go(e, href)} data-entry={entry.id} style={{ ["--stagger" as string]: `${Math.min(index, 12) * 30}ms` }}>
+    <a className={`memory-entry-row ${open ? "on" : ""}`} href={href} onClick={(e) => go(e, href)} data-entry={entry.id} aria-current={open || undefined}>
       <span className={`memory-entry-tile ${entry.section}`} aria-hidden><Icon name={entry.section === "you" ? "user" : entry.section === "area" ? "folder" : "bulb"} size={16} /></span>
       <span className="memory-entry-main">
         <span className="memory-entry-title">
           {entry.title}
           {entry.sensitive.length > 0 && <span className="memory-sensitive" title={t("memory.entry.sensitive", { subjects: entry.sensitive.map((s) => t(`settings.memory.subject.${s}`)).join(", ") })}><Icon name="lock" size={12} /></span>}
         </span>
-        <span className="memory-entry-summary">{entry.summary || (entry.project_name && entry.section === "area" ? t("memory.entry.project", { name: entry.project_name }) : plural("memory.entry.facts", count))}</span>
+        <span className="memory-entry-summary">{entry.summary || (entry.project_name && entry.section === "area" ? t("memory.entry.project", { name: entry.project_name }) : "")}</span>
       </span>
-      <span className="memory-entry-end">
-        {(entry.suggestions ?? 0) > 0 && <span className="memory-badge" data-suggestions={entry.suggestions} title={plural("memory.review.badge", entry.suggestions ?? 0)} aria-label={plural("memory.review.badge", entry.suggestions ?? 0)}>{entry.suggestions}</span>}
+      {waiting > 0 && <span className="memory-badge" data-suggestions={waiting} title={plural("memory.review.badge", waiting)} aria-label={plural("memory.review.badge", waiting)}>{waiting}</span>}
+      <span className="memory-entry-stats">
+        <span className="memory-entry-count">{plural("memory.entry.facts", count)}</span>
         <span className="memory-entry-when">{updatedLabel(entry.updated_at)}</span>
       </span>
     </a>
   );
 }
 
-/** The list of entries, the quick add under it, and the empty state when memory holds nothing. */
-export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHistory: () => void }) {
+type EntriesProps = {
+  query: string;
+  onQuery: (query: string) => void;
+  onHistory: () => void;
+  /** The header's commands; All facts adds Select, so the screen builds the list. */
+  menu: MenuItem[];
+  onImport: () => void;
+};
+
+/** The list of entries with the field under it that files a note, the entry open beside it, and the
+ *  empty state when memory holds nothing. */
+export function MemoryEntries({ query, onQuery, onHistory, menu, onImport }: EntriesProps) {
+  const route = useRoute();
+  const split = useSplit();
+  const entryId = route.detail ?? null;
   const { data, error, loading, refresh } = useQuery<MemoryEntryListing>(ENTRIES_KEY, { staleMs: 10000 });
-  const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const entries = useMemo(() => filterEntries(data?.entries ?? [], query), [data, query]);
@@ -121,74 +104,52 @@ export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHis
     }
   }
 
-  let index = 0;
+  // A window too narrow for the pane gives the entry the whole page, with the way back in its header.
+  if (entryId && !split) return <EntryView entryId={entryId} as="page" onHistory={onHistory} />;
+
+  const subtitle = data ? `${plural("memory.entries.n", data.entries.length)} · ${plural("memory.facts.n", data.records)}` : undefined;
   return (
     <>
-      <PageHeader
-        title={t("nav.memory")}
-        subtitle={data ? `${plural("memory.entries.n", data.entries.length)} · ${plural("memory.facts.n", data.records)}` : undefined}
-        actions={
-          <>
-            <button className={`iconbtn ${searching ? "on" : ""}`} onClick={() => { setSearching((v) => !v); if (searching) setQuery(""); }} title={t("common.search")} aria-label={t("common.search")} aria-pressed={searching}><Icon name="search" /></button>
-            <button className="iconbtn" data-action="history" onClick={onHistory} title={t("memory.history")} aria-label={t("memory.history")}><Icon name="clock" /></button>
-            <OverflowMenu
-              label={t("memory.more")}
-              className="memory-more"
-              items={[
-                { label: t("memory.import"), icon: "import", onSelect: () => setImporting(true) },
-                { label: t("memory.export"), icon: "download", onSelect: () => void exportMemory() },
-                "-",
-                { label: t("memory.settings"), icon: "settings", onSelect: () => navigate(SETTINGS_PATH) },
-              ]}
-            />
-          </>
-        }
-        filters={
-        <>
-        {searching && <input className="field search" autoFocus placeholder={t("memory.entries.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.entries.search")} />}
-        <div className="memory-modebar">
-          {switcher}
-          <StatusPill listing={data} />
-        </div>
-        </>
-        }
-      />
-      <div className="screen narrow memory memory-entries" data-view="entries">
-        {loading && !data && <Skeleton rows={6} />}
-        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {empty && (
-          <div className="card memory-empty" data-empty>
-            <div className="memory-empty-title">{t("memory.empty.entries")}</div>
-            <div className="sub">{t("memory.empty.entries.sub")}</div>
-            <div className="memory-empty-actions">
-              <button className="btn" onClick={() => setImporting(true)}><Icon name="import" size={14} /> {t("memory.import.start")}</button>
-              <a className="btn ghost" href={SETTINGS_PATH} onClick={(e) => go(e, SETTINGS_PATH)}><Icon name="settings" size={14} /> {t("memory.settings")}</a>
-            </div>
+      <MemoryHead mode="entries" subtitle={subtitle} query={query} onQuery={onQuery} onHistory={onHistory} menu={menu} />
+      <div className="memory-split" data-view="entries">
+        <section className="memory-list">
+          <div className="memory-scroll">
+            <Page width="list" className="memory memory-entries">
+              {loading && !data && <Skeleton rows={6} />}
+              {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+              {!empty && (data?.status || (data?.suggestions ?? 0) > 0) && (
+                <div className="memory-notes">
+                  <StatusRow listing={data} />
+                  <ReviewBanner count={data?.suggestions ?? 0} onOpen={() => setReviewing(true)} />
+                </div>
+              )}
+              {empty && (
+                <div className="empty memory-empty" data-empty>
+                  <Icon name="brain" size={20} />
+                  <b>{t("memory.empty.entries")}</b>
+                  <div>{t("memory.empty.entries.sub")}</div>
+                  <div className="memory-empty-actions">
+                    <Button icon="import" onClick={onImport}>{t("memory.import.start")}</Button>
+                    <Button variant="quiet" icon="settings" onClick={() => navigate(SETTINGS_PATH)}>{t("memory.settings")}</Button>
+                  </div>
+                </div>
+              )}
+              {data && !empty && groups.length === 0 && <div className="empty"><b>{t("memory.nomatch")}</b></div>}
+              {!empty && groups.map((group) => (
+                <section key={group.id} className="memory-section" data-group={group.id}>
+                  <div className="memory-section-head">{t(`memory.group.${group.id}`)}</div>
+                  <div className="memory-entry-list">{group.entries.map((entry) => <EntryRow key={entry.id} entry={entry} open={entry.id === entryId} />)}</div>
+                </section>
+              ))}
+            </Page>
           </div>
-        )}
-        <ReviewBanner count={data?.suggestions ?? 0} onOpen={() => setReviewing(true)} />
-        {data && !empty && groups.length === 0 && <div className="empty"><b>{t("memory.nomatch")}</b></div>}
-        {!empty && groups.map((group) => (
-          <section key={group.id} className="memory-section" data-group={group.id}>
-            <div className="memory-section-head">{t(`memory.group.${group.id}`)}</div>
-            <div className="memory-entry-list">{group.entries.map((entry) => <EntryRow key={entry.id} entry={entry} index={index++} />)}</div>
-          </section>
-        ))}
-        <div className="memory-composer-space" aria-hidden />
+          <MemoryComposer placeholder={t("memory.quick.placeholder")} label={t("memory.quick.label")} busy={busy} onSend={quickAdd} />
+        </section>
+        {entryId && <EntryView key={entryId} entryId={entryId} as="pane" onHistory={onHistory} />}
       </div>
-      <MemoryComposer placeholder={t("memory.quick.placeholder")} label={t("memory.quick.label")} busy={busy} onSend={quickAdd} />
-      {importing && <ImportSheet onClose={() => setImporting(false)} onDone={() => { setImporting(false); refreshMemory(); refresh(); }} />}
       {reviewing && <ReviewSheet onClose={() => setReviewing(false)} onChanged={refresh} />}
     </>
   );
-}
-
-async function exportMemory(): Promise<void> {
-  try {
-    await downloadExport();
-  } catch (e) {
-    toast(errorText(e));
-  }
 }
 
 /** A source chip: the chat a bullet was learned in, opened at the place it was said when that is known. */
@@ -199,6 +160,7 @@ function SourceChip({ source }: { source: MemorySource }) {
   const body = <><Icon name={source.session_id ? "compose" : source.origin === "import" ? "import" : "user"} size={12} /> <span className="memory-source-t">{label}</span>{source.at && <span className="faint"> · {when}</span>}</>;
   return href ? <a className="memory-source" href={href} onClick={(e) => go(e, href)} data-source={source.session_id}>{body}</a> : <span className="memory-source" data-origin={source.origin}>{body}</span>;
 }
+
 
 function BulletRow({ bullet, onChanged }: { bullet: MemoryBullet; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
@@ -223,6 +185,8 @@ function BulletRow({ bullet, onChanged }: { bullet: MemoryBullet; onChanged: () 
     return res;
   }, t("memory.updated"));
   const mark = (patch: { locked?: boolean; archived?: boolean }, said: string) => act(() => api.post<Undoable>(`/api/memory/${encodeURIComponent(bullet.id)}/mark`, patch), said);
+  // One fact forgotten offers Undo rather than a question: the history brings it back either way, and a
+  // question on every fact of a long section would be the louder of the two.
   const forget = () => act(() => api.delete<Undoable>(`/api/memory/${encodeURIComponent(bullet.id)}`), plural("memory.forgotten", 1));
   const operator = bullet.sources.some((s) => s.origin === "operator");
   return (
@@ -231,8 +195,8 @@ function BulletRow({ bullet, onChanged }: { bullet: MemoryBullet; onChanged: () 
         <div className="memory-bullet-edit">
           <textarea className="field" rows={2} autoFocus value={text} onChange={(e) => setText(e.target.value)} aria-label={t("memory.bullet.edit")} onKeyDown={(e) => { if (e.key === "Escape") { setEditing(false); setText(bullet.text); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
           <div className="memory-bullet-edit-foot">
-            <button className="btn small ghost" onClick={() => { setEditing(false); setText(bullet.text); }}>{t("common.cancel")}</button>
-            <button className="btn small primary" data-action="save-bullet" disabled={busy || !text.trim() || text.trim() === bullet.text} onClick={() => void save()}>{t("common.save")}</button>
+            <Button variant="quiet" size="sm" onClick={() => { setEditing(false); setText(bullet.text); }}>{t("common.cancel")}</Button>
+            <Button variant="primary" size="sm" data-action="save-bullet" disabled={busy || !text.trim() || text.trim() === bullet.text} onClick={() => void save()}>{t("common.save")}</Button>
           </div>
         </div>
       ) : (
@@ -246,10 +210,10 @@ function BulletRow({ bullet, onChanged }: { bullet: MemoryBullet; onChanged: () 
           {bullet.locked && <span className="memory-mark locked" title={t("memory.bullet.locked.hint")}><Icon name="lock" size={12} /> {t("memory.bullet.locked")}</span>}
           <span className="grow" />
           <span className="memory-bullet-actions">
-            <button className="iconbtn small" data-action="edit" onClick={() => setEditing(true)} title={t("memory.bullet.edit")} aria-label={t("memory.bullet.edit")}><Icon name="pen" size={14} /></button>
-            <button className={`iconbtn small ${bullet.locked ? "on" : ""}`} data-action="lock" aria-pressed={!!bullet.locked} disabled={busy} onClick={() => void mark({ locked: !bullet.locked }, t(bullet.locked ? "memory.bullet.unlocked" : "memory.bullet.lockedtoast"))} title={t(bullet.locked ? "memory.bullet.unlock" : "memory.bullet.lock")} aria-label={t(bullet.locked ? "memory.bullet.unlock" : "memory.bullet.lock")}><Icon name="lock" size={14} /></button>
-            <button className="iconbtn small" data-action="archive" disabled={busy} onClick={() => void mark({ archived: !bullet.archived }, t(bullet.archived ? "memory.bullet.unarchived" : "memory.bullet.archived"))} title={t(bullet.archived ? "memory.bullet.unarchive" : "memory.bullet.archive")} aria-label={t(bullet.archived ? "memory.bullet.unarchive" : "memory.bullet.archive")}><Icon name="archive" size={14} /></button>
-            <button className="iconbtn small danger" data-action="forget" disabled={busy} onClick={() => void forget()} title={t("memory.forget")} aria-label={t("memory.forget")}><Icon name="trash" size={14} /></button>
+            <IconButton size={28} icon="pen" label={t("memory.bullet.edit")} onClick={() => setEditing(true)} />
+            <IconButton size={28} icon="lock" label={t(bullet.locked ? "memory.bullet.unlock" : "memory.bullet.lock")} pressed={!!bullet.locked} disabled={busy} onClick={() => void mark({ locked: !bullet.locked }, t(bullet.locked ? "memory.bullet.unlocked" : "memory.bullet.lockedtoast"))} />
+            <IconButton size={28} icon="archive" label={t(bullet.archived ? "memory.bullet.unarchive" : "memory.bullet.archive")} disabled={busy} onClick={() => void mark({ archived: !bullet.archived }, t(bullet.archived ? "memory.bullet.unarchived" : "memory.bullet.archived"))} />
+            <IconButton size={28} icon="trash" label={t("memory.forget")} className="danger" disabled={busy} onClick={() => void forget()} />
           </span>
         </div>
       )}
@@ -257,9 +221,10 @@ function BulletRow({ bullet, onChanged }: { bullet: MemoryBullet; onChanged: () 
   );
 }
 
-/** One entry: its title and summary edited in place, its bullets with their sources, the older ones
- *  folded, and the field that changes it in the operator's words. */
-export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHistory: () => void }) {
+/** One entry, in the pane beside the list or as a page in a window too narrow for both: its title and
+ *  summary edited in place, its facts with their sources, the older ones folded, and the field that
+ *  changes it in the operator's words. */
+function EntryView({ entryId, as, onHistory }: { entryId: string; as: "pane" | "page"; onHistory: () => void }) {
   const key = `${ENTRIES_KEY}/${encodeURIComponent(entryId)}`;
   const { data, error, loading, refresh } = useQuery<MemoryEntryDetail>(key);
   const [renaming, setRenaming] = useState(false);
@@ -275,6 +240,7 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
   const entry = data?.entry;
   const { live, older } = useMemo(() => splitArchived(data?.records ?? []), [data]);
   const changed = () => { refresh(); refreshMemory(); listing.refresh(); };
+  const close = () => navigate(pathFor("memory"));
 
   async function patchEntry(patch: { title?: string; summary?: string }) {
     if (!entry) return;
@@ -321,7 +287,7 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
   async function remove() {
     if (!entry) return;
     const you = entry.section === "you";
-    if (!(await confirmAsync(t(you ? "memory.entry.clear.title" : "memory.entry.delete.title", { title: entry.title }), { body: plural("memory.entry.delete.body", data?.records.length ?? 0), action: t(you ? "memory.entry.clear" : "memory.entry.delete") }))) return;
+    if (!(await confirmDialog({ title: t(you ? "memory.entry.clear.title" : "memory.entry.delete.title", { title: entry.title }), body: plural("memory.entry.delete.body", data?.records.length ?? 0), action: t(you ? "memory.entry.clear" : "memory.entry.delete"), danger: true }))) return;
     try {
       const res = await api.delete<Undoable>(`${ENTRIES_KEY}/${encodeURIComponent(entry.id)}?version=${entry.version}`);
       undoToast(t(you ? "memory.entry.cleared" : "memory.entry.deleted", { title: entry.title }), res.history_id, refreshMemory);
@@ -333,90 +299,112 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
     }
   }
 
+  const menu: MenuItem[] = entry ? [
+    { label: t("memory.entry.rename"), icon: "pen", onSelect: () => { setTitle(entry.title); setRenaming(true); } },
+    { label: t("memory.bullet.add"), icon: "plus", onSelect: () => setAdding(true) },
+    "-",
+    { label: t(entry.section === "you" ? "memory.entry.clear" : "memory.entry.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
+  ] : [];
+
+  const heading = entry ? (renaming ? (
+    <input className="field memory-title-edit" autoFocus value={title} aria-label={t("memory.entry.rename")} onChange={(e) => setTitle(e.target.value)} onBlur={() => { setRenaming(false); if (title.trim() && title.trim() !== entry.title) void patchEntry({ title: title.trim() }); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitle(entry.title); setRenaming(false); } }} />
+  ) : <span className="memory-entry-heading" data-entry-title>{entry.title}</span>) : t("nav.memory");
+
+  const body = (
+    <div className="memory-entry" data-view="entry" data-entry={entryId}>
+      {loading && !data && <Skeleton rows={5} />}
+      {error && !data && <div className="empty"><b>{t("memory.entry.gone")}</b><div>{error}</div><a className="btn" href={pathFor("memory")} onClick={(e) => go(e, pathFor("memory"))}>{t("memory.entry.back")}</a></div>}
+      {entry && (
+        <>
+          {as === "pane" && <h2 className="memory-pane-title">{heading}</h2>}
+          {waiting > 0 && <div className="memory-notes"><ReviewBanner count={waiting} onOpen={() => setReviewing(true)} /></div>}
+          {entry.section === "area" && entry.project_id && entry.project_name && (
+            <div className="memory-entry-project"><Icon name="folder" size={14} /> {t("memory.entry.project", { name: entry.project_name })}</div>
+          )}
+          <div className="memory-block">
+            <div className="memory-block-head">{t("memory.entry.summary")}</div>
+            {summary !== null ? (
+              <div className="memory-summary-edit">
+                <textarea className="field" rows={2} autoFocus maxLength={150} value={summary} aria-label={t("memory.entry.summary")} onChange={(e) => setSummary(e.target.value)} />
+                <div className="memory-bullet-edit-foot">
+                  <span className="faint">{summary.length}/150</span>
+                  <span className="grow" />
+                  <Button variant="quiet" size="sm" onClick={() => setSummary(null)}>{t("common.cancel")}</Button>
+                  <Button variant="primary" size="sm" data-action="save-summary" onClick={() => { void patchEntry({ summary }); setSummary(null); }}>{t("common.save")}</Button>
+                </div>
+              </div>
+            ) : (
+              <button className="memory-summary" data-action="edit-summary" onClick={() => setSummary(entry.summary)}>
+                {entry.summary || <span className="faint">{t("memory.entry.summary.none")}</span>}
+                <Icon name="pen" size={12} />
+              </button>
+            )}
+          </div>
+          <div className="memory-block">
+            <div className="memory-block-head">
+              <span>{t("memory.entry.details")}</span>
+              <span className="faint">{live.length}</span>
+              <span className="grow" />
+              <Button variant="quiet" size="sm" icon="plus" data-action="add-bullet" onClick={() => setAdding(true)}>{t("memory.bullet.add")}</Button>
+            </div>
+            {adding && (
+              <div className="memory-bullet-edit memory-bullet-new">
+                <textarea className="field" rows={2} autoFocus value={added} placeholder={t("memory.bullet.add.placeholder")} aria-label={t("memory.bullet.add")} onChange={(e) => setAdded(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setAdding(false); setAdded(""); } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void addBullet(); } }} />
+                <div className="memory-bullet-edit-foot">
+                  <Button variant="quiet" size="sm" onClick={() => { setAdding(false); setAdded(""); }}>{t("common.cancel")}</Button>
+                  <Button variant="primary" size="sm" data-action="save-new-bullet" disabled={busy || !added.trim()} onClick={() => void addBullet()}>{t("memory.bullet.add.save")}</Button>
+                </div>
+              </div>
+            )}
+            {live.length === 0 && !adding && <div className="sub memory-none">{t("memory.entry.empty")}</div>}
+            <ul className="memory-bullets">{live.map((bullet) => <BulletRow key={bullet.id} bullet={bullet} onChanged={changed} />)}</ul>
+            {older.length > 0 && (
+              <details className="memory-older" data-older>
+                <summary>{t("memory.entry.older", { n: older.length })}</summary>
+                <ul className="memory-bullets">{older.map((bullet) => <BulletRow key={bullet.id} bullet={bullet} onChanged={changed} />)}</ul>
+              </details>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+  const field = entry && <MemoryComposer inPane={as === "pane"} placeholder={t("memory.instruct.placeholder")} label={t("memory.instruct.label")} busy={busy} onSend={instruct} />;
+  const sheets = (
+    <>
+      {reviewing && <ReviewSheet entryId={entryId} onClose={() => setReviewing(false)} onChanged={changed} />}
+      {entry && proposal && data && <DiffSheet entry={entry} records={data.records} instruction={proposal.instruction} proposal={proposal.proposal} onClose={() => setProposal(null)} onApplied={() => { setProposal(null); changed(); }} />}
+    </>
+  );
+
+  if (as === "pane") {
+    return (
+      <>
+        <MemoryPane kind={t("memory.pane.entry")} meta={entry ? updatedLabel(entry.updated_at) : undefined} menu={menu} onClose={close} label={entry?.title ?? t("nav.memory")} foot={field}>{body}</MemoryPane>
+        {sheets}
+      </>
+    );
+  }
   return (
     <>
       <PageHeader
         back={pathFor("memory")}
-        title={entry ? (renaming ? (
-          <input className="field memory-title-edit" autoFocus value={title} aria-label={t("memory.entry.rename")} onChange={(e) => setTitle(e.target.value)} onBlur={() => { setRenaming(false); if (title.trim() && title.trim() !== entry.title) void patchEntry({ title: title.trim() }); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitle(entry.title); setRenaming(false); } }} />
-        ) : <span className="memory-entry-heading" data-entry-title>{entry.title}</span>) : t("nav.memory")}
+        title={heading}
         subtitle={entry ? updatedLabel(entry.updated_at) : undefined}
         actions={entry && (
           <>
-            <button className="iconbtn" data-action="history" onClick={onHistory} title={t("memory.history")} aria-label={t("memory.history")}><Icon name="clock" /></button>
-            <OverflowMenu
-              label={t("memory.more")}
-              className="memory-entry-more"
-              items={[
-                { label: t("memory.entry.rename"), icon: "pen", onSelect: () => { setTitle(entry.title); setRenaming(true); } },
-                { label: t("memory.bullet.add"), icon: "plus", onSelect: () => setAdding(true) },
-                "-",
-                { label: t(entry.section === "you" ? "memory.entry.clear" : "memory.entry.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
-              ]}
-            />
+            <IconButton icon="clock" label={t("memory.history")} onClick={onHistory} />
+            <OverflowMenu label={t("memory.more")} className="memory-entry-more" items={menu} />
           </>
         )}
       />
-      <div className="screen narrow memory memory-entry" data-view="entry" data-entry={entryId}>
-        {loading && !data && <Skeleton rows={5} />}
-        {error && !data && <div className="empty"><b>{t("memory.entry.gone")}</b><div>{error}</div><a className="btn" href={pathFor("memory")} onClick={(e) => go(e, pathFor("memory"))}>{t("memory.entry.back")}</a></div>}
-        {entry && (
-          <>
-            <ReviewBanner count={waiting} onOpen={() => setReviewing(true)} />
-            {entry.section === "area" && entry.project_id && entry.project_name && (
-              <div className="memory-entry-project"><Icon name="folder" size={14} /> {t("memory.entry.project", { name: entry.project_name })}</div>
-            )}
-            <div className="memory-block">
-              <div className="memory-block-head">{t("memory.entry.summary")}</div>
-              {summary !== null ? (
-                <div className="memory-summary-edit">
-                  <textarea className="field" rows={2} autoFocus maxLength={150} value={summary} aria-label={t("memory.entry.summary")} onChange={(e) => setSummary(e.target.value)} />
-                  <div className="memory-bullet-edit-foot">
-                    <span className="faint">{summary.length}/150</span>
-                    <span className="grow" />
-                    <button className="btn small ghost" onClick={() => setSummary(null)}>{t("common.cancel")}</button>
-                    <button className="btn small primary" data-action="save-summary" onClick={() => { void patchEntry({ summary }); setSummary(null); }}>{t("common.save")}</button>
-                  </div>
-                </div>
-              ) : (
-                <button className="memory-summary" data-action="edit-summary" onClick={() => setSummary(entry.summary)}>
-                  {entry.summary || <span className="faint">{t("memory.entry.summary.none")}</span>}
-                  <Icon name="pen" size={12} />
-                </button>
-              )}
-            </div>
-            <div className="memory-block">
-              <div className="memory-block-head">
-                <span>{t("memory.entry.details")}</span>
-                <span className="faint">{live.length}</span>
-                <span className="grow" />
-                <button className="btn small ghost" data-action="add-bullet" onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("memory.bullet.add")}</button>
-              </div>
-              {adding && (
-                <div className="memory-bullet-edit memory-bullet-new">
-                  <textarea className="field" rows={2} autoFocus value={added} placeholder={t("memory.bullet.add.placeholder")} aria-label={t("memory.bullet.add")} onChange={(e) => setAdded(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setAdding(false); setAdded(""); } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void addBullet(); } }} />
-                  <div className="memory-bullet-edit-foot">
-                    <button className="btn small ghost" onClick={() => { setAdding(false); setAdded(""); }}>{t("common.cancel")}</button>
-                    <button className="btn small primary" data-action="save-new-bullet" disabled={busy || !added.trim()} onClick={() => void addBullet()}>{t("memory.bullet.add.save")}</button>
-                  </div>
-                </div>
-              )}
-              {live.length === 0 && !adding && <div className="sub memory-none">{t("memory.entry.empty")}</div>}
-              <ul className="memory-bullets">{live.map((bullet) => <BulletRow key={bullet.id} bullet={bullet} onChanged={changed} />)}</ul>
-              {older.length > 0 && (
-                <details className="memory-older" data-older>
-                  <summary>{t("memory.entry.older", { n: older.length })}</summary>
-                  <ul className="memory-bullets">{older.map((bullet) => <BulletRow key={bullet.id} bullet={bullet} onChanged={changed} />)}</ul>
-                </details>
-              )}
-            </div>
-          </>
-        )}
-        <div className="memory-composer-space" aria-hidden />
+      <div className="memory-split">
+        <section className="memory-list">
+          <div className="memory-scroll"><Page width="list" className="memory">{body}</Page></div>
+          {field}
+        </section>
       </div>
-      {entry && <MemoryComposer placeholder={t("memory.instruct.placeholder")} label={t("memory.instruct.label")} busy={busy} onSend={instruct} />}
-      {reviewing && <ReviewSheet entryId={entryId} onClose={() => setReviewing(false)} onChanged={changed} />}
-      {entry && proposal && data && <DiffSheet entry={entry} records={data.records} instruction={proposal.instruction} proposal={proposal.proposal} onClose={() => setProposal(null)} onApplied={() => { setProposal(null); changed(); }} />}
+      {sheets}
     </>
   );
 }

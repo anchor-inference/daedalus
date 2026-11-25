@@ -2,7 +2,7 @@
 // entries are grouped, what a natural-language edit would do to an entry, how a date and the status
 // pill read.
 
-import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus, MemorySuggestion, MemoryTidy } from "../api";
+import { MEMORY_CATEGORIES, type MemoryEntry, type MemoryOp, type MemoryRecord, type MemorySource, type MemoryStatus, type MemorySuggestion, type MemoryTidy } from "../api";
 import { absDate, relTimeLong } from "../format";
 import { plural, t } from "../i18n";
 
@@ -179,4 +179,25 @@ export function groupSuggestions(list: MemorySuggestion[], by: ReviewBy): Sugges
 /** The background pass's suggestions, of one entry when the review is opened from that entry. */
 export function suggestionsFor(list: MemorySuggestion[], entryId: string | null | undefined): MemorySuggestion[] {
   return list.filter((s) => isLearned(s) && (!entryId || s.entry_id === entryId));
+}
+
+/** The categories the app has a word for; anything else (a record the agent filed oddly) shows as written. */
+export const categoryWord = (category: string) => ((MEMORY_CATEGORIES as readonly string[]).includes(category) ? t(`memory.cat.${category}`) : category);
+
+/** Topics as the host keeps them, from what was typed: lower case, hyphens for spaces, no `#`. */
+export function parseTopics(text: string): string[] {
+  const out: string[] = [];
+  for (const part of text.split(/[,;\n]/)) {
+    const topic = part.trim().toLowerCase().replace(/^#+/, "").replace(/\s+/g, "-");
+    if (topic && !out.includes(topic)) out.push(topic);
+  }
+  return out.slice(0, 5);
+}
+
+/** Records grouped under each topic they carry (a record with two topics is under both), the
+ *  biggest group first and the records without a topic last. */
+export function byTopic(records: MemoryRecord[]): [string, MemoryRecord[]][] {
+  const groups = new Map<string, MemoryRecord[]>();
+  for (const r of records) for (const topic of r.topics.length ? r.topics : [""]) groups.set(topic, [...(groups.get(topic) ?? []), r]);
+  return [...groups.entries()].sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : b[1].length - a[1].length || a[0].localeCompare(b[0])));
 }

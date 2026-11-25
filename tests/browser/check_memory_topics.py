@@ -32,6 +32,8 @@ from screenshots import MEMORY_PROJECTS, MEMORY_RECORDS, MEMORY_SUGGESTIONS, SET
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
+WORDS = {"en": {"history": "History", "select": "Select"}, "ru": {"history": "История", "select": "Выбрать"}}
+
 OVERFLOW = """() => {
   const vw = document.documentElement.clientWidth;
   const out = [];
@@ -102,12 +104,12 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
     if width < 600:
         for item in page.evaluate(OVERFLOW)[:5]:
             problems.append(f"{where}: past the screen's edge: {item}")
-    page.locator('.memory-card[data-memory="m5"] .topic-tag', has_text="#refunds").first.click()
+    page.locator('.memory-card[data-memory="m5"] .topic-tag', has_text="refunds").first.click()
     page.wait_for_selector(".memory-filter", timeout=5000)
     shown = set(page.evaluate("() => [...document.querySelectorAll('.memory-card')].map((c) => c.dataset.memory)"))
     if shown != {"m5"}:
         problems.append(f"{where}: filtering by #refunds shows {sorted(shown)}")
-    page.locator(".memory-filter .chip").click()
+    page.locator(".memory-filter").click()
     views.nth(2).click()
     page.wait_for_timeout(200)
     categories = [name for name, _ in groups(page)]
@@ -129,7 +131,7 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
         if page.locator(".memory-suggest-banner").count():
             problems.append(f"{where}: the banner still offers the applied suggestion")
     # History and undo.
-    page.locator('[data-action="history"]').click()
+    page.get_by_role("button", name=WORDS[lang]["history"], exact=True).click()
     page.wait_for_selector(".memory-history-entry", timeout=5000)
     page.locator('.memory-history-entry [data-action="undo"]').first.click()
     page.wait_for_timeout(400)
@@ -139,7 +141,8 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
     page.wait_for_timeout(300)
     # Merging two selected records.
     views.nth(0).click()
-    page.locator('[data-action="select"]').click()
+    page.locator(".memory-more").click()
+    page.get_by_role("menuitem", name=WORDS[lang]["select"], exact=True).click()
     page.locator('.memory-card[data-memory="m1"]').click()
     page.locator('.memory-card[data-memory="m8"]').click()
     page.locator('[data-action="merge"]').click()

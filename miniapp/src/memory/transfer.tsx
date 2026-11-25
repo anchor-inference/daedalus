@@ -10,7 +10,7 @@ import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
 import { useCopied } from "../ui/components";
-import { Sheet, toast } from "../ui/dialogs";
+import { Button, Sheet, toast } from "../ui/primitives";
 import { undoToast } from "./undo";
 
 /** The export zip, downloaded under the name the host gives it. */
@@ -123,9 +123,9 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
           </section>
         ))}
         <div className="sheet-foot">
-          <button className="btn ghost" onClick={() => setItems(null)}>{t("memory.import.back")}</button>
+          <Button variant="quiet" onClick={() => setItems(null)}>{t("memory.import.back")}</Button>
           <span className="grow" />
-          <button className="btn primary" data-action="import-apply" disabled={busy || ticked.size === 0} onClick={() => void apply()}>{plural("memory.import.apply", ticked.size)}</button>
+          <Button variant="primary" data-action="import-apply" disabled={busy || ticked.size === 0} onClick={() => void apply()}>{plural("memory.import.apply", ticked.size)}</Button>
         </div>
       </Sheet>
     );
@@ -137,7 +137,7 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
       <div className="memory-import-step">{t("memory.import.step1")}</div>
       <div className="memory-import-prompt">
         <pre>{prompt}</pre>
-        <button className="btn small" data-action="copy-prompt" onClick={async () => { if (!(await copy(prompt))) toast(prompt); }}><Icon name={copied ? "check" : "copy"} size={14} /> {t("common.copy")}</button>
+        <Button size="sm" data-action="copy-prompt" onClick={async () => { if (!(await copy(prompt))) toast(prompt); }}><Icon name={copied ? "check" : "copy"} size={14} /> {t("common.copy")}</Button>
       </div>
       <div className="memory-import-step">{t("memory.import.step2")}</div>
       <textarea className="field" rows={7} value={text} placeholder={t("memory.import.paste")} aria-label={t("memory.import.paste")} onChange={(e) => setText(e.target.value)} />
@@ -148,8 +148,8 @@ export function ImportSheet({ onClose, onDone }: { onClose: () => void; onDone: 
           <input type="file" accept=".zip,.md,.json,.txt" hidden onChange={(e) => void pick(e.target.files?.[0])} />
         </label>
         <span className="grow" />
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" data-action="import-preview" disabled={busy || !text.trim()} onClick={() => void preview({ text })}>{t("memory.import.next")}</button>
+        <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" data-action="import-preview" disabled={busy || !text.trim()} onClick={() => void preview({ text })}>{t("memory.import.next")}</Button>
       </div>
     </Sheet>
   );
