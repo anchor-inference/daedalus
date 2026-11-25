@@ -509,6 +509,8 @@ BOARD += [
     {"id": "d17b90", "title": "Copy the build to the shop's server", "status": "doing", "priority": 3, "acceptance": "The form opens on the site and a test order reaches the sheet.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=6)},
     {"id": "5e2c77", "title": "Taste the new rye loaf before it goes on the menu", "status": "todo", "priority": 3, "acceptance": "", "checklist": [], "depends_on": ["7f2a1c"], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(hours=6), "updated_at": ago(hours=6)},
     {"id": "b48e13", "title": "Square crops for the gallery thumbnails", "status": "todo", "priority": 4, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S2, "notes": "", "created_at": ago(days=1), "updated_at": ago(hours=20)},
+    {"id": "2f6b81", "title": "Show an error when an order does not go through", "status": "review", "priority": 3, "acceptance": "A failed order shows a line the buyer can read, and the order is not lost.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=35)},
+    {"id": "8a1e55", "title": "Read the order form and the owner's sheet", "status": "done", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=58)},
     {"id": "0c93fa", "title": "Old holiday banner", "status": "dropped", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(days=2), "updated_at": ago(days=1)},
 ]
 
@@ -1245,7 +1247,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # ``session=`` is one chat's own board: the tasks that chat created; ``project=`` one project's.
         chat = params.get("session", [""])[0]
         project = params.get("project", [""])[0]
-        listed = [t for t in BOARD if (not chat or t["origin_session_id"] == chat) and (not project or t["project_id"] == project)]
+        # A helper works on its leader's board: the host answers a helper's id with the leader's family.
+        leader = next((s["metadata"].get("subagent_of") for s in SESSIONS if s["id"] == chat), None) or chat
+        family = {leader, *(s["id"] for s in SESSIONS if s["metadata"].get("subagent_of") == leader)}
+        listed = [t for t in BOARD if (not chat or t["origin_session_id"] in family) and (not project or t["project_id"] == project)]
         if params.get("include_done", ["0"])[0] != "1":
             listed = [t for t in listed if t["status"] not in ("done", "dropped")]
         return respond(route, listed)
