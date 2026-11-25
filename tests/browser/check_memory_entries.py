@@ -254,7 +254,7 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
     if confirm.is_disabled():
         problems.append(f"{where}: Reset stays disabled after the word is typed")
     if width < 600:
-        for item in page.evaluate(OVERFLOW.replace(".memory *, .pagehead *, .memory-composer *", ".settings-stage *, .memory-reset *"))[:5]:
+        for item in page.evaluate(OVERFLOW.replace(".memory *, .pagehead *, .memory-composer *", ".settings-page *, .memory-reset *"))[:5]:
             problems.append(f"{where}: past the screen's edge: {item}")
     page.context.close()
 

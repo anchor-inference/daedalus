@@ -1,11 +1,11 @@
-import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openPathOf } from "./subagents";
 import { SchedulesDialogHost } from "./schedules/host";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
 import type { OnboardingState } from "./screens/AddModel";
-import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, ICONS, PaletteItem, besideSession, chatStatus, go, goKey, screenTitle, useMedia, useShortcuts } from "./shell";
 import { Palette } from "./palette";
 import { AppDrawer } from "./drawer";
@@ -66,7 +66,7 @@ const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => 
 const CanvasScreen = lazy(retried(() => import("./canvas/CanvasList"), (m) => ({ default: m.CanvasScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
-const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.HealthScreen })));
+const HealthScreen = lazy(retried(() => import("./screens/Health"), (m) => ({ default: m.HealthScreen })));
 const MemoryScreen = lazy(retried(() => import("./screens/Memory"), (m) => ({ default: m.MemoryScreen })));
 const TerminalsScreen = lazy(retried(() => import("./screens/Terminals"), (m) => ({ default: m.TerminalsScreen })));
 const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m) => ({ default: m.BrowserFullScreen })));
@@ -155,53 +155,17 @@ export function App() {
   useLang();
   const live = useRoute();
   const wide = useWide();
-  // Settings is a dialog over the screen it was opened from, so on a desktop the shell goes on
-  // drawing that screen (`route` below) while the address is Settings' (`live`). Opened from
-  // scratch — a reload, a link from outside — there is no such screen and the mode's home is drawn
-  // under it. A phone has no "under": Settings is a full-screen stack there and `route` is the address.
-  const overlay = wide && live.screen === "settings";
-  const beneath = useRef<{ route: Route; href: string; depth: number } | null>(null);
-  if (live.screen !== "settings") beneath.current = { route: live, href: window.location.pathname + window.location.search + window.location.hash, depth: historyDepth() };
-  const homeRoute = useMemo(() => {
-    const [path, search = ""] = modeHome(storedMode(), wide).split("?");
-    return parse(path, search ? `?${search}` : "");
-  }, [wide]);
-  const route = overlay ? beneath.current?.route ?? homeRoute : live;
-  // The screen under the dialog choosing its own entry (`replace`) changes that screen, not the address.
-  const [, redraw] = useState(0);
-  useEffect(() => {
-    if (!overlay) return;
-    holdReplacements((path) => {
-      const [pathname, search = ""] = path.split("#")[0].split("?");
-      const next = parse(pathname, search ? `?${search}` : "");
-      if (next.screen === "settings") return false;
-      // Opened from scratch there is no entry of the app's under the dialog (-1): closing then goes to
-      // this address rather than back through the history.
-      beneath.current = { route: next, href: path, depth: beneath.current?.depth ?? -1 };
-      redraw((n) => n + 1);
-      return true;
-    });
-    return () => holdReplacements(null);
-  }, [overlay]);
-  // Focus goes back to whatever opened the dialog when it closes. Noted here, as the shell decides to
-  // draw it: the shell turns inert under the dialog in that same commit, before the dialog's lazy code
-  // has even arrived, and the browser drops the focus from an inert control onto the body.
-  const opener = useRef<HTMLElement | null>(null);
-  const wasOverlay = useRef(false);
-  if (overlay && !wasOverlay.current) opener.current = document.activeElement as HTMLElement | null;
-  wasOverlay.current = overlay;
-  useEffect(() => {
-    if (overlay) return;
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected) requestAnimationFrame(() => back.focus({ preventScroll: true }));
-  }, [overlay]);
-  // Closing goes back through the history to the screen under the dialog, however many sections
-  // were opened inside it; with nothing of the app's under it, it goes to the mode's home instead.
+  // Settings is a page of its own on a desktop: its list of sections stands where the sidebar was, so
+  // the shell is not drawn under it. Where the operator was before it opened is kept, for its Back.
+  const route = live;
+  const beneath = useRef<{ href: string; depth: number } | null>(null);
+  if (live.screen !== "settings") beneath.current = { href: window.location.pathname + window.location.search + window.location.hash, depth: historyDepth() };
+  // Back goes through the history to where Settings was opened from, however many sections were
+  // opened inside it; opened from scratch (a reload, a link from outside) it goes to the mode's home.
   const closeSettings = useCallback(() => {
     const under = beneath.current;
     const now = historyDepth();
-    if (under && under.depth >= 0 && under.depth < now) window.history.go(under.depth - now);
+    if (under && under.depth < now) window.history.go(under.depth - now);
     else navigate(under?.href ?? modeHome(storedMode(), wide));
   }, [wide]);
   // Which mode the shell is in: the route's, where the route belongs to one, and otherwise the one the
@@ -728,15 +692,31 @@ export function App() {
   // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
+  if (wide && route.screen === "settings") {
+    // A page that takes the window: the list of its sections is where the sidebar was. The layers
+    // that belong to the whole app (toasts, the palette, a pairing request) stay over it.
+    return (
+      <div ref={shell} className="settings-shell">
+        <MaintenanceNotice />
+        {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
+        <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
+        {palette !== null && <Palette items={paletteItems} initialQuery={palette} onClose={() => setPalette(null)} />}
+        <NotificationToasts />
+        <PairingHost />
+        {/* The companion stays on the screen: Appearance is where it is switched on, and seen. */}
+        <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
+        <UpdateHost />
+        <ToastHost />
+        <ConfirmHost />
+      </div>
+    );
+  }
   return (
-    <HeldRoute.Provider value={overlay ? route : null}>
     <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${canvasOpen ? "focus-mode" : ""} ${wide && columnFolded ? "sidebar-folded" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
-        // Under the Settings dialog the shell is out of reach — for the pointer (the backdrop), for Tab
-        // (the dialog's own trap) and for a screen reader, which otherwise read the chat beneath it.
         <SidebarFrame value={{ mode, screen: live.screen, detail: live.detail, waiting, nav, menuOpen: menu, onMenu: () => setMenu((m) => !m), menuButton, onToggle: sidebarToggle, onPalette: openPalette }}>
-        {columnFolded ? <div className="sidebar-corner" inert={overlay || undefined}><UnfoldButton onToggle={sidebarToggle} /></div> : (
-        <div className="desktop-column" inert={overlay || undefined} aria-hidden={overlay || undefined}>
+        {columnFolded ? <div className="sidebar-corner"><UnfoldButton onToggle={sidebarToggle} /></div> : (
+        <div className="desktop-column">
       {focusProject && (
         <ErrorBoundary key={focusProject}>
         <Suspense fallback={<nav className="sidebar project-sidebar" />}>
@@ -768,19 +748,12 @@ export function App() {
         </SidebarFrame>
       )}
       {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearchAll={searchPalette} />}
-      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}>
+      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />
         <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
       </div>
-      {overlay && (
-        <ErrorBoundary key="settings">
-          <Suspense fallback={null}>
-            <SettingsScreen toast={showToast} section={live.detail} onClose={closeSettings} />
-          </Suspense>
-        </ErrorBoundary>
-      )}
       {palette !== null && <Palette items={paletteItems} initialQuery={palette} onClose={() => setPalette(null)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once.
@@ -807,7 +780,6 @@ export function App() {
       <ToastHost />
       <ConfirmHost />
     </div>
-    </HeldRoute.Provider>
   );
 }
 

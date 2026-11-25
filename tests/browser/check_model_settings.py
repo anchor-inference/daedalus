@@ -22,7 +22,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, settings_model  # noqa: E402
 from screenshots import S1, SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -55,9 +55,8 @@ def models_page(browser, lang: str, width: int, scheme: str, failures: list[str]
 
     page.route("**/api/presets/*/price", price_route)
     page.goto(f"{BASE}/settings/models?token=t&lang={lang}&scheme={scheme}")
-    page.wait_for_selector(".mrow")
-    flash = page.locator(".mrow", has_text="DeepSeek Flash")
-    flash.locator(".mmain").click()
+    flash = settings_model(page, "DeepSeek Flash")
+    flash.locator(".pmodel-open").click()
     price = flash.locator(".model-price")
     price.wait_for()
     text = price.inner_text()
@@ -84,8 +83,8 @@ def models_page(browser, lang: str, width: int, scheme: str, failures: list[str]
     if ("PUT", "presets/deepseek-flash/price", {"input": 0.4, "output": 1, "cache_hit": 0.005, "billing": "metered"}) not in sent:
         failures.append(f"{where}: Save sent {sent[-1:]}")
 
-    login = page.locator(".mrow", has_text="Claude Opus 5")
-    login.locator(".mmain").click()
+    login = settings_model(page, "Claude Opus 5")
+    login.locator(".pmodel-open").click()
     login.locator(".model-price").wait_for()
     if words["default"] not in login.locator(".model-price").inner_text():
         failures.append(f"{where}: the login's zero price is not marked as the default")
@@ -94,8 +93,8 @@ def models_page(browser, lang: str, width: int, scheme: str, failures: list[str]
     if ("PUT", "presets/claude-opus-5/price", {"input": 0, "output": 0, "cache_hit": 0, "billing": "metered"}) not in sent:
         failures.append(f"{where}: switching the login to per-token sent {sent[-1:]}")
 
-    luna = page.locator(".mrow", has_text="GPT-5.6 Luna")
-    luna.locator(".mmain").click()
+    luna = settings_model(page, "GPT-5.6 Luna")
+    luna.locator(".pmodel-open").click()
     luna.locator(".model-price").wait_for()
     if words["locked"] not in luna.locator(".model-price").inner_text() or luna.locator(".model-price [role=radiogroup]").count():
         failures.append(f"{where}: a prepaid provider's model offers a switch it cannot have")

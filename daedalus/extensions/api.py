@@ -4534,7 +4534,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         makes it hear the sentence at three times its speed and answer with noise.
         """
         if not app.speech.available():
-            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
+            raise refusal(409, "no local speech model is installed and selected (Settings → Recognition models)", LOCAL_SPEECH_MODEL)
         _prune_streams()
         try:
             clamp_rate(rate)
@@ -4563,7 +4563,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         the browser recognised itself.
         """
         if not app.speech.available():
-            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
+            raise refusal(409, "no local speech model is installed and selected (Settings → Recognition models)", LOCAL_SPEECH_MODEL)
         chunk = await request.body()
         if len(chunk) > LISTEN_CHUNK_MAX:
             raise HTTPException(413, f"a chunk may be up to {LISTEN_CHUNK_MAX >> 20} MB of samples")
@@ -7555,7 +7555,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if app.config.model.preset == preset_id and not last:
             raise HTTPException(400, "this preset is the global default; pick another default first")
         if app.config.vision.preset == preset_id and not last:
-            raise HTTPException(400, "this preset is the ImageView model; pick another in Settings → Tools first")
+            raise HTTPException(400, "this preset is the ImageView model; pick another in Settings → Models for tasks first")
         raw = app.config.model_dump(mode="json")
         del raw["presets"][preset_id]
         raw["model"]["chain"] = [c for c in raw["model"].get("chain", []) if c != preset_id]

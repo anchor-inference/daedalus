@@ -102,8 +102,8 @@ export function revealSetting(key: string, opts: { root?: ParentNode; tries?: nu
       // A card above the row that answers its own request later (the companion's, on the voice
       // section) grows after the scroll and pushes the row out of sight; for a moment after the
       // scroll the row is put back whenever the section moves it. Measured against the box that
-      // scrolls it: inside the Settings dialog a row can be within the window and still hidden
-      // under the dialog's edge, which the window's bounds alone took for "in view".
+      // scrolls it: inside Settings' column a row can be within the window and still hidden under
+      // the column's edge, which the window's bounds alone took for "in view".
       const until = performance.now() + 1500;
       const keep = () => {
         const box = row.getBoundingClientRect();

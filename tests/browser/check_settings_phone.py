@@ -108,7 +108,7 @@ def sweep(page: Page, width: int, lang: str, problems: list[str]) -> None:
         where = f"{lang} {width}px {section}"
         page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
         try:
-            page.wait_for_selector(".settings-col .card, .settings-col .settings-row, .settings-col .empty", timeout=15000)
+            page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row, .settings-col .empty", timeout=15000)
         except Exception:  # noqa: BLE001
             problems.append(f"{where}: the page did not draw")
             continue

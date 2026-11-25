@@ -7,7 +7,7 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 
-from api_stub import DEFAULT_APP, expect_app
+from api_stub import DEFAULT_APP, expect_app, settings_provider
 from playwright.sync_api import expect, sync_playwright
 from screenshots import SETTINGS, UNHANDLED, stub
 
@@ -63,8 +63,7 @@ def main() -> int:
             page = context.new_page()
             page.route("**/api/**", host)
             page.goto(f"{BASE}/settings/providers?token=t&lang={lang}")
-            provider = page.locator(".mrow", has_text="vendor").first
-            provider.locator(".mmain").click()
+            provider = settings_provider(page, "vendor")
             limits = provider.locator(".provider-limit")
             expect(limits).to_contain_text("rate limit" if lang == "en" else "ограничении частоты")
             expect(limits).to_contain_text("provider-declared" if lang == "en" else "заявленный сброс")

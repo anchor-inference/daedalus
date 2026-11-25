@@ -42,8 +42,7 @@ export function Sheet({ title, ariaLabel, onClose, children, size = "lg", classN
     <Dialog.Root open modal onOpenChange={closeHandler(isTop, onClose)}>
       <Dialog.Portal className="overlay-root">
         {/* The portal is `.overlay-root`, a child of the body, as every layer's root has been: the
-            settings dialog stops calling itself modal while one is there, and the phone's composer
-            keeps its toolbar open while the focus is in one. The viewport is the scrim and the box that
+            phone's composer keeps its toolbar open while the focus is in one. The viewport is the scrim and the box that
             places the sheet, as `.sheet-backdrop` always was: the checks and the screens' own rules
             address the sheet as `.sheet-backdrop .sheet`. */}
         <Dialog.Viewport className="sheet-backdrop" data-overlay-root="" {...STOP}>

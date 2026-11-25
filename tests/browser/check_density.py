@@ -297,9 +297,9 @@ def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """Settings' column and rows as drawn: inside the dialog the section takes the pane's whole width
-    (the dialog is already the reading width; the page's centred 960 px column went with the page), a
-    row is at least the touch height, and a phone does not scroll sideways."""
+    """Settings' frame, column and rows as drawn: a page whose list of sections is the sidebar's 300 px,
+    a 52 px header, the section in a centred 880 px column (the pane less 24 px a side when that is
+    narrower), a row at least the touch height, and a phone that does not scroll sideways."""
     problems: list[str] = []
     for width, height, mobile in ((1920, 1080, False), (1180, 820, False), (390, 844, True)):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
@@ -308,19 +308,26 @@ def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
           const col = document.querySelector('.settings-col').getBoundingClientRect();
           const main = document.querySelector('.settings-main');
           const pane = main ? main.getBoundingClientRect() : null;
+          const nav = document.querySelector('.settings-nav');
+          const head = document.querySelector('.settings-head');
           const rows = [...document.querySelectorAll('.settings-row')].map((r) => {
             const b = r.getBoundingClientRect();
             const ctl = r.querySelector('.settings-row-ctl');
             return { h: Math.round(b.height), right: Math.round(b.right), ctlRight: ctl ? Math.round(ctl.getBoundingClientRect().right) : null };
           });
           return { col: { x: Math.round(col.x), w: Math.round(col.width), r: Math.round(col.right) }, pane: pane ? { x: Math.round(pane.x), w: Math.round(pane.width) } : null, rows,
+                   nav: nav ? Math.round(nav.getBoundingClientRect().width) : null, head: head ? Math.round(head.getBoundingClientRect().height) : null,
                    scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth] };
         }""")
         print(f"settings-{width}", json.dumps({k: v for k, v in m.items() if k != "rows"}), f"{len(m['rows'])} rows")
         if m["pane"]:
-            want = m["pane"]["w"]
+            want = min(880, m["pane"]["w"] - 48)
             if abs(m["col"]["w"] - want) > 1:
-                problems.append(f"settings {width}: the column is {m['col']['w']}px, not the pane's {want}")
+                problems.append(f"settings {width}: the column is {m['col']['w']}px, not {want}")
+            if m["nav"] != 300:
+                problems.append(f"settings {width}: the list of sections is {m['nav']}px, not the sidebar's 300")
+            if m["head"] != 52:
+                problems.append(f"settings {width}: the header is {m['head']}px, not 52")
             if abs((m["col"]["x"] - m["pane"]["x"]) - (m["pane"]["x"] + m["pane"]["w"] - m["col"]["r"])) > 2:
                 problems.append(f"settings {width}: the column is off centre {m['col']} in {m['pane']}")
         for row in m["rows"]:

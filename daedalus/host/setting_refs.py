@@ -56,13 +56,13 @@ def provider_spend_cap(provider_id: str) -> SettingRef:
 
 
 def preset_images(preset_id: str) -> SettingRef:
-    """One model's Images switch, in its row on Settings → Models."""
+    """One model's Images switch, in its row on Settings → Models and providers."""
     return SettingRef("models", f"presets.{preset_id}.images")
 
 
 def provider_key(provider_id: str) -> SettingRef:
-    """The key of one provider endpoint, on Settings → Providers."""
-    return SettingRef("providers", f"providers.{provider_id}.api_key")
+    """The key of one provider endpoint, behind its Connection on Settings → Models and providers."""
+    return SettingRef("models", f"providers.{provider_id}.api_key")
 
 
 class SettingProblem(RuntimeError):

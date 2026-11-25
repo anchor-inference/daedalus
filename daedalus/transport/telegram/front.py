@@ -1766,7 +1766,7 @@ class TelegramFront:
                 await message.answer(f"Session model: {self.config.presets[arg].display(arg)} (from the next model call)")
             return
         if general:
-            await message.answer("In General, /model takes a preset id (see /model). Create presets in the Mini App → Settings → Models.")
+            await message.answer("In General, /model takes a preset id (see /model). Create presets in the Mini App → Settings → Models and providers.")
             return
         state = await self._session_for_message(message)
         if state is None:

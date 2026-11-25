@@ -176,8 +176,6 @@ const BOX_ALLOWED = [
   // The note editor is a dialog of its own, and its writing and reading panes are pages, not rows:
   // the room under the last line is where the next one is written.
   ".ne-dialog", ".ne-field", ".ne-tint", ".ne-read",
-  // Settings is a dialog: its section is a page inside it, with the room round it a page has.
-  ".settings-dialog",
   // A layer over the whole window is a surface like a sheet: its bar is a page header's height.
   ".fullscreen-",
   // The page header's one row is 52 px on a desktop, as tall as the surface it heads.
@@ -837,20 +835,30 @@ describe("the start page", () => {
 
 describe("settings", () => {
   const decl = (selector: string) => all.filter((r) => r.selector === selector && !r.media).map((r) => r.body).join(" ");
+  const declared = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
   // What a desktop reads: the sidebar's rules draw the phone's drawer too, so most of them stand
   // outside any media query and only the column's own (the grid, the fold, the hover) inside the wide one.
   const wide = (selector: string) => all.filter((r) => (!r.media || r.media.includes("min-width: 1024px")) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("opens as a dialog of Claude's proportions with a 248 px list and the section at the full width beside it", () => {
-    // Settings was a page that took the window, its section a centred 960 px column; on the owner's
-    // word it is now a dialog over the screen it was opened from: nine tenths of the window up to
-    // 1100 × 760, the list of sections 248 px, and the section using the rest of the dialog's width,
-    // since the dialog is already the reading width. Between 1024 and 1180 px the list is icons.
-    expect(wide(".settings-dialog")).toContain("width: min(90vw, 1100px)");
-    expect(wide(".settings-dialog")).toContain("height: min(100vh - 64px, 760px)");
-    expect(wide(".settings-stage")).toContain("grid-template-columns: 248px minmax(0, 1fr)");
-    expect(wide(".settings-stage.icons")).toContain("grid-template-columns: 56px minmax(0, 1fr)");
-    expect(wide(".settings-col")).not.toContain("width:");
+  it("is a page: the list of sections in the sidebar's 300 px, the section in a centred 880 px column", () => {
+    // Settings was a dialog over the screen it was opened from, its list 248 px and its section the
+    // dialog's whole width. It is a page of its own now: the list stands where the sidebar was and is
+    // as wide, a 52 px header carries the section's title, and the section reads in the same centred
+    // 880 px column (less 24 px a side on a narrower window) at every width.
+    expect(wide(".settings-nav")).toContain("width: 300px");
+    expect(wide(".settings-head")).toContain("height: var(--head-h)");
+    expect(wide(".settings-page .settings-col")).toContain("width: min(880px, 100% - 48px)");
+    expect(wide(".settings-page .settings-col")).toContain("margin: 0 auto");
+    expect(wide(".settings-nav .settings-link")).toContain("height: var(--row-h)");
+  });
+
+  it("draws a settings card's rows 44 px tall and a provider's 56", () => {
+    // The cards a section is drawn in: a row of a name and its value at 44, a provider leading its
+    // models at 56, both from tokens so the phone can take them to its own touch sizes.
+    expect(declared()).toContain("--card-row-h: 44px");
+    expect(declared()).toContain("--card-row-h-lg: 56px");
+    expect(decl(".set-row")).toContain("min-height: var(--card-row-h)");
+    expect(decl(".prov-row")).toContain("height: var(--card-row-h-lg)");
   });
 
   it("draws every setting as a touch-height row with its control in one lane", () => {

@@ -21,7 +21,7 @@ describe("the integration rows", () => {
     expect(failing.state).toBe("Sign-in required");
     expect(failing.fix).toContain("sign in");
     expect(describeIntegration(row({})).fix).toBe("");
-    expect(describeIntegration(row({ kind: "provider", state: "no_key", severity: "fail" })).fix).toContain("Settings → Providers");
+    expect(describeIntegration(row({ kind: "provider", state: "no_key", severity: "fail" })).fix).toContain("Settings → Models and providers");
     setLang("ru");
     expect(describeIntegration(row({ kind: "github", name: "GitHub", state: "token_rejected", severity: "fail" })).state).toBe("Токен отклонён");
   });

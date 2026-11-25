@@ -55,7 +55,7 @@ def test_a_reference_survives_being_re_raised_and_rides_a_link_both_ways() -> No
     assert setting_from_link(link) == COMPACTION_MODEL
     assert setting_from_link("/app/agents/abc") is None
     missing = ProviderUnavailable("opencode", ["local"])
-    assert setting_of(missing) == SettingRef("providers", "providers.opencode.api_key")
+    assert setting_of(missing) == SettingRef("models", "providers.opencode.api_key")
     assert "'opencode' is not configured" in str(missing) and isinstance(missing, KeyError)
 
 
@@ -192,7 +192,7 @@ def test_a_command_that_fails_on_a_setting_answers_409_with_the_row_and_a_provid
 
         monkeypatch.setattr(slash, "run_command", no_key)
         answer = client.post("/api/sessions/s1/command", headers=HEAD, json={"line": "/compact"})
-        assert answer.status_code == 409 and answer.json()["setting"] == {"page": "providers", "key": "providers.opencode.api_key"}
+        assert answer.status_code == 409 and answer.json()["setting"] == {"page": "models", "key": "providers.opencode.api_key"}
 
 
 def test_the_fallback_switch_is_a_setting_on_by_default(tmp_path) -> None:

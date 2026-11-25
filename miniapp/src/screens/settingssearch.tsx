@@ -1,5 +1,5 @@
-// The parts of the Settings dialog that are behaviour rather than sections: the keys it answers, the
-// focus it keeps, and the search results drawn as the sections' own live controls.
+// The parts of the Settings page that are behaviour rather than sections: the keys it answers and the
+// search results drawn as the sections' own live controls.
 //
 // The results are the real section bodies, filtered. A row drawn on its own outside its section
 // would need every section taken apart into rows, and the sections are large components other work
@@ -58,7 +58,7 @@ export function filterHits(root: HTMLElement, anchors: Set<string>): Set<string>
 }
 
 /** A section's body cut down to the rows a search found, with a link for each found row the body
- *  does not draw right now. The section is the one the dialog draws, so the row works here as it does
+ *  does not draw right now. The section is the one the page draws, so the row works here as it does
  *  on its page. A section's settings arrive after it is drawn, so the filter runs again whenever the
  *  body changes; the links for missing rows wait a moment for that, rather than flashing up first. */
 export function HitBody({ fields, children }: { fields: IndexField[]; children: React.ReactNode }) {
@@ -116,24 +116,23 @@ function typing(target: EventTarget | null): boolean {
 }
 
 /**
- * The dialog's keys and focus. Escape is answered in this order: an open list inside the dialog
- * closes itself first (the dropdown hears the same key), then a search with words in it is emptied,
- * then the dialog closes. `/` puts the cursor in the search. Focus moves into the dialog when it opens;
- * the shell gives it back to whatever opened it (App.tsx), since only the shell sees it before it goes.
+ * The page's keys. Escape is answered in this order: an open list or popover on the page closes itself
+ * first (it hears the same key), then a search with words in it is emptied, then the page goes back to
+ * where the operator was. `/` puts the cursor in the search. Focus moves onto the page when it opens,
+ * unless a link already put it somewhere inside, so Escape and `/` work without a click first.
  */
-export function useDialogKeys({ dialog, search, query, clear, onClose }: { dialog: React.RefObject<HTMLElement | null>; search: React.RefObject<HTMLInputElement | null>; query: string; clear: () => void; onClose: () => void }) {
+export function usePageKeys({ page, search, query, clear, onClose }: { page: React.RefObject<HTMLElement | null>; search: React.RefObject<HTMLInputElement | null>; query: string; clear: () => void; onClose: () => void }) {
   const state = useRef({ query, clear, onClose });
   state.current = { query, clear, onClose };
   useLayer(() => {
-    const root = dialog.current;
-    // The dropdown and the model list close themselves on the same key; the dialog stays.
+    const root = page.current;
+    // The dropdown and the model list close themselves on the same key; the page stays.
     if (root?.querySelector('.dropdown-btn[aria-expanded="true"], .models-menu')) return;
     if (state.current.query) state.current.clear();
     else state.current.onClose();
   });
   useEffect(() => {
-    // Into the dialog, unless a link already put the cursor somewhere inside it.
-    if (!dialog.current?.contains(document.activeElement)) dialog.current?.focus({ preventScroll: true });
+    if (!page.current?.contains(document.activeElement)) page.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
       if (!search.current || search.current.getClientRects().length === 0) return;
@@ -142,37 +141,7 @@ export function useDialogKeys({ dialog, search, query, clear, onClose }: { dialo
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [dialog, search]);
-}
-
-/** Whether a sheet or a confirmation is open over the dialog. While one is, the dialog stops saying
- *  it is modal: Chromium honours one modal at a time, and with two it let the rows under the sheet back
- *  into what a screen reader (and a test reading by role) sees. Sheets are portalled to the body. */
-export function useCovered(): boolean {
-  const [covered, setCovered] = useState(false);
-  useEffect(() => {
-    const check = () => setCovered(!!document.querySelector("body > .overlay-root"));
-    check();
-    const observer = new MutationObserver(check);
-    observer.observe(document.body, { childList: true });
-    return () => observer.disconnect();
-  }, []);
-  return covered;
-}
-
-/** Tab and Shift+Tab go round the dialog's own controls: the screen under it is out of reach. */
-export function trapTab(e: React.KeyboardEvent<HTMLElement>) {
-  if (e.key !== "Tab") return;
-  const items = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")].filter((el) => el.getClientRects().length > 0);
-  if (!items.length) return;
-  const at = items.indexOf(document.activeElement as HTMLElement);
-  if (e.shiftKey && at <= 0) {
-    e.preventDefault();
-    items[items.length - 1].focus();
-  } else if (!e.shiftKey && (at < 0 || at === items.length - 1)) {
-    e.preventDefault();
-    items[0].focus();
-  }
+  }, [page, search]);
 }
 
 /** Up and Down move through the list of sections (and the rows a search found under them); Enter

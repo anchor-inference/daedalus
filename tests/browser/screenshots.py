@@ -709,7 +709,23 @@ SETTINGS = {
         "gpt-5.6-luna": {"provider": None, "catalog": 272000, "table": None, "error": None},
         "qwen-local": {"provider": 65536, "catalog": None, "table": None, "error": None},
     },
-    "providers": {}, "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
+    # Settings → Models and providers: the four endpoints the models run on. Claude is a subscription
+    # signed in through the key proxy, DeepSeek a key the proxy holds, OpenCode Go a prepaid plan whose
+    # key has not been given yet, and a vLLM server on this machine that needs no key.
+    "providers": {
+        "claude": {"kind": "claude", "base_url": "http://keyproxy:3200/claude", "timeout_seconds": 900, "billing": "subscription"},
+        "deepseek": {"kind": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "timeout_seconds": 600, "api_key_set": True},
+        "opencode": {"kind": "opencode", "name": "OpenCode Go", "base_url": "http://keyproxy:3200/opencode", "billing": "subscription", "timeout_seconds": 900},
+        "vllm": {"kind": "vllm", "name": "Local vLLM", "base_url": "http://127.0.0.1:8000/v1", "timeout_seconds": 600},
+    },
+    "provider_keys": {
+        "claude": {"via_proxy": True, "key_held": True, "key_kind": "cli_login", "ready": True},
+        "deepseek": {"via_proxy": True, "key_held": True, "key_kind": "api_key", "ready": True},
+        "opencode": {"via_proxy": True, "key_held": False, "key_kind": "api_key", "ready": False},
+        "vllm": {"via_proxy": False, "key_held": True, "key_kind": "endpoint", "ready": True},
+    },
+    "provider_kinds": ["claude", "deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"],
+    "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
     "orchestrator": {"preset": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},
     "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": ["duckduckgo"], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000, "background_after_seconds": 120}},
@@ -1100,6 +1116,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return None
     # Its quick agent's models, and the quick agents a running call looks for its helper among.
     if rel.startswith("/api/sessions/") and rel.endswith(("/quick-models", "/quick-agents")) and fulfil_shared(route):
+        return None
+    # Settings → Models and providers: a provider's connection test, and Approvals' standing project rules,
+    # are the shared host's answers.
+    if rel.startswith("/api/providers/") and rel.endswith("/test") and fulfil_shared(route):
+        return None
+    if rel.startswith("/api/projects/") and "/approval-rules" in rel and fulfil_shared(route):
         return None
     if rel.startswith("/api/proposals"):
         # A recipe's ``proposals_empty`` flag answers the list with nothing, and so does the empty inbox's scene:
@@ -2638,7 +2660,7 @@ def run() -> int:
         shot(page, "memory", "memory")
         # Settings is a popup over the screen it was opened from, on its first section; it has no
         # `.screen` of its own to wait for.
-        shot(page, "settings", "settings", wait=".settings-stage")
+        shot(page, "settings", "settings", wait=".settings-page")
         shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
@@ -2906,9 +2928,9 @@ def run_features() -> int:
         shot(page, "agent-link", f"agents/{S1}", wait=".chat-scroll .timeline", before=agent_link, settle=700)
 
         def find_setting(pg: Page) -> None:
-            pg.locator(".settings-dialog input[type='search'], .settings-dialog input").first.fill(word("settings.find"))
+            pg.locator(".settings-page .settings-search").first.fill(word("settings.find"))
 
-        shot(page, "settings-search", "settings", wait=".settings-stage", before=find_setting, settle=900)
+        shot(page, "settings-search", "settings", wait=".settings-page", before=find_setting, settle=900)
 
         def new_agent(pg: Page) -> None:
             pg.locator(".start-agent-name").fill(word("agent.name"))
@@ -2968,7 +2990,7 @@ def run_features() -> int:
             try_on_host(card)
             card.locator("[data-mcp-server='files']").evaluate("(row) => row.scrollIntoView({ block: 'start' })")
 
-        shot(page, "settings-mcp", "settings/mcp", wait=".settings-stage", before=mcp_settings, settle=700)
+        shot(page, "settings-mcp", "settings/mcp", wait=".settings-page", before=mcp_settings, settle=700)
 
         def review_block(pg: Page) -> None:
             pg.wait_for_selector('.composer .approval-card[data-kind="blocked"]', timeout=10000)
