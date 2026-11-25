@@ -45,6 +45,9 @@ class CreateBody(BaseModel):
     assignee_operator: bool = False
     due_at: str | None = Field(default=None, max_length=40)
     folder_id: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["todo", "doing", "review", "done", "blocked", "dropped"] | None = None
+    """The column the card is made in; absent, its dependencies decide. A column a new card cannot be
+    in is refused as the move to it would be (409)."""
 
 
 class UpdateBody(BaseModel):

@@ -198,7 +198,11 @@ agent adds is drawn on the board of the project it works in. `GET /api/projects/
 (`objective`, `deliverable`, `boundaries`, `done_when`) and its `assignee` with that staff member's
 live status; `needs_you` is the project's open requests routed to the operator, read from the
 requests themselves each time, so an answer from anywhere ends one. `POST` to the same address adds a
-task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority"}`; `PUT /api/board/{id}`
+task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority", "status"?}`; without
+`status` its dependencies decide (`todo`, or `blocked` while one is open), and with it the task is made
+in that column only where a move would take it: `todo` with nothing open before it, `blocked` always,
+`doing` for a task you keep for yourself (`assignee_operator`) with nothing open; `review`, `done` and
+`dropped` are refused (**409**, with the sentence the move gets). `PUT /api/board/{id}`
 also takes `assignee_staff_id` (`""` unassigns), `brief` (the parts sent) and `depends_on`; `POST
 /api/board/{id}/accept` moves a task from review to done, and on a task with a staff branch it is the
 merge below (**409** when it is not in review, or the merge is refused); `GET /api/board?project=<id>`

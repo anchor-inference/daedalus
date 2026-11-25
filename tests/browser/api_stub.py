@@ -2988,6 +2988,22 @@ class BoardStub:
         team = [{**{k: m[k] for k in ("id", "name", "color", "harness")}, "isolation": m.get("isolation", "worktree")} for m in self.staff]
         return {"project": self.project, "tasks": rows, "needs_you": self.needs_you, "counts": counts, "staff": team}
 
+    def initial(self, payload: dict) -> tuple[str, str]:
+        """The column a new card is made in, or the host's refusal: ``status`` when asked, else its
+        dependencies decide. To do and doing need every dependency done, doing a card the operator keeps,
+        blocked is always allowed; review, done and dropped are never where a card starts."""
+        waits = any(t["status"] != "done" for t in self.tasks if t["id"] in (payload.get("depends_on") or []))
+        asked = payload.get("status")
+        if asked is None:
+            return ("blocked" if waits else "todo"), ""
+        if asked == "dropped":
+            return "", "a new task starts open; drop it once it exists"
+        if asked not in ("todo", "blocked") and not (asked == "doing" and payload.get("assignee_operator")):
+            return "", "work, review and completion require their dedicated result or launch command"
+        if asked in ("todo", "doing") and waits:
+            return "", "this task still has unfinished dependencies"
+        return asked, ""
+
     def _assign(self, row: dict, staff_id: str | None) -> None:
         member = next((m for m in self.staff if m["id"] == staff_id), None)
         row["assignee_staff_id"] = member["id"] if member else None
@@ -3196,10 +3212,13 @@ class BoardStub:
             return 200, self.listing("include_done=1" in query)
         if path == base and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
             brief = {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}
             brief.update(payload.get("brief") or {})
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"), due_at=self.due(payload.get("due_at")))
             self._assign(row, payload.get("assignee_staff_id"))
             if payload.get("assignee_operator"):
@@ -3208,8 +3227,11 @@ class BoardStub:
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), project_id=None,
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
                             acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []],
                             due_at=self.due(payload.get("due_at")))
