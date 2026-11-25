@@ -96,7 +96,8 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
 
     # Pause, from the menu; the banner it leaves resumes.
     menu("pause")
-    until(page, lambda: ("POST", "/api/companion/pause", {"paused": True}) in posted)
+    # The page draws the pause after the host has answered the post, so the banner is waited for too.
+    until(page, lambda: ("POST", "/api/companion/pause", {"paused": True}) in posted and page.locator(".companion-paused").count() == 1 and page.locator(".companion-state.state-paused").count() == 1)
     check(("POST", "/api/companion/pause", {"paused": True}) in posted, f"{where}: Pause pauses it")
     check(page.locator(".companion-state.state-paused").count() == 1, f"{where}: and the header says so")
     check(page.locator(".companion-paused").count() == 1, f"{where}: with a line saying what pausing means")
