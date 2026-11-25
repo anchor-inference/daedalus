@@ -197,7 +197,7 @@
 .main-entry:hover { background: var(--surface-2); }
 .main-entry.current { background: var(--surface-3); border-color: transparent; }
 .main-entry-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); flex: none; }
-.main-entry.working .main-entry-icon { color: var(--accent); }
+.main-entry.working .main-entry-icon { color: var(--live); }
 .main-entry-text { display: grid; min-width: 0; flex: 1; }
 .main-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
 .main-entry-name { font-size: var(--fs-14); font-weight: 500; }

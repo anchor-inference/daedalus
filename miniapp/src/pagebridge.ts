@@ -21,7 +21,7 @@ export const PROTOCOL = 1;
 export const TOKEN_NAMES: string[] = [...new Set([...tokensCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]))];
 
 /** What appearance.ts sets that the stylesheet does not declare. */
-const APPEARANCE_ONLY = ["--wash", "--term-fg", "--font-prose"];
+const APPEARANCE_ONLY = ["--term-fg", "--font-prose"];
 
 export type ThemeMessage = { tokens: Record<string, string>; scheme: string; theme: string; lang: string; phone: boolean };
 

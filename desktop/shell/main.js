@@ -384,7 +384,7 @@ function createWindow() {
     title: 'Daedalus',
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#101114',
+    backgroundColor: '#111111',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

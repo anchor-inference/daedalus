@@ -145,9 +145,9 @@ function sessionStore(): Storage | null {
   }
 }
 
-/** The sidebar's width: its default, and the range a drag is held to. 288 rather than 272 since its
- *  rows went to two lines: a Russian chat title was cut at eighteen characters in the narrower one. */
-const SIDEBAR_W = 288;
+/** The sidebar's width: its default, and the range a drag is held to. The default is the 300 px the
+ *  approved design draws; the operator's own drag still wins and is remembered. */
+const SIDEBAR_W = 300;
 const SIDEBAR_W_MIN = 232;
 const SIDEBAR_W_MAX = 360;
 

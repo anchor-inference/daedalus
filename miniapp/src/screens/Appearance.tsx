@@ -2,7 +2,7 @@ import { usePetModel, usePetPreference } from "../ui/pet";
 // Appearance is this browser's look: the named themes, then the few adjustments that are not a new theme.
 
 import { useState } from "react";
-import { FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
+import { COLOR_KEYS, FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
 import { Select, LangPicker, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
@@ -150,7 +150,8 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
       <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
         {THEMES.map((item) => (
           <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
-            <span className="settings-swatch" style={{ background: item.wash }} />
+            {/* The page with the frame along its left edge: Dark and Soot differ more in the frame than in the page. */}
+            <span className="settings-swatch" style={{ background: item.wash, boxShadow: `inset 0 0 0 1px var(--line), inset 18px 0 0 ${item.side}` }} />
             <span>{t(`theme.${item.id}`)}</span>
           </button>
         ))}
@@ -174,8 +175,8 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
       <div className="section-title">{t("theme.colors")}</div>
       <p className="sub">{t("theme.colors.lead")}</p>
       <div className="card" data-setting="appearance.colors">
-        {(["bg", "surface", "fg", "fg2", "accent", "send"] as const).map((key) => {
-          const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : key === "fg2" ? resolved.fg2 : key === "accent" ? resolved.accent : resolved.send.startsWith("#") ? resolved.send : resolved.accent;
+        {COLOR_KEYS.map((key) => {
+          const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : resolved.fg2;
           const value = color(key, fallback);
           return (
             <Row key={key} title={t(`theme.color.${key}`)} htmlFor={`theme-color-${key}`}>

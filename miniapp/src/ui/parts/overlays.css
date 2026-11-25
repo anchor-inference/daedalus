@@ -4,9 +4,7 @@
    1 px strong edge, 14 px corners and the one floating shadow; a dialog has the same corners; a
    sheet on a phone has 20 px top corners. One entrance, 180 ms on the decelerating curve, and one
    stack of z-indexes (tokens.css): overlay 30, popover 35, menu 38, confirm 40, toast 45.
-   Tokens this file reads that the token stylesheet adds: --hover and --selected (the row hover and
-   the chosen row; until they exist the solid surface steps stand in) and --attention (the orange
-   of "needs you"; --warn until then). */
+   A row under the pointer is --hover, the chosen row --selected, and "needs you" --attention. */
 
 /* Base UI hangs every popup from a positioner it places itself. The positioner carries the layer's
    place in the stack; the popup inside it is laid out in the positioner's box. */
@@ -44,12 +42,12 @@
 .menu:has(> button > .ic:first-child) > button:not(:has(> .ic:first-child)) { padding-left:calc(var(--menu-pad) + var(--icon-sm) + var(--space-2)); }
 /* Base UI marks the row the keyboard or the pointer is on with data-highlighted, and moves the focus
    with it: one highlight, whichever moved last. */
-.menu button:hover, .menu button[data-highlighted], .menu button:focus-visible { background: var(--hover, var(--surface-3)); outline: none; }
-.menu button:active { background:var(--selected, var(--surface-4)); }
+.menu button:hover, .menu button[data-highlighted], .menu button:focus-visible { background: var(--hover); outline: none; }
+.menu button:active { background:var(--selected); }
 .menu button:disabled, .menu button[data-disabled] { opacity:.45; cursor:default; background:none; }
 .menu button.danger, .menu button.danger .ic { color:var(--bad); }
-.menu button.warn, .menu button.warn .ic { color:var(--attention, var(--warn)); }
-.menu button[data-popup-open] { background: var(--selected, var(--surface-3)); }
+.menu button.warn, .menu button.warn .ic { color:var(--attention); }
+.menu button[data-popup-open] { background: var(--selected); }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; flex: none; }
 .menu-group { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 .menu-heading { padding: 6px 10px 2px; }
@@ -62,7 +60,7 @@
 /* One row of a menu or a sheet (MenuRow): 32 px, a 16 px icon, an 8 px gap; its second line, its aside
    and its key at the far end in the meta size. */
 .menu-row { display:flex; align-items:center; gap:var(--space-2); width:100%; min-height:var(--row-h); padding:0 10px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
-button.menu-row:hover { background:var(--hover, var(--surface-2)); }
+button.menu-row:hover { background:var(--hover); }
 .menu-row:disabled { opacity:.45; cursor:default; }
 .menu-row > .ic { flex:none; color:var(--fg-2); }
 .menu-row-main { flex:1; min-width:0; display:flex; flex-direction:column; }
@@ -74,8 +72,8 @@ button.menu-row:hover { background:var(--hover, var(--surface-2)); }
 .menu-row-check { flex:none; width:16px; display:inline-flex; color:var(--accent); }
 .menu-row-chev { flex:none; display:inline-flex; color:var(--fg-3); }
 .menu-row.danger, .menu-row.danger > .ic { color:var(--bad); }
-.menu-row.warn, .menu-row.warn > .ic { color:var(--attention, var(--warn)); }
-.menu-row.on { background:var(--selected, var(--surface-3)); }
+.menu-row.warn, .menu-row.warn > .ic { color:var(--attention); }
+.menu-row.on { background:var(--selected); }
 
 /* A popover or a menu drawn as a sheet below 1024 px keeps its `.menu` (the screens' rules and the
    checks address it so) but loses the floating box: the sheet is the box now. */
@@ -89,7 +87,7 @@ button.menu-row:hover { background:var(--hover, var(--surface-2)); }
    row, where the control spans the row, the list cannot overhang either edge. */
 .dropdown-list { display: flex; flex-direction: column; width: max-content; min-width: max(var(--anchor-width, 0px), min(200px, calc(100vw - 16px))); max-width: min(360px, calc(100vw - 16px)); max-height: min(320px, var(--available-height, 320px)); overflow-y: auto; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); outline: 0; }
 .dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 4px 10px; border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-14); text-align: left; cursor: pointer; outline: 0; }
-.dropdown-item[data-highlighted] { background: var(--hover, var(--surface-3)); }
+.dropdown-item[data-highlighted] { background: var(--hover); }
 .dropdown-item[data-disabled] { opacity: .5; cursor: not-allowed; }
 .dropdown-item .ic { flex: none; color: var(--fg-2); }
 .dropdown-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
@@ -101,7 +99,7 @@ button.menu-row:hover { background:var(--hover, var(--surface-2)); }
 .combo-list { display: flex; flex-direction: column; gap: 1px; outline: 0; overflow-y: auto; }
 .combo-popup { min-width: max(var(--anchor-width, 0px), 240px); }
 .combo-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-14); cursor: pointer; }
-.combo-item[data-highlighted] { background: var(--hover, var(--surface-3)); }
+.combo-item[data-highlighted] { background: var(--hover); }
 .combo-item[data-selected] { color: var(--accent); }
 .combo-group-label { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
 .combo-empty:not(:empty) { padding: 8px 10px; color: var(--fg-3); font-size: var(--fs-13); }
@@ -172,8 +170,8 @@ button.menu-row:hover { background:var(--hover, var(--surface-2)); }
 .toast .btn.small { min-height: 30px; padding: 4px 8px; }
 .toast > .ic { flex: none; color: var(--fg-2); }
 .toast.notice { align-items: flex-start; padding: 12px 10px 12px 14px; }
-.toast.notice.attention > .ic { color: var(--attention, var(--warn)); }
-.toast.notice.live > .ic { color: var(--live, var(--ok)); }
+.toast.notice.attention > .ic { color: var(--attention); }
+.toast.notice.live > .ic { color: var(--live); }
 .toast-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .toast-title { font-size: var(--fs-14); font-weight: 500; }
 .toast-body { color: var(--fg-2); }

@@ -15,7 +15,7 @@
 .focus-row .ic { color: var(--fg-2); flex: none; }
 .focus-row.orchestrator { font-weight: 500; }
 .focus-row.orchestrator .ic { color: var(--fg); }
-.focus-row.orchestrator.live .focus-row-meta { color: var(--accent); }
+.focus-row.orchestrator.live .focus-row-meta { color: var(--live); }
 .focus-row.off .focus-row-label, .focus-row.ended .focus-row-label { color: var(--fg-3); }
 .focus-row-label { flex: 1; min-width: 0; }
 .focus-row-meta { flex: none; color: var(--fg-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
@@ -43,7 +43,7 @@
 .focus-staff-line { color: var(--fg-3); font-size: var(--fs-11); }
 .focus-staff-line.waits { color: var(--warn); }
 .focus-dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; background: var(--fg-3); }
-.focus-dot.tone-working { background: var(--accent); }
+.focus-dot.tone-working { background: var(--live); }
 .focus-dot.tone-review { background: var(--ok); }
 .focus-dot.tone-waiting { background: var(--warn); }
 .focus-dot.tone-free { background: var(--surface-4); }
@@ -191,7 +191,7 @@
 .staff-head-meta > span { max-width: 100%; }
 .staff-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .focus-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.focus-pill.tone-working { color: var(--accent); }
+.focus-pill.tone-working { color: var(--live); }
 .focus-pill.tone-waiting { color: var(--warn); }
 .focus-pill.tone-review { color: var(--ok); }
 .focus-pill.tone-error { color: var(--bad); }

@@ -27,7 +27,11 @@ framework. The classes are added to, never renamed or removed.
 Tokens, usable in any style of the page:
 
 - colours: `--bg`, `--surface-1`, `--surface-2`, `--surface-3`, `--fg`, `--fg-2`, `--fg-3`, `--line`,
-  `--line-strong`, `--accent`, `--accent-ink`, `--primary`, `--primary-ink`, `--ok`, `--warn`, `--bad`, `--info`
+  `--line-strong`, `--accent`, `--accent-ink`, `--primary`, `--primary-ink`, `--ok`, `--warn`, `--bad`, `--info`.
+  The app's greys are neutral and it has three accents, each with one meaning: violet (`--accent`,
+  `--primary`) is what is chosen and the one primary action; cyan (`--ok`, `--info`) is running, done
+  or added; orange (`--warn`, `--bad`) needs the reader, warns or failed. Say a failure in words too,
+  never by colour alone.
 - type: `--font`, `--mono`, `--fs-11` … `--fs-22`, `--lh-ui`, `--lh-prose`
 - space and shape: `--space-1` … `--space-8`, `--page-pad`, `--gutter`, `--radius-sm`, `--radius-md`,
   `--radius-pill`

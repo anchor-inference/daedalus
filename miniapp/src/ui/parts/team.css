@@ -85,7 +85,7 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-dot.exited { background: var(--fg-3); box-shadow: none; }
 .term-dot.cmd-ok { background: var(--ok); box-shadow: none; }
 .term-dot.cmd-failed { background: var(--bad); box-shadow: none; }
-.term-dot.cmd-running { box-shadow: inset 0 0 0 2px var(--accent); }
+.term-dot.cmd-running { box-shadow: inset 0 0 0 2px var(--live); }
 .term-tabs > .iconbtn { margin-left: 2px; }
 .term-tools { flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; }
 /* A touch tablet is wide enough for the desktop's dock but is worked with a thumb: the dock's tools
@@ -118,7 +118,7 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-host .xterm-decoration.term-mark::before { content: ""; position: absolute; left: -7px; top: calc(50% - 2.5px); width: 5px; height: 5px; border-radius: 50%; background: var(--fg-3); }
 .term-host .xterm-decoration.term-mark[data-result="ok"]::before { background: var(--ok); }
 .term-host .xterm-decoration.term-mark[data-result="failed"]::before { background: var(--bad); }
-.term-host .xterm-decoration.term-mark[data-result="running"]::before { background: var(--accent); }
+.term-host .xterm-decoration.term-mark[data-result="running"]::before { background: var(--live); }
 .term-host .xterm-decoration.term-mark.current::before { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 45%, transparent); }
 .term-menu-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 .term-menu button { min-width: 240px; }

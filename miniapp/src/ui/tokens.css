@@ -1,83 +1,98 @@
+/* The fonts are bundled (main.tsx imports them from @fontsource-variable), so every machine draws the
+   same letters and nothing is fetched from a font host. The family names are the packages' own. */
 :root {
-  /* The palette is the chatcn theme's (chatcn.dev/r/chatcn-theme.json): a pure neutral ramp, an ink
-     primary and status colours that never fill a surface. Its OKLCH steps are written here as the hex
-     they compute to, because appearance.ts writes a theme inline and the terminal can read only a
-     computed hex. The names are the app's own, and each stands for one chatcn role: --bg is the frame
-     (bg-subtle), --wash the page (bg), --card a card on the page, --surface-1 what floats over it
-     (surface), --surface-2/3/4 the fill and its hover and pressed steps, --line and --line-strong the
-     border and the strong border, --fg / --fg-2 / --fg-3 the text, its muted and its subtle step. */
+  /* Neutral greys and three accents, each with one meaning wherever it appears: violet is what is
+     chosen and the one primary action, cyan what is running, live or added, orange what needs the
+     operator, has full access or was removed. No other hue is chrome; a status that is not one of the
+     three is a grey. The roles: --bg is the frame (sidebar, settings, drawer), --wash the page under
+     .main, --card a card or the composer on the page, --surface-1 what floats over it (popover, menu,
+     dialog, sheet), --surface-2/3/4 a solid fill and its two steps for a place a translucent --hover
+     cannot sit, --inset code, terminals and diffs, --line and --line-strong the hairline and the edge
+     of what floats or takes input, --fg / --fg-2 / --fg-3 the text, the secondary and the meta. Every
+     text step reads at 4.5:1 or better on every surface it is drawn on (appearance.test.ts holds it).
+     Written as hex rather than var(): appearance.ts writes a theme inline and the terminal reads only
+     a computed hex. */
   --bg: #111111;
-  --wash: #0a0a0a;
-  --card: #101010;
-  --inset: #0c0c0c;
-  --surface-1: #171717;
-  --surface-2: #1c1c1c;
-  --surface-3: #232323;
-  --surface-4: #2a2a2a;
-  --line: rgba(255, 255, 255, 0.09);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --fg: var(--tg-theme-text-color, #f5f5f5);
-  --fg-2: #a4a4a4;
-  --fg-3: #868686;
-  /* One hue, used sparingly: what is live (a running dot, a working row) and what is a link. Every
-     control is ink: the primary button, a switch that is on, a chosen chip, the focus ring. */
-  --accent: #5ba5f6;
-  --accent-ink: #0a0a0a;
-  --primary: #f5f5f5;
-  --primary-ink: #0a0a0a;
-  --primary-hover: #a4a4a4;
-  --ring: var(--fg);
-  --ok: #5bcc80;
-  --warn: #f3af49;
-  --bad: #f86a6b;
-  --info: #5ba5f6;
-  --code: #f3af49;
-  --code-block: #d1d1d1;
+  --wash: #161616;
+  --card: #1f1f1f;
+  --inset: #101010;
+  --surface-1: #262626;
+  --surface-2: #1f1f1f;
+  --surface-3: #262626;
+  --surface-4: #2e2e2e;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --hover: rgba(255, 255, 255, 0.06);
+  --selected: rgba(255, 255, 255, 0.10);
+  --bubble: #242424;
+  --fg: var(--tg-theme-text-color, #ededed);
+  --fg-2: #a8a8a8;
+  --fg-3: #8e8e8e;
+  --accent: #a998ff;
+  --accent-ink: #141414;
+  /* The primary fill is a step darker than the drawn violet (#7a63ee): white on that is 4.33:1, under
+     the 4.5 every label is held to. The hover goes darker still for the same reason. */
+  --primary: #765eee;
+  --primary-ink: #ffffff;
+  --primary-hover: #6a51e6;
+  --ring: var(--accent);
+  --live: #4fcbe0;
+  --attention: #f59e4c;
+  --ok: #4fcbe0;
+  --warn: #f59e4c;
+  --bad: #f59e4c;
+  --info: #4fcbe0;
+  --added-bg: rgba(79, 203, 224, 0.12);
+  --removed-bg: rgba(245, 158, 76, 0.13);
+  --code: var(--fg);
+  --code-block: #d6d6d6;
   --scrim: rgba(0, 0, 0, 0.6);
-  /* Elevation is a one-pixel ring and a soft drop, never a border and a blur: the ring is the edge on
-     either scheme, and on the dark one a hairline of light along the top is what lifts the surface.
-     xs is a control, sm a card and the composer, md a popover and a menu, lg a toast and a floating
-     bar, xl a dialog. What lies in the page's flow (a button, a field, a card) keeps a real one-pixel
-     border in the ring's place, so a state can recolor its edge, and takes only the drop from here. */
+  /* One shadow, for what floats (a popover, a menu, a dialog, a toast), which also carries a real
+     one-pixel --line-strong edge, so the shadow holds no ring of its own. Cards lie flat: what lies in
+     the page's flow is drawn by its border, and the drops are nothing on the dark scheme, where a
+     shadow on near-black only muddies the edge, and a hairline on the light one. */
   --shadow-ring: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-xs: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 4px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 32px -8px rgba(0, 0, 0, 0.6);
-  --shadow-xl: 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 32px 64px -12px rgba(0, 0, 0, 0.7);
-  --drop-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --drop-sm: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 4px rgba(0, 0, 0, 0.4);
+  /* "No shadow" is written as a transparent one, never `none`: a rule that lists a drop after an
+     inset edge (a host terminal's amber line) loses its whole box-shadow when one item is `none`. */
+  --shadow-xs: 0 0 transparent;
+  --shadow-sm: 0 0 transparent;
+  --shadow-md: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: var(--shadow-md);
+  --shadow-xl: var(--shadow-md);
+  --drop-xs: 0 0 transparent;
+  --drop-sm: 0 0 transparent;
   --shadow-focus: 0 0 0 3px var(--line);
   --shadow-pop: var(--shadow-md);
-  --font: -apple-system, "SF Pro Text", Inter, Roboto, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  /* The terminal: its own background, a step darker than the page so the pane reads as a surface,
-     and the sixteen ANSI colours programs choose from, tuned to the status colours above. Plain hex
-     only: theme.ts hands these to xterm.js, which cannot read var() or color-mix(). */
-  --term-bg: #060606;
-  --ansi-0: #1c1c1c; --ansi-1: #f86a6b; --ansi-2: #5bcc80; --ansi-3: #f3af49;
-  --ansi-4: #5ba5f6; --ansi-5: #bf93f1; --ansi-6: #5cc9c2; --ansi-7: #a4a4a4;
+  --font: "Inter Variable", Inter, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* The terminal: the inset's colour, and the sixteen ANSI colours programs choose from. Those are
+     content, not chrome, so they keep their hues; black, white and bright white sit on the grey ramp
+     above. Plain hex only: theme.ts hands these to xterm.js, which cannot read var() or color-mix(). */
+  --term-bg: #101010;
+  --ansi-0: #262626; --ansi-1: #f86a6b; --ansi-2: #5bcc80; --ansi-3: #f3af49;
+  --ansi-4: #5ba5f6; --ansi-5: #bf93f1; --ansi-6: #5cc9c2; --ansi-7: #a8a8a8;
   --ansi-8: #636363; --ansi-9: #ff8f8e; --ansi-10: #86e3a4; --ansi-11: #f8c877;
-  --ansi-12: #8cc0fa; --ansi-13: #d4b5f6; --ansi-14: #8adcd6; --ansi-15: #f5f5f5;
+  --ansi-12: #8cc0fa; --ansi-13: #d4b5f6; --ansi-14: #8adcd6; --ansi-15: #ededed;
   /* One colour per kind of data, wherever a terminal's details are drawn: a context meter is always
      the same colour, a cache figure another, a path a third. Each is an alias of a semantic token that
      every theme sets (appearance.ts writes them inline), so the kinds follow the active theme and a
      theme never has to know about them. */
-  --data-context: var(--ansi-5);
-  --data-cache: var(--ok);
-  --data-wait: var(--warn);
-  --data-output: var(--warn);
-  --data-path: var(--info);
+  --data-context: var(--accent);
+  --data-cache: var(--live);
+  --data-wait: var(--attention);
+  --data-output: var(--attention);
+  --data-path: var(--live);
   --data-branch: var(--accent);
-  --data-bad: var(--bad);
-  /* What a terminal is doing, as its dot draws it (terminal/status.ts paneState). */
-  --state-working: var(--accent);
-  --state-waiting: var(--data-wait);
-  --state-done: var(--ok);
-  --state-failed: var(--bad);
-  --state-message: var(--info);  /* another agent's message just reached the agent in a terminal */
-  --state-glow: 0 0 6px;  /* the soft halo a lit dot carries, in the dot's own colour */
-  /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). */
+  --data-bad: var(--attention);
+  /* What a terminal is doing, as its dot draws it (terminal/status.ts paneState): running is cyan,
+     waiting and failed are orange, done is quiet. A dot carries no glow. */
+  --state-working: var(--live);
+  --state-waiting: var(--attention);
+  --state-done: var(--fg-3);
+  --state-failed: var(--attention);
+  --state-message: var(--accent);  /* another agent's message just reached the agent in a terminal */
+  /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). They
+     identify people, so they are content and keep their hues. */
   --staff-blue: #5ba5f6; --staff-green: #5bcc80; --staff-amber: #f3af49; --staff-violet: #bf93f1;
   --staff-rose: #f28bab; --staff-teal: #5cc9c2; --staff-orange: #f59e5b; --staff-slate: #9aa4b5;
   /* An attached file's type square (attachcards.tsx): the colours the office suites taught everyone to
@@ -87,49 +102,54 @@
   --file-text: #5b667a; --file-other: #6f7280; --file-glyph: #ffffff;
 
   /* ── the scale everything is drawn on ────────────────────────────────────────────────────
-     Type: the UI is 13/14, prose is 15 on a desktop and 16 on a phone; code is 12.5. A rule that
-     wants a size names a step here, never a number — density.test.ts reads this file and refuses
-     a size above 14 outside the answer, the headings and the prose. */
-  --fs-11: 11px;   /* meta-2: timestamps in rows, kbd hints, badge text */
-  --fs-12: 12px;   /* meta: chips, group labels, aside values, table cells, crumbs */
-  --fs-13: 13px;   /* ui: a row's second line, buttons, panel tabs, the composer's footer */
-  --fs-14: 14px;   /* ui-lg: row titles, nav items, headers, step rows, the user's card */
-  --fs-15: 15px;   /* prose on a desktop; a phone's row titles and body */
+     Type: controls, lists and rows are 14, reading text 15 on a desktop and 16 on a phone, secondary
+     13, meta and labels 12 and never smaller; titles are 15/600 for a page and 18/500 for a pane or a
+     section, 28/500 only for a page's hero; code is 13. A rule that wants a size names a step here,
+     never a number. density.test.ts reads this file and refuses a size above 15 outside the answer,
+     the headings, the titles and the prose, and any size under 12 on a desktop. */
+  --fs-11: 12px;   /* kept at the floor for published pages, which were promised the name; the app writes --fs-12 */
+  --fs-12: 12px;   /* meta: labels, counts, kbd, chips' second words, timestamps — the floor */
+  --fs-13: 13px;   /* secondary: a row's second line, chips, panel tabs, code in a line */
+  --fs-14: 14px;   /* controls, lists, rows; the body */
+  --fs-15: 15px;   /* reading text on a desktop; a page's title in its header (15/600) */
   --fs-16: 16px;   /* prose on a phone, its top bar's title, and any text field on a touch screen (or Safari zooms) */
   --fs-17: 17px;   /* phone: a sheet's title and the home's greeting (see the phone block below) */
-  --fs-18: 18px;   /* a sheet's title, the smallest heading in an answer */
+  --fs-18: 18px;   /* a pane or section title (18/500), the smallest heading in an answer */
   --fs-20: 20px;   /* the middle heading in an answer */
   --fs-22: 22px;   /* the top heading in an answer */
-  --fs-mono: 12.5px;
+  --fs-28: 28px;   /* a page's hero, and nothing else (28/500) */
+  --fs-mono: 13px;
   --fs-prose: var(--fs-15);
-  --lh-ui: 1.35;
-  --lh-prose: 1.55;
+  --lh-ui: 1.45;
+  --lh-prose: 1.6;
   /* Space: an 8 px grid with a 4 px half step. */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-7: 32px; --space-8: 40px;
-  /* Radius: one family. Pills only for chips and the composer. */
+  /* Radius: one family. 8 for a control, 12 for a card, 14 for what floats, 20 for the composer and a
+     large card; pills only for chips. */
   --radius-xs: 6px;    /* inline code, kbd, small badges */
-  --radius-sm: 8px;    /* rows, nav items, menu items, icon buttons */
+  --radius-sm: 8px;    /* rows, nav items, menu items, buttons, icon buttons */
   --radius-md: 12px;   /* cards, code blocks, sheets on a desktop */
-  --radius-lg: 16px;   /* the user's card, popovers, sheets on a phone */
+  --radius-lg: 14px;   /* popovers, menus, dialogs; sheets on a phone */
+  --radius-bubble: 18px; /* the operator's message in the conversation */
   --radius-pill: 999px;
   /* Rows and controls. A phone gets the touch sizes below. */
-  --row-h: 36px;        /* project rows, nav items, explorer rows, menu items */
+  --row-h: 32px;        /* every one-line row: sidebar, menus, settings' sections, explorer rows, nav items */
   --row-h-2: 44px;      /* a chat in the sidebar: its title over a line of state, host, model and time */
   --row-h-kid: 40px;    /* a chat hung from an open project in the sidebar, under the project's tile */
-  --row-h-dense: 32px;  /* explorer tree, palette rows, aside rows */
+  --row-h-dense: 28px;  /* a dense row: explorer tree, terminal pane headers, aside rows, a step of a run */
   --row-h-touch: 44px;  /* phones only: rows and icon buttons */
   --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
   --composer-toolbar-h: 32px;
   --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */
   --chip-h-dense: 24px; /* the sidebar's filter chips: four of them share the column's one line */
   --ctl-h-lg: 40px;     /* large icon buttons and voice actions */
-  --icon: 18px; --icon-sm: 16px; --icon-xs: 14px;
+  --icon: 16px; --icon-sm: 16px; --icon-xs: 14px;
   --dot: 6px;           /* the status dot in a session row */
   --avatar: 24px;
   --plate: 24px;        /* a sidebar row's round plate (a chat) or square tile (a project) */
   /* Layout. */
-  --sidebar-w: 288px;   /* dragged between the two below and remembered; 288 holds a Russian title on a two-line row */
+  --sidebar-w: 300px;   /* the default; dragged between the two below and remembered */
   --sidebar-w-min: 232px; --sidebar-w-max: 360px;
   --rail-w: 52px;       /* the rail of icons at the left edge, always there on a desktop */
   --panel-w: 42%; --panel-w-min: 360px;
@@ -156,7 +176,7 @@
   --drawer-w: min(86vw, 336px);
   --gutter: 16px;         /* a phone page's side padding: both reference apps measure 16 */
   --radius-xl: 20px;      /* a sheet's top corners, a grouped card's outer corners */
-  --radius-composer: 24px;
+  --radius-composer: var(--radius-xl);
   /* Motion: 150 ms for a control, 180 for a popover, 220 for a dialog, on one decelerating curve. */
   --t-fast: 150ms; --t-base: 180ms; --t-slow: 220ms;
   --ease-out: cubic-bezier(.23, 1, .32, 1); --ease-in: cubic-bezier(.4, 0, 1, 1);
@@ -182,44 +202,50 @@
   :root { --ctl-h: 40px; --ctl-h-sm: 32px; }
 }
 :root[data-scheme="light"] {
-  --bg: #fafafa;
+  --bg: #f5f5f4;
   --wash: #ffffff;
   --card: #ffffff;
-  --inset: #f7f7f7;
+  --inset: #f6f6f5;
   --surface-1: #ffffff;
-  --surface-2: #f5f5f5;
-  --surface-3: #eeeeee;
-  --surface-4: #e8e8e8;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-strong: rgba(0, 0, 0, 0.14);
-  --fg: var(--tg-theme-text-color, #0a0a0a);
-  --fg-2: #525252;
-  --fg-3: #6a6a6a;
-  --accent: #1f6dd8;
+  --surface-2: #f5f5f4;
+  --surface-3: #efefee;
+  --surface-4: #e7e7e6;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.17);
+  --hover: rgba(0, 0, 0, 0.05);
+  --selected: rgba(0, 0, 0, 0.08);
+  --bubble: #f0f0ef;
+  --fg: var(--tg-theme-text-color, #1b1b1b);
+  --fg-2: #595959;
+  /* A step under the drawn #6e6e6e, cyan and orange likewise (#0a7c92, #b4560a): on the frame and on a
+     pressed fill those read at 4.2 to 4.5:1, under the 4.5 every text step is held to. */
+  --fg-3: #6b6b6b;
+  --accent: #5a41d8;
   --accent-ink: #ffffff;
-  --primary: #0a0a0a;
+  --primary: #6a52e8;
   --primary-ink: #ffffff;
-  --primary-hover: #525252;
-  --ok: #218041;
-  --warn: #a75e0f;
-  --bad: #d02c2a;
-  --info: #1f6dd8;
-  --code: #a75e0f;
+  --primary-hover: #5b42dc;
+  --live: #0a778c;
+  --attention: #ae530a;
+  --ok: #0a778c;
+  --warn: #ae530a;
+  --bad: #ae530a;
+  --info: #0a778c;
+  --added-bg: rgba(10, 124, 146, 0.10);
+  --removed-bg: rgba(180, 86, 10, 0.10);
   --code-block: #262626;
-  --scrim: rgba(0, 0, 0, 0.32);
+  --scrim: rgba(0, 0, 0, 0.35);
   --shadow-ring: 0 0 0 1px rgba(0, 0, 0, 0.08);
-  --shadow-xs: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-sm: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 8px -2px rgba(0, 0, 0, 0.06), 0 16px 32px -8px rgba(0, 0, 0, 0.12);
-  --shadow-xl: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.08), 0 32px 64px -12px rgba(0, 0, 0, 0.18);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 16px 48px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   --drop-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --drop-sm: 0 1px 2px -1px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --drop-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   /* On a light page "white" (7) and "bright white" (15) are greys, or text in them would vanish. */
-  --term-bg: #fafafa;
-  --ansi-0: #0a0a0a; --ansi-1: #d02c2a; --ansi-2: #218041; --ansi-3: #a75e0f;
-  --ansi-4: #1f6dd8; --ansi-5: #7f47c7; --ansi-6: #007f80; --ansi-7: #868686;
-  --ansi-8: #525252; --ansi-9: #e0524d; --ansi-10: #25b865; --ansi-11: #c98a26;
+  --term-bg: #f6f6f5;
+  --ansi-0: #1b1b1b; --ansi-1: #d02c2a; --ansi-2: #218041; --ansi-3: #a75e0f;
+  --ansi-4: #1f6dd8; --ansi-5: #7f47c7; --ansi-6: #007f80; --ansi-7: #6b6b6b;
+  --ansi-8: #595959; --ansi-9: #e0524d; --ansi-10: #25b865; --ansi-11: #c98a26;
   --ansi-12: #4a84f0; --ansi-13: #b066dd; --ansi-14: #13b3a0; --ansi-15: #bebebe;
   --staff-blue: #1f6dd8; --staff-green: #218041; --staff-amber: #a75e0f; --staff-violet: #7f47c7;
   --staff-rose: #d0456f; --staff-teal: #007f80; --staff-orange: #d46a1c; --staff-slate: #5b667a;
@@ -230,15 +256,15 @@
    px bar title, so ours came down one step (rows 16 to 15, secondary 15 to 14, bar 17 to 16, sheet
    titles and the greeting 22 to 17). Text fields stay at 16, or Safari zooms on focus. The desktop
    steps that are not on the scale are moved to the nearest one here, once, so a rule written for the
-   desktop (an 11 px time, an 18 px heading) lands on it without a phone copy of itself: 11 becomes
-   12, and 18, 20 and 22 become 17, so an answer's headings sit one step over its 16 px prose; the
-   desktop's 14 is on the scale now and stays. density.test.ts holds this block to the six steps and
+   desktop (an 18 px heading, a 28 px hero) lands on it without a phone copy of itself: 18, 20, 22
+   and 28 become 17, so an answer's headings sit one step over its 16 px prose; the desktop's 12 and
+   14 are on the scale and stay. density.test.ts holds this block to the six steps and
    check_density.py measures the drawn page against them.
    The palette is the desktop's: a phone had four greys of its own until the two were drawn from one
    theme, and a theme is written inline over any block here in any case. */
 @media (max-width: 1023px) {
   :root {
-    --fs-11: 12px; --fs-18: 17px; --fs-20: 17px; --fs-22: 17px; --fs-mono: 13px; --fs-prose: var(--fs-16);
+    --fs-18: 17px; --fs-20: 17px; --fs-22: 17px; --fs-28: 17px; --fs-prose: var(--fs-16);
     --head-h: var(--top-h); --page-pad: var(--gutter); --composer-h: 44px;
     --radius-md: 16px; --radius-lg: 20px;
   }

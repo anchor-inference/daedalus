@@ -15,7 +15,7 @@
 /* The page itself: the app's background, text and font, with no margin of the browser's own. */
 html { background: var(--wash); color: var(--fg); color-scheme: dark; }
 :root[data-scheme="light"] { color-scheme: light; }
-body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); -webkit-font-smoothing: antialiased; }
+body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; }
 .dk-page { min-height: 100vh; box-sizing: border-box; padding: var(--space-4) var(--page-pad); }
 .dk-page *, .dk-page *::before, .dk-page *::after { box-sizing: border-box; }
 .dk-stack { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -24,26 +24,26 @@ body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); -webkit-font-sm
 .dk-muted { color: var(--fg-2); }
 .dk-meta { color: var(--fg-3); font-size: var(--fs-12); }
 .dk-mono { font-family: var(--mono); font-size: var(--fs-mono); }
-.dk-h1 { font-size: var(--fs-18); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
+.dk-h1 { font-size: var(--fs-18); font-weight: 500; text-wrap: balance; margin: 0; }
 .dk-h2 { font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
 .dk-section-title { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; margin: var(--space-4) 2px var(--space-2); }
 
 /* Buttons: an action; .primary is the next action, .danger destroys, .ghost is quiet, .small is dense. */
 .dk-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--ctl-h);
-  padding: 5px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); box-shadow: var(--drop-xs);
-  color: var(--fg); font: 500 var(--fs-13) / 1.2 var(--font); cursor: pointer; text-decoration: none;
+  padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: transparent;
+  color: var(--fg); font: 500 var(--fs-14) / 1.2 var(--font); cursor: pointer; text-decoration: none;
   transition: background var(--t-fast), opacity var(--t-fast), transform var(--t-fast);
 }
-.dk-btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.dk-btn:hover { background: var(--hover); }
 .dk-btn:active { transform: scale(var(--press-scale)); }
 .dk-btn:focus-visible, .dk-input:focus-visible, .dk-select:focus-visible, .dk-textarea:focus-visible, .dk-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .dk-btn.primary { background: var(--primary); color: var(--primary-ink); border-color: transparent; box-shadow: none; }
 .dk-btn.primary:hover { background: var(--primary-hover); border-color: transparent; }
 .dk-btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--fg-2); }
-.dk-btn.ghost:hover { background: var(--surface-2); color: var(--fg); border-color: transparent; }
-.dk-btn.danger { background: var(--card); color: var(--bad); }
-.dk-btn.danger:hover { background: color-mix(in srgb, var(--bad) 10%, var(--card)); }
+.dk-btn.ghost:hover { background: var(--hover); color: var(--fg); border-color: transparent; }
+.dk-btn.danger { color: var(--bad); }
+.dk-btn.danger:hover { background: var(--removed-bg); }
 .dk-btn.small { min-height: var(--ctl-h-sm); padding: 4px 10px; }
 .dk-btn.icon { width: var(--ctl-h); padding: 0; }
 .dk-btn:disabled, .dk-btn[aria-disabled="true"] { opacity: .45; cursor: default; pointer-events: none; }
@@ -52,12 +52,12 @@ body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); -webkit-font-sm
 .dk-field { display: grid; gap: 6px; }
 .dk-field > label, .dk-label { color: var(--fg-2); font-size: var(--fs-12); }
 .dk-input, .dk-select, .dk-textarea {
-  width: 100%; min-height: var(--ctl-h); padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
-  background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font: var(--fs-13) / 1.35 var(--font);
+  width: 100%; min-height: var(--ctl-h); padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--card); color: var(--fg); font: var(--fs-14) / var(--lh-ui) var(--font);
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
-/* Focus darkens the edge and adds a soft halo; the ring below stays for keyboard focus only. */
-.dk-input:focus, .dk-select:focus, .dk-textarea:focus { outline: none; border-color: var(--line-strong); box-shadow: var(--shadow-focus); }
+/* Focus takes the selection's violet on the edge; the ring below stays for keyboard focus only. */
+.dk-input:focus, .dk-select:focus, .dk-textarea:focus { outline: none; border-color: var(--accent); box-shadow: none; }
 .dk-input:focus-visible, .dk-select:focus-visible, .dk-textarea:focus-visible { outline: none; }
 .dk-textarea { min-height: 80px; resize: vertical; line-height: var(--lh-prose); }
 .dk-select { appearance: none; padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--fg-2) 50%), linear-gradient(135deg, var(--fg-2) 50%, transparent 50%); background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
@@ -66,32 +66,32 @@ body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); -webkit-font-sm
 .dk-error { color: var(--bad); font-size: var(--fs-12); }
 
 /* A card: a raised surface for a group of things. */
-.dk-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--drop-xs); padding: var(--space-4); }
+.dk-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-4); }
 .dk-card.flat { border-color: transparent; box-shadow: none; background: var(--surface-2); }
 
 /* A list of rows: a title over an optional meta line, with an optional trailing value or action. */
-.dk-list { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--drop-xs); overflow: hidden; }
+.dk-list { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
 .dk-row { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-h); padding: 6px var(--space-3); color: inherit; text-decoration: none; }
 .dk-list > .dk-row + .dk-row { border-top: 1px solid var(--line); }
 .dk-row.pressable, a.dk-row, button.dk-row { cursor: pointer; background: none; border: 0; width: 100%; text-align: left; font: inherit; }
-.dk-row.pressable:hover, a.dk-row:hover, button.dk-row:hover { background: var(--surface-2); }
-.dk-row[aria-selected="true"] { background: var(--surface-3); }
+.dk-row.pressable:hover, a.dk-row:hover, button.dk-row:hover { background: var(--hover); }
+.dk-row[aria-selected="true"] { background: var(--selected); }
 .dk-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .dk-row-title { font-size: var(--fs-14); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dk-row-meta { color: var(--fg-3); font-size: var(--fs-12); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Tabs: a row of choices; mark the open one with aria-selected="true". A long strip scrolls itself. */
 .dk-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-.dk-tab { flex: none; min-height: var(--ctl-h); padding: 6px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--fg-2); font: 500 var(--fs-13) / 1.2 var(--font); cursor: pointer; }
+.dk-tab { flex: none; min-height: var(--ctl-h); padding: 6px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--fg-2); font: 500 var(--fs-14) / 1.2 var(--font); cursor: pointer; }
 .dk-tab:hover { color: var(--fg); }
-.dk-tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+.dk-tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 
 /* A toolbar: actions in a line above content; .dk-spacer pushes what follows to the end. */
 .dk-toolbar { display: flex; align-items: center; gap: var(--space-2); min-height: var(--head-h); padding: 0 var(--page-pad); border-bottom: 1px solid var(--line); background: var(--wash); position: sticky; top: 0; z-index: 2; }
 .dk-spacer { flex: 1; }
 
 /* A badge: a count or a state, never an action. */
-.dk-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; padding: 0 7px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.dk-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; padding: 0 7px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 14%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
 .dk-badge.ok { color: var(--ok); }
 .dk-badge.warn { color: var(--warn); }
 .dk-badge.bad { color: var(--bad); }
@@ -99,17 +99,17 @@ body { margin: 0; font: var(--fs-14) / var(--lh-ui) var(--font); -webkit-font-sm
 .dk-badge.accent { color: var(--accent); }
 
 /* A table: hairlines between rows, a quiet header, numbers aligned with .num. */
-.dk-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
+.dk-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
 .dk-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
 .dk-table th, .dk-table td { padding: 8px var(--space-3); border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .dk-table th { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; background: var(--inset); }
-.dk-table tbody tr:hover { background: var(--surface-2); }
+.dk-table tbody tr:hover { background: var(--hover); }
 .dk-table tbody tr:last-child > * { border-bottom: 0; }
 .dk-table .num { text-align: right; }
 
 /* An empty state: what will appear here, and one thing to do about it. */
 .dk-empty { display: grid; justify-items: center; gap: 6px; padding: 48px 16px; color: var(--fg-2); text-align: center; }
-.dk-empty > b, .dk-empty > strong { color: var(--fg); font-size: var(--fs-15); font-weight: 500; letter-spacing: -0.01em; }
+.dk-empty > b, .dk-empty > strong { color: var(--fg); font-size: var(--fs-15); font-weight: 500; }
 .dk-empty .dk-btn { margin-top: var(--space-2); }
 
 /* A split pane: a side column and the main area; on a phone they stack, the side above. */

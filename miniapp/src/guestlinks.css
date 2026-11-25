@@ -52,7 +52,9 @@
    end rather than taking a line of its own under it: three limits were six rows tall. */
 @media (max-width: 599px) {
   .guest-limit .settings-row-ctl, .guest-daily .settings-row-ctl { flex-wrap: nowrap; }
-  .guest-limit .settings-row-ctl > .settings-num, .guest-daily .settings-row-ctl > .settings-num { flex: 1 1 0; }
+  /* min-width 0: the field gives way to "No limit" rather than pushing the row out of the sheet, which
+     it did by 12 to 29 px at 390 once Inter set the unit and the chip a little wider. */
+  .guest-limit .settings-row-ctl > .settings-num, .guest-daily .settings-row-ctl > .settings-num { flex: 1 1 0; min-width: 0; }
 }
 .guest-daily .settings-row-ctl { flex-wrap: wrap; }
 .guest-draft { align-self: flex-start; margin-top: var(--space-2); }

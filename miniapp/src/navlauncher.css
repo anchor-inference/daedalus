@@ -43,7 +43,7 @@
 .launch-catalogue { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 4px; }
 @container (max-width: 460px) { .launch-catalogue { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-.launch-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: var(--row-h-dense); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; text-decoration: none; cursor: pointer; outline: none; }
+.launch-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: var(--row-h); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; text-decoration: none; cursor: pointer; outline: none; }
 .launch-row:hover, .launch-row:focus-visible { background: var(--surface-3); }
 .launch-row .ic { flex: none; color: var(--fg-3); }
 /* Where the reader already is, in ink: the accent is kept for what is live. */
