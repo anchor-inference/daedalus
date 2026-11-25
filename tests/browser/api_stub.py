@@ -4296,7 +4296,7 @@ class FocusStub:
         readable = [{"id": f["id"], "path": f["path"], "label": f["label"], "env": f["env"], "readonly": f["readonly"], "writable": False}
                     for f in project["folders"]] if orchestrator_of else []
         return {
-            "id": sid, "title": title, "status": status, "run_id": None, "compacting": None, "housekeeping": False, "error": "",
+            "id": sid, "title": title, "status": status, "run_id": None, "run_started_at": None, "branch": None, "compacting": None, "housekeeping": False, "error": "",
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",

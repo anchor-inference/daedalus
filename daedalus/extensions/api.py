@@ -175,6 +175,7 @@ from daedalus.host import (
     attached_files,
     capabilities,
     component_install,
+    git_branch,
     launcher_bridge,
     quick_agent,
     subagent_models,
@@ -2565,6 +2566,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         default = app.config.default_preset()
         return default[1].provider if default else ""
 
+    def _session_branch(state: Any) -> str | None:
+        """The branch the session's working folder is on. A session working in a folder of its own under
+        the workspaces root reads only inside it: the root may itself sit in some repository."""
+        folder = manager.work_dir(state)
+        root = app.settings.workspaces_dir
+        return git_branch.branch_of(folder, stop=root if folder.is_relative_to(root) else None)
+
     def _session_folders(state: Any) -> list[dict[str, Any]]:
         """The folders of its project the session's file pane may open: the ones its walls let it read.
 
@@ -2660,6 +2668,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # A summary written ahead of the trigger while the session goes on: shown, never as blocking.
             "compaction_background": state.background_compacting,
             "run_id": state.run_id,
+            # When the run in flight began, on the wall clock; null between runs. A run that waited for the
+            # operator's answer counts from the resume, as the run-time cap does.
+            "run_started_at": since.isoformat() if (since := manager.run_since(session_id)) is not None else None,
+            # The branch the working folder is on, from the repository's HEAD file and not from git itself:
+            # this is read on every poll. Null outside a repository, on a detached HEAD, and for a session
+            # working in a folder on the host, which this process cannot see.
+            "branch": _session_branch(state),
             # The operator's messages acknowledged and still with the translator: drawn as translating after
             # a reload too, not only by the window that sent them.
             "translating": manager.translating(session_id),

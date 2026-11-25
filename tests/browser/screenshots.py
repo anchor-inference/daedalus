@@ -354,6 +354,8 @@ def detail(id_: str) -> dict:
     status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
+        # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
+        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None,
         "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
