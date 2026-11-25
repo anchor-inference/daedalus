@@ -469,7 +469,7 @@ Two shapes; both keep every feature:
    the files in your workspace and tell me the date"; it must answer within a minute and the run must
    show tool steps. Before a model exists this step answers 409 with "No model is configured yet",
    which is the correct behaviour, not a fault.
-2. Settings → Models shows the model they added, marked default; Usage shows the call you just made.
+2. Settings → Models and providers shows the model they added, marked default; Usage shows the call you just made.
 3. `docker logs deploy-daedalus-1 | grep -i error` shows nothing about providers.
 
 ## 7. Updating, and whether the agent may update itself

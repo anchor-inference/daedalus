@@ -135,7 +135,7 @@ async def _config(ctx: DoctorContext) -> list[Check]:
     cfg, st = ctx.config, ctx.settings
     found = cfg.default_preset()
     if found is None:
-        out.append(Check("default model", False, "no model is configured; nothing can run yet", "fail", "open the app and add one: Settings → Models → Add a model"))
+        out.append(Check("default model", False, "no model is configured; nothing can run yet", "fail", "open the app and add one: Settings → Models and providers → Add a model"))
         pid, preset = "", None
     else:
         pid, preset = found
@@ -143,12 +143,12 @@ async def _config(ctx: DoctorContext) -> list[Check]:
         out.append(Check("default model", True, f"{pid} = {preset.display(pid)}", "ok"))
         provider = cfg.providers.get(preset.provider)
         if provider is None:
-            out.append(Check("default provider", False, f"preset {pid} uses provider '{preset.provider}', which is not configured", "fail", "add the provider in Settings → Providers, or pick another default preset"))
+            out.append(Check("default provider", False, f"preset {pid} uses provider '{preset.provider}', which is not configured", "fail", "add the provider in Settings → Models and providers, or pick another default preset"))
         else:
             source = provider_key_source(st, provider)
             fine = source != "missing"
             detail = {"key": "configured", "proxy": "held by the key proxy", "keyless": "no API key (fine for a keyless self-hosted endpoint)"}.get(source, "no API key")
-            out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Providers"))
+            out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Models and providers"))
             if provider.kind == "llamacpp":
                 out.append(Check("pricing for the default model", True, "local llama.cpp inference is recorded at $0 and does not consume spending caps", "ok"))
             elif provider.billing == "subscription":
@@ -167,7 +167,7 @@ async def _config(ctx: DoctorContext) -> list[Check]:
     chain_detail = ", ".join(cfg.model.chain) or "none"
     if not cfg.model.auto_fallback:
         chain_detail = f"off (configured: {chain_detail})"
-    out.append(Check("fallback chain", not chain_bad, chain_detail if not chain_bad else f"unknown presets: {', '.join(chain_bad)}", "ok" if not chain_bad else "warn", "fix the chain in Settings → Models"))
+    out.append(Check("fallback chain", not chain_bad, chain_detail if not chain_bad else f"unknown presets: {', '.join(chain_bad)}", "ok" if not chain_bad else "warn", "fix the chain in Settings → Models and providers"))
     sandbox = cfg.tools.exec.sandbox
     status = await asyncio.to_thread(bwrap_status)
     usable = status == "ok"
@@ -940,13 +940,13 @@ async def _providers(ctx: DoctorContext) -> list[Check]:
             detail = describe_discovery(discovered)
             if discovered.sleeping:
                 return Check(f"llama.cpp {label}", False, detail, "warn", "wait for the model to wake or finish loading")
-            return Check(f"llama.cpp {label}", discovered.reachable, detail, "ok" if discovered.reachable else "fail", "check the server and base_url in Settings → Providers")
+            return Check(f"llama.cpp {label}", discovered.reachable, detail, "ok" if discovered.reachable else "fail", "check the server and base_url in Settings → Models and providers")
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(base.rstrip("/") + "/models", headers={"authorization": f"Bearer {key}"} if key else {})
             ok = response.status_code < 500 and response.status_code != 401
             detail = f"HTTP {response.status_code}" + (" (key rejected)" if response.status_code == 401 else "")
-            return Check(f"provider {pid}", ok, f"{shown} → {detail}", "ok" if ok else "fail", "check the key and base_url in Settings → Providers")
+            return Check(f"provider {pid}", ok, f"{shown} → {detail}", "ok" if ok else "fail", "check the key and base_url in Settings → Models and providers")
         except Exception as exc:  # noqa: BLE001 — a typo in base_url raises InvalidURL, not HTTPError
             return Check(f"provider {pid}", False, f"{shown} unreachable: {type(exc).__name__}", "fail", "network, proxy or a wrong base_url")
 

@@ -4049,7 +4049,7 @@ class SessionManager:
             preset_id = self._preset_of_rung(overrides, provider, model)
             if preset_id is None:
                 return None, f"the session's model {model} is not marked as taking images", None
-            return None, f"the session's model {model} is not marked as taking images (its Images switch in Settings → Models is off)", preset_images(preset_id)
+            return None, f"the session's model {model} is not marked as taking images (its Images switch in Settings → Models and providers is off)", preset_images(preset_id)
         return (provider, model, self.blobs, TENANT), "", None
 
     def _preset_of_rung(self, overrides: dict[str, Any], provider: Any, model: str) -> str | None:

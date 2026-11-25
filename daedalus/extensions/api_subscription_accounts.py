@@ -1,4 +1,4 @@
-"""Settings → Models → Accounts: more than one account per subscription, and which one a model uses.
+"""Settings → Subscription accounts: more than one account per subscription, and which one a model uses.
 
 An account is named and ordered here (:class:`daedalus.stores.subscription_accounts.SubscriptionAccounts`);
 its credential is the key proxy's (``deploy/keyproxy/accounts.py``). Adding a CLI-login account makes its

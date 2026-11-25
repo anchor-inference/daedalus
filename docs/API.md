@@ -287,7 +287,7 @@ the one it replaces. It sleeps between turns and is woken by its project's event
 seconds (at once for a question, a permission, an error or a stuck report); every turn begins with the
 project as it is now, which `GET /api/projects/{id}/state` shows as it sees it. Its questions never
 pause it: they are requests you answer like a staff member's, and the answer wakes it. Its model is
-the project's own choice, else the default for project orchestrators in Settings → Models, else the
+the project's own choice, else the default for project orchestrators in Settings → Models for tasks, else the
 strongest preset; the model chip in its chat changes the project's choice. In `GET /api/sessions`
 such a project carries `orchestrator: {"enabled", "session_id", "staff", "working", "needs_you"}`
 (null for a project without one), and `GET /api/sessions/{id}` names what a session is to its
@@ -415,7 +415,7 @@ worked, and it tells you in a line or two — pushed to your phone when you are 
 A question a project puts to you about a dispatch (`AskOperator(dispatch_id=…)`) is shown in the main
 chat as well as the project's, as one request answered once wherever you answer it; its model is not
 woken for it. It answers one for you only when your latest message says the answer (`Answer` quotes
-your words), and never a permission. Its model is Settings → Models → Main orchestrator, a mid-tier
+your words), and never a permission. Its model is Settings → Models for tasks → Main orchestrator, a mid-tier
 preset unless you choose one; the model chip in its chat writes that setting. `GET /api/main` is the
 chat as the app draws it (the session, the dispatches, the questions), `POST /api/main` opens it the
 first time and `POST /api/main/replace` gives it a fresh chat; `GET /api/dispatches/{id}` and `POST

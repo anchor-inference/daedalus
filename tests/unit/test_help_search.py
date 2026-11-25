@@ -147,7 +147,7 @@ def test_the_settings_index_is_whole_and_names_real_configuration() -> None:
 
 def test_a_link_names_the_section_and_the_row() -> None:
     assert setting_link("dictation", "asr.transcriber") == "/app/settings/dictation#asr.transcriber"
-    assert setting_link("providers", "providers.list") == "/app/settings/providers#providers.list"
+    assert setting_link("models", "providers.list") == "/app/settings/models#providers.list"
     assert setting_link("budget") == "/app/settings/budget"
 
 

@@ -596,7 +596,7 @@ class ModelPresetConfig(BaseModel):
     """Which of those the listing no longer offers, for the model's settings to say. Written by the daily check
     and after a refusal; the choice itself stays, because a provider that comes back should be used again."""
     account: str = ""
-    """The subscription account this model's calls go out on (an id from Settings → Accounts), "" for the
+    """The subscription account this model's calls go out on (an id from Settings → Subscription accounts), "" for the
     upstream's default account. Like the OpenRouter route it is one choice per endpoint and model, written to
     every preset of the pair; an id that no longer exists is the default again (``SubscriptionAccounts.chain``)."""
 
@@ -2574,7 +2574,7 @@ class RuntimeConfig(BaseModel):
     presets: dict[str, ModelPresetConfig] = Field(default_factory=dict)
     """Named models keyed by id. Empty on a fresh install: a provider endpoint is not a model, and
     which model to run — and pay for — is the operator's to pick. The app asks for one at first login
-    (Settings → Models → Add a model); ``deploy/config.example.toml`` shows the shape of an entry."""
+    (Settings → Models and providers → Add a model); ``deploy/config.example.toml`` shows the shape of an entry."""
     providers: dict[str, ProviderConfig] = Field(
         default_factory=lambda: {
             "deepseek": ProviderConfig(kind="deepseek", base_url=keyproxy_base() + "/deepseek"),
@@ -2685,7 +2685,7 @@ class RuntimeConfig(BaseModel):
         on a subscription. What a preset does say is how hard it is asked to think and how much it
         may hold: the highest reasoning effort with thinking on wins, then the larger window, then the
         longer reply, and a tie goes to the default preset, then to the order of the table. It is a
-        guess the operator corrects once, in Settings → Models.
+        guess the operator corrects once, in Settings → Models and providers.
         """
         if not self.presets:
             return None

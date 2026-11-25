@@ -587,18 +587,18 @@ class Orchestrators:
 
     def _check_model(self, model: str) -> None:
         if model and model not in self.manager.config.presets:
-            raise ProjectError(f"no model preset {model!r}; the presets are in Settings → Models")
+            raise ProjectError(f"no model preset {model!r}; the presets are in Settings → Models and providers")
 
     async def _preflight_model(self, project: Project, model: str | None) -> None:
         """Refuse an unusable first call before publishing an office or model change."""
         config = self.manager.config
         selected = config.orchestrator_preset(project.settings.orchestrator.model if model is None else model)
         if selected is None:
-            raise ProjectError("choose a coordinator model in Settings → Models before enabling it")
+            raise ProjectError("choose a coordinator model in Settings → Models for tasks before enabling it")
         try:
             rungs, preset = self.manager.resolve_model({"preset": selected})
         except (KeyError, RuntimeError, ValueError) as exc:
-            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model in Settings → Models") from exc
+            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model in Settings → Models for tasks") from exc
         if not rungs:
             raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model")
         adapter, effective_model = rungs[0]
@@ -621,7 +621,7 @@ class Orchestrators:
             # Enable used to publish a working office that its very first capped call refused.
             raise ProjectError(
                 f"coordinator model {selected!r} cannot run with spending limits: {exc}. "
-                "Correct its price entry or output limit in Settings → Models & providers, or choose another model."
+                "Correct its price entry or output limit in Settings → Models and providers, or choose another model."
             ) from exc
 
     def needs_home(self, project: Project) -> bool:
