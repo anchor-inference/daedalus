@@ -4,8 +4,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
-import { Sheet } from "../ui/dialogs";
-import { Segmented, Switch } from "../ui/components";
+import { Button, Segmented, Select, Sheet, Switch } from "../ui/primitives";
 import { errorText } from "../ui";
 import { prime } from "../store";
 import { parseClock } from "./dates";
@@ -32,53 +31,60 @@ export function SettingsSheet({ settings, zone, onClose, toast }: { settings: Ca
     finally { setBusy(false); }
   }
 
+  const views = ["day", "week", "month", "agenda"] as const;
   return (
-    <Sheet title={t("cal.settings")} onClose={onClose} size="sm" className="cal-settings">
-      <div className="cal-settings-body">
-        <Row label={t("cal.settings.week.start")}>
-          <Segmented value={String(s.week_start) as "0" | "1"} onChange={(v) => set({ week_start: Number(v) as 0 | 1 })} label={t("cal.settings.week.start")} options={[{ id: "1", label: t("cal.weekday.mo") }, { id: "0", label: t("cal.weekday.su") }]} />
-        </Row>
-        <Row label={t("cal.settings.weekends")}>
-          <Switch checked={s.show_weekends} onChange={(on) => set({ show_weekends: on })} label={t("cal.settings.weekends")} />
-        </Row>
-        <Row label={t("cal.settings.work")} hint={invalid ? t("cal.invalid.range") : t("cal.settings.work.hint")} bad={invalid}>
-          <span className="cal-settings-pair">
-            <ClockSelect value={s.work_start} onChange={(v) => set({ work_start: v })} label={t("cal.settings.work.start")} />
-            <span aria-hidden="true">–</span>
-            <ClockSelect value={s.work_end} onChange={(v) => set({ work_end: v })} label={t("cal.settings.work.end")} />
-          </span>
-        </Row>
-        <Row label={t("cal.settings.view")}>
-          <select className="field" value={s.default_view} onChange={(e) => set({ default_view: e.target.value as CalendarSettings["default_view"] })} aria-label={t("cal.settings.view")}>
-            {(["day", "week", "month", "agenda"] as const).map((v) => <option key={v} value={v}>{t(`cal.view.${v}`)}</option>)}
-          </select>
-        </Row>
-        <Row label={t("cal.settings.duration")}>
-          <select className="field" value={s.default_duration} onChange={(e) => set({ default_duration: Number(e.target.value) })} aria-label={t("cal.settings.duration")}>
-            {DURATIONS.map((m) => <option key={m} value={m}>{duration(m)}</option>)}
-          </select>
-        </Row>
-        <Row label={t("cal.settings.reminders")} wide>
-          <Reminders value={s.default_reminders} onChange={(default_reminders) => set({ default_reminders })} />
-        </Row>
-        <Row label={t("cal.settings.zone")} hint={t("cal.settings.zone.hint")} wide>
-          <ZonePicker value={s.timezone} onChange={(timezone) => set({ timezone })} />
-        </Row>
-        <div className="sheet-foot cal-foot">
-          <span className="cal-spacer" />
-          <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
-          <button type="button" className="btn primary" disabled={busy || invalid} onClick={() => void save()}>{t("common.save")}</button>
+    <Sheet title={t("cal.settings")} onClose={onClose} size="md" className="cal-settings"
+      footer={<>
+        <span className="cal-spacer" />
+        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={busy || invalid} onClick={() => void save()}>{t("common.save")}</Button>
+      </>}>
+      <div className="cal-set">
+        <div className="cal-set-label">{t("cal.settings.section.week")}</div>
+        <div className="cal-set-card">
+          <Row label={t("cal.settings.week.start")}>
+            <Segmented value={String(s.week_start) as "0" | "1"} onChange={(v) => set({ week_start: Number(v) as 0 | 1 })} label={t("cal.settings.week.start")} options={[{ id: "1", label: t("cal.weekday.mo") }, { id: "0", label: t("cal.weekday.su") }]} />
+          </Row>
+          <Row label={t("cal.settings.weekends")}>
+            <Switch checked={s.show_weekends} onChange={(on) => set({ show_weekends: on })} label={t("cal.settings.weekends")} />
+          </Row>
+          <Row label={t("cal.settings.view")}>
+            <Select value={s.default_view} label={t("cal.settings.view")} onChange={(v) => set({ default_view: v })} options={views.map((v) => ({ id: v, label: t(`cal.view.${v}`) }))} />
+          </Row>
+        </div>
+        <div className="cal-set-label">{t("cal.settings.section.day")}</div>
+        <div className="cal-set-card">
+          <Row label={t("cal.settings.work")} hint={invalid ? t("cal.invalid.range") : t("cal.settings.work.hint")} bad={invalid}>
+            <span className="cal-settings-pair">
+              <ClockSelect value={s.work_start} onChange={(v) => set({ work_start: v })} label={t("cal.settings.work.start")} />
+              <span aria-hidden="true">–</span>
+              <ClockSelect value={s.work_end} onChange={(v) => set({ work_end: v })} label={t("cal.settings.work.end")} />
+            </span>
+          </Row>
+          <Row label={t("cal.settings.zone")} hint={t("cal.settings.zone.hint")} stack>
+            <ZonePicker value={s.timezone} onChange={(timezone) => set({ timezone })} />
+          </Row>
+        </div>
+        <div className="cal-set-label">{t("cal.settings.section.new")}</div>
+        <div className="cal-set-card">
+          <Row label={t("cal.settings.duration")}>
+            <Select value={String(s.default_duration)} label={t("cal.settings.duration")} onChange={(m) => set({ default_duration: Number(m) })} options={DURATIONS.map((m) => ({ id: String(m), label: duration(m) }))} />
+          </Row>
+          <Row label={t("cal.settings.reminders")} wide>
+            <Reminders value={s.default_reminders} onChange={(default_reminders) => set({ default_reminders })} />
+          </Row>
         </div>
       </div>
     </Sheet>
   );
 }
 
-function Row({ label, hint, children, wide, bad }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean; bad?: boolean }) {
+/** A card's row: what it sets and, under it, the one line that says what that does; the control at the end. */
+function Row({ label, hint, children, wide, bad, stack }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean; bad?: boolean; stack?: boolean }) {
   return (
-    <div className={`cal-settings-row ${wide ? "wide" : ""}`}>
-      <div className="cal-settings-label"><span>{label}</span>{hint && <small className={bad ? "bad" : ""}>{hint}</small>}</div>
-      <div className="cal-settings-control">{children}</div>
+    <div className={`cal-set-row ${wide ? "wide" : ""} ${stack ? "stack" : ""}`}>
+      <div className="cal-set-title"><span>{label}</span>{hint && <small className={bad ? "bad" : ""}>{hint}</small>}</div>
+      <div className="cal-set-control">{children}</div>
     </div>
   );
 }
