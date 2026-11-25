@@ -127,7 +127,8 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
     memory = stubbed()
     page = open_page(browser, width, lang, memory, f"memory/{AREA}")
     page.wait_for_selector(".memory-review-banner", timeout=20000)
-    page.locator(".memory-review-banner").click()
+    # With the pane open the list's own banner stands before the entry's.
+    page.locator(".memory-review-banner").last.click()
     page.wait_for_selector(".memory-review-row", timeout=8000)
     shown = page.evaluate("() => [...document.querySelectorAll('.memory-review-row')].map((r) => Number(r.dataset.suggestion))")
     if shown != [21, 22, 23] or page.locator(".memory-review-by").count():
