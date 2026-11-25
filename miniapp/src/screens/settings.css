@@ -138,19 +138,62 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 
 /* ── the cards a section is drawn in ─────────────────────────────────────────────────────────
    A small label over a card of 44 px rows with a hairline between them, the control at the row's
-   end. Models and providers is drawn in them; the other sections move into them one by one. */
+   end, and a sentence of help in the secondary ink under the label. Every section is drawn in them:
+   `SetGroup` (settingsrow.tsx) is the label, the help and the card; a row is `Row`'s `.settings-row`,
+   which looks like this inside a card and like a plain form row anywhere else (a sheet, an editor). */
+.set-group + .set-group, .set-group + .set-label, .set-card + .set-group, .set-card + .set-label { margin-top: 20px; }
 .set-label { display: flex; align-items: center; gap: 12px; height: 28px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .set-label:not(:first-child) { margin-top: 20px; }
+.set-group > .set-label:first-child { margin-top: 0; }
 .set-label > :first-child { flex: 1; }
 .set-label-note { font-weight: 400; }
+.set-help { margin: -2px 0 8px; max-width: 72ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; text-wrap: pretty; }
 .set-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.set-group > .set-card > * + *, .set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 0 16px; font-size: var(--fs-14); }
-.set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row-title { flex: 1; min-width: 0; }
+/* The rows of the shared kind, `Row`: the words left (a title, a grey line under it), one control in the
+   lane at the right, the same 44 px and the same padding as the rows written out above. */
+.set-card .settings-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 8px 16px; font-size: var(--fs-14); }
+.set-card .settings-row-text { flex: 1; min-width: 0; }
+.set-card .settings-row-title { font-weight: 400; line-height: 1.35; }
+.set-card .settings-row-desc { margin-top: 1px; max-width: 66ch; font-size: var(--fs-13); }
+.set-card .settings-row-ctl { flex: none; max-width: 64%; }
+/* A list, a paragraph or a field that needs the width: the card's padding, no row of its own. */
+.set-block, .set-card .settings-block { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+.set-block > .field, .set-card .settings-block > .field { margin: 0; }
+.set-group > .set-card > .btnrow { margin: 0; padding: 12px 16px; }
+.set-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; }
+.set-hint { color: var(--fg-2); font-size: var(--fs-13); }
+/* What a face or a size looks like, in the card under the rows that choose it. */
+.set-specimen { gap: 8px; }
+.set-specimen p { display: flex; gap: 16px; margin: 0; font-size: var(--fs-15); line-height: 1.45; overflow-wrap: anywhere; }
+.set-specimen p[data-role="code"] { font-size: var(--fs-14); }
+.set-specimen-role { flex: none; width: 96px; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); line-height: 24px; }
+.set-card .set-face { width: 260px; }
+.set-card .set-face .combo-input { margin: 0; }
+.set-card .settings-themes { margin: 0; }
+.set-card .prose-stepper { flex-direction: row; align-items: center; gap: 8px; }
 /* A value and its caret, as the row's end: the box round a select is the card's own edge. */
-.set-row .set-value .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
-.set-row .set-value .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
-.set-row .set-value { max-width: 420px; }
+.set-card .set-value .dropdown-btn, .set-card .settings-row-ctl > .dropdown > .dropdown-btn { max-width: 420px; min-height: var(--row-h); padding: 0 8px 0 10px; border-color: transparent; background: transparent; color: var(--fg-2); font-size: var(--fs-14); font-weight: 400; }
+.set-card .set-value .dropdown-btn:hover:not(:disabled), .set-card .settings-row-ctl > .dropdown > .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.set-card .set-value, .set-card .settings-row-ctl > .dropdown { max-width: 420px; }
+
+/* ── Navigation: one row per destination, in the list it sits in ───────────────────────────── */
+.nav-cfg-row { display: flex; align-items: center; gap: 8px; min-height: var(--card-row-h); padding: 0 8px 0 12px; font-size: var(--fs-14); cursor: grab; }
+.nav-cfg-row + .nav-cfg-row { border-top: 1px solid var(--line); }
+.nav-cfg-row:hover { background: var(--hover); }
+.nav-cfg-row.dragging { opacity: 0.5; }
+.nav-cfg-grip { display: inline-flex; color: var(--fg-3); }
+.nav-cfg-title { flex: 1; min-width: 0; }
+.nav-cfg-arrows { display: inline-flex; gap: 2px; }
+.nav-cfg-place { flex: none; width: 128px; }
+.nav-cfg-place .dropdown-btn { width: 100%; justify-content: space-between; }
+.nav-cfg-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--ctl-h), 1fr)); gap: var(--space-1); margin-bottom: var(--space-3); }
+.nav-cfg-icons .iconbtn.on { background: var(--surface-3); color: var(--fg); }
+.nav-cfg > .set-help { margin: 0 0 12px; }
+.nav-cfg-list + .nav-cfg-list { margin-top: 20px; }
+.set-actions { margin-top: 20px; }
 
 /* ── Models and providers ─────────────────────────────────────────────────────────────────── */
 .prov + .prov { border-top: 1px solid var(--line); }
@@ -221,8 +264,8 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .prov-body { padding: 8px var(--space-4) 12px; }
   .pmodel-row { height: var(--row-h-touch); }
   .pmodel-open { height: var(--row-h-touch); }
-  .set-row { min-height: var(--set-row-h); }
-  .set-row .set-value, .set-row .set-value .dropdown-btn { max-width: 60vw; }
+  .set-row, .set-card .settings-row { min-height: var(--set-row-h); }
+  .set-card .set-value, .set-card .set-value .dropdown-btn { max-width: 60vw; }
   .fallback-warn { flex-basis: 100%; text-align: left; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
 }
