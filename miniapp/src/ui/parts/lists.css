@@ -248,41 +248,10 @@
 .needs-you .notice-body { font-family: var(--mono); font-size: var(--fs-mono); color: var(--fg-2); }
 .linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
 .linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
-.notice-toasts .iconbtn.quiet { background: transparent; color: var(--fg-2); }
-.notice-toasts .iconbtn.quiet:hover { background: var(--surface-3); color: var(--fg); }
-.notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-.notice-toasts > * { pointer-events: auto; }
-.notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }
-/* A toast is a floating surface a step above a menu: the raised colour with the large ring and drop,
-   12 px corners, and its first answer the one filled button (ui/phone.css evens them on a phone). */
-/* On a phone the banner and its foot are one strip over the top of the page, on the page's own colour:
-   as two floating cards the 8 px between them let the page show through, the half of a heading cut
-   across the foot's upper edge. */
-.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px; background: var(--bg); border-bottom: 1px solid var(--line); pointer-events: auto; }
-.notice-toasts.banner .notice-foot { padding: 3px 4px; box-shadow: none; }
-.notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); cursor: pointer; touch-action: pan-x; animation: notice-in var(--t-base) var(--ease-out); }
-.notice-toast-head { display: flex; align-items: flex-start; gap: 10px; }
-.notice-toast-head .kind { width: var(--avatar); height: var(--avatar); }
-.notice-toast-head .notice-title { font-size: var(--fs-14); font-weight: 500; padding-top: 2px; }
-.notice-toast > .notice-body { padding-left: calc(var(--avatar) + 10px); }
-.notice-toast > .notice-actions { padding-left: calc(var(--avatar) + 10px); }
-.notice-toast .notice-actions { margin-top: 6px; }
-.notice-foot { display: flex; align-items: center; gap: 4px; padding: 2px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
-.notice-foot .grow { flex: 1; }
-.notice-foot .btn.small { padding: 2px 8px; font-size: var(--fs-12); color: var(--fg-3); }
-.notice-more { padding: 2px 8px; border: 0; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); font-weight: 500; cursor: pointer; }
-.notice-more:hover { color: var(--fg); }
-@keyframes notice-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-/* A toast about a setting says by its square whether the work was done another way (amber) or not at
-   all (red): a wash of the tone under its glyph. It was a tinted border and a stripe down the edge. */
-.notice-toast.tone-warning { --toast-tone: var(--warn); }
-.notice-toast.tone-error { --toast-tone: var(--bad); }
-.notice-toast:is(.tone-warning, .tone-error) .kind { color: var(--toast-tone); background: color-mix(in srgb, var(--toast-tone) 12%, transparent); }
 /* The row a link brought the operator to: two soft pulses of ink, then nothing. */
 .setting-flash { animation: setting-flash 1.2s var(--ease-out) 2; border-radius: var(--radius-md); }
 @keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
 .inbox-text { margin: 0; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-mono); white-space: pre-wrap; word-break: break-word; line-height: 1.45; max-height: 50vh; overflow: auto; color: var(--fg-2); }
 .erow.proposal { grid-template-columns: minmax(0, 1fr); }
 .erow.proposal .pill { flex: none; }

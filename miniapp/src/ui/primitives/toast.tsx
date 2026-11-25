@@ -5,6 +5,7 @@ import { Toast } from "@base-ui/react/toast";
 import { useEffect, type ReactNode } from "react";
 import { Icon, type IconName } from "../../icons";
 import { t } from "../../i18n";
+import { NoticeStack } from "./notices";
 
 /** How long a line stays: a failure has to be read, and it does not come back. */
 const TOAST_MS = 6000;
@@ -63,14 +64,18 @@ export function ToastHost() {
     return () => { hosts -= 1; };
   }, []);
   return (
-    <Toast.Provider toastManager={manager} limit={1}>
-      <Toast.Portal>
-        {/* Base UI names the region in English; the app names it in the reader's language. */}
-        <Toast.Viewport className="toast-viewport" aria-label={t("dlg.toasts")}>
-          <Lines />
-        </Toast.Viewport>
-      </Toast.Portal>
-    </Toast.Provider>
+    <>
+      <Toast.Provider toastManager={manager} limit={1}>
+        <Toast.Portal>
+          {/* Base UI names the region in English; the app names it in the reader's language. */}
+          <Toast.Viewport className="toast-viewport" aria-label={t("dlg.toasts")}>
+            <Lines />
+          </Toast.Viewport>
+        </Toast.Portal>
+      </Toast.Provider>
+      {/* The pop-ups the host raises for what happened elsewhere: a queue and a stack of their own. */}
+      <NoticeStack />
+    </>
   );
 }
 
