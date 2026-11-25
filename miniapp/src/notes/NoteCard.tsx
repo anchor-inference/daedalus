@@ -37,6 +37,7 @@ export const NoteCard = memo(function NoteCard({ note, index, files, query, menu
       <button type="button" className="note-open" onClick={() => onOpen(note)} aria-label={t("notes.open", { title: title || t("notes.untitled") })} />
       <div className="note-main">
         <div className={`note-title ${title ? "" : "untitled"}`}>
+          {note.color && <i className="note-dot" aria-hidden="true" />}
           {note.pinned && <span className="note-pinmark" aria-label={t("notes.pinned")}><Icon name="pushpin" size={12} /></span>}
           <Mark text={title || t("notes.untitled")} query={query} />
         </div>

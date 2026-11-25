@@ -102,12 +102,15 @@ def plain_chat(page: Page) -> None:
     body = page.locator(".ne-field").input_value()
     check("uploading:" not in body and body.count("![") == 1, f"the pasted picture did not become one reference: {body!r}")
 
-    # [[ opens the files of the chat; Enter puts the reference in.
+    # [[ opens the files of the chat in a list with a field of its own; typing narrows it and Enter puts
+    # the reference in, with the [[ taken out.
     page.keyboard.press("Enter")
-    page.keyboard.type("Again: [[scr")
-    menu = page.locator(".ne-menu")
+    page.keyboard.type("Again: [[")
+    menu = page.locator(".ne-picker")
     expect(menu).to_be_visible()
-    expect(menu.locator(".ne-menu-item.on")).to_contain_text("screenshot-")
+    expect(menu.locator(".combo-input")).to_be_focused()
+    page.keyboard.type("scr")
+    expect(menu.locator(".combo-item[data-highlighted]")).to_contain_text("screenshot-")
     page.keyboard.press("Enter")
     expect(menu).to_have_count(0)
     body = page.locator(".ne-field").input_value()
@@ -141,22 +144,22 @@ def project_chat(page: Page, lang: str) -> None:
     NOTES.writes.clear()
     page.evaluate("localStorage.removeItem('daedalus.notes.subtab')")
     open_notes(page, S1, lang)
-    tabs = page.locator(".notes-subtab")
+    tabs = page.locator(".notes-subtabs .tab")
     expect(tabs).to_have_count(2)
-    expect(tabs.nth(0).locator(".notes-subtab-count")).to_have_text("3")
-    expect(tabs.nth(1).locator(".notes-subtab-count")).to_have_text("2")
+    expect(tabs.nth(0).locator(".tab-count")).to_have_text("3")
+    expect(tabs.nth(1).locator(".tab-count")).to_have_text("2")
     expect(page.locator(".note-card")).to_have_count(3)
     # Pinned first.
     check("pinned" in (page.locator(".note-card").first.get_attribute("class") or ""), f"{lang}: the pinned note is not first")
     tabs.nth(1).click()
     expect(page.locator(".note-card")).to_have_count(2)
     page.reload()
-    expect(page.locator(".notes-subtab.on")).to_have_attribute("data-scope", "chat")
+    expect(page.locator(".notes-subtabs .tab.on")).to_have_attribute("data-tab", "chat")
 
     # The search marks what it found and counts per sub-tab.
     page.locator(".notes-search input").fill("croiss" if lang == "en" else "круасс")
     expect(page.locator(".note-card")).to_have_count(1)
-    expect(page.locator(".notes-subtab").nth(1).locator(".notes-subtab-count")).to_have_text("1")
+    expect(page.locator(".notes-subtabs .tab").nth(1).locator(".tab-count")).to_have_text("1")
     page.locator(".notes-search-clear").click()
 
     # A task box in the reading view ticks its own line and saves.
@@ -191,7 +194,7 @@ def conflict_and_live(page: Page, feed: EventFeed) -> None:
             break
         page.wait_for_timeout(100)
     check(bool(feed.connected()), "the page never opened the event stream")
-    page.locator(".notes-subtab[data-scope='project']").click()
+    page.locator(".notes-subtabs .tab[data-tab='project']").click()
 
     # Live: the agent rewrites the open note while nothing here is unsaved; it arrives in place.
     launch = ids["launch"]["id"]
@@ -208,12 +211,12 @@ def conflict_and_live(page: Page, feed: EventFeed) -> None:
     page.locator(".ne-field").press("End")
     page.keyboard.press("Enter")
     page.keyboard.type("mine")
-    prompt = page.locator(".ne-conflict")
+    prompt = page.locator(".dialog.wide")
     expect(prompt).to_be_visible(timeout=5000)
     expect(prompt.locator(".ne-diff-row.mine").last).to_contain_text("- [ ] mine")
     expect(prompt.locator(".ne-diff-row.theirs")).to_contain_text("The agent's own list")
     check(NOTES.notes[launch]["body"] == "- [ ] The agent's own list", "a stale save overwrote the newer note")
-    prompt.locator(".btn.primary").click()
+    prompt.locator(".dialog-actions .btn.primary").click()
     expect(prompt).to_have_count(0)
     page.wait_for_function("document.querySelector('.ne-state.ok') !== null", timeout=5000)
     forced = [w for w in writes("PATCH", f"/notes/{launch}") if isinstance(w[2], dict) and w[2].get("force")]

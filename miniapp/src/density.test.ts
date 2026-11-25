@@ -176,6 +176,9 @@ const BOX_ALLOWED = [
   // The note editor is a dialog of its own, and its writing and reading panes are pages, not rows:
   // the room under the last line is where the next one is written.
   ".ne-dialog", ".ne-field", ".ne-tint", ".ne-read",
+  // A tool with nothing in it (no notes yet, nothing found, the list would not load) and a file with
+  // nothing to draw are empty states like any other: a mark, a sentence and the way to begin, with the room around them.
+  ".notes-empty", ".notes-none", ".notes-error", ".preview-none",
   // A layer over the whole window is a surface like a sheet: its bar is a page header's height.
   ".fullscreen-",
   // The page header's one row is 52 px on a desktop, as tall as the surface it heads.
@@ -216,6 +219,15 @@ const CONTENT_BOXES = [
   { selector: ".html-frame", property: "min-height", max: 400 },
   // A note card's picture and the card-shaped placeholders the Notes tab shows while it loads.
   { selector: ".note-thumb", property: "height", max: 52 },
+  // A file of the notes is the large 48 px row of a list of tools; the strip that says what is wrong
+  // with a note is a row and a half, the editor's foot a row of small print, a message's attached file
+  // the design's 52 px card, and an empty list's mark the one 48 px square.
+  { selector: ".shelf-open", property: "min-height", max: 48 },
+  { selector: ".shelf-tile.uploading", property: "min-height", max: 48 },
+  { selector: ".ne-banner", property: "min-height", max: 44 },
+  { selector: ".ne-foot", property: "min-height", max: 40 },
+  { selector: ".msg-file", property: "min-height", max: 52 },
+  { selector: ".file-tile.lg", property: "height", max: 48 },
   { selector: ".notes-loading i", property: "height", max: 64 },
   // A reply waiting in the composer is a tile, not a row: two lines of its words over its "Reply" chip,
   // as Claude draws it; and the field that edits one holds a few lines of them.
