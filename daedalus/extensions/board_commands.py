@@ -284,10 +284,11 @@ class BoardCommands:
             assert task is not None
             payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class,
                        "actor_id": principal.actor_id}
-            if (prior["due_at"] if prior is not None else None) != task["due_at"]:
-                # The history says a date was set, moved or cleared ("" is cleared), not only that the card changed.
-                payload["due_at"] = task["due_at"] or ""
-            announced = [(event_type, payload)]
+            # The history says a date was set, moved or cleared ("" is cleared), not only that the card
+            # changed; only the event of the change itself carries it, not the move or the assignment
+            # that came with it.
+            dated = {"due_at": task["due_at"] or ""} if (prior["due_at"] if prior is not None else None) != task["due_at"] else {}
+            announced = [(event_type, {**payload, **dated})]
             if prior is not None and prior["status"] != task["status"]:
                 announced.append(("task.moved", {**payload, "from": prior["status"], "to": task["status"]}))
             if ((prior["assignee_staff_id"] if prior is not None else None) != task["assignee_staff_id"]

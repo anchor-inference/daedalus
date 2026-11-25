@@ -252,6 +252,10 @@ async def test_the_history_says_when_a_card_was_kept_for_the_operator(client: ht
     events = (await client.get(f"/api/board/{task['id']}/events", headers=HEADERS)).json()
     assert [e["type"] for e in events] == ["task.created", "task.assigned"]
     assert events[1]["assignee"] == {"kind": "operator"} and events[1]["text"] == "Kept by the operator"
+    # Made with a date and kept in one step: the date is on the creation, not repeated on the assignment.
+    both = await create(client, "Renew the domain", due_at=day(2), assignee_operator=True)
+    created, assigned = (await client.get(f"/api/board/{both['id']}/events", headers=HEADERS)).json()
+    assert created["due_at"] == both["due_at"] and "due_at" not in assigned
 
 
 # -- the history ---------------------------------------------------------------------------------
@@ -273,6 +277,7 @@ async def test_a_cards_history_is_its_stored_events_oldest_first(client: httpx.A
     created, due, moved, cleared = events
     assert created["text"] == "Created in todo" and created["actor"]["kind"] == "operator" and created["actor"]["id"] == "operator:1"
     assert due["due_at"] == f"{day(5)}T23:59:59Z" and due["text"].startswith("Due ")
+    assert "due_at" not in moved  # the date belongs to the event that set it, not to the move after it
     # One edit that moved the card is one line: the move, not "edited" and then the move.
     assert (moved["from"], moved["to"], moved["text"]) == ("todo", "blocked", "todo → blocked")
     assert cleared["due_at"] is None and cleared["text"] == "Due date cleared"
