@@ -145,4 +145,3 @@ export function HealthScreen({ toast }: { toast: (t: string) => void }) {
     </>
   );
 }
-
