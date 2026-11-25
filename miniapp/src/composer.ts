@@ -268,6 +268,9 @@ export type Approval = {
   /** A call the auto-review blocked, held for the operator's "Allow anyway": the reviewer's reason.
    *  Its Allow overrides a check rather than answering a question, so the card says so. */
   blocked?: string;
+  /** Why the policy asks, in the host's words ("outside the project's folders"), when it gave a reason
+   *  apart from the command it quotes. */
+  reason?: string;
 };
 
 /** The tool by which the agent asks for the operator's Chrome; its card is the switch, not a grant. */
@@ -328,9 +331,11 @@ export function pendingApproval(messages: readonly MessageLike[], seen: Readonly
       // A browser action has no command, path or address to quote: the reason the host gave for asking
       // ("this would submit a form on …") is what says what Allow lets through.
       const said = typeof a.command === "string" ? a.command : typeof a.path === "string" ? a.path : typeof a.url === "string" ? a.url : "";
-      const detail = said || (REASON_RE.exec(r.content)?.[1] ?? "");
+      const why = REASON_RE.exec(r.content)?.[1]?.trim() ?? "";
+      const detail = said || why;
       const blocked = blockedReason(r.content);
-      return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160), ...(blocked ? { blocked } : {}) };
+      const reason = said && why ? why.slice(0, 300) : "";
+      return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160), ...(blocked ? { blocked } : {}), ...(reason ? { reason } : {}) };
     }
   }
   return null;

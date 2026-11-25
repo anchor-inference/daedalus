@@ -210,6 +210,9 @@ const CONTENT_BOXES = [
   // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
   // large row the approved designs draw for a list of providers or entries. The 56 is that one.
   { selector: ".list-row.h56", property: "min-height", max: 56 },
+  // The model picker's list is a window onto six 32 px rows (six and the five 1 px gaps between them),
+  // the same height whatever the tab or the search holds, so the box around it never changes size.
+  { selector: ".model-picker-list", property: "height", max: 197 },
 ];
 
 /** Top and bottom padding of a shorthand, in px; a component that is not a plain length counts as its first literal. */

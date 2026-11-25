@@ -37,26 +37,17 @@ def run() -> None:
             page.reload()
             page.wait_for_selector(".composer")
             expect(page.locator(".answer")).to_have_count(0)
-            # Effort is a branch of the model menu on a desktop, and one row of choices in the
-            # phone's model sheet, which the toolbar its composer opens onto leads to.
+            # Reasoning off is the first choice of the picker's reasoning row, at every size.
             reveal_composer(page)
             page.locator(".composer .model-select").click()
-            if width < 600:
-                page.locator(".ph-model-effort button[role='radio']").first.click()
-            else:
-                page.locator(".effort-entry").click()
-                page.locator('.effort-option input[value="off"]').click()
+            page.locator(".model-picker .model-effort-seg button[role='radio']").first.click()
             page.wait_for_timeout(200)
             assert HOST.thinking is False
             page.reload()
             page.wait_for_selector(".composer")
             reveal_composer(page)
             page.locator(".composer .model-select").click()
-            if width < 600:
-                expect(page.locator(".ph-model-effort button[role='radio']").first).to_have_attribute("aria-checked", "true")
-            else:
-                page.locator(".effort-entry").click()
-                expect(page.locator('.effort-option input[value="off"]')).to_be_checked()
+            expect(page.locator(".model-picker .model-effort-seg button[role='radio']").first).to_have_attribute("aria-checked", "true")
             print(f"{width}: destructive retry/revert, reload, reasoning off passed")
             context.close()
         browser.close()

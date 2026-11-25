@@ -4,9 +4,10 @@ The composer's one circle has a unit test for what it means (miniapp/src/compose
 the part that only exists once it is drawn against a host: a message goes out and the primary is
 Send; while a run is on an empty pill is Stop and a written one is queued for after the turn with no
 choice asked, appearing as a card above the pill whose Steer hands it to the run now and whose ×
-withdraws it, with Stop still beside the circle; a tool call the policy refused is a dock above the
-pill whose Allow once spends the key, and the agent's ask for the operator's Chrome is the same dock
-naming that Chrome with the consent summary; the agent's question is a card whose answer the circle sends
+withdraws it, with Stop still beside the circle; a tool call the policy refused is a card in the pill's
+place whose Allow once (Enter, or y) spends the key, whose middle answer allows similar calls in the
+project where the host keeps such a rule and in the chat where it does not, and the agent's ask for the
+operator's Chrome is the same card naming that Chrome with the consent summary; the agent's question is a card whose answer the circle sends
 as Reply; the model list opens from inside the pill and a pick reaches the host; and while another
 model stands in the selector says so and offers the way back.
 
@@ -92,6 +93,9 @@ class Host:
         self.similar_key = ""
         self.covered: list[str] = []
         self.server_key = ""
+        # The request a project-wide rule may answer, and whether the host then refuses it anyway.
+        self.project_key = ""
+        self.project_refuses = False
         # The keys of the requests the host still holds open; the app offers a refusal only while its
         # key is here, as the real host's detail says.
         self.open: list[str] = []
@@ -193,6 +197,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []
             HOST.answered(*resolved)
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "similar": {"label": "rm*"}, "resolved": resolved, "approves": [], "standing": []}))
+        if rel == f"/api/sessions/{SESSION}/policy/grant-project":
+            key = str((data or {}).get("key") or "")
+            if HOST.project_refuses:
+                return route.fulfill(status=400, content_type="application/json", body=json.dumps({"detail": "the question 'git.force_push' is always asked again in each chat; allow it once, or for this chat"}))
+            resolved = [key, *HOST.covered] if key == HOST.project_key else []
+            HOST.answered(*resolved)
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "rule": {"id": "r1", "label": "rm*"}, "resolved": resolved, "approves": [], "rules": []}))
         if rel == f"/api/sessions/{SESSION}/policy/grant-server":
             key = str((data or {}).get("key") or "")
             HOST.answered(key)
@@ -242,7 +253,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     elif rel.startswith(f"/api/sessions/{SESSION}/policy/similar/"):
         key = rel.rsplit("/", 1)[1]
         body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None,
-                "server": {"name": "mobile-mcp", "hours": [1, 2, 6, 12, 0], "default_hours": 6} if key == HOST.server_key else None}
+                "server": {"name": "mobile-mcp", "hours": [1, 2, 6, 12, 0], "default_hours": 6} if key == HOST.server_key else None,
+                "project": {"available": True, "project": {"id": "p", "name": "Project"}} if key == HOST.project_key else {"available": False, "reason": "no family"}}
     elif rel.startswith(f"/api/sessions/{SESSION}/"):
         body = []
     elif rel == "/api/settings":
@@ -263,7 +275,8 @@ def open_page(context, phone: bool = False, lang: str = "en") -> Page:  # type: 
     page = context.new_page()
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
+    # A request waiting on the operator takes the pill's place, circle and all.
+    page.wait_for_selector(".composer .roundbtn.primary, .composer .approval-card", timeout=15000)
     page.wait_for_timeout(400)
     return page
 
@@ -324,21 +337,23 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if not page.locator(".composer .model-select").count() or "Opus" not in page.locator(".composer .model-select").inner_text():
         problems.append("the model selector is not in the pill")
     if not page.locator(".composer .ctx-ring").count():
-        problems.append("the context ring is not in the pill")
+        problems.append("the context in use is not in the pill")
     ring = page.locator(".composer .ctx-ring").get_attribute("title") or ""
     if "21%" not in ring or "38" not in ring:
-        problems.append(f"the ring's tooltip does not carry the numbers ({ring!r})")
-    # The percentage is written beside the ring: an unlabelled partial circle at rest read as a spinner.
-    if page.locator(".composer .ctx-ring .ctx-pct").inner_text().strip() != "21%":
-        problems.append("the ring has no percentage beside it")
+        problems.append(f"the context's tooltip does not carry the numbers ({ring!r})")
+    # The context is its number: an unlabelled partial circle at rest read as a spinner.
+    if page.locator(".composer .ctx-ring").inner_text().strip() != "21%":
+        problems.append("the context in use does not say its percentage")
+    if page.locator(".composer .ctx-ring svg").count():
+        problems.append("the context still draws a ring beside its number")
     if page.locator(".composer .effort-select").count():
         problems.append("effort must share the model selector, not a separate composer button")
     if "high" not in page.locator(".composer .model-effort").inner_text().lower():
         problems.append("the current effort is not on the chip")
 
     page.locator(".composer .plus").click()
-    page.wait_for_selector(".plus-menu", timeout=5000)
-    plus_menu = page.locator(".plus-menu").bounding_box()
+    page.wait_for_selector(".menu.attach-menu", timeout=5000)
+    plus_menu = page.locator(".menu.attach-menu").bounding_box()
     plus_btn = page.locator(".composer .plus").bounding_box()
     print("plus menu:", plus_menu)
     if not plus_menu or plus_menu["width"] > 360:
@@ -525,8 +540,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     # A refused tool call: the dock offers it once; Allow once spends the key.
     HOST.refuse("0123456789ab")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval", timeout=15000)
-    dock = page.locator(".composer .dock.approval")
+    page.wait_for_selector(".composer .approval-card", timeout=15000)
+    dock = page.locator(".composer .approval-card")
     print("approval dock:", dock.inner_text().replace("\n", " | "))
     if "Exec" not in dock.inner_text() or "rm -rf build" not in dock.inner_text():
         problems.append("the dock does not name the refused call")
@@ -538,14 +553,14 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("granted:", granted)
     if not granted or granted[-1][2] != {"key": "0123456789ab"}:
         problems.append(f"the approval did not spend the key ({granted})")
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the dock stayed after the key was spent")
     # The refusal is still in the transcript, and an answered request must not come back from it:
     # this is what kept an approval allowed days before on the screen of every reload.
     page.reload()
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(400)
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("a reload brought back the dock of a request already allowed")
 
     # A refusal the host no longer holds open — answered on another device or in Telegram, or closed
@@ -556,16 +571,16 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.reload()
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(400)
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the dock offers a refusal the host says is no longer open")
 
     # A request the host has no family for offers Allow once only.
     HOST.messages = HOST.messages[:2]
     HOST.refuse("fedcba987654")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval", timeout=15000)
+    page.wait_for_selector(".composer .approval-card", timeout=15000)
     page.wait_for_timeout(400)
-    if page.locator(".composer .dock.approval [data-action='allow-similar']").count():
+    if page.locator(".composer .approval-card [data-action='allow-similar']").count():
         problems.append("the dock offers Allow similar for a request with no family")
 
     # A request with a family: the button says what "similar" means, and pressing it grants the
@@ -580,11 +595,15 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     ]
     HOST.open.append("0a1b2c3d4e5f")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval [data-action='allow-similar']", timeout=15000)
-    similar = page.locator(".composer .dock.approval [data-action='allow-similar']")
+    page.wait_for_selector(".composer .approval-card [data-action='allow-similar']", timeout=15000)
+    similar = page.locator(".composer .approval-card [data-action='allow-similar']")
     print("allow similar:", similar.inner_text())
-    if similar.inner_text().strip() != "Allow rm* in this session":
-        problems.append(f"the similar button does not say what it allows ({similar.inner_text()!r})")
+    # The project's rule is not offered for this request (the host says so), so the chat's grant is,
+    # and it says so; what "similar" covers is in its title.
+    if similar.inner_text().strip() != "Allow similar in this chat" or similar.get_attribute("data-scope") != "chat":
+        problems.append(f"the similar button does not say where it allows ({similar.inner_text()!r})")
+    if "rm*" not in (similar.get_attribute("title") or ""):
+        problems.append(f"the similar button does not say what it covers ({similar.get_attribute('title')!r})")
     before = len(posts("/policy/grant-similar"))
     similar.click()
     reached(page, "/policy/grant-similar", before, "Allow similar", problems)
@@ -592,10 +611,58 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     asked = posts("/policy/grant-similar")
     if not asked or asked[-1][2] != {"key": "0a1b2c3d4e5f"}:
         problems.append(f"Allow similar did not reach the host with the key ({asked})")
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the dock came back for a request the similar grant answered")
     HOST.similar_key = ""
     HOST.covered = []
+
+    # A request the project may answer for good: the middle button says "in this project" and makes
+    # the project's rule; where the host then refuses the project scope, the chat's grant is made instead.
+    for refuses in (False, True):
+        HOST.messages = HOST.messages[:2]
+        HOST.similar_key = HOST.project_key = "9a8b7c6d5e4f"
+        HOST.project_refuses = refuses
+        HOST.refuse("9a8b7c6d5e4f")
+        page.reload()
+        page.wait_for_selector(".composer .approval-card [data-action='allow-similar'][data-scope='project']", timeout=15000)
+        widen = page.locator(".composer .approval-card [data-action='allow-similar']")
+        if widen.inner_text().strip() != "Allow similar in this project":
+            problems.append(f"the project button reads {widen.inner_text()!r}")
+        before_project, before_chat = len(posts("/policy/grant-project")), len(posts("/policy/grant-similar"))
+        widen.click()
+        reached(page, "/policy/grant-project", before_project, "Allow similar in this project", problems)
+        if posts("/policy/grant-project")[-1][2] != {"key": "9a8b7c6d5e4f"}:
+            problems.append(f"the project grant did not carry the key ({posts('/policy/grant-project')[-1:]})")
+        if refuses:
+            reached(page, "/policy/grant-similar", before_chat, "the chat's grant after the project refused", problems)
+            page.wait_for_selector(".toast", timeout=5000)
+            if "this chat only" not in page.locator(".toast").last.inner_text():
+                problems.append(f"the fallback to the chat's grant is not said ({page.locator('.toast').last.inner_text()!r})")
+        elif len(posts("/policy/grant-similar")) != before_chat:
+            problems.append("a project grant also made the chat's grant")
+        page.wait_for_timeout(300)
+        if page.locator(".composer .approval-card").count():
+            problems.append(f"the card stayed after the project's answer (refused: {refuses})")
+    HOST.similar_key = HOST.project_key = ""
+    HOST.project_refuses = False
+
+    # The card's own keys: Enter allows once, Escape refuses and gives the field back the keyboard.
+    for key, kind in (("Enter", "/policy/grant"), ("Escape", "/policy/refuse")):
+        HOST.messages = HOST.messages[:2]
+        HOST.refuse("e5c0e5c0e5c0")
+        page.reload()
+        page.wait_for_selector(".composer .approval-card", timeout=15000)
+        if page.locator(".composer .composer-box").is_visible():
+            problems.append("the field is still drawn under the approval card")
+        page.evaluate("document.activeElement?.blur()")
+        before = len(posts(kind, "POST"))
+        page.keyboard.press(key)
+        reached(page, kind, before, f"{key} on the card", problems, "POST")
+        if posts(kind, "POST")[-1][2] != {"key": "e5c0e5c0e5c0"}:
+            problems.append(f"{key} did not answer the card's key ({posts(kind, 'POST')[-1:]})")
+        page.wait_for_timeout(200)
+        if key == "Escape" and not page.locator(".composer .composer-field").evaluate("el => el === document.activeElement"):
+            problems.append("refusing did not give the field back the keyboard")
 
     # An MCP server's tool asking: "Allow all from <server>" with six hours chosen, and a span changed
     # before the press is the span that reaches the host.
@@ -607,8 +674,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     ]
     HOST.open.append("3c3c3c3c3c3c")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval [data-action='allow-server']", timeout=15000)
-    grant = page.locator(".composer .dock.approval [data-action='allow-server']")
+    page.wait_for_selector(".composer .approval-card [data-action='allow-server']", timeout=15000)
+    grant = page.locator(".composer .approval-card [data-action='allow-server']")
     print("allow all:", grant.inner_text())
     if "Allow all from mobile-mcp" not in grant.inner_text():
         problems.append(f"the server button does not name the server ({grant.inner_text()!r})")
@@ -622,7 +689,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if not asked or asked[-1][2] != {"key": "3c3c3c3c3c3c", "hours": 2}:
         problems.append(f"Allow all did not reach the host with the key and the span ({asked})")
     page.wait_for_timeout(200)
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the dock came back for a request the server grant answered")
     HOST.server_key = ""
 
@@ -630,7 +697,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     HOST.messages = HOST.messages[:2]
     HOST.refuse("abcdef012345")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval", timeout=15000)
+    page.wait_for_selector(".composer .approval-card", timeout=15000)
     before = len(posts("/policy/refuse"))
     page.keyboard.press("n")
     reached(page, "/policy/refuse", before, "refusing", problems)
@@ -639,7 +706,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("refused:", refused)
     if not refused or refused[-1][2] != {"key": "abcdef012345"}:
         problems.append(f"refusing did not reach the host ({refused})")
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the dock stayed after the call was refused")
 
     # The agent's ask for the operator's Chrome: a card that names that Chrome, the reason and the
@@ -647,9 +714,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     HOST.messages = HOST.messages[:2]
     HOST.ask_chrome("c0ffee123456")
     page.reload()
-    page.wait_for_selector(".composer .dock.approval[data-kind='chrome']", timeout=15000)
+    page.wait_for_selector(".composer .approval-card[data-kind='chrome']", timeout=15000)
     page.wait_for_timeout(300)
-    dock = page.locator(".composer .dock.approval")
+    dock = page.locator(".composer .approval-card")
     said = dock.inner_text()
     print("chrome ask:", said.replace("\n", " | "))
     for words in ("The agent asks to work in your Chrome «Work»", "open anchorinference signed in as you", "signed in as you, in a tab group of its own", "Use my Chrome", "Keep the agent's browser"):
@@ -663,7 +730,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(100)
     if posts("/policy/grant")[-1][2] != {"key": "c0ffee123456"}:
         problems.append(f"the Chrome ask's yes did not reach the host with its key ({posts('/policy/grant')[-1:]})")
-    if page.locator(".composer .dock.approval").count():
+    if page.locator(".composer .approval-card").count():
         problems.append("the Chrome ask card stayed after the yes")
     # Its own context: the language the address names is remembered, and the steps after this one
     # read English words.
@@ -671,8 +738,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     HOST.open.append("c0ffee123456")
     ru_context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
     ru = open_page(ru_context, lang="ru")
-    ru.wait_for_selector(".composer .dock.approval[data-kind='chrome']", timeout=15000)
-    said = ru.locator(".composer .dock.approval").inner_text()
+    ru.wait_for_selector(".composer .approval-card[data-kind='chrome']", timeout=15000)
+    said = ru.locator(".composer .approval-card").inner_text()
     print("chrome ask (ru):", said.replace("\n", " | "))
     for words in ("Агент просит поработать в вашем Chrome «Work»", "Использовать мой Chrome", "Оставить браузер агента", "под вашими входами"):
         if words not in said:
@@ -720,28 +787,23 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"picking a skill did not name it in the draft ({field_text(field(page))!r})")
     field(page).fill("")
 
-    # The model list: opens from the pill, names the presets with their kind, a pick reaches the host.
+    # The model picker: opens from the pill on its tabs, the model in use marked inside its provider, a
+    # pick reaches the host.
     page.reload()
     page.wait_for_selector(".composer .model-select", timeout=15000)
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".model-list .model-row", timeout=5000)
-    # The first step also carries the free models as a group of their own, a row of the same kind
-    # without a provider behind it, so the three providers are counted by the provider they name
-    # and the group is held to being the only other row there. No model is on this step: a model's
-    # row is the one that carries its thinking or fast mark.
-    providers = page.locator(".provider-row[data-provider]")
-    free_group = page.locator(".provider-row:not([data-provider])")
-    if providers.count() != 3 or free_group.count() != 1 or page.locator(".model-list .model-kind").count() or page.locator(".model-list .model-row.on").count():
-        problems.append("the first step must list providers rather than every model")
-    page.locator('.provider-row[data-provider="claude"]').click()
-    if not page.locator(".model-list .model-row.on", has_text="Claude Opus 5").count():
+    page.wait_for_selector(".model-picker [role=option]", timeout=5000)
+    tabs = page.locator(".model-picker [role=tab][data-provider]")
+    if tabs.count() != 3:
+        problems.append(f"the picker has {tabs.count()} provider tabs, not 3")
+    page.locator('.model-picker [role=tab][data-provider="claude"]').click()
+    if not page.locator(".model-picker [role=option][aria-selected='true']", has_text="Claude Opus 5").count():
         problems.append("the current model is not marked within its provider")
-    if page.locator(".model-list .model-row", has_text="DeepSeek Flash").count():
-        problems.append("another provider's model leaked into this group")
-    page.locator(".provider-back").click()
-    page.locator('.provider-row[data-provider="local"]').click()
-    local = page.locator(".model-list .model-row", has_text="Local model")
-    if not local.locator('[title="128,000 token context"]').count() or "128k" not in local.inner_text():
+    if page.locator(".model-picker [role=option]", has_text="DeepSeek Flash").count():
+        problems.append("another provider's model leaked into this tab")
+    page.locator('.model-picker [role=tab][data-provider="local"]').click()
+    local = page.locator(".model-picker [role=option]", has_text="Local model")
+    if "128,000" not in (local.get_attribute("title") or "") or "128k" not in local.inner_text():
         problems.append("the local preset lost its discovered context window")
     before = len(posts("/model"))
     local.click()
@@ -752,10 +814,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     # them to confirm it (it once hid the circle behind "Use current target").
     field(page).fill("a draft written before the pick")
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".model-list")
+    page.wait_for_selector(".model-picker [role=option]")
     before = len(posts("/model"))
-    page.locator('.provider-row[data-provider="deepseek"]').click()
-    page.locator(".model-list .model-row", has_text="DeepSeek Flash").click()
+    page.locator('.model-picker [role=tab][data-provider="deepseek"]').click()
+    page.locator(".model-picker [role=option]", has_text="DeepSeek Flash").click()
     reached(page, "/model", before, "the model pick", problems)
     page.wait_for_timeout(100)
     send = page.locator(".composer .roundbtn.primary")
@@ -768,24 +830,24 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("picked:", picked)
     if not picked or picked[-1][2] != {"preset": "flash"}:
         problems.append(f"the pick did not reach the host ({picked})")
-    if page.locator(".model-list").count():
+    if page.locator(".model-picker").count():
         problems.append("the list stayed open after a pick")
     field(page).click()
     page.keyboard.press("Control+M")
-    page.wait_for_selector(".model-list", timeout=5000)
+    page.wait_for_selector(".model-picker [role=option]", timeout=5000)
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
-    if page.locator(".model-list").count():
+    if page.locator(".model-picker").count():
         problems.append("Escape did not close the model list")
 
+    # The reasoning is a row of the same box, inside the window.
     page.locator(".composer .model-select").click()
-    page.locator(".effort-entry").click()
-    page.wait_for_selector(".effort-options", timeout=5000)
-    effort_menu = page.locator(".effort-menu").bounding_box()
-    if not effort_menu or effort_menu["x"] < 8 or effort_menu["x"] + effort_menu["width"] > page.viewport_size["width"] - 7:
-        problems.append("the effort submenu is outside the window")
+    page.wait_for_selector(".model-picker .model-effort-seg", timeout=5000)
+    effort_row = page.locator(".model-picker .model-effort-seg").bounding_box()
+    if not effort_row or effort_row["x"] < 8 or effort_row["x"] + effort_row["width"] > page.viewport_size["width"] - 7:
+        problems.append("the reasoning row is outside the window")
     before = len(posts("/model"))
-    page.locator('.effort-option').filter(has=page.locator('input[value="xhigh"]')).click()
+    page.locator(".model-picker .model-effort-seg [role=radio]", has_text="Max").click()
     reached(page, "/model", before, "the effort pick", problems)
     efforted = [p for p in posts("/model") if isinstance(p[2], dict) and p[2].get("reasoning_effort")]
     print("effort:", efforted[-1] if efforted else None)
@@ -803,9 +865,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if "flash" not in label or "opus" not in label:
         problems.append(f"the selector does not say which model stands in for which ({label!r})")
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".model-list .model-row.restore", timeout=5000)
+    page.wait_for_selector(".model-picker .model-row.restore", timeout=5000)
     before = len(posts("/model"))
-    page.locator(".model-list .model-row.restore").click()
+    page.locator(".model-picker .model-row.restore").click()
     reached(page, "/model", before, "the way back", problems)
     restored = posts("/model")[-1]
     print("restored:", restored)
@@ -853,16 +915,16 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).click()
     page.wait_for_selector('.composer[data-shape="open"] .model-select', timeout=5000)
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".sheet .model-list", timeout=5000)
+    page.wait_for_selector(".sheet .model-picker [role=option]", timeout=5000)
     before = len(posts("/model"))
-    # Effort is one row of choices in the phone's model sheet.
-    page.locator(".sheet .ph-model-effort button[role='radio']").nth(1).click()
+    # Effort is one row of choices in the same box, here a sheet.
+    page.locator(".sheet .model-effort-seg button[role='radio']").nth(1).click()
     reached(page, "/model", before, "phone: the effort choice", problems)
     if HOST.effort != "low":
         problems.append("phone: the named effort choice did not reach the host")
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
-    if page.locator(".sheet .model-list").count():
+    if page.locator(".sheet .model-picker").count():
         problems.append("phone: the model sheet did not close on Escape")
     field(page).fill("Wire the order form to the sheet")
     if page.locator('.composer .roundbtn[data-action="send"]').count() != 1:
@@ -875,14 +937,14 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
         if not mic.is_visible() or not box or box["x"] < 0 or box["x"] + box["width"] > width:
             problems.append(f"phone: the mic is not beside a typed draft on the screen ({box})")
     page.locator(".composer .iconbtn.plus").click()
-    page.wait_for_selector(".ph-plus-sheet", timeout=5000)
-    tiles = page.locator(".ph-plus-sheet .ph-tile").count()
-    if tiles != 3:
-        problems.append(f"phone: the + sheet has {tiles} tiles, not photo, photos and files")
+    page.wait_for_selector(".sheet .menu.attach-menu", timeout=5000)
+    for action in ("photo", "photos", "files"):
+        if not page.locator(f".sheet .attach-menu [data-action='{action}']").count():
+            problems.append(f"phone: the + sheet has no {action} row")
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
-    page.locator(".composer .composer-mode").click()
-    page.wait_for_selector(".mode-sheet .yagni-row", timeout=5000)
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".sheet .access-menu .yagni-row", timeout=5000)
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     field(page).fill("")
@@ -956,7 +1018,7 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                   const rect = el => { const r = el.getBoundingClientRect(); return {x:r.x, y:r.y, w:r.width, h:r.height, bottom:r.bottom, right:r.right}; };
                   const field = one('.composer .composer-field'), cs = getComputedStyle(field);
                   const row = one('.composer-row');
-                  const controls = [...row.querySelectorAll('button, .composer-mode')].filter(el => el.getBoundingClientRect().width > 0);
+                  const controls = [...row.querySelectorAll('button')].filter(el => el.getBoundingClientRect().width > 0);
                   return {field:rect(field), card:rect(one('.composer-box')), row:rect(row),
                     line:parseFloat(cs.lineHeight), padding:parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom),
                     scroll:field.scrollHeight, client:field.clientHeight,
@@ -970,7 +1032,9 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
                     problems.append(f"{prefix}: an empty field reserves more than two lines")
                 if measure["scroll"] > measure["client"] + 1:
                     problems.append(f"{prefix}: placeholder is clipped")
-                if f["bottom"] > row["y"] or abs(f["w"] - row["w"]) > 1:
+                # The row of controls is pulled 8 px out to the left, so the + button's glyph and the
+                # field's words share one edge; both end at the card's padding on the right.
+                if f["bottom"] > row["y"] or abs(f["right"] - row["right"]) > 1 or abs(f["x"] - row["x"] - 8) > 1:
                     problems.append(f"{prefix}: text does not own a full row")
                 if any(abs(c["y"] + c["h"] / 2 - row["y"] - row["h"] / 2) > 1 or c["right"] > row["right"] + 1 for c in measure["controls"]):
                     problems.append(f"{prefix}: controls wrap or overflow")
@@ -1033,9 +1097,9 @@ def layout(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """The toggles chip: it names the agent and holds the YAGNI switch and nothing to choose
-    between, the switch reaches the host, the chip shows what the host says after a reload, and on
-    a narrow phone it stays in the row mid-run."""
+    """The access chip: it says the access ("With checks", "Full access" in the attention colour) and
+    then what else is on; its menu holds the switches, which reach the host and keep the menu open;
+    the chip shows what the host says after a reload; on a narrow phone it stays in the row mid-run."""
     problems: list[str] = []
     HOST.pending = None
     HOST.status = "idle"
@@ -1044,96 +1108,103 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     context.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
     page = open_page(context)
-    chip = page.locator(".composer .composer-mode")
-    if chip.inner_text().strip() != "Agent":
-        problems.append(f"the toggles chip reads {chip.inner_text()!r}, not Agent")
+    chip = page.locator(".composer .composer-access")
+    if chip.locator(".access-word").inner_text().strip() != "With checks":
+        problems.append(f"the access chip reads {chip.inner_text()!r}, not With checks")
     marker = page.locator(".msg.user .msg-yagni")
     if marker.count() != 1 or "YAGNI on" not in marker.inner_text():
         problems.append("the message that told the agent carries no YAGNI mark")
-    # The keyboard: the chip opens with Enter onto the switch, Enter flips it, Escape closes.
+    # The keyboard: the chip opens with Enter onto its first switch, the arrows walk them, Enter flips.
     chip.focus()
     page.keyboard.press("Enter")
-    page.wait_for_selector(".mode-menu")
-    if page.locator(".mode-menu [role='menuitemradio']").count():
-        problems.append("the toggles menu still offers something to choose between")
-    names = page.locator(".mode-menu .mode-row .truncate").all_inner_texts()
-    # No autopilot status on this session: YAGNI and "Bypass all checks" are the switches offered.
-    if names != ["YAGNI", "Bypass all checks"]:
-        problems.append(f"the toggles menu lists {names}")
+    page.wait_for_selector(".menu.access-menu")
+    names = page.locator(".access-menu [data-toggle] .menu-row-t").all_inner_texts()
+    # No autopilot status on this session: full access and YAGNI are the switches offered, and the
+    # agent's language is the row under them.
+    if names != ["Full access", "YAGNI"]:
+        problems.append(f"the access menu lists {names}")
+    if not page.locator(".access-menu [data-action='language']").count():
+        problems.append("the access menu has no row for the agent's language")
     focused = page.evaluate("document.activeElement?.className || ''")
-    if "yagni-row" not in focused:
-        problems.append(f"the menu opens with the focus on {focused!r}, not the switch")
+    if "bypass-row" not in focused:
+        problems.append(f"the menu opens with the focus on {focused!r}, not its first switch")
+    page.keyboard.press("ArrowDown")
     before = len(posts("/yagni"))
     page.keyboard.press("Enter")
     reached(page, "/yagni", before, "the YAGNI switch", problems)
     if not posts("/yagni") or posts("/yagni")[-1][2] != {"on": True}:
         problems.append(f"the switch posted {posts('/yagni')[-1:]}")
-    if page.locator(".mode-menu").count() != 1:
+    if page.locator(".menu.access-menu").count() != 1:
         problems.append("the switch closed the menu")
     page.keyboard.press("Escape")
-    page.wait_for_selector(".mode-menu", state="detached")
+    page.wait_for_selector(".menu.access-menu", state="detached")
     page.reload()
-    page.wait_for_selector(".composer .composer-mode")
+    page.wait_for_selector(".composer .composer-access")
     page.wait_for_timeout(300)
-    if "yagni" not in (page.locator(".composer .composer-mode").get_attribute("class") or "").split():
+    if page.locator(".composer .composer-access").get_attribute("data-yagni") is None:
         problems.append("after a reload the chip does not show YAGNI on")
-    if page.locator(".composer .composer-mode").inner_text().strip() != "YAGNI":
-        problems.append(f"with YAGNI on the chip reads {page.locator('.composer .composer-mode').inner_text()!r}")
-    # "Bypass all checks": one click and no confirmation, a line under it naming what stays refused, and once the
-    # host has it the header carries the BYPASS mark, through a reload too.
+    if "YAGNI" not in page.locator(".composer .composer-access").inner_text():
+        problems.append(f"with YAGNI on the chip reads {page.locator('.composer .composer-access').inner_text()!r}")
+    # Full access: one click and no confirmation, a line under it naming what stays refused, and once the
+    # host has it the chip says so in the attention colour and the header carries the BYPASS mark.
     if page.locator(".chat-title-line .bypass-mark").count():
         problems.append("the header shows BYPASS before the switch is on")
-    page.locator(".composer .composer-mode").click()
-    page.wait_for_selector(".mode-menu .bypass-row")
-    hint = page.locator(".mode-menu .bypass-row .sub").inner_text()
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".access-menu .bypass-row")
+    hint = page.locator(".access-menu .bypass-row .menu-row-sub").inner_text()
     if "containers" not in hint or "sealed ports" not in hint:
         problems.append(f"the bypass switch does not say what still holds: {hint!r}")
     before = len(posts("/bypass"))
-    page.locator(".mode-menu .bypass-row").click()
+    page.locator(".access-menu .bypass-row").click()
     reached(page, "/bypass", before, "the bypass switch", problems)
     if not posts("/bypass") or posts("/bypass")[-1][2] != {"on": True}:
         problems.append(f"the bypass switch posted {posts('/bypass')[-1:]}")
     if page.locator(".dialog, .confirm-dialog, [role='alertdialog']").count():
         problems.append("the bypass switch asked for a confirmation")
     page.keyboard.press("Escape")
-    page.wait_for_selector(".mode-menu", state="detached")
+    page.wait_for_selector(".menu.access-menu", state="detached")
     page.reload()
     page.wait_for_selector(".chat-title-line .bypass-mark", timeout=5000)
     if page.locator(".chat-title-line .bypass-mark").inner_text().strip() != "BYPASS":
         problems.append(f"the header's bypass mark reads {page.locator('.chat-title-line .bypass-mark').inner_text()!r}")
-    if "bypass" not in (page.locator(".composer .composer-mode").get_attribute("class") or "").split():
-        problems.append("after a reload the chip does not show bypass on")
-    page.locator(".composer .composer-mode").click()
-    page.wait_for_selector(".mode-menu .bypass-row")
-    if page.locator(".mode-menu .bypass-row").get_attribute("aria-checked") != "true":
+    access = page.locator(".composer .composer-access")
+    if "bypass" not in (access.get_attribute("class") or "").split() or access.locator(".access-word").inner_text().strip() != "Full access":
+        problems.append("after a reload the chip does not say Full access")
+    colour = access.evaluate("el => getComputedStyle(el).color")
+    attention = page.evaluate("() => { const p = document.createElement('i'); p.style.color = 'var(--attention)'; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }")
+    if colour != attention:
+        problems.append(f"Full access is not in the attention colour ({colour} against {attention})")
+    access.click()
+    page.wait_for_selector(".access-menu .bypass-row")
+    if page.locator(".access-menu .bypass-row").get_attribute("aria-checked") != "true":
         problems.append("the bypass switch does not read on after a reload")
-    page.locator(".mode-menu .bypass-row").click()
+    page.locator(".access-menu .bypass-row").click()
     page.keyboard.press("Escape")
     page.reload()
-    page.wait_for_selector(".composer .composer-mode")
+    page.wait_for_selector(".composer .composer-access")
     page.wait_for_timeout(300)
     if page.locator(".chat-title-line .bypass-mark").count():
         problems.append("the header keeps BYPASS once it is off")
     context.close()
-    # A narrow phone mid-run: the model chip gives way, the toggles chip stays inside the row of the
-    # toolbar the composer opens onto under the finger.
+    # A narrow phone mid-run: the model chip gives way, the access chip (its shield) stays inside the
+    # row of the toolbar the composer opens onto under the finger.
     HOST.status = "running"
     for width in (360, 390):
         context = browser.new_context(viewport={"width": width, "height": 780}, is_mobile=True, has_touch=True, color_scheme="dark")
         context.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
         page = open_page(context, phone=True)
         reveal_composer(page)
-        box = page.locator(".composer .composer-mode").bounding_box()
+        box = page.locator(".composer .composer-access").bounding_box()
         row = page.locator(".composer-row").bounding_box()
-        print("phone toggles chip", width, box, row)
+        print("phone access chip", width, box, row)
         if not box or not row or box["width"] < 24 or box["x"] + box["width"] > row["x"] + row["width"] + 1:
-            problems.append(f"{width}: the toggles chip is missing or leaves the row while running")
-        page.locator(".composer .composer-mode").click()
-        page.wait_for_selector(".sheet.mode-sheet .yagni-row")
-        if page.locator(".sheet.mode-sheet .yagni-row").get_attribute("aria-checked") != "true":
+            problems.append(f"{width}: the access chip is missing or leaves the row while running")
+        page.locator(".composer .composer-access").click()
+        page.wait_for_selector(".sheet .access-menu .yagni-row")
+        if page.locator(".sheet .access-menu .yagni-row").get_attribute("aria-checked") != "true":
             problems.append(f"{width}: the phone's sheet does not show YAGNI on")
         page.keyboard.press("Escape")
-        page.wait_for_selector(".sheet.mode-sheet", state="detached")
+        page.wait_for_selector(".sheet .access-menu", state="detached")
         context.close()
     HOST.status = "idle"
     HOST.yagni = False
@@ -1155,14 +1226,14 @@ def second_device(browser) -> list[str]:  # type: ignore[no-untyped-def]
         page.route("**/api/**", stub)
         page.route("**/api/events**", feed.route)
         page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang=en")
-        page.wait_for_selector(".composer .dock.approval", timeout=15000)
+        page.wait_for_selector(".composer .approval-card", timeout=15000)
         deadline = time.monotonic() + 10
         while not feed.connected() and time.monotonic() < deadline:
             page.wait_for_timeout(50)
         HOST.answered("5ec0d0de1ce0")
         feed.send("permission.resolved", {"request_id": "5ec0d0de1ce0", "request_ref": f"policy:{SESSION}:5ec0d0de1ce0", "decision": "allow", "via": "telegram"}, session=SESSION)
         try:
-            page.wait_for_selector(".composer .dock.approval", state="detached", timeout=5000)
+            page.wait_for_selector(".composer .approval-card", state="detached", timeout=5000)
         except Exception:  # noqa: BLE001 — said as a problem, not raised
             problems.append("the dock stayed after another device answered the request")
     finally:

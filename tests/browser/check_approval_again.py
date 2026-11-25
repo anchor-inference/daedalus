@@ -52,14 +52,14 @@ def scenario(browser, width: int, height: int, phone: bool, shots: str | None) -
         page.route("**/api/**", stub)
         page.route("**/api/events**", feed.route)
         page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang=en")
-        page.wait_for_selector(".composer .dock.approval", timeout=15000)
+        page.wait_for_selector(".composer .approval-card", timeout=15000)
         deadline = time.monotonic() + 10
         while not feed.connected() and time.monotonic() < deadline:
             page.wait_for_timeout(50)
         before = len(posts("/policy/grant"))
-        page.locator(".composer .dock.approval button", has_text="Allow once").first.click()
+        page.locator(".composer .approval-card button", has_text="Allow once").first.click()
         reached(page, "/policy/grant", before, f"{where}: Allow once", problems)
-        page.wait_for_selector(".composer .dock.approval", state="detached", timeout=5000)
+        page.wait_for_selector(".composer .approval-card", state="detached", timeout=5000)
         if page.locator("[data-awaiting]").count():
             problems.append(f"{where}: the steps still say they wait after the request was answered")
 
@@ -69,10 +69,10 @@ def scenario(browser, width: int, height: int, phone: bool, shots: str | None) -
         HOST.open = [KEY]
         feed.send("permission.pending", {"request_id": KEY, "request_ref": f"policy:{SESSION}:{KEY}", "tool": "BrowserAct"}, session=SESSION)
         try:
-            page.wait_for_selector(".composer .dock.approval", timeout=8000)
+            page.wait_for_selector(".composer .approval-card", timeout=8000)
         except Exception:  # noqa: BLE001 — said as a problem, not raised
             problems.append(f"{where}: the same action refused again after an Allow is not offered in the dock")
-        dock = page.locator(".composer .dock.approval")
+        dock = page.locator(".composer .approval-card")
         if dock.count():
             box = dock.bounding_box()
             if not box or box["y"] < 0 or box["y"] + box["height"] > height + 1 or box["x"] < 0 or box["x"] + box["width"] > width + 1:
@@ -92,7 +92,7 @@ def scenario(browser, width: int, height: int, phone: bool, shots: str | None) -
         HOST.answered(KEY)
         feed.send("permission.resolved", {"request_id": KEY, "request_ref": f"policy:{SESSION}:{KEY}", "decision": "allow", "via": "telegram"}, session=SESSION)
         try:
-            page.wait_for_selector(".composer .dock.approval", state="detached", timeout=5000)
+            page.wait_for_selector(".composer .approval-card", state="detached", timeout=5000)
         except Exception:  # noqa: BLE001
             problems.append(f"{where}: the dock stayed after Telegram answered the request")
         if page.locator("[data-awaiting]").count():

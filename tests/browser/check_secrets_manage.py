@@ -134,12 +134,12 @@ def open_chat(context, scheme: str) -> Page:  # type: ignore[no-untyped-def]
 def open_sheet(page: Page, phone: bool) -> None:
     if phone:
         page.locator(".composer .iconbtn.plus").click()
-        page.wait_for_selector(".ph-plus-sheet", timeout=5000)
-        page.locator(".ph-plus-sheet .menu-row").filter(has_text="Secret" if LANG == "en" else "Секрет").click()
+        page.wait_for_selector(".sheet .menu.attach-menu", timeout=5000)
+        page.locator(".sheet .attach-menu [data-action='secret']").click()
     else:
         page.locator(".composer .plus").click()
-        page.wait_for_selector(".plus-menu", timeout=5000)
-        page.locator(".plus-menu [role='menuitem']").last.click()
+        page.wait_for_selector(".menu.attach-menu", timeout=5000)
+        page.locator(".attach-menu [data-action='secret']").click()
     page.locator(".secret-sheet .secret-row").first.wait_for(timeout=5000)
 
 

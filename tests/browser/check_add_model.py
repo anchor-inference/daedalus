@@ -92,11 +92,11 @@ def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-unty
         page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
         reveal_composer(page)
         page.locator(".composer .model-select").first.click()
-        page.wait_for_selector(".model-list", timeout=5000)
-        if page.locator(".model-list input:not(.model-search)").count():
+        page.wait_for_selector(".model-picker [role=option]", timeout=5000)
+        if page.locator(".model-picker input:not(.model-search)").count():
             failures.append(f"{width}: the model picker still has a field to type a model into")
-        add = page.locator(".model-list .model-add")
-        if add.count() != 1 or "Add model" not in add.inner_text():
+        add = page.locator(".model-picker .model-add")
+        if add.count() != 1 or "Add model" not in (add.get_attribute("aria-label") or ""):
             failures.append(f"{width}: the model picker has no Add model row")
             context.close()
             continue
@@ -107,7 +107,7 @@ def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-unty
             pass
         if "/settings/models" not in page.url or "add=1" not in page.url or page.locator(".addmodel").count() == 0:
             failures.append(f"{width}: Add model went to {page.url} without the add sheet open")
-        elif page.locator(".model-list").count():
+        elif page.locator(".model-picker").count():
             failures.append(f"{width}: the picker stayed open over the add sheet")
         else:
             page.keyboard.press("Escape")

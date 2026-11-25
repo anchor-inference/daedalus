@@ -283,24 +283,23 @@ def composer(browser, width: int, failures: list[str]) -> None:  # type: ignore[
     page.wait_for_selector(".composer", timeout=15000)
     reveal_composer(page)
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".model-list .model-row")
+    page.wait_for_selector(".model-picker [role=option]")
     page.wait_for_timeout(200)
-    search = page.locator(".model-list .model-search")
+    search = page.locator(".model-picker .model-search")
     if not mobile and not search.evaluate("el => el === document.activeElement"):
         failures.append(f"{where}: opening the list did not give the search field the keyboard")
-    # Into a provider's models, then back to the search field, as the operator does before clicking.
-    if not mobile or not page.locator(".model-list .ph-model-row").count():
-        page.locator(".model-list .provider-row[data-provider='opencode']").click()
-        page.wait_for_timeout(200)
+    # Onto a provider's tab, then back to the search field, as the operator does before clicking.
+    page.locator(".model-picker [role=tab][data-provider='opencode']").click()
+    page.wait_for_timeout(200)
     search.focus()
     page.wait_for_timeout(100)
-    rows = page.locator(".model-list .model-row:not(.on):not(.provider-row):not(.provider-back):not(.model-add):not(.restore)").filter(has_text="Bulk Model")
+    rows = page.locator(".model-picker [role=option][data-preset]:not(.on)").filter(has_text="Bulk Model")
     target = rows.nth(min(5, rows.count() - 1))
-    label = target.locator(".model-text .truncate").first.inner_text().strip()
+    label = target.locator(".model-row-name").inner_text().strip()
     target_id = next((k for k, v in settings_with_models()["presets"].items() if v["label"] == label), "")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/composer-{width}-open.png")
-    press_once(page, target, ".model-list", where, failures)
+    press_once(page, target, ".model-picker-list", where, failures)
     picked = [body for kind, body in sent if kind == "model"]
     if not picked or picked[-1] != {"preset": target_id}:
         failures.append(f"{where}: one click on {label} ({target_id}) did not choose it: {picked}")

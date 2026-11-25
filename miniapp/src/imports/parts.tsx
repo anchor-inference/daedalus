@@ -117,7 +117,7 @@ function ModelRow({ flow, preview, phone }: { flow: ImportFlow; preview: ImportP
     <div className="imp-model" data-model={flow.model}>
       <div className="imp-plbl">{t("imp.model")}</div>
       <div className="imp-model-row">
-        <ModelSelect model={label} fallback={null} open={open} onOpenChange={setOpen} onChoose={(choice) => flow.setModel(choiceValue(choice))} sheet={phone} />
+        <ModelSelect model={label} fallback={null} open={open} onOpenChange={setOpen} onChoose={(choice) => flow.setModel(choiceValue(choice))} />
         {hint && <span className="imp-model-hint">{hint}</span>}
       </div>
     </div>

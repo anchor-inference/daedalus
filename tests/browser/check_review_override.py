@@ -55,11 +55,11 @@ def scenario(browser, lang: str, width: int, height: int, phone: bool, shots: st
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme={scheme}&lang={lang}")
         try:
-            page.wait_for_selector('.composer .dock.approval[data-kind="blocked"]', timeout=15000)
+            page.wait_for_selector('.composer .approval-card[data-kind="blocked"]', timeout=15000)
         except Exception:  # noqa: BLE001 — said as a problem, not raised
             problems.append(f"{where}: the blocked call has no card above the composer")
             return problems
-        dock = page.locator('.composer .dock.approval[data-kind="blocked"]')
+        dock = page.locator('.composer .approval-card[data-kind="blocked"]')
         said = dock.inner_text()
         for what in (words["title"], words["reason"] + REASON[:40], words["allow"], words["keep"]):
             if what not in said:

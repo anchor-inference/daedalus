@@ -38,12 +38,12 @@ CHAT = "chat-1"
 SIDE = "btw-1"
 WORDS = {
     "en": {
-        "helpers": "Improve the prompt or ask a quick question", "coach": "Improve prompt", "open": "Quick question", "title": "Quick question", "ask": "Ask",
+        "helpers": "Helpers", "coach": "Improve prompt", "open": "Quick question", "title": "Quick question", "ask": "Ask",
         "question": "where did the prices go?", "typed": "why menu.json and not the page?",
         "answer": "They moved into **menu.json**:\n\n- each item has a `price` field\n- the page reads it at build time",
     },
     "ru": {
-        "helpers": "Улучшить промпт или задать вопрос по ходу", "coach": "Улучшить промпт", "open": "Вопрос по ходу", "title": "Вопрос по ходу", "ask": "Спросить",
+        "helpers": "Помощники", "coach": "Улучшить промпт", "open": "Вопрос по ходу", "title": "Вопрос по ходу", "ask": "Спросить",
         "question": "куда делись цены?", "typed": "почему menu.json, а не страница?",
         "answer": "Они переехали в **menu.json**:\n\n- у каждого блюда есть поле `price`\n- страница читает его при сборке",
     },
@@ -170,48 +170,29 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
     page.evaluate(f"() => localStorage.removeItem('daedalus.draft.{CHAT}')")
     root = ".btw-sheet" if phone else ".btw-window"
 
-    # The way in by the button: beside the coach, in the wand's menu or the + sheet.
-    if phone:
-        if page.locator(".composer .coach-open").count():
-            say("a phone's composer row carries the helpers' button; they belong in the + sheet")
-        page.locator(".composer .plus").first.click()
-        row = page.locator(".ph-plus-sheet [data-action='btw']")
-        try:
-            row.wait_for(timeout=5000)
-        except Exception:  # noqa: BLE001 - reported
-            say("the + sheet has no side question row")
-            context.close()
-            return
-        if words["open"] not in row.inner_text() or not page.locator(".ph-plus-sheet [data-action='coach']").count():
-            say(f"the + sheet does not offer the side question beside the coach ({row.inner_text()!r})")
-        page.wait_for_timeout(400)
-        shot("menu")
-        off = overflow(page, ".ph-plus-sheet")
-        if off:
-            say(f"the + sheet runs off the side: {off}")
-        row.click()
-    else:
-        button = page.locator(".composer .coach-open")
-        if button.count() != 1:
-            say(f"the composer has {button.count()} helper buttons")
-            context.close()
-            return
-        if button.get_attribute("aria-label") != words["helpers"]:
-            say(f"the helpers' button is not labelled {words['helpers']!r}")
-        button.click()
-        item = page.locator(".helpers-menu [data-action='btw']")
-        try:
-            item.wait_for(timeout=5000)
-        except Exception:  # noqa: BLE001 - reported
-            say("the helpers' menu has no side question")
-            context.close()
-            return
-        coach = page.locator(".helpers-menu [data-action='coach']")
-        if words["open"] not in item.inner_text() or not coach.count() or words["coach"] not in coach.inner_text():
-            say(f"the helpers' menu does not hold the coach and the side question ({page.locator('.helpers-menu').inner_text()!r})")
-        page.wait_for_timeout(250)
-        shot("menu")
-        item.click()
+    # The way in by the button: a row of the + menu (a sheet on a phone), under Helpers beside the coach.
+    if page.locator(".composer .coach-open").count():
+        say("the composer's row still carries a helpers' button of its own; they belong in the + menu")
+    page.locator(".composer .plus").first.click()
+    menu = ".menu.attach-menu"
+    item = page.locator(f"{menu} [data-action='btw']")
+    try:
+        item.wait_for(timeout=5000)
+    except Exception:  # noqa: BLE001 - reported
+        say("the + menu has no side question row")
+        context.close()
+        return
+    coach = page.locator(f"{menu} [data-action='coach']")
+    if words["open"] not in item.inner_text() or not coach.count() or words["coach"] not in coach.inner_text():
+        say(f"the + menu does not hold the coach and the side question ({page.locator(menu).inner_text()!r})")
+    if words["helpers"] not in page.locator(f"{menu} .menu-group").inner_text():
+        say(f"the helpers are not under their heading in the + menu ({page.locator(menu).inner_text()!r})")
+    page.wait_for_timeout(400 if phone else 250)
+    shot("menu")
+    off = overflow(page, menu)
+    if off:
+        say(f"the + menu runs off the side: {off}")
+    item.click()
 
     try:
         page.wait_for_selector(f"{root} .btw-ask textarea", timeout=8000)
@@ -273,8 +254,15 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         say("the answer is not rendered as markdown (no bold, no list)")
     if page.locator(f"{root} .chat-head, {root} .ph-topbar, {root} .terminal-dock").count():
         say("the embedded conversation draws a header or a terminal dock of its own")
-    if page.locator(f"{root} .composer .coach-open").count() or page.locator(f"{root} .ph-plus-sheet").count():
+    if page.locator(f"{root} .composer .coach-open").count():
         say("the side question's own composer offers the helpers")
+    if page.locator(f"{root} .composer .plus").count():
+        page.locator(f"{root} .composer .plus").first.click()
+        page.wait_for_selector(".menu.attach-menu", timeout=5000)
+        if page.locator(".menu.attach-menu [data-action='btw'], .menu.attach-menu [data-action='coach']").count():
+            say("the side question's own composer offers the helpers")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
     if not page.locator(f"{root} .coach-chat .composer .composer-field").count():
         say("the window has no field for a follow-up")
     box = page.locator(root).bounding_box()

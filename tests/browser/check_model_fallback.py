@@ -153,8 +153,8 @@ def run() -> int:
                 problems.append(f"{name}: the selector is not marked as standing in")
             reveal_composer(page)
             selector.click()
-            page.wait_for_selector(".model-list", timeout=5000)
-            restore = page.locator(".model-list .model-row.restore")
+            page.wait_for_selector(".model-picker [role=option]", timeout=5000)
+            restore = page.locator(".model-picker .model-row.restore")
             if not restore.count():
                 problems.append(f"{name}: the open list does not offer the way back to the configured model")
             elif CONFIGURED.split("-")[-1] not in restore.first.inner_text():

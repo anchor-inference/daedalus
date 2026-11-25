@@ -68,10 +68,15 @@ def walk(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents/{SESSION}?token=t&lang={lang}&scheme=dark")
 
-    # The chip: the pair, in the accent.
-    chip = page.locator(".composer .agentlang-chip")
+    # The access chip says the pair, in the live colour, while the session translates.
+    access = page.locator(".composer .composer-access")
+    chip = access.locator(".access-lang")
     expect(chip).to_have_text("EN ⇄ RU")
-    assert "translating" in (chip.get_attribute("class") or ""), chip.get_attribute("class")
+
+    def languages():  # type: ignore[no-untyped-def]
+        access.click()
+        page.locator(".access-menu [data-action='language']").click()
+        return page.locator(".menu.agentlang-menu")
 
     # The operator's own words by default; one click shows what the agent got, code block and all.
     bubble = page.locator(".msg.user").last
@@ -101,21 +106,16 @@ def walk(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     shot(page, f"answer-translated-{lang}.png")
 
     # The menu: the default, off and the languages, English checked; off reaches the host and the chip mutes.
-    chip.click()
-    menu = page.locator(".mode-menu")
+    menu = languages()
     expect(menu.locator(".agentlang-row[data-lang='en']")).to_have_attribute("aria-checked", "true")
     expect(menu.locator(".agentlang-row[data-lang='ru']")).to_have_count(0)
     page.wait_for_timeout(400)  # the popover fades in
     shot(page, f"composer-chip-menu-{lang}.png")
     before = len(CHOSEN)
     menu.locator(".agentlang-row[data-lang='off']").click()
-    expect(chip).to_have_text("RU")
+    expect(chip).to_have_count(0)
     assert CHOSEN[before:] == [{"agent": ""}], CHOSEN
-    page.wait_for_timeout(300)
-    expect(chip).to_have_text("RU")
-    assert "off" in (chip.get_attribute("class") or ""), chip.get_attribute("class")
-    chip.click()
-    page.locator(".mode-menu .agentlang-row[data-lang='default']").click()
+    languages().locator(".agentlang-row[data-lang='default']").click()
     expect(chip).to_have_text("EN ⇄ RU")
     assert CHOSEN[-1] == {"agent": None}, CHOSEN
 

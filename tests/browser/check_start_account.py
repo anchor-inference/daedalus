@@ -72,12 +72,12 @@ def run(browser, lang: str, phone: bool, default: str, problems: list[str]) -> N
     page.wait_for_timeout(800)
     subscription = default == "opus"
 
+    # The account is a chip on the picker's reasoning line, the same in its sheet on a phone.
     if phone:
         page.locator(".ph-top .ph-top-tb").click()
-        rows = page.locator(".sheet .ph-model-account")
     else:
         composer.locator(".model-select").click()
-        rows = page.locator("[data-branch='account']")
+    rows = page.locator(".model-picker [data-branch='account']")
     page.wait_for_timeout(500)
     if not subscription:
         if rows.count():
@@ -85,11 +85,10 @@ def run(browser, lang: str, phone: bool, default: str, problems: list[str]) -> N
         page.keyboard.press("Escape")
     else:
         expect(rows).to_be_visible()
-        if not phone:
-            rows.locator(".effort-entry").click()
-        page.locator(f".account-options input[value='{WORK}']").click()
+        rows.locator(".model-account-chip").click()
+        page.locator(f".account-menu [data-account='{WORK}']").click()
         page.wait_for_timeout(200)
-        if phone and page.locator(".sheet").count():
+        if page.locator(".model-picker").count():
             page.keyboard.press("Escape")
     page.wait_for_timeout(300)
 

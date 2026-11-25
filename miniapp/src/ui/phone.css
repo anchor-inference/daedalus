@@ -696,7 +696,7 @@
   .composer[data-shape="idle"] .iconbtn.plus { order: 0; }
   .composer[data-shape="idle"] .composer-tools > .mic { order: 2; }
   .composer[data-shape="idle"] .composer-tools > .roundbtn { order: 3; }
-  .composer[data-shape="idle"] .composer-mode, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
+  .composer[data-shape="idle"] .composer-access, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
   .composer[data-shape="open"] .composer-box { border-radius: var(--radius-xl); }
   .composer[data-shape="open"] .composer-box > .composer-field { padding: 8px 10px 4px; }
   /* The desktop gives the mic and Send one slot; the phone keeps a disabled Send in view beside the
@@ -717,10 +717,11 @@
   .composer[data-shape] .roundbtn.primary:disabled { background: var(--surface-3); color: var(--fg-3); opacity: 1; }
   /* 10 px insets, not 12: Inter sets a model's name a little wider than the system face did, and at
      360 px the pill showed one letter fewer than the ten that tell one model from another. */
-  .composer[data-shape] .composer-mode, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 10px; gap: 4px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); }
-  .composer[data-shape] .composer-mode::after, .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
-  .composer[data-shape] .composer-mode { flex: none; max-width: 40%; }
-  .composer[data-shape] .composer-mode .mode-yagni, .composer[data-shape] .composer-mode .mode-autopilot { font-size: var(--fs-12); }
+  .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 10px; gap: 4px; border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; color: var(--fg); font-size: var(--fs-14); }
+  .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
+  /* The access is its shield alone on a phone, in the attention colour while everything is let through. */
+  .composer[data-shape] .composer-access { position: relative; flex: none; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); padding: 0; justify-content: center; border-radius: 50%; }
+  .composer[data-shape] .composer-access::after { content: ""; position: absolute; inset: -5px; }
   .composer[data-shape] .model-select { flex: 0 1 auto; min-width: 0; }
   .composer[data-shape] .model-select > .ic:first-child { display: none; }
   /* The effort stacks under the name (styles.css, a narrow composer), a size down from it. The pill
@@ -731,9 +732,7 @@
   .composer[data-shape] .model-select .model-effort { color: var(--fg-3); flex: none; }
   .composer[data-shape] .model-select .model-label { min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
   .composer[data-shape] .model-select .model-from { font-size: var(--fs-12); }
-  .composer[data-shape] .ctx-ring { position: relative; width: var(--ctl-round); height: var(--ctl-round); padding: 0; }
-  .composer[data-shape] .ctx-ring svg { display: block; width: 22px; height: 22px; }
-  .composer[data-shape] .ctx-ring .ctx-pct { display: none; }
+  .composer[data-shape] .ctx-ring { position: relative; height: var(--ctl-round); padding: 0 2px; }
   .composer[data-shape] .ctx-ring::after { content: ""; position: absolute; inset: -5px; }
   .composer[data-shape] .composer-tools { margin-left: auto; }
   .composer[data-shape] .upload-progress, .composer[data-shape] .ph-hint { padding: 2px 10px 0; font-size: var(--fs-13); color: var(--fg-3); }
@@ -1242,41 +1241,7 @@
   .dialog-actions .btn:not(.primary):not(.danger) { background: none; color: var(--fg-2); }
   .dialog-actions .btn.danger.solid { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 
-  /* The model sheet: search, the way back from a stand-in, effort as one row of choices, the models of
-     the provider in use with their marks in words, then the other providers with their key state. */
-  /* The subtitle sits on its own line under the title and keeps 8 px below it, so rows that scroll
-     up under the head are clipped short of the words rather than touching them. */
-  .model-sheet .sheet-head { flex-wrap: wrap; padding-bottom: var(--space-2); }
-  .model-sheet .sheet-head h3 { flex: 1; }
-  .model-sheet-sub { order: 3; flex: 1 1 100%; margin-top: -6px; font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-model-list { display: flex; flex-direction: column; padding-bottom: var(--space-4); }
-  .ph-model-search { flex: none; height: 40px; margin: var(--space-1) 0 var(--space-2); }
-  .ph-model-search .model-search { min-height: 0; padding: 0; border: 0; background: none; }
-  .ph-model-fallback { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-15); }
-  .ph-model-fallback > .ic { flex: none; margin-top: 2px; color: var(--warn); }
-  .ph-model-fallback .sub { margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); }
-  .ph-model-fallback .model-row.restore { width: auto; max-width: 100%; min-height: 36px; margin-top: var(--space-2); padding: 0 var(--space-4); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); font-size: var(--fs-14); font-weight: 500; }
-  .ph-model-effort button { padding: 0 4px; }
-  .ph-model-sec { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-3) 0 4px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  /* Every provider keeps its mark on the phone, as it has on the desktop: a 32 px tile leads a row, a
-     20 px one a section header. The desktop's own rule sizes the tile to a control (40 px here). */
-  .ph-model-list .provider-mark { width: 32px; height: 32px; border-radius: var(--radius-sm); }
-  .ph-model-list .provider-mark svg { width: 20px; height: 20px; }
-  .ph-model-sec .provider-mark { width: 20px; height: 20px; border-radius: var(--radius-xs); }
-  .ph-model-sec .provider-mark svg { width: 14px; height: 14px; }
   .provider-letter { font-size: var(--fs-14); font-weight: 600; line-height: 1; color: var(--fg); background: var(--surface-2); }
-  .ph-model-sec .provider-letter { font-size: var(--fs-12); }
-  .ph-model-list .provider-count { flex: none; font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-model-list .model-row { min-height: var(--list-row-h-1); padding: 4px 0; gap: var(--space-3); border-radius: var(--radius-sm); font-size: var(--fs-15); }
-  .ph-model-list .model-row:hover, .ph-model-list .model-row:focus-visible { background: none; }
-  .ph-model-list .model-row:active { background: var(--surface-2); }
-  .ph-model-list .model-row .sub { font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-model-list .model-row > .ic { color: var(--fg-3); flex: none; }
-  .ph-model-list .model-row.on > .ic { color: var(--fg); }
-  .ph-model-list .model-text { display: flex; flex-direction: column; min-width: 0; }
-  .ph-model-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .ph-model-tag { flex: none; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; line-height: 20px; }
-  .ph-model-tag.on { color: var(--fg); }
   /* The Secret form in the phone's dress: the labels and fields of the other phone forms, and 16 px in the
      fields so Safari does not zoom into them. */
   .secret-sheet label.field, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }

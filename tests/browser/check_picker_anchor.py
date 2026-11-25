@@ -39,7 +39,7 @@ def inside(page: Page, rect: dict, where: str) -> None:
 def below(page: Page, chip_selector: str, where: str) -> None:
     """The list hangs under the chip, from its left edge or clamped to the window's right edge."""
     chip = box(page, chip_selector)
-    menu = box(page, ".model-menu")
+    menu = box(page, ".menu.model-picker")
     inside(page, menu, where)
     gap = menu["top"] - chip["bottom"]
     assert 0 <= gap <= 12, f"{where}: the picker is not under the chip (chip {chip}, picker {menu})"
@@ -49,16 +49,16 @@ def below(page: Page, chip_selector: str, where: str) -> None:
 
 def names(page: Page, language: str, where: str) -> None:
     subscription, key, _ = NAMES[language]
-    expect(page.locator('.provider-row[data-provider="claude"]'), where).to_contain_text(subscription)
-    expect(page.locator('.provider-row[data-provider="anthropic"]'), where).to_contain_text(key)
+    expect(page.locator('.model-picker [role=tab][data-provider="claude"]'), where).to_have_attribute("aria-label", subscription)
+    expect(page.locator('.model-picker [role=tab][data-provider="anthropic"]'), where).to_have_attribute("aria-label", key)
 
 
 def desktop(page: Page, language: str, where: str) -> None:
     chip = ".panel [data-panel-strip] .panel-strip-model"
     page.wait_for_selector(chip)
     page.locator(chip).click()
-    expect(page.locator(".model-menu"), where).to_be_visible()
-    page.wait_for_selector(".model-menu .provider-row")
+    expect(page.locator(".menu.model-picker"), where).to_be_visible()
+    page.wait_for_selector(".model-picker [role=tab][data-provider]")
     below(page, chip, f"{where} chip")
     names(page, language, where)
     # The composer's pill is not the one that is open.
@@ -66,26 +66,26 @@ def desktop(page: Page, language: str, where: str) -> None:
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/picker-strip-{where.replace(' ', '-')}.png")
     page.keyboard.press("Escape")
-    expect(page.locator(".model-menu"), where).to_have_count(0)
+    expect(page.locator(".menu.model-picker"), where).to_have_count(0)
     expect(page.locator(chip), f"{where}: Escape gives the keyboard back to the chip").to_be_focused()
     # A second press on the chip closes what the first opened.
     page.locator(chip).click()
-    expect(page.locator(".model-menu"), where).to_be_visible()
+    expect(page.locator(".menu.model-picker"), where).to_be_visible()
     page.locator(chip).click()
-    expect(page.locator(".model-menu"), f"{where}: the chip toggles").to_have_count(0)
+    expect(page.locator(".menu.model-picker"), f"{where}: the chip toggles").to_have_count(0)
     # "Change the model" in the strip's own menu hangs the list from the strip's chip too.
     page.locator(".panel [data-panel-strip] button[aria-haspopup='menu']").last.click()
     page.get_by_role("menuitem", name=NAMES[language][2]).click()
-    expect(page.locator(".model-menu"), where).to_be_visible()
+    expect(page.locator(".menu.model-picker"), where).to_be_visible()
     below(page, chip, f"{where} strip menu")
     page.keyboard.press("Escape")
-    expect(page.locator(".model-menu"), where).to_have_count(0)
+    expect(page.locator(".menu.model-picker"), where).to_have_count(0)
     # The composer's pill keeps its list where it always was: above the pill, its right edges together.
     pill = ".composer .model-select"
     page.locator(pill).click()
-    expect(page.locator(".model-menu"), where).to_be_visible()
+    expect(page.locator(".menu.model-picker"), where).to_be_visible()
     trigger = box(page, pill)
-    menu = box(page, ".model-menu")
+    menu = box(page, ".menu.model-picker")
     inside(page, menu, f"{where} composer")
     assert menu["bottom"] <= trigger["top"] and trigger["top"] - menu["bottom"] <= 12, f"{where}: the composer's picker left its pill (pill {trigger}, picker {menu})"
     assert abs(menu["right"] - trigger["right"]) <= 1 or menu["left"] <= 8.5, f"{where}: the composer's picker is not aligned to its pill (pill {trigger}, picker {menu})"
@@ -99,12 +99,12 @@ def phone(page: Page, language: str, where: str) -> None:
     chip = ".panel-sheet [data-panel-strip] .panel-strip-model"
     page.wait_for_selector(chip)
     page.locator(chip).click()
-    sheet = page.locator(".model-sheet")
+    sheet = page.locator(".sheet.model-picker")
     expect(sheet, where).to_be_visible()
-    page.wait_for_selector(".model-sheet .provider-row")
+    page.wait_for_selector(".sheet .model-picker [role=tab][data-provider]")
     # The sheet slides up into place; measured mid-slide its foot is still below the window.
     page.wait_for_timeout(600)
-    inside(page, box(page, ".model-sheet"), where)
+    inside(page, box(page, ".sheet.model-picker"), where)
     names(page, language, where)
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/picker-{where.replace(' ', '-')}.png")

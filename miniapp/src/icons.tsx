@@ -9,13 +9,13 @@ import {
   Archive, ArrowDown, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleQuestionMark, ClipboardPaste, Clock, Cloud, Code,
   Columns2, Compass, Copy, Crop, Database, Diamond, Dot, Download, Dumbbell, Ellipsis, EllipsisVertical,
-  ExternalLink, Eye, EyeOff, FastForward, File, FileText, Flag, Folder, FolderPlus, GitBranch, GitBranchPlus,
+  ExternalLink, Eye, EyeOff, FastForward, File, FileText, Flag, Folder, FolderPlus, Gift, GitBranch, GitBranchPlus,
   GitFork, Globe, Grid2x2Plus, Hand, Headset, Heart, House, Image, Import, Inbox, Italic, Key, Languages,
   Laptop, LayoutGrid, LetterB, LetterH, Lightbulb, Link, List, ListOrdered, ListTodo, Lock, LogIn, Mail,
   MapPin, Maximize2, Menu, MessageCircle, Mic, Minus, Monitor, Network, NotebookText, PanelLeft, PanelRight,
   Paperclip, Pause, Pencil, Pin, Plane, Play, Plug, Plus, QuestionMark, RefreshCw, Reply, RotateCw, ScanText,
   Scissors, Search, Send, SeparatorHorizontal, Settings, Settings2, Share, Shield, ShoppingCart, Smartphone,
-  Square, SquareKanban, SquarePen, SquareSplitHorizontal, SquareTerminal, Strikethrough, Table, TextAlignStart,
+  Square, SquareKanban, Star, SquarePen, SquareSplitHorizontal, SquareTerminal, Strikethrough, Table, TextAlignStart,
   TextQuote, Trash, TriangleExclamationPoint, Undo2, Unlink, User, Utensils, Volume1, VolumeX, WandSparkles,
   WifiOff, Wrench, X, Zap,
 } from "lucide";
@@ -26,7 +26,7 @@ export type IconName =
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
-  | "hand" | "ffwd" | "translate"
+  | "hand" | "ffwd" | "translate" | "star" | "gift"
   | "monitor" | "laptop"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
@@ -48,6 +48,8 @@ const NODES: Record<IconName, IconNode> = {
   cut: Scissors,
   selectall: ScanText,
   hand: Hand,
+  star: Star,
+  gift: Gift,
   ffwd: FastForward,
   utensils: Utensils,
   cart: ShoppingCart,
