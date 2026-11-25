@@ -11,7 +11,7 @@ import type { Project } from "./api";
 import { SelfDevMode } from "./capabilities";
 import { t } from "./i18n";
 import { type Mode } from "./mode";
-import { navigate, pathFor, useRoute } from "./router";
+import { inLayer, navigate, pathFor, useRoute } from "./router";
 import { type ResolvedNav, currentId } from "./navconfig";
 import { Launcher } from "./navmenu";
 import type { PaletteItem } from "./shell";
@@ -60,6 +60,15 @@ export type AppDrawerProps = {
   toast: (t: string) => void;
 };
 
+/** Closes the drawer and runs `then` once its history entry is gone. A sheet opened at once (the
+ *  projects, the palette) was there before the drawer's Back landed, and that late Back moved the
+ *  address under the new sheet, which a busy phone then showed closing again. */
+function closeThen(then: () => void): void {
+  if (!inLayer()) { closeDrawer(); then(); return; }
+  window.addEventListener("popstate", () => window.setTimeout(then, 0), { once: true });
+  closeDrawer();
+}
+
 export function AppDrawer(p: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
@@ -79,14 +88,14 @@ export function AppDrawer(p: AppDrawerProps) {
   const here = currentId(route.screen, route.detail);
   const frame = {
     mode: p.mode, screen: route.screen, detail: route.detail, waiting: p.waiting, nav: p.nav,
-    menuOpen: more, onMenu: () => setMore(true), menuButton: moreButton, onToggle: closeDrawer, onPalette: () => { closeDrawer(); p.onPalette(); }, drawer: true,
+    menuOpen: more, onMenu: () => setMore(true), menuButton: moreButton, onToggle: closeDrawer, onPalette: () => closeThen(p.onPalette), drawer: true,
   };
   return (
     <SidebarFrame value={frame}>
       <Drawer open={open} onClose={closeDrawer} label={t("nav.menu")}>
         <div className="ph-drawer-nav" onClick={onClick}>
           {p.mode === "orchestration" ? <OrchestrationSidebar onMain={p.mainOpen} /> : (
-            <Sidebar session={p.session} projects={p.projects} project={p.project} onProjects={() => { closeDrawer(); p.onProjects(); }}
+            <Sidebar session={p.session} projects={p.projects} project={p.project} onProjects={() => closeThen(p.onProjects)}
               onClearProject={p.onClearProject} onOpen={p.onOpen} toast={p.toast} />
           )}
         </div>
@@ -103,7 +112,7 @@ export function AppDrawer(p: AppDrawerProps) {
             search={p.search}
             phone
             onGo={(path) => { setMore(false); navigate(path); }}
-            onRun={(run) => { setMore(false); closeDrawer(); run(); }}
+            onRun={(run) => { setMore(false); closeThen(run); }}
             onClose={() => setMore(false)}
           />
         </Sheet>

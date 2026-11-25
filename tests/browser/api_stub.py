@@ -2554,6 +2554,9 @@ def open_projects(page) -> None:  # type: ignore[no-untyped-def]
         return
     open_drawer(page)
     page.locator(".ph-drawer-root.open [data-action='all-projects']").click()
+    # The sheet opens once the drawer's history entry is gone, and slides in: wait until it stands.
+    page.wait_for_selector(":is(.project-row, .projects-row)", timeout=10000)
+    page.wait_for_timeout(400)
 
 
 FIELD_TEXT = "el => [...el.querySelectorAll('[data-line]')].map(line => line.textContent).join('\\n')"
