@@ -7,7 +7,7 @@
 // refused it as a stale write.
 
 import { api, type Settings } from "./api";
-import { type NavConfig, type ResolvedNav, desktopLayout, drawerLayout, placeDesktop } from "./navconfig";
+import { type NavConfig, type ResolvedNav, desktopLayout, placeDesktop } from "./navconfig";
 import { prime } from "./store";
 import { NAV_KEY } from "./usenav";
 import { toast } from "./ui/dialogs";
@@ -53,18 +53,5 @@ export function placeItem(nav: ResolvedNav, id: string, to: "pinned" | "more" | 
     for (const it of nav.catalogue) if (now.hidden.has(it.id)) { placement[it.id] = "hidden"; order.push(it.id); }
     placement[id] = to;
     return desktopLayout(previous, order, placement, known);
-  }));
-}
-
-/** Puts a destination in the phone drawer's list, or takes it out. `listed` is what the drawer shows
- *  now: the shipped drawer is no list at all in the configuration, so the first change writes it out;
- *  after that the list the host holds when the write comes up is the one changed. */
-export function placeInDrawer(nav: ResolvedNav, listed: string[], id: string, on: boolean): Promise<boolean> {
-  const known = new Set(nav.catalogue.map((it) => it.id));
-  return enqueue(() => save((previous) => {
-    const held = Array.isArray(previous.drawer) ? previous.drawer.filter((one) => known.has(one)) : [];
-    const current = held.length ? held : listed;
-    const ids = on ? [...current.filter((one) => one !== id), id] : current.filter((one) => one !== id);
-    return { drawer: drawerLayout(previous, ids, known) };
   }));
 }

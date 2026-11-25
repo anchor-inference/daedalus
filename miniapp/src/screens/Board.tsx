@@ -1,60 +1,26 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Project, SessionList, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
-import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
 import { Chip, ChipBar, EmptyState, TopBar } from "../ui/phone";
-import { IconButton, MenuRow, Row, Segmented } from "../ui/primitives";
+import { Button, Combobox, Field, IconButton, Menu, MenuRow, Popover, Row, Segmented, Select, Sheet, type MenuItem } from "../ui/primitives";
 import { colourOf, initials } from "../drawer";
 import { useMedia } from "../shell";
 import { StaffAvatar } from "../team/parts";
-import { absTime, relTime } from "../format";
-import { useEdgeFade } from "../edgefade";
-import { Icon } from "../icons";
+import { relTime } from "../format";
+import { Icon, type IconName } from "../icons";
+import { useEvent, useStreamUp } from "../events";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, useOffline, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
-// `t` is also the name every task on this screen goes by, so the translator is imported twice: the
-// plain name where there is no task in scope, and `t2` inside the functions that take one.
-import { plural, t, t as t2 } from "../i18n";
-import { useSessionTitles } from "./Sessions";
+import { errorText } from "../ui";
+import { plural, t } from "../i18n";
 import { closeItems } from "../board/operatorClose";
-import { ChatFinish, type ChatFinishInfo } from "../board/ChatFinish";
-import { byProject, filtered, storedGrouping, type Grouping, type NeedsReason } from "./boardview";
+import { BoardColumns, type BoardColumn, type ChatInfo } from "../board/BoardColumns";
+import { TaskPane, TaskSheet } from "../board/TaskPane";
+import { useTaskWrites, type TaskWrites } from "../board/useTaskWrites";
+import { assigneeName, byUrgency, columnLabel, FINISHED, isFinished, movesFor, OPEN_COLUMNS, type BoardTask, type Status } from "../board/tasks";
+import { byProject, filtered, scopeFrom, scopeKey, scopeQuery, searched, storedGrouping, type Grouping, type Scope } from "./boardview";
 
-type Status = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
-type Task = {
-  id: string;
-  title: string;
-  status: Status;
-  priority: number;
-  acceptance: string;
-  checklist: { id?: string; text: string; done: boolean }[];
-  entity_revision?: number;
-  depends_on: string[];
-  session_id: string | null;
-  origin_session_id: string | null;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-  // A project's task: its four-part brief, and the names the host adds so the card can say whose
-  // project it is and who does it. A task outside every project has none of them.
-  brief?: Partial<Record<BriefField, string>>;
-  project_id?: string | null;
-  project_name?: string | null;
-  assignee?: { id: string; name: string; color: string } | null;
-  /** Why the card waits on the operator: an open question or approval tied to it, or review. */
-  needs_you?: NeedsReason | null;
-  /** The chat that finished the card itself, and its result note. */
-  finished_by?: ChatFinishInfo | null;
-};
-type BriefField = "objective" | "deliverable" | "boundaries" | "done_when";
-const BRIEF_FIELDS: BriefField[] = ["objective", "deliverable", "boundaries", "done_when"];
-
-const COLUMNS: Status[] = ["todo", "doing", "review", "blocked"];
-const FINISHED: Status[] = ["done", "dropped"];
-const columnLabel = (s: Status) => t(`board.col.${s}`);
-const NEXT: Record<Status, Status[]> = { todo: ["blocked", "dropped"], doing: [], review: [], blocked: ["todo", "dropped"], done: [], dropped: ["todo"] };
 /** The grouping the operator chose, kept per browser and per form: a wide window starts from the
  *  status columns and a phone from its projects, as each did before there was a choice, and a webview
  *  without site data simply starts from that again. */
@@ -67,199 +33,212 @@ function useGrouping(key: string, fallback: Grouping): [Grouping, (value: Groupi
   return [grouping, choose];
 }
 
-export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null; project?: Project | null }) {
-  const offline = useOffline();
+/** The chats the board can name and narrow to: the operator's own, not a helper of one. */
+function useChats(): { list: SessionSummary[]; info: ChatInfo } {
+  const { data } = useQuery<SessionList>("/api/sessions", { staleMs: 15000 });
+  return useMemo(() => {
+    const sessions = data?.sessions ?? [];
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    return {
+      list: sessions.filter((s) => !s.metadata?.subagent_of && !s.archived).sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at)),
+      info: {
+        title: (id) => byId.get(id)?.title,
+        running: (id) => byId.get(id)?.status === "running",
+        waiting: (id) => { const s = byId.get(id); return Boolean(s && (s.needs_attention || s.status === "waiting")); },
+      },
+    };
+  }, [data]);
+}
+
+export function BoardScreen({ toast, onOpen, selected, project, projects = [], query }: {
+  toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null; project?: Project | null; projects?: Project[]; query?: URLSearchParams;
+}) {
   const phone = useMedia("(max-width: 1023px)");
+  const scope = scopeFrom(query ?? new URLSearchParams(), project?.id ?? null);
   const [showDone, setShowDone] = useState(false);
   const [needs, setNeeds] = useState(false);
+  const [search, setSearch] = useState<string | null>(null);
   const [grouping, setGrouping] = useGrouping("board.grouping", "status");
   const [phoneGrouping, setPhoneGrouping] = useGrouping("board.grouping.phone", "project");
-  // The shell's project lens narrows this board as it narrows the list of agents.
-  const key = `/api/board?include_done=${showDone ? 1 : 0}${project ? `&project=${encodeURIComponent(project.id)}` : ""}`;
-  const { data: tasks, error, loading, refresh } = useQuery<Task[]>(key, { pollMs: 20000, staleMs: 5000 });
-  const titles = useSessionTitles();
-  const [creating, setCreating] = useState(false);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [over, setOver] = useState<Status | null>(null);
-  const pending = useRef<{ fingerprint: string; id: string } | null>(null);
-  const operationId = (fingerprint: string) => {
-    if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
-    return pending.current.id;
-  };
-
-  const reload = () => {
-    refresh();
-    invalidate("/api/board");
-  };
-  async function move(t: Task, status: Status) {
-    if (t.status === status || !NEXT[t.status].includes(status)) return;
-    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
-    const body = { status, expected_entity_revision: t.entity_revision };
-    try {
-      await api.put(`/api/board/${encodeURIComponent(t.id)}`, { ...body, client_operation_id: operationId(`${t.id}:${JSON.stringify(body)}`) });
-      pending.current = null;
-      reload();
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
-      toast(errorText(e));
-    }
-  }
-  async function check(t: Task, i: number) {
-    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
-    try {
-      const contract = await api.get<{ checklist: { id: string; text: string }[] }>(`/api/board/${encodeURIComponent(t.id)}/contract`);
-      const criterion = contract.checklist[i];
-      if (!criterion || criterion.text !== t.checklist[i].text || (t.checklist[i].id && t.checklist[i].id !== criterion.id)) {
-        toast(t2("board.check.stale"));
-        reload();
-        return;
-      }
-      const body = { [t.checklist[i].done ? "uncheck_ids" : "check_ids"]: [criterion.id], expected_entity_revision: t.entity_revision };
-      await api.put(`/api/board/${encodeURIComponent(t.id)}`, { ...body, client_operation_id: operationId(`${t.id}:${JSON.stringify(body)}`) });
-      pending.current = null;
-      reload();
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
-      toast(errorText(e));
-    }
-  }
-  const ending = (task: Task, blocked: boolean): MenuItem[] => closeItems(task, blocked, {
-    onDone: reload, toast,
-    onRemoved: () => { if (selected === task.id) navigate(pathFor("board"), { replace: true }); },
-  });
-
+  const live = useStreamUp();
+  const key = scopeKey(scope);
+  const { data: tasks, error, loading, refresh } = useQuery<BoardTask[]>(key, { pollMs: live ? 60000 : 20000, staleMs: 5000 });
+  // A card changed anywhere (an agent's tool, another window, a member's report) is read again at once;
+  // the poll is only the fallback for a window without the event stream.
+  useEvent(["task."], () => invalidate("/api/board"), []);
+  const chats = useChats();
+  const [creating, setCreating] = useState<null | { status?: Status }>(null);
+  const reload = () => { refresh(); invalidate("/api/board"); };
+  const writes = useTaskWrites(reload);
+  const agentProjects = projects.filter((p) => !p.settings.orchestrator?.enabled && p.system !== "dispatcher" && !p.settings.archived && !p.settings.ephemeral);
+  const go = (next: Scope, task: string | null = null) => navigate(pathFor("board", task, scopeQuery(next)), { replace: true });
+  const openTask = (id: string) => navigate(pathFor("board", id, scopeQuery(scope)));
+  const closeTask = () => navigate(pathFor("board", null, scopeQuery(scope)), { replace: true });
 
   const every = tasks ?? [];
-  const needsCount = filtered(every, true).length;
-  // "Needs you" narrows what is drawn and nothing else: the counts in the header stay the board's.
-  const all = filtered(every, needs);
-  const finished = all.filter((t) => FINISHED.includes(t.status));
-  const openCount = every.filter((t) => !FINISHED.includes(t.status)).length;
-  const open = selected ? every.find((t) => t.id === selected) ?? null : null;
-  // A link to a finished task widens the filter so the task can be shown.
+  const open = selected ? every.find((task) => task.id === selected) ?? null : null;
+  // A link to a finished task widens the filter so the task can be shown; a link to a card outside the
+  // scope in view widens the scope, so the card opens rather than a blank pane.
   useEffect(() => {
-    if (selected && tasks && !open && !showDone) setShowDone(true);
-  }, [selected, tasks, open, showDone]);
-  const column = (status: Status) => all.filter((t) => t.status === status).sort((a, b) => a.priority - b.priority || Date.parse(b.updated_at) - Date.parse(a.updated_at));
-  const card = (t: Task) => (
-    <TaskRow key={t.id} t={t} owner={t.session_id ? titles[t.session_id] : undefined} onOpen={() => navigate(pathFor("board", t.id))} onDragStart={() => setDragging(t.id)} onDragEnd={() => { setDragging(null); setOver(null); }} dragging={dragging === t.id} canDrag={!offline && Number.isInteger(t.entity_revision) && NEXT[t.status].length > 0} />
-  );
-  const dropProps = (status: Status) => ({
-    onDragOver: (e: React.DragEvent) => {
-      if (!dragging) return;
-      const source = all.find((task) => task.id === dragging);
-      if (!source || !NEXT[source.status].includes(status)) return;
-      e.preventDefault();
-      if (over !== status) setOver(status);
-    },
-    onDragLeave: (e: React.DragEvent) => {
-      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-      if (over === status) setOver(null);
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
-      const id = dragging ?? e.dataTransfer.getData("text/plain");
-      const t = all.find((x) => x.id === id);
-      setDragging(null);
-      setOver(null);
-      if (t && NEXT[t.status].includes(status)) void move(t, status);
-    },
-  });
+    if (!selected || !tasks) return;
+    if (!open && scope.kind !== "all") go({ kind: "all" }, selected);
+    else if (open && isFinished(open) && !showDone) setShowDone(true);
+  }, [selected, tasks, open, showDone, scope.kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const kanban = useRef<HTMLDivElement>(null);
-  useEdgeFade(kanban, `${showDone}:${all.length}`);
-  const sheets = <>
-    {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
-    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} ending={ending} onOpenSession={onOpen} onChanged={reload} toast={toast} />}
-  </>;
+  const openCards = every.filter((task) => !isFinished(task));
+  const finishedCount = every.length - openCards.length;
+  const needsCount = filtered(openCards, true).length;
+  const shown = searched(filtered(showDone ? every : openCards, needs), search ?? "");
+  const pane = open && {
+    task: open, chats: chats.info, writes, onClose: closeTask, onChanged: reload, onOpenSession: onOpen, onOpenTask: openTask, others: every, toast,
+    onRemoved: closeTask,
+  };
+
   if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null} grouping={phoneGrouping} setGrouping={setPhoneGrouping}
-    titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} ending={ending} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
+    chats={chats.info} writes={writes} onNew={() => setCreating({})} onOpenTask={openTask} onOpenSession={onOpen} toast={toast} reload={reload}
+    sheets={<>
+      {creating && <NewTaskSheet scope={scope} chats={chats.list} onClose={() => setCreating(null)} onCreated={() => { setCreating(null); reload(); }} toast={toast} />}
+      {pane && <TaskSheet {...pane} />}
+    </>} />;
+
+  const columns: BoardColumn[] = grouping === "project"
+    ? byProject(shown).map((group) => ({ key: group.key, name: group.projectId ? group.name : t("pbph.noproject"), tasks: group.items }))
+    : [
+      ...OPEN_COLUMNS.map((status) => ({
+        key: status, name: columnLabel(status), drop: status, tasks: shown.filter((task) => task.status === status).sort(byUrgency),
+        onAdd: status === "todo" ? () => setCreating({}) : undefined,
+      })),
+      ...(showDone ? [{ key: "finished", name: t("board.finished"), drop: "dropped" as Status, tasks: shown.filter(isFinished).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)) }] : []),
+    ];
   return (
-    <>
-      <PageHeader
-        title={screenTitle("board")}
-        subtitle={tasks ? `${plural("board.open.count", openCount)}${finished.length && showDone ? t("board.finished.count", { n: finished.length }) : ""}` : undefined}
-        actions={<button className="iconbtn primary" onClick={() => setCreating(true)} title={t("board.new")} aria-label={t("board.new")}><Icon name="plus" /></button>}
-        filters={
-        <div className="chips">
-          {project && <span className="chip accent">{t("board.lens", { name: project.name })}</span>}
-          <button className="chip select" aria-pressed={!showDone} onClick={() => setShowDone(false)}>{t("board.filter.open")}</button>
-          <button className="chip select" aria-pressed={showDone} onClick={() => setShowDone(true)}>{t("board.filter.done")}</button>
-          <button className="chip select" aria-pressed={needs} data-filter="needs" onClick={() => setNeeds(!needs)}>{t("pboard.col.needs")} <span className="n">{needsCount}</span></button>
-          <button className="chip select" aria-pressed={grouping === "status"} data-group="status" onClick={() => setGrouping("status")}>{t("board.group.status")}</button>
-          <button className="chip select" aria-pressed={grouping === "project"} data-group="project" onClick={() => setGrouping("project")}>{t("board.group.project")}</button>
-          {project && !project.system && !project.settings.ephemeral && (
-            <button className="chip select" onClick={() => navigate(projectPagePath(project.id, "board"))}>{t("board.lens.project")}</button>
+    <div className="board-page">
+      <section className="board-area" aria-label={t("board.region")}>
+        <PageHeader
+          title={screenTitle("board")}
+          filters={<>
+            <Segmented label={t("board.scope")} size="md" className="board-scope" value={scope.kind}
+              options={[
+                { id: "all", label: t("board.scope.all") },
+                { id: "project", label: t("board.scope.project"), disabled: agentProjects.length === 0 && scope.kind !== "project" },
+                { id: "chat", label: t("board.scope.chat"), disabled: chats.list.length === 0 && scope.kind !== "chat" },
+              ]}
+              onChange={(kind) => go(kind === "all" ? { kind } : kind === "project" ? { kind, id: project?.id ?? openTaskProject(every, agentProjects) ?? agentProjects[0].id } : { kind, id: chats.list[0].id })} />
+            <ScopePick scope={scope} projects={agentProjects} chats={chats.list} onPick={go} />
+          </>}
+          actions={<>
+            <Menu label={t("board.group")} trigger={<button type="button" className="board-group-btn">{t(`board.group.${grouping}`)}<Icon name="chevron" size={14} /></button>}
+              items={(["status", "project"] as Grouping[]).map((value) => ({ label: t(`board.group.${value}`), checked: grouping === value, onSelect: () => setGrouping(value) }))} />
+            {search === null
+              ? <IconButton icon="search" label={t("board.search")} onClick={() => setSearch("")} />
+              : <SearchField value={search} onChange={setSearch} onClose={() => setSearch(null)} />}
+            <Button variant="primary" icon="plus" className="board-new-btn" aria-label={t("board.new")} title={t("board.new")} onClick={() => setCreating({})}><span className="board-new-label">{t("board.new")}</span></Button>
+          </>}
+        />
+        <div className="board-filters" role="group" aria-label={t("pboard.filter")}>
+          <button type="button" className="board-filter" aria-pressed={!showDone} data-filter="open" onClick={() => setShowDone(false)}>{t("board.filter.open")}</button>
+          <button type="button" className="board-filter" aria-pressed={showDone} data-filter="done" onClick={() => setShowDone(true)}>{t("board.filter.done")} <span className="n">{finishedCount}</span></button>
+          <button type="button" className="board-filter needs" aria-pressed={needs} data-filter="needs" onClick={() => setNeeds(!needs)}>
+            <span className="kanban-dot attention" aria-hidden="true" />{t("pboard.col.needs")} <span className="n">{needsCount}</span>
+          </button>
+          <span className="grow" />
+          {tasks && <span className="board-summary">{plural("board.open.count", openCards.length)}</span>}
+        </div>
+        <div className="board-scroll">
+          {loading && !tasks && !error && <Skeleton rows={4} />}
+          {error && !tasks && <div className="empty"><b>{t("board.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+          {tasks && tasks.length === 0 && (
+            <div className="empty">
+              <b>{t(scope.kind === "chat" ? "board.empty.chat" : "board.empty")}</b>
+              <div>{t("board.empty.sub")}</div>
+              <button className="btn primary" onClick={() => setCreating({})}><Icon name="plus" size={16} /> {t("board.new")}</button>
+            </div>
+          )}
+          {tasks && tasks.length > 0 && shown.length === 0 && (
+            <div className="empty">
+              <b>{t(search ? "board.none.search" : needs ? "pboard.none.needs" : "board.none.open")}</b>
+              <button className="btn" onClick={() => { setNeeds(false); setSearch(null); setShowDone(true); }}>{t("pbph.all")}</button>
+            </div>
+          )}
+          {tasks && shown.length > 0 && (
+            <div data-grouping={grouping}>
+              <BoardColumns columns={columns} scope={grouping === "project" ? "none" : scope.kind} selected={open?.id ?? null} onOpen={(task) => openTask(task.id)} chats={chats.info}
+                canMove={(task) => (writes.blocked(task) ? [] : movesFor(task))} onMove={(task, status) => void writes.move(task, status, "card")} refusal={writes.refusal} />
+            </div>
           )}
         </div>
-        }
-      />
-      <div className="screen wide board">
-        {loading && !error && <Skeleton rows={4} />}
-        {error && !tasks && <div className="empty"><b>{t("board.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {tasks && tasks.length === 0 && (
-          <div className="empty">
-            <b>{t("board.empty")}</b>
-            <div>{t("board.empty.sub")}</div>
-            <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> {t("board.new")}</button>
-          </div>
-        )}
-        {tasks && tasks.length > 0 && needs && all.length === 0 && (
-          <div className="empty">
-            <b>{t("pboard.none.needs")}</b>
-            <button className="btn" onClick={() => setNeeds(false)}>{t("pbph.all")}</button>
-          </div>
-        )}
-        {tasks && all.length > 0 && grouping === "project" && (() => {
-          const groups = byProject(all);
-          return (
-            <div ref={kanban} className="kanban" data-grouping="project" style={{ gridTemplateColumns: kanbanColumns(groups.map((group) => group.items.length)) }}>
-              {groups.map((group) => (
-                <section key={group.key} className="kanban-col" data-project={group.projectId ?? ""}>
-                  <div className="section-title">
-                    {group.projectId ? group.name : t("pbph.noproject")} <span className="n">{group.items.length}</span>
-                  </div>
-                  {group.items.map(card)}
-                </section>
-              ))}
-            </div>
-          );
-        })()}
-        {tasks && all.length > 0 && grouping === "status" && (
-          <div ref={kanban} className={`kanban ${showDone ? "five" : ""}`} style={{ gridTemplateColumns: kanbanColumns([...COLUMNS.map((col) => column(col).length), ...(showDone ? [finished.length] : [])]) }}>
-            {COLUMNS.map((col) => {
-              const items = column(col);
-              return (
-                <section key={col} className={`kanban-col ${over === col ? "over" : ""} ${items.length === 0 ? "is-empty" : ""}`} {...dropProps(col)}>
-                  <div className="section-title">
-                    {columnLabel(col)} <span className="n">{items.length}</span>
-                  </div>
-                  {items.map(card)}
-                  {items.length === 0 && <div className="kanban-empty">—</div>}
-                </section>
-              );
-            })}
-            {showDone && (
-              <section className={`kanban-col ${over === "done" ? "over" : ""}`} {...dropProps("done")}>
-                <div className="section-title">
-                  {t("board.finished")} <span className="n">{finished.length}</span>
-                </div>
-                {finished.map(card)}
-              </section>
+      </section>
+      {pane && <TaskPane key={pane.task.id} {...pane} />}
+      {creating && <NewTaskSheet scope={scope} chats={chats.list} onClose={() => setCreating(null)} onCreated={() => { setCreating(null); reload(); }} toast={toast} />}
+    </div>
+  );
+}
+
+/** The project of the card most recently touched, for a first press of "Project" with no lens. */
+function openTaskProject(tasks: BoardTask[], projects: Project[]): string | null {
+  const ids = new Set(projects.map((p) => p.id));
+  const recent = [...tasks].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).find((task) => task.project_id && ids.has(task.project_id));
+  return recent?.project_id ?? null;
+}
+
+type Pick = { kind: "all" } | { kind: "project"; id: string; name: string } | { kind: "chat"; id: string; name: string; project: string };
+
+/** Which board is in view, named, and the list to change it from: every project and chat, a project,
+ *  or one chat. Orchestrated projects are not offered: their boards are the orchestration mode's. */
+function ScopePick({ scope, projects, chats, onPick }: { scope: Scope; projects: Project[]; chats: SessionSummary[]; onPick: (scope: Scope) => void }) {
+  const anchor = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const current = scope.kind === "project" ? projects.find((p) => p.id === scope.id)?.name : scope.kind === "chat" ? chats.find((s) => s.id === scope.id)?.title : null;
+  const name = scope.kind === "all" ? t("board.scope.everything") : current ?? t(scope.kind === "chat" ? "board.of.gone" : "board.scope.project");
+  const icon: IconName = scope.kind === "all" ? "board" : scope.kind === "project" ? "folder" : "chat";
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (text: string) => words.every((w) => text.toLowerCase().includes(w));
+  const groups = [
+    { label: t("board.scope.all"), items: [{ kind: "all" } as Pick].filter(() => hit(t("board.scope.everything"))) },
+    { label: t("board.scope.projects"), items: projects.filter((p) => hit(p.name)).map((p): Pick => ({ kind: "project", id: p.id, name: p.name })) },
+    { label: t("board.scope.chats"), items: chats.filter((s) => hit(s.title)).slice(0, 40).map((s): Pick => ({ kind: "chat", id: s.id, name: s.title, project: s.project })) },
+  ].filter((group) => group.items.length > 0);
+  const label = (item: Pick) => (item.kind === "all" ? t("board.scope.everything") : item.name);
+  return (
+    <>
+      <button ref={anchor} type="button" className="board-scope-pick" aria-haspopup="menu" aria-expanded={open} aria-label={t("board.scope.shown", { name })} title={t("board.scope.choose")} onClick={() => setOpen(!open)}>
+        <Icon name={icon} size={16} />
+        <span className="truncate">{name}</span>
+        <Icon name="chevron" size={14} />
+      </button>
+      {open && (
+        <Popover anchor={anchor.current} onClose={() => { setOpen(false); setQuery(""); }} label={t("board.scope.choose")} width={340} side="bottom" className="board-scope-pop">
+          <Combobox inline autoFocus label={t("board.scope.find")} placeholder={t("board.scope.find")} groups={groups} items={[]} query={query} onQuery={setQuery} toLabel={(item) => `${item.kind}:${item.kind === "all" ? "" : item.id}:${label(item)}`}
+            empty={t("board.scope.nothing")}
+            render={(item) => (
+              <span className="board-scope-row">
+                <Icon name={item.kind === "all" ? "board" : item.kind === "project" ? "folder" : "chat"} size={16} />
+                <span className="truncate">{label(item)}</span>
+                {item.kind === "chat" && item.project && <span className="sub truncate">{item.project}</span>}
+              </span>
             )}
-          </div>
-        )}
-      </div>
-      {sheets}
+            onChoose={(item) => { setOpen(false); setQuery(""); onPick(item.kind === "all" ? { kind: "all" } : { kind: item.kind, id: item.id }); }} />
+        </Popover>
+      )}
     </>
   );
 }
 
+function SearchField({ value, onChange, onClose }: { value: string; onChange: (value: string) => void; onClose: () => void }) {
+  return (
+    <label className="board-search">
+      <Icon name="search" size={16} />
+      <input autoFocus type="search" value={value} aria-label={t("board.search")} placeholder={t("board.search")} onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } }}
+        onBlur={() => { if (!value.trim()) onClose(); }} />
+    </label>
+  );
+}
+
 type PhoneBoardProps = {
-  tasks: Task[] | null | undefined; error: string | null | undefined; loading: boolean; refresh: () => void; showDone: boolean; setShowDone: (v: boolean) => void; project: Project | null;
-  grouping: Grouping; setGrouping: (value: Grouping) => void;
-  titles: Record<string, string>; offline: boolean; onNew: () => void; onMove: (t: Task, s: Status) => void; ending: (t: Task, blocked: boolean) => MenuItem[];
-  onOpenSession: (id: string) => void; toast: (text: string) => void; sheets: ReactNode;
+  tasks: BoardTask[] | null | undefined; error: string | null | undefined; loading: boolean; refresh: () => void; showDone: boolean; setShowDone: (v: boolean) => void; project: Project | null;
+  grouping: Grouping; setGrouping: (value: Grouping) => void; chats: ChatInfo; writes: TaskWrites; reload: () => void;
+  onNew: () => void; onOpenTask: (id: string) => void; onOpenSession: (id: string) => void; toast: (text: string) => void; sheets: ReactNode;
 };
 
 /**
@@ -268,38 +247,38 @@ type PhoneBoardProps = {
  * commands (open, move, its session, copy, archive) are its long-press sheet; what the list shows
  * (open or with finished, the project lens) is behind the options glyph, so the bar keeps two glyphs.
  */
-function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, grouping, setGrouping, titles, offline, onNew, onMove, ending, onOpenSession, toast, sheets }: PhoneBoardProps) {
+function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, grouping, setGrouping, chats, writes, reload, onNew, onOpenTask, onOpenSession, toast, sheets }: PhoneBoardProps) {
   const [filter, setFilter] = useState<Status | "finished" | "needs" | null>(null);
   const [options, setOptions] = useState(false);
   const all = tasks ?? [];
-  const needsCount = filtered(all, true).length;
-  const inColumn = (task: Task) => filter === null ? true : filter === "needs" ? Boolean(task.needs_you) : filter === "finished" ? FINISHED.includes(task.status) : task.status === filter;
-  const shown = all.filter((task) => (showDone || !FINISHED.includes(task.status)) && inColumn(task))
-    .sort((a, b) => a.priority - b.priority || Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  const needsCount = filtered(all.filter((task) => !isFinished(task)), true).length;
+  const inColumn = (task: BoardTask) => filter === null ? true : filter === "needs" ? Boolean(task.needs_you) : filter === "finished" ? isFinished(task) : task.status === filter;
+  const shown = all.filter((task) => (showDone || !isFinished(task)) && inColumn(task)).sort(byUrgency);
   const ordered = byProject(shown).map((group) => ({ id: group.projectId, name: group.name, items: group.items }));
-  const byStatus = [...COLUMNS, ...FINISHED].map((status) => ({ status, items: shown.filter((task) => task.status === status) })).filter((group) => group.items.length > 0);
-  const columns = [...COLUMNS, ...(showDone ? ["finished" as const] : [])].map((column) => ({ column, count: all.filter((task) => column === "finished" ? FINISHED.includes(task.status) : task.status === column).length })).filter((c) => c.count > 0);
-  const openCount = all.filter((task) => !FINISHED.includes(task.status)).length;
-  const row = (task: Task) => {
+  const byStatus = [...OPEN_COLUMNS, ...FINISHED].map((status) => ({ status, items: shown.filter((task) => task.status === status) })).filter((group) => group.items.length > 0);
+  const columns = [...OPEN_COLUMNS, ...(showDone ? ["finished" as const] : [])].map((column) => ({ column, count: all.filter((task) => column === "finished" ? isFinished(task) : task.status === column).length })).filter((c) => c.count > 0);
+  const openCount = all.filter((task) => !isFinished(task)).length;
+  const row = (task: BoardTask) => {
     const done = task.checklist.filter((c) => c.done).length;
     const pct = task.checklist.length ? Math.round((100 * done) / task.checklist.length) : 0;
-    const owner = task.session_id ? titles[task.session_id] : undefined;
-    const blocked = offline || !Number.isInteger(task.entity_revision);
-    const open = () => navigate(pathFor("board", task.id));
+    const chat = task.origin_session_id ?? task.session_id;
+    const owner = chat ? chats.title(chat) : undefined;
+    const blocked = writes.blocked(task);
+    const open = () => onOpenTask(task.id);
     const actions: MenuItem[] = [
       { label: t("common.open"), icon: "expand", onSelect: open },
-      ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: columnLabel(status) }), icon: "forward" as const, disabled: blocked, onSelect: () => onMove(task, status) })),
-      ...(task.session_id ? [{ label: owner ? t("board.open.owner", { name: owner }) : t("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(task.session_id!) }] : []),
+      ...movesFor(task).map((status) => ({ label: t("pbph.moveto", { column: columnLabel(status) }), icon: "forward" as const, disabled: blocked, onSelect: () => void writes.move(task, status, "card").then((ok) => { if (!ok && writes.refusal) toast(writes.refusal.text); }) })),
+      ...(chat ? [{ label: owner ? t("board.open.owner", { name: owner }) : t("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(chat) }] : []),
       ...(task.project_id ? [{ label: t("board.on.project", { name: task.project_name ?? task.project_id }), icon: "board" as const, onSelect: () => navigate(projectPagePath(task.project_id!, "board", { task: task.id })) }] : []),
       { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
-      ...ending(task, blocked),
+      ...closeItems(task, blocked, { onDone: reload, toast }),
     ];
     return (
       <Row key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
         meta={<>
-          {task.assignee && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
+          {task.assignee?.kind === "staff" && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
           {task.needs_you && <span className="ph-pill warn" data-needs={task.needs_you}>{t(`board.needs.${task.needs_you}`)}</span>}
-          <span className={`ph-ell ${task.status === "doing" ? "running" : task.status === "blocked" ? "waiting" : ""}`}>{[columnLabel(task.status), owner ?? task.assignee?.name, relTime(task.updated_at)].filter(Boolean).join(" · ")}</span>
+          <span className={`ph-ell ${task.status === "doing" ? "running" : task.status === "blocked" ? "waiting" : ""}`}>{[columnLabel(task.status), owner ?? assigneeName(task), relTime(task.updated_at)].filter(Boolean).join(" · ")}</span>
         </>}
         trail={<>
           {task.priority <= 2 && <span className={`ph-pill ${task.priority === 1 ? "bad" : ""}`}>P{task.priority}</span>}
@@ -311,7 +290,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
   };
   return (
     <div className="ph-page ph-board ph-gboard">
-      <TopBar center title={screenTitle("board")} sub={undefined}
+      <TopBar title={screenTitle("board")} sub={undefined}
         actions={<>
           <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} className="ph-ib" />
           <IconButton icon="plus" label={t("board.new")} onClick={onNew} className="ph-ib" />
@@ -377,226 +356,83 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
   );
 }
 
-function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging, canDrag }: { t: Task; owner?: string; onOpen: () => void; onDragStart: () => void; onDragEnd: () => void; dragging: boolean; canDrag: boolean }) {
-  const done = t.checklist.filter((c) => c.done).length;
-  const next = t.checklist.find((c) => !c.done);
-  const pct = t.checklist.length ? Math.round((100 * done) / t.checklist.length) : 0;
-  return (
-    <div className={`erow task p${Math.min(t.priority, 4)} ${dragging ? "dragging" : ""}`} role="link" tabIndex={0} draggable={canDrag} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); onDragStart(); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
-      <div className="erow-main">
-        <div className="erow-head">
-          <span className="erow-title clamp-3">{t.title}</span>
-          <span className="erow-time num" title={absTime(t.updated_at)}>{relTime(t.updated_at)}</span>
-        </div>
-        {t.checklist.length > 0 && (
-          <div className="task-check">
-            <div className={`bar ${pct === 100 ? "ok" : ""}`} style={{ ["--v" as string]: pct }}><i /></div>
-            <span className="num sub">{done}/{t.checklist.length}</span>
-          </div>
-        )}
-        {next && <div className="erow-meta"><span className="faint">{t2("board.next")}</span><span>{next.text}</span></div>}
-        <div className="erow-meta">
-          {t.needs_you && <span className="chip attn" data-needs={t.needs_you}>{t2(`board.needs.${t.needs_you}`)}</span>}
-          {t.priority <= 2 && <span className={`chip ${t.priority === 1 ? "bad" : "attn"}`}>P{t.priority}</span>}
-          {t.assignee && <span>{t.assignee.name}</span>}
-          {t.assignee && owner && <span className="sep">·</span>}
-          {owner && <span>{owner}</span>}
-          {t.depends_on.length > 0 && (owner || t.assignee) && <span className="sep">·</span>}
-          {t.depends_on.length > 0 && <span>{plural("board.after", t.depends_on.length)}</span>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSession, onChanged, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; ending: (t: Task, blocked: boolean) => MenuItem[]; onOpenSession: (id: string) => void; onChanged: () => void; toast: (t: string) => void }) {
-  const offline = useOffline();
-  const writeBlocked = offline || !Number.isInteger(t.entity_revision);
-  const done = t.checklist.filter((c) => c.done).length;
-  // Acceptance that only restates the brief's "Done when" is one section, not two: the pair, one under
-  // the other and a clause apart, left nobody able to say what set them apart. The longer words stay.
-  const merged = Boolean(t.acceptance) && restates(t.acceptance!, t.brief?.done_when);
-  const briefText = (field: BriefField) => (field === "done_when" && merged && t.acceptance!.length > (t.brief?.done_when ?? "").length ? t.acceptance! : t.brief?.[field] ?? "");
-  return (
-    <Sheet
-      title={t.title}
-      onClose={onClose}
-      head={
-        <OverflowMenu
-          small
-          label={t2("board.actions")}
-          items={[
-            ...(t.session_id ? [{ label: owner ? t2("board.open.owner", { name: owner }) : t2("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(t.session_id!) }] : []),
-            { label: t2("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(t.id); if (!ok) toast(t.id); return ok; } },
-            "-",
-            ...ending(t, writeBlocked),
-          ]}
-        />
-      }
-    >
-      <div className="erow-meta" style={{ marginBottom: 10 }}>
-        <span className="chip">{columnLabel(t.status)}</span>
-        <span className={`chip ${t.priority === 1 ? "bad" : t.priority === 2 ? "attn" : ""}`}>P{t.priority}</span>
-        {owner && <span className="sep">·</span>}
-        {owner && <button className="linkbtn" onClick={() => onOpenSession(t.session_id!)}>{owner}</button>}
-        <span className="sep">·</span>
-        <span title={absTime(t.updated_at)}>{t2("board.updated", { t: relTime(t.updated_at) })}</span>
-      </div>
-      <div className="sub" style={{ marginBottom: 10 }}>
-        {t.origin_session_id ? <>{t2("board.of")} <button className="linkbtn" onClick={() => onOpenSession(t.origin_session_id!)}>{board ?? t2("board.of.gone")}</button></> : t2("board.everyone")}
-      </div>
-      {(t.project_id || t.assignee) && (
-        <div className="erow-meta board-task-where" style={{ marginBottom: 10 }}>
-          {t.assignee && <span>{t2("board.assignee", { name: t.assignee.name })}</span>}
-          {t.assignee && t.project_id && <span className="sep">·</span>}
-          {t.project_id && (
-            // A link that looks like one, and the project named only when the line above has not
-            // just named it: "Board of Bakery site" over "Open on the board of Bakery site" read as
-            // the same words twice, with nothing to say the second was a way somewhere.
-            <button className="linkbtn accent board-task-open" onClick={() => navigate(projectPagePath(t.project_id!, "board", { task: t.id }))}>
-              {(t.project_name ?? t.project_id) === board ? t2("board.on.project.same") : t2("board.on.project", { name: t.project_name ?? t.project_id })}
-              <Icon name="forward" size={12} />
-            </button>
-          )}
-        </div>
-      )}
-      {BRIEF_FIELDS.filter((field) => (t.brief?.[field] ?? "").trim()).map((field) => (
-        <section key={field} className="sheet-section board-task-brief">
-          <div className="sheet-section-title">{t2(`pboard.brief.${field}`)}</div>
-          <div className="proposal-text">{briefText(field)}</div>
-        </section>
-      ))}
-      {t.acceptance && !merged && (
-        <section className="sheet-section">
-          <div className="sheet-section-title">{t2("board.acceptance")}</div>
-          <div className="proposal-text">{t.acceptance}</div>
-        </section>
-      )}
-      {t.checklist.length > 0 && (
-        <section className="sheet-section">
-          <div className="sheet-section-title">{t2("board.checklist")} <span className="sub">{done}/{t.checklist.length}</span></div>
-          {t.checklist.map((c, i) => (
-            <label key={i} className="toggle-row check-row">
-              <input type="checkbox" checked={c.done} disabled={writeBlocked || t.status === "done"} onChange={() => onCheck(t, i)} />
-              <span className={c.done ? "done" : ""}>{c.text}</span>
-            </label>
-          ))}
-        </section>
-      )}
-      {t.depends_on.length > 0 && (
-        <section className="sheet-section">
-          <div className="sheet-section-title">{t2("board.depends")}</div>
-          <div className="sub mono">{t.depends_on.join(", ")}</div>
-        </section>
-      )}
-      {t.notes && (
-        <section className="sheet-section">
-          <div className="sheet-section-title">{t2(t.project_id ? "board.history" : "board.notes")}</div>
-          <pre className="inbox-text">{t.notes}</pre>
-        </section>
-      )}
-      <ChatFinish task={t} onOpenSession={onOpenSession} onChanged={onChanged} toast={toast} />
-      {NEXT[t.status].length > 0 && <section className="sheet-section">
-        <div className="sheet-section-title">{t2("board.moveto")}</div>
-        <div className="btnrow" style={{ marginTop: 0 }}>
-          {NEXT[t.status].map((s) => (
-            <button key={s} className="btn small" disabled={writeBlocked} onClick={() => onMove(t, s)}>
-              {columnLabel(s)}
-            </button>
-          ))}
-        </div>
-      </section>}
-      {writeBlocked && <div className="result-warning" role="status">{t2("result.block.unconfirmed")}</div>}
-    </Sheet>
-  );
-}
-
-function NewTaskSheet({ onClose, onCreated, toast }: { onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
+/**
+ * A new card. Its words are the pane's two blocks, Description and Acceptance, then its checklist; who
+ * does it, when it is due and how urgent it is; and the chat whose board it goes on. A chat in a
+ * project posts to that project's board, since the board of every chat refuses a project's chat.
+ */
+function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scope; chats: SessionSummary[]; onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
   const offline = useOffline();
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
-  const collectionRevision = useRef<number | null>(null);
-  const [form, setForm] = useState({ title: "", acceptance: "", checklist: "", priority: 3, session_id: "" });
+  const collectionRevision = useRef<{ key: string; value: number } | null>(null);
+  const [form, setForm] = useState({ title: "", description: "", acceptance: "", checklist: "", priority: 3, due: "", you: false, session_id: scope.kind === "chat" ? scope.id : "" });
   const [busy, setBusy] = useState(false);
-  const { data: listing } = useQuery<SessionList>("/api/sessions", { staleMs: 15000 });
-  const sessions = listing?.sessions;
-  const agents = (sessions ?? []).filter((s) => !s.title.startsWith("[sub]"));
+  const [refused, setRefused] = useState<string | null>(null);
+  const chat = chats.find((s) => s.id === form.session_id);
+  const projectId = chat?.project_id || (scope.kind === "project" ? scope.id : "");
+  const options = [{ id: "", label: t("board.board.any") }, ...chats.filter((s) => scope.kind !== "project" || s.project_id === scope.id).slice(0, 60).map((s) => ({ id: s.id, label: s.title }))];
   async function create() {
-    if (offline) { toast(t("result.block.unconfirmed")); return; }
+    if (offline) { setRefused(t("result.block.unconfirmed")); return; }
     setBusy(true);
     try {
-      if (collectionRevision.current === null) {
-        const revisions = await api.get<{ collection_revision: number }>("/api/control/revisions");
-        if (!Number.isInteger(revisions.collection_revision)) { toast(t("result.block.unconfirmed")); return; }
-        collectionRevision.current = revisions.collection_revision;
+      const revisionsPath = projectId ? `/api/control/revisions?project=${encodeURIComponent(projectId)}` : "/api/control/revisions";
+      if (collectionRevision.current?.key !== revisionsPath) {
+        const revisions = await api.get<{ collection_revision: number }>(revisionsPath);
+        if (!Number.isInteger(revisions.collection_revision)) { setRefused(t("result.block.unconfirmed")); return; }
+        collectionRevision.current = { key: revisionsPath, value: revisions.collection_revision };
       }
       const body = {
-        title: form.title,
-        acceptance: form.acceptance,
+        title: form.title.trim(),
+        acceptance: form.acceptance.trim(),
         priority: form.priority,
         checklist: form.checklist.split("\n").map((l) => l.trim()).filter(Boolean),
+        ...(form.description.trim() ? { brief: { objective: form.description.trim() } } : {}),
+        ...(form.due ? { due_at: form.due } : {}),
+        ...(form.you ? { assignee_operator: true } : {}),
         session_id: form.session_id || null,
-        expected_collection_revision: collectionRevision.current,
+        expected_collection_revision: collectionRevision.current.value,
       };
       const fingerprint = JSON.stringify(body);
       if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
-      await api.post("/api/board", { ...body, client_operation_id: operation.current.id });
+      await api.post(projectId ? `/api/projects/${encodeURIComponent(projectId)}/board` : "/api/board", { ...body, client_operation_id: operation.current.id });
       operation.current = null;
       collectionRevision.current = null;
       onCreated();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) { operation.current = null; collectionRevision.current = null; }
+      setRefused(errorText(e));
       toast(errorText(e));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <Sheet title={t("board.new")} onClose={onClose}>
-      <label className="field">{t("board.title")}</label>
-      <input className="field" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-      <label className="field">{t("board.acceptance.label")}</label>
-      <textarea className="field" rows={2} value={form.acceptance} onChange={(e) => setForm({ ...form, acceptance: e.target.value })} />
-      <label className="field">{t("board.checklist.label")}</label>
-      <textarea className="field" rows={3} value={form.checklist} onChange={(e) => setForm({ ...form, checklist: e.target.value })} />
-      <label className="field">{t("board.priority")}</label>
-      {/* P1 and P2 wear the red and amber of the pills on the cards, so the choice previews the mark
-          the task will carry; the rest stay neutral, as their pills do. */}
-      <div className="segmented inline priority-pick" role="radiogroup">
-        {[1, 2, 3, 4, 5].map((p) => (
-          <button key={p} role="radio" aria-checked={form.priority === p} className={`${form.priority === p ? "on" : ""} ${p === 1 ? "bad" : p === 2 ? "attn" : ""}`} onClick={() => setForm({ ...form, priority: p })}>P{p}</button>
-        ))}
+    <Sheet title={t("board.new")} onClose={onClose} size="md" className="board-new"
+      footer={<>
+        <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" busy={busy} disabled={offline || !form.title.trim()} onClick={() => void create()}>{t("common.create")}</Button>
+      </>}>
+      <Field label={t("board.title")} autoFocus value={form.title} maxLength={200} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+      <Field multiline label={t("board.description")} rows={3} maxLength={4000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+      <Field multiline label={t("board.acceptance.label")} rows={2} maxLength={2000} value={form.acceptance} onChange={(e) => setForm({ ...form, acceptance: e.target.value })} />
+      <Field multiline label={t("board.checklist.label")} rows={3} value={form.checklist} onChange={(e) => setForm({ ...form, checklist: e.target.value })} />
+      <div className="board-new-row">
+        <span className="field-label">{t("board.priority")}</span>
+        <Segmented label={t("board.priority")} value={String(form.priority)} onChange={(v) => setForm({ ...form, priority: Number(v) })}
+          options={[1, 2, 3, 4, 5].map((p) => ({ id: String(p), label: `P${p}` }))} />
       </div>
-      <div className="sub" style={{ marginTop: 4 }}>{t("board.priority.hint")}</div>
-      <label className="field">{t("board.board")}</label>
-      <select className="field" value={form.session_id} onChange={(e) => setForm({ ...form, session_id: e.target.value })}>
-        <option value="">{t("board.board.any")}</option>
-        {agents.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-      </select>
-      <div className="sub" style={{ marginTop: 4 }}>{t("board.board.hint")}</div>
-      <div className="sheet-foot">
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || offline || !form.title.trim()} onClick={create}>{t("common.create")}</button>
+      <div className="board-new-row">
+        <span className="field-label">{t("board.kv.assignee")}</span>
+        <Segmented label={t("board.kv.assignee")} value={form.you ? "you" : "agent"} onChange={(v) => setForm({ ...form, you: v === "you" })}
+          options={[{ id: "agent", label: t("board.who.agent.full") }, { id: "you", label: t("board.who.you.full") }]} />
       </div>
-      {offline && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
+      <Field label={t("board.kv.due")} type="date" value={form.due} onChange={(e) => setForm({ ...form, due: e.target.value })} />
+      <div className="board-new-row">
+        <span className="field-label">{t("board.kv.chat")}</span>
+        <Select label={t("board.kv.chat")} size="md" value={form.session_id} options={options} onChange={(v) => setForm({ ...form, session_id: v })} />
+      </div>
+      <div className="sub">{t("board.board.hint")}</div>
+      {refused && <div className="task-refusal" role="alert">{refused}</div>}
     </Sheet>
   );
-}
-
-/** Whether `text` says no more than `other`: one contains the other once case, spaces and the final
- *  full stop are set aside. */
-export function restates(text: string, other: string | undefined): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.;:!]+$/, "");
-  const a = norm(text);
-  const b = norm(other ?? "");
-  return Boolean(a && b) && (a.includes(b) || b.includes(a));
-}
-
-/**
- * The board's columns on a wide screen: an empty column narrow, a column with cards wide enough for a
- * title on one line, and the board scrolling sideways (its edge faded) when they do not all fit.
- * Equal shares left two empty columns holding half of a desktop around a lone dash, and squeezed five
- * columns on a tablet until every title broke over two lines.
- */
-export function kanbanColumns(counts: number[]): string {
-  return counts.map((n) => (n === 0 ? "minmax(120px, 0.5fr)" : "minmax(240px, 1fr)")).join(" ");
 }

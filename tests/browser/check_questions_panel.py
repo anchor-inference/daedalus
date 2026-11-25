@@ -84,10 +84,12 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
     chat = page.locator(".chat.in-project.orchestrator")
     expect(chat).to_be_visible()
 
-    # The tab leads the panel beside the orchestrator, with the count of what waits.
+    # The tab is on screen beside the orchestrator, with the count of what waits, and it comes first
+    # after the Overview: what waits for the operator goes before the tools they opened.
     tab = page.locator(".panel .panel-tab[data-tab='questions']")
     expect(tab).to_have_attribute("aria-selected", "true")
-    expect(page.locator(".panel .panel-tab").first).to_have_attribute("data-tab", "questions")
+    expect(page.locator(".panel .panel-tab").nth(0)).to_have_attribute("data-tab", "overview")
+    expect(page.locator(".panel .panel-tab").nth(1)).to_have_attribute("data-tab", "questions")
     expect(tab.locator(".count")).to_have_text("6")
     # The chat has one line for the whole list, after its latest turn, and no card per question —
     # but not while the Questions tab is open beside it, where its "Open" would open what is shown.

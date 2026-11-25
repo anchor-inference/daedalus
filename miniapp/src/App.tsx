@@ -680,7 +680,7 @@ export function App() {
         {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onPickProject={pickProject} />}
         {route.screen === "companion" && <CompanionScreen tab={route.detail} onOpen={open} toast={showToast} />}
         {route.screen === "inbox" && <InboxScreen onOpen={open} toast={showToast} />}
-        {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
+        {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} projects={projectList} query={route.query} />}
         {route.screen === "changes" &&
           (selfdev === "off" ? (
             // In a screen of its own so it takes the page's height and sits in its middle, as every
@@ -796,7 +796,8 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} onSearchAll={searchPalette} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} onPalette={openPalette} onSearchAll={searchPalette} mainOpen={mainChat}
+        session={sessionId} projects={agentProjects} project={project} onProjects={() => setSwitching(true)} onClearProject={clearProject} onOpen={open} toast={showToast} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PairingHost />

@@ -196,7 +196,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     page.locator(".ph-menu").first.wait_for(timeout=15000)
     page.locator(".ph-menu").first.tap()
-    page.locator(".ph-drawer-root.open [data-nav='more']").tap()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").tap()
     sheet = page.locator(".ph-more-sheet")
     sheet.locator(".launch-field").wait_for(timeout=5000)
     sheet.locator(".launch-field").fill("Expense")

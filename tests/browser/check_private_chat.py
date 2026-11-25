@@ -77,7 +77,7 @@ def start(browser, phone: bool):  # type: ignore[no-untyped-def]
 
 def choose_private(page: Page, composer, phone: bool) -> None:  # type: ignore[no-untyped-def]
     composer.locator(".plus").click()
-    item = page.locator(".ph-plus-sheet [data-private]" if phone else ".plus-menu [data-private]")
+    item = page.locator(".attach-menu [data-private]")
     expect(item).to_be_visible()
     item.click()
     if phone:
@@ -95,15 +95,12 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     composer = page.locator(".start-composer")
     expect(composer).to_be_visible(timeout=15000)
     composer.locator(".plus").click()
-    item = page.locator(".ph-plus-sheet [data-private]" if phone else ".plus-menu [data-private]")
+    item = page.locator(".attach-menu [data-private]")
     expect(item).to_contain_text(words["menu"])
     if item.get_attribute("aria-checked") != "false":
         say("the private choice starts switched on")
     item.click()
-    if phone:
-        # The idle pill shares its one row with the field and leaves the chip for the open toolbar.
-        expect(composer.locator(".private-chip")).to_be_hidden()
-        composer.locator(".composer-field").click()
+    # The phone's composer is the same card at rest as while typing: the chip is in its row at once.
     chip = composer.locator(".private-chip")
     expect(chip).to_be_visible()
     expect(chip).to_contain_text(words["badge"])

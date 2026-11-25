@@ -166,30 +166,6 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
   .term-screen { padding-left: 4px; }
 }
 
-/* The Board screen's cards and lanes (screens/Board.tsx). A task card is the list's card with a
-   hairline, its priority said by the P1/P2 tag inside it rather than by a coloured edge, and a lane is
-   a label over its cards, not a box. */
-.erow.task { grid-template-columns: minmax(0, 1fr); padding: 12px; margin-bottom: var(--space-2); }
-.erow.task:hover { background: var(--surface-2); border-color: var(--line-strong); }
-.erow.task.dragging { opacity: .4; }
-.erow.task .erow-title { font-size: var(--fs-14); }
-.erow.task .erow-time { color: var(--fg-3); }
-.erow.task .erow-meta { color: var(--fg-3); font-size: var(--fs-12); }
-.kanban { display: flex; flex-direction: column; gap: var(--space-2); }
-.kanban-col.is-empty { display: none; }
-.kanban-empty { display: none; }
-@media (min-width: 1024px) {
-  /* The columns are set by kanbanColumns (Board.tsx): narrow when empty, and sideways scrolling when
-     the rest do not fit. A lane a card is dragged over says so with a dashed edge alone. */
-  .kanban { display: grid; align-items: start; overflow-x: auto; }
-  .kanban-col { min-height: 240px; padding: 0 0 8px; border-radius: var(--radius-md); border: 1px dashed transparent; }
-  .kanban-col.is-empty { display: block; }
-  .kanban-col.over { border-color: var(--line-strong); }
-  .kanban-col .section-title { margin: 6px 2px 8px; }
-  .kanban-empty { display: block; text-align: center; color: var(--fg-3); padding: 24px 0; }
-  .erow.task { cursor: grab; }
-}
-
 /* A project's board. On a phone and in a narrow panel it is one list under chips; from 1024 px the
    columns stand side by side and each scrolls with the page, so a long queue never hides the review. */
 .pboard-list { display: flex; flex-direction: column; gap: var(--space-2); }

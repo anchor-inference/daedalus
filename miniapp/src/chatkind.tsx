@@ -19,14 +19,14 @@
 // tab is the new chat's default mode, so an operator looking at their computer chats who presses New
 // chat starts another one of those.
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { BrowserUserStatus, SessionSummary } from "./api";
 import { COMPUTER, type ComputerState, wordsText } from "./computer";
 import { USER_STATUS, chromeState } from "./browser/yourchrome";
 import { t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { useQuery } from "./store";
-import { Popover, Sheet } from "./ui/dialogs";
+import { MenuRow, Popover } from "./ui/primitives";
 
 export type ChatKind = "chat" | "computer" | "chrome" | "remote";
 export type KindTab = "all" | ChatKind;
@@ -233,73 +233,6 @@ export function tabLabel(tab: KindTab): string {
   return t(`kind.tab.${tab}`);
 }
 
-/**
- * The tabs over a chat list: All, Chats, Computer, Browser, Remote. Drawn as a tab bar with an underline, not
- * as pills, so they do not read as one more row of the status chips under them. The underline slides
- * to the next tab rather than jumping, measured from the buttons themselves, because the labels are as wide
- * as their words and Russian ones are half as wide again. Arrows move between them, as a tab list's do.
- */
-export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindTab; onChange: (tab: KindTab) => void; counts?: Record<KindTab, number>; className?: string }) {
-  const box = useRef<HTMLDivElement>(null);
-  const pill = useRef<HTMLSpanElement>(null);
-  // The underline is placed on the element itself, not through state. The tabs stretch with the
-  // sidebar, so dragging its edge resizes them every frame, and a state update per measurement made
-  // React commit once per pointer move for the whole drag.
-  useLayoutEffect(() => {
-    const place = () => {
-      const bar = box.current;
-      if (!bar) return;
-      // Five tabs do not fit a sidebar of the usual width with every label written out, least of all
-      // in Russian. Where they do not, the kinds that have an icon keep only the icon and the count,
-      // and the chosen one keeps its word: measured with the words out, so widening the column brings
-      // them back. The words stay in the page, clipped, for a screen reader and the tooltip says them.
-      delete bar.dataset.compact;
-      const cut = bar.scrollWidth > bar.clientWidth + 1 || [...bar.querySelectorAll<HTMLElement>(".kind-tab")].some((b) => b.scrollWidth > b.clientWidth + 1);
-      if (cut) bar.dataset.compact = "";
-      const on = bar.querySelector<HTMLElement>(`[data-kind-tab="${tab}"]`);
-      const line = pill.current;
-      if (!on || !line) return;
-      // The first placement must not slide in from the left edge.
-      const first = !line.dataset.placed;
-      if (first) line.style.transition = "none";
-      line.style.transform = `translateX(${on.offsetLeft}px)`;
-      line.style.width = `${on.offsetWidth}px`;
-      line.dataset.placed = "1";
-      if (first) { void line.offsetWidth; line.style.transition = ""; }
-    };
-    place();
-    if (typeof ResizeObserver === "undefined" || !box.current) return;
-    const observer = new ResizeObserver(place);
-    observer.observe(box.current);
-    return () => observer.disconnect();
-  }, [tab, counts?.all, counts?.remote]);
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const at = KIND_TABS.indexOf(tab);
-    const next = KIND_TABS[(at + (e.key === "ArrowRight" ? 1 : KIND_TABS.length - 1)) % KIND_TABS.length];
-    onChange(next);
-    box.current?.querySelector<HTMLElement>(`[data-kind-tab="${next}"]`)?.focus();
-  };
-  return (
-    <div ref={box} className={`kind-tabs ${className}`} role="tablist" aria-label={t("kind.tabs.label")} onKeyDown={onKey}>
-      <span ref={pill} className="kind-tabs-pill" data-on={tab} aria-hidden />
-      {KIND_TABS.map((k) => {
-        const icon = k === "all" ? null : kindIcon(k);
-        const n = counts?.[k];
-        return (
-          <button key={k} type="button" role="tab" data-kind-tab={k} aria-selected={tab === k} tabIndex={tab === k ? 0 : -1}
-            className={`kind-tab ${tab === k ? "on" : ""}`} onClick={() => onChange(k)} title={t(`kind.tab.${k}.title`)}>
-            {icon && <Icon name={icon} size={13} />}
-            <span>{tabLabel(k)}</span>
-            {n !== undefined && n > 0 && k !== "all" && k !== "chat" && <b className="num">{n}</b>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** The small mark a computer, Chrome or remote chat carries where kinds are listed together; nothing for a
  *  plain chat, which is what a list is mostly made of and needs no mark to say so. An ordinary chat
  *  holding a control now carries that control's mark, drawn hollow and live, until it lets go. */
@@ -321,7 +254,7 @@ const AGENT_ICON: IconName = "user";
  * A kind this installation cannot start stays in the list, greyed, with the reason under its name, so
  * the operator learns where it would be offered rather than wondering why it is missing.
  */
-export function KindSelect({ kind, offers, onChoose, sheet, className = "", agent = false, onAgent }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; sheet: boolean; className?: string; agent?: boolean; onAgent?: (on: boolean) => void }) {
+export function KindSelect({ kind, offers, onChoose, className = "", agent = false, onAgent }: { kind: ChatKind; offers: KindOffers; onChoose: (kind: ChatKind) => void; className?: string; agent?: boolean; onAgent?: (on: boolean) => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const asAgent = agent && kind === "chat" && !!onAgent;
@@ -340,36 +273,18 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "", agen
     if (k === "chrome" && !offers.chromeConnected) return t("kind.chrome.waiting");
     return t(`kind.mode.${k}.hint`);
   };
+  // One row per way a chat can begin. A kind this installation cannot start stays, greyed, with its
+  // reason in the row's second line, so the operator learns where it would be offered.
   const list = (
-    <div className="mode-list kind-list" role="menu" aria-label={t("kind.mode.label")}>
-      {!sheet && <div className="menu-heading sub">{t("kind.mode.label")}</div>}
+    <>
       {KINDS.flatMap((k) => {
-        const on = k === kind && !asAgent;
-        const row = (
-          <button key={k} type="button" role="menuitemradio" aria-checked={on} disabled={!offers[k].ok} data-kind={k}
-            className={`model-row mode-row kind-row ${on ? "on" : ""}`} onClick={() => pick(k)} title={offers[k].ok ? undefined : offers[k].reason}>
-            <span className={`kind-row-icon kind-${k}`}><Icon name={MODE_ICON[k]} size={16} /></span>
-            <span className="grow model-text">
-              <span className="truncate">{t(`kind.mode.${k}`)}</span>
-              <span className="sub clamp-2">{hint(k)}</span>
-            </span>
-            {on && <Icon name="check" size={16} />}
-          </button>
-        );
+        const row = <MenuRow key={k} icon={MODE_ICON[k]} label={t(`kind.mode.${k}`)} sub={hint(k)} checked={k === kind && !asAgent} disabled={!offers[k].ok}
+          className={`kind-row kind-${k}`} data={{ kind: k }} onSelect={() => pick(k)} />;
         if (k !== "chat" || !onAgent) return [row];
-        return [row, (
-          <button key="agent" type="button" role="menuitemradio" aria-checked={asAgent} data-kind="agent"
-            className={`model-row mode-row kind-row ${asAgent ? "on" : ""}`} onClick={pickAgent}>
-            <span className="kind-row-icon kind-agent"><Icon name={AGENT_ICON} size={16} /></span>
-            <span className="grow model-text">
-              <span className="truncate">{t("kind.mode.agent")}</span>
-              <span className="sub clamp-2">{t("kind.mode.agent.hint")}</span>
-            </span>
-            {asAgent && <Icon name="check" size={16} />}
-          </button>
-        )];
+        return [row, <MenuRow key="agent" icon={AGENT_ICON} label={t("kind.mode.agent")} sub={t("kind.mode.agent.hint")} checked={asAgent}
+          className="kind-row kind-agent" data={{ kind: "agent" }} onSelect={pickAgent} />];
       })}
-    </div>
+    </>
   );
   const label = asAgent ? t("kind.mode.agent") : t(`kind.mode.${kind}`);
   const shown = asAgent ? "agent" : kind;
@@ -381,13 +296,8 @@ export function KindSelect({ kind, offers, onChoose, sheet, className = "", agen
         <span className="truncate">{label}</span>
         <Icon name="chevron" size={12} />
       </button>
-      {open && sheet && (
-        <Sheet title={t("kind.mode.label")} onClose={() => setOpen(false)} className="mode-sheet" size="sm">
-          {list}
-        </Sheet>
-      )}
-      {open && !sheet && (
-        <Popover anchor={trigger.current} onClose={() => setOpen(false)} className="mode-menu kind-menu" label={t("kind.mode.label")}>
+      {open && (
+        <Popover anchor={trigger.current} onClose={() => setOpen(false)} className="kind-menu" label={t("kind.mode.label")}>
           {list}
         </Popover>
       )}

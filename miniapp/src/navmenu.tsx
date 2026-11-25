@@ -2,7 +2,7 @@
 // and a pin on each that puts it in the sidebar (or takes it out). A search field narrows the list to
 // the destinations that match; what is not a destination (a chat, a setting) is the command palette's,
 // one row away. The desktop opens it beside the sidebar's More row (NavMenu); the phone's drawer
-// opens the same body as a sheet, where the pin edits the drawer's list instead.
+// opens the same body as a sheet over the drawer; the pin is the same on both, the sidebar's pinned list.
 //
 // A dialog, not a menu. ARIA's menu may hold menu items and nothing else, and a screen reader in a
 // menu takes the letter keys for itself, so the search field on top could not be typed into; a
@@ -240,7 +240,7 @@ function Destination({ it, phone, on, placed, selfdev, open, onGo, onPlace }: { 
   const link = useRef<HTMLAnchorElement>(null);
   const tag = it.screen ? screenTag(it.screen, selfdev, []) : "";
   const n = it.badge;
-  const pinLabel = t(`nav.launch.${placed ? "unpin" : "pin"}${phone ? ".drawer" : ".named"}`, { name: it.title });
+  const pinLabel = t(`nav.launch.${placed ? "unpin" : "pin"}.named`, { name: it.title });
   const items = useMemo<MenuItem[]>(() => [
     { label: t("common.open"), icon: "open", onSelect: () => onGo(it.path) },
     { label: t("nav.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(it.path, location.href).href, "_blank", "noopener") },

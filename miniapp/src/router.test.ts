@@ -4,7 +4,7 @@
 // hash along, or the link opens the chat at its end as if it pointed at nothing.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { canonical, markAnchor, navigate, pagePath, parse } from "./router";
+import { canonical, inLayer, markAnchor, navigate, pagePath, parse, pushLayer } from "./router";
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -29,6 +29,17 @@ describe("parse", () => {
 });
 
 describe("navigate", () => {
+  it("takes a layer's entry for the destination, so Back returns to the page under the layer", () => {
+    window.history.replaceState(null, "", "/app/agents");
+    const before = window.history.length;
+    pushLayer();
+    expect(inLayer()).toBe(true);
+    navigate("/app/inbox");
+    expect(window.location.pathname).toBe("/app/inbox");
+    expect(inLayer()).toBe(false);
+    expect(window.history.length).toBe(before + 1);
+  });
+
   it("carries the hash along a redirect", () => {
     window.history.replaceState(null, "", "/app/agents/orch#m42");
     navigate("/app/orchestration/project/p1", { replace: true, keepHash: true });

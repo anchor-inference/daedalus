@@ -36,10 +36,6 @@
 .composer-field .cf-close { padding:2px 14px 6px; border-top:1px solid var(--line); font-family:var(--mono); font-size:var(--fs-mono); line-height:1.5; white-space:pre; color:var(--fg-3); }
 /* The tools give up width before they leave the card: the model chip inside them is what is cut. */
 .composer-tools { display:flex; align-items:center; justify-content:flex-end; gap:4px; flex:0 1 auto; margin-left:auto; min-width:0; }
-/* A phone's card has no room to pull the row out to the left: its + would stand on the edge. */
-@media (max-width: 1023px) {
-  .composer-row { margin-left:0; }
-}
 .composer-row > .iconbtn.plus, .composer-tools > .iconbtn { width:var(--ctl-h); height:var(--ctl-h); border-radius:var(--radius-sm); }
 .iconbtn.flat { background:transparent; color:var(--fg-2); }
 .iconbtn.flat:hover { background:var(--hover); color:var(--fg); }
@@ -55,8 +51,8 @@
 .roundbtn.primary:disabled { opacity:1; background:var(--selected); color:var(--fg-3); cursor:default; }
 .roundbtn.primary.stop, .roundbtn.primary.queue, .roundbtn.primary.reply { background:var(--primary); color:var(--primary-ink); }
 /* The row's two chips: words on a 28 px line that take a wash under the pointer, never a box. */
-.composer-access, .model-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); min-width:0; padding:0 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.composer-access:hover, .composer-access[aria-expanded="true"], .model-select:hover, .model-select[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
+.composer-access, .model-select, .composer-mode, .composer-project, .runon-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); min-width:0; padding:0 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
+.composer-access:hover, .composer-access[aria-expanded="true"], .model-select:hover, .model-select[aria-expanded="true"], .composer-mode:hover, .composer-mode[aria-expanded="true"], .composer-project:hover, .composer-project[aria-expanded="true"], .runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
 .composer-access { flex:0 1 auto; max-width:260px; }
 .composer-access > .ic { flex:none; }
 .composer-access .access-more { flex:none; color:var(--fg-3); }
@@ -80,28 +76,17 @@
 .ctx-ring:disabled { cursor:default; }
 .ctx-ring.attn, .ctx-ring.bad { color:var(--attention); }
 .ctx-pct { line-height:1; }
-/* Where a new chat runs, beside the model in the start composer: the environment's own pill, on a
-   control's height, opening the two choices with the reason the host is greyed out when it is. */
-.runon-select { display:inline-flex; align-items:center; height:var(--ctl-h-sm); padding:0 4px; background:transparent; border:0; border-radius:var(--radius-sm); cursor:pointer; flex:none; }
-.runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--hover); }
-.runon-menu { width:min(320px, 92vw); max-width:min(320px, 92vw); }
-.menu .runon-option { align-items:flex-start; padding:8px 10px; }
-.runon-option-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
-.runon-option-main .sub { font-size:var(--fs-12); white-space:normal; }
-.menu .runon-option:disabled { cursor:default; opacity:.7; }
-.menu .runon-option:disabled:hover { background:none; }
-.menu .runon-option.on > .ic { color:var(--fg); margin-top:2px; }
-/* The start page's kind chip and its menu (chatkind.tsx): a word chip like the access chip, opening
-   rows of a name over its hint. */
-.composer-mode { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); font-weight:500; cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
-.composer-mode:hover, .composer-mode[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
-.mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
-.mode-list { display:flex; flex-direction:column; }
-.model-row { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--row-h); padding:4px 8px; background:none; border:0; border-radius:var(--radius-sm); color:var(--fg); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
-.model-row:hover, .model-row:focus-visible { background:var(--hover); outline:none; }
-.model-row .sub { font-size:var(--fs-12); color:var(--fg-3); }
-.model-text { display:flex; flex-direction:column; min-width:0; }
-.mode-row .model-text .sub { white-space:normal; }
+/* The start composer's own chips share the access chip's shape (above): the project the chat starts
+   in, what it will be, and where it runs. Only what is chosen away from the default takes ink. */
+.composer-project { flex:0 1 auto; max-width:220px; color:var(--fg); }
+.composer-project > .ic, .composer-mode > .ic, .runon-select > .ic { flex:none; color:var(--fg-3); }
+.composer-mode { max-width:180px; }
+.composer-mode > .ic:last-child, .composer-project > .ic:last-child { opacity:.7; }
+.runon-select { flex:none; }
+.runon-menu, .kind-menu, .project-menu { width:min(340px, 92vw); max-width:min(340px, 92vw); }
+.kind-menu { max-height:70vh; overflow-y:auto; }
+.menu .kind-row .menu-row-sub, .menu .runon-option .menu-row-sub { white-space:normal; }
+.menu .kind-row:disabled, .menu .runon-option:disabled { cursor:default; opacity:.55; }
 /* A session that runs on the host, on its row and in its details: the host pill, never squeezed. */
 .host-mark { display:inline-flex; flex:none; }
 .composer-box .attachments { margin:4px 6px 2px; width:auto; }
@@ -237,8 +222,8 @@
 .model-picker .model-tab .provider-mark { display:inline-flex; width:auto; height:auto; background:none; border:0; color:inherit; }
 .model-picker-title { flex:none; height:25px; box-sizing:border-box; padding:6px 10px 2px; font-size:var(--fs-12); font-weight:500; line-height:17px; color:var(--fg-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .model-picker-list { position:relative; flex:none; height:197px; display:flex; flex-direction:column; gap:1px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
-.model-picker .model-row { flex:none; display:flex; align-items:center; gap:10px; height:var(--row-h); padding:0 6px 0 10px; border-radius:var(--radius-sm); color:var(--fg); font-size:var(--fs-14); cursor:pointer; user-select:none; }
-.model-picker .model-row.active { background:var(--hover); }
+.model-picker .model-row { flex:none; display:flex; align-items:center; gap:10px; width:100%; height:var(--row-h); padding:0 6px 0 10px; border-radius:var(--radius-sm); color:var(--fg); font-size:var(--fs-14); cursor:pointer; user-select:none; }
+.model-picker .model-row:hover, .model-picker .model-row.active { background:var(--hover); }
 .model-picker .model-row.restore { color:var(--attention); }
 .model-row-name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .model-row-meta { flex:none; max-width:40%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--fs-12); color:var(--fg-3); }
@@ -276,6 +261,114 @@
   /* The reasoning's choices are 32 px drawn and 44 px to the finger. */
   .sheet .model-picker-body .segmented.model-effort-seg button { position:relative; height:32px; min-height:32px; }
   .sheet .model-picker-body .segmented.model-effort-seg button::after { content:""; position:absolute; inset:-6px 0; }
+}
+
+/* On a phone the composer is the same card at a finger's sizes: the field in the reading size over one
+   row of 44 px targets — the +, the access shield and the model chip at the left, then the context, the
+   mic and the send circle at the right. One shape at rest and while typing: a card that grew a toolbar
+   when the field took the reader changed height under the finger that had pressed it. A control drawn
+   smaller than 44 px gets the rest of its target from an invisible ::after. */
+@media (max-width: 1023px) {
+  .composer[data-shape] { gap: var(--space-2); padding: var(--space-2) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, transparent, var(--bg) 14px); }
+  :root[data-keyboard="open"] .composer[data-shape] { padding-bottom: var(--space-2); }
+  .composer[data-shape] .composer-box { position: relative; gap: var(--space-2); padding: 14px var(--space-2) 6px var(--space-4); border-radius: var(--radius-composer); }
+  .composer[data-shape] .composer-box .composer-field { min-height: 24px; max-height: calc(5lh); padding: 0 var(--space-2) 0 0; font-size: var(--fs-16); line-height: 24px; }
+  .composer[data-shape] .composer-box .composer-field:has(.cf-card) { max-height: 45vh; }
+  .composer[data-shape] .composer-ghost-accept { position: static; align-self: flex-start; }
+  .composer[data-shape] .composer-row { height: var(--tap); gap: 0; margin-left: calc(-1 * var(--space-2)); }
+  /* The tools' box would keep the model chip at the right edge; on a phone it stands by the shield. */
+  .composer[data-shape] .composer-tools { display: contents; }
+  .composer[data-shape] .model-select, .composer[data-shape] .ph-hint { order: 1; }
+  .composer[data-shape] .model-select { margin-right: auto; }
+  .composer[data-shape] .ctx-ring { order: 2; }
+  .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { order: 3; }
+  .composer[data-shape] .roundbtn { order: 4; }
+  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside, .composer[data-shape] .composer-access { position: relative; flex: none; width: var(--tap); height: var(--tap); min-width: var(--tap); min-height: var(--tap); margin: 0; padding: 0; justify-content: center; border-radius: 12px; background: transparent; color: var(--fg-2); }
+  .composer[data-shape] .iconbtn.plus > .ic, .composer[data-shape] .composer-tools > .mic > .ic, .composer[data-shape] .composer-access > .ic { width: 20px; height: 20px; }
+  /* The access is its shield alone, in the attention colour while everything is let through. */
+  .composer[data-shape] .composer-access .access-word, .composer[data-shape] .composer-access .access-more { display: none; }
+  /* The send circle is 40 drawn in its 44 px place. */
+  .composer[data-shape] .roundbtn { position: relative; flex: none; width: 40px; height: 40px; margin: 2px; border: 0; border-radius: 50%; }
+  .composer[data-shape] .roundbtn::after { content: ""; position: absolute; inset: -2px; }
+  .composer[data-shape] .roundbtn > .ic { width: 20px; height: 20px; }
+  /* The model chip is the row's one word-bearing control and takes what the glyphs leave. Its effort
+     stacks under the name (the narrow card's rule, above), so a provider's long name keeps the ten
+     characters that tell one model from another; a clipped effort read as another word ("высока"),
+     so the effort is never the one cut. */
+  .composer[data-shape] .model-select { flex: 0 1 auto; min-width: 0; height: var(--tap); padding: 0 10px; border-radius: 12px; color: var(--fg); font-size: var(--fs-14); }
+  .composer[data-shape] .model-select > .ic:first-child { display: none; }
+  .composer[data-shape] .model-select .model-label { min-width: 3em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .composer[data-shape] .model-select .model-effort { color: var(--fg-3); }
+  .composer[data-shape] .model-select > .ic:last-child { flex: none; color: var(--fg-3); }
+  .composer[data-shape] .model-select .model-from { font-size: var(--fs-12); }
+  .composer[data-shape] .ctx-ring { position: relative; justify-content: center; min-width: var(--tap); height: var(--tap); padding: 0 4px; }
+  .composer[data-shape] .upload-progress, .composer[data-shape] .ph-hint { padding: 2px 10px 0; font-size: var(--fs-13); color: var(--fg-3); }
+  .composer[data-shape] .attachments { margin: 4px 4px 2px; gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .composer[data-shape] .attachment-open { min-height: 64px; border: 0; border-radius: 12px; background: var(--surface-2); }
+  .composer[data-shape] .attachment.image .attachment-open { width: 64px; height: 64px; padding: 0; overflow: hidden; }
+  .composer[data-shape] .attachment.image .attachment-open img, .composer[data-shape] .attachment.image .attachment-open video { width: 64px; height: 64px; border-radius: 0; }
+  .composer[data-shape] .attachment.image .attachment-meta { display: none; }
+  .composer[data-shape] .attachment-name { font-size: var(--fs-13); }
+  .composer[data-shape] .attachment-meta .sub { font-size: var(--fs-12); }
+  .composer[data-shape] .attachment-glyph { font-size: var(--fs-17); }
+  .composer[data-shape] .attachment-x { background: color-mix(in srgb, var(--fg) 72%, transparent); color: var(--bg); }
+  .composer[data-shape] .reply-card .reply-card-open { width: 132px; border: 0; border-radius: 12px; background: var(--surface-2); flex: none; }
+  .composer[data-shape] .reply-card { flex: none; }
+  .sheet.ph-sheet.reply-sheet .sheet-body { padding: 0 var(--gutter) var(--space-4); }
+  .reply-sheet .reply-quote { font-size: var(--fs-15); }
+  .reply-sheet .reply-form { margin-top: var(--space-3); }
+  .reply-sheet .reply-input { height: var(--row-h-touch); font-size: var(--fs-16); }
+  .reply-sheet .reply-form .reply-add { width: var(--ctl-round); height: var(--ctl-round); }
+  .reply-sheet .reply-dialog-text { font-size: var(--fs-16); }
+  .reply-pill-btn { height: var(--ctl-round); padding: 0 var(--space-3); font-size: var(--fs-15); border-radius: 10px; }
+  .composer[data-shape] .attachment-x::after { content: ""; position: absolute; inset: -8px -8px -2px -2px; }
+  .composer[data-shape] .voicebar { min-height: 36px; gap: 6px; padding: 0; }
+  .composer[data-shape] .voicebar .voicebar-cancel { position: relative; width: var(--ctl-round); height: var(--ctl-round); border-radius: 50%; background: var(--surface-2); }
+  .composer[data-shape] .voicebar .roundbtn { width: var(--ctl-round); height: var(--ctl-round); }
+  .composer[data-shape] .voicebar .voicebar-cancel::after, .composer[data-shape] .voicebar .roundbtn::after { content: ""; position: absolute; inset: -5px; }
+  .composer[data-shape] .voicebar-time { font-size: var(--fs-14); color: var(--fg); }
+  .composer[data-shape] .voicebar-busy { font-size: var(--fs-14); }
+  .composer[data-shape] .steers { gap: 0; overflow: hidden; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
+  .composer[data-shape] .steer { min-height: var(--list-row-h-1); padding: 4px 6px 4px 14px; border: 0; border-radius: 0; background: none; font-size: var(--fs-12); column-gap: var(--space-2); }
+  .composer[data-shape] .steer + .steer { border-top: 1px solid var(--line); }
+  .composer[data-shape] .steer-text { font-size: var(--fs-14); }
+  .composer[data-shape] .steer-hint { font-size: var(--fs-12); }
+  .composer[data-shape] .steer-now { position: relative; height: 36px; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .composer[data-shape] .steer-now::after { content: ""; position: absolute; inset: -4px 0; }
+  .composer[data-shape] .steer-x, .composer[data-shape] .steer-edit { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .composer[data-shape] > .ph-note { margin: 0; }
+  /* The tray over the field: the queue, a permission request and the agent's question share one
+     shape — a card with a 13 px label line, the content, and full-width answers 44 px to the finger. */
+  .composer[data-shape] .ph-tray-head { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .composer[data-shape] .ph-tray-head.warn { color: var(--warn); }
+  .composer[data-shape] .ph-tray-head.bad { color: var(--bad); }
+  .composer[data-shape] .steers .ph-tray-head { min-height: 36px; padding: 4px 14px 0; font-weight: 500; }
+  .composer[data-shape] .steers .ph-tray-head + .steer { border-top: 0; }
+  .composer[data-shape] .steer > .ic:first-child { display: none; }
+  /* The controls take the next columns in their order, so a card without Steer leaves no empty one. */
+  .composer[data-shape] .steer { grid-template-columns: minmax(0, 1fr); grid-auto-columns: auto; row-gap: 1px; }
+  .composer[data-shape] .steer-text { grid-row: 1; grid-column: 1; -webkit-line-clamp: 1; line-clamp: 1; }
+  .composer[data-shape] .steer-hint { grid-row: 2; grid-column: 1; }
+  .composer[data-shape] .steer-now { grid-row: 1 / 3; }
+  .composer[data-shape] .steer-x, .composer[data-shape] .steer-edit { grid-row: 1 / 3; color: var(--fg); }
+  .composer[data-shape] .steer-x .ic, .composer[data-shape] .steer-edit .ic { width: 18px; height: 18px; }
+  .composer[data-shape] .steer-now { color: var(--fg); }
+  .composer[data-shape] .steer[data-kind="steer"] .steer-hint { color: var(--info); }
+  .composer[data-shape] .dock.ph-tray { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 12px 14px; border: 0; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); max-height: 55vh; overflow-y: auto; overscroll-behavior: contain; }
+  .ph-tray-title { font-size: var(--fs-15); line-height: 1.35; color: var(--fg); overflow-wrap: anywhere; }
+  .ph-tray-detail { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6lh; overflow-y: auto; }
+  .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
+  .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
+  .ph-btn.ph-deny { background: none; color: var(--bad); }
+}
+
+/* Under 380 px the glyphs give the model's name the ten characters that tell one model from another:
+   drawn a little narrower, each still reaches 44 px to the finger through its ::after. */
+@media (max-width: 379px) {
+  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .composer-access { width: 38px; min-width: 38px; }
+  .composer[data-shape] .iconbtn.plus::after, .composer[data-shape] .composer-tools > .mic::after, .composer[data-shape] .composer-access::after { content: ""; position: absolute; inset: 0 -3px; }
+  .composer[data-shape] .ctx-ring { min-width: 32px; padding: 0; }
+  .composer[data-shape] .ctx-ring::after { content: ""; position: absolute; inset: 0 -6px; }
 }
 
 /* The slash palette floats over the conversation like any menu: one surface, rows that light. */

@@ -28,7 +28,7 @@ vi.mock("./store", () => ({ prime: vi.fn() }));
 vi.mock("./ui/dialogs", () => ({ toast: vi.fn() }));
 vi.mock("./ui", () => ({ errorText: (e: unknown) => String(e) }));
 
-const { placeInDrawer, placeItem } = await import("./navplace");
+const { placeItem } = await import("./navplace");
 
 beforeEach(() => {
   calls.length = 0;
@@ -66,16 +66,5 @@ describe("pinning to the sidebar", () => {
     const real = (await import("./api")).api.get as unknown as ReturnType<typeof vi.fn>;
     real.mockResolvedValueOnce({ revision: "r1", navigation: {} });
     expect(await placeItem(nav, "usage", "pinned")).toBe(false);
-  });
-});
-
-describe("the phone drawer's list", () => {
-  const nav = resolveNav({ config: null, pages: null, selfdev: "server" });
-
-  it("writes the list out with the item at its end, then without it", async () => {
-    await placeInDrawer(nav, ["inbox", "board"], "memory", true);
-    expect(navigation.drawer).toEqual(["inbox", "board", "memory"]);
-    await placeInDrawer(nav, ["inbox", "board", "memory"], "board", false);
-    expect(navigation.drawer).toEqual(["inbox", "memory"]);
   });
 });

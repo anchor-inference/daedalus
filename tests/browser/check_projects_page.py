@@ -78,7 +78,7 @@ def run(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     check(page.evaluate("location.pathname + location.search").endswith("/agents?view=projects"), f"{where}: All projects opens the page at /agents?view=projects")
     check(page.locator(".sheet").count() == 0, f"{where}: and no sheet over it")
 
-    rows = page.locator(".projects-row:not(.head)")
+    rows = page.locator(".projects-row")
     ids = [rows.nth(i).get_attribute("data-project") for i in range(rows.count())]
     listed = [p["id"] for p in kept_projects() if is_kept(p)]
     check(sorted(ids) == sorted(listed), f"{where}: the table lists the {len(listed)} kept projects ({len(ids)})")
@@ -103,12 +103,12 @@ def run(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
 
     # Search and the Waiting filter narrow it.
     page.locator(".projects-search input").fill("bak")
-    check(page.locator(".projects-row:not(.head)").count() == 1, f"{where}: the search finds Bakery site alone")
+    check(page.locator(".projects-row").count() == 1, f"{where}: the search finds Bakery site alone")
     page.locator(".projects-search input").fill("")
-    page.locator(".projects-chip", has_text=words["filter"]).click()
-    shown = page.locator(".projects-row:not(.head)")
+    page.locator(".projects-filter").get_by_role("radio", name=words["filter"]).click()
+    shown = page.locator(".projects-row")
     check(shown.count() == 1 and shown.first.get_attribute("data-project") == shots.P4, f"{where}: Waiting keeps the project with a waiting chat")
-    page.locator(".projects-chip").first.click()
+    page.locator(".projects-filter [role=radio]").first.click()
 
     # Archived, folded, with Restore; orchestrated, in the note.
     fold = page.locator(".projects-archived")
@@ -120,9 +120,9 @@ def run(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
 
     # A row starts a chat in its project.
     bakery.locator(".projects-name").click()
-    page.wait_for_selector(".start-where", timeout=10000)
+    page.wait_for_selector(".composer-project", timeout=10000)
     check(page.evaluate("location.search").startswith(f"?in={shots.P1}"), f"{where}: a row opens a new chat in its project ({page.evaluate('location.search')})")
-    check(page.locator(f".start-where-chip[data-project='{shots.P1}']").get_attribute("aria-pressed") == "true", f"{where}: with the project picked under the composer")
+    check(page.locator(".composer-project").get_attribute("data-project") == shots.P1, f"{where}: with the project picked in the composer's row")
 
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang={lang}")
     page.wait_for_selector(".projects-note a", timeout=10000)

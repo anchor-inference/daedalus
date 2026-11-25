@@ -286,7 +286,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub = board()
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-    expect(page.locator(".ph-board .ph-top-t")).to_have_text("Board" if lang == "en" else "Доска")
+    expect(page.locator(".ph-board .pagehead-t")).to_have_text("Board" if lang == "en" else "Доска")
     expect(page.locator(".pboard-cols")).to_have_count(0)
     # All, then one chip per column with something in it; Needs you in amber.
     chips = page.locator(".ph-board .ph-chip")

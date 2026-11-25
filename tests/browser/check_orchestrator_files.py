@@ -1,7 +1,8 @@
 """The orchestrator's Files tab: the project's folders and each staff member's worktree, read-only.
 
 The orchestrator writes no file, yet the operator steering it must see the project's files and what
-the staff made in their worktrees before it is merged. Its panel has a Files tab; the folder switch
+the staff made in their worktrees before it is merged. Its panel offers a Files tool, which
+`?panel=files` opens as a tab; the folder switch
 lists the project's folders and then one entry per worktree, named by the member and the branch; a
 worktree opens under the pane id the host gave it, its document opens in Preview, and nothing in the
 tab offers an upload. At 1440 px and on a 390 px phone, in English and Russian.
@@ -57,8 +58,10 @@ def visit(browser, lang: str, phone: bool) -> None:  # type: ignore[no-untyped-d
     scope = ".panel-sheet" if phone else ".panel"
     if not phone:
         page.wait_for_selector(".chat.in-project .panel", timeout=15000)
+        # The Overview leads, the questions the orchestrator opens on follow, and the Files the route
+        # named is opened as a tab of its own after them.
         tabs = page.eval_on_selector_all(".panel .panel-tab", "els => els.map(e => e.dataset.tab)")
-        assert tabs[:3] == ["questions", "details", "files"], f"{where}: the orchestrator's tabs are {tabs}"
+        assert tabs == ["overview", "questions", "files"], f"{where}: the orchestrator's tabs are {tabs}"
     # The folders are a menu off the header's chevron; the header itself names the folder by its path.
     switcher = page.locator(f"{scope} .explorer-switch")
     expect(switcher).to_be_visible(timeout=15000)

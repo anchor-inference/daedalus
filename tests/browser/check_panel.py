@@ -23,7 +23,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, S2, UNHANDLED, phone_tool, stub  # noqa: E402
+from screenshots import S1, S2, UNHANDLED, open_tool, phone_tool, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -63,14 +63,14 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     w0 = width(page, ".panel")
     chat0 = width(page, ".chat-main")
     print(f"panel {w0}px, conversation {chat0}px")
-    if w0 < 360 or chat0 < 600:
+    if w0 < 400 or w0 > 520 or chat0 < 600:
         problems.append(f"panel {w0}px / conversation {chat0}px at 1440")
     # --head-h, the 52 px every header shares (48 before the design set it).
     if page.locator(".chat-head").evaluate("(el) => Math.round(el.getBoundingClientRect().height)") != 52:
         problems.append("the header is not 52px")
 
-    # Files → a file → Preview, with the breadcrumb and the route.
-    page.locator(".panel-tab[data-tab='files']").click()
+    # Files from the + menu → a file → Preview, with the breadcrumb and the route.
+    open_tool(page, "files")
     page.wait_for_selector(".panel-files .filerow", timeout=5000)
     if "panel=files" not in query(page):
         problems.append(f"the route does not say Files: {query(page)}")
@@ -143,8 +143,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"the width did not survive a reload: {after} → {kept}")
     stored = page.evaluate("() => localStorage.getItem('daedalus.width.panel')")
     print("stored width:", stored)
-    if not stored or not stored.replace(".", "").isdigit() or float(stored) > 65:
-        problems.append(f"the width is not stored as a percentage: {stored!r}")
+    if not stored or not stored.isdigit() or int(stored) < 400:
+        problems.append(f"the width is not stored in pixels: {stored!r}")
     # Dragging far past the ceiling stops at 65 %.
     box = page.locator(".panel .pane-handle").bounding_box()
     assert box
@@ -154,14 +154,15 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.mouse.move(x - 900, y, steps=10)
     page.mouse.up()
     page.wait_for_timeout(300)
-    area = width(page, ".chat-body")
+    area = width(page, ".chat")
     capped = width(page, ".panel")
     print(f"capped: {capped} of {area}")
     if capped > 0.66 * area:
         problems.append(f"the panel grew past 65%: {capped} of {area}")
 
-    # Expand covers the conversation; Escape restores; Escape again closes.
-    page.locator(".panel-actions button[aria-label*='Expand']").click()
+    # Expand (the panel's ⋯) covers the whole chat; Escape restores; Escape again closes.
+    page.locator(".panel-actions .panel-menu").click()
+    page.locator(".menu[role='menu'] button", has_text="Expand over the conversation").click()
     page.wait_for_timeout(300)
     step(page, "expanded")
     full = width(page, ".panel.full")
@@ -192,7 +193,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     step(page, "ctrl+shift+.")
     if not page.locator(".panel.full").count():
         problems.append("Ctrl+Shift+. did not expand the panel")
-    page.locator(".panel-actions button[aria-label*='Back beside']").click()
+    page.locator(".panel-actions .panel-menu").click()
+    page.locator(".menu[role='menu'] button", has_text="Back beside the conversation").click()
     page.wait_for_timeout(300)
     step(page, "restored")
     page.locator(".panel-actions button[aria-label='Close the panel']").click()
@@ -216,8 +218,15 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.locator(".panel-actions button[aria-label='Close the panel']").click()
     page.wait_for_timeout(200)
     remembered = page.evaluate("() => localStorage.getItem('daedalus.session.panel')")
-    if remembered != "0":
+    if not remembered or remembered.split("|")[0] != "0":
         problems.append(f"closing the panel is remembered as {remembered!r}, not '0'")
+    # A tool's × closes its tab onto the one before it, and the tool stays in the + menu.
+    page.locator(".chat-head button[aria-label='Panel']").click()
+    open_tool(page, "memory")
+    page.locator(".panel .panel-tab-close").click()
+    page.wait_for_timeout(200)
+    if page.locator(".panel .panel-tab[data-tab='memory']").count():
+        problems.append("the memory tab's × did not close it")
     context.close()
     return problems
 
@@ -247,23 +256,19 @@ def dual(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("dual at 2560: panels open", n)
     if n != 2:
         problems.append(f"dual view at 2560 holds {n} panels, not two")
-    page.wait_for_selector(".panel [data-prop='context']")
-    sections = page.locator(".panel [data-prop]")
+    page.wait_for_selector(".panel [data-prop='mcp']")
+    sections = page.locator(".panel [data-prop][id]")
     section_ids = sections.evaluate_all("els => els.map(el => el.id)")
     assert len(section_ids) == len(set(section_ids)), "Details sections share ids across panels"
     for side in ("right", "left"):
-        # Both inspectors back on their lists, then one pane's chip opens the Context page of its own panel.
-        for back in page.locator(".panel .dt-back").all():
-            back.click()
+        # One pane's context chip opens the Context tool of its own panel; the other keeps Details.
         pane = page.locator(f".pane-{side}")
         other_side = "left" if side == "right" else "right"
         pane.get_by_role("button", name="Context in use").click()
-        target = pane.locator(".panel .dt-drill[data-page='context']")
-        expect(target).to_have_count(1)
-        expect(page.locator(f".pane-{other_side} .panel .dt-drill")).to_have_count(0)
-        prefix = pane.locator(".panel [role='tabpanel']").get_attribute("id").removesuffix("-body")
-        assert target.get_attribute("id") == f"{prefix}-info-context"
-        print(f"{side} Context in use opens its own section; the other stays closed")
+        expect(pane.locator(".panel [data-page='context']")).to_have_count(1)
+        expect(page.locator(f".pane-{other_side} .panel [data-page='context']")).to_have_count(0)
+        pane.locator(".panel .panel-tab-close").click()
+        print(f"{side} Context in use opens its own panel's Context; the other stays on Details")
     context.close()
     return problems
 
@@ -281,7 +286,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("phone sheet height:", h)
     if h < 844 - 56 - 2:
         problems.append(f"the phone sheet is {h}px, not the height under the bar")
-    page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
+    open_tool(page, "files", ".panel-sheet")
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
     page.locator(".panel-sheet .filerow .title", has_text="NOTES.md").click()
     page.wait_for_selector(".panel-sheet .tab-preview .preview-doc", timeout=5000)

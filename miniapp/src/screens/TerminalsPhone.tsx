@@ -71,7 +71,7 @@ export function PhoneTerminals({ toast, project, projects }: { toast: (text: str
 
   return (
     <div className="ph-page ph-terms">
-      <TopBar center title={t("nav.terminals")} sub={list.data && rows.length > 0 ? t("term.screen.counts", { open: counts.open, host: counts.host, staff: counts.staff }) : undefined}
+      <TopBar title={t("nav.terminals")} sub={list.data && rows.length > 0 ? t("term.screen.counts", { open: counts.open, host: counts.host, staff: counts.staff }) : undefined}
         actions={<IconButton icon="plus" label={t("term.new")} disabled={!!list.data && !anyEnv} onClick={() => setSheet("new")} className="ph-ib" />} />
       {load.data && rows.length > 0 && <CapacityLine load={load.data} onOpen={() => setSheet("capacity")} />}
       {rows.length > 0 && (

@@ -18,7 +18,7 @@ On a 1440 × 900 desktop:
 
 On a 390 px phone the drawer's More is the same launcher as a sheet: the field, the chips (wrapping to a
 second line where four do not fit), one column of rows, Settings, Customise and About, nothing sideways;
-its pin edits the drawer's list.
+its pin writes the same pinned list as the desktop's.
 
 Exit 0 when every step holds.
 """
@@ -273,7 +273,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     page.locator(".ph-menu").first.wait_for(timeout=15000)
     page.locator(".ph-menu").first.tap()
-    page.locator(".ph-drawer-root.open [data-nav='more']").tap()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").tap()
     sheet = page.locator(".ph-more-sheet")
     sheet.locator(".launch").wait_for(timeout=5000)
     page.wait_for_timeout(300)
@@ -281,7 +281,7 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
         say("the sheet has no search field")
     if sheet.locator(".launch-chip").count() != 4:
         say("the sheet's Frequent does not hold four chips")
-    drawer = page.locator(".ph-drawer-root [data-screen]").evaluate_all("els => els.map(e => e.dataset.screen)")
+    drawer = page.locator(".ph-drawer-root .sb-pinned-nav [data-nav]").evaluate_all("els => els.map(e => e.dataset.nav)")
     marked = sheet.locator(".launch-grid [data-placed]").evaluate_all("els => els.map(e => e.dataset.screen)")
     if not marked or any(m not in drawer for m in marked):
         say(f"the marked items {marked} are not the drawer's {drawer}")
@@ -296,10 +296,10 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     width = page.evaluate("() => [document.documentElement.scrollWidth, document.querySelector('.ph-more-sheet .sheet-body').scrollWidth - document.querySelector('.ph-more-sheet .sheet-body').clientWidth]")
     if width[0] > 390 or width[1] > 0:
         say(f"the sheet scrolls sideways: {width}")
-    # The pin edits the drawer's list: Memory goes in at its end.
+    # The pin is the sidebar's: Memory goes to the end of the same pinned list the desktop writes.
     sheet.locator(".launch-cell", has=page.locator("[data-nav-item='memory']")).locator(".launch-pin").tap()
     page.wait_for_timeout(600)
-    if not host.puts or host.puts[-1]["navigation"]["drawer"][-1] != "memory":
+    if not host.puts or host.puts[-1]["navigation"]["pinned"][-1] != "memory":
         say(f"the pin wrote {host.puts[-1:]}")
     sheet.locator("[data-nav='settings']").tap()
     page.wait_for_url("**/settings**", timeout=5000)

@@ -1,16 +1,17 @@
-"""The desktop's start screen: "Active now", "Start in …" and the one white circle. English and
-Russian at 1440 px, and a phone that must not grow any of it.
+"""The desktop's start screen: the question, the composer, "Continue" and the one white circle.
+English and Russian at 1440 px, and a phone that must not grow any of it.
 
 What is checked:
 
-- "Active now" lists the live chats in the phone home's order — the one waiting for the operator,
-  then the ones at work, then the loops — three of them, with the rest behind "Show all"; only the
-  waiting one carries Reply, and a row opens its chat;
-- "Start in …" offers a chat of its own (picked at first) and the projects, the hidden ones behind
-  "N more"; a project picked there is the one the new chat is created in, and the Container/Host
-  choice, which only a chat of its own has, leaves the composer while a project is picked;
+- "Continue" lists the chats to pick up in the order of what needs the operator: the one waiting
+  first, then the ones at work, then the rest by recency, three of them with the rest behind "Show
+  all"; the card is the whole link and says its state in words under the title;
+- where the chat starts is a chip in the composer's own row: it names "No project" at first, opens
+  every project with a search, and a project picked there is the one the new chat is created in; the
+  Container/Host choice, which only a chat of its own has, leaves the row while a project is picked;
 - the projects page's "New chat in …" arrives with that project already picked (``?in=<id>``);
-- the circle is the voice conversation while the field is empty and Send once it holds text;
+- the circle is Send, greyed while the field is empty;
+- "Full access", chosen in the row, is switched on for the chat once it exists;
 - a phone draws none of it: its home is unchanged; the projects page, kept when a window narrows,
   fits without scrolling sideways.
 
@@ -31,11 +32,11 @@ import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
 
 BASE = shots.BASE
-WORDS = {"en": {"live": "Active now", "reply": "Reply", "all": "Show all 4", "chat": "a chat of its own"},
-         "ru": {"live": "Сейчас активны", "reply": "Ответить", "all": "Показать все 4", "chat": "отдельном чате"}}
+WORDS = {"en": {"resume": "Continue", "all": "Show all 9", "none": "No project", "waiting": "Waiting for your answer", "working": "Working", "full": "Full access"},
+         "ru": {"resume": "Продолжить", "all": "Показать все 9", "none": "Без проекта", "waiting": "Ждёт вашего ответа", "working": "Работает", "full": "Полный доступ"}}
 
 
-def serve(page: Page, posted: list[object]) -> None:
+def serve(page: Page, posted: list[object], bypassed: list[tuple[str, object]]) -> None:
     def route(r) -> None:  # type: ignore[no-untyped-def]
         request = r.request
         path = urlsplit(request.url).path
@@ -52,6 +53,8 @@ def serve(page: Page, posted: list[object]) -> None:
         if request.method == "POST" and path == "/api/sessions":
             posted.append(request.post_data_json)
             return r.fulfill(status=200, content_type="application/json", body=json.dumps({"id": shots.S1}))
+        if request.method == "POST" and path.endswith("/bypass"):
+            bypassed.append((path, request.post_data_json))
         if request.method == "POST" and path.startswith(f"/api/sessions/{shots.S1}/"):
             return r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "run_id": "r1"}))
         return shots.stub(r)
@@ -64,30 +67,36 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = context.new_page()
     posted: list[object] = []
-    serve(page, posted)
+    bypassed: list[tuple[str, object]] = []
+    serve(page, posted, bypassed)
     page.goto(f"{BASE}/agents?token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".start-live-row", timeout=15000)
+    page.wait_for_selector(".resume-card", timeout=15000)
     where = f"{lang} 1440"
 
-    # Active now: waiting first, then working, three rows; the loop is the fourth, behind Show all.
-    live = page.locator(".start-live")
-    check(words["live"] in live.locator(".start-live-head").inner_text(), f"{where}: the section is called {words['live']!r}")
-    rows = page.locator(".start-live-row")
-    order = [rows.nth(i).get_attribute("data-session") for i in range(rows.count())]
-    check(len(order) == 3, f"{where}: three live rows at most, not {len(order)}")
+    # Continue: waiting first, then the two at work, then by recency; three cards, the rest behind Show all.
+    resume = page.locator(".start-resume")
+    check(words["resume"] in resume.locator(".start-resume-head").inner_text(), f"{where}: the section is called {words['resume']!r}")
+    cards = page.locator(".resume-card")
+    order = [cards.nth(i).get_attribute("data-session") for i in range(cards.count())]
+    check(len(order) == 3, f"{where}: three cards at most, not {len(order)}")
     check(order[:1] == [shots.S4], f"{where}: the chat waiting for the operator comes first ({order})")
-    check(shots.S3 not in order, f"{where}: the loop waits behind the chats at work")
-    check(page.locator(".start-live-row.running").count() == 2, f"{where}: the two chats at work follow")
-    check(page.locator(".start-live-reply").count() == 1 and rows.first.locator(".start-live-reply").count() == 1, f"{where}: only the waiting chat has Reply")
-    reply = rows.first.locator(".start-live-reply")
-    check(words["reply"] in reply.inner_text(), f"{where}: and it says {words['reply']!r}")
-    check("primary" not in (reply.get_attribute("class") or ""), f"{where}: Reply is neutral, the white primary stays the composer's")
-    more = page.locator(".start-live-more")
+    states = [cards.nth(i).get_attribute("data-state") for i in range(cards.count())]
+    check(states == ["waiting", "working", "working"], f"{where}: then the two at work ({states})")
+    check(words["waiting"] in cards.first.inner_text(), f"{where}: the first card says {words['waiting']!r} ({cards.first.inner_text()!r})")
+    check(words["working"] in cards.nth(1).inner_text(), f"{where}: the next says {words['working']!r}")
+    heights = {round(cards.nth(i).bounding_box()["height"]) for i in range(cards.count())}
+    check(heights == {56}, f"{where}: cards are 56 px ({heights})")
+    more = page.locator(".start-resume-more")
     check(more.inner_text().strip() == words["all"], f"{where}: the rest are behind {words['all']!r} ({more.inner_text()!r})")
     more.click()
-    check(page.locator(f".start-live-row[data-session='{shots.S3}']").count() == 1, f"{where}: Show all brings the loop in")
-    meta = page.locator(f".start-live-row[data-session='{shots.S10}'] .start-live-meta").inner_text()
-    check("Companion" in meta, f"{where}: a chat's meta names its project ({meta!r})")
+    check(page.locator(f".resume-card[data-session='{shots.S3}']").count() == 1, f"{where}: Show all brings the loop in")
+    meta = page.locator(f".resume-card[data-session='{shots.S10}']").inner_text()
+    check("Companion" in meta, f"{where}: a chat's title names its project ({meta!r})")
+    cards.first.click()
+    page.wait_for_function("() => location.pathname.includes('/agents/')", timeout=10000)
+    check(shots.S4 in page.url, f"{where}: a card opens its chat")
+    page.goto(f"{BASE}/agents?token=t&scheme=dark&lang={lang}")
+    page.wait_for_selector(".resume-card", timeout=15000)
 
     # The circle is Send, and nothing in an ordinary composer opens Voice mode: that is a beta with a
     # chat of its own, and the button that led there from every empty field is gone.
@@ -99,37 +108,45 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     circle = send.bounding_box()
     check(send.is_visible() and send.is_enabled(), f"{where}: text makes Send live")
     check(bool(circle) and abs(circle["width"] - circle["height"]) < 1, f"{where}: the primary is a circle ({circle})")
+    box = composer.locator(".composer-box").bounding_box()
+    check(bool(box) and round(box["width"]) == 760, f"{where}: the composer is the conversation's 760 px column ({box and box['width']})")
 
-    # Start in: a chat of its own first, with the run-on choice; a project drops the choice.
-    chips = page.locator(".start-where-chip")
-    check(chips.first.get_attribute("aria-pressed") == "true" and words["chat"] in chips.first.inner_text(), f"{where}: a chat of its own is picked at first")
+    # Where the chat starts: a chip in the row, "No project" first, with the run-on choice.
+    chip = composer.locator(".composer-row .composer-project")
+    check(chip.count() == 1 and words["none"] in chip.inner_text(), f"{where}: the chip in the composer's row says {words['none']!r}")
+    check(page.locator(".start-where").count() == 0, f"{where}: no row of chips under the composer")
     check(composer.locator(".runon-select").count() == 1, f"{where}: a chat of its own offers Container or Host")
-    picker = page.locator(".start-where-pick")
-    check(picker.count() == 1, f"{where}: every project is reachable through Choose a project")
-    picker.click()
-    search = page.locator(".start-where-menu input[type='search']")
-    check(search.count() == 1 and search.evaluate("el => el === document.activeElement"), f"{where}: the picker opens on its search")
-    rows = page.locator(".start-where-menu .project-pick-row")
+    chip.click()
+    search = page.locator(".project-menu input[type='search']")
+    check(search.count() == 1 and search.evaluate("el => el === document.activeElement"), f"{where}: the chooser opens on its search")
+    rows = page.locator(".project-menu .project-pick-row")
     check(rows.first.get_attribute("data-project") is None and rows.count() >= 4, f"{where}: No project first, then every project ({rows.count()})")
     search.fill("supp")
     check(rows.count() == 1, f"{where}: the search narrows the list ({rows.count()})")
     pick = rows.first.get_attribute("data-project")
     search.press("Enter")
-    check(page.locator(".start-where-menu").count() == 0, f"{where}: Enter picks the first match and closes the picker")
-    check(page.locator(f".start-where-chip[data-project='{pick}']").get_attribute("aria-pressed") == "true", f"{where}: the project picked stays in the row, picked")
-    bakery = page.locator(f".start-where-chip[data-project='{shots.P1}']")
-    bakery.click()
-    check(bakery.get_attribute("aria-pressed") == "true", f"{where}: a project chip is picked by a click")
+    check(page.locator(".project-menu").count() == 0, f"{where}: Enter picks the first match and closes the chooser")
+    check(chip.get_attribute("data-project") == pick, f"{where}: the chip names the project picked")
+    chip.click()
+    page.locator(f".project-menu .project-pick-row[data-project='{shots.P1}']").click()
+    check(chip.get_attribute("data-project") == shots.P1, f"{where}: a project is picked by a click")
     check(composer.locator(".runon-select").count() == 0, f"{where}: and the project's folder decides where it runs")
+
+    # Full access is the row's own chip; it is switched on once the chat exists.
+    composer.locator(".composer-access").click()
+    page.locator(".access-menu [data-toggle='bypass']").click()
+    check(words["full"] in composer.locator(".composer-access").inner_text(), f"{where}: the access chip says {words['full']!r}")
+    page.keyboard.press("Escape")
     composer.locator(".roundbtn[data-action='send']").click()
     page.wait_for_function("() => location.pathname.includes('/agents/')", timeout=10000)
     body = posted[0] if posted else {}
     check(isinstance(body, dict) and body.get("project_id") == shots.P1, f"{where}: the chat is created in the picked project ({body})")
+    check(any(path.endswith("/bypass") and sent == {"on": True} for path, sent in bypassed), f"{where}: full access is switched on for the new chat ({bypassed})")
 
     # The projects page's New chat arrives with its project picked.
     page.goto(f"{BASE}/agents?in={shots.P2}&token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".start-where", timeout=15000)
-    check(page.locator(f".start-where-chip[data-project='{shots.P2}']").get_attribute("aria-pressed") == "true", f"{where}: ?in= picks that project")
+    page.wait_for_selector(".start-composer .composer-project", timeout=15000)
+    check(page.locator(".composer-project").get_attribute("data-project") == shots.P2, f"{where}: ?in= picks that project")
     context.close()
 
 
@@ -140,7 +157,7 @@ def phone(browser, check) -> None:  # type: ignore[no-untyped-def]
     page.goto(f"{BASE}/agents?token=t&scheme=dark&lang=en")
     page.wait_for_selector(".ph-home .start-composer", timeout=15000)
     page.wait_for_timeout(600)
-    check(page.locator(".start-where, .start-live, .start-mark").count() == 0, "390: the phone's home has none of the desktop's parts")
+    check(page.locator(".start-resume, .composer-project, .start-greeting").count() == 0, "390: the phone's home has none of the desktop's parts")
     check(page.locator(".ph-live .list-row, .ph-live > *").count() >= 1, "390: and keeps its own live rows")
     page.locator(".ph-where").click()
     sheet = page.locator(".sheet .project-pick")
@@ -150,7 +167,7 @@ def phone(browser, check) -> None:  # type: ignore[no-untyped-def]
     # Nothing on a phone leads to the projects page (its drawer opens the projects sheet), but a window
     # narrowed with the page open keeps it, so it has to fit.
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
+    page.wait_for_selector(".projects-row", timeout=15000)
     check(page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "390: the projects page, kept in a narrow window, does not scroll sideways")
     context.close()
 

@@ -1,0 +1,123 @@
+/* ── the start page and the projects page ───────────────────────────────────────────────────── */
+
+/* The start canvas: the question, the composer and the chats to pick up again, one 760 px column
+   (the conversation's own) in the middle of the window. The group is held a little above the middle:
+   80 px more under it than over it, where the eye already is. It grows with what it holds and the
+   page scrolls, rather than being squeezed into the window and clipped at the top. */
+@media (min-width: 1024px) {
+  .start { flex:1; min-height:0; }
+  .start-hero { flex:1 0 auto; justify-content:center; gap:28px; width:100%; padding:var(--space-6) var(--space-6) calc(var(--space-6) + 80px); }
+  h1.start-greeting { max-width:none; font-size:var(--fs-28); font-weight:500; letter-spacing:-0.02em; line-height:1.45; }
+  .start-composer, .start-resume, .start-import { width:100%; max-width:var(--chat-w); }
+  /* The chat's composer pads itself off the conversation's edges; here the box is the column. */
+  .start-composer.composer { padding:0; }
+  /* With no conversation above it the card is the page's one object, so its field is given room: 36 px
+     between the words and the row of controls, where a chat's own composer keeps 14. */
+  .start-composer .composer-box { gap:36px; padding-top:16px; }
+}
+
+/* "Continue": 56 px cards, a dot for the state, the title over a line that says it in words, when,
+   and a chevron. The head is a section label of the sidebar's size. */
+.start-resume { display:flex; flex-direction:column; gap:2px; }
+.start-resume-head { display:flex; align-items:center; height:28px; padding:0 14px; font-size:var(--fs-12); font-weight:500; color:var(--fg-3); }
+.start-resume-head .grow { flex:1; }
+.start-resume-more { border:0; background:none; padding:0; color:var(--fg-3); font:inherit; font-size:var(--fs-12); cursor:pointer; }
+.start-resume-more:hover { color:var(--fg); }
+.resume-card { display:flex; align-items:center; gap:12px; width:100%; height:56px; padding:0 14px; border:0; border-radius:var(--radius-md); background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+.resume-card:hover { background:var(--hover); }
+.resume-card:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.resume-card > .ic { flex:none; color:var(--fg-3); }
+.resume-dot { flex:none; width:8px; height:8px; border-radius:50%; background:var(--fg-3); }
+.resume-card[data-state="waiting"] .resume-dot { background:var(--attention); }
+.resume-card[data-state="working"] .resume-dot { background:var(--live); }
+.resume-card[data-state="failed"] .resume-dot { background:var(--bad); }
+.resume-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.resume-title { display:flex; align-items:center; gap:6px; min-width:0; font-size:var(--fs-14); font-weight:500; }
+.resume-title > .truncate { min-width:0; }
+.resume-note { font-size:var(--fs-13); color:var(--fg-2); }
+.resume-when { flex:none; font-size:var(--fs-12); color:var(--fg-3); }
+
+/* What the other programs left to continue sits under it, in the same shape. */
+.start-import { display:flex; flex-direction:column; gap:2px; margin-top:0; }
+.start-import .si-head { height:28px; padding:0 14px; font-size:var(--fs-12); font-weight:500; color:var(--fg-3); }
+.start-import .si-row { height:56px; padding:0 14px; border-radius:var(--radius-md); }
+.start-import .si-row:hover { background:var(--hover); }
+
+/* The + menu's sentences about what a choice fixes are read whole, not cut at the menu's edge. */
+.start-menu { max-width:min(340px, 92vw); }
+.start-menu .menu-row-sub { white-space:normal; }
+.start-import .si-time { align-self:center; padding-top:0; }
+
+/* "Choose a project" for a chat about to start: a search over rows of a tile, the name and its path,
+   in a popover on a desktop and a sheet on a phone. */
+.project-pick { display:flex; flex-direction:column; gap:var(--space-2); width:100%; min-width:0; }
+.project-pick, .project-pick * { box-sizing:border-box; }
+.project-pick > * { width:100%; }
+.project-menu { padding:var(--space-2); }
+.project-pick-search { display:flex; align-items:center; gap:var(--space-2); height:var(--ctl-h); padding:0 var(--space-2); border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--card); color:var(--fg-3); }
+.project-pick-search input { flex:1; width:100%; min-width:0; border:0; background:transparent; color:var(--fg); font:inherit; font-size:var(--fs-13); outline:none; }
+.project-pick-search:focus-within { border-color:var(--fg-3); }
+.project-pick-list { display:flex; flex-direction:column; gap:1px; max-height:min(360px, 50vh); overflow-y:auto; }
+.project-pick-row { overflow:hidden; display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-2); width:100%; padding:4px var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+.project-pick-row:hover:not(:disabled), .project-pick-row:focus-visible { background:var(--hover); outline:none; }
+.project-pick-row.on { background:var(--selected); }
+.project-pick-row:disabled { opacity:.55; cursor:default; }
+.project-pick-row > .ic:last-child { flex:none; color:var(--fg); }
+.project-pick-tile { display:grid; place-items:center; flex:none; width:24px; height:24px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); }
+.project-pick-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.project-pick-name { font-size:var(--fs-14); font-weight:500; }
+.project-pick-sub { font-size:var(--fs-12); color:var(--fg-3); }
+.project-pick-note { color:var(--attention); font-weight:500; }
+.project-pick-empty { padding:var(--space-2); }
+@media (pointer: coarse) { .project-pick-row { min-height:var(--row-h-touch); } .project-pick-search { height:var(--row-h-touch); } }
+
+/* The projects page: the page chrome's header, then one list of 56 px rows in the 880 px column. Not
+   held to a desktop's width: a window narrowed with the page open keeps it (Start.tsx), its rows then
+   down to the name, what is live and the actions. */
+.projects-page { display:flex; flex-direction:column; flex:1; min-height:0; }
+.projects-search { display:flex; align-items:center; gap:var(--space-2); width:220px; height:var(--ctl-h); padding:0 var(--space-3); border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--card); color:var(--fg-3); }
+.projects-search input { flex:1; min-width:0; border:0; background:none; outline:none; color:var(--fg); font:inherit; font-size:var(--fs-13); }
+.projects-search:focus-within { border-color:var(--fg-3); }
+.projects-filter .num { margin-left:6px; color:var(--fg-3); font-weight:400; }
+.projects-table { display:flex; flex-direction:column; gap:2px; }
+.projects-row { display:grid; grid-template-columns:minmax(0,1fr) 130px 76px 96px 44px 100px; align-items:center; gap:var(--space-3); height:56px; padding:0 14px; border-radius:var(--radius-md); color:var(--fg-2); font-size:var(--fs-13); cursor:pointer; }
+.projects-row:hover, .projects-row:focus-within { background:var(--hover); }
+.projects-row:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.projects-name { display:flex; align-items:center; gap:var(--space-3); min-width:0; }
+.projects-tile { position:relative; display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg-2); }
+.projects-tile > .dot { position:absolute; right:-3px; bottom:-3px; box-shadow:0 0 0 2px var(--wash, var(--bg)); }
+.projects-text { display:flex; flex-direction:column; min-width:0; }
+.projects-name b { color:var(--fg); font-size:var(--fs-14); font-weight:500; }
+.projects-name .mono { color:var(--fg-3); font-family:var(--mono); font-size:var(--fs-12); }
+.projects-state { display:flex; flex-wrap:nowrap; gap:var(--space-1); min-width:0; overflow:hidden; }
+.projects-pill { display:inline-flex; align-items:center; height:20px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, currentColor 12%, transparent); color:var(--fg-2); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
+.projects-pill.warn { color:var(--attention); }
+.projects-pill.info { color:var(--live); }
+.projects-none, .projects-when, .projects-count { color:var(--fg-3); }
+.projects-when { text-align:right; font-size:var(--fs-12); }
+/* Faded rather than hidden: a hidden button cannot take the keyboard's focus that reveals it. */
+.projects-acts { display:flex; justify-content:flex-end; gap:2px; opacity:0; transition:opacity var(--t-fast); }
+.projects-row:hover .projects-acts, .projects-row:focus-within .projects-acts { opacity:1; }
+.projects-empty { padding:var(--space-6) var(--space-3); color:var(--fg-3); font-size:var(--fs-13); text-align:center; }
+
+.projects-archived { margin-top:var(--space-4); }
+.projects-archived > summary { display:flex; align-items:center; gap:6px; height:28px; padding:0 14px; color:var(--fg-3); font-size:var(--fs-12); font-weight:500; cursor:pointer; list-style:none; }
+.projects-archived > summary::-webkit-details-marker { display:none; }
+.projects-archived > summary .num { font-weight:400; }
+.projects-archived > summary .grow { flex:1; }
+.projects-archived > summary > .ic { transform:rotate(-90deg); }
+.projects-archived[open] > summary > .ic { transform:none; }
+.projects-archived > summary:hover { color:var(--fg); }
+.projects-archived-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-2); padding:var(--space-1) 14px; }
+.projects-archived-row .projects-name { flex-direction:column; align-items:flex-start; gap:0; }
+.projects-note { display:flex; align-items:center; gap:var(--space-2); margin-top:var(--space-5); padding:10px var(--space-3); border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); color:var(--fg-2); font-size:var(--fs-13); }
+.projects-note .grow { flex:1; min-width:0; }
+.projects-note a { flex:none; color:var(--accent); font-weight:500; text-decoration:none; }
+.projects-note a:hover { text-decoration:underline; }
+@media (max-width:1023px) {
+  .projects-search { width:100%; margin-bottom:var(--space-3); }
+  .projects-acts > .iconbtn:not(:last-child) { display:none; }
+  .projects-row { grid-template-columns:minmax(0,1fr) auto auto; }
+  .projects-row > :nth-child(3), .projects-row > :nth-child(4), .projects-row > :nth-child(5) { display:none; }
+  .projects-acts { opacity:1; }
+}

@@ -7,6 +7,7 @@ import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetail, StaffSessionView, StaffTurn } from "../api";
 import { SessionDetails, type DetailsActions } from "../details";
+import { ContextPane, UsagePane } from "../panelpanes";
 import { DICT, setLang } from "../i18n";
 import type { Staff } from "../team/team";
 import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, steadySession, windowName } from "./details";
@@ -157,23 +158,27 @@ describe("the panels", () => {
       context: { tokens: 50_000, window: 200_000, messages: 40, summaries: 2, operator_turns: 3, last_compaction: { at: "2026-09-27T10:00:00Z", reason: "auto" } },
       usage: { c: 12, i: 90_000, o: 4_000, usd: 3.5, c_today: 4, i_today: 20_000, o_today: 1_000, usd_today: 0.75 },
     } as unknown as SessionDetail;
-    const on = new Proxy({}, { get: () => () => {} }) as DetailsActions;
+    const opened: string[] = [];
+    const on = new Proxy({}, { get: (_, name) => (name === "openTool" ? (tool: string) => opened.push(tool) : () => {}) }) as DetailsActions;
     const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
     await render("orchestrator");
-    // The inspector lists one line a section; a section's page opens in place of the list. The vision
-    // model stays for the orchestrators: they read the operator's screenshots through it too.
+    // The facts first (the model opens the picker, the cost the Usage tool, the context line the
+    // Context tool), then one line a setting, whose page opens in place of the list. The vision model
+    // stays for the orchestrators: they read the operator's screenshots through it too.
     const sections = () => [...host.querySelectorAll<HTMLElement>("[data-prop]")].map((s) => s.dataset.prop);
-    expect(sections()).toEqual(["context", "usage", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["model", "usage", "context", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
     const openPage = (id: string) => act(async () => { host.querySelector<HTMLElement>(`[data-prop="${id}"]`)!.click(); });
     await openPage("usage");
+    await openPage("context");
+    expect(opened).toEqual(["usage", "context"]);
+    // Their pages are the panel's Usage and Context tools now.
+    await act(async () => root.render(<UsagePane sessionId="o1" detail={detail} provider="" providerUsage={null} />));
     expect(host.querySelector("[data-usage-today]")!.textContent).toContain("$0.75");
     expect(host.querySelector("[data-usage-table]")!.textContent).toContain("90k");
-    await act(async () => { host.querySelector<HTMLElement>(".dt-back")!.click(); });
-    await openPage("context");
+    await act(async () => root.render(<ContextPane detail={detail} busy={false} onCompact={() => {}} />));
     expect(host.querySelector("[data-last-compaction]")!.textContent).toContain("(auto)");
-    await act(async () => { host.querySelector<HTMLElement>(".dt-back")!.click(); });
     await render("main");
-    expect(sections()).toEqual(["context", "usage", "workspace", "disk", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["model", "workspace", "usage", "context", "disk", "mcp", "grants", "vision", "toolgroups", "brief", "spend", "advanced"]);
     await render("session");
     // Clearing and deleting the session left the tab for the session's menu.
     expect(sections()).not.toContain("danger");

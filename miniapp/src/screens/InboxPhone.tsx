@@ -238,7 +238,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
         <TopBar back={() => setSelected(null)} backIcon="close" backLabel={t("ph.inbox.done")} title={plural("ph.inbox.selected", shown.size)}
           actions={<button type="button" className="ph-link" onClick={() => setSelected(new Set(everything.map((e) => e.id)))}>{t("ph.inbox.selectall")}</button>} />
       ) : (
-        <TopBar center title={t("nav.inbox")} sub={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
+        <TopBar title={t("nav.inbox")} sub={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
           actions={<IconButton icon="vdots" label={t("ph.inbox.menu")} popup="menu" onClick={() => setOpen({ kind: "menu" })} className="ph-ib" />} />
       )}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}

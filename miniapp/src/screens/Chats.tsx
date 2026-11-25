@@ -23,10 +23,10 @@ import { errorText } from "../ui";
 import { fmtInterval, statusWord } from "../ui/components";
 import type { MenuAction, MenuItem } from "../ui/dialogs";
 import { Banner, Chip, ChipBar, EmptyState, NewChatPill, SectionHeader, TopBar } from "../ui/phone";
-import { IconButton, Menu, Row as ListRow, isAction } from "../ui/primitives";
+import { IconButton, Menu, Row as ListRow, Tabs, isAction } from "../ui/primitives";
 import { useSessionCommands } from "./Sessions";
 import { asChatCommand } from "../chatproject";
-import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { KIND_TABS, type KindTab, byTab, kindIcon, kindPlate, tabCounts, tabLabel, useKindTab } from "../chatkind";
 import { remoteRowWords } from "../remote";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
@@ -326,7 +326,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
       {query && <IconButton icon="close" label={t("ph.search.clear")} onClick={() => { setQuery(""); field.current?.focus(); }} className="ph-ib" />}
     </header>
   ) : (
-    <TopBar center title={t("ph.chats")} pip={counts.attention > 0} actions={<IconButton icon="search" label={t("search.label")} onClick={() => setSearching(true)} className="ph-ib" />} />
+    <TopBar title={t("ph.chats")} pip={counts.attention > 0} actions={<IconButton icon="search" label={t("search.label")} onClick={() => setSearching(true)} className="ph-ib" />} />
   );
 
   let body: React.ReactNode;
@@ -398,7 +398,10 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
     <div className="ph-page ph-chats">
       {top}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
-      {!searching && <KindTabs tab={tab} onChange={setTab} counts={all.data ? kindCounts : undefined} className="ph-kinds" />}
+      {/* The kinds are the shared page tabs: a count only on the kinds a list holds few of, since on
+          All and Chats it would be one more number to read. */}
+      {!searching && <Tabs variant="page" className="ph-kinds" label={t("kind.tabs.label")} value={tab} onChange={(next) => setTab(next as KindTab)}
+        tabs={KIND_TABS.map((k) => ({ id: k, label: tabLabel(k), icon: k === "all" ? undefined : kindIcon(k) ?? undefined, count: all.data && k !== "all" && k !== "chat" && kindCounts[k] > 0 ? kindCounts[k] : undefined }))} />}
       {!searching && (
         <ChipBar label={t("agents.filter.label")}>
           {lens && (visit || onPickProject) && <Chip on onClick={clearLens} label={t("ph.lens.clear", { name: lens.name })}><span className="ph-lens"><Icon name="folder" size={16} />{lens.name}<Icon name="close" size={14} /></span></Chip>}
@@ -410,7 +413,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
         </ChipBar>
       )}
       <div className="ph-page-body list">{body}</div>
-      {!searching && <NewChatPill floating label={t("ph.newchat")} onClick={newChat} />}
+      {!searching && <NewChatPill label={t("ph.newchat")} onClick={newChat} />}
     </div>
   );
 }

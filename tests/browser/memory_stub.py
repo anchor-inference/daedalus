@@ -169,7 +169,9 @@ class MemoryStub:
     def _get(self, memory_id: str) -> dict[str, Any] | None:
         return next((r for r in self.records if r["id"] == memory_id), None)
 
-    def listing(self) -> dict[str, Any]:
+    def listing(self, source_session: str = "") -> dict[str, Any]:
+        """The host's listing; ``source_session`` keeps the records that chat taught, as the host reads
+        them from the records' sources (the panel's Memory tool asks for one chat's)."""
         counts: dict[str, int] = {}
         for r in self.records:
             for topic in r["topics"]:
@@ -178,8 +180,9 @@ class MemoryStub:
         for r in self.records:
             b = buckets.setdefault(f"{r['scope']}:{r['scope_key']}", {"scope": r["scope"], "scope_key": r["scope_key"], "title": self.projects.get(r["scope_key"]) if r["scope"] == "project" else None, "count": 0})
             b["count"] += 1
+        taught = [r for r in self.records if not source_session or any(src.get("session_id") == source_session for src in self.sources.get(r["id"], []))]
         return {
-            "records": copy.deepcopy(self.records),
+            "records": copy.deepcopy(taught),
             "buckets": sorted(buckets.values(), key=lambda b: (b["scope"] != "global", -b["count"])),
             "projects": self.projects,
             "topics": [{"topic": t, "count": n} for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))],
@@ -245,7 +248,7 @@ class MemoryStub:
         if entries is not None:
             return entries
         if path == "/api/memory" and method == "GET":
-            return 200, self.listing()
+            return 200, self.listing(params.get("source_session", ""))
         if path == "/api/memory" and method == "POST":
             record = {"id": f"m{len(self.records) + 100}", "scope": body.get("scope", "global"), "scope_key": body.get("scope_key", ""), "category": body.get("category") or "fact",
                       "topics": body.get("topics") or [], "text": body.get("text", ""), "salience": 0, "version": 1, "created_at": datetime.now(UTC).isoformat(),

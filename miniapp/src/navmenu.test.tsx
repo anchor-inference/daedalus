@@ -44,7 +44,7 @@ function pending() {
 async function open(phone = false) {
   const nav = resolveNav({ config: null, pages: [PAGE], selfdev: "server" });
   await act(async () => root.render(
-    <Launcher nav={nav} placed={phone ? nav.drawer.agents : nav.pinned} current="board" selfdev="server" onGo={go} onPlace={place} onEverywhere={everywhere} onClose={() => {}} phone={phone} />,
+    <Launcher nav={nav} placed={nav.pinned} current="board" selfdev="server" onGo={go} onPlace={place} onEverywhere={everywhere} onClose={() => {}} phone={phone} />,
   ));
 }
 const type = (text: string) => act(async () => {
@@ -100,10 +100,10 @@ describe("the pin", () => {
     expect(pin.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("is the drawer's list on a phone, and says so", async () => {
+  it("is the sidebar's pin on a phone as well, with the foot's Settings and About", async () => {
     await open(true);
     const pin = host.querySelector("[data-nav-item='memory']")!.parentElement!.querySelector<HTMLButtonElement>(".launch-pin")!;
-    expect(pin.getAttribute("aria-label")).toBe("Add to the menu: Memory");
+    expect(pin.getAttribute("aria-label")).toBe("Pin to the sidebar: Memory");
     expect(host.querySelector(".launch-foot [data-nav='about']")).not.toBeNull();
   });
 });

@@ -227,28 +227,27 @@ def phone(page: Page, lang: str) -> None:
     serve(page, focus, main, lang)
     go(page, "/agents", lang)
 
-    # No bottom bar: the drawer carries both modes as a switch, the count waiting quietly on
-    # Orchestration's side; Agents mode lists its own projects and none with an orchestrator.
+    # No bottom bar: the drawer is the sidebar, its mode menu says how much waits in Orchestration,
+    # and Agents mode lists its own projects and none with an orchestrator.
     expect(page.locator("nav.tabbar")).to_have_count(0)
     expect(page.locator(".ph-home .main-entry")).to_have_count(0)
     open_drawer(page)
     drawer = page.locator(".ph-drawer-root.open")
-    seg = drawer.locator(".ph-seg button")
-    expect(seg.nth(0)).to_have_attribute("aria-checked", "true")
-    expect(seg.nth(1)).to_contain_text(words["orchestration"])
-    expect(seg.nth(1).locator("[data-waiting]")).to_have_text(WAITING)
+    expect(drawer.locator(".sb-mode")).to_have_attribute("data-mode", "agents")
+    expect(drawer.locator(".sb-mode .sb-mode-pip")).to_have_count(1)
     expect(drawer.locator(f"[data-project='{PID}']")).to_have_count(0)
     expect(drawer.locator(f"[data-project='{GARDEN}']")).to_be_visible()
     fits(page, f"{lang} phone agents")
 
-    # One tap into orchestration's lists: Main first, then the projects; "See all" is the list the
-    # desktop's column holds, as a page.
-    seg.nth(1).click()
-    expect(seg.nth(1)).to_have_attribute("aria-checked", "true")
-    expect(drawer.locator("[data-nav='main']")).to_be_visible()
-    expect(drawer.locator(f"[data-project='{PID}'] .ph-badge")).to_have_text("1")
-    drawer.locator("[data-nav='orchestration-list']").click()
+    # One choice in the mode menu goes to orchestration's home, the list the desktop's column holds,
+    # as a page; the drawer there lists Main first, then the projects with what waits in each.
+    switch_mode(page, "orchestration", scope=".ph-drawer-root.open")
     page.wait_for_url("**/app/orchestration/projects**")
+    open_drawer(page)
+    expect(drawer.locator(".sb-mode")).to_have_attribute("data-mode", "orchestration")
+    expect(drawer.locator(".orch-main")).to_be_visible()
+    expect(drawer.locator(f".orch-row[data-project='{PID}'] .needs-badge")).to_have_text("1")
+    page.keyboard.press("Escape")
     listing = page.locator(".ph-orch")
     expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
     # Main opens the chat as a detail of the list: no bar, and its back returns to the list.
@@ -257,7 +256,7 @@ def phone(page: Page, lang: str) -> None:
     expect(page.locator(".timeline > .questions-line")).to_be_visible()
     expect(page.locator("nav.tabbar")).to_have_count(0)
     fits(page, f"{lang} phone main chat")
-    page.locator(".chat-head > button.iconbtn, .chat-head > .ph-ib").first.click()
+    page.locator(".chat-head .pagehead-row > .ph-ib, .chat-head > button.iconbtn").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
     # Remembered by the phone too: a bare /app opens orchestration at its list.
@@ -279,14 +278,13 @@ def phone(page: Page, lang: str) -> None:
     page.locator("nav.tabbar.project-tabs button[data-tab='more']").click()
     expect(page.locator(".sheet.more-sheet .menu-row[data-more='journal']")).to_be_visible()
     page.keyboard.press("Escape")
-    # The project's hamburger opens the same drawer, in orchestration mode, with the project marked.
+    # The project's hamburger opens the same drawer, in orchestration mode.
     page.locator(".pagehead .ph-menu").first.click()
-    expect(drawer.locator(".ph-seg button").nth(1)).to_have_attribute("aria-checked", "true")
-    expect(drawer.locator(f"[data-project='{PID}']")).to_have_class(re.compile(r"\bon\b"))
+    expect(drawer.locator(".sb-mode")).to_have_attribute("data-mode", "orchestration")
+    expect(drawer.locator(f".orch-row[data-project='{PID}']")).to_be_visible()
 
-    # And one tap back to Agents: a new chat is Agents' home.
-    drawer.locator(".ph-seg button").nth(0).click()
-    drawer.locator(".ph-newchat").click()
+    # And one choice back to Agents, whose home is a new chat.
+    switch_mode(page, "agents", scope=".ph-drawer-root.open")
     page.wait_for_url("**/app/agents**")
     expect(page.locator(".ph-home")).to_be_visible()
 

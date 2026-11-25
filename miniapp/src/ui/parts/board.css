@@ -1,0 +1,209 @@
+/* ── the Board: columns of cards at the left, the open card's pane at the right ───────────────
+   The page is one row: the board (its 52 px header, a 44 px filter bar, then the columns, which
+   scroll by themselves) and, when a card is open, a 420 px pane from the top of the window to its foot.
+   The header belongs to the board, not to the pane, so the pane's own 52 px head sits level with it.
+   Colours are the three accents and nothing else: orange for what waits on the operator or is late,
+   cyan for work going on, violet for the card that is open. */
+.board-page { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.board-area { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.board-area > .pagehead { flex: none; }
+.pagehead-row .board-scope { margin: 0; }
+.board-scope.segmented { height: var(--ctl-h); box-sizing: border-box; padding: 2px; gap: 2px; border: 1px solid var(--line-strong); border-radius: 9px; background: none; }
+.board-scope.segmented button { min-height: 26px; height: 26px; padding: 0 12px; border-radius: 7px; font-size: var(--fs-13); }
+.board-scope-pick { display: inline-flex; align-items: center; gap: 8px; height: var(--ctl-h); max-width: 300px; min-width: 0; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
+.board-scope-pick:hover { background: var(--hover); }
+.board-scope-pick > .ic:first-child { color: var(--fg-2); }
+.board-scope-pick > .ic:last-child { color: var(--fg-3); }
+.board-scope-pick[aria-expanded="true"] { background: var(--selected); }
+.board-scope-row { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.board-scope-row > .ic { color: var(--fg-2); flex: none; }
+.board-scope-row .sub { margin-left: auto; flex: 0 1 auto; max-width: 40%; color: var(--fg-3); font-size: var(--fs-12); }
+.board-group-btn { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; white-space: nowrap; }
+.board-group-btn:hover, .board-group-btn[aria-expanded="true"] { background: var(--hover); color: var(--fg); }
+.board-group-btn .ic { color: var(--fg-3); }
+.board-search { display: inline-flex; align-items: center; gap: 8px; height: var(--ctl-h); width: 220px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--fg-3); }
+.board-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.board-search:focus-within { border-color: var(--accent); }
+.pagehead-actions:has(.board-group-btn) { gap: 8px; }
+/* Beside an open pane the board is narrow (646 px at 1366): the title keeps its word, the picker gives
+   up its width first, and the new-task button keeps only its plus, named for a screen reader. */
+.board-area { container-type: inline-size; container-name: board; }
+.board-area .pagehead-title { flex: none; }
+.pagehead .pagehead-filters > .board-scope-pick { flex: 0 1 auto; min-width: 96px; }
+@container board (max-width: 760px) {
+  .board-new-btn .board-new-label { display: none; }
+  .board-new-btn.btn { padding: 4px 8px; }
+  .board-search { width: 160px; }
+}
+
+.board-filters { flex: none; height: 44px; padding: 0 24px; display: flex; align-items: center; gap: 8px; }
+.board-filter { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; cursor: pointer; }
+.board-filter:hover { background: var(--hover); color: var(--fg); }
+.board-filter[aria-pressed="true"] { background: var(--selected); color: var(--fg); border-color: var(--line-strong); font-weight: 500; }
+.board-filter .n { color: var(--fg-3); font-weight: 400; }
+.board-filter.needs .n { color: var(--attention); font-weight: 600; }
+.board-summary { font-size: var(--fs-13); color: var(--fg-3); white-space: nowrap; }
+
+.board-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 24px 24px; scrollbar-width: thin; }
+
+/* The columns. On the page they stand side by side, each at least 240 px, and the board scrolls
+   sideways once they do not fit; stacked, in a narrow place, they read one under another. */
+.board-cols.grid { display: grid; gap: 12px; align-items: start; min-width: min-content; }
+.board-cols.stacked { display: flex; flex-direction: column; }
+.kanban-col { min-width: 0; display: flex; flex-direction: column; border-radius: var(--radius-md); outline: 1px dashed transparent; outline-offset: 4px; }
+.kanban-col.can-drop { outline-color: var(--line-strong); }
+.kanban-col.over { outline-color: var(--accent); }
+.kanban-head { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 0 0 2px; position: sticky; top: 0; z-index: 1; background: var(--wash, var(--bg)); }
+.kanban-name { font-size: var(--fs-13); font-weight: 500; color: var(--fg); }
+.kanban-n { font-size: var(--fs-13); color: var(--fg-3); }
+.kanban-add { margin-right: -4px; }
+.kanban-fold { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.kanban-caret { display: inline-flex; color: var(--fg-3); transition: rotate var(--t-fast); }
+.kanban-caret.open { rotate: 90deg; }
+.kanban-empty { height: 56px; box-sizing: border-box; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: var(--fs-13); color: var(--fg-3); }
+.kanban-lane { display: flex; flex-direction: column; gap: 8px; }
+.kanban-lane + .kanban-lane { margin-top: 8px; }
+.kanban-lane-head { height: 28px; margin-top: 8px; padding: 0 2px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.kanban-lane-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.kanban-lane-state { flex: none; font-weight: 400; }
+.kanban-lane-state.live { color: var(--live); }
+.kanban-lane-state.attention { color: var(--attention); }
+.kanban-more { align-self: center; margin-top: 8px; }
+.kanban-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--fg-3); }
+.kanban-dot.live { background: var(--live); }
+.kanban-dot.attention { background: var(--attention); }
+.board-filter .kanban-dot { width: 8px; height: 8px; }
+
+/* A card: its title on at most two lines, what it waits on in colour, the chat it came from on the
+   board of every chat, and one line of who, when and how far. */
+.task-card { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.task-card:hover { background: var(--hover); border-color: var(--line-strong); }
+.task-card.on { background: var(--selected); border-color: var(--accent); }
+.task-card:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.task-card.draggable { cursor: grab; }
+.task-card.dragging { opacity: .45; }
+.task-card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-14); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.task-card.finished .task-card-title { color: var(--fg-2); }
+.task-card-state, .task-card-chat, .task-card-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.task-card-state { font-weight: 500; }
+.task-card-state.live { color: var(--live); }
+.task-card-state.live .kanban-dot { background: var(--live); }
+.task-card-state.attention { color: var(--attention); }
+.task-card-state.attention .kanban-dot { background: var(--attention); }
+.task-card-meta { gap: 12px; }
+.task-card-meta > span { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.task-card-meta > .grow { flex: 1; }
+.task-card-who.you { color: var(--fg); font-weight: 500; }
+.task-card-due.late { color: var(--attention); }
+.task-card-prio { color: var(--fg-3); font-weight: 500; }
+.task-card-prio.p1, .task-card-prio.p2 { color: var(--attention); font-weight: 600; }
+.task-card-refusal, .task-refusal { font-size: var(--fs-13); line-height: 1.45; color: var(--attention); overflow-wrap: anywhere; }
+/* The compact card of a narrow column: the title and one line of state. */
+.task-card.compact { padding: 10px 12px; gap: 4px; border-radius: 10px; background: var(--card); }
+.task-card.compact.finished { background: transparent; }
+.task-card.compact.finished .task-card-title { color: var(--fg-3); }
+.task-card-line { font-size: var(--fs-12); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.task-card-line.live { color: var(--live); }
+.task-card-line.attention { color: var(--attention); }
+.board-cols.stacked .kanban-col { outline-offset: 0; }
+.board-cols.stacked .kanban-head { height: 36px; padding: 0 12px; background: none; position: static; }
+.board-cols.stacked .kanban-name, .board-cols.stacked .kanban-n { font-size: var(--fs-12); color: var(--fg-3); }
+.board-cols.stacked .kanban-lane { gap: 6px; }
+
+/* The pane. 420 px beside the page's board, the panel's width in a chat's panel, a sheet on a phone. */
+.task-pane { width: 420px; flex: none; box-sizing: border-box; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--wash, var(--bg)); min-height: 0; }
+.task-pane.in-sheet { width: auto; border: 0; background: none; display: flex; flex-direction: column; gap: 20px; }
+.task-pane-head { height: 52px; flex: none; padding: 0 12px 0 20px; display: flex; align-items: center; gap: 4px; }
+.task-pane-kind { font-size: var(--fs-13); color: var(--fg-3); }
+.task-pane-code { font-size: var(--fs-12); color: var(--fg-3); margin-left: 4px; }
+.task-pane-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; display: flex; flex-direction: column; gap: 20px; scrollbar-width: thin; }
+.task-pane-title { margin: 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.task-pane-need { margin-top: -8px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; font-size: var(--fs-13); font-weight: 500; color: var(--attention); }
+.task-pane-need .kanban-dot { width: 8px; height: 8px; }
+.task-kv { margin-top: -8px; display: flex; flex-direction: column; }
+.task-kv-row { min-height: 32px; display: flex; align-items: center; gap: 12px; font-size: var(--fs-14); }
+.task-kv-key { width: 96px; flex: none; color: var(--fg-3); font-size: var(--fs-13); }
+.task-kv-value { flex: 1; min-width: 0; display: flex; align-items: center; }
+.task-kv-status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.task-kv-status .kanban-dot { width: 8px; height: 8px; }
+.task-kv-status .kanban-dot:not(.live):not(.attention) { background: var(--fg-3); }
+.task-kv-state { font-size: var(--fs-13); font-weight: 500; }
+.task-kv-state.live { color: var(--live); }
+.task-kv-state.attention { color: var(--attention); }
+.task-kv-quiet { color: var(--fg-2); }
+.task-kv + .task-refusal, .task-kv .task-refusal { margin: 0 0 4px 108px; }
+.task-link { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 0 8px; margin-left: -8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); cursor: pointer; }
+.task-link:hover { background: var(--hover); }
+.task-link > .ic { color: var(--fg-2); flex: none; }
+.task-link > .ic:last-child { color: var(--fg-3); }
+.task-link-hint { font-size: var(--fs-12); color: var(--fg-3); flex: none; }
+/* A pane's choice reads as its value, framed only under the pointer, as the mock rows read. */
+/* The shift left is the wrapper's, not the button's: on the button it made the wrapper, which sizes to
+   the button's margin box, ten pixels short of the words, and every value ended in an ellipsis. */
+.task-kv-value > .task-select { flex: none; max-width: calc(100% + 10px); margin-left: -10px; }
+.task-select .dropdown-btn { max-width: 100%; border-color: transparent; background: none; min-height: 28px; font-size: var(--fs-14); color: var(--fg); }
+.task-select .dropdown-btn:hover:not(:disabled) { background: var(--hover); }
+.task-select .dropdown-btn:disabled { opacity: 1; cursor: default; }
+.task-select .dropdown-btn:disabled .dropdown-caret { visibility: hidden; }
+.task-select.high .dropdown-btn, .task-select.you .dropdown-btn { font-weight: 500; }
+.task-select.high .dropdown-btn { color: var(--attention); }
+.task-due { position: relative; display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.task-due-btn { min-height: 28px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); cursor: pointer; }
+.task-due-btn:hover:not(:disabled) { background: var(--hover); }
+.task-due-btn:disabled { cursor: default; }
+.task-due-btn.none { color: var(--fg-3); }
+.task-due-btn.late { color: var(--attention); }
+/* The browser's own date field, under the words, opened from them: it keeps the keyboard's and the
+   picker's handling of dates, which a hand-made calendar would have to redo. */
+.task-due-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.task-block { display: flex; flex-direction: column; gap: 8px; }
+.task-sec { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); display: flex; align-items: center; gap: 8px; }
+.task-sec-n { font-weight: 400; }
+.task-prose { font-size: var(--fs-15); line-height: 1.55; overflow-wrap: anywhere; }
+.task-prose p { margin: 0; }
+.task-prose p + p { margin-top: 8px; }
+.task-prose.quiet { font-size: var(--fs-14); line-height: 1.5; color: var(--fg-2); }
+.task-lead { color: var(--fg-2); font-weight: 500; }
+.task-none { font-size: var(--fs-13); color: var(--fg-3); line-height: 1.5; }
+.task-progress { height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; margin: -2px 0 2px; }
+.task-progress i { display: block; height: 4px; border-radius: 2px; background: var(--fg-2); }
+.task-sub { width: calc(100% + 16px); min-height: 32px; margin-left: -8px; padding: 0 8px; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: none; display: flex; align-items: center; gap: 10px; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.task-sub:hover:not(:disabled) { background: var(--hover); }
+.task-sub:disabled { cursor: default; }
+.task-box { width: 16px; height: 16px; box-sizing: border-box; flex: none; border: 1.5px solid var(--line-strong); border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--primary-ink); }
+.task-sub.done .task-box { background: var(--primary); border-color: var(--primary); }
+.task-sub-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.task-sub.done .task-sub-text { color: var(--fg-3); text-decoration: line-through; }
+.task-dep { display: flex; align-items: center; gap: 8px; min-height: 28px; width: calc(100% + 16px); margin-left: -8px; padding: 0 8px; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.task-dep:hover:not(:disabled) { background: var(--hover); }
+.task-dep:disabled { cursor: default; }
+.task-dep-status { margin-left: auto; flex: none; font-size: var(--fs-12); color: var(--fg-3); }
+.task-notes { margin: 0; font-family: var(--font); font-size: var(--fs-14); line-height: 1.5; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-moves { display: flex; gap: 8px; flex-wrap: wrap; }
+.task-move.btn { font-weight: 400; }
+.task-pane .chat-finish { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.task-pane .chat-finish .sheet-section-title { font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); margin: 0; }
+.task-pane .chat-finish-note { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: var(--fs-14); line-height: 1.5; }
+.task-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.task-log-row { display: flex; gap: 12px; }
+.task-log-rail { width: 8px; flex: none; padding-top: 7px; display: flex; flex-direction: column; align-items: center; }
+.task-log-rail i { width: 1px; flex: 1; background: var(--line); margin-top: 4px; }
+.task-log-row:last-child .task-log-rail i { visibility: hidden; }
+.task-log-body { flex: 1; min-width: 0; padding-bottom: 10px; display: flex; flex-direction: column; }
+.task-log-text { font-size: var(--fs-14); overflow-wrap: anywhere; }
+.task-log-time { font-size: var(--fs-12); color: var(--fg-3); }
+.task-pane-foot { flex: none; height: 64px; box-sizing: border-box; padding: 0 20px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.task-pane-foot .btn.quietly, .task-sheet .btn.quietly { font-weight: 400; }
+.task-pane-foot .btn.quietly .ic { color: var(--fg-2); }
+.task-pane-foot .task-refusal { flex: 1; min-width: 0; }
+
+/* The new card's sheet: its fields one under another, the short choices beside their names. */
+.board-new-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
+.board-new-row .field-label { min-width: 96px; margin: 0; }
+.board-new-row .segmented { margin: 0; }
+
+@media (max-width: 1023px) {
+  .task-sheet .sheet-head .task-pane-code { margin-left: auto; }
+  .task-sheet .task-kv-row { min-height: var(--row-h-touch); }
+  .task-sheet .task-sub, .task-sheet .task-dep { min-height: var(--row-h-touch); }
+}
