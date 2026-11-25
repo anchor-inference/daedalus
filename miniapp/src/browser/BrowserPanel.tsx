@@ -7,7 +7,7 @@
 // over. "Take control" hands this window the page — the agent's calls then wait, and it sees nothing of
 // the page while a person types — and "Give back" returns it with a note the agent is woken with.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup, BrowserUserChoice, BrowserWorkflow } from "../api";
 import { OverflowMenu, Popover, toast as statusToast, type MenuItem } from "../ui/dialogs";
@@ -177,6 +177,8 @@ function useFitChoice(group: string, enabled: boolean): [boolean, (on: boolean) 
   return [fit, choose];
 }
 
+/** The head's width under which the picture's fit and quality go into the menu. */
+const NARROW_TOOLBAR = 420;
 const PAGE_MIN = 320;
 const PAGE_MAX = 3840;
 /** A resize settles, including the handoff that grows the corner card into this picture. */
@@ -620,7 +622,26 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
     }
   };
   const nav = (action: "back" | "forward" | "reload") => live?.input({ t: "nav", action });
+  // In a panel of about 400 px the address would be left a few letters wide: the picture's fit and quality
+  // then move into the menu, which has the room.
+  const bar = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const measure = () => setNarrow(el.clientWidth < NARROW_TOOLBAR);
+    measure();
+    const watched = new ResizeObserver(measure);
+    watched.observe(el);
+    return () => watched.disconnect();
+  }, []);
+  const qualities: MenuItem[] = PICTURE_QUALITIES.map((q) => ({ label: t(`browser.quality.${q}`), hint: t(`browser.quality.${q}.hint`), checked: q === quality, onSelect: () => onQuality(q) }));
   const items: MenuItem[] = [
+    ...(narrow ? [
+      { label: t("browser.fit"), icon: "expand" as IconName, checked: fit, onSelect: () => onFit(!fit) },
+      { label: t("browser.quality", { quality: t(`browser.quality.${quality}`) }), icon: "image" as IconName, submenu: qualities },
+      "-" as const,
+    ] : []),
     ...(drive === "paused" ? [] : drive === "you" ? [] : [{ label: t("browser.pause"), icon: "pause" as IconName, onSelect: () => void control.pause() }]),
     // The keyboard's Ctrl+V and Ctrl+C do the same; these are for a tablet or a mouse alone.
     ...(driving ? [
@@ -663,7 +684,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   ];
   return (
     <>
-      <div className="bp-toolbar panel-toolbar">
+      <div className="bp-toolbar panel-toolbar" ref={bar}>
         <span className="bp-nav">
           <IconButton icon="back" label={t("panel.back")} disabled={!driving} onClick={() => nav("back")} />
           <IconButton icon="forward" label={t("panel.forward")} disabled={!driving} onClick={() => nav("forward")} />
@@ -672,13 +693,8 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
         <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
         {recordable && <RecordButton group={group.id} toast={toast} />}
         <SnapshotButton session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))} />
-        <IconButton icon="expand" label={t("browser.fit")} pressed={fit} onClick={() => onFit(!fit)} className="bp-fit" />
-        <OverflowMenu
-          className="bp-quality"
-          label={t("browser.quality", { quality: t(`browser.quality.${quality}`) })}
-          icon="image"
-          items={PICTURE_QUALITIES.map((q) => ({ label: t(`browser.quality.${q}`), hint: t(`browser.quality.${q}.hint`), checked: q === quality, onSelect: () => onQuality(q) }))}
-        />
+        {!narrow && <IconButton icon="expand" label={t("browser.fit")} pressed={fit} onClick={() => onFit(!fit)} className="bp-fit" />}
+        {!narrow && <OverflowMenu className="bp-quality" label={t("browser.quality", { quality: t(`browser.quality.${quality}`) })} icon="image" items={qualities} />}
         <OverflowMenu label={t("browser.menu")} items={items} />
       </div>
       {tabs.length > 1 && <TabStrip tabs={tabs} viewing={viewing} active={snap.active} onPick={(id) => live?.view({ tab: id })} />}

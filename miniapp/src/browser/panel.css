@@ -210,11 +210,13 @@
 .bp-rec-start-keep .sub { font-size: var(--fs-12); line-height: 1.4; }
 .bp-rec-start-foot { display: flex; justify-content: flex-end; }
 .bp-rec-start-foot .btn { gap: 6px; }
-.bp-recbar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h-2); box-sizing: border-box; padding: 0 8px 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-13); }
+.bp-recbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: var(--row-h-2); box-sizing: border-box; padding: 4px 8px 4px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font-size: var(--fs-13); }
 .bp-recbar-title { flex: none; font-weight: 500; }
 .bp-recbar-count { flex: none; color: var(--fg-3); }
 .bp-recbar-latest { flex: 1; min-width: 0; color: var(--fg-2); }
 .bp-recbar .btn { flex: none; gap: 6px; white-space: nowrap; }
+/* A panel too narrow for the words and both buttons puts the latest step on a line under them. */
+@container (max-width: 460px) { .bp-recbar-latest { order: 3; flex: 1 1 100%; } .bp-recbar-title { flex: 1; } }
 
 /* A finished recording, a draft and the skill's editor are cards of the same family as a request: the
    words at the top, what there is to decide, then the answers. */
