@@ -2101,7 +2101,7 @@ def run_notifications() -> int:
         page.route("**/api/**", stub)
         shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "inbox-question", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_entry(p, QUESTION["id"]), settle=500)
-        shot(page, "inbox-proposal", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_proposal(p, PROPOSALS[0]["id"]), settle=500)
+        shot(page, "inbox-proposal", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_proposal(p, PROPOSALS.rows[0]["id"]), settle=500)
         shot(page, "inbox-problems", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_tab(p, "problems"), settle=500)
         stub.inbox_empty = True  # type: ignore[attr-defined]
         shot(page, "inbox-empty", "inbox", wait=".inbox-empty", settle=500)
