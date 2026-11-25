@@ -569,6 +569,7 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 .start-agent-loop textarea.field { resize:vertical; }
 .start-agent-loop-row { display:flex; flex-wrap:wrap; gap:6px; }
 .start-agent-loop-row .field { flex:1 1 110px; min-width:0; width:auto; }
+.start-agent-loop-row .start-loop-mode, .start-agent-loop-row .start-loop-mode .dropdown-btn { flex:1 1 110px; min-width:0; max-width:none; }
 /* Where the attachments were while they upload: the percentage, in figures that do not jitter. */
 .composer .upload-progress { font-variant-numeric: tabular-nums; }
 .composer .upload-progress { padding: 8px 14px 0; }
