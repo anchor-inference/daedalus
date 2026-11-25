@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { Icon } from "../icons";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 import type { ProjectTask, Review, ReviewReceipt } from "./board";
@@ -143,7 +144,8 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
         <Icon name="check" size={12} /> {receipt.criterion || t("result.checks.unnamed")}{" "}
         <button type="button" className="btn small" disabled={offline || busy || !current} onClick={() => offerCheck(receipt)}>{t("result.checks.use")}</button>
         {choosing === receipt.id && <div className="result-comment-form">
-          <select className="field" aria-label={t("result.checks.for")} value={checkCriterion} onChange={(event) => setCheckCriterion(event.target.value)}>{checks.map((check) => <option key={check.id} value={check.id}>{check.text}</option>)}</select>
+          <Select label={t("result.checks.for")} size="md" className="wide" value={checkCriterion} onChange={setCheckCriterion}
+            options={checks.map((check) => ({ id: check.id, label: check.text }))} />
           <button type="button" className="btn small primary" disabled={offline || busy || !current || !checkCriterion} onClick={() => void attachCheck(receipt, checkCriterion)}>{t("result.checks.attach")}</button>
         </div>}
         <details className="result-check-details"><summary className="sub">{t("result.checks.details")}</summary>
@@ -154,8 +156,10 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
       {otherCommit && <p className="sub">{t("result.checks.otherCommit")}</p>}
     </div>}
     <div className="result-comment-form">
-      {checks.length > 0 && <select className="field" aria-label={t("result.criterion")} value={selectedCriterion} onChange={(event) => setCriterion(event.target.value)}>{checks.map((check) => <option key={check.id} value={check.id}>{check.text}</option>)}</select>}
-      {(result.artifacts ?? []).length > 0 && <select className="field" aria-label={t("result.commentArtifact")} value={selectedArtifact} onChange={(event) => setArtifact(event.target.value)}>{result.artifacts.map((item) => <option key={item.id} value={item.id}>{item.artifact_key}</option>)}</select>}
+      {checks.length > 0 && <Select label={t("result.criterion")} size="md" className="wide" value={selectedCriterion} onChange={setCriterion}
+        options={checks.map((check) => ({ id: check.id, label: check.text }))} />}
+      {(result.artifacts ?? []).length > 0 && <Select label={t("result.commentArtifact")} size="md" className="wide" value={selectedArtifact} onChange={setArtifact}
+        options={result.artifacts.map((item) => ({ id: item.id, label: item.artifact_key }))} />}
       <textarea className="field" rows={3} value={observation} onChange={(event) => setObservation(event.target.value)} aria-label={t("result.observation")} placeholder={t("result.observationHint")} />
       <button type="button" className="btn small" disabled={offline || busy || !current || !selectedArtifact || !observation.trim()} onClick={() => void attest()}>{t("result.recordEvidence")}</button>
     </div>

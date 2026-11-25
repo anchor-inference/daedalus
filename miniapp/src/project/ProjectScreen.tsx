@@ -29,7 +29,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   const route = useRoute();
   const [goalOpen, setGoalOpen] = useState(false);
   const { project, loading } = useProject(projectId);
-  const { data: currentGoal } = useQuery<{ body: string; project_id: string }>(
+  const { data: currentGoal, updatedAt: goalRead, error: goalError } = useQuery<{ body: string; project_id: string }>(
     `/api/projects/${encodeURIComponent(projectId)}/scope-revisions/current`, { staleMs: 5000 });
   // The setup card counts the team; the query is the one the team tab reads, so it costs nothing more.
   const { data: team } = useQuery<{ staff: unknown[] }>(!wide && project?.setup_by === "dispatcher" ? staffKey(projectId) : null, { staleMs: 5000 });
@@ -63,7 +63,9 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
           {/* A phone has no Questions column beside the chat: the one card answers the oldest request
               and opens the decision sheet for the rest. */}
           {!wide && <NeedsYouBanner projectId={projectId} toast={toast} />}
-          {!currentGoal?.body && <div className="main-setup" data-goal-setup>
+          {/* Only once the goal has been read: drawn while it loaded, the line stood over the chat
+              for a moment and then left, and the whole conversation jumped up by its height. */}
+          {(goalRead !== null || goalError !== null) && !currentGoal?.body && <div className="main-setup" data-goal-setup>
             <span className="grow">{t("goal.start.missing")}</span>
             <button className="linkbtn" onClick={() => setGoalOpen(true)}>{t("goal.start.title")}</button>
           </div>}

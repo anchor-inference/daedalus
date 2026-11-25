@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, open_task_tool  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, choose_option, expect_app, open_task_tool  # noqa: E402
 from check_project_board import PID, board, serve  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -69,8 +69,8 @@ def check(lang: str, width: int) -> None:
         page.reload()
         expect(page.locator(".sheet.pboard-sheet")).to_be_visible()
         workflow = open_task_tool(page, WORKFLOW[lang], lang).locator(".task-workflow-section")
-        expect(workflow.get_by_label("Earlier runs" if lang == "en" else "Предыдущие запуски")).to_have_value("workflow-2")
-        workflow.get_by_label("Earlier runs" if lang == "en" else "Предыдущие запуски").select_option("workflow-1")
+        expect(workflow.get_by_label("Earlier runs" if lang == "en" else "Предыдущие запуски")).to_have_attribute("data-value", "workflow-2")
+        choose_option(page, workflow.get_by_label("Earlier runs" if lang == "en" else "Предыдущие запуски"), "workflow-1")
         expect(workflow).to_contain_text("A newer run replaced this one" if lang == "en" else "Этот запуск заменён новым")
         assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0
         assert unhandled.report() == 0

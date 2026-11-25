@@ -47,14 +47,14 @@ def journal(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".journal-entry")).to_have_count(30)
     fits(page, f"{lang} {width} rules pinned")
 
-    page.locator(".journal-as-rule input").check()
+    page.locator(".journal-as-rule [role=switch]").click()
     expect(page.locator(".journal-note textarea")).to_have_attribute("maxlength", "600")
     page.locator(".journal-note textarea").fill(RULE[lang])
     page.get_by_role("button", name=words["add"]).click()
     expect(pinned.locator(".journal-rule")).to_have_count(2)
     expect(pinned.locator(".journal-rule").nth(1)).to_contain_text(RULE[lang])
     assert focus.ruled == [RULE[lang]] and focus.notes == [], (focus.ruled, focus.notes)
-    expect(page.locator(".journal-as-rule input")).not_to_be_checked()
+    expect(page.locator(".journal-as-rule [role=switch]")).not_to_be_checked()
     fits(page, f"{lang} {width} rule added")
 
     pinned.locator(".journal-rule").first.get_by_role("button", name=words["lift"]).click()

@@ -71,7 +71,7 @@ def panel(page: Page, lang: str) -> None:
     # Every day at a time: a five-field cron line, never the local clock sent as if it were UTC.
     page.locator(".panel .wakeup-section-head button", has_text=words["add"]).click()
     sheet.locator("#wakeup-note").fill(words["note"] + " 2")
-    sheet.locator(".chip.select", has_text=words["daily"]).click()
+    sheet.get_by_role("radio", name=words["daily"]).click()
     sheet.locator("#wakeup-daily").fill("09:30")
     sheet.locator(".sheet-foot .btn.primary").click()
     expect(sheet).to_have_count(0)
@@ -109,9 +109,10 @@ def panel(page: Page, lang: str) -> None:
     page.locator(".panel .wakeup-section-head button", has_text=words["watch"]).click()
     sheet = page.locator(".sheet.watch-sheet")
     expect(sheet).to_be_visible()
-    sheet.locator("#watch-kind").select_option(label=words["kind"])
+    sheet.locator("#watch-kind").click()
+    page.locator(".dropdown-list .dropdown-item", has_text=words["kind"]).click()
     sheet.locator("#watch-conclusion").fill("failure")
-    sheet.locator(".chip.select", has_text=words["notify"]).click()
+    sheet.get_by_role("radio", name=words["notify"]).click()
     sheet.locator("#watch-title").fill("CI red")
     sheet.locator("#watch-cooldown").fill("30")
     sheet.locator(".sheet-foot .btn.primary", has_text=words["add_watch"]).click()
@@ -147,7 +148,9 @@ def phone(page: Page, lang: str) -> None:
     page.locator(".wakeup-section-head button", has_text=words["watch"]).click()
     sheet = page.locator(".sheet.watch-sheet")
     expect(sheet).to_be_visible()
-    for field in ("#watch-kind", "#watch-staff", "#watch-cooldown", "#watch-deadline", "#watch-note"):
+    # The kind, the member and the deadline are Select buttons, which Safari does not zoom into; the
+    # typed fields are what must stay at 16 px.
+    for field in ("#watch-cooldown", "#watch-note"):
         size = page.evaluate(f"parseFloat(getComputedStyle(document.querySelector('{field}')).fontSize)")
         assert size >= 16, f"{lang} phone: {field} is {size}px, which makes Safari zoom"
     fits(page, f"{lang} phone watch sheet")

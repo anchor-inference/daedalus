@@ -12,7 +12,7 @@ export function EditingNow({ editing, heading }: { editing: Editing[]; heading?:
   const shared = new Set(editing.flatMap((e) => e.files.map((f) => f.path)).filter((p, i, all) => all.indexOf(p) !== i));
   return (
     <>
-      {heading ?? <div className="section-title">{t("team.editing.section")}</div>}
+      {heading ?? <div className="orch-label"><span>{t("team.editing.section")}</span></div>}
       <div className="team-editing">
         {editing.map((e) => (
           <div key={e.holder} className="team-editing-row">

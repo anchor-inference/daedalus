@@ -19,8 +19,10 @@
 @import "./parts/signin.css";
 @import "./parts/start.css";
 @import "./parts/team.css";
+@import "./parts/projectboard.css";
 @import "./parts/focus.css";
 @import "./parts/staff.css";
+@import "./parts/orchestration.css";
 @import "./parts/browser.css";
 @import "./parts/companion.css";
 @import "./parts/pet.css";

@@ -167,9 +167,11 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
     page.goto(f"{BASE}/agents?token=t&lang={language}")
     section = open_authority()
     section.get_by_text(words["add"]).click()
-    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").select_option(bundle_id)
+    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").click()
+    page.locator(f".dropdown-list [role=option][data-value='{bundle_id}']").click()
     if bundle_id == "assignment":
-        section.get_by_label(re.compile("^Task" if language == "en" else "^Задача")).select_option("first-task")
+        section.get_by_label(re.compile("^Task" if language == "en" else "^Задача")).click()
+        page.locator(".dropdown-list [role=option][data-value='first-task']").click()
     else:
         expect(section.get_by_text(words["wake"], exact=False)).to_be_visible()
     section.get_by_role("button", name=words["approve"]).click()

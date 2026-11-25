@@ -13,6 +13,7 @@ import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { SidebarFoot, SidebarHead, SidebarPinned } from "../sidebar";
+import { IconButton } from "../ui/primitives";
 import { relTime } from "../format";
 import { ORCHESTRATION, navigate, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
 import { go } from "../shell";
@@ -73,89 +74,96 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
   // A project is entered from orchestration mode's list, and its way back leads there.
   const allProjects = ORCHESTRATION;
 
+  const orchestratorLive = orchestratorRow?.status === "running";
   return (
     <nav className="sidebar project-sidebar" aria-label={t("focus.label", { name: project?.name ?? "" })}>
       <SidebarHead />
       <SidebarPinned />
       {p.pinned && <div className="sidebar-pinned" aria-label={t("focus.pinned")}>{p.pinned}</div>}
       <div className="sidebar-body focus-body">
-        <a className="focus-back" href={allProjects} onClick={(e) => go(e, allProjects)}>
-          <Icon name="back" size={16} />
-          <span>{t("focus.all")}</span>
-        </a>
-        <div className="focus-project">
-          <div className="focus-project-line">
-            <span className="focus-project-name truncate">{project?.name ?? "…"}</span>
-            {project && <EnvPill env={project.settings.default_env ?? project.folders[0]?.env ?? "container"} tiny />}
-            {project && <RevealButton target={{ project_id: project.id }} className="focus-project-reveal" />}
-          </div>
-          {project && (
-            <div className="focus-project-meta truncate">
-              {[plural("focus.count.folders", project.folders.length), team ? plural("team.count.staff", team.counts.staff) : "", orchestrator?.enabled ? t("focus.autonomy", { level: t(`focus.autonomy.${orchestrator.autonomy}`) }) : ""].filter(Boolean).join(" · ")}
-            </div>
-          )}
-          {spent && <span className="chip tiny focus-spend" title={usage ? totalsLine(usage) : undefined}>{spent}</span>}
-          {remaining && <span className="chip tiny focus-spend" title={t("budget.summaryHint")}>{remaining}</span>}
-        </div>
-
-        <FocusRow
-          icon="conductor"
-          label={t("focus.nav.orchestrator")}
-          href={projectHome(p.projectId)}
-          current={p.view.kind === "orchestrator"}
-          meta={!orchestrator?.enabled ? t("focus.orchestrator.off") : orchestratorRow?.status === "running" ? t("focus.orchestrator.now") : orchestratorRow?.last_message_at ? relTime(orchestratorRow.last_message_at) : ""}
-          className={`orchestrator ${orchestratorRow?.status === "running" ? "live" : ""} ${!orchestrator?.enabled ? "off" : ""}`}
-        />
-
-        <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={countKnown ? String(decisions) : "?"} metaTitle={countKnown ? undefined : t("focus.attention.countUnknown")} />
-        <FocusRow icon="journal" label={t("focus.nav.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
-
-        <details className="focus-advanced" open={toolsOpen} onToggle={(e) => { const next = e.currentTarget.open; setToolsOpen(next); writeLayout(TOOLS_KEY, next ? "open" : "closed"); }}>
-          <summary>{t("focus.nav.more")}</summary>
-
-        <div className="focus-sec">
-          <a href={projectPagePath(p.projectId, "team")} onClick={(e) => go(e, projectPagePath(p.projectId, "team"))} className={here("team") ? "current" : ""}>
-            {t("focus.team")} <span className="n">{members.length}</span>
+        <div className="sb-list">
+          <a className="sb-row focus-back" href={allProjects} onClick={(e) => go(e, allProjects)}>
+            <span className="sb-tile"><Icon name="back" size={16} /></span>
+            <span className="sb-t">{t("focus.all")}</span>
           </a>
-          {team && <button className="iconbtn small quiet" onClick={() => setHiring(true)} title={t("team.hire")} aria-label={t("team.hire")}><Icon name="plus" size={16} /></button>}
-        </div>
-        {team && members.length === 0 && <div className="focus-none">{t("focus.nobody")}</div>}
-        {members.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} />)}
-
-        {oneOff.length > 0 && (
-          <>
-            <div className="focus-sec"><span>{t("focus.oneoff")} <span className="n">{oneOff.length}</span></span></div>
-            {oneOff.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} compact />)}
-          </>
-        )}
-
-        {terminals && terminals.terminals.length > 0 && (
-          <>
-            <div className="focus-sec">
-              <a href={projectPagePath(p.projectId, "terminals")} onClick={(e) => go(e, projectPagePath(p.projectId, "terminals"))} className={here("terminals") ? "current" : ""}>
-                {t("focus.terminals")} <span className="n">{terminals.terminals.length}</span>
-              </a>
+          {/* The project's name over a line of what it is: folders, team, autonomy, and what it cost
+              today. The spend was two chips; as words they take the line's own size and colour. */}
+          <div className="focus-project">
+            <div className="focus-project-line">
+              <span className="focus-project-name truncate">{project?.name ?? "…"}</span>
+              {project && <EnvPill env={project.settings.default_env ?? project.folders[0]?.env ?? "container"} tiny />}
+              {project && <RevealButton target={{ project_id: project.id }} className="focus-project-reveal" />}
             </div>
-            {terminals.terminals.slice(0, 6).map((term) => (
-              <FocusRow
-                key={term.id}
-                icon="terminal"
-                label={term.title || t("term.untitled")}
-                href={projectPagePath(p.projectId, "terminals", { t: term.id })}
-                current={here("terminals") && p.terminal === term.id}
-                meta={term.status === "running" ? "" : term.exit_code !== null ? t("focus.terminal.code", { code: term.exit_code }) : term.exit_signal ?? ""}
-                className={term.status === "running" ? "" : "ended"}
-              />
-            ))}
-          </>
-        )}
+            {project && (
+              <div className="focus-project-meta truncate">
+                {[plural("focus.count.folders", project.folders.length), team ? plural("team.count.staff", team.counts.staff) : "", orchestrator?.enabled ? t("focus.autonomy", { level: t(`focus.autonomy.${orchestrator.autonomy}`) }) : ""].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            {(spent || remaining) && <div className="focus-project-spend">
+              {spent && <span className="focus-spend" title={usage ? totalsLine(usage) : undefined}>{spent}</span>}
+              {remaining && <span className="focus-spend" title={t("budget.summaryHint")}>{remaining}</span>}
+            </div>}
+          </div>
 
-        <div className="focus-sec"><span>{t("focus.project")}</span></div>
-        <FocusRow icon="board" label={t("focus.page.board")} href={projectPagePath(p.projectId, "board")} current={here("board")} meta={board ? String(openTasks) : ""} />
-        <FocusRow icon="pen" label={t("focus.page.brief")} href={projectPagePath(p.projectId, "brief")} current={here("brief")} />
-        <FocusRow icon="clock" label={t("focus.page.wakeups")} href={projectPagePath(p.projectId, "wakeups")} current={here("wakeups")} meta={wakeups ? String(wakeups) : ""} />
-        <FocusRow icon="folder" label={t("focus.page.folders")} href={projectPagePath(p.projectId, "folders")} current={here("folders")} meta={project ? String(project.folders.length) : ""} />
-        </details>
+          <FocusRow
+            icon="conductor"
+            label={t("focus.nav.orchestrator")}
+            href={projectHome(p.projectId)}
+            current={p.view.kind === "orchestrator"}
+            meta={!orchestrator?.enabled ? t("focus.orchestrator.off") : orchestratorLive ? t("focus.orchestrator.now") : orchestratorRow?.last_message_at ? relTime(orchestratorRow.last_message_at) : ""}
+            tone={orchestratorLive ? "running" : ""}
+            className={`orchestrator ${orchestratorLive ? "live" : ""} ${!orchestrator?.enabled ? "off" : ""}`}
+          />
+          <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={countKnown ? String(decisions) : "?"} tone={countKnown && decisions > 0 ? "count" : ""} metaTitle={countKnown ? undefined : t("focus.attention.countUnknown")} />
+          <FocusRow icon="journal" label={t("focus.nav.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
+
+          <details className="focus-advanced" open={toolsOpen} onToggle={(e) => { const next = e.currentTarget.open; setToolsOpen(next); writeLayout(TOOLS_KEY, next ? "open" : "closed"); }}>
+            <summary className="sb-sec"><span className="sb-sec-link">{t("focus.nav.more")}<Icon name="chevron" size={12} /></span></summary>
+
+            <div className="sb-sec focus-sec">
+              <a className={`sb-sec-link ${here("team") ? "current" : ""}`} href={projectPagePath(p.projectId, "team")} onClick={(e) => go(e, projectPagePath(p.projectId, "team"))}>
+                {t("focus.team")} <span className="n">{members.length}</span>
+              </a>
+              {team && <IconButton icon="plus" size={28} className="sb-sec-add" label={t("team.hire")} onClick={() => setHiring(true)} />}
+            </div>
+            {team && members.length === 0 && <div className="focus-none">{t("focus.nobody")}</div>}
+            {members.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} />)}
+
+            {oneOff.length > 0 && (
+              <>
+                <div className="sb-sec focus-sec"><span>{t("focus.oneoff")} <span className="n">{oneOff.length}</span></span></div>
+                {oneOff.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} compact />)}
+              </>
+            )}
+
+            {terminals && terminals.terminals.length > 0 && (
+              <>
+                <div className="sb-sec focus-sec">
+                  <a className={`sb-sec-link ${here("terminals") ? "current" : ""}`} href={projectPagePath(p.projectId, "terminals")} onClick={(e) => go(e, projectPagePath(p.projectId, "terminals"))}>
+                    {t("focus.terminals")} <span className="n">{terminals.terminals.length}</span>
+                  </a>
+                </div>
+                {terminals.terminals.slice(0, 6).map((term) => (
+                  <FocusRow
+                    key={term.id}
+                    icon="terminal"
+                    label={term.title || t("term.untitled")}
+                    href={projectPagePath(p.projectId, "terminals", { t: term.id })}
+                    current={here("terminals") && p.terminal === term.id}
+                    meta={term.status === "running" ? "" : term.exit_code !== null ? t("focus.terminal.code", { code: term.exit_code }) : term.exit_signal ?? ""}
+                    className={term.status === "running" ? "" : "ended"}
+                  />
+                ))}
+              </>
+            )}
+
+            <div className="sb-sec focus-sec"><span>{t("focus.project")}</span></div>
+            <FocusRow icon="board" label={t("focus.page.board")} href={projectPagePath(p.projectId, "board")} current={here("board")} meta={board ? String(openTasks) : ""} />
+            <FocusRow icon="pen" label={t("focus.page.brief")} href={projectPagePath(p.projectId, "brief")} current={here("brief")} />
+            <FocusRow icon="clock" label={t("focus.page.wakeups")} href={projectPagePath(p.projectId, "wakeups")} current={here("wakeups")} meta={wakeups ? String(wakeups) : ""} />
+            <FocusRow icon="folder" label={t("focus.page.folders")} href={projectPagePath(p.projectId, "folders")} current={here("folders")} meta={project ? String(project.folders.length) : ""} />
+          </details>
+        </div>
       </div>
       <SidebarFoot />
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={() => invalidate(staffKey(p.projectId).split("?")[0])} toast={p.toast} />}
@@ -163,16 +171,18 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
   );
 }
 
-function FocusRow({ icon, label, href, current, meta, metaTitle, className = "" }: { icon: IconName; label: string; href: string; current: boolean; meta?: string; metaTitle?: string; className?: string }) {
+/** A row of the column, the Agents column's 32 px line: a glyph, the name, and at the right edge a
+ *  count or a word — in the live colour while the orchestrator works, in the attention colour for
+ *  decisions that wait. */
+function FocusRow({ icon, label, href, current, meta, metaTitle, tone = "", className = "" }: { icon: IconName; label: string; href: string; current: boolean; meta?: string; metaTitle?: string; tone?: "" | "running" | "count"; className?: string }) {
   return (
-    <a className={`focus-row ${current ? "current" : ""} ${className}`} href={href} onClick={(e) => go(e, href)} aria-current={current ? "page" : undefined}>
-      <Icon name={icon} size={16} />
-      <span className="focus-row-label truncate">{label}</span>
-      {meta && <span className="focus-row-meta" title={metaTitle} aria-label={metaTitle}>{meta}</span>}
+    <a className={`sb-row focus-row ${current ? "current" : ""} ${className}`} href={href} onClick={(e) => go(e, href)} aria-current={current ? "page" : undefined}>
+      <span className="sb-tile"><Icon name={icon} size={16} /></span>
+      <span className="sb-t focus-row-label">{label}</span>
+      {meta && <span className={`focus-row-meta ${tone === "running" ? "sb-word running" : tone === "count" ? "needs-badge" : "sb-time num"}`} title={metaTitle} aria-label={metaTitle}>{meta}</span>}
     </a>
   );
 }
-
 /** Where a member's row leads: into the session it works in, a command-line member's own view, or
  *  the team page for a Daedalus member with no session. */
 function openMember(projectId: string, member: Staff): void {
@@ -195,16 +205,15 @@ function StaffRow({ projectId, member, taskTitle, current, compact }: { projectI
   const tone = staffTone(member);
   const wait = firstWait(member);
   const line = wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : taskTitle ?? t(`focus.tone.${tone}`);
+  // One line: the face, the name, then what the member is on — a waiting launch's reason in the
+  // attention colour — and the dot for how it goes. The role and the whole line are the tooltip.
+  const title = [member.role ? `${member.name} · ${member.role}` : member.name, wait?.detail || member.live?.waiting_for || line].filter(Boolean).join("\n");
   return (
-    <button className={`focus-staff ${current ? "current" : ""} ${compact ? "compact" : ""}`} onClick={() => openMember(projectId, member)} aria-current={current ? "page" : undefined} title={wait?.detail || member.live?.waiting_for || undefined}>
+    <button className={`sb-row focus-staff ${current ? "current" : ""} ${compact ? "compact" : ""}`} onClick={() => openMember(projectId, member)} aria-current={current ? "page" : undefined} title={title}>
       <StaffAvatar name={member.name} color={member.color} size="small" />
-      <span className="focus-staff-main">
-        <span className="focus-staff-name truncate">
-          {member.name}
-          {member.role && !compact && <span className="focus-staff-role"> · {member.role}</span>}
-        </span>
-        {!compact && <span className={`focus-staff-line truncate ${wait ? "waits" : ""}`}>{line}</span>}
-      </span>
+      <span className="focus-staff-name">{member.name}</span>
+      {!compact && <span className={`focus-staff-line truncate ${wait ? "waits" : ""}`}>{line}</span>}
+      {compact && <span className="grow" />}
       {/* The same outlined chip that marks a host terminal: an amber word inside the name once read as
           part of the role, or as a warning that had leaked out of the status line. */}
       {member.env === "host" && <EnvPill env="host" tiny />}

@@ -15,7 +15,8 @@ import { ProjectSettingsSheet } from "../projects";
 import { folderName, reachIsProblem, reachKey } from "../folders";
 import { RevealButton } from "../reveal";
 import { navigate, ORCHESTRATION, pathFor, projectPagePath } from "../router";
-import { go, PageHeader } from "../shell";
+import { go, Page, PageHeader } from "../shell";
+import { Button, IconButton, Switch } from "../ui/primitives";
 import { invalidate, useQuery } from "../store";
 import { EnvPill } from "../envpill";
 import { TerminalView } from "../terminal/view";
@@ -39,7 +40,7 @@ export function BriefPage({ projectId, back, compact, toast }: { projectId: stri
   const body = (
     <div className={`brief ${compact ? "compact" : ""}`}>
       {!data && !error && <Skeleton rows={3} />}
-      {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+      {error && !data && <div className="empty"><div>{error}</div><Button variant="primary" onClick={refresh}>{t("common.retry")}</Button></div>}
       {data && sections.map((s) => <BriefCard key={s.section} projectId={projectId} project={project} section={s} toast={toast} />)}
     </div>
   );
@@ -47,7 +48,7 @@ export function BriefPage({ projectId, back, compact, toast }: { projectId: stri
   return (
     <>
       <PageHeader title={project ? `${t("focus.brief.title")} · ${project.name}` : t("focus.brief.title")} back={back ?? undefined} />
-      <div className="screen narrow">{body}</div>
+      <Page width="reading">{body}</Page>
     </>
   );
 }
@@ -80,10 +81,10 @@ function BriefCard({ projectId, project, section, toast }: { projectId: string; 
     <section className={`brief-card ${section.section}`} aria-label={name}>
       <div className="brief-head">
         <span className="brief-name">{name}</span>
-        {onlyYou && <span className="chip tiny attn">{t("focus.brief.onlyyou")}</span>}
-        {section.updated_by === "orchestrator" && <span className="chip tiny accent" title={absTime(section.updated_at)}>{t("focus.brief.byorch")}</span>}
+        {onlyYou && <span className="brief-mark attn">{t("focus.brief.onlyyou")}</span>}
+        {section.updated_by === "orchestrator" && <span className="brief-mark accent" title={absTime(section.updated_at)}>{t("focus.brief.byorch")}</span>}
         <span className="grow" />
-        {draft === null && <button className="btn small ghost" onClick={() => (goal ? setChanging(true) : setDraft(section.body))}>{t("common.edit")}</button>}
+        {draft === null && <Button size="sm" variant="quiet" onClick={() => (goal ? setChanging(true) : setDraft(section.body))}>{t("common.edit")}</Button>}
       </div>
       {changing && project && <Sheet title={t("goal.change.title")} onClose={() => setChanging(false)} size="sm">
         <GuidedGoal project={project} toast={toast} wide embedded change ready={null}
@@ -96,8 +97,8 @@ function BriefCard({ projectId, project, section, toast }: { projectId: string; 
         <>
           <textarea className="field brief-edit" value={draft} rows={Math.min(12, Math.max(3, draft.split("\n").length + 1))} maxLength={20000} autoFocus onChange={(e) => setDraft(e.target.value)} aria-label={name} />
           <div className="btnrow">
-            <button className="btn small primary" disabled={busy} onClick={() => void save()}>{t("common.save")}</button>
-            <button className="btn small ghost" disabled={busy} onClick={() => setDraft(null)}>{t("common.cancel")}</button>
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void save()}>{t("common.save")}</Button>
+            <Button size="sm" variant="quiet" disabled={busy} onClick={() => setDraft(null)}>{t("common.cancel")}</Button>
           </div>
         </>
       )}
@@ -177,28 +178,28 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
   return (
     <>
       <PageHeader title={project ? t("focus.journal.title", { name: project.name }) : t("focus.page.journal")} back={back ?? undefined} />
-      <div className="screen narrow journal">
+      <Page width="list" className="journal">
         {usage && (
           <div className="journal-usage" aria-label={t("pusage.title")}>
             <span className="num">{totalsLine(usage)}</span>
-            {orchestratorSpend && <span className="sub">{t("pusage.orchestrator", { line: orchestratorSpend })}</span>}
+            {orchestratorSpend && <span>{t("pusage.orchestrator", { line: orchestratorSpend })}</span>}
           </div>
         )}
         {rules.length > 0 && (
           <section className="journal-rules" aria-label={t("focus.rules.title")}>
-            <div className="journal-rules-head">
+            <div className="orch-label journal-rules-head">
               <span className="journal-rules-title">{t("focus.rules.title")}</span>
-              <span className="sub">{t("focus.rules.hint")}</span>
+              <span className="orch-label-n">{t("focus.rules.hint")}</span>
             </div>
             <ol className="journal-list">
               {rules.map((rule) => (
                 <li key={rule.id} className="journal-rule">
                   <div className="journal-meta">
-                    <span className={`chip tiny author ${rule.author}`}>{t(`focus.author.${rule.author}`)}</span>
+                    <span className={`journal-author ${rule.author}`}>{t(`focus.author.${rule.author}`)}</span>
                     <span className="journal-kind num">#{rule.id}</span>
                     <span className="grow" />
                     <time className="journal-time num" dateTime={rule.at} title={absTime(rule.at)}>{relTime(rule.at)}</time>
-                    <button className="btn small ghost" disabled={lifting === rule.id} onClick={() => void lift(rule)}>{t("focus.rules.lift")}</button>
+                    <Button size="sm" variant="quiet" disabled={lifting === rule.id} onClick={() => void lift(rule)}>{t("focus.rules.lift")}</Button>
                   </div>
                   <div className="journal-text">{rule.text}</div>
                 </li>
@@ -206,24 +207,30 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
             </ol>
           </section>
         )}
+        {/* The note box is the composer's card: the words, then a row with the rule switch and the
+            button that adds it. */}
         <form className="journal-note" onSubmit={(e) => { e.preventDefault(); void add(); }}>
-          <textarea className="field" rows={2} value={note} maxLength={asRule ? RULE_MAX : 4000} placeholder={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} aria-label={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} onChange={(e) => setNote(e.target.value)} />
-          <button className="btn small primary" type="submit" disabled={busy || !note.trim()}>{t(asRule ? "focus.rules.add" : "focus.journal.add")}</button>
-          <label className="toggle-row journal-as-rule">
-            <input type="checkbox" checked={asRule} onChange={(e) => setAsRule(e.target.checked)} />
-            <span>{t("focus.rules.as")}</span>
-          </label>
+          <textarea rows={2} value={note} maxLength={asRule ? RULE_MAX : 4000} placeholder={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} aria-label={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} onChange={(e) => setNote(e.target.value)} />
+          <div className="journal-note-row">
+            <label className="journal-as-rule">
+              <Switch checked={asRule} onChange={setAsRule} label={t("focus.rules.as")} />
+              <span>{t("focus.rules.as")}</span>
+            </label>
+            <span className="grow" />
+            <Button type="submit" size="sm" variant="primary" disabled={busy || !note.trim()}>{t(asRule ? "focus.rules.add" : "focus.journal.add")}</Button>
+          </div>
         </form>
         {!data && !error && <Skeleton rows={4} />}
-        {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><div>{error}</div><Button variant="primary" onClick={refresh}>{t("common.retry")}</Button></div>}
         {data && entries.length === 0 && <div className="empty"><b>{t("focus.journal.empty")}</b></div>}
-        <ol className="journal-list">
+        {entries.length > 0 && <div className="orch-label"><span>{t("focus.journal.history")}</span></div>}
+        {entries.length > 0 && <ol className="journal-list">
           {entries.map((entry) => (
             <li key={entry.id} className={`journal-entry ${entry.author}`}>
               <div className="journal-meta">
-                <span className={`chip tiny author ${entry.author}`}>{t(`focus.author.${entry.author}`)}</span>
+                <span className={`journal-author ${entry.author}`}>{t(`focus.author.${entry.author}`)}</span>
                 <span className="journal-kind">{JOURNAL_KINDS.includes(entry.kind) ? t(`focus.kind.${entry.kind}`) : entry.kind}</span>
-                {entry.lifted && <span className="chip tiny">{t("focus.rules.liftedChip")}</span>}
+                {entry.lifted && <span className="journal-lifted">{t("focus.rules.liftedChip")}</span>}
                 <span className="grow" />
                 <time className="journal-time num" dateTime={entry.at} title={absTime(entry.at)}>{relTime(entry.at)}</time>
               </div>
@@ -231,11 +238,11 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
               <JournalRefs projectId={projectId} refs={entry.refs} names={names} titles={titles} />
             </li>
           ))}
-        </ol>
+        </ol>}
         {next !== null && (
-          <button className="btn ghost load-more" disabled={loadingMore} onClick={() => void more()}>{t(loadingMore ? "common.loading" : "focus.journal.older")}</button>
+          <Button variant="quiet" className="load-more" disabled={loadingMore} onClick={() => void more()}>{t(loadingMore ? "common.loading" : "focus.journal.older")}</Button>
         )}
-      </div>
+      </Page>
     </>
   );
 }
@@ -249,7 +256,7 @@ function JournalRefs({ projectId, refs, names, titles }: { projectId: string; re
   return (
     <div className="journal-refs">
       {links.map((link) => (
-        <a key={link.key} className="chip tiny link" href={link.href} onClick={(e) => { e.preventDefault(); navigate(link.href); }}>{link.label}</a>
+        <a key={link.key} className="journal-ref" href={link.href} onClick={(e) => { e.preventDefault(); navigate(link.href); }}>{link.label}</a>
       ))}
     </div>
   );
@@ -267,23 +274,25 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
   if (!project) return <Skeleton rows={2} />;
   const body = (
     <div className="focus-folders">
-      {project.folders.map((folder, i) => (
-        <div key={folder.id} className="focus-folder">
-          <Icon name="folder" size={16} />
-          <div className="focus-folder-main">
-            <div className="focus-folder-name truncate">
-              {folderName(folder)}
-              {i === 0 && <span className="chip tiny">{t("folder.primary")}</span>}
-              {folder.readonly && <span className="chip tiny">{t("project.readonly.short")}</span>}
+      <div className="focus-folder-list">
+        {project.folders.map((folder, i) => (
+          <div key={folder.id} className="focus-folder">
+            <Icon name="folder" size={16} />
+            <div className="focus-folder-main">
+              <div className="focus-folder-name truncate">
+                {folderName(folder)}
+                {i === 0 && <span className="focus-folder-tag">{t("folder.primary")}</span>}
+                {folder.readonly && <span className="focus-folder-tag">{t("project.readonly.short")}</span>}
+              </div>
+              <FolderPath path={folder.path} />
+              {reachIsProblem(reachKey(folder)) && <div className="focus-folder-warn"><Icon name="alert" size={12} /><span>{t(reachKey(folder))}</span></div>}
             </div>
-            <FolderPath path={folder.path} />
-            {reachIsProblem(reachKey(folder)) && <div className="focus-folder-warn"><Icon name="alert" size={12} /><span>{t(reachKey(folder))}</span></div>}
+            <EnvPill env={folder.env} />
+            {folder.reachable !== false && <RevealButton target={{ project_id: projectId, folder_id: folder.id }} />}
           </div>
-          <EnvPill env={folder.env} />
-          {folder.reachable !== false && <RevealButton target={{ project_id: projectId, folder_id: folder.id }} />}
-        </div>
-      ))}
-      <button className="btn small" onClick={() => setManaging(true)}><Icon name="settings" size={14} /> {t("focus.folders.manage")}</button>
+        ))}
+      </div>
+      <Button size="sm" icon="settings" onClick={() => setManaging(true)}>{t("focus.folders.manage")}</Button>
       {managing && <ProjectSettingsSheet project={project} onClose={() => setManaging(false)} onRemoved={() => { setManaging(false); navigate(ORCHESTRATION); }} toast={toast} />}
     </div>
   );
@@ -291,7 +300,7 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
   return (
     <>
       <PageHeader title={`${t("focus.folders.title")} · ${project.name}`} back={back ?? undefined} />
-      <div className="screen narrow">{body}</div>
+      <Page width="list">{body}</Page>
     </>
   );
 }
@@ -314,9 +323,7 @@ export function TerminalsPage({ projectId, selected, back, toast }: { projectId:
           // The rows stay here, inside the project's column; the Terminals screen's own view (a grid,
           // End, the owner) is one step away rather than the place a row leads, which would leave focus mode.
           current ? (
-            <a className="iconbtn" href={pathFor("terminals", current.id)} onClick={(e) => go(e, pathFor("terminals", current.id))} aria-label={t("term.maximize")} title={t("term.maximize")}>
-              <Icon name="expand" />
-            </a>
+            <IconButton icon="expand" label={t("term.maximize")} href={pathFor("terminals", current.id)} />
           ) : undefined
         }
       />
@@ -325,11 +332,11 @@ export function TerminalsPage({ projectId, selected, back, toast }: { projectId:
           {data && terminals.length === 0 && <div className="empty calm">{t("focus.terminals.empty")}</div>}
           {terminals.map((term) => (
             <div key={term.id} className={`focus-term-row ${term.id === selected ? "current" : ""}`} data-terminal={term.id}>
-              <button className={`focus-row ${term.id === selected ? "current" : ""} ${term.status === "running" ? "" : "ended"}`} onClick={() => navigate(projectPagePath(projectId, "terminals", { t: term.id }), { replace: !!selected })}>
-                <Icon name="terminal" size={16} />
-                <span className="focus-row-label truncate">{term.title || t("term.untitled")}</span>
+              <button className={`sb-row focus-row ${term.id === selected ? "current" : ""} ${term.status === "running" ? "" : "ended"}`} onClick={() => navigate(projectPagePath(projectId, "terminals", { t: term.id }), { replace: !!selected })}>
+                <span className="sb-tile"><Icon name="terminal" size={16} /></span>
+                <span className="sb-t focus-row-label">{term.title || t("term.untitled")}</span>
                 <EnvPill env={term.env} />
-                {term.status !== "running" && term.exit_code !== null && <span className="focus-row-meta">{t("focus.terminal.code", { code: term.exit_code })}</span>}
+                {term.status !== "running" && term.exit_code !== null && <span className="focus-row-meta sb-time num">{t("focus.terminal.code", { code: term.exit_code })}</span>}
               </button>
               {/* A removed terminal that was on screen leaves the page on the list, not on a view of nothing. */}
               <TerminalRowMenu row={term} toast={toast} onRemoved={term.id === selected ? () => navigate(projectPagePath(projectId, "terminals"), { replace: true }) : undefined} />
@@ -358,15 +365,15 @@ export function EnableOrchestrator({ project, back }: { project: Project; back?:
   return (
     <>
     {head}
-    <div className="screen narrow focus-enable">
+    <Page width="reading" className="focus-enable">
       <div className="empty">
-        <Icon name="conductor" size={28} />
+        <Icon name="conductor" size={24} />
         <b>{t("focus.enable.title", { name: project.name })}</b>
         <div>{t("focus.enable.body")}</div>
-        <button className="btn primary" onClick={() => setOpen(true)}>{t("focus.enable.action")}</button>
+        <Button variant="primary" onClick={() => setOpen(true)}>{t("focus.enable.action")}</Button>
       </div>
       {open && <EnableSheet project={project} onClose={() => setOpen(false)} />}
-    </div>
+    </Page>
     </>
   );
 }
@@ -479,9 +486,9 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
       <input id="orch-cap" className="field" type="number" min={1} max={32} value={cap} onChange={(e) => setCap(Math.max(1, Math.min(32, Number(e.target.value) || 1)))} />
       <div className="sub form-hint">{t("focus.enable.cap.hint")} {plural("team.count.staff", cap)}</div>
       </details>
-      <div className="btnrow">
-        <button className="btn primary" disabled={busy || currentCheck.state !== "ready"} onClick={() => void go()}>{t("focus.enable.go")}</button>
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
+      <div className="sheet-foot">
+        <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
+        <Button variant="primary" disabled={busy || currentCheck.state !== "ready"} onClick={() => void go()}>{t("focus.enable.go")}</Button>
       </div>
     </Sheet>
   );
