@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, announceProviderKeys, type ContextWindowSource, type ContextWindowSources, type Preset, type PriceView, type ProviderConf, type Settings } from "../api";
 import { Icon } from "../icons";
-import { lang, plural, t } from "../i18n";
+import { plural, t } from "../i18n";
 import { confirmAsync, numInput } from "../ui";
 import { Select, SelectionList, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
@@ -23,6 +23,7 @@ import { ProviderMark, providerName } from "../ui/provider-mark";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { accountName, type SubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
 import { settingTarget } from "../settinglink";
+import { useProviderTest } from "../providertest";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -77,11 +78,6 @@ export function providerStatus(conf: ProviderConf | undefined, s: Pick<Settings,
 function windowSize(n: number): string {
   if (n >= 1_000_000) return `${Math.round(n / 100_000) / 10}M`.replace(".0M", "M");
   return `${Math.round(n / 1000)}K`;
-}
-
-/** Seconds with the reader's decimal mark: "0,18 s" in Russian. */
-function seconds(ms: number): string {
-  return t("prov.test.seconds", { s: new Intl.NumberFormat(lang(), { maximumFractionDigits: 2 }).format(ms / 1000) });
 }
 
 type Take = (next: Settings) => void;
@@ -438,19 +434,6 @@ function ProviderConnection({ id, p, kinds, viaProxy, onPatch }: { id: string; p
   );
 }
 
-type TestResult = { ok: boolean; latency_ms: number | null; status: number | null; detail: string; models?: number };
-type TestState = { state: "running" } | ({ state: "done" } & TestResult) | { state: "error"; detail: string };
-
-/** The line beside Test connection: what the endpoint answered, how fast, or why it did not. */
-function testNote(test: TestState | null): { text: string; tone: "live" | "attention" | "idle" } | null {
-  if (!test) return null;
-  if (test.state === "running") return { text: t("prov.test.running"), tone: "idle" };
-  if (test.state === "error") return { text: test.detail, tone: "attention" };
-  if (!test.ok) return { text: test.detail || t("prov.test.failed"), tone: "attention" };
-  const said = test.latency_ms == null ? t("prov.test.ok.plain") : t("prov.test.ok", { time: seconds(test.latency_ms) });
-  return { text: test.models ? `${said} · ${plural("prov.test.models", test.models)}` : said, tone: "live" };
-}
-
 type ProviderProps = {
   id: string;
   conf?: ProviderConf;
@@ -480,19 +463,7 @@ function ProviderRow({ id, conf, s, presets, kinds, accounts, open, onToggle, ta
   const kind = conf ? providerKind(conf, s, id) : null;
   // Opened at its key when a link to the key brought the operator here: the field is behind Connection.
   const [editing, setEditing] = useState(() => settingTarget() === `providers.${id}.api_key`);
-  const [test, setTest] = useState<TestState | null>(null);
-  const current = useRef(0);
-  const runTest = async () => {
-    const turn = ++current.current;
-    setTest({ state: "running" });
-    try {
-      const answer = await api.post<TestResult>(`/api/providers/${encodeURIComponent(id)}/test`, {});
-      if (turn === current.current) setTest({ state: "done", ...answer });
-    } catch (e) {
-      if (turn === current.current) setTest({ state: "error", detail: (e as Error).message });
-    }
-  };
-  const note = testNote(test);
+  const { test, run: runTest, note } = useProviderTest(id);
   const providerIds = Object.keys(s.providers ?? {});
   return (
     <div className={`prov ${open ? "open" : ""}`} data-provider={id} data-setting={`providers.${id}.api_key`}>

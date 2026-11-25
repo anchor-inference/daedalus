@@ -1017,6 +1017,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "add.sub": { en: "Your agent has no model yet — one is all it takes to start.", ru: "У агента ещё нет модели. Одной достаточно, чтобы начать." },
   "add.step1": { en: "Where it runs", ru: "Где она работает" },
   "add.step1.sub": { en: "An endpoint this installation can reach.", ru: "Адрес, до которого эта установка достаёт." },
+  "add.tab.providers": { en: "Providers", ru: "Провайдеры" },
   "add.step2": { en: "Which model", ru: "Какая модель" },
   "add.step2.sub": { en: "Listed by the endpoint itself.", ru: "Список приходит от самого адреса." },
   "add.step3": { en: "How it runs", ru: "Как она работает" },

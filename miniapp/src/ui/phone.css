@@ -544,33 +544,6 @@
   .usage .card .usage-row .what .l1 .name { font-size: var(--fs-15); }
   .usage .card .usage-row .cost { font-size: var(--fs-14); color: var(--fg-3); }
 
-  /* ── Add model: the endpoints as rows in groups, the steps as plain sections ────────────────── */
-  .addmodel .card.step { padding: 0; border: 0; background: none; box-shadow: none; }
-  .addmodel .step-head { padding: var(--space-3) 4px var(--space-2); }
-  .addmodel .step-head b { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
-  .ph-picks .ph-gl { padding-left: 4px; padding-right: 4px; }
-  .ph-picks .ph-gl:first-child { padding-top: var(--space-2); }
-  .ph-picks .pickgrid { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--drop-xs); }
-  .ph-picks .pickgrid > .pick.ph-pickrow { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--space-3); width: 100%; min-height: var(--set-row-h); margin: 0; padding: 6px 12px 6px 14px; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-  .ph-picks .pickgrid > .pick.ph-pickrow:not(:first-child) { border-top: 1px solid var(--line); }
-  .ph-picks .pickgrid > .pick.ph-pickrow:active { background: var(--surface-2); }
-  .ph-picks .pickgrid > .ph-pickrow:first-child { border-top-left-radius: calc(var(--radius-xl) - 1px); border-top-right-radius: calc(var(--radius-xl) - 1px); }
-  .ph-picks .pickgrid > .ph-pickrow:last-child { border-bottom-left-radius: calc(var(--radius-xl) - 1px); border-bottom-right-radius: calc(var(--radius-xl) - 1px); }
-  .ph-picks .pickgrid > .pick.ph-pickrow.on { box-shadow: inset 0 0 0 1.5px var(--fg); }
-  .ph-pickrow.blocked { opacity: .55; }
-  .ph-pickrow > .ic { flex: none; color: var(--fg-3); }
-  .ph-pickrow-ico { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); }
-  .ph-pickrow .provider-mark { width: 32px; height: 32px; border-radius: var(--radius-sm); }
-  .ph-pickrow .provider-mark svg { width: 20px; height: 20px; }
-  .ph-pickrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .ph-pickrow-main b { display: flex; align-items: center; gap: 6px; font-size: var(--fs-15); font-weight: 400; }
-  .ph-pickrow-sub { font-size: var(--fs-13); line-height: 1.35; color: var(--fg-3); overflow-wrap: anywhere; }
-  .ph-pickrow .pill { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); }
-  .ph-new { height: 20px; padding: 0 6px; font-size: var(--fs-12); }
-  .ph-advanced { margin: var(--space-3) 4px 0; font-size: var(--fs-13); color: var(--fg-3); }
-  .ph-advanced summary { min-height: var(--tap); display: flex; align-items: center; cursor: pointer; }
-  .ph-advanced .mono { display: block; overflow-wrap: anywhere; }
-
   /* ── the creation pill: floating over a list, in neutral ink on a raised surface ──────────── */
   .ph-newchat { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; height: var(--tap); display: inline-flex; align-items: center; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-1); box-shadow: var(--shadow-lg); color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast); }
   .ph-newchat:active { background: var(--surface-3); }
