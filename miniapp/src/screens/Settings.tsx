@@ -137,26 +137,33 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
   const held = spend?.total.reserved_usd ?? 0;
   const engaged = spent + held;
   const cap = s.limits.usd_total;
+  async function reset() {
+    if (!(await confirmDialog({ title: t("settings.limits.reset.title"), body: t("settings.limits.reset.body"), action: t("settings.limits.reset"), danger: true }))) return;
+    await api.post("/api/limits/reset-total");
+    load();
+  }
   return (
     <>
-      {spendState === "failed" && <div className="result-warning" role="status">{t("settings.limits.balance.failed")} <button type="button" className="linkbtn" onClick={load}>{t("common.retry")}</button></div>}
+      {spendState === "failed" && <SetBlock><div className="result-warning" role="status">{t("settings.limits.balance.failed")} <Button size="sm" variant="quiet" onClick={load}>{t("common.retry")}</Button></div></SetBlock>}
       {/* Only with a cap: "of $0, no cap" has no bar to draw and no share to read. */}
       {cap > 0 && spend && (
-        <div className="spend-meter" data-level={engaged >= cap ? "bad" : engaged >= cap * 0.8 ? "warn" : "ok"}>
-          <div className="spend-meter-line">
-            <b>{held > 0 ? t("settings.limits.meter.held", { spent: usd(spent), held: usd(held), cap: usd(cap) })
-              : t("settings.limits.meter", { spent: usd(spent), cap: usd(cap) })}</b>
-            <span className="sub">{t("settings.limits.since", { when: since })}</span>
+        <SetBlock>
+          <div className="spend-meter" data-level={engaged >= cap ? "bad" : engaged >= cap * 0.8 ? "warn" : "ok"}>
+            <div className="spend-meter-line">
+              <b>{held > 0 ? t("settings.limits.meter.held", { spent: usd(spent), held: usd(held), cap: usd(cap) })
+                : t("settings.limits.meter", { spent: usd(spent), cap: usd(cap) })}</b>
+              <span className="sub">{t("settings.limits.since", { when: since })}</span>
+            </div>
+            <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (engaged / cap) * 100)}%` }} /></span>
           </div>
-          <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (engaged / cap) * 100)}%` }} /></span>
-        </div>
+        </SetBlock>
       )}
-      {spend && (held > 0 || spend.total.unmetered > 0) && <details className="sheet-section"><summary>{t("settings.limits.balance.details")}</summary>
+      {spend && (held > 0 || spend.total.unmetered > 0) && <SetBlock><details className="sheet-section"><summary>{t("settings.limits.balance.details")}</summary>
         {held > 0 && <p className="sub">{t("settings.limits.balance.held", { amount: usd(held), n: spend.total.reserved_count })}</p>}
         {spend.total.uncertain_usd > 0 && <p className="sub">{t("settings.limits.balance.uncertain", { amount: usd(spend.total.uncertain_usd), n: spend.total.uncertain_count })}</p>}
         {spend.total.unmetered > 0 && <p className="sub">{t("settings.limits.balance.unpriced", { n: spend.total.unmetered })}</p>}
         {held > 0 && <p className="sub">{t("settings.limits.balance.reset")}</p>}
-      </details>}
+      </details></SetBlock>}
       <Row data-setting="limits.usd_total" title={t("settings.limits.total")} htmlFor="limits-total" desc={spend ? t("settings.limits.total.sub", { sum: usd(spent) }) : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack>
         <NumInput id="limits-total" label={t("settings.limits.total")} value={cap} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total: v } })} />
       </Row>
@@ -171,11 +178,10 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
       {/* Said, not left blank: an empty space where the providers go read as a list that failed to load. */}
       {providers.length === 0 && <Row title={t("settings.limits.perprovider")} desc={t("settings.limits.noproviders")} />}
       <Row title={t("settings.limits.counting")} data-setting="limits.total_since" desc={t("settings.limits.since", { when: since })}>
-        <button className="btn small" onClick={async () => { await api.post("/api/limits/reset-total"); load(); }}>{t("settings.limits.reset")}</button>
+        <Button size="sm" onClick={() => void reset()}>{t("settings.limits.reset")}</Button>
       </Row>
     </>
-  );
-}
+  );}
 
 function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; reload: () => void }) {
   const search = s.tools.web.search;
@@ -750,7 +756,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             {/* Which models subagents may run on: it sat under Limits, but it is a choice of model and belongs with the others. */}
-            <div className="card">
+            <SetGroup title={t("settings.tasks.helpers")}>
               <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
                 <SubagentModelsPicker
                   value={s.subagents?.models ?? { mode: "all", presets: [] }}
@@ -767,11 +773,9 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
               {/* Beside the models it limits: how long a quick agent holds its leader waiting for the operator in the browser. */}
               <NumRow id="quick-operator-wait" setting="subagents.operator_wait_minutes" title={t("qagent.wait.setting")} desc={t("qagent.wait.setting.sub")} unit={t("settings.unit.minutes")} value={s.subagents?.operator_wait_minutes ?? 10} min={1} max={60} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, operator_wait_minutes: v } })} {...shipped(s.subagents?.operator_wait_minutes ?? 10, 10, () => save({ subagents: { ...s.subagents!, operator_wait_minutes: 10 } }))} />
-            </div>
+            </SetGroup>
             {Object.keys(s.presets ?? {}).length > 0 && (
-              <div className="card">
-                <div className="section-title">{t("settings.orchestrator.title")}</div>
-                <div className="sub">{t("settings.orchestrator.sub")}</div>
+              <SetGroup title={t("settings.orchestrator.title")} help={t("settings.orchestrator.sub")}>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack data-setting="orchestrator.preset">
                   <ModelPicker
                     id="orchestrator-preset"
@@ -782,12 +786,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     tag={(id) => (id === s.orchestrator?.strongest ? t("settings.orchestrator.strongest") : undefined)}
                   />
                 </Row>
-              </div>
+              </SetGroup>
             )}
             {Object.keys(s.presets ?? {}).length > 0 && (
-              <div className="card" data-card="main-orchestrator">
-                <div className="section-title">{t("settings.main.title")}</div>
-                <div className="sub">{t("settings.main.sub")}</div>
+              <SetGroup title={t("settings.main.title")} help={t("settings.main.sub")} data-card="main-orchestrator">
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack data-setting="dispatcher.preset">
                   <ModelPicker
                     id="main-preset"
@@ -798,13 +800,11 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     tag={(id) => (id === s.dispatcher?.middle ? t("settings.main.middle") : undefined)}
                   />
                 </Row>
-              </div>
+              </SetGroup>
             )}
             {/* Here rather than under Tools: it is a choice of model, and this is where the operator
                 comes to choose one. */}
-            <div className="card vision-card">
-              <div className="section-title">{t("settings.vision.title")}</div>
-              <div className="sub">{t("settings.vision.sub")}</div>
+            <SetGroup title={t("settings.vision.title")} help={t("settings.vision.sub")}>
               <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
                 {/* Only the models that see images are offered; the one in use stays listed even if
                     it does not, so the row names it rather than calling it missing. */}
@@ -818,15 +818,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 />
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
-            </div>
+            </SetGroup>
             {/* The same setting as under Approvals, here too: the operator came to the models looking
                 for which model reviews a push, and it was only on a page about permissions. */}
-            <div className="card" data-card="action-review">
-              <div className="section-title">{t("settings.review.title")}</div>
-              <div className="sub">
-                {t("settings.review.sub")}{" "}
-                <a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a>
-              </div>
+            <SetGroup
+              title={t("settings.review.title")}
+              help={<>{t("settings.review.sub")}{" "}<a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a></>}
+            >
               <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
                 <ModelPicker
                   id="models-review-preset"
@@ -837,14 +835,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   defaultOption={{ label: t("rules.model.auto") }}
                 />
               </Row>
-            </div>
+            </SetGroup>
             {/* Beside the auxiliary models it governs: the summary model (Context) and the vision model above. */}
-            <div className="card" data-card="auxiliary-fallback">
-              <div className="section-title">{t("settings.auxiliary.title")}</div>
+            <SetGroup title={t("settings.auxiliary.title")}>
               <Row title={t("settings.auxiliary.fallback")} desc={t("settings.auxiliary.fallback.sub")} data-setting="model.fallback_to_session">
                 <Switch checked={s.model.fallback_to_session ?? true} onChange={(fallback_to_session) => save({ model: { fallback_to_session } as any })} label={t("settings.auxiliary.fallback")} />
               </Row>
-            </div>
+            </SetGroup>
           </>
         );
       case "accounts":
@@ -852,7 +849,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "keyproxy":
         return <KeyproxyCard toast={toast} onChanged={rereadSettings} />;
       case "free-models":
-        return <div className="card" data-setting="models.free"><FreeModels onSaved={(_, next) => setS(next)} toast={toast} /></div>;
+        return <FreeModels onSaved={(_, next) => setS(next)} toast={toast} />;
       case "translation":
         return <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />;
       case "rules":
@@ -884,19 +881,17 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "budget":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.budget.caps")}</div>
+            <SetGroup title={t("settings.budget.caps")}>
               <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
               <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
               <TotalCaps s={s} save={save} />
-            </div>
-            <div className="card">
-              <div className="section-title">{t("settings.balance.title")}</div>
-              <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack data-setting="balance.thresholds_usd">
-                <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
+            </SetGroup>
+            <SetGroup title={t("settings.balance.title")}>
+              <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" data-setting="balance.thresholds_usd">
+                <input id="balance-thresholds" className="field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
               </Row>
               <NumRow id="balance-poll" setting="balance.poll_seconds" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
-            </div>
+            </SetGroup>
           </>
         );
       case "limits":

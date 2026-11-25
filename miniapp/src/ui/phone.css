@@ -517,9 +517,6 @@
   .main .settings-col .settings-groups > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
   .main .settings-col .settings-groups > .section-title:first-child { margin-top: var(--space-2); }
   .main .settings-col .settings-groups > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
-  .main .settings-col .catalogue > .catalogue-filters { margin: 0 0 var(--space-2); }
-  .main .settings-col .catalogue > .stt-list { gap: var(--space-2); margin: 0 0 var(--space-2); }
-  .main .settings-col .stt-card { border-radius: var(--radius-xl); }
 
   /* ── Usage: the period as a segmented track, the tightest quota first and wide, the rest as the
      settings' cards ──────────────────────────────────────────────────────────────────────────── */

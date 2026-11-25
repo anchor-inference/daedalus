@@ -1,32 +1,24 @@
-/* Settings → Subscription accounts. A subscription is one card: a head that names it, its two rules,
-   its accounts in the order calls fall over in, and a foot that adds one. Every size is a token's. */
-.accounts { display: flex; flex-direction: column; gap: var(--space-4); }
-.accounts > .sub { max-width: 75ch; }
-.accounts-note { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-13); }
-.accounts-note .ic { flex: none; margin-top: 2px; }
-.accounts-note[data-tone="warn"] { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
-.accounts-foot { max-width: 75ch; }
+/* Settings → Subscription accounts. A subscription is one group: its two rules as rows, its accounts in
+   the order calls fall over in as rows of their own (a name, who is signed in, a state, the arrows),
+   and a foot that adds one. Every size is a token's. */
+.accounts > .set-help { max-width: 75ch; }
+.accounts > .set-group { margin-top: var(--space-5); }
+.accounts > .accounts-foot { margin: var(--space-4) 0 0; }
 
-.settings-col .card.account-upstream, .card.account-upstream { margin: 0; padding: 0; overflow: hidden; background: var(--card); }
-.account-upstream-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
-.account-upstream-head .provider-mark { width: var(--ctl-h); height: var(--ctl-h); }
-.account-upstream-text { min-width: 0; }
-h3.account-upstream-title { margin: 0; font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; line-height: var(--lh-ui); }
-.account-upstream-text .sub { font-size: var(--fs-12); color: var(--fg-3); }
-.account-rules { padding: 0 var(--space-4); border-top: 1px solid var(--line); }
-
-.account-list { border-top: 1px solid var(--line); }
-.account-row { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4); }
-.account-row + .account-row { border-top: 1px solid var(--line); }
-.account-head { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.account-row { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) var(--space-4); font-size: var(--fs-14); }
+.account-line { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 /* The place in the order, in the tile an avatar would take: the order is what the arrows change. */
-.account-order { display: grid; place-items: center; flex: none; width: var(--avatar); height: var(--avatar); margin-top: 2px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.account-order { display: grid; place-items: center; flex: none; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
 .account-row[data-default] .account-order { background: var(--fg); color: var(--bg); }
 .account-who { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.account-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--fs-14); font-weight: 500; }
-.account-who .mmeta { color: var(--fg-2); font-family: var(--font); font-size: var(--fs-13); white-space: normal; overflow-wrap: anywhere; }
-.account-head > .pill { flex: none; max-width: 50%; margin-top: 2px; white-space: normal; text-align: right; }
-.account-row .account-facts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-4); padding-left: calc(var(--avatar) + var(--space-3)); color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.account-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-weight: 500; }
+.account-meta { color: var(--fg-2); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.account-status { display: inline-flex; align-items: center; flex: none; gap: 6px; max-width: 40%; color: var(--fg-2); font-size: var(--fs-13); }
+.account-status[data-account-status="ok"] { color: var(--live); }
+.account-status[data-account-status="failed"], .account-status[data-account-status="warn"] { color: var(--attention); }
+.account-end { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.account-end .btn { margin-right: var(--space-1); }
+.account-facts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-4); padding-left: calc(var(--avatar) + var(--space-3)); color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .account-windows { display: inline-flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
 .account-window { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--fg-2); }
 .account-meter { display: block; width: 48px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
@@ -34,31 +26,22 @@ h3.account-upstream-title { margin: 0; font-size: var(--fs-14); font-weight: 600
 .account-window[data-tone="warn"] .account-meter i { background: var(--warn); }
 .account-window[data-tone="bad"] { color: var(--bad); }
 .account-window[data-tone="bad"] .account-meter i { background: var(--bad); }
-.account-row .account-command { margin-left: calc(var(--avatar) + var(--space-3)); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; user-select: all; }
-/* The name, the key and the actions share one line where there is room and stack where there is
-   not; the actions keep to the right edge either way, Remove last and apart. */
-.account-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2) var(--space-3); padding-left: calc(var(--avatar) + var(--space-3)); }
-.account-field { display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 200px; min-width: 0; max-width: 320px; }
-.account-field > span:first-child { color: var(--fg-3); font-size: var(--fs-12); }
-.account-field .field { margin: 0; min-height: var(--ctl-h-sm); padding-block: 4px; font-size: var(--fs-13); }
-.account-key { display: flex; gap: var(--space-2); }
-.account-key .field { flex: 1; min-width: 0; }
-.account-actions { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
-.account-move { display: inline-flex; gap: 2px; }
-.account-actions .btn.ghost.danger { background: transparent; border-color: transparent; }
-.account-actions .btn.ghost.danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.account-row .account-command { margin: var(--space-1) 0 0 calc(var(--avatar) + var(--space-3)); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; user-select: all; }
+/* What opens under a row to change it: the name, a new key, Remove last and apart. */
+.account-edit { display: flex; flex-direction: column; gap: var(--space-2); max-width: 420px; margin: var(--space-2) 0 0 calc(var(--avatar) + var(--space-3)); }
+.account-edit .field-box { margin: 0; }
+.account-key { display: flex; align-items: flex-end; gap: var(--space-2); }
+.account-key .field-box { flex: 1; min-width: 0; }
+.account-edit-foot { display: flex; }
 
-.account-add { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); background: var(--inset); }
 .account-add .field { flex: 1 1 160px; min-width: 0; min-height: var(--ctl-h-sm); padding-block: 4px; font-size: var(--fs-13); }
 @media (max-width: 1023px) {
   /* The state takes a line of its own under the name: beside it, a long one ("resting: usage limit,
      back in 2 hours") squeezed the address into a column three letters wide. */
-  .account-head { flex-wrap: wrap; }
-  .account-head > .pill { max-width: 100%; margin: 0 0 0 calc(var(--avatar) + var(--space-3)); text-align: left; }
-  .account-who { flex-basis: calc(100% - var(--avatar) - var(--space-3)); }
-  .account-row .account-facts, .account-controls, .account-row .account-command { padding-left: 0; margin-left: 0; }
-  .account-field { max-width: none; flex-basis: 100%; }
-  .account-field .field, .account-add .field { font-size: var(--fs-16); min-height: var(--ctl-h); }
-  .account-actions { margin-left: 0; width: 100%; }
-  .account-actions .btn.ghost.danger { margin-left: auto; }
+  .account-line { flex-wrap: wrap; }
+  .account-who { flex-basis: calc(100% - var(--avatar) - var(--space-3) - var(--space-3) - 108px); }
+  .account-status { order: 3; max-width: 100%; margin-left: calc(var(--avatar) + var(--space-3)); }
+  .account-end { margin-left: auto; }
+  .account-facts, .account-row .account-command, .account-edit { padding-left: 0; margin-left: 0; }
+  .account-add .field { font-size: var(--fs-16); min-height: var(--ctl-h); }
 }

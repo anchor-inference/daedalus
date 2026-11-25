@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
 import { RouteListing, RouteRow, routeBill } from "../models";
+import { Badge, Field, Switch } from "../ui/primitives";
 
 function rate(usd: number | null): string {
   if (usd === null) return "—";
@@ -29,7 +30,7 @@ function Row({ row, on, gone, onToggle }: { row: RouteRow; on: boolean; gone: bo
   const price = (value: number | null) => (gone ? "—" : row.varies && value !== null ? `≤${rate(value)}` : rate(value));
   return (
     <label className={`orp-row ${on ? "on" : ""}`} data-slug={row.slug}>
-      <input type="checkbox" checked={on} onChange={onToggle} />
+      <Switch checked={on} onChange={onToggle} label={row.name} />
       <span className="orp-name">
         <b>{row.name}</b>
         {variant(row.slug) && <span className="mono faint">{variant(row.slug)}</span>}
@@ -42,14 +43,14 @@ function Row({ row, on, gone, onToggle }: { row: RouteRow; on: boolean; gone: bo
         <span className="orp-cell num" data-label={t("add.routes.col.output")}>{size(row.max_output_tokens)}</span>
         <span className="orp-cell num" data-label={t("add.routes.col.uptime")}>{row.uptime === null ? "—" : `${Math.round(row.uptime * 10) / 10}%`}</span>
         <span className="orp-tags">
-          {gone && <span className="pill failed">{t("add.routes.gone")}</span>}
-          {!gone && row.tool_choice === "none" && <span className="pill failed">{t("add.routes.tools.none")}</span>}
-          {row.tool_choice === "partial" && <span className="pill pending" title={t("add.routes.tools.partial.title")}>{t("add.routes.tools.partial")}</span>}
-          {row.tool_choice === "full" && <span className="pill">{t("add.routes.tools")}</span>}
-          {row.reasoning && <span className="pill">{t("add.routes.reasoning")}</span>}
-          {row.caching && <span className="pill">{t("add.routes.cache")}</span>}
-          {row.zdr && <span className="pill done" title={t("add.routes.zdr.title")}>{t("add.routes.zdr")}</span>}
-          {row.tier && <span className="pill">{row.tier}</span>}
+          {gone && <Badge tone="attention">{t("add.routes.gone")}</Badge>}
+          {!gone && row.tool_choice === "none" && <Badge tone="attention">{t("add.routes.tools.none")}</Badge>}
+          {row.tool_choice === "partial" && <span title={t("add.routes.tools.partial.title")}><Badge tone="attention">{t("add.routes.tools.partial")}</Badge></span>}
+          {row.tool_choice === "full" && <Badge>{t("add.routes.tools")}</Badge>}
+          {row.reasoning && <Badge>{t("add.routes.reasoning")}</Badge>}
+          {row.caching && <Badge>{t("add.routes.cache")}</Badge>}
+          {row.zdr && <span title={t("add.routes.zdr.title")}><Badge tone="live">{t("add.routes.zdr")}</Badge></span>}
+          {row.tier && <Badge>{row.tier}</Badge>}
         </span>
       </span>
     </label>
@@ -80,10 +81,9 @@ export function OpenRouterProviders({ listing, chosen, saved = [], onChange }: {
   return (
     <div className="orp">
       {listing.rows.length > 8 && (
-        <label className="mfield orp-filter">
-          <span>{t("add.filter.plain")}</span>
-          <input className="field" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("add.filter.plain")} />
-        </label>
+        <div className="orp-filter">
+          <Field label={t("add.filter.plain")} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("add.filter.plain")} />
+        </div>
       )}
       <div className="orp-list">
         <div className="orp-head" aria-hidden="true">

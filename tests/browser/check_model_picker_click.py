@@ -200,7 +200,7 @@ def settings_multi(browser, width: int, failures: list[str]) -> None:  # type: i
     if not text or not box or abs(box["x"] - text["x"]) > 1 or box["y"] < text["y"] + text["height"] - 1:
         failures.append(f"{where}: the list is not under the row's words: words {text}, list {box}")
     inside(page, f"{setting}", f"{setting} *", where, failures)
-    card = row.evaluate("el => { const c = el.closest('.card'); c.setAttribute('data-probe-card', ''); return true; }")
+    card = row.evaluate("el => { const c = el.closest('.card, .set-card'); c.setAttribute('data-probe-card', ''); return true; }")
     if card:
         inside(page, "[data-probe-card]", f"{setting} *", where, failures)
     inside(page, ".settings-col, .main", f"{setting} *", where, failures)

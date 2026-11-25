@@ -217,6 +217,67 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .nav-cfg-list + .nav-cfg-list { margin-top: 20px; }
 .set-actions { margin-top: 20px; }
 
+/* A row whose control is a list of models (a picker, the helpers' choice) takes the whole width under
+   its words at every width, as it does outside a card (selection.css): beside them it was clipped. */
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+.set-card .settings-row:has(> .settings-row-ctl :is(.sel, .subagent-models, .quick-models)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+
+/* ── Catalogues of downloadable models: voices and recognition models ───────────────────────── */
+.set-card .settings-value { color: var(--fg-2); font-size: var(--fs-14); }
+/* A value that is only the state of something loading: the pulse says the wait is happening now,
+   rather than under the first thing the operator says. */
+.stt-loading { color: var(--warn); }
+.stt-loading::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
+/* A field in a row's lane: wide enough for an address or a model name, as the face fields are. */
+.set-card .settings-row-ctl > .field { width: 280px; max-width: 100%; margin: 0; }
+.cat-filters { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.cat-filters > .field { flex: 1 1 200px; min-width: 160px; }
+.cat-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.cat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 24px; padding: 12px 16px; font-size: var(--fs-14); }
+/* The one in use is the row with the selected ground, as the chosen section is in the list of sections. */
+.cat-row[data-using] { background: var(--selected); }
+.cat-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cat-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cat-name > b { margin-right: 4px; font-weight: 500; }
+.cat-note { color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+.cat-facts { color: var(--fg-3); font-size: var(--fs-12); line-height: 1.4; }
+.cat-meters { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-top: 3px; }
+.cat-meter { display: flex; align-items: center; gap: 8px; width: 168px; color: var(--fg-3); font-size: var(--fs-12); }
+.cat-meter > span:first-child { flex: none; width: 64px; }
+.cat-track { flex: 1; height: 4px; overflow: hidden; border-radius: 2px; background: var(--surface-3); }
+.cat-fill { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
+.cat-progress { display: flex; align-items: center; gap: 8px; margin-top: 3px; color: var(--fg-3); font-size: var(--fs-12); }
+.cat-progress .cat-fill { background: var(--fg); }
+.cat-progress > span:last-child { flex: none; min-width: 64px; text-align: right; }
+.cat-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+/* What offers the speech runtime, where the card above says the browser's own is all there is. */
+.set-card > .voice-needs { margin: 0; padding: 12px 16px; border-radius: 0; background: transparent; }
+
+/* ── Key proxy ───────────────────────────────────────────────────────────────────────────── */
+/* A line that says the section cannot do what it normally does, or does it with a caveat. */
+.set-note { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-13); }
+.set-note .ic { flex: none; margin-top: 2px; }
+.set-note[data-tone="warn"] { background: color-mix(in srgb, var(--attention) 12%, transparent); color: var(--attention); }
+.keyproxy-card > .set-group, .keyproxy-card > .keyproxy-clients { margin-top: var(--space-5); }
+.keyproxy-card > .set-help + .set-group { margin-top: 0; }
+.kp-item + .kp-item { border-top: 1px solid var(--line); }
+.kp-open .ic { transition: transform var(--t-fast) var(--ease-out); }
+.kp-item.open .kp-open .ic { transform: rotate(180deg); }
+.kp-edit { border-top: 1px solid var(--line); background: var(--bg); gap: var(--space-3); }
+.kp-add { gap: var(--space-3); }
+.kp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kp-field .field { margin: 0; }
+.kp-field code { color: var(--fg-3); font-size: var(--fs-12); }
+.kp-edit-foot { display: flex; }
+
+/* ── Free models: the providers as rows to choose from, the chosen one's models under them ───── */
+.free-catalog > .set-group { margin-top: var(--space-5); }
+.free-catalog > .set-help + .set-group { margin-top: 0; }
+.accounts > .set-help, .keyproxy-card > .set-help, .free-catalog > .set-help { margin: 0 0 var(--space-4); }
+.free-pick.on { background: var(--selected); }
+.free-pick-key { flex: none; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.free-pick-mark { display: grid; flex: none; place-items: center; width: var(--ctl-h-sm); color: var(--fg); }
+
 /* ── Models and providers ─────────────────────────────────────────────────────────────────── */
 .prov + .prov { border-top: 1px solid var(--line); }
 .prov-row { display: flex; align-items: center; gap: 12px; width: 100%; height: var(--card-row-h-lg); padding: 0 12px 0 16px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
@@ -291,6 +352,13 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .set-row, .set-card .settings-row { min-height: var(--set-row-h); }
   .set-card .set-value, .set-card .set-value .dropdown-btn { max-width: 60vw; }
   .fallback-warn { flex-basis: 100%; text-align: left; }
+  .cat-row { grid-template-columns: minmax(0, 1fr); }
+  .cat-meter { flex: 1; min-width: 140px; }
+  .cat-actions { justify-content: flex-start; }
+  .set-card .settings-row-ctl > .field { width: 100%; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) { flex-direction: column; align-items: stretch; gap: 8px; }
+  .set-card .settings-row:has(> .settings-row-ctl > .settings-range) > .settings-row-ctl { max-width: none; }
+  .settings-range input[type="range"] { flex: 1; width: auto; }
   .settings-phone-actions { margin: 0 0 var(--space-3); }
 }
 

@@ -12,6 +12,7 @@ import { api, Preset, PriceView, ProviderConf, QuickModelsView, SubagentModelsCh
 import { plural, t } from "./i18n";
 import { modelItems } from "./modelitems";
 import { InheritNote, SelectionList, type InheritState, type SelectionGroup, type SelectionItem } from "./ui/index";
+import { Segmented } from "./ui/primitives";
 
 const MODES: SubagentModelsMode[] = ["all", "session", "chosen"];
 
@@ -35,18 +36,14 @@ export function SubagentModelsPicker({ value, items, groups, onChange, disabled,
   return (
     <div className="subagent-models">
       {inherit && <InheritNote inherit={inherit} disabled={disabled} />}
-      <div className="subm-modes" role="radiogroup" aria-label={t("subm.title")}>
-        {MODES.map((mode) => (
-          <label key={mode} className={`subm-mode ${value.mode === mode ? "on" : ""}`}>
-            <input type="radio" name={`subm-${own ?? "default"}`} checked={value.mode === mode} disabled={disabled}
-              onChange={() => onChange({ mode, presets: mode === "chosen" ? value.presets : [] })} />
-            <span className="sel-text">
-              <span className="sel-name">{t(`subm.mode.${mode}`)}</span>
-              <span className="sel-detail">{explain[mode]}</span>
-            </span>
-          </label>
-        ))}
-      </div>
+      <Segmented
+        label={t("subm.title")}
+        className="subm-modes"
+        value={value.mode}
+        options={MODES.map((mode) => ({ id: mode, label: t(`subm.mode.${mode}`), disabled }))}
+        onChange={(mode) => onChange({ mode, presets: mode === "chosen" ? value.presets : [] })}
+      />
+      <div className="sub subm-explain">{explain[value.mode]}</div>
       {value.mode === "chosen" && (
         <SelectionList
           label={t("subm.chosen")}

@@ -31,14 +31,6 @@ def main() -> int:
 
                 page.route("**/api/settings", save)
                 suffix = f"?token=t&lang=ru&scheme={scheme}"
-                for section, selector in (("speech-models", ".stt-list"),):
-                    page.goto(f"{BASE}/settings/{section}{suffix}")
-                    page.wait_for_selector(f"{selector} > div")
-                    page.wait_for_timeout(250)
-                    for grid in page.locator(selector).all():
-                        heights = grid.evaluate("g => [...g.children].map(c => c.getBoundingClientRect().height)")
-                        if width >= 760:
-                            assert max(heights) - min(heights) < 1, (width, scheme, section, heights)
                 page.goto(f"{BASE}/settings/text{suffix}")
                 panel = page.locator('[data-setting="appearance.font"]')
                 panel.wait_for()
