@@ -136,7 +136,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
         say(f"the Pinned list reads {order}")
 
     # Board dragged into Hidden.
-    page.locator("[data-nav-row='board']").drag_to(page.locator("[data-nav-list='hidden'] .nav-cfg-head"))
+    page.locator("[data-nav-row='board']").drag_to(page.locator("[data-nav-list='hidden'] .set-label"))
     page.wait_for_timeout(600)
     if "board" not in host.settings["navigation"]["hidden"]:
         say(f"dragging Board into Hidden left {host.settings['navigation']}")
