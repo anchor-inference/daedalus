@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Sheet } from "../ui/dialogs";
 import { SelectionSingle } from "../ui/selection";
+import { WithEffort } from "../taskeffort";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { duration } from "../format";
@@ -32,6 +33,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
   const [view, setView] = useState<View | null>(null);
   const [instruction, setInstruction] = useState("");
   const [preset, setPreset] = useState("");
+  const [effort, setEffort] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [review, setReview] = useState(false);
@@ -71,7 +73,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
     setBusy(true);
     setProblem("");
     try {
-      await api.post("/api/prompt-change/request", { instruction, preset });
+      await api.post("/api/prompt-change/request", { instruction, preset, effort });
       await load();
     } catch (error) {
       setProblem(errorText(error));
@@ -125,8 +127,10 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
       </div>
       <label htmlFor="prompt-change-request">{t("settings.rules.assistant.request")}</label>
       <textarea id="prompt-change-request" className="field" rows={3} maxLength={2000} value={instruction} disabled={planning || busy} onChange={(event) => setInstruction(event.target.value)} placeholder={t("settings.rules.assistant.placeholder")} />
-      <SelectionSingle label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
-        items={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
+      <WithEffort id="prompt-change-effort" value={effort} onChange={setEffort} fallback="off" disabled={planning || busy}>
+        <SelectionSingle label={t("settings.rules.assistant.model")} value={preset} disabled={planning || busy} onChange={setPreset}
+          items={(view?.models ?? []).map((model) => ({ id: model.id, label: model.label }))} />
+      </WithEffort>
       <div className="prompt-change-actions">
         <button className="btn primary" disabled={planning || busy || !instruction.trim() || !preset} onClick={() => void request()}>
           <Icon name="bolt" size={15} /> {t("settings.rules.assistant.prepare")}

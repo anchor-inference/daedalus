@@ -75,7 +75,7 @@ async def test_the_review_fails_closed_to_a_question() -> None:
     async def rambling(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
         return "Well, it depends.", "m"
 
-    async def blocking(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def blocking(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         return "BLOCK: the recipient is not the one the operator named.", "m"
 
     timed_out = await rules.review(slow, "p", preset="", timeout=0.05)
@@ -112,7 +112,7 @@ async def test_a_command_too_long_to_read_whole_is_never_allowed_unread() -> Non
     async def allowing(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
         return "ALLOW it writes the notes the operator asked for.", "m"
 
-    async def blocking(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def blocking(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         return "BLOCK a force-push nobody asked for.", "m"
 
     unread = await rules.review(allowing, "p", preset="", timeout=1, cut=action.cut)
@@ -127,7 +127,7 @@ async def test_the_hook_asks_when_the_recipient_is_past_what_the_reviewer_could_
     manager = await _manager(settings, db, message="auto")
     prompts_seen: list[str] = []
 
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def model(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         prompts_seen.append(prompt)
         return "ALLOW the operator asked for the report to be sent.", "small"
 
@@ -229,7 +229,7 @@ async def test_the_review_runs_in_the_hook_and_its_verdicts_land(settings, db) -
     answers: list[str] = []
     prompts_seen: list[str] = []
 
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def model(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         prompts_seen.append(prompt)
         return answers.pop(0), "small"
 
@@ -279,7 +279,7 @@ async def test_a_browser_action_meets_the_rules_after_the_site_rule(settings, db
         state = await manager.create_session("shop")
         sid = state.session.id
 
-        async def blocking(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+        async def blocking(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
             return "BLOCK nobody asked to buy anything.", "small"
 
         manager.action_rules._ask_model = blocking  # type: ignore[method-assign]
@@ -301,7 +301,7 @@ async def _blocking_manager(settings, db, answers: list[str]):  # type: ignore[n
     manager = await _manager(settings, db, publish="auto")
     prompts_seen: list[str] = []
 
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def model(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         prompts_seen.append(prompt)
         return answers.pop(0) if answers else "BLOCK the operator asked for neither.", "small"
 
@@ -454,7 +454,7 @@ async def test_a_blocked_browser_action_is_held_too(settings, db) -> None:  # ty
         state = await manager.create_session("shop")
         sid = state.session.id
 
-        async def blocking(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+        async def blocking(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
             return "BLOCK nobody asked to buy anything.", "small"
 
         manager.action_rules._ask_model = blocking  # type: ignore[method-assign]

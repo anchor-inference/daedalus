@@ -156,7 +156,7 @@ def desktop(page: Page, lang: str) -> None:
     card = page.locator('[data-card="main-orchestrator"]')
     expect(card).to_be_visible()
     # The choice is the chosen model drawn as its row, tagged as the mid-tier one.
-    expect(card.locator(".sel-current")).to_contain_text(words["middle"])
+    expect(card.locator("#main-preset .sel-current")).to_contain_text(words["middle"])
 
 
 def phone(page: Page, lang: str) -> None:

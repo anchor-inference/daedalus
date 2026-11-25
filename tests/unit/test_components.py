@@ -601,6 +601,15 @@ class FakeManager:
     async def get_state(self, session_id: str) -> None:
         return None
 
+    class model_health:  # noqa: N801 — no model is marked; these routes are about the settings around them
+        @staticmethod
+        def broken(*_: Any) -> None:
+            return None
+
+        @staticmethod
+        async def view(*_: Any) -> dict[str, Any]:
+            return {}
+
     class providers:  # noqa: N801
         @staticmethod
         def available() -> list[str]:
